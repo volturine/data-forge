@@ -37,6 +37,7 @@ ALWAYS use Svelte 5 runes - never legacy syntax:
 ```
 
 NEVER use legacy syntax:
+
 - `let x = 0` for reactive state (use `$state()`)
 - `$: x = ...` for derived values (use `$derived()`)
 - `export let` for props (use `$props()`)
@@ -71,8 +72,8 @@ Use scoped CSS in Svelte components with the `<style>` tag.
 
 ```typescript
 // Frontend - use $lib alias
-import { apiRequest } from '$lib/api/client';
-import { authStore } from '$lib/stores/auth.svelte';
+import { apiRequest } from "$lib/api/client";
+import { authStore } from "$lib/stores/auth.svelte";
 ```
 
 ```python
@@ -135,3 +136,9 @@ Usage: Automatic via OpenCode integration. Reviews Python and Svelte/TypeScript 
 ## Environment Setup
 
 Copy `.env.example` to `.env` in both `backend/` and `frontend/` directories.
+
+## Git Restrictions
+
+- NEVER push to remote repositories
+- Only local commits are allowed
+- To share changes, create a pull request or ask a maintainer to push
