@@ -1,0 +1,258 @@
+# Claude Code Project Rules
+
+This is a no-code data analysis platform built with SvelteKit 2 + FastAPI + Polars.
+
+## Project Context
+
+**Mission**: Make data transformation and analysis accessible through a visual interface, running entirely on the user's machine with isolated compute environments.
+
+**Key Documents**:
+- `docs/PRD.md` - Complete product requirements and architecture
+- `AGENTS.md` - Development guidelines and conventions
+- `STYLE_GUIDE.md` - Code style preferences
+- `tasks/` - Detailed implementation task breakdowns
+
+## Tech Stack Conventions
+
+### Frontend (SvelteKit 2 + Svelte 5)
+
+**CRITICAL: Always use Svelte 5 runes - never legacy syntax**
+
+✅ Correct:
+```svelte
+<script lang="ts">
+  let count = $state(0);
+  let doubled = $derived(count * 2);
+  $effect(() => {
+    console.log(`Count: ${count}`);
+  });
+  interface Props {
+    name: string;
+  }
+  let { name }: Props = $props();
+</script>
+```
+
+❌ Wrong (legacy syntax - never use):
+```svelte
+<script lang="ts">
+  let count = 0;  // Use $state() instead
+  $: doubled = count * 2;  // Use $derived() instead
+  export let name;  // Use $props() instead
+  onMount(() => {});  // Use $effect() instead
+</script>
+```
+
+**Other Frontend Rules**:
+- Use TanStack Query for server state management
+- Scoped CSS in `<style>` tags
+- TypeScript strict mode
+- File naming: `PascalCase.svelte` for components, `kebab-case.ts` for utils
+- Stores: `*.svelte.ts` extension (enables runes outside components)
+- Imports: Use `$lib` alias (e.g., `import { api } from '$lib/api/client'`)
+
+### Backend (FastAPI + Python)
+
+**CRITICAL: Follow RORO pattern and async/await**
+
+✅ Correct:
+```python
+# Service functions
+async def create_analysis(data: AnalysisCreateSchema) -> AnalysisResponseSchema:
+    """Receive Pydantic input, return Pydantic output"""
+    async with get_session() as session:
+        analysis = Analysis(**data.model_dump())
+        session.add(analysis)
+        await session.commit()
+        return AnalysisResponseSchema.model_validate(analysis)
+
+# Routes (thin - delegate to services)
+@router.post("/analysis", response_model=AnalysisResponseSchema)
+async def create_analysis_route(data: AnalysisCreateSchema):
+    return await analysis_service.create_analysis(data)
+```
+
+**Other Backend Rules**:
+- Type hints everywhere
+- Pydantic V2 with `model_config = ConfigDict(from_attributes=True)`
+- SQLAlchemy with `Mapped` type hints for models
+- Async database operations with `async with` session context
+- File naming: `snake_case.py`
+- Imports: Relative imports within modules
+
+### Style Guide
+
+From `STYLE_GUIDE.md`:
+- Avoid `let` statements - prefer `const` with ternary operators
+- Avoid `else` statements - prefer early returns
+- Prefer single-word variable names where possible
+- Avoid unnecessary destructuring (use `obj.prop` to preserve context)
+- Avoid `try/catch` where possible
+- Never use `any` type
+
+## Code Review Mode
+
+When reviewing code or asked to check code quality:
+
+**Check for**:
+1. Svelte 5 runes usage (not legacy syntax)
+2. RORO pattern in backend services
+3. Type safety (TypeScript strict mode, Python type hints)
+4. Async/await patterns for database operations
+5. Performance implications
+6. Security considerations (input validation, SQL injection, path traversal)
+7. Edge cases and error handling
+
+**Provide**:
+- Specific file and line references
+- Constructive feedback with clear rationale
+- Code examples for suggested improvements
+
+## PRD Generation Mode
+
+When asked to create a PRD or document a feature:
+
+**Include**:
+1. **Overview**: Feature summary, user value, success criteria
+2. **Technical Approach**:
+   - Frontend components (using Svelte 5 runes)
+   - Backend endpoints and services (RORO pattern)
+   - Database schema changes
+   - API contracts (Pydantic schemas)
+3. **User Stories**: With clear acceptance criteria and edge cases
+4. **Implementation Notes**: Conventions, security, performance
+5. **Testing Strategy**: Unit, integration, and manual testing scenarios
+
+**Context**: This is a single-user local-first application with:
+- Isolated Polars subprocesses for compute
+- Client-side schema calculation
+- Gallery view of analyses
+- Visual pipeline builder
+
+## Task List Generation Mode
+
+When asked to create implementation tasks or break down work:
+
+**Requirements**:
+1. **Specific and Testable**: Clear completion criteria
+2. **Properly Ordered**: Database → Backend → Frontend → Tests
+3. **Technical Details**: Specific file paths, function names, schemas
+4. **Best Practices**: Error handling, validation, security, performance
+5. **Follow Conventions**: Svelte 5 runes, RORO pattern, async/await
+
+**Format**: Numbered checklist with sub-tasks
+**Reference**: Check `tasks/` directory for examples
+
+## Documentation Writing Mode
+
+When writing documentation:
+
+**Style**:
+- Relaxed and friendly tone (not verbose)
+- Title: Single word or 2-3 word phrase
+- Description: One short line, 5-10 words, avoid starting with "The"
+- Chunks: Max 2 sentences per paragraph
+- Sections: Separated by `---`
+- Section titles: Short, imperative mood, first letter capitalized only
+- Code snippets: Remove trailing semicolons and commas
+
+**Commits**: Prefix with `docs:` when committing documentation
+
+## Common Commands
+
+### Backend (from `backend/` directory)
+```bash
+uv sync --extra dev              # Install dependencies
+uv run main.py                   # Start dev server (port 8000)
+uv run pytest                    # Run tests
+uv run ruff format . && uv run ruff check --fix .  # Format and lint
+uv run mypy .                    # Type check
+```
+
+### Frontend (from `frontend/` directory)
+```bash
+npm install                      # Install dependencies
+npm run dev                      # Start dev server (port 5173)
+npm run build                    # Production build
+npm run test                     # Run all tests
+npm run check                    # TypeScript check
+npm run lint && npm run format   # Lint and format
+```
+
+### Both (from project root)
+```bash
+just dev                         # Run both backend and frontend
+```
+
+## Project Structure
+
+### Backend Modules
+```
+backend/
+├── core/              # Config, database, shared utilities
+├── modules/
+│   ├── analysis/      # Analysis CRUD, pipeline storage
+│   ├── datasource/    # File upload, schema extraction
+│   ├── compute/       # Polars subprocess engine
+│   └── results/       # Result storage, export
+└── tests/
+```
+
+### Frontend Structure
+```
+frontend/src/
+├── routes/            # SvelteKit pages
+├── lib/
+│   ├── components/    # Svelte components
+│   ├── stores/        # Svelte stores (*.svelte.ts)
+│   ├── api/           # API client functions
+│   └── utils/         # Utility functions
+```
+
+## Key Architecture Patterns
+
+1. **Compute Isolation**: Each analysis spawns a Polars subprocess (prevents OOM crashes)
+2. **Client-Side Schema Calculation**: Frontend calculates schema changes without backend round-trips
+3. **RORO Pattern**: Services receive Pydantic input, return Pydantic output
+4. **Async First**: All database operations use async/await
+5. **Type Safety**: TypeScript strict mode + Python type hints everywhere
+
+## Security Considerations
+
+- Single-user app (no authentication required)
+- Validate file types and size limits on upload
+- Sanitize database connection strings
+- Use parameterized queries (never string concatenation)
+- Validate file paths (prevent path traversal)
+- Isolate subprocess execution (prevent code injection)
+
+## Performance Considerations
+
+- Use Polars lazy evaluation for large datasets
+- Stream results for large outputs
+- Cache data source schemas
+- Virtual scroll for large tables
+- Debounce schema calculations on config changes
+
+## When to Reference Task Files
+
+The `tasks/` directory contains detailed implementation breakdowns:
+- `master-task-list-simple.md` - Overview and dependency graph
+- `tasks-data-analysis-platform.md` - Detailed task breakdown
+- Individual module folders - Granular sub-tasks with checkboxes
+
+Reference these when:
+- Planning implementation work
+- Estimating scope
+- Understanding dependencies
+- Tracking progress
+
+## Default Behavior
+
+When not given specific instructions:
+1. Follow project conventions (Svelte 5 runes, RORO pattern)
+2. Consult PRD and task files for context
+3. Prefer editing existing files over creating new ones
+4. Include proper error handling and type safety
+5. Write tests for new functionality
+6. Keep code simple and focused (avoid over-engineering)
