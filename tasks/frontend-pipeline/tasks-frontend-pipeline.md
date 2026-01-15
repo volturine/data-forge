@@ -1,0 +1,207 @@
+# Frontend Pipeline Builder Components
+
+**Parallel Group**: Frontend Components
+**Dependencies**: frontend-infrastructure, frontend-stores
+**Blocks**: frontend-editor
+
+## Relevant Files
+
+- `frontend/src/lib/components/pipeline/StepLibrary.svelte` - Draggable operations palette
+- `frontend/src/lib/components/pipeline/StepNode.svelte` - Individual transformation step
+- `frontend/src/lib/components/pipeline/StepConfig.svelte` - Step configuration panel
+- `frontend/src/lib/components/pipeline/ConnectionLine.svelte` - Visual connections
+- `frontend/src/lib/components/pipeline/PipelineCanvas.svelte` - Main pipeline builder canvas
+- `frontend/src/lib/components/operations/FilterConfig.svelte` - Filter step config
+- `frontend/src/lib/components/operations/SelectConfig.svelte` - Column selection config
+- `frontend/src/lib/components/operations/JoinConfig.svelte` - Join step config
+- `frontend/src/lib/components/operations/GroupByConfig.svelte` - Aggregation config
+- `frontend/src/lib/components/operations/SortConfig.svelte` - Sort step config
+- `frontend/src/lib/components/operations/ExpressionConfig.svelte` - Custom expression config
+- `frontend/src/lib/components/operations/MLModelConfig.svelte` - ML model config
+
+## Tasks
+
+- [ ] 13.0 Implement Operation Config Components
+  - [ ] 13.1 Create `frontend/src/lib/components/operations/FilterConfig.svelte`:
+    - [ ] 13.1.1 Define props: config (FilterConfig), schema (Schema), onChange callback
+    - [ ] 13.1.2 Define condition row component:
+      - Column dropdown (from schema)
+      - Operator dropdown (=, !=, >, <, >=, <=, contains, startswith, endswith, is_null, is_not_null)
+      - Value input (type-aware based on column dtype)
+    - [ ] 13.1.3 Add condition button
+    - [ ] 13.1.4 Remove condition button (per row)
+    - [ ] 13.1.5 Logic toggle: AND / OR (between conditions)
+    - [ ] 13.1.6 Call onChange when any value changes
+  - [ ] 13.2 Create `frontend/src/lib/components/operations/SelectConfig.svelte`:
+    - [ ] 13.2.1 Define props: config (SelectConfig), schema (Schema), onChange callback
+    - [ ] 13.2.2 Display all columns with checkboxes
+    - [ ] 13.2.3 Select All / Deselect All buttons
+    - [ ] 13.2.4 Drag-and-drop to reorder selected columns
+    - [ ] 13.2.5 Inline rename input for each column
+    - [ ] 13.2.6 Show original vs renamed name
+    - [ ] 13.2.7 Call onChange when selection or order changes
+  - [ ] 13.3 Create `frontend/src/lib/components/operations/JoinConfig.svelte`:
+    - [ ] 13.3.1 Define props: config (JoinConfig), leftSchema (Schema), dataSources, onChange callback
+    - [ ] 13.3.2 Data source selector dropdown for right side
+    - [ ] 13.3.3 Display right schema when selected
+    - [ ] 13.3.4 Join type dropdown (inner, left, right, outer)
+    - [ ] 13.3.5 Key column mapping:
+      - Left column dropdown
+      - Right column dropdown
+      - Add/remove mapping rows
+    - [ ] 13.3.6 Column suffix input for conflict resolution
+    - [ ] 13.3.7 Call onChange when config changes
+  - [ ] 13.4 Create `frontend/src/lib/components/operations/GroupByConfig.svelte`:
+    - [ ] 13.4.1 Define props: config (GroupByConfig), schema (Schema), onChange callback
+    - [ ] 13.4.2 Multi-select for group-by columns
+    - [ ] 13.4.3 Aggregations section:
+      - Add aggregation button
+      - Per aggregation:
+        - Column dropdown
+        - Function dropdown (sum, mean, count, min, max, first, last, std, var)
+        - Alias input
+        - Remove button
+    - [ ] 13.4.4 Preview output columns
+    - [ ] 13.4.5 Call onChange when config changes
+  - [ ] 13.5 Create `frontend/src/lib/components/operations/SortConfig.svelte`:
+    - [ ] 13.5.1 Define props: config (SortConfig), schema (Schema), onChange callback
+    - [ ] 13.5.2 Add sort column button
+    - [ ] 13.5.3 Per sort column:
+      - Column dropdown
+      - Direction toggle (Asc / Desc)
+      - Remove button
+    - [ ] 13.5.4 Drag-and-drop to reorder sort priority
+    - [ ] 13.5.5 Call onChange when config changes
+  - [ ] 13.6 Create `frontend/src/lib/components/operations/ExpressionConfig.svelte`:
+    - [ ] 13.6.1 Define props: config (ExpressionConfig), schema (Schema), onChange callback
+    - [ ] 13.6.2 New column name input
+    - [ ] 13.6.3 Expression editor textarea
+    - [ ] 13.6.4 Available columns reference panel
+    - [ ] 13.6.5 Expression syntax help:
+      - pl.col("column_name")
+      - pl.lit(value)
+      - Common operations
+    - [ ] 13.6.6 Basic syntax validation (highlight errors)
+    - [ ] 13.6.7 Call onChange when config changes
+  - [ ] 13.7 Create `frontend/src/lib/components/operations/MLModelConfig.svelte`:
+    - [ ] 13.7.1 Define props: config, schema, onChange callback
+    - [ ] 13.7.2 Model type selector:
+      - Linear Regression
+      - Logistic Regression
+      - K-Means Clustering
+      - Random Forest (future)
+    - [ ] 13.7.3 Feature columns multi-select (numeric columns)
+    - [ ] 13.7.4 Target column selector (for supervised models)
+    - [ ] 13.7.5 Hyperparameters section (model-specific):
+      - K-Means: n_clusters
+      - Linear Regression: fit_intercept
+    - [ ] 13.7.6 Output column name input
+    - [ ] 13.7.7 Call onChange when config changes
+
+- [ ] 14.0 Implement Pipeline Builder Components
+  - [ ] 14.1 Create `frontend/src/lib/components/pipeline/StepLibrary.svelte`:
+    - [ ] 14.1.1 Define step categories:
+      - Transform: Filter, Select, Sort, Expression
+      - Combine: Join
+      - Aggregate: Group By
+      - Advanced: Window, ML Model
+    - [ ] 14.1.2 Display collapsible category sections
+    - [ ] 14.1.3 Display draggable step items:
+      - Icon
+      - Name
+      - Brief description on hover
+    - [ ] 14.1.4 Implement drag start handler:
+      - Set drag data with step type
+      - Visual feedback during drag
+    - [ ] 14.1.5 Style as sidebar panel
+  - [ ] 14.2 Create `frontend/src/lib/components/pipeline/StepNode.svelte`:
+    - [ ] 14.2.1 Define props:
+      - step: PipelineStep
+      - isSelected: boolean
+      - inputSchema: Schema
+      - outputSchema: Schema
+      - onSelect callback
+      - onDelete callback
+      - onPreview callback
+    - [ ] 14.2.2 Display step type icon
+    - [ ] 14.2.3 Display step type name
+    - [ ] 14.2.4 Display config summary (e.g., "3 columns", "filter by age > 18")
+    - [ ] 14.2.5 Display schema change indicator (columns added/removed)
+    - [ ] 14.2.6 Edit button (or click to select)
+    - [ ] 14.2.7 Delete button (with stopPropagation)
+    - [ ] 14.2.8 Preview button (with stopPropagation)
+    - [ ] 14.2.9 Connection point indicators (top/bottom or left/right)
+    - [ ] 14.2.10 Selected state styling
+    - [ ] 14.2.11 Error state styling (if config invalid)
+  - [ ] 14.3 Create `frontend/src/lib/components/pipeline/ConnectionLine.svelte`:
+    - [ ] 14.3.1 Define props:
+      - startPoint: {x, y}
+      - endPoint: {x, y}
+      - isHighlighted: boolean
+    - [ ] 14.3.2 Render SVG path between points
+    - [ ] 14.3.3 Use bezier curve for smooth connections
+    - [ ] 14.3.4 Arrow head at end point
+    - [ ] 14.3.5 Highlighted state (thicker, different color)
+  - [ ] 14.4 Create `frontend/src/lib/components/pipeline/StepConfig.svelte`:
+    - [ ] 14.4.1 Define props:
+      - step: PipelineStep
+      - schema: Schema
+      - dataSources: DataSource[]
+      - onChange callback
+      - onClose callback
+    - [ ] 14.4.2 Display step type header
+    - [ ] 14.4.3 Dynamic component rendering based on step type:
+      - filter → FilterConfig
+      - select → SelectConfig
+      - join → JoinConfig
+      - groupBy → GroupByConfig
+      - sort → SortConfig
+      - expression → ExpressionConfig
+      - mlModel → MLModelConfig
+    - [ ] 14.4.4 Current input schema display (collapsible)
+    - [ ] 14.4.5 Output schema preview
+    - [ ] 14.4.6 Close button (X)
+    - [ ] 14.4.7 Style as right sidebar panel
+  - [ ] 14.5 Create `frontend/src/lib/components/pipeline/PipelineCanvas.svelte`:
+    - [ ] 14.5.1 Define props:
+      - pipeline: PipelineStep[]
+      - schemas: Map<string, Schema>
+      - selectedStepId: string | null
+      - onSelectStep callback
+      - onAddStep callback
+      - onDeleteStep callback
+      - onReorderStep callback
+      - onPreviewStep callback
+    - [ ] 14.5.2 Implement drop zone for new steps:
+      - Handle dragover event
+      - Handle drop event to add step
+      - Visual drop indicator
+    - [ ] 14.5.3 Render steps in linear layout:
+      - Source node (data source indicator)
+      - Step nodes in sequence
+      - Connection lines between nodes
+    - [ ] 14.5.4 Implement step selection
+    - [ ] 14.5.5 Implement step deletion
+    - [ ] 14.5.6 Implement drag-and-drop reordering (linear mode):
+      - Drag step to new position
+      - Visual indicator for drop position
+    - [ ] 14.5.7 DAG mode (advanced):
+      - Render steps based on dependsOn
+      - Calculate node positions
+      - Render connections for dependencies
+      - Right-click to add branch
+    - [ ] 14.5.8 Zoom and pan (optional for larger pipelines)
+    - [ ] 14.5.9 Empty state: "Drag steps here to build pipeline"
+
+## Completion Criteria
+
+- [ ] All operation configs render and update correctly
+- [ ] StepLibrary shows all operation types
+- [ ] Drag-and-drop from library to canvas works
+- [ ] StepNode displays config summary
+- [ ] ConnectionLine renders between steps
+- [ ] StepConfig panel shows correct config for step type
+- [ ] Pipeline reordering works
+- [ ] Step deletion works
+- [ ] Preview button triggers preview
+- [ ] Components work with Svelte 5 runes
