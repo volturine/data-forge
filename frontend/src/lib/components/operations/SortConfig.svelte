@@ -13,6 +13,9 @@
 
 	let { schema, config = $bindable([]) }: Props = $props();
 
+	// Ensure config is an array (handles empty {} from step creation)
+	let safeConfig = $derived(Array.isArray(config) ? config : []);
+
 	let newRule = $state<SortRule>({
 		column: '',
 		descending: false
@@ -22,9 +25,13 @@
 		if (!newRule.column) return;
 
 		// Check if column is already in sort rules
-		const exists = config.some((rule) => rule.column === newRule.column);
+		const exists = safeConfig.some((rule) => rule.column === newRule.column);
 		if (exists) return;
 
+		// Ensure config is an array before pushing
+		if (!Array.isArray(config)) {
+			config = [] as unknown as SortRule[];
+		}
 		config.push({
 			column: newRule.column,
 			descending: newRule.descending
@@ -37,29 +44,33 @@
 	}
 
 	function removeSortRule(index: number) {
-		config.splice(index, 1);
+		if (Array.isArray(config)) {
+			config.splice(index, 1);
+		}
 	}
 
 	function toggleDirection(index: number) {
-		config[index].descending = !config[index].descending;
+		if (Array.isArray(config) && config[index]) {
+			config[index].descending = !config[index].descending;
+		}
 	}
 
 	function moveUp(index: number) {
-		if (index === 0) return;
+		if (!Array.isArray(config) || index === 0) return;
 		const temp = config[index];
 		config[index] = config[index - 1];
 		config[index - 1] = temp;
 	}
 
 	function moveDown(index: number) {
-		if (index === config.length - 1) return;
+		if (!Array.isArray(config) || index === config.length - 1) return;
 		const temp = config[index];
 		config[index] = config[index + 1];
 		config[index + 1] = temp;
 	}
 
 	let availableColumns = $derived(
-		schema.columns.filter((col) => !config.some((rule) => rule.column === col.name))
+		schema.columns.filter((col) => !safeConfig.some((rule) => rule.column === col.name))
 	);
 </script>
 
@@ -82,10 +93,10 @@
 		<button type="button" onclick={addSortRule} disabled={!newRule.column}> Add Sort Rule </button>
 	</div>
 
-	{#if config.length > 0}
+	{#if safeConfig.length > 0}
 		<div class="sort-rules">
 			<h4>Sort Order (top to bottom)</h4>
-			{#each config as rule, i (i)}
+			{#each safeConfig as rule, i (i)}
 				<div class="sort-rule-item">
 					<div class="rule-info">
 						<span class="rule-column">{rule.column}</span>
@@ -101,7 +112,7 @@
 						<button
 							type="button"
 							onclick={() => moveDown(i)}
-							disabled={i === config.length - 1}
+							disabled={i === safeConfig.length - 1}
 							title="Move down"
 						>
 							↓

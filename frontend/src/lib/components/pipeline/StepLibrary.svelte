@@ -62,9 +62,45 @@
 			description: 'Create computed columns'
 		},
 		{
+			type: 'pivot',
+			label: 'Pivot',
+			icon: '🔄',
+			description: 'Reshape data wide'
+		},
+		{
+			type: 'fill_null',
+			label: 'Fill Null',
+			icon: '🔧',
+			description: 'Handle missing values'
+		},
+		{
+			type: 'deduplicate',
+			label: 'Deduplicate',
+			icon: '🧹',
+			description: 'Remove duplicate rows'
+		},
+		{
+			type: 'explode',
+			label: 'Explode',
+			icon: '💥',
+			description: 'Expand list columns'
+		},
+		{
+			type: 'timeseries',
+			label: 'Time Series',
+			icon: '📅',
+			description: 'Date/time operations'
+		},
+		{
+			type: 'string_transform',
+			label: 'String Transform',
+			icon: '📝',
+			description: 'Text manipulation'
+		},
+		{
 			type: 'view',
 			label: 'View',
-			icon: '🔍',
+			icon: '👁️',
 			description: 'Preview data at this step'
 		}
 	];

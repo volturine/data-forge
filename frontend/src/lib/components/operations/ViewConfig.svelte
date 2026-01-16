@@ -11,6 +11,15 @@
 	}
 
 	let { schema: _schema, config = $bindable({ rowLimit: 100 }) }: Props = $props();
+
+	// Ensure config has proper structure (handles empty {} from step creation)
+	$effect(() => {
+		if (!config || typeof config !== 'object') {
+			config = { rowLimit: 100 };
+		} else if (typeof config.rowLimit !== 'number' || config.rowLimit < 10) {
+			config.rowLimit = 100;
+		}
+	});
 </script>
 
 <div class="view-config">

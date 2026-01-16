@@ -28,6 +28,7 @@ async def upload_file(
         '.parquet': 'parquet',
         '.json': 'json',
         '.ndjson': 'json',
+        '.xlsx': 'excel',
     }
 
     if file_extension not in file_type_mapping:

@@ -132,13 +132,7 @@
 
 				<div class="form-group">
 					<label for="file-input">File</label>
-					<input
-						id="file-input"
-						type="file"
-						onchange={handleFileChange}
-						accept=".csv,.parquet,.json"
-						disabled={loading}
-					/>
+					<input id="file-input" type="file" onchange={handleFileChange} disabled={loading} />
 					{#if file}
 						<p class="file-info">Selected: {file.name}</p>
 					{/if}

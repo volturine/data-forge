@@ -19,6 +19,24 @@
 
 	let { schema, config = $bindable({ groupBy: [], aggregations: [] }) }: Props = $props();
 
+	// Ensure config has proper structure (handles empty {} from step creation)
+	$effect(() => {
+		if (!config || typeof config !== 'object') {
+			config = { groupBy: [], aggregations: [] };
+		} else {
+			if (!Array.isArray(config.groupBy)) {
+				config.groupBy = [];
+			}
+			if (!Array.isArray(config.aggregations)) {
+				config.aggregations = [];
+			}
+		}
+	});
+
+	// Safe accessors
+	let safeGroupBy = $derived(Array.isArray(config?.groupBy) ? config.groupBy : []);
+	let safeAggregations = $derived(Array.isArray(config?.aggregations) ? config.aggregations : []);
+
 	let newAggregation = $state<Aggregation>({
 		column: '',
 		function: 'sum',
@@ -38,6 +56,9 @@
 	];
 
 	function toggleGroupByColumn(columnName: string) {
+		if (!Array.isArray(config.groupBy)) {
+			config.groupBy = [];
+		}
 		const index = config.groupBy.indexOf(columnName);
 		if (index > -1) {
 			config.groupBy.splice(index, 1);
@@ -48,6 +69,10 @@
 
 	function addAggregation() {
 		if (!newAggregation.column) return;
+
+		if (!Array.isArray(config.aggregations)) {
+			config.aggregations = [];
+		}
 
 		const alias = newAggregation.alias || `${newAggregation.column}_${newAggregation.function}`;
 
@@ -65,7 +90,9 @@
 	}
 
 	function removeAggregation(index: number) {
-		config.aggregations.splice(index, 1);
+		if (Array.isArray(config.aggregations)) {
+			config.aggregations.splice(index, 1);
+		}
 	}
 </script>
 
@@ -79,16 +106,16 @@
 				<label class="column-item">
 					<input
 						type="checkbox"
-						checked={config.groupBy.includes(column.name)}
+						checked={safeGroupBy.includes(column.name)}
 						onchange={() => toggleGroupByColumn(column.name)}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
 			{/each}
 		</div>
-		{#if config.groupBy.length > 0}
+		{#if safeGroupBy.length > 0}
 			<div class="selected-info">
-				Selected: {config.groupBy.join(', ')}
+				Selected: {safeGroupBy.join(', ')}
 			</div>
 		{/if}
 	</div>
@@ -117,9 +144,9 @@
 			</button>
 		</div>
 
-		{#if config.aggregations.length > 0}
+		{#if safeAggregations.length > 0}
 			<div class="aggregations-list">
-				{#each config.aggregations as agg, i (i)}
+				{#each safeAggregations as agg, i (i)}
 					<div class="aggregation-item">
 						<span class="agg-details">
 							{agg.function}({agg.column}) as {agg.alias}

@@ -92,7 +92,12 @@
 
 		{#if step.type === 'view' && datasourceId && allSteps.length > 0}
 			<div class="view-preview expanded">
-				<InlineDataTable {datasourceId} pipeline={allSteps} stepId={step.id} rowLimit={1000} />
+				<InlineDataTable
+					{datasourceId}
+					pipeline={allSteps}
+					stepId={step.id}
+					rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
+				/>
 			</div>
 		{/if}
 	</div>
@@ -107,7 +112,9 @@
 	}
 
 	.step-node.view-node {
-		max-width: 600px;
+		max-width: none;
+		width: 75%;
+		min-width: 600px;
 	}
 
 	.connection-point {
@@ -181,7 +188,7 @@
 		margin-top: var(--space-3);
 		border-top: 1px solid var(--border-primary);
 		padding-top: var(--space-3);
-		max-width: 800px;
+		width: 100%;
 		overflow-y: auto;
 	}
 

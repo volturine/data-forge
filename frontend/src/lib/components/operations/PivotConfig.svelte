@@ -18,9 +18,35 @@
 		config = $bindable({ index: [], columns: '', values: '', aggregate_function: 'first' })
 	}: Props = $props();
 
+	// Ensure config has proper structure (handles empty {} from step creation)
+	$effect(() => {
+		if (!config || typeof config !== 'object') {
+			config = { index: [], columns: '', values: '', aggregate_function: 'first' };
+		} else {
+			if (!Array.isArray(config.index)) {
+				config.index = [];
+			}
+			if (typeof config.columns !== 'string') {
+				config.columns = '';
+			}
+			if (typeof config.values !== 'string') {
+				config.values = '';
+			}
+			if (typeof config.aggregate_function !== 'string') {
+				config.aggregate_function = 'first';
+			}
+		}
+	});
+
+	// Safe accessor
+	let safeIndex = $derived(Array.isArray(config?.index) ? config.index : []);
+
 	const aggregateFunctions = ['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'count'];
 
 	function toggleIndexColumn(columnName: string) {
+		if (!Array.isArray(config.index)) {
+			config.index = [];
+		}
 		const index = config.index.indexOf(columnName);
 		if (index > -1) {
 			config.index.splice(index, 1);
@@ -40,15 +66,15 @@
 				<label class="column-item">
 					<input
 						type="checkbox"
-						checked={config.index.includes(column.name)}
+						checked={safeIndex.includes(column.name)}
 						onchange={() => toggleIndexColumn(column.name)}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
 			{/each}
 		</div>
-		{#if config.index.length > 0}
-			<div class="selected-info">Selected: {config.index.join(', ')}</div>
+		{#if safeIndex.length > 0}
+			<div class="selected-info">Selected: {safeIndex.join(', ')}</div>
 		{/if}
 	</div>
 

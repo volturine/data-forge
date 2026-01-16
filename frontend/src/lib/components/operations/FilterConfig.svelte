@@ -22,6 +22,20 @@
 		config = $bindable({ conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' })
 	}: Props = $props();
 
+	// Ensure config has proper structure (handles empty {} from step creation)
+	$effect(() => {
+		if (!config || typeof config !== 'object') {
+			config = { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' };
+		} else {
+			if (!Array.isArray(config.conditions)) {
+				config.conditions = [{ column: '', operator: '=', value: '' }];
+			}
+			if (!config.logic) {
+				config.logic = 'AND';
+			}
+		}
+	});
+
 	const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains'];
 
 	function addCondition() {
