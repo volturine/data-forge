@@ -30,8 +30,7 @@
 	function formatDate(date: string): string {
 		return new Date(date).toLocaleDateString('en-US', {
 			month: 'short',
-			day: 'numeric',
-			year: 'numeric'
+			day: 'numeric'
 		});
 	}
 </script>
@@ -42,76 +41,76 @@
 			<img src={analysis.thumbnail} alt={analysis.name} />
 		{:else}
 			<div class="placeholder">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-				>
-					<path d="M3 3h18v18H3z" stroke-width="2" />
-					<path d="M3 9l6 6 3-3 9 9" stroke-width="2" />
-					<circle cx="7.5" cy="6.5" r="1.5" fill="currentColor" />
+				<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+					<rect x="3" y="3" width="18" height="18" rx="1" />
+					<path d="M3 15l6-6 4 4 8-8" />
 				</svg>
 			</div>
 		{/if}
 	</div>
 
 	<div class="content">
-		<h3>{analysis.name}</h3>
+		<div class="header">
+			<h3>{analysis.name}</h3>
+			<button class="btn-delete" onclick={handleDelete} aria-label="Delete analysis">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<path d="M3 6h18M8 6V4h8v2M19 6v14H5V6" />
+					<path d="M10 11v6M14 11v6" />
+				</svg>
+			</button>
+		</div>
 
 		<div class="metadata">
-			{#if analysis.row_count !== null || analysis.column_count !== null}
-				<div class="stats">
-					{#if analysis.row_count !== null}
-						<span>{analysis.row_count.toLocaleString()} rows</span>
-					{/if}
-					{#if analysis.column_count !== null}
-						<span>{analysis.column_count} cols</span>
-					{/if}
-				</div>
-			{/if}
-			<div class="date">Updated {formatDate(analysis.updated_at)}</div>
+			<span class="stat">
+				{#if analysis.row_count !== null}
+					{analysis.row_count.toLocaleString()} rows
+				{:else}
+					-- rows
+				{/if}
+			</span>
+			<span class="divider">/</span>
+			<span class="stat">
+				{#if analysis.column_count !== null}
+					{analysis.column_count} cols
+				{:else}
+					-- cols
+				{/if}
+			</span>
+			<span class="divider">/</span>
+			<span class="date">{formatDate(analysis.updated_at)}</span>
 		</div>
-	</div>
-
-	<div class="actions">
-		<button class="btn-delete" onclick={handleDelete} aria-label="Delete analysis">
-			<svg
-				xmlns="http://www.w3.org/2000/svg"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-			>
-				<path d="M3 6h18M8 6V4h8v2M19 6v14H5V6" stroke-width="2" />
-				<path d="M10 11v6M14 11v6" stroke-width="2" />
-			</svg>
-		</button>
 	</div>
 </div>
 
 <style>
 	.card {
-		border: 1px solid #e0e0e0;
-		border-radius: 8px;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		overflow: hidden;
 		cursor: pointer;
-		transition: all 0.2s;
-		background: white;
-		position: relative;
+		transition: all var(--transition-fast);
+		background-color: var(--bg-primary);
+		box-shadow: var(--card-shadow);
 	}
 
 	.card:hover {
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-		transform: translateY(-2px);
+		border-color: var(--border-tertiary);
+		transform: translateY(-1px);
+	}
+
+	.card:focus {
+		outline: none;
+		border-color: var(--border-focus);
 	}
 
 	.thumbnail {
 		width: 100%;
 		aspect-ratio: 16 / 9;
-		background: #f5f5f5;
+		background-color: var(--bg-tertiary);
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		border-bottom: 1px solid var(--border-primary);
 	}
 
 	.thumbnail img {
@@ -121,80 +120,63 @@
 	}
 
 	.placeholder {
-		width: 64px;
-		height: 64px;
-		color: #bdbdbd;
-	}
-
-	.placeholder svg {
-		width: 100%;
-		height: 100%;
+		color: var(--fg-faint);
 	}
 
 	.content {
-		padding: 16px;
+		padding: var(--space-4);
+	}
+
+	.header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: var(--space-3);
+		margin-bottom: var(--space-3);
 	}
 
 	h3 {
-		margin: 0 0 12px 0;
-		font-size: 18px;
+		margin: 0;
+		font-size: var(--text-sm);
 		font-weight: 600;
-		color: #212121;
+		color: var(--fg-primary);
+		line-height: 1.4;
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.metadata {
 		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		font-size: 14px;
-		color: #757575;
-	}
-
-	.stats {
-		display: flex;
-		gap: 12px;
-	}
-
-	.stats span {
-		display: inline-flex;
 		align-items: center;
-		gap: 4px;
+		gap: var(--space-2);
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
 	}
 
-	.date {
-		color: #9e9e9e;
-		font-size: 13px;
-	}
-
-	.actions {
-		position: absolute;
-		top: 12px;
-		right: 12px;
+	.divider {
+		color: var(--fg-faint);
 	}
 
 	.btn-delete {
-		background: rgba(255, 255, 255, 0.9);
-		border: 1px solid #e0e0e0;
-		border-radius: 6px;
-		padding: 8px;
+		flex-shrink: 0;
+		background-color: transparent;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		padding: var(--space-1);
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		transition: all 0.2s;
-		width: 36px;
-		height: 36px;
+		color: var(--fg-muted);
+		transition: all var(--transition-fast);
 	}
 
 	.btn-delete:hover {
-		background: #fff;
-		border-color: #d32f2f;
-		color: #d32f2f;
-	}
-
-	.btn-delete svg {
-		width: 20px;
-		height: 20px;
-		stroke-width: 2;
+		background-color: var(--error-bg);
+		border-color: var(--error-border);
+		color: var(--error-fg);
 	}
 </style>

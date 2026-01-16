@@ -30,7 +30,6 @@
 			const analysis = await getAnalysis(analysisId);
 			await analysisStore.loadAnalysis(analysisId);
 
-			// Load schema for the first datasource
 			if (analysis.pipeline_definition && 'datasource_ids' in analysis.pipeline_definition) {
 				const datasourceIds = analysis.pipeline_definition.datasource_ids as string[];
 				if (datasourceIds.length > 0) {
@@ -96,7 +95,6 @@
 	async function handleSave() {
 		if (isSaving || saveStatus === 'saving') return;
 
-		// Clear any pending autosave
 		if (saveTimeout) {
 			clearTimeout(saveTimeout);
 			saveTimeout = null;
@@ -123,8 +121,6 @@
 		try {
 			const job = await computeStore.executeAnalysis(analysisId);
 			showResults = true;
-
-			// Wait for job to complete (polling is handled by computeStore)
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Failed to run analysis';
 			alert(message);
@@ -142,31 +138,25 @@
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
 	});
 
-	// Autosave effect - watches pipeline changes
 	$effect(() => {
 		const pipeline = analysisStore.pipeline;
 
-		// Skip autosave on initial load
 		if (initialPipeline === null) {
 			initialPipeline = pipeline;
 			return;
 		}
 
-		// Skip if no real changes (same reference)
 		if (pipeline === initialPipeline) {
 			return;
 		}
 
-		// Clear previous timeout
 		if (saveTimeout) {
 			clearTimeout(saveTimeout);
 			saveTimeout = null;
 		}
 
-		// Mark as unsaved
 		saveStatus = 'unsaved';
 
-		// Set new timeout for autosave
 		saveTimeout = setTimeout(async () => {
 			saveStatus = 'saving';
 			try {
@@ -178,7 +168,6 @@
 			}
 		}, 3000);
 
-		// Cleanup function
 		return () => {
 			if (saveTimeout) {
 				clearTimeout(saveTimeout);
@@ -194,65 +183,65 @@
 	</div>
 {:else if analysisQuery.isError}
 	<div class="error-container">
-		<h2>Error Loading Analysis</h2>
+		<div class="error-icon">!</div>
+		<h2>Error loading analysis</h2>
 		<p>{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}</p>
-		<button onclick={() => goto('/analysis')} type="button">Back to Gallery</button>
+		<button onclick={() => goto('/')} type="button">Back to Gallery</button>
 	</div>
 {:else if analysisQuery.data}
 	<div class="editor-container">
-		<!-- Header -->
 		<header class="editor-header">
 			<div class="header-left">
-				<button class="back-button" onclick={() => goto('/')} type="button" title="Back to gallery">
-					← Back
+				<button class="back-button" onclick={() => goto('/')} type="button">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M19 12H5M12 19l-7-7 7-7" />
+					</svg>
 				</button>
-				<h1>{analysisQuery.data.name}</h1>
-				{#if analysisQuery.data.description}
-					<span class="description">{analysisQuery.data.description}</span>
-				{/if}
+				<div class="header-title">
+					<h1>{analysisQuery.data.name}</h1>
+					{#if analysisQuery.data.description}
+						<span class="description">{analysisQuery.data.description}</span>
+					{/if}
+				</div>
 			</div>
 			<div class="header-right">
-				<span class="save-status" class:saved={saveStatus === 'saved'}>
+				<span class="save-status" class:saved={saveStatus === 'saved'} class:unsaved={saveStatus === 'unsaved'}>
 					{#if saveStatus === 'saving'}
-						Saving...
+						saving...
 					{:else if saveStatus === 'unsaved'}
-						Unsaved changes
+						unsaved
 					{:else}
-						All changes saved
+						saved
 					{/if}
 				</span>
 				<button
-					class="button-secondary"
+					class="btn btn-secondary"
 					onclick={handleSave}
 					disabled={isSaving || saveStatus === 'saving' || analysisStore.loading}
 					type="button"
 				>
-					{isSaving || saveStatus === 'saving' ? 'Saving...' : 'Save'}
+					Save
 				</button>
 				<button
-					class="button-primary"
+					class="btn btn-primary"
 					onclick={handleRun}
 					disabled={isRunning || analysisStore.pipeline.length === 0}
 					type="button"
 				>
-					{isRunning ? 'Running...' : 'Run Analysis'}
+					{isRunning ? 'Running...' : 'Run'}
 				</button>
 			</div>
 		</header>
 
-		<!-- Main workspace -->
 		<div class="editor-workspace">
-			<!-- Left sidebar: Step library -->
 			<StepLibrary onAddStep={handleAddStep} />
 
-			<!-- Center: Pipeline canvas -->
 			<PipelineCanvas
 				steps={analysisStore.pipeline}
 				onStepClick={handleSelectStep}
 				onStepDelete={handleDeleteStep}
 			/>
 
-			<!-- Right sidebar: Step config -->
 			<StepConfig
 				step={selectedStep}
 				schema={analysisStore.calculatedSchema}
@@ -261,34 +250,29 @@
 			/>
 		</div>
 
-		<!-- Bottom panel: Results viewer -->
 		{#if showResults}
-			<div class="results-panel" class:collapsed={!showResults}>
+			<div class="results-panel">
 				<div class="results-header">
 					<h3>Results</h3>
 					<div class="results-actions">
 						{#if currentJob}
-							<span class="job-status" class:completed={currentJob?.status === 'completed'}>
+							<span class="job-status" class:completed={currentJob?.status === 'completed'} class:failed={currentJob?.status === 'failed'}>
 								{currentJob?.status}
 							</span>
 						{/if}
-						<button
-							class="collapse-button"
-							onclick={() => (showResults = !showResults)}
-							type="button"
-						>
-							{showResults ? '▼' : '▲'}
+						<button class="btn-icon" onclick={() => (showResults = false)} type="button">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M18 6L6 18M6 6l12 12" />
+							</svg>
 						</button>
 					</div>
 				</div>
 
 				<div class="results-content">
 					{#if currentJob?.status === 'pending' || currentJob?.status === 'running'}
-						<div class="loading-state">
+						<div class="results-loading">
 							<div class="spinner"></div>
-							<p>
-								{currentJob?.status === 'pending' ? 'Analysis queued...' : 'Running analysis...'}
-							</p>
+							<p>{currentJob?.status === 'pending' ? 'Queued...' : 'Running...'}</p>
 							{#if currentJob?.progress !== undefined}
 								<div class="progress-bar">
 									<div class="progress-fill" style="width: {currentJob?.progress}%"></div>
@@ -296,7 +280,7 @@
 							{/if}
 						</div>
 					{:else if currentJob?.status === 'failed'}
-						<div class="error-state">
+						<div class="results-error">
 							<p>Analysis failed</p>
 							<span>{currentJob?.error || 'Unknown error'}</span>
 						</div>
@@ -307,12 +291,12 @@
 							loading={resultQuery.isLoading}
 						/>
 					{:else if currentJob?.status === 'completed' && resultQuery.isLoading}
-						<div class="loading-state">
+						<div class="results-loading">
 							<div class="spinner"></div>
 							<p>Loading results...</p>
 						</div>
 					{:else}
-						<div class="empty-state">
+						<div class="results-empty">
 							<p>Run the analysis to see results</p>
 						</div>
 					{/if}
@@ -329,161 +313,217 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		height: 100vh;
-		gap: 1rem;
+		height: calc(100vh - 60px);
+		gap: var(--space-4);
 	}
 
 	.spinner {
-		width: 40px;
-		height: 40px;
-		border: 4px solid #f3f4f6;
-		border-top-color: #3b82f6;
+		width: 32px;
+		height: 32px;
+		border: 2px solid var(--border-primary);
+		border-top-color: var(--fg-primary);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
 
 	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
+		to { transform: rotate(360deg); }
 	}
 
-	.loading-container p,
-	.error-container p {
-		color: #6b7280;
-		margin: 0;
+	.loading-container p {
+		color: var(--fg-tertiary);
+		font-size: var(--text-sm);
+	}
+
+	.error-container {
+		text-align: center;
+	}
+
+	.error-icon {
+		width: 52px;
+		height: 52px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xl);
+		font-weight: 700;
+		box-shadow: var(--shadow-soft);
 	}
 
 	.error-container h2 {
-		color: #ef4444;
 		margin: 0;
+		font-size: var(--text-lg);
+		color: var(--fg-primary);
+	}
+
+	.error-container p {
+		margin: 0;
+		color: var(--fg-tertiary);
+		font-size: var(--text-sm);
 	}
 
 	.error-container button {
-		margin-top: 1rem;
-		padding: 0.5rem 1rem;
-		background: #3b82f6;
-		color: white;
-		border: none;
-		border-radius: 4px;
+		margin-top: var(--space-4);
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 		cursor: pointer;
+		box-shadow: var(--card-shadow);
 	}
 
 	.editor-container {
 		display: flex;
 		flex-direction: column;
-		height: 100vh;
-		background: #fff;
+		height: calc(100vh - 60px);
+		background-color: var(--bg-secondary);
+		gap: var(--space-4);
 	}
 
 	.editor-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 1rem 1.5rem;
-		border-bottom: 1px solid #e5e7eb;
-		background: white;
-		gap: 1rem;
+		padding: var(--space-4) var(--space-5);
+		border-bottom: 1px solid var(--border-primary);
+		background-color: var(--bg-primary);
+		gap: var(--space-4);
+		box-shadow: var(--shadow-soft);
 	}
 
 	.header-left {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: var(--space-3);
 		min-width: 0;
 		flex: 1;
 	}
 
 	.back-button {
-		padding: 0.5rem 0.75rem;
-		background: none;
-		border: 1px solid #d1d5db;
-		border-radius: 4px;
+		padding: var(--space-2);
+		background: transparent;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 0.875rem;
-		color: #374151;
-		transition: all 0.2s;
-		flex-shrink: 0;
+		color: var(--fg-secondary);
+		transition: all var(--transition-fast);
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.back-button:hover {
-		background: #f9fafb;
-		border-color: #9ca3af;
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
+	}
+
+	.header-title {
+		min-width: 0;
 	}
 
 	.editor-header h1 {
 		margin: 0;
-		font-size: 1.25rem;
-		color: #111827;
+		font-size: var(--text-base);
+		font-weight: 600;
+		color: var(--fg-primary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
 	.description {
-		font-size: 0.875rem;
-		color: #6b7280;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
 	}
 
 	.header-right {
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		flex-shrink: 0;
 		align-items: center;
 	}
 
 	.save-status {
-		font-size: 0.875rem;
-		color: #9ca3af;
-		white-space: nowrap;
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-tertiary);
 	}
 
 	.save-status.saved {
-		color: #6b7280;
+		color: var(--success-fg);
+		background-color: var(--success-bg);
 	}
 
-	.button-primary,
-	.button-secondary {
-		padding: 0.5rem 1rem;
-		border: none;
-		border-radius: 4px;
-		font-size: 0.875rem;
+	.save-status.unsaved {
+		color: var(--warning-fg);
+		background-color: var(--warning-bg);
+	}
+
+	.btn {
+		padding: var(--space-2) var(--space-4);
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.2s;
-		white-space: nowrap;
+		transition: all var(--transition-fast);
 	}
 
-	.button-primary {
-		background: #3b82f6;
-		color: white;
+	.btn-primary {
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-color: var(--accent-primary);
 	}
 
-	.button-primary:hover:not(:disabled) {
-		background: #2563eb;
+	.btn-primary:hover:not(:disabled) {
+		opacity: 0.85;
 	}
 
-	.button-primary:disabled {
-		background: #9ca3af;
+	.btn-primary:disabled {
+		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
-	.button-secondary {
-		background: white;
-		color: #374151;
-		border: 1px solid #d1d5db;
+	.btn-secondary {
+		background-color: transparent;
+		color: var(--fg-primary);
+		border-color: var(--border-secondary);
 	}
 
-	.button-secondary:hover:not(:disabled) {
-		background: #f9fafb;
+	.btn-secondary:hover:not(:disabled) {
+		background-color: var(--bg-hover);
 	}
 
-	.button-secondary:disabled {
-		color: #9ca3af;
+	.btn-secondary:disabled {
+		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.btn-icon {
+		padding: var(--space-1);
+		background: transparent;
+		border: none;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		color: var(--fg-muted);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.btn-icon:hover {
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
 	}
 
 	.editor-workspace {
@@ -493,66 +533,57 @@
 	}
 
 	.results-panel {
-		border-top: 1px solid #e5e7eb;
-		background: white;
-		max-height: 400px;
+		border-top: 1px solid var(--border-primary);
+		background-color: var(--bg-primary);
+		max-height: 360px;
 		display: flex;
 		flex-direction: column;
-	}
-
-	.results-panel.collapsed {
-		max-height: 48px;
+		box-shadow: var(--shadow-soft);
 	}
 
 	.results-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #e5e7eb;
-		background: #f9fafb;
+		padding: var(--space-3) var(--space-4);
+		border-bottom: 1px solid var(--border-primary);
+		background-color: var(--bg-tertiary);
 	}
 
 	.results-header h3 {
 		margin: 0;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		font-weight: 600;
-		color: #111827;
+		color: var(--fg-primary);
 	}
 
 	.results-actions {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
+		gap: var(--space-3);
 	}
 
 	.job-status {
-		font-size: 0.75rem;
-		padding: 0.25rem 0.5rem;
-		border-radius: 4px;
-		background: #fef3c7;
-		color: #92400e;
-		text-transform: uppercase;
-		font-weight: 600;
+		font-size: var(--text-xs);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
+		background-color: var(--warning-bg);
+		color: var(--warning-fg);
+		border: 1px solid var(--warning-border);
+		text-transform: lowercase;
+		font-weight: 500;
 	}
 
 	.job-status.completed {
-		background: #d1fae5;
-		color: #065f46;
+		background-color: var(--success-bg);
+		color: var(--success-fg);
+		border-color: var(--success-border);
 	}
 
-	.collapse-button {
-		padding: 0.25rem 0.5rem;
-		background: none;
-		border: 1px solid #d1d5db;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 0.875rem;
-		color: #6b7280;
-	}
-
-	.collapse-button:hover {
-		background: #f3f4f6;
+	.job-status.failed {
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border-color: var(--error-border);
 	}
 
 	.results-content {
@@ -560,46 +591,47 @@
 		overflow-y: auto;
 	}
 
-	.loading-state,
-	.error-state,
-	.empty-state {
+	.results-loading,
+	.results-error,
+	.results-empty {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 3rem;
-		gap: 1rem;
+		padding: var(--space-8);
+		gap: var(--space-3);
 	}
 
-	.loading-state p,
-	.error-state p,
-	.empty-state p {
+	.results-loading p,
+	.results-empty p {
 		margin: 0;
-		color: #6b7280;
-		font-size: 0.875rem;
+		color: var(--fg-tertiary);
+		font-size: var(--text-sm);
 	}
 
-	.error-state p {
-		color: #ef4444;
-		font-weight: 600;
+	.results-error p {
+		margin: 0;
+		color: var(--error-fg);
+		font-size: var(--text-sm);
+		font-weight: 500;
 	}
 
-	.error-state span {
-		font-size: 0.875rem;
-		color: #6b7280;
+	.results-error span {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
 	}
 
 	.progress-bar {
 		width: 200px;
 		height: 4px;
-		background: #e5e7eb;
-		border-radius: 2px;
+		background-color: var(--bg-tertiary);
+		border-radius: var(--radius-sm);
 		overflow: hidden;
 	}
 
 	.progress-fill {
 		height: 100%;
-		background: #3b82f6;
+		background-color: var(--accent-primary);
 		transition: width 0.3s ease;
 	}
 </style>

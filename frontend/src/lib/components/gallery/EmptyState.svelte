@@ -8,18 +8,18 @@
 
 <div class="empty">
 	<div class="icon">
-		<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-			<rect x="3" y="3" width="18" height="18" rx="2" stroke-width="2" />
-			<path d="M3 9h18M9 3v18" stroke-width="2" />
+		<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+			<rect x="3" y="3" width="18" height="18" rx="1" />
+			<path d="M3 9h18M9 3v18" />
 		</svg>
 	</div>
 
-	<h2>No Analyses Yet</h2>
-	<p>Create your first analysis to get started with data exploration</p>
+	<h2>No analyses yet</h2>
+	<p>Create your first analysis to get started with data exploration.</p>
 
 	<button class="btn-create" onclick={createNew}>
-		<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-			<path d="M12 5v14M5 12h14" stroke-width="2" />
+		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+			<path d="M12 5v14M5 12h14" />
 		</svg>
 		Create Analysis
 	</button>
@@ -31,61 +31,56 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 80px 24px;
+		padding: var(--space-12) var(--space-6);
 		text-align: center;
 		min-height: 400px;
+		border: 1px dashed var(--border-secondary);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-primary);
+		box-shadow: var(--card-shadow);
 	}
 
 	.icon {
-		width: 80px;
-		height: 80px;
-		color: #bdbdbd;
-		margin-bottom: 24px;
-	}
-
-	.icon svg {
-		width: 100%;
-		height: 100%;
+		width: 64px;
+		height: 64px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--fg-faint);
+		margin-bottom: var(--space-6);
 	}
 
 	h2 {
-		margin: 0 0 12px 0;
-		font-size: 24px;
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-lg);
 		font-weight: 600;
-		color: #212121;
+		color: var(--fg-primary);
 	}
 
 	p {
-		margin: 0 0 32px 0;
-		font-size: 16px;
-		color: #757575;
-		max-width: 400px;
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
+		max-width: 300px;
 	}
 
 	.btn-create {
-		background: #1976d2;
-		color: white;
-		border: none;
-		border-radius: 8px;
-		padding: 12px 24px;
-		font-size: 16px;
-		font-weight: 500;
-		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		transition: all 0.2s;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		font-weight: 500;
+		cursor: pointer;
+		transition: opacity var(--transition-fast);
 	}
 
 	.btn-create:hover {
-		background: #1565c0;
-		transform: translateY(-1px);
-		box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
-	}
-
-	.btn-create svg {
-		width: 20px;
-		height: 20px;
-		stroke-width: 2;
+		opacity: 0.85;
 	}
 </style>

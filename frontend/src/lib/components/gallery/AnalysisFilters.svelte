@@ -31,15 +31,9 @@
 
 <div class="filters">
 	<div class="search-box">
-		<svg
-			class="search-icon"
-			xmlns="http://www.w3.org/2000/svg"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-		>
-			<circle cx="11" cy="11" r="8" stroke-width="2" />
-			<path d="M21 21l-4.35-4.35" stroke-width="2" />
+		<svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+			<circle cx="11" cy="11" r="8" />
+			<path d="M21 21l-4.35-4.35" />
 		</svg>
 		<input
 			type="text"
@@ -50,20 +44,20 @@
 		/>
 		{#if searchQuery}
 			<button class="clear-btn" onclick={clearSearch} aria-label="Clear search">
-				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-					<path d="M18 6L6 18M6 6l12 12" stroke-width="2" />
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<path d="M18 6L6 18M6 6l12 12" />
 				</svg>
 			</button>
 		{/if}
 	</div>
 
 	<div class="sort-box">
-		<label for="sort-select" class="sort-label">Sort by:</label>
+		<label for="sort-select" class="sort-label">Sort:</label>
 		<select id="sort-select" value={sortOption} onchange={handleSortChange} class="sort-select">
-			<option value="newest">Newest First</option>
-			<option value="oldest">Oldest First</option>
-			<option value="name-asc">Name A-Z</option>
-			<option value="name-desc">Name Z-A</option>
+			<option value="newest">Newest</option>
+			<option value="oldest">Oldest</option>
+			<option value="name-asc">A-Z</option>
+			<option value="name-desc">Z-A</option>
 		</select>
 	</div>
 </div>
@@ -71,114 +65,109 @@
 <style>
 	.filters {
 		display: flex;
-		gap: 16px;
+		gap: var(--space-4);
 		align-items: center;
-		margin-bottom: 24px;
+		margin-bottom: var(--space-7);
 		flex-wrap: wrap;
 	}
 
 	.search-box {
 		position: relative;
 		flex: 1;
-		min-width: 240px;
+		min-width: 220px;
+		max-width: 420px;
 	}
 
 	.search-icon {
 		position: absolute;
-		left: 12px;
+		left: var(--space-3);
 		top: 50%;
 		transform: translateY(-50%);
-		width: 20px;
-		height: 20px;
-		color: #9e9e9e;
+		color: var(--fg-muted);
 		pointer-events: none;
 	}
 
 	.search-input {
 		width: 100%;
-		padding: 12px 40px 12px 44px;
-		border: 1px solid #e0e0e0;
-		border-radius: 8px;
-		font-size: 15px;
-		color: #212121;
-		background: white;
-		transition: all 0.2s;
+		padding: var(--space-3) var(--space-10) var(--space-3) var(--space-10);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+		background-color: var(--bg-primary);
+		transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+		box-shadow: var(--card-shadow);
 	}
 
 	.search-input:focus {
 		outline: none;
-		border-color: #1976d2;
-		box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+		border-color: var(--border-focus);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-focus) 20%, transparent);
 	}
 
 	.search-input::placeholder {
-		color: #9e9e9e;
+		color: var(--fg-muted);
 	}
 
 	.clear-btn {
 		position: absolute;
-		right: 8px;
+		right: var(--space-2);
 		top: 50%;
 		transform: translateY(-50%);
-		background: none;
+		background: transparent;
 		border: none;
-		padding: 6px;
+		padding: var(--space-1);
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 4px;
-		color: #9e9e9e;
-		transition: all 0.2s;
+		border-radius: var(--radius-sm);
+		color: var(--fg-muted);
+		transition: all var(--transition-fast);
 	}
 
 	.clear-btn:hover {
-		background: #f5f5f5;
-		color: #424242;
-	}
-
-	.clear-btn svg {
-		width: 18px;
-		height: 18px;
-		stroke-width: 2;
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
 	}
 
 	.sort-box {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--space-2);
 	}
 
 	.sort-label {
-		font-size: 14px;
-		color: #757575;
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
 		font-weight: 500;
 		white-space: nowrap;
 	}
 
 	.sort-select {
-		padding: 10px 36px 10px 14px;
-		border: 1px solid #e0e0e0;
-		border-radius: 8px;
-		font-size: 15px;
-		color: #212121;
-		background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23757575'%3E%3Cpath d='M6 9l6 6 6-6' stroke-width='2'/%3E%3C/svg%3E")
-			no-repeat right 8px center;
-		background-size: 20px;
+		padding: var(--space-2) var(--space-8) var(--space-2) var(--space-3);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+		background-color: var(--bg-primary);
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+		background-repeat: no-repeat;
+		background-position: right var(--space-2) center;
 		cursor: pointer;
 		appearance: none;
-		transition: all 0.2s;
-		min-width: 160px;
+		transition: border-color var(--transition-fast);
 	}
 
 	.sort-select:focus {
 		outline: none;
-		border-color: #1976d2;
-		box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+		border-color: var(--border-focus);
 	}
 
 	.sort-select:hover {
-		border-color: #bdbdbd;
+		border-color: var(--border-tertiary);
 	}
 
 	@media (max-width: 640px) {
@@ -188,17 +177,15 @@
 		}
 
 		.search-box {
-			min-width: 0;
+			max-width: none;
 		}
 
 		.sort-box {
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 6px;
+			justify-content: space-between;
 		}
 
 		.sort-select {
-			width: 100%;
+			flex: 1;
 		}
 	}
 </style>

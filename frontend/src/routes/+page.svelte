@@ -82,24 +82,17 @@
 </script>
 
 <div class="container">
-	<header>
-		<div class="header-content">
-			<div>
-				<h1>Analysis Gallery</h1>
-				<p class="subtitle">Browse and manage your data analyses</p>
-			</div>
-			<button class="btn-new" onclick={createNew}>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-				>
-					<path d="M12 5v14M5 12h14" stroke-width="2" />
-				</svg>
-				New Analysis
-			</button>
+	<header class="page-header">
+		<div class="header-text">
+			<h1>Analyses</h1>
+			<p class="subtitle">Browse and manage your data analyses</p>
 		</div>
+		<button class="btn-new" onclick={createNew}>
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M12 5v14M5 12h14" />
+			</svg>
+			New Analysis
+		</button>
 	</header>
 
 	<main>
@@ -119,21 +112,11 @@
 				</div>
 			</div>
 		{:else if query.isError}
-			<div class="error">
-				<div class="error-icon">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-					>
-						<circle cx="12" cy="12" r="10" stroke-width="2" />
-						<path d="M12 8v4M12 16h.01" stroke-width="2" />
-					</svg>
-				</div>
-				<h2>Failed to Load Analyses</h2>
+			<div class="error-state">
+				<div class="error-icon">!</div>
+				<h2>Failed to load analyses</h2>
 				<p class="error-message">{query.error.message}</p>
-				<button class="btn-retry" onclick={() => query.refetch()}> Try Again </button>
+				<button class="btn-retry" onclick={() => query.refetch()}>Try again</button>
 			</div>
 		{:else if query.data}
 			{#if query.data.length === 0}
@@ -164,104 +147,103 @@
 
 <style>
 	.container {
-		max-width: 1400px;
+		max-width: 1200px;
 		margin: 0 auto;
-		padding: 24px;
+		padding: var(--space-7) var(--space-6);
 	}
 
-	header {
-		margin-bottom: 32px;
-	}
-
-	.header-content {
+	.page-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-start;
-		gap: 24px;
+		gap: var(--space-6);
+		margin-bottom: var(--space-8);
+		padding-bottom: var(--space-6);
+		border-bottom: 1px solid var(--border-primary);
 	}
 
-	h1 {
-		margin: 0 0 8px 0;
-		font-size: 32px;
-		font-weight: 700;
-		color: #212121;
+	.header-text h1 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-2xl);
+		font-weight: 600;
 	}
 
 	.subtitle {
 		margin: 0;
-		font-size: 16px;
-		color: #757575;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
 	}
 
 	.btn-new {
-		background: #1976d2;
-		color: white;
-		border: none;
-		border-radius: 8px;
-		padding: 12px 24px;
-		font-size: 16px;
-		font-weight: 500;
-		cursor: pointer;
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		transition: all 0.2s;
-		white-space: nowrap;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		font-weight: 500;
+		cursor: pointer;
+		transition: opacity var(--transition-fast);
 	}
 
 	.btn-new:hover {
-		background: #1565c0;
-		transform: translateY(-1px);
-		box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
-	}
-
-	.btn-new svg {
-		width: 20px;
-		height: 20px;
-		stroke-width: 2;
+		opacity: 0.85;
 	}
 
 	.loading {
-		padding: 24px 0;
+		padding: var(--space-4) 0;
 	}
 
 	.skeleton-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-		gap: 24px;
+		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+		gap: var(--space-4);
 	}
 
 	.skeleton-card {
-		border: 1px solid #e0e0e0;
-		border-radius: 8px;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		overflow: hidden;
-		background: white;
+		background: var(--bg-primary);
 	}
 
 	.skeleton-thumbnail {
 		width: 100%;
 		aspect-ratio: 16 / 9;
-		background: linear-gradient(90deg, #f5f5f5 25%, #eeeeee 50%, #f5f5f5 75%);
+		background: linear-gradient(
+			90deg,
+			var(--bg-tertiary) 25%,
+			var(--bg-hover) 50%,
+			var(--bg-tertiary) 75%
+		);
 		background-size: 200% 100%;
 		animation: shimmer 1.5s infinite;
 	}
 
 	.skeleton-content {
-		padding: 16px;
+		padding: var(--space-4);
 	}
 
 	.skeleton-title,
 	.skeleton-text {
-		height: 16px;
-		background: linear-gradient(90deg, #f5f5f5 25%, #eeeeee 50%, #f5f5f5 75%);
+		height: 14px;
+		background: linear-gradient(
+			90deg,
+			var(--bg-tertiary) 25%,
+			var(--bg-hover) 50%,
+			var(--bg-tertiary) 75%
+		);
 		background-size: 200% 100%;
 		animation: shimmer 1.5s infinite;
-		border-radius: 4px;
-		margin-bottom: 12px;
+		border-radius: var(--radius-sm);
+		margin-bottom: var(--space-3);
 	}
 
 	.skeleton-title {
-		height: 20px;
+		height: 16px;
 		width: 70%;
 	}
 
@@ -278,85 +260,80 @@
 		}
 	}
 
-	.error {
+	.error-state {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 80px 24px;
+		padding: var(--space-12) var(--space-6);
 		text-align: center;
 		min-height: 400px;
 	}
 
 	.error-icon {
-		width: 64px;
-		height: 64px;
-		color: #d32f2f;
-		margin-bottom: 24px;
+		width: 48px;
+		height: 48px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xl);
+		font-weight: 700;
+		margin-bottom: var(--space-6);
 	}
 
-	.error-icon svg {
-		width: 100%;
-		height: 100%;
-	}
-
-	.error h2 {
-		margin: 0 0 12px 0;
-		font-size: 24px;
+	.error-state h2 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-lg);
 		font-weight: 600;
-		color: #212121;
 	}
 
 	.error-message {
-		margin: 0 0 32px 0;
-		font-size: 16px;
-		color: #757575;
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
 		max-width: 400px;
 	}
 
 	.btn-retry {
-		background: #1976d2;
-		color: white;
-		border: none;
-		border-radius: 8px;
-		padding: 12px 24px;
-		font-size: 16px;
-		font-weight: 500;
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
 		cursor: pointer;
-		transition: all 0.2s;
+		transition: opacity var(--transition-fast);
 	}
 
 	.btn-retry:hover {
-		background: #1565c0;
+		opacity: 0.85;
 	}
 
 	.no-results {
 		text-align: center;
-		padding: 60px 24px;
+		padding: var(--space-12) var(--space-6);
+		border: 1px dashed var(--border-primary);
+		border-radius: var(--radius-sm);
 	}
 
 	.no-results p {
 		margin: 0;
-		font-size: 16px;
-		color: #757575;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
 	}
 
 	@media (max-width: 768px) {
 		.container {
-			padding: 16px;
+			padding: var(--space-4);
 		}
 
-		.header-content {
+		.page-header {
 			flex-direction: column;
 			align-items: stretch;
-		}
-
-		h1 {
-			font-size: 24px;
-		}
-
-		.subtitle {
-			font-size: 14px;
 		}
 
 		.btn-new {
@@ -366,7 +343,6 @@
 
 		.skeleton-grid {
 			grid-template-columns: 1fr;
-			gap: 16px;
 		}
 	}
 </style>

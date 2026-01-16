@@ -52,21 +52,21 @@
 
 <div class="wizard-container">
 	<div class="wizard-header">
-		<h1>Create New Analysis</h1>
+		<h1>New Analysis</h1>
 		<div class="steps-indicator">
 			<div class="step" class:active={step === 1} class:completed={step > 1}>
-				<div class="step-number">1</div>
-				<div class="step-label">Details</div>
+				<span class="step-number">{step > 1 ? '✓' : '1'}</span>
+				<span class="step-label">Details</span>
 			</div>
 			<div class="step-line" class:completed={step > 1}></div>
 			<div class="step" class:active={step === 2} class:completed={step > 2}>
-				<div class="step-number">2</div>
-				<div class="step-label">Data Source</div>
+				<span class="step-number">{step > 2 ? '✓' : '2'}</span>
+				<span class="step-label">Data Source</span>
 			</div>
 			<div class="step-line" class:completed={step > 2}></div>
 			<div class="step" class:active={step === 3}>
-				<div class="step-number">3</div>
-				<div class="step-label">Review</div>
+				<span class="step-number">3</span>
+				<span class="step-label">Review</span>
 			</div>
 		</div>
 	</div>
@@ -75,9 +75,16 @@
 		{#if step === 1}
 			<div class="step-content">
 				<h2>Analysis Details</h2>
+				<p class="step-description">Give your analysis a name and optional description.</p>
+
 				<div class="form-group">
 					<label for="name">Name <span class="required">*</span></label>
-					<input id="name" type="text" bind:value={name} placeholder="My Data Analysis" autofocus />
+					<input
+						id="name"
+						type="text"
+						bind:value={name}
+						placeholder="My Data Analysis"
+					/>
 				</div>
 				<div class="form-group">
 					<label for="description">Description</label>
@@ -92,10 +99,10 @@
 		{:else if step === 2}
 			<div class="step-content">
 				<h2>Select Data Sources</h2>
-				<p class="hint">Choose one or more data sources for this analysis</p>
+				<p class="step-description">Choose one or more data sources for this analysis.</p>
 
 				{#if datasourcesQuery.isLoading}
-					<div class="loading">Loading data sources...</div>
+					<div class="loading-state">Loading data sources...</div>
 				{:else if datasourcesQuery.error}
 					<div class="error-message">
 						Error loading data sources: {datasourcesQuery.error.message}
@@ -112,18 +119,17 @@
 								class="datasource-card"
 								class:selected={selectedDatasourceIds.includes(datasource.id)}
 								onclick={() => toggleDatasource(datasource.id)}
+								type="button"
 							>
-								<div class="card-header">
-									<h3>{datasource.name}</h3>
+								<div class="card-row">
+									<span class="card-name">{datasource.name}</span>
 									<span class="type-badge">{datasource.source_type}</span>
 								</div>
-								<div class="card-info">
-									<span class="created-date">
-										Created {new Date(datasource.created_at).toLocaleDateString()}
-									</span>
+								<div class="card-meta">
+									Created {new Date(datasource.created_at).toLocaleDateString()}
 								</div>
 								{#if selectedDatasourceIds.includes(datasource.id)}
-									<div class="selected-indicator">✓</div>
+									<span class="selected-check">✓</span>
 								{/if}
 							</button>
 						{/each}
@@ -133,27 +139,38 @@
 		{:else if step === 3}
 			<div class="step-content">
 				<h2>Review & Create</h2>
+				<p class="step-description">Review your analysis configuration before creating.</p>
+
 				<div class="review-section">
-					<h3>Analysis Details</h3>
-					<dl>
-						<dt>Name:</dt>
-						<dd>{name}</dd>
+					<h3>Details</h3>
+					<dl class="review-list">
+						<div class="review-item">
+							<dt>Name</dt>
+							<dd>{name}</dd>
+						</div>
 						{#if description}
-							<dt>Description:</dt>
-							<dd>{description}</dd>
+							<div class="review-item">
+								<dt>Description</dt>
+								<dd>{description}</dd>
+							</div>
 						{/if}
 					</dl>
 				</div>
+
 				<div class="review-section">
 					<h3>Data Sources ({selectedDatasourceIds.length})</h3>
-					<ul>
+					<ul class="review-sources">
 						{#if datasourcesQuery.data}
-							{#each datasourcesQuery.data.filter( (ds: DataSource) => selectedDatasourceIds.includes(ds.id) ) as ds}
-								<li>{ds.name} ({ds.source_type})</li>
+							{#each datasourcesQuery.data.filter((ds: DataSource) => selectedDatasourceIds.includes(ds.id)) as ds}
+								<li>
+									<span class="source-name">{ds.name}</span>
+									<span class="source-type">{ds.source_type}</span>
+								</li>
 							{/each}
 						{/if}
 					</ul>
 				</div>
+
 				{#if error}
 					<div class="error-message">{error}</div>
 				{/if}
@@ -162,298 +179,344 @@
 	</div>
 
 	<div class="wizard-footer">
-		<div class="footer-actions">
-			{#if step > 1}
-				<button class="btn btn-secondary" onclick={() => (step -= 1)} disabled={creating}>
-					Back
-				</button>
-			{:else}
-				<a href="/" class="btn btn-secondary">Cancel</a>
-			{/if}
+		{#if step > 1}
+			<button class="btn btn-secondary" onclick={() => (step -= 1)} disabled={creating}>
+				Back
+			</button>
+		{:else}
+			<a href="/" class="btn btn-secondary">Cancel</a>
+		{/if}
 
-			<div class="spacer"></div>
+		<div class="spacer"></div>
 
-			{#if step < 3}
-				<button
-					class="btn btn-primary"
-					onclick={() => (step += 1)}
-					disabled={(step === 1 && !canProceedStep1) || (step === 2 && !canProceedStep2)}
-				>
-					Next
-				</button>
-			{:else}
-				<button class="btn btn-primary" onclick={handleCreate} disabled={creating}>
-					{creating ? 'Creating...' : 'Create Analysis'}
-				</button>
-			{/if}
-		</div>
+		{#if step < 3}
+			<button
+				class="btn btn-primary"
+				onclick={() => (step += 1)}
+				disabled={(step === 1 && !canProceedStep1) || (step === 2 && !canProceedStep2)}
+			>
+				Next
+			</button>
+		{:else}
+			<button class="btn btn-primary" onclick={handleCreate} disabled={creating}>
+				{creating ? 'Creating...' : 'Create Analysis'}
+			</button>
+		{/if}
 	</div>
 </div>
 
 <style>
 	.wizard-container {
-		max-width: 800px;
+		max-width: 720px;
 		margin: 0 auto;
-		padding: 2rem;
+		padding: var(--space-7) var(--space-6);
 		display: flex;
 		flex-direction: column;
-		min-height: calc(100vh - 4rem);
+		min-height: calc(100vh - 60px);
+		gap: var(--space-6);
+	}
+
+	.wizard-header {
+		margin-bottom: var(--space-8);
 	}
 
 	.wizard-header h1 {
-		margin: 0 0 2rem 0;
-		font-size: 2rem;
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--text-2xl);
 		font-weight: 600;
 	}
 
 	.steps-indicator {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		margin-bottom: 3rem;
+		gap: var(--space-2);
 	}
 
 	.step {
 		display: flex;
-		flex-direction: column;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--space-2);
 	}
 
 	.step-number {
-		width: 40px;
-		height: 40px;
-		border-radius: 50%;
-		border: 2px solid #ddd;
+		width: 28px;
+		height: 28px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		border: 1px solid var(--border-secondary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xs);
 		font-weight: 600;
-		background: white;
-		color: #999;
+		color: var(--fg-muted);
+		background-color: var(--bg-primary);
 	}
 
 	.step.active .step-number {
-		border-color: #4f46e5;
-		background: #4f46e5;
-		color: white;
+		border-color: var(--accent-primary);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
 	}
 
 	.step.completed .step-number {
-		border-color: #10b981;
-		background: #10b981;
-		color: white;
+		border-color: var(--success-border);
+		background-color: var(--success-bg);
+		color: var(--success-fg);
 	}
 
 	.step-label {
-		font-size: 0.875rem;
-		color: #666;
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
 	}
 
 	.step.active .step-label {
-		color: #4f46e5;
-		font-weight: 600;
+		color: var(--fg-primary);
+		font-weight: 500;
 	}
 
 	.step-line {
 		flex: 1;
-		height: 2px;
-		background: #ddd;
-		min-width: 60px;
+		height: 1px;
+		background-color: var(--border-primary);
+		min-width: 40px;
 	}
 
 	.step-line.completed {
-		background: #10b981;
+		background-color: var(--success-border);
 	}
 
 	.wizard-content {
 		flex: 1;
-		margin-bottom: 2rem;
+		margin-bottom: var(--space-6);
 	}
 
 	.step-content {
-		background: white;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
-		padding: 2rem;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		padding: var(--space-6);
+		box-shadow: var(--card-shadow);
 	}
 
 	.step-content h2 {
-		margin: 0 0 1.5rem 0;
-		font-size: 1.5rem;
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-lg);
 		font-weight: 600;
 	}
 
-	.hint {
-		color: #666;
-		margin-bottom: 1.5rem;
+	.step-description {
+		color: var(--fg-tertiary);
+		margin-bottom: var(--space-6);
 	}
 
 	.form-group {
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-5);
 	}
 
 	.form-group label {
 		display: block;
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-2);
+		font-size: var(--text-sm);
 		font-weight: 500;
-		color: #374151;
+		color: var(--fg-secondary);
 	}
 
 	.required {
-		color: #ef4444;
+		color: var(--error-fg);
 	}
 
 	.form-group input,
 	.form-group textarea {
 		width: 100%;
-		padding: 0.75rem;
-		border: 1px solid #d1d5db;
-		border-radius: 6px;
-		font-size: 1rem;
-		font-family: inherit;
+		padding: var(--space-3);
+		border: 1px solid var(--border-secondary);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-primary);
+		color: var(--fg-primary);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 	}
 
 	.form-group input:focus,
 	.form-group textarea:focus {
 		outline: none;
-		border-color: #4f46e5;
-		box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+		border-color: var(--border-focus);
+	}
+
+	.form-group textarea {
+		resize: vertical;
+		min-height: 100px;
 	}
 
 	.datasource-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-		gap: 1rem;
+		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+		gap: var(--space-3);
 	}
 
 	.datasource-card {
 		position: relative;
-		padding: 1.5rem;
-		border: 2px solid #e5e7eb;
-		border-radius: 8px;
-		background: white;
+		padding: var(--space-4);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-primary);
 		cursor: pointer;
-		transition: all 0.2s;
+		transition: all var(--transition-fast);
 		text-align: left;
+		font-family: var(--font-mono);
+		box-shadow: var(--card-shadow);
 	}
 
 	.datasource-card:hover {
-		border-color: #4f46e5;
-		box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+		border-color: var(--border-tertiary);
+		background-color: var(--bg-hover);
 	}
 
 	.datasource-card.selected {
-		border-color: #4f46e5;
-		background: #f5f3ff;
+		border-color: var(--accent-primary);
+		background-color: var(--accent-bg);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 20%, transparent);
 	}
 
-	.card-header {
+	.card-row {
 		display: flex;
 		justify-content: space-between;
-		align-items: start;
-		gap: 0.5rem;
-		margin-bottom: 0.75rem;
+		align-items: flex-start;
+		gap: var(--space-2);
+		margin-bottom: var(--space-2);
 	}
 
-	.card-header h3 {
-		margin: 0;
-		font-size: 1rem;
-		font-weight: 600;
-		color: #111827;
+	.card-name {
+		font-size: var(--text-sm);
+		font-weight: 500;
+		color: var(--fg-primary);
 	}
 
 	.type-badge {
-		padding: 0.25rem 0.5rem;
-		background: #e5e7eb;
-		border-radius: 4px;
-		font-size: 0.75rem;
-		color: #6b7280;
-		white-space: nowrap;
+		padding: var(--space-1) var(--space-2);
+		background-color: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xs);
+		color: var(--fg-tertiary);
 	}
 
-	.card-info {
-		font-size: 0.875rem;
-		color: #6b7280;
+	.card-meta {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
 	}
 
-	.selected-indicator {
+	.selected-check {
 		position: absolute;
-		top: 1rem;
-		right: 1rem;
-		width: 24px;
-		height: 24px;
-		background: #4f46e5;
-		color: white;
-		border-radius: 50%;
+		top: var(--space-2);
+		right: var(--space-2);
+		width: 20px;
+		height: 20px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.875rem;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xs);
 	}
 
 	.review-section {
-		margin-bottom: 2rem;
+		margin-bottom: var(--space-6);
+		padding-bottom: var(--space-6);
+		border-bottom: 1px solid var(--border-primary);
+	}
+
+	.review-section:last-of-type {
+		border-bottom: none;
+		margin-bottom: 0;
+		padding-bottom: 0;
 	}
 
 	.review-section h3 {
-		margin: 0 0 1rem 0;
-		font-size: 1.125rem;
+		margin: 0 0 var(--space-4) 0;
+		font-size: var(--text-sm);
 		font-weight: 600;
-		color: #111827;
+		color: var(--fg-tertiary);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
-	.review-section dl {
-		display: grid;
-		grid-template-columns: 120px 1fr;
-		gap: 0.75rem;
+	.review-list {
 		margin: 0;
 	}
 
-	.review-section dt {
-		font-weight: 500;
-		color: #6b7280;
+	.review-item {
+		display: flex;
+		gap: var(--space-4);
+		margin-bottom: var(--space-2);
 	}
 
-	.review-section dd {
+	.review-item dt {
+		width: 100px;
+		flex-shrink: 0;
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
+	}
+
+	.review-item dd {
 		margin: 0;
-		color: #111827;
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
 	}
 
-	.review-section ul {
+	.review-sources {
 		margin: 0;
-		padding-left: 1.5rem;
-		color: #111827;
+		padding: 0;
+		list-style: none;
 	}
 
-	.review-section li {
-		margin-bottom: 0.5rem;
+	.review-sources li {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-2) 0;
+		border-bottom: 1px solid var(--border-primary);
 	}
 
-	.loading,
+	.review-sources li:last-child {
+		border-bottom: none;
+	}
+
+	.source-name {
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+	}
+
+	.source-type {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
+
+	.loading-state,
 	.empty-state {
 		text-align: center;
-		padding: 3rem;
-		color: #6b7280;
+		padding: var(--space-8);
+		color: var(--fg-tertiary);
+		border: 1px dashed var(--border-primary);
+		border-radius: var(--radius-sm);
 	}
 
 	.error-message {
-		padding: 1rem;
-		background: #fee2e2;
-		border: 1px solid #ef4444;
-		border-radius: 6px;
-		color: #991b1b;
-		margin-top: 1rem;
+		padding: var(--space-4);
+		background-color: var(--error-bg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		color: var(--error-fg);
+		font-size: var(--text-sm);
+		margin-top: var(--space-4);
 	}
 
 	.wizard-footer {
-		border-top: 1px solid #e5e7eb;
-		padding-top: 1.5rem;
-	}
-
-	.footer-actions {
 		display: flex;
-		gap: 1rem;
+		gap: var(--space-3);
+		padding-top: var(--space-6);
+		border-top: 1px solid var(--border-primary);
 	}
 
 	.spacer {
@@ -461,39 +524,43 @@
 	}
 
 	.btn {
-		padding: 0.75rem 1.5rem;
-		border: none;
-		border-radius: 6px;
-		font-size: 1rem;
+		padding: var(--space-2) var(--space-5);
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.2s;
+		transition: all var(--transition-fast);
 		text-decoration: none;
-		display: inline-block;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.btn-primary {
-		background: #4f46e5;
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-color: var(--accent-primary);
 	}
 
 	.btn-primary:hover:not(:disabled) {
-		background: #4338ca;
+		opacity: 0.85;
 	}
 
 	.btn-primary:disabled {
-		background: #9ca3af;
+		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
 	.btn-secondary {
-		background: white;
-		color: #374151;
-		border: 1px solid #d1d5db;
+		background-color: transparent;
+		color: var(--fg-primary);
+		border-color: var(--border-secondary);
 	}
 
 	.btn-secondary:hover:not(:disabled) {
-		background: #f9fafb;
+		background-color: var(--bg-hover);
 	}
 
 	.btn-secondary:disabled {

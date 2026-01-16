@@ -15,9 +15,12 @@
 <div class="pipeline-canvas">
 	{#if steps.length === 0}
 		<div class="empty-state">
-			<div class="empty-icon">📊</div>
-			<h3>No pipeline steps yet</h3>
-			<p>Add operations from the library to build your data pipeline</p>
+			<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+				<rect x="3" y="3" width="18" height="18" rx="1" />
+				<path d="M3 9h18M9 3v18" />
+			</svg>
+			<h3>No pipeline steps</h3>
+			<p>Add operations from the library to build your pipeline</p>
 		</div>
 	{:else}
 		<div class="steps-container">
@@ -38,8 +41,8 @@
 <style>
 	.pipeline-canvas {
 		flex: 1;
-		padding: 2rem;
-		background-color: #f8f9fa;
+		padding: var(--space-6);
+		background-color: var(--bg-secondary);
 		overflow-y: auto;
 		min-height: 400px;
 	}
@@ -51,24 +54,26 @@
 		justify-content: center;
 		height: 100%;
 		min-height: 400px;
-		color: #6c757d;
+		color: var(--fg-muted);
+		text-align: center;
 	}
 
-	.empty-icon {
-		font-size: 4rem;
-		margin-bottom: 1rem;
-		opacity: 0.5;
+	.empty-state svg {
+		color: var(--fg-faint);
+		margin-bottom: var(--space-4);
 	}
 
 	.empty-state h3 {
-		margin: 0 0 0.5rem 0;
-		font-size: 1.5rem;
-		color: #495057;
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-base);
+		font-weight: 600;
+		color: var(--fg-secondary);
 	}
 
 	.empty-state p {
 		margin: 0;
-		font-size: 1rem;
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
 	}
 
 	.steps-container {
@@ -76,7 +81,7 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 0;
-		max-width: 500px;
+		max-width: 400px;
 		margin: 0 auto;
 	}
 </style>

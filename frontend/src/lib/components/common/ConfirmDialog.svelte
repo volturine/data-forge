@@ -69,8 +69,8 @@
 			<div class="dialog-header">
 				<h2 id="dialog-title">{title}</h2>
 				<button class="close-btn" onclick={onCancel} aria-label="Close dialog">
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-						<path d="M18 6L6 18M6 6l12 12" stroke-width="2" />
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M18 6L6 18M6 6l12 12" />
 					</svg>
 				</button>
 			</div>
@@ -95,36 +95,33 @@
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
+		background-color: var(--overlay-bg);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		z-index: 1000;
-		padding: 16px;
-		animation: fadeIn 0.2s ease-out;
+		padding: var(--space-4);
+		animation: fadeIn var(--transition-base);
 	}
 
 	@keyframes fadeIn {
-		from {
-			opacity: 0;
-		}
-		to {
-			opacity: 1;
-		}
+		from { opacity: 0; }
+		to { opacity: 1; }
 	}
 
 	.dialog {
-		background: white;
-		border-radius: 12px;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-		max-width: 500px;
+		background-color: var(--dialog-bg);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		box-shadow: var(--dialog-shadow);
+		max-width: 400px;
 		width: 100%;
-		animation: slideIn 0.2s ease-out;
+		animation: slideIn var(--transition-base);
 	}
 
 	@keyframes slideIn {
 		from {
-			transform: translateY(-20px);
+			transform: translateY(-10px);
 			opacity: 0;
 		}
 		to {
@@ -141,99 +138,88 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 20px 24px;
-		border-bottom: 1px solid #e0e0e0;
+		padding: var(--space-4);
+		border-bottom: 1px solid var(--border-primary);
 	}
 
 	.dialog-header h2 {
 		margin: 0;
-		font-size: 20px;
+		font-size: var(--text-base);
 		font-weight: 600;
-		color: #212121;
+		color: var(--fg-primary);
 	}
 
 	.close-btn {
-		background: none;
+		background: transparent;
 		border: none;
-		padding: 6px;
+		padding: var(--space-1);
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 4px;
-		color: #757575;
-		transition: all 0.2s;
+		border-radius: var(--radius-sm);
+		color: var(--fg-muted);
+		transition: all var(--transition-fast);
 	}
 
 	.close-btn:hover {
-		background: #f5f5f5;
-		color: #424242;
-	}
-
-	.close-btn svg {
-		width: 20px;
-		height: 20px;
-		stroke-width: 2;
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
 	}
 
 	.dialog-body {
-		padding: 24px;
+		padding: var(--space-6);
 	}
 
 	.dialog-body p {
 		margin: 0;
-		font-size: 15px;
+		font-size: var(--text-sm);
 		line-height: 1.6;
-		color: #424242;
+		color: var(--fg-secondary);
 	}
 
 	.dialog-footer {
 		display: flex;
 		justify-content: flex-end;
-		gap: 12px;
-		padding: 16px 24px;
-		border-top: 1px solid #e0e0e0;
+		gap: var(--space-3);
+		padding: var(--space-4);
+		border-top: 1px solid var(--border-primary);
 	}
 
 	.btn {
-		border: none;
-		border-radius: 8px;
-		padding: 10px 20px;
-		font-size: 15px;
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		padding: var(--space-2) var(--space-4);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all 0.2s;
+		transition: all var(--transition-fast);
 	}
 
 	.btn-cancel {
-		background: #f5f5f5;
-		color: #424242;
+		background-color: transparent;
+		color: var(--fg-primary);
+		border-color: var(--border-secondary);
 	}
 
 	.btn-cancel:hover {
-		background: #e0e0e0;
+		background-color: var(--bg-hover);
 	}
 
 	.btn-confirm {
-		background: #d32f2f;
-		color: white;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border-color: var(--error-border);
 	}
 
 	.btn-confirm:hover {
-		background: #b71c1c;
-		box-shadow: 0 2px 8px rgba(211, 47, 47, 0.3);
+		opacity: 0.85;
 	}
 
 	@media (max-width: 640px) {
 		.dialog {
 			max-width: 100%;
-			margin: 16px;
-		}
-
-		.dialog-header,
-		.dialog-body,
-		.dialog-footer {
-			padding: 16px;
 		}
 
 		.dialog-footer {
