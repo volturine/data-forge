@@ -318,6 +318,11 @@ class PolarsComputeEngine:
         elif operation == 'sort':
             columns = params.get('columns', [])
             descending = params.get('descending', False)
+            # Handle both single boolean and list of booleans for descending
+            if isinstance(descending, list):
+                # Ensure descending list matches columns length
+                if len(descending) != len(columns):
+                    descending = descending[:len(columns)] if len(descending) > len(columns) else descending + [False] * (len(columns) - len(descending))
             return lf.sort(columns, descending=descending)
 
         elif operation == 'rename':

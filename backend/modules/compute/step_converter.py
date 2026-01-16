@@ -44,17 +44,19 @@ def convert_config_to_params(operation: str, config: dict) -> dict:
         'filter': convert_filter_config,
         'select': lambda c: c,  # Direct passthrough
         'groupby': convert_groupby_config,
-        'sort': lambda c: c,  # Direct passthrough
-        'rename': lambda c: c,  # Direct passthrough
+        'sort': convert_sort_config,
+        'rename': convert_rename_config,
         'drop': lambda c: c,  # Direct passthrough
         'join': convert_join_config,
         'with_columns': lambda c: c,  # Direct passthrough
-        'deduplicate': lambda c: c,  # Direct passthrough
+        'deduplicate': convert_deduplicate_config,
         'fill_null': convert_fillnull_config,
         'explode': lambda c: c,  # Direct passthrough
         'pivot': convert_pivot_config,
         'unpivot': lambda c: c,  # Direct passthrough
         'view': lambda c: c,  # Direct passthrough
+        'timeseries': convert_timeseries_config,
+        'string_transform': convert_string_transform_config,
     }
 
     converter = converters.get(operation, lambda c: c)
@@ -122,12 +124,93 @@ def convert_fillnull_config(config: dict) -> dict:
 def convert_pivot_config(config: dict) -> dict:
     """Convert pivot config from frontend to backend format.
 
-    Frontend: {index, columns, values, aggregateFunction}
+    Frontend: {index, columns, values, aggregate_function} or {index, columns, values, aggregateFunction}
     Backend: {index, columns, values, aggregate_function}
     """
     return {
         'index': config.get('index'),
         'columns': config.get('columns'),
         'values': config.get('values'),
-        'aggregate_function': config.get('aggregateFunction', 'sum'),
+        # Support both camelCase and snake_case
+        'aggregate_function': config.get('aggregate_function') or config.get('aggregateFunction', 'first'),
+    }
+
+
+def convert_rename_config(config: dict) -> dict:
+    """Convert rename config from frontend to backend format.
+
+    Frontend: {column_mapping: {oldName: newName}}
+    Backend: {mapping: {oldName: newName}}
+    """
+    # Support both column_mapping (frontend) and mapping (backend format)
+    mapping = config.get('column_mapping') or config.get('mapping', {})
+    return {'mapping': mapping}
+
+
+def convert_sort_config(config: dict) -> dict:
+    """Convert sort config from frontend to backend format.
+
+    Frontend: [{column: 'col1', descending: false}, {column: 'col2', descending: true}]
+    Backend: {columns: ['col1', 'col2'], descending: [false, true]}
+    """
+    # If config is already a list (frontend format)
+    if isinstance(config, list):
+        columns = [rule.get('column') for rule in config if rule.get('column')]
+        descending = [rule.get('descending', False) for rule in config if rule.get('column')]
+        return {'columns': columns, 'descending': descending}
+
+    # If config is a dict, check if it has the 'columns' key (already backend format)
+    if 'columns' in config:
+        return config
+
+    # Empty or invalid config
+    return {'columns': [], 'descending': []}
+
+
+def convert_deduplicate_config(config: dict) -> dict:
+    """Convert deduplicate config from frontend to backend format.
+
+    Frontend: {columns: [...], keep: 'first'}
+    Backend: {subset: [...], keep: 'first'}
+    """
+    return {
+        'subset': config.get('columns') or config.get('subset'),
+        'keep': config.get('keep', 'first'),
+    }
+
+
+def convert_timeseries_config(config: dict) -> dict:
+    """Convert timeseries config from frontend to backend format.
+
+    Frontend: {column, operationType, newColumn, component, value, unit, column2}
+    Backend: {column, operation_type, new_column, component, value, unit, column2}
+    """
+    return {
+        'column': config.get('column'),
+        'operation_type': config.get('operationType') or config.get('operation_type'),
+        'new_column': config.get('newColumn') or config.get('new_column'),
+        'component': config.get('component'),
+        'value': config.get('value'),
+        'unit': config.get('unit'),
+        'column2': config.get('column2'),
+    }
+
+
+def convert_string_transform_config(config: dict) -> dict:
+    """Convert string_transform config from frontend to backend format.
+
+    Frontend: {column, method, newColumn, pattern, replacement, start, end, delimiter, index, groupIndex}
+    Backend: {column, method, new_column, pattern, replacement, start, end, delimiter, index, group_index}
+    """
+    return {
+        'column': config.get('column'),
+        'method': config.get('method'),
+        'new_column': config.get('newColumn') or config.get('new_column') or config.get('column'),
+        'pattern': config.get('pattern'),
+        'replacement': config.get('replacement'),
+        'start': config.get('start'),
+        'end': config.get('end'),
+        'delimiter': config.get('delimiter'),
+        'index': config.get('index'),
+        'group_index': config.get('groupIndex') or config.get('group_index'),
     }

@@ -13,7 +13,15 @@ import {
 	applyWithColumnRule,
 	applyDropRule,
 	applyUniqueRule,
-	applyCastRule
+	applyCastRule,
+	applyTimeSeriesRule,
+	applyStringTransformRule,
+	applyFillNullRule,
+	applyDeduplicateRule,
+	applyExplodeRule,
+	applyPivotRule,
+	applyUnpivotRule,
+	applyViewRule
 } from './transformation-rules';
 
 class SchemaCalculator {
@@ -75,6 +83,46 @@ class SchemaCalculator {
 		return applyCastRule(schema, config);
 	}
 
+	// TimeSeries: date/time operations
+	applyTimeSeries(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyTimeSeriesRule(schema, config);
+	}
+
+	// StringTransform: string operations
+	applyStringTransform(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyStringTransformRule(schema, config);
+	}
+
+	// FillNull: handle null values
+	applyFillNull(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyFillNullRule(schema, config);
+	}
+
+	// Deduplicate: remove duplicate rows
+	applyDeduplicate(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyDeduplicateRule(schema, config);
+	}
+
+	// Explode: expand list columns
+	applyExplode(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyExplodeRule(schema, config);
+	}
+
+	// Pivot: reshape wide
+	applyPivot(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyPivotRule(schema, config);
+	}
+
+	// Unpivot: reshape long
+	applyUnpivot(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyUnpivotRule(schema, config);
+	}
+
+	// View: passthrough for visualization
+	applyView(schema: Schema, config: Record<string, unknown>): Schema {
+		return applyViewRule(schema, config);
+	}
+
 	// Apply a single step transformation
 	applyStep(schema: Schema, step: PipelineStep, schemaMap?: Map<string, Schema>): Schema | null {
 		switch (step.type) {
@@ -125,6 +173,38 @@ class SchemaCalculator {
 
 			case 'cast': {
 				return this.applyCast(schema, step.config);
+			}
+
+			case 'timeseries': {
+				return this.applyTimeSeries(schema, step.config);
+			}
+
+			case 'string_transform': {
+				return this.applyStringTransform(schema, step.config);
+			}
+
+			case 'fill_null': {
+				return this.applyFillNull(schema, step.config);
+			}
+
+			case 'deduplicate': {
+				return this.applyDeduplicate(schema, step.config);
+			}
+
+			case 'explode': {
+				return this.applyExplode(schema, step.config);
+			}
+
+			case 'pivot': {
+				return this.applyPivot(schema, step.config);
+			}
+
+			case 'unpivot': {
+				return this.applyUnpivot(schema, step.config);
+			}
+
+			case 'view': {
+				return this.applyView(schema, step.config);
 			}
 
 			default: {
