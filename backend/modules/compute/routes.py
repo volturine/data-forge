@@ -24,7 +24,7 @@ async def execute_analysis(
     request: ExecuteRequest,
     session: AsyncSession = Depends(get_db),
 ):
-    """Execute a data analysis pipeline"""
+    """Execute a data analysis pipeline."""
     try:
         return await service.execute_analysis(
             session=session,
@@ -42,7 +42,7 @@ async def preview_step(
     request: PreviewRequest,
     session: AsyncSession = Depends(get_db),
 ):
-    """Preview the result of a pipeline step"""
+    """Preview the result of a pipeline step."""
     try:
         return await service.preview_step(
             session=session,
@@ -58,7 +58,7 @@ async def preview_step(
 
 @router.get('/status/{job_id}', response_model=schemas.ComputeStatusSchema)
 async def get_job_status(job_id: str):
-    """Get the status of a compute job"""
+    """Get the status of a compute job."""
     try:
         return service.get_job_status(job_id)
     except ValueError as e:
@@ -69,7 +69,7 @@ async def get_job_status(job_id: str):
 
 @router.get('/result/{job_id}', response_model=schemas.ComputeResultSchema)
 async def get_job_result(job_id: str):
-    """Get the result of a completed job"""
+    """Get the result of a completed job."""
     try:
         return service.get_job_result(job_id)
     except ValueError as e:
@@ -80,7 +80,7 @@ async def get_job_result(job_id: str):
 
 @router.delete('/{job_id}')
 async def cancel_job(job_id: str):
-    """Cancel a running compute job"""
+    """Cancel a running compute job."""
     try:
         service.cancel_job(job_id)
         return {'message': f'Job {job_id} cancelled successfully'}
@@ -92,7 +92,7 @@ async def cancel_job(job_id: str):
 
 @router.delete('/{job_id}/cleanup')
 async def cleanup_job(job_id: str):
-    """Clean up job data from memory"""
+    """Clean up job data from memory."""
     try:
         service.cleanup_job(job_id)
         return {'message': f'Job {job_id} cleaned up successfully'}

@@ -17,7 +17,7 @@ async def upload_file(
     name: str = Form(...),
     session: AsyncSession = Depends(get_db),
 ):
-    """Upload a file and create a data source"""
+    """Upload a file and create a data source."""
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
 
@@ -64,7 +64,7 @@ async def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: AsyncSession = Depends(get_db),
 ):
-    """Create a database or API data source connection"""
+    """Create a database or API data source connection."""
     try:
         if datasource.source_type == 'database':
             config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
@@ -97,11 +97,25 @@ async def connect_datasource(
 
 @router.get('', response_model=list[schemas.DataSourceResponse])
 async def list_datasources(session: AsyncSession = Depends(get_db)):
-    """List all data sources"""
+    """List all data sources."""
     try:
         return await service.list_datasources(session)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to list datasources: {str(e)}')
+
+
+@router.get('/{datasource_id}', response_model=schemas.DataSourceResponse)
+async def get_datasource(
+    datasource_id: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """Get a single data source by ID."""
+    try:
+        return await service.get_datasource(session, datasource_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to get datasource: {str(e)}')
 
 
 @router.get('/{datasource_id}/schema', response_model=schemas.SchemaInfo)
@@ -109,7 +123,7 @@ async def get_datasource_schema(
     datasource_id: str,
     session: AsyncSession = Depends(get_db),
 ):
-    """Get schema information for a data source"""
+    """Get schema information for a data source."""
     try:
         return await service.get_datasource_schema(session, datasource_id)
     except ValueError as e:
@@ -123,7 +137,7 @@ async def delete_datasource(
     datasource_id: str,
     session: AsyncSession = Depends(get_db),
 ):
-    """Delete a data source and associated file"""
+    """Delete a data source and associated file."""
     try:
         await service.delete_datasource(session, datasource_id)
         return {'message': f'DataSource {datasource_id} deleted successfully'}

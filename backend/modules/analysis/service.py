@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +31,7 @@ async def create_analysis(
         'datasource_ids': data.datasource_ids,
     }
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     analysis = Analysis(
         id=analysis_id,
         name=data.name,
@@ -118,7 +118,7 @@ async def update_analysis(
     if data.status is not None:
         analysis.status = data.status
 
-    analysis.updated_at = datetime.now(timezone.utc)
+    analysis.updated_at = datetime.now(UTC)
 
     await session.commit()
     await session.refresh(analysis)
@@ -175,6 +175,37 @@ async def link_datasource(
 
     if datasource_id not in analysis.pipeline_definition.get('datasource_ids', []):
         analysis.pipeline_definition['datasource_ids'] = analysis.pipeline_definition.get('datasource_ids', []) + [datasource_id]
-        analysis.updated_at = datetime.now(timezone.utc)
+        analysis.updated_at = datetime.now(UTC)
+
+    await session.commit()
+
+
+async def unlink_datasource(
+    session: AsyncSession,
+    analysis_id: str,
+    datasource_id: str,
+) -> None:
+    result = await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise ValueError(f'Analysis {analysis_id} not found')
+
+    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    datasource = result.scalar_one_or_none()
+    if not datasource:
+        raise ValueError(f'DataSource {datasource_id} not found')
+
+    await session.execute(
+        delete(AnalysisDataSource).where(
+            AnalysisDataSource.analysis_id == analysis_id,
+            AnalysisDataSource.datasource_id == datasource_id,
+        )
+    )
+
+    datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
+    if datasource_id in datasource_ids:
+        datasource_ids.remove(datasource_id)
+        analysis.pipeline_definition['datasource_ids'] = datasource_ids
+        analysis.updated_at = datetime.now(UTC)
 
     await session.commit()

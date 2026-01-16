@@ -1,5 +1,4 @@
-"""
-Example usage of the Polars Compute Engine
+"""Example usage of the Polars Compute Engine.
 
 This demonstrates how to use the compute module to execute
 data transformations in isolated subprocesses.

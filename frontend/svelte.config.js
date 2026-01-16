@@ -16,6 +16,6 @@ export default {
 		// Ensure the app is served from the root path
 		paths: {
 			base: ''
-		},
+		}
 	}
 };

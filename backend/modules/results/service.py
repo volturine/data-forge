@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -12,13 +12,13 @@ def _get_result_path(analysis_id: str) -> Path:
 
 
 async def store_result(analysis_id: str, df: pl.DataFrame) -> None:
-    """Store analysis result as parquet file"""
+    """Store analysis result as parquet file."""
     result_path = _get_result_path(analysis_id)
     df.write_parquet(result_path)
 
 
 async def get_result_metadata(analysis_id: str) -> ResultMetadataSchema:
-    """Get metadata about stored result"""
+    """Get metadata about stored result."""
     result_path = _get_result_path(analysis_id)
 
     if not result_path.exists():
@@ -35,12 +35,12 @@ async def get_result_metadata(analysis_id: str) -> ResultMetadataSchema:
         row_count=row_count,
         column_count=len(columns),
         columns_schema=columns,
-        created_at=datetime.fromtimestamp(result_path.stat().st_mtime, tz=timezone.utc),
+        created_at=datetime.fromtimestamp(result_path.stat().st_mtime, tz=UTC),
     )
 
 
 async def get_result_data(analysis_id: str, page: int = 1, page_size: int = 100) -> ResultDataSchema:
-    """Get paginated result data"""
+    """Get paginated result data."""
     result_path = _get_result_path(analysis_id)
 
     if not result_path.exists():
@@ -59,7 +59,7 @@ async def get_result_data(analysis_id: str, page: int = 1, page_size: int = 100)
 
 
 async def export_result(analysis_id: str, format: str) -> Path:
-    """Export result to requested format"""
+    """Export result to requested format."""
     result_path = _get_result_path(analysis_id)
 
     if not result_path.exists():
@@ -84,7 +84,7 @@ async def export_result(analysis_id: str, format: str) -> Path:
 
 
 async def delete_result(analysis_id: str) -> None:
-    """Delete stored result file"""
+    """Delete stored result file."""
     result_path = _get_result_path(analysis_id)
 
     if not result_path.exists():

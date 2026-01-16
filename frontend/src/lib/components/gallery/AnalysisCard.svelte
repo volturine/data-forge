@@ -9,8 +9,6 @@
 
 	let { analysis, onDelete }: Props = $props();
 
-	let showConfirm = $state(false);
-
 	function handleClick(e: MouseEvent) {
 		if (!(e.target as HTMLElement).closest('button')) {
 			goto(`/analysis/${analysis.id}`);
@@ -26,18 +24,7 @@
 
 	function handleDelete(e: MouseEvent) {
 		e.stopPropagation();
-		showConfirm = true;
-	}
-
-	function confirmDelete(e: MouseEvent) {
-		e.stopPropagation();
 		onDelete(analysis.id);
-		showConfirm = false;
-	}
-
-	function cancelDelete(e: MouseEvent) {
-		e.stopPropagation();
-		showConfirm = false;
 	}
 
 	function formatDate(date: string): string {
@@ -88,25 +75,17 @@
 	</div>
 
 	<div class="actions">
-		{#if showConfirm}
-			<div class="confirm">
-				<span>Delete?</span>
-				<button class="btn-confirm" onclick={confirmDelete}>Yes</button>
-				<button class="btn-cancel" onclick={cancelDelete}>No</button>
-			</div>
-		{:else}
-			<button class="btn-delete" onclick={handleDelete} aria-label="Delete analysis">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-				>
-					<path d="M3 6h18M8 6V4h8v2M19 6v14H5V6" stroke-width="2" />
-					<path d="M10 11v6M14 11v6" stroke-width="2" />
-				</svg>
-			</button>
-		{/if}
+		<button class="btn-delete" onclick={handleDelete} aria-label="Delete analysis">
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+			>
+				<path d="M3 6h18M8 6V4h8v2M19 6v14H5V6" stroke-width="2" />
+				<path d="M10 11v6M14 11v6" stroke-width="2" />
+			</svg>
+		</button>
 	</div>
 </div>
 
@@ -217,51 +196,5 @@
 		width: 20px;
 		height: 20px;
 		stroke-width: 2;
-	}
-
-	.confirm {
-		background: rgba(255, 255, 255, 0.95);
-		border: 1px solid #e0e0e0;
-		border-radius: 6px;
-		padding: 8px 12px;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		font-size: 14px;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-	}
-
-	.confirm span {
-		color: #424242;
-		font-weight: 500;
-	}
-
-	.btn-confirm,
-	.btn-cancel {
-		border: none;
-		border-radius: 4px;
-		padding: 4px 12px;
-		font-size: 13px;
-		cursor: pointer;
-		font-weight: 500;
-		transition: all 0.2s;
-	}
-
-	.btn-confirm {
-		background: #d32f2f;
-		color: white;
-	}
-
-	.btn-confirm:hover {
-		background: #b71c1c;
-	}
-
-	.btn-cancel {
-		background: #f5f5f5;
-		color: #424242;
-	}
-
-	.btn-cancel:hover {
-		background: #e0e0e0;
 	}
 </style>

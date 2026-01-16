@@ -3,7 +3,10 @@
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { goto } from '$app/navigation';
 	import { listAnalyses, deleteAnalysis } from '$lib/api/analysis';
-	import { GalleryGrid, EmptyState } from '$lib/components/gallery';
+	import { GalleryGrid, EmptyState, AnalysisFilters } from '$lib/components/gallery';
+	import { ConfirmDialog } from '$lib/components/common';
+	import type { AnalysisGalleryItem } from '$lib/types/analysis';
+	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
 
 	const queryClient = useQueryClient();
 
@@ -12,18 +15,69 @@
 		queryFn: listAnalyses
 	}));
 
+	let searchQuery = $state('');
+	let sortOption = $state<SortOption>('newest');
+	let deleteConfirmId = $state<string | null>(null);
+
+	const filteredAndSortedAnalyses = $derived.by(() => {
+		if (!query.data) return [];
+
+		let result = [...query.data];
+
+		if (searchQuery) {
+			const lowerQuery = searchQuery.toLowerCase();
+			result = result.filter((analysis) => analysis.name.toLowerCase().includes(lowerQuery));
+		}
+
+		result.sort((a, b) => {
+			switch (sortOption) {
+				case 'newest':
+					return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+				case 'oldest':
+					return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+				case 'name-asc':
+					return a.name.localeCompare(b.name);
+				case 'name-desc':
+					return b.name.localeCompare(a.name);
+				default:
+					return 0;
+			}
+		});
+
+		return result;
+	});
+
 	function createNew() {
 		goto('/analysis/new');
 	}
 
-	async function handleDelete(id: string) {
+	function handleSearch(query: string) {
+		searchQuery = query;
+	}
+
+	function handleSort(option: SortOption) {
+		sortOption = option;
+	}
+
+	function requestDelete(id: string) {
+		deleteConfirmId = id;
+	}
+
+	async function confirmDelete() {
+		if (!deleteConfirmId) return;
+
 		try {
-			await deleteAnalysis(id);
+			await deleteAnalysis(deleteConfirmId);
 			queryClient.invalidateQueries({ queryKey: ['analyses'] });
+			deleteConfirmId = null;
 		} catch (err) {
 			console.error('Failed to delete analysis:', err);
 			alert('Failed to delete analysis. Please try again.');
 		}
+	}
+
+	function cancelDelete() {
+		deleteConfirmId = null;
 	}
 </script>
 
@@ -85,11 +139,28 @@
 			{#if query.data.length === 0}
 				<EmptyState />
 			{:else}
-				<GalleryGrid analyses={query.data} onDelete={handleDelete} />
+				<AnalysisFilters onSearch={handleSearch} onSort={handleSort} />
+				{#if filteredAndSortedAnalyses.length === 0}
+					<div class="no-results">
+						<p>No analyses match your search.</p>
+					</div>
+				{:else}
+					<GalleryGrid analyses={filteredAndSortedAnalyses} onDelete={requestDelete} />
+				{/if}
 			{/if}
 		{/if}
 	</main>
 </div>
+
+<ConfirmDialog
+	show={deleteConfirmId !== null}
+	title="Delete Analysis"
+	message="Are you sure you want to delete this analysis? This action cannot be undone."
+	confirmText="Delete"
+	cancelText="Cancel"
+	onConfirm={confirmDelete}
+	onCancel={cancelDelete}
+/>
 
 <style>
 	.container {
@@ -257,6 +328,17 @@
 
 	.btn-retry:hover {
 		background: #1565c0;
+	}
+
+	.no-results {
+		text-align: center;
+		padding: 60px 24px;
+	}
+
+	.no-results p {
+		margin: 0;
+		font-size: 16px;
+		color: #757575;
 	}
 
 	@media (max-width: 768px) {

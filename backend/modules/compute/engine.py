@@ -1,7 +1,5 @@
 import multiprocessing as mp
 import uuid
-from datetime import datetime, timezone
-from typing import Any
 
 import polars as pl
 
@@ -18,7 +16,7 @@ class PolarsComputeEngine:
         self.current_job_id: str | None = None
 
     def start(self) -> None:
-        """Start the compute subprocess"""
+        """Start the compute subprocess."""
         if self.is_running:
             return
 
@@ -30,7 +28,7 @@ class PolarsComputeEngine:
         self.is_running = True
 
     def execute(self, datasource_config: dict, pipeline_steps: list[dict], timeout: int = 300) -> str:
-        """Execute a Polars pipeline in the subprocess"""
+        """Execute a Polars pipeline in the subprocess."""
         job_id = str(uuid.uuid4())
         self.current_job_id = job_id
 
@@ -49,14 +47,14 @@ class PolarsComputeEngine:
         return job_id
 
     def get_result(self, timeout: float = 1.0) -> dict | None:
-        """Get result from result queue (non-blocking)"""
+        """Get result from result queue (non-blocking)."""
         try:
             return self.result_queue.get(timeout=timeout)
         except:
             return None
 
     def shutdown(self) -> None:
-        """Shutdown the compute subprocess"""
+        """Shutdown the compute subprocess."""
         if not self.is_running:
             return
 
@@ -75,7 +73,7 @@ class PolarsComputeEngine:
 
     @staticmethod
     def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue) -> None:
-        """Main compute loop running in subprocess"""
+        """Main compute loop running in subprocess."""
         while True:
             try:
                 command = command_queue.get()
@@ -146,7 +144,7 @@ class PolarsComputeEngine:
         job_id: str,
         result_queue: mp.Queue,
     ) -> dict:
-        """Execute the Polars transformation pipeline"""
+        """Execute the Polars transformation pipeline."""
         df = PolarsComputeEngine._load_datasource(datasource_config)
 
         total_steps = len(pipeline_steps)
@@ -177,7 +175,7 @@ class PolarsComputeEngine:
 
     @staticmethod
     def _load_datasource(config: dict) -> pl.DataFrame:
-        """Load data from datasource configuration"""
+        """Load data from datasource configuration."""
         source_type = config.get('source_type', 'file')
 
         if source_type == 'file':
@@ -203,7 +201,7 @@ class PolarsComputeEngine:
 
     @staticmethod
     def _apply_step(df: pl.DataFrame, step: dict) -> pl.DataFrame:
-        """Apply a single transformation step to the DataFrame"""
+        """Apply a single transformation step to the DataFrame."""
         operation = step.get('operation')
         params = step.get('params', {})
 
@@ -264,6 +262,183 @@ class PolarsComputeEngine:
         elif operation == 'drop':
             columns = params.get('columns', [])
             return df.drop(columns)
+
+        elif operation == 'pivot':
+            index = params.get('index', [])
+            on = params.get('columns')
+            values = params.get('values')
+            aggregate_function = params.get('aggregate_function', 'first')
+
+            return df.pivot(on=on, index=index, values=values, aggregate_function=aggregate_function)
+
+        elif operation == 'timeseries':
+            column = params.get('column')
+            operation_type = params.get('operation_type')
+            new_column = params.get('new_column')
+
+            if operation_type == 'extract':
+                component = params.get('component')
+                if component == 'year':
+                    return df.with_columns(pl.col(column).dt.year().alias(new_column))
+                elif component == 'month':
+                    return df.with_columns(pl.col(column).dt.month().alias(new_column))
+                elif component == 'day':
+                    return df.with_columns(pl.col(column).dt.day().alias(new_column))
+                elif component == 'hour':
+                    return df.with_columns(pl.col(column).dt.hour().alias(new_column))
+                elif component == 'minute':
+                    return df.with_columns(pl.col(column).dt.minute().alias(new_column))
+                elif component == 'second':
+                    return df.with_columns(pl.col(column).dt.second().alias(new_column))
+                elif component == 'quarter':
+                    return df.with_columns(pl.col(column).dt.quarter().alias(new_column))
+                elif component == 'week':
+                    return df.with_columns(pl.col(column).dt.week().alias(new_column))
+                elif component == 'dayofweek':
+                    return df.with_columns(pl.col(column).dt.weekday().alias(new_column))
+                else:
+                    raise ValueError(f'Unsupported time component: {component}')
+
+            elif operation_type == 'add':
+                value = params.get('value')
+                unit = params.get('unit', 'days')
+
+                if unit == 'days':
+                    duration = pl.duration(days=value)
+                elif unit == 'weeks':
+                    duration = pl.duration(weeks=value)
+                elif unit == 'hours':
+                    duration = pl.duration(hours=value)
+                elif unit == 'minutes':
+                    duration = pl.duration(minutes=value)
+                elif unit == 'seconds':
+                    duration = pl.duration(seconds=value)
+                else:
+                    raise ValueError(f'Unsupported time unit: {unit}')
+
+                return df.with_columns((pl.col(column) + duration).alias(new_column))
+
+            elif operation_type == 'subtract':
+                value = params.get('value')
+                unit = params.get('unit', 'days')
+
+                if unit == 'days':
+                    duration = pl.duration(days=value)
+                elif unit == 'weeks':
+                    duration = pl.duration(weeks=value)
+                elif unit == 'hours':
+                    duration = pl.duration(hours=value)
+                elif unit == 'minutes':
+                    duration = pl.duration(minutes=value)
+                elif unit == 'seconds':
+                    duration = pl.duration(seconds=value)
+                else:
+                    raise ValueError(f'Unsupported time unit: {unit}')
+
+                return df.with_columns((pl.col(column) - duration).alias(new_column))
+
+            elif operation_type == 'diff':
+                column2 = params.get('column2')
+                return df.with_columns((pl.col(column2) - pl.col(column)).alias(new_column))
+
+            else:
+                raise ValueError(f'Unsupported timeseries operation: {operation_type}')
+
+        elif operation == 'string_transform':
+            column = params.get('column')
+            method = params.get('method')
+            new_column = params.get('new_column', column)
+
+            if method == 'uppercase':
+                return df.with_columns(pl.col(column).str.to_uppercase().alias(new_column))
+            elif method == 'lowercase':
+                return df.with_columns(pl.col(column).str.to_lowercase().alias(new_column))
+            elif method == 'title':
+                return df.with_columns(pl.col(column).str.to_titlecase().alias(new_column))
+            elif method == 'strip':
+                return df.with_columns(pl.col(column).str.strip_chars().alias(new_column))
+            elif method == 'lstrip':
+                return df.with_columns(pl.col(column).str.strip_chars_start().alias(new_column))
+            elif method == 'rstrip':
+                return df.with_columns(pl.col(column).str.strip_chars_end().alias(new_column))
+            elif method == 'length':
+                return df.with_columns(pl.col(column).str.len_chars().alias(new_column))
+            elif method == 'slice':
+                start = params.get('start', 0)
+                end = params.get('end')
+                return df.with_columns(pl.col(column).str.slice(start, end).alias(new_column))
+            elif method == 'replace':
+                pattern = params.get('pattern')
+                replacement = params.get('replacement', '')
+                return df.with_columns(pl.col(column).str.replace_all(pattern, replacement).alias(new_column))
+            elif method == 'extract':
+                pattern = params.get('pattern')
+                group_index = params.get('group_index', 0)
+                return df.with_columns(pl.col(column).str.extract(pattern, group_index).alias(new_column))
+            elif method == 'split':
+                delimiter = params.get('delimiter', ' ')
+                index = params.get('index', 0)
+                return df.with_columns(pl.col(column).str.split(delimiter).list.get(index).alias(new_column))
+            else:
+                raise ValueError(f'Unsupported string method: {method}')
+
+        elif operation == 'fill_null':
+            strategy = params.get('strategy')
+            columns = params.get('columns', None)
+
+            if strategy == 'literal':
+                value = params.get('value')
+                if columns:
+                    return df.with_columns([pl.col(c).fill_null(value) for c in columns])
+                return df.fill_null(value)
+
+            elif strategy == 'forward':
+                if columns:
+                    return df.with_columns([pl.col(c).forward_fill() for c in columns])
+                return df.select([pl.all().forward_fill()])
+
+            elif strategy == 'backward':
+                if columns:
+                    return df.with_columns([pl.col(c).backward_fill() for c in columns])
+                return df.select([pl.all().backward_fill()])
+
+            elif strategy == 'mean':
+                if not columns:
+                    raise ValueError('Columns must be specified for mean strategy')
+                exprs = []
+                for c in columns:
+                    mean_val = df.select(pl.col(c).mean()).item()
+                    exprs.append(pl.col(c).fill_null(mean_val))
+                return df.with_columns(exprs)
+
+            elif strategy == 'median':
+                if not columns:
+                    raise ValueError('Columns must be specified for median strategy')
+                exprs = []
+                for c in columns:
+                    median_val = df.select(pl.col(c).median()).item()
+                    exprs.append(pl.col(c).fill_null(median_val))
+                return df.with_columns(exprs)
+
+            elif strategy == 'drop_rows':
+                if columns:
+                    return df.drop_nulls(subset=columns)
+                return df.drop_nulls()
+
+            else:
+                raise ValueError(f'Unsupported fill_null strategy: {strategy}')
+
+        elif operation == 'deduplicate':
+            subset = params.get('subset', None)
+            keep = params.get('keep', 'first')
+
+            return df.unique(subset=subset, keep=keep, maintain_order=True)
+
+        elif operation == 'explode':
+            columns = params.get('columns')
+            if isinstance(columns, str):
+                columns = [columns]
+            return df.explode(columns)
 
         else:
             raise ValueError(f'Unsupported operation: {operation}')

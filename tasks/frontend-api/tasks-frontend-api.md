@@ -15,21 +15,21 @@
 ## Tasks
 
 - [ ] 7.0 Implement Frontend API Clients
-  - [ ] 7.1 Create `frontend/src/lib/api/analysis.ts`:
-    - [ ] 7.1.1 Import types and client utilities
-    - [ ] 7.1.2 Implement `createAnalysis(data: CreateAnalysisRequest)`:
+  - [x] 7.1 Create `frontend/src/lib/api/analysis.ts`:
+    - [x] 7.1.1 Import types and client utilities
+    - [x] 7.1.2 Implement `createAnalysis(data: CreateAnalysisRequest)`:
       - POST to /analysis
       - Return Analysis
-    - [ ] 7.1.3 Implement `listAnalyses()`:
+    - [x] 7.1.3 Implement `listAnalyses()`:
       - GET /analysis
       - Return AnalysisGalleryItem[]
-    - [ ] 7.1.4 Implement `getAnalysis(id: string)`:
+    - [x] 7.1.4 Implement `getAnalysis(id: string)`:
       - GET /analysis/{id}
       - Return Analysis
-    - [ ] 7.1.5 Implement `updateAnalysis(id: string, data: UpdateAnalysisRequest)`:
+    - [x] 7.1.5 Implement `updateAnalysis(id: string, data: UpdateAnalysisRequest)`:
       - PUT /analysis/{id}
       - Return Analysis
-    - [ ] 7.1.6 Implement `deleteAnalysis(id: string)`:
+    - [x] 7.1.6 Implement `deleteAnalysis(id: string)`:
       - DELETE /analysis/{id}
       - Return void
     - [ ] 7.1.7 Implement `linkDataSource(analysisId: string, datasourceId: string)`:
@@ -44,27 +44,27 @@
       - useCreateAnalysis() - mutation
       - useUpdateAnalysis() - mutation
       - useDeleteAnalysis() - mutation
-  - [ ] 7.2 Create `frontend/src/lib/api/datasource.ts`:
-    - [ ] 7.2.1 Import types and client utilities
-    - [ ] 7.2.2 Implement `uploadFile(file: File, name: string)`:
+  - [x] 7.2 Create `frontend/src/lib/api/datasource.ts`:
+    - [x] 7.2.1 Import types and client utilities
+    - [x] 7.2.2 Implement `uploadFile(file: File, name: string)`:
       - POST to /datasource/upload with FormData
       - Return DataSource
-    - [ ] 7.2.3 Implement `connectDatabase(config: DatabaseConfig, name: string)`:
+    - [x] 7.2.3 Implement `connectDatabase(config: DatabaseConfig, name: string)`:
       - POST to /datasource/connect
       - Return DataSource
-    - [ ] 7.2.4 Implement `connectAPI(config: APIConfig, name: string)`:
+    - [x] 7.2.4 Implement `connectAPI(config: APIConfig, name: string)`:
       - POST to /datasource/connect
       - Return DataSource
-    - [ ] 7.2.5 Implement `listDataSources()`:
+    - [x] 7.2.5 Implement `listDataSources()`:
       - GET /datasource
       - Return DataSourceListItem[]
     - [ ] 7.2.6 Implement `getDataSource(id: string)`:
       - GET /datasource/{id}
       - Return DataSource
-    - [ ] 7.2.7 Implement `getDataSourceSchema(id: string)`:
+    - [x] 7.2.7 Implement `getDataSourceSchema(id: string)`:
       - GET /datasource/{id}/schema
       - Return Schema
-    - [ ] 7.2.8 Implement `deleteDataSource(id: string)`:
+    - [x] 7.2.8 Implement `deleteDataSource(id: string)`:
       - DELETE /datasource/{id}
       - Return void
     - [ ] 7.2.9 Export TanStack Query hooks:
@@ -74,18 +74,18 @@
       - useUploadFile() - mutation
       - useConnectDatabase() - mutation
       - useDeleteDataSource() - mutation
-  - [ ] 7.3 Create `frontend/src/lib/api/compute.ts`:
-    - [ ] 7.3.1 Import types and client utilities
-    - [ ] 7.3.2 Implement `executeAnalysis(analysisId: string)`:
+  - [x] 7.3 Create `frontend/src/lib/api/compute.ts`:
+    - [x] 7.3.1 Import types and client utilities
+    - [x] 7.3.2 Implement `executeAnalysis(analysisId: string)`:
       - POST to /analysis/{id}/run
       - Return ComputeResult
-    - [ ] 7.3.3 Implement `getComputeStatus(analysisId: string)`:
+    - [x] 7.3.3 Implement `getComputeStatus(analysisId: string)`:
       - GET /analysis/{id}/status
       - Return ComputeJob
-    - [ ] 7.3.4 Implement `previewStep(request: PreviewRequest)`:
+    - [x] 7.3.4 Implement `previewStep(request: PreviewRequest)`:
       - POST to /compute/preview
       - Return PreviewResponse
-    - [ ] 7.3.5 Implement `cancelJob(analysisId: string)`:
+    - [x] 7.3.5 Implement `cancelJob(analysisId: string)`:
       - DELETE /compute/{analysisId}
       - Return void
     - [ ] 7.3.6 Export TanStack Query hooks:
@@ -93,15 +93,15 @@
       - useExecuteAnalysis() - mutation
       - usePreviewStep() - mutation
       - useCancelJob() - mutation
-  - [ ] 7.4 Create `frontend/src/lib/api/results.ts`:
-    - [ ] 7.4.1 Import types and client utilities
-    - [ ] 7.4.2 Implement `getResultMetadata(analysisId: string)`:
+  - [x] 7.4 Create `frontend/src/lib/api/results.ts`:
+    - [x] 7.4.1 Import types and client utilities
+    - [x] 7.4.2 Implement `getResultMetadata(analysisId: string)`:
       - GET /results/{analysisId}
       - Return ResultMetadata
-    - [ ] 7.4.3 Implement `getResultData(analysisId: string, request: ResultDataRequest)`:
+    - [x] 7.4.3 Implement `getResultData(analysisId: string, request: ResultDataRequest)`:
       - GET /results/{analysisId}/data with query params
       - Return ResultDataResponse
-    - [ ] 7.4.4 Implement `exportResult(analysisId: string, format: ExportFormat)`:
+    - [x] 7.4.4 Implement `exportResult(analysisId: string, format: ExportFormat)`:
       - POST /results/{analysisId}/export
       - Return ExportResponse
     - [ ] 7.4.5 Implement `getDownloadUrl(analysisId: string, filename: string)`:

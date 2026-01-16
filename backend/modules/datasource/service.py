@@ -1,16 +1,14 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
 from modules.datasource.models import DataSource
 from modules.datasource.schemas import (
     ColumnSchema,
-    DataSourceCreate,
     DataSourceResponse,
     SchemaInfo,
 )
@@ -36,7 +34,7 @@ async def create_file_datasource(
         name=name,
         source_type='file',
         config=config,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     session.add(datasource)
@@ -64,7 +62,7 @@ async def create_database_datasource(
         name=name,
         source_type='database',
         config=config,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     session.add(datasource)
@@ -96,7 +94,7 @@ async def create_api_datasource(
         name=name,
         source_type='api',
         config=config,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     session.add(datasource)
@@ -173,6 +171,16 @@ async def _extract_schema(datasource: DataSource) -> SchemaInfo:
 
     else:
         raise ValueError(f'Schema extraction not supported for type: {datasource.source_type}')
+
+
+async def get_datasource(session: AsyncSession, datasource_id: str) -> DataSourceResponse:
+    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    datasource = result.scalar_one_or_none()
+
+    if not datasource:
+        raise ValueError(f'DataSource {datasource_id} not found')
+
+    return DataSourceResponse.model_validate(datasource)
 
 
 async def list_datasources(session: AsyncSession) -> list[DataSourceResponse]:

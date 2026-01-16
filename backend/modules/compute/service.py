@@ -1,13 +1,9 @@
-import uuid
-from typing import Any
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.compute.manager import get_manager
 from modules.compute.schemas import ComputeResultSchema, ComputeStatusSchema, JobStatus
 from modules.datasource.models import DataSource
-
 
 _job_results: dict[str, dict] = {}
 _job_status: dict[str, dict] = {}
@@ -18,7 +14,7 @@ async def execute_analysis(
     datasource_id: str,
     pipeline_steps: list[dict],
 ) -> ComputeStatusSchema:
-    """Execute a data analysis pipeline"""
+    """Execute a data analysis pipeline."""
     result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
     datasource = result.scalar_one_or_none()
 
@@ -57,7 +53,7 @@ async def preview_step(
     pipeline_steps: list[dict],
     step_index: int,
 ) -> dict:
-    """Preview the result of executing pipeline up to a specific step"""
+    """Preview the result of executing pipeline up to a specific step."""
     result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
     datasource = result.scalar_one_or_none()
 
@@ -74,7 +70,7 @@ async def preview_step(
         **datasource.config,
     }
 
-    job_id = engine.execute(
+    engine.execute(
         datasource_config=datasource_config,
         pipeline_steps=preview_steps,
         timeout=300,
@@ -92,7 +88,7 @@ async def preview_step(
 
 
 def get_job_status(job_id: str) -> ComputeStatusSchema:
-    """Get the status of a compute job"""
+    """Get the status of a compute job."""
     manager = get_manager()
 
     for analysis_id in manager.list_engines():
@@ -111,7 +107,7 @@ def get_job_status(job_id: str) -> ComputeStatusSchema:
 
 
 def get_job_result(job_id: str) -> ComputeResultSchema:
-    """Get the result of a completed job"""
+    """Get the result of a completed job."""
     if job_id not in _job_results:
         raise ValueError(f'Job {job_id} result not found')
 
@@ -126,7 +122,7 @@ def get_job_result(job_id: str) -> ComputeResultSchema:
 
 
 def cancel_job(job_id: str) -> None:
-    """Cancel a running job"""
+    """Cancel a running job."""
     manager = get_manager()
 
     for analysis_id in manager.list_engines():
@@ -147,7 +143,7 @@ def cancel_job(job_id: str) -> None:
 
 
 def cleanup_job(job_id: str) -> None:
-    """Clean up job data from memory"""
+    """Clean up job data from memory."""
     if job_id in _job_status:
         del _job_status[job_id]
     if job_id in _job_results:

@@ -8,7 +8,7 @@ router = APIRouter(prefix='/api/v1/results', tags=['results'])
 
 @router.get('/{analysis_id}', response_model=schemas.ResultMetadataSchema)
 async def get_result_metadata(analysis_id: str):
-    """Get metadata for analysis result"""
+    """Get metadata for analysis result."""
     try:
         return await service.get_result_metadata(analysis_id)
     except ValueError as e:
@@ -19,7 +19,7 @@ async def get_result_metadata(analysis_id: str):
 
 @router.get('/{analysis_id}/data', response_model=schemas.ResultDataSchema)
 async def get_result_data(analysis_id: str, page: int = 1, page_size: int = 100):
-    """Get paginated result data"""
+    """Get paginated result data."""
     if page < 1:
         raise HTTPException(status_code=400, detail='Page must be >= 1')
     if page_size < 1 or page_size > 1000:
@@ -35,7 +35,7 @@ async def get_result_data(analysis_id: str, page: int = 1, page_size: int = 100)
 
 @router.post('/{analysis_id}/export')
 async def export_result(analysis_id: str, request: schemas.ExportRequestSchema):
-    """Export result to requested format"""
+    """Export result to requested format."""
     try:
         export_path = await service.export_result(analysis_id, request.format)
         return FileResponse(
@@ -51,7 +51,7 @@ async def export_result(analysis_id: str, request: schemas.ExportRequestSchema):
 
 @router.delete('/{analysis_id}')
 async def delete_result(analysis_id: str):
-    """Delete analysis result"""
+    """Delete analysis result."""
     try:
         await service.delete_result(analysis_id)
         return {'message': f'Result {analysis_id} deleted successfully'}
