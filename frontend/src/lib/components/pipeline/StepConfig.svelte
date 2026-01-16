@@ -16,7 +16,12 @@
 		PivotConfigData,
 		TimeSeriesConfigData,
 		StringMethodsConfigData,
-		ViewConfigData
+		ViewConfigData,
+		SampleConfigData,
+		LimitConfigData,
+		TopKConfigData,
+		ValueCountsConfigData,
+		UnpivotConfigData
 	} from '$lib/types/operation-config';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { schemaCalculator } from '$lib/utils/schema';
@@ -35,6 +40,12 @@
 	import TimeSeriesConfig from '$lib/components/operations/TimeSeriesConfig.svelte';
 	import StringMethodsConfig from '$lib/components/operations/StringMethodsConfig.svelte';
 	import ViewConfig from '$lib/components/operations/ViewConfig.svelte';
+	import SampleConfig from '$lib/components/operations/SampleConfig.svelte';
+	import LimitConfig from '$lib/components/operations/LimitConfig.svelte';
+	import TopKConfig from '$lib/components/operations/TopKConfig.svelte';
+	import NullCountConfig from '$lib/components/operations/NullCountConfig.svelte';
+	import ValueCountsConfig from '$lib/components/operations/ValueCountsConfig.svelte';
+	import UnpivotConfig from '$lib/components/operations/UnpivotConfig.svelte';
 
 	interface Props {
 		step: PipelineStep | null;
@@ -184,6 +195,18 @@
 				/>
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={step.config as unknown as ViewConfigData} />
+			{:else if step.type === 'sample'}
+				<SampleConfig bind:config={step.config as unknown as SampleConfigData} />
+			{:else if step.type === 'limit'}
+				<LimitConfig bind:config={step.config as unknown as LimitConfigData} />
+			{:else if step.type === 'topk'}
+				<TopKConfig schema={inputSchema} bind:config={step.config as unknown as TopKConfigData} />
+			{:else if step.type === 'null_count'}
+				<NullCountConfig bind:config={step.config as unknown as Record<string, never>} />
+			{:else if step.type === 'value_counts'}
+				<ValueCountsConfig schema={inputSchema} bind:config={step.config as unknown as ValueCountsConfigData} />
+			{:else if step.type === 'unpivot'}
+				<UnpivotConfig schema={inputSchema} bind:config={step.config as unknown as UnpivotConfigData} />
 			{:else}
 				<div class="not-implemented">
 					<p>Configuration for {step.type} is not yet implemented</p>

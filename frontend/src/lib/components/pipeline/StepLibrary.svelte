@@ -68,6 +68,12 @@
 			description: 'Reshape data wide'
 		},
 		{
+			type: 'unpivot',
+			label: 'Unpivot',
+			icon: '🔃',
+			description: 'Reshape data long'
+		},
+		{
 			type: 'fill_null',
 			label: 'Fill Null',
 			icon: '🔧',
@@ -96,6 +102,36 @@
 			label: 'String Transform',
 			icon: '📝',
 			description: 'Text manipulation'
+		},
+		{
+			type: 'sample',
+			label: 'Sample',
+			icon: '🎲',
+			description: 'Random sample rows'
+		},
+		{
+			type: 'limit',
+			label: 'Limit',
+			icon: '✂️',
+			description: 'Keep first N rows'
+		},
+		{
+			type: 'topk',
+			label: 'Top K',
+			icon: '🏆',
+			description: 'Get top K rows by column'
+		},
+		{
+			type: 'null_count',
+			label: 'Null Count',
+			icon: '❓',
+			description: 'Count null values per column'
+		},
+		{
+			type: 'value_counts',
+			label: 'Value Counts',
+			icon: '📊',
+			description: 'Get value frequencies'
 		},
 		{
 			type: 'view',

@@ -226,47 +226,48 @@
 	.container {
 		max-width: 800px;
 		margin: 0 auto;
-		padding: 2rem;
+		padding: var(--space-8);
 	}
 
 	header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 2rem;
+		margin-bottom: var(--space-8);
 	}
 
 	h1 {
-		font-size: 2rem;
+		font-size: var(--text-2xl);
 		font-weight: 600;
 		margin: 0;
 	}
 
 	.button {
 		display: inline-block;
-		padding: 0.5rem 1rem;
-		background: #e5e7eb;
-		border: none;
-		border-radius: 0.375rem;
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		text-decoration: none;
-		color: #1f2937;
-		font-size: 0.875rem;
+		color: var(--fg-primary);
+		font-size: var(--text-sm);
 		font-weight: 500;
-		transition: background-color 0.15s;
+		transition: background-color var(--transition-fast);
 	}
 
 	.button:hover:not(:disabled) {
-		background: #d1d5db;
+		background-color: var(--bg-hover);
 	}
 
 	.button.primary {
-		background: #3b82f6;
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-color: var(--accent-primary);
 	}
 
 	.button.primary:hover:not(:disabled) {
-		background: #2563eb;
+		opacity: 0.9;
 	}
 
 	.button:disabled {
@@ -276,46 +277,46 @@
 
 	.tabs {
 		display: flex;
-		gap: 0.5rem;
-		border-bottom: 2px solid #e5e7eb;
-		margin-bottom: 2rem;
+		gap: var(--space-2);
+		border-bottom: 2px solid var(--border-primary);
+		margin-bottom: var(--space-8);
 	}
 
 	.tab {
-		padding: 0.75rem 1.5rem;
+		padding: var(--space-3) var(--space-6);
 		background: none;
 		border: none;
 		border-bottom: 2px solid transparent;
 		cursor: pointer;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		font-weight: 500;
-		color: #6b7280;
+		color: var(--fg-muted);
 		margin-bottom: -2px;
-		transition: all 0.15s;
+		transition: all var(--transition-fast);
 	}
 
 	.tab:hover {
-		color: #374151;
+		color: var(--fg-secondary);
 	}
 
 	.tab.active {
-		color: #3b82f6;
-		border-bottom-color: #3b82f6;
+		color: var(--accent-primary);
+		border-bottom-color: var(--accent-primary);
 	}
 
 	.error-banner {
-		padding: 1rem;
-		background: #fee2e2;
-		color: #991b1b;
-		border-radius: 0.5rem;
-		margin-bottom: 1.5rem;
+		padding: var(--space-4);
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border-radius: var(--radius-md);
+		margin-bottom: var(--space-6);
 	}
 
 	.content {
-		background: white;
-		padding: 2rem;
-		border-radius: 0.5rem;
-		box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+		background-color: var(--card-bg);
+		padding: var(--space-8);
+		border-radius: var(--radius-md);
+		box-shadow: var(--card-shadow);
 	}
 
 	.form {

@@ -38,35 +38,6 @@ def convert_step_format(frontend_step: dict) -> dict:
     }
 
 
-def convert_config_to_params(operation: str, config: dict) -> dict:
-    """Convert operation-specific config to params."""
-    converters = {
-        'filter': convert_filter_config,
-        'select': lambda c: c,  # Direct passthrough
-        'groupby': convert_groupby_config,
-        'sort': convert_sort_config,
-        'rename': convert_rename_config,
-        'drop': lambda c: c,  # Direct passthrough
-        'join': convert_join_config,
-        'with_columns': lambda c: c,  # Direct passthrough
-        'deduplicate': convert_deduplicate_config,
-        'fill_null': convert_fillnull_config,
-        'explode': lambda c: c,  # Direct passthrough
-        'pivot': convert_pivot_config,
-        'unpivot': lambda c: c,  # Direct passthrough
-        'view': lambda c: c,  # Direct passthrough
-        'timeseries': convert_timeseries_config,
-        'string_transform': convert_string_transform_config,
-    }
-
-    converter = converters.get(operation, lambda c: c)
-    try:
-        return converter(config)
-    except Exception as e:
-        logger.error(f'Error converting {operation} config: {e}')
-        return config  # Return original on error
-
-
 def convert_filter_config(config: dict) -> dict:
     """Convert filter config from frontend format to backend format.
 
@@ -215,3 +186,92 @@ def convert_string_transform_config(config: dict) -> dict:
         'index': config.get('index'),
         'group_index': config.get('groupIndex') or config.get('group_index'),
     }
+
+
+def convert_sample_config(config: dict) -> dict:
+    """Convert sample config from frontend to backend format.
+
+    Frontend: {n, fraction, shuffle, seed}
+    Backend: {n, fraction, shuffle, seed}
+    """
+    return {
+        'n': config.get('n'),
+        'fraction': config.get('fraction'),
+        'shuffle': config.get('shuffle', False),
+        'seed': config.get('seed'),
+    }
+
+
+def convert_limit_config(config: dict) -> dict:
+    """Convert limit config from frontend to backend format.
+
+    Frontend: {n}
+    Backend: {n}
+    """
+    return {
+        'n': config.get('n', 10),
+    }
+
+
+def convert_topk_config(config: dict) -> dict:
+    """Convert topk config from frontend to backend format.
+
+    Frontend: {column, k, descending}
+    Backend: {column, k, descending}
+    """
+    return {
+        'column': config.get('column'),
+        'k': config.get('k', 10),
+        'descending': config.get('descending', False),
+    }
+
+
+def convert_value_counts_config(config: dict) -> dict:
+    """Convert value_counts config from frontend to backend format.
+
+    Frontend: {column, normalize, sort}
+    Backend: {column, normalize, sort}
+    """
+    return {
+        'column': config.get('column'),
+        'normalize': config.get('normalize', False),
+        'sort': config.get('sort', True),
+    }
+
+
+def get_converters() -> dict:
+    """Return all converters dictionary."""
+    return {
+        'filter': convert_filter_config,
+        'select': lambda c: c,
+        'groupby': convert_groupby_config,
+        'sort': convert_sort_config,
+        'rename': convert_rename_config,
+        'drop': lambda c: c,
+        'join': convert_join_config,
+        'with_columns': lambda c: c,
+        'deduplicate': convert_deduplicate_config,
+        'fill_null': convert_fillnull_config,
+        'explode': lambda c: c,
+        'pivot': convert_pivot_config,
+        'unpivot': lambda c: c,
+        'view': lambda c: c,
+        'timeseries': convert_timeseries_config,
+        'string_transform': convert_string_transform_config,
+        'sample': convert_sample_config,
+        'limit': convert_limit_config,
+        'topk': convert_topk_config,
+        'null_count': lambda c: c,
+        'value_counts': convert_value_counts_config,
+    }
+
+
+def convert_config_to_params(operation: str, config: dict) -> dict:
+    """Convert operation-specific config to params."""
+    converters = get_converters()
+    converter = converters.get(operation, lambda c: c)
+    try:
+        return converter(config)
+    except Exception as e:
+        logger.error(f'Error converting {operation} config: {e}')
+        return config if isinstance(config, dict) else {}

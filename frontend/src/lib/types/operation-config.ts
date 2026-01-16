@@ -101,6 +101,38 @@ export interface ViewConfigData {
 	rowLimit: number;
 }
 
+export interface SampleConfigData {
+	n?: number;
+	fraction?: number;
+	shuffle?: boolean;
+	seed?: number;
+}
+
+export interface LimitConfigData {
+	n: number;
+}
+
+export interface TopKConfigData {
+	column: string;
+	k: number;
+	descending: boolean;
+}
+
+export interface NullCountConfigData extends Record<string, never> {}
+
+export interface ValueCountsConfigData {
+	column: string;
+	normalize?: boolean;
+	sort?: boolean;
+}
+
+export interface UnpivotConfigData {
+	index?: string[];
+	on?: string[];
+	variable_name?: string;
+	value_name?: string;
+}
+
 // Union type for all possible config types
 export type OperationConfig =
 	| FilterConfigData
@@ -117,4 +149,10 @@ export type OperationConfig =
 	| PivotConfigData
 	| TimeSeriesConfigData
 	| StringMethodsConfigData
-	| ViewConfigData;
+	| ViewConfigData
+	| SampleConfigData
+	| LimitConfigData
+	| TopKConfigData
+	| NullCountConfigData
+	| ValueCountsConfigData
+	| UnpivotConfigData;

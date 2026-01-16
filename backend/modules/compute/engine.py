@@ -578,5 +578,51 @@ class PolarsComputeEngine:
             # This is useful for certain analytical patterns
             return lf.join(lf, left_on=left_on, right_on=right_on, how=how, suffix='_right')
 
+        elif operation == 'sample':
+            n = params.get('n')
+            fraction = params.get('fraction')
+            shuffle = params.get('shuffle', False)
+            seed = params.get('seed')
+
+            if n is not None:
+                df = lf.collect()
+                return df.sample(n=n, shuffle=shuffle, seed=seed).lazy()
+            elif fraction is not None:
+                df = lf.collect()
+                return df.sample(n=None, fraction=fraction, shuffle=shuffle, seed=seed).lazy()
+            else:
+                raise ValueError('Sample requires n or fraction parameter')
+
+        elif operation == 'limit':
+            n = params.get('n', 10)
+            return lf.head(n)
+
+        elif operation == 'topk':
+            column = params.get('column')
+            k = params.get('k', 10)
+            descending = params.get('descending', False)
+
+            if not column:
+                raise ValueError('TopK requires a column parameter')
+
+            return lf.sort(column, descending=descending).head(k)
+
+        elif operation == 'null_count':
+            df = lf.collect()
+            null_counts = df.null_count()
+            return null_counts.lazy()
+
+        elif operation == 'value_counts':
+            column = params.get('column')
+            normalize = params.get('normalize', False)
+            sort = params.get('sort', True)
+
+            if not column:
+                raise ValueError('Value counts requires a column parameter')
+
+            df = lf.collect()
+            result = df.select(pl.col(column).value_counts(normalize=normalize, sort=sort))
+            return result.lazy()
+
         else:
             raise ValueError(f'Unsupported operation: {operation}')
