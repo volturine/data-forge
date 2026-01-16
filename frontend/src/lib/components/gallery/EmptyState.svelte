@@ -2,13 +2,20 @@
 	import { goto } from '$app/navigation';
 
 	function createNew() {
-		goto('/analysis/new');
+		goto('/analysis/new', { invalidateAll: true });
 	}
 </script>
 
 <div class="empty">
 	<div class="icon">
-		<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+		<svg
+			width="32"
+			height="32"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.5"
+		>
 			<rect x="3" y="3" width="18" height="18" rx="1" />
 			<path d="M3 9h18M9 3v18" />
 		</svg>
@@ -18,7 +25,14 @@
 	<p>Create your first analysis to get started with data exploration.</p>
 
 	<button class="btn-create" onclick={createNew}>
-		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+		<svg
+			width="16"
+			height="16"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+		>
 			<path d="M12 5v14M5 12h14" />
 		</svg>
 		Create Analysis

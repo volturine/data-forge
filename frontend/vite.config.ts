@@ -31,14 +31,15 @@ export default defineConfig({
 	server: {
 		host: '0.0.0.0',
 		port: 3000,
-		allowedHosts: ['localhost', 'code-server.bee-justice.ts.net'],
-		hmr: {
-			host: 'code-server.bee-justice.ts.net'
-		},
+		allowedHosts: true,
 		proxy: {
 			'/api': 'http://localhost:8000'
+		},
+		hmr: {
+			host: '0.0.0.0'
 		}
 	},
+
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}'],
 		environment: 'happy-dom',

@@ -11,14 +11,14 @@
 
 	function handleClick(e: MouseEvent) {
 		if (!(e.target as HTMLElement).closest('button')) {
-			goto(`/analysis/${analysis.id}`);
+			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
 		}
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
 		if ((e.key === 'Enter' || e.key === ' ') && !(e.target as HTMLElement).closest('button')) {
 			e.preventDefault();
-			goto(`/analysis/${analysis.id}`);
+			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
 		}
 	}
 
@@ -41,7 +41,14 @@
 			<img src={analysis.thumbnail} alt={analysis.name} />
 		{:else}
 			<div class="placeholder">
-				<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+				<svg
+					width="32"
+					height="32"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.5"
+				>
 					<rect x="3" y="3" width="18" height="18" rx="1" />
 					<path d="M3 15l6-6 4 4 8-8" />
 				</svg>
@@ -53,7 +60,14 @@
 		<div class="header">
 			<h3>{analysis.name}</h3>
 			<button class="btn-delete" onclick={handleDelete} aria-label="Delete analysis">
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<svg
+					width="14"
+					height="14"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+				>
 					<path d="M3 6h18M8 6V4h8v2M19 6v14H5V6" />
 					<path d="M10 11v6M14 11v6" />
 				</svg>

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import SelectConfig from './SelectConfig.svelte';
 import type { Schema } from '$lib/types/schema';
@@ -26,19 +26,12 @@ describe('SelectConfig', () => {
 		columns: ['id', 'name', 'age', 'email']
 	};
 
-	let onSaveMock: ReturnType<typeof vi.fn>;
-
-	beforeEach(() => {
-		onSaveMock = vi.fn();
-	});
-
 	describe('rendering', () => {
 		it('should render with empty selection', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -51,8 +44,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -66,8 +58,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -80,8 +71,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
+					config: partialConfig
 				}
 			});
 
@@ -96,8 +86,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
+					config: partialConfig
 				}
 			});
 
@@ -109,8 +98,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -123,8 +111,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -139,8 +126,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
+					config: partialConfig
 				}
 			});
 
@@ -155,8 +141,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -173,8 +158,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -193,8 +177,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: fullConfig,
-					onSave: onSaveMock
+					config: fullConfig
 				}
 			});
 
@@ -213,8 +196,7 @@ describe('SelectConfig', () => {
 			render(SelectConfig, {
 				props: {
 					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
+					config: partialConfig
 				}
 			});
 
@@ -225,94 +207,6 @@ describe('SelectConfig', () => {
 			checkboxes.forEach((checkbox) => {
 				expect(checkbox).toBeChecked();
 			});
-		});
-	});
-
-	describe('onSave callback', () => {
-		it('should call onSave with selected columns when Save is clicked', async () => {
-			render(SelectConfig, {
-				props: {
-					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
-				}
-			});
-
-			const saveButton = screen.getByRole('button', { name: /^save$/i });
-			await fireEvent.click(saveButton);
-
-			expect(onSaveMock).toHaveBeenCalledTimes(1);
-			expect(onSaveMock).toHaveBeenCalledWith({
-				columns: expect.arrayContaining(['id', 'name'])
-			});
-		});
-
-		it('should call onSave with empty array when no columns selected', async () => {
-			render(SelectConfig, {
-				props: {
-					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
-				}
-			});
-
-			const saveButton = screen.getByRole('button', { name: /^save$/i });
-			await fireEvent.click(saveButton);
-
-			expect(onSaveMock).toHaveBeenCalledWith({
-				columns: []
-			});
-		});
-
-		it('should not call onSave when Cancel is clicked', async () => {
-			render(SelectConfig, {
-				props: {
-					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
-				}
-			});
-
-			const cancelButton = screen.getByRole('button', { name: /cancel/i });
-			await fireEvent.click(cancelButton);
-
-			expect(onSaveMock).not.toHaveBeenCalled();
-		});
-
-		it('should reset to original selection when Cancel is clicked', async () => {
-			render(SelectConfig, {
-				props: {
-					schema: mockSchema,
-					config: partialConfig,
-					onSave: onSaveMock
-				}
-			});
-
-			// Select a new column
-			const checkboxes = screen.getAllByRole('checkbox');
-			await fireEvent.click(checkboxes[2]); // Select age
-
-			// Cancel
-			const cancelButton = screen.getByRole('button', { name: /cancel/i });
-			await fireEvent.click(cancelButton);
-
-			// Verify age is no longer selected
-			expect(checkboxes[2]).not.toBeChecked();
-			expect(checkboxes[0]).toBeChecked(); // id still selected
-			expect(checkboxes[1]).toBeChecked(); // name still selected
-
-			// Save and verify original config
-			const saveButton = screen.getByRole('button', { name: /^save$/i });
-			await fireEvent.click(saveButton);
-
-			expect(onSaveMock).toHaveBeenCalledWith({
-				columns: expect.arrayContaining(['id', 'name'])
-			});
-			expect(onSaveMock).toHaveBeenCalledWith(
-				expect.objectContaining({
-					columns: expect.not.arrayContaining(['age'])
-				})
-			);
 		});
 	});
 });

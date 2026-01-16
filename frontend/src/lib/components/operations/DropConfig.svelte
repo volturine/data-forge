@@ -8,13 +8,24 @@
 
 	interface Props {
 		schema: Schema;
-		config: DropConfigData;
-		onSave: (config: DropConfigData) => void;
+		config?: DropConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
+	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	let selectedColumns = $state(new SvelteSet(config?.columns || []));
+	// Keep SvelteSet for UI
+	let selectedColumns = $state(new SvelteSet(config.columns));
+
+	// Bidirectional sync
+	$effect(() => {
+		// Sync SvelteSet → config.columns
+		config.columns = Array.from(selectedColumns);
+	});
+
+	$effect(() => {
+		// Sync config.columns → SvelteSet (when parent changes)
+		selectedColumns = new SvelteSet(config.columns);
+	});
 
 	function toggleColumn(columnName: string) {
 		if (selectedColumns.has(columnName)) {
@@ -30,14 +41,6 @@
 
 	function deselectAll() {
 		selectedColumns = new SvelteSet();
-	}
-
-	function handleSave() {
-		onSave({ columns: Array.from(selectedColumns) });
-	}
-
-	function handleCancel() {
-		selectedColumns = new SvelteSet(config?.columns || []);
 	}
 
 	let selectedColumnNames = $derived(Array.from(selectedColumns));
@@ -79,17 +82,12 @@
 			<strong>Warning:</strong> No columns selected. This operation will have no effect.
 		</div>
 	{/if}
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.drop-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -101,7 +99,7 @@
 	.description {
 		margin-top: 0;
 		margin-bottom: 1rem;
-		color: #6c757d;
+		color: var(--fg-muted);
 		font-size: 0.875rem;
 	}
 
@@ -113,7 +111,7 @@
 
 	.bulk-actions button {
 		padding: 0.5rem 1rem;
-		background-color: #6c757d;
+		background-color: var(--fg-muted);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -123,7 +121,7 @@
 	.column-list {
 		max-height: 300px;
 		overflow-y: auto;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		padding: 0.5rem;
 		margin-bottom: 1rem;
@@ -138,7 +136,7 @@
 	}
 
 	.column-item:hover {
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 	}
 
 	.column-item input[type='checkbox'] {
@@ -152,13 +150,13 @@
 	}
 
 	.column-type {
-		color: #6c757d;
+		color: var(--fg-muted);
 		font-size: 0.875rem;
 	}
 
 	.selected-summary {
 		padding: 1rem;
-		background-color: #fff3cd;
+		background-color: var(--warning-bg);
 		border: 1px solid #ffc107;
 		border-radius: 4px;
 		margin-bottom: 1rem;
@@ -167,39 +165,16 @@
 	.selected-names {
 		margin-top: 0.5rem;
 		font-size: 0.875rem;
-		color: #495057;
+		color: var(--fg-primary);
 	}
 
 	.warning-box {
 		padding: 1rem;
-		background-color: #f8f9fa;
-		border: 1px solid #dee2e6;
+		background-color: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		margin-bottom: 1rem;
-		color: #6c757d;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
+		color: var(--fg-muted);
 	}
 
 	button:hover {

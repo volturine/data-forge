@@ -20,11 +20,7 @@ _job_timestamps: dict[str, float] = {}
 def _cleanup_expired_jobs() -> None:
     """Remove jobs older than TTL from memory."""
     current_time = time.time()
-    expired_jobs = [
-        job_id
-        for job_id, timestamp in _job_timestamps.items()
-        if current_time - timestamp > settings.job_ttl
-    ]
+    expired_jobs = [job_id for job_id, timestamp in _job_timestamps.items() if current_time - timestamp > settings.job_ttl]
 
     for job_id in expired_jobs:
         logger.debug(f'Cleaning up expired job: {job_id}')

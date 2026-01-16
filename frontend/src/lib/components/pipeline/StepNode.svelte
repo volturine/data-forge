@@ -30,7 +30,7 @@
 
 	function getConfigSummary(step: PipelineStep): string {
 		switch (step.type) {
-			case 'filter':
+			case 'filter': {
 				const conditions = step.config.conditions as Array<{
 					column: string;
 					operator: string;
@@ -38,25 +38,30 @@
 				}>;
 				if (!conditions || conditions.length === 0) return 'no conditions';
 				return `${conditions.length} condition${conditions.length > 1 ? 's' : ''}`;
+			}
 
-			case 'select':
+			case 'select': {
 				const columns = step.config.columns as string[];
 				if (!columns || columns.length === 0) return 'no columns';
 				return `${columns.length} column${columns.length > 1 ? 's' : ''}`;
+			}
 
-			case 'groupby':
+			case 'groupby': {
 				const groupBy = step.config.groupBy as string[];
 				const aggregations = step.config.aggregations as Array<unknown>;
 				if (!groupBy || groupBy.length === 0) return 'not configured';
 				return `${groupBy.length} key${groupBy.length > 1 ? 's' : ''}, ${aggregations?.length || 0} agg`;
+			}
 
-			case 'sort':
+			case 'sort': {
 				const sortRules = step.config as unknown as Array<{ column: string; descending: boolean }>;
 				if (!Array.isArray(sortRules) || sortRules.length === 0) return 'not configured';
 				return `${sortRules.length} column${sortRules.length > 1 ? 's' : ''}`;
+			}
 
-			default:
+			default: {
 				return 'click to configure';
+			}
 		}
 	}
 
@@ -76,9 +81,7 @@
 		<div class="step-summary">{summary}</div>
 
 		<div class="step-actions">
-			<button class="action-btn" onclick={() => onEdit(step.id)} type="button">
-				edit
-			</button>
+			<button class="action-btn" onclick={() => onEdit(step.id)} type="button"> edit </button>
 			<button class="action-btn danger" onclick={() => onDelete(step.id)} type="button">
 				delete
 			</button>

@@ -44,7 +44,7 @@
 			<div class="column-nullable">Nullable</div>
 		</div>
 
-		{#each schema.columns as column}
+		{#each schema.columns as column (column.name)}
 			<div class="column-row">
 				<div class="column-name">
 					<span class="dtype-icon">{getDtypeIcon(column.dtype)}</span>

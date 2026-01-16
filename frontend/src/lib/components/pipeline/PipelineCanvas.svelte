@@ -15,7 +15,14 @@
 <div class="pipeline-canvas">
 	{#if steps.length === 0}
 		<div class="empty-state">
-			<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+			<svg
+				width="32"
+				height="32"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.5"
+			>
 				<rect x="3" y="3" width="18" height="18" rx="1" />
 				<path d="M3 9h18M9 3v18" />
 			</svg>
@@ -24,13 +31,9 @@
 		</div>
 	{:else}
 		<div class="steps-container">
-			{#each steps as step, i}
+			{#each steps as step, i (step.id)}
 				{#if i > 0}
-					<ConnectionLine
-						fromStepIndex={i - 1}
-						toStepIndex={i}
-						totalSteps={steps.length}
-					/>
+					<ConnectionLine fromStepIndex={i - 1} toStepIndex={i} totalSteps={steps.length} />
 				{/if}
 				<StepNode {step} index={i} onEdit={onStepClick} onDelete={onStepDelete} />
 			{/each}

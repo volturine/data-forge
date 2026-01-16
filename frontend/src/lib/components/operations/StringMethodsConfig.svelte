@@ -16,24 +16,24 @@
 
 	interface Props {
 		schema: Schema;
-		config: StringMethodsConfigData;
-		onSave: (config: StringMethodsConfigData) => void;
+		config?: StringMethodsConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<StringMethodsConfigData>({
-		column: config?.column || '',
-		method: config?.method || 'uppercase',
-		new_column: config?.new_column || '',
-		start: config?.start || 0,
-		end: config?.end || null,
-		pattern: config?.pattern || '',
-		replacement: config?.replacement || '',
-		group_index: config?.group_index || 0,
-		delimiter: config?.delimiter || ' ',
-		index: config?.index || 0
-	});
+	let {
+		schema,
+		config = $bindable({
+			column: '',
+			method: 'uppercase',
+			new_column: '',
+			start: 0,
+			end: null,
+			pattern: '',
+			replacement: '',
+			group_index: 0,
+			delimiter: ' ',
+			index: 0
+		})
+	}: Props = $props();
 
 	const methods = [
 		{ value: 'uppercase', label: 'Uppercase', params: [] },
@@ -58,43 +58,10 @@
 		)
 	);
 
-	const currentMethod = $derived(methods.find((m) => m.value === localConfig.method));
+	const currentMethod = $derived(methods.find((m) => m.value === config.method));
 
 	function needsParam(param: string): boolean {
 		return currentMethod?.params.includes(param) || false;
-	}
-
-	function handleSave() {
-		const saveConfig: StringMethodsConfigData = {
-			column: localConfig.column,
-			method: localConfig.method,
-			new_column: localConfig.new_column
-		};
-
-		if (needsParam('start')) saveConfig.start = localConfig.start;
-		if (needsParam('end')) saveConfig.end = localConfig.end;
-		if (needsParam('pattern')) saveConfig.pattern = localConfig.pattern;
-		if (needsParam('replacement')) saveConfig.replacement = localConfig.replacement;
-		if (needsParam('group_index')) saveConfig.group_index = localConfig.group_index;
-		if (needsParam('delimiter')) saveConfig.delimiter = localConfig.delimiter;
-		if (needsParam('index')) saveConfig.index = localConfig.index;
-
-		onSave(saveConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			column: config?.column || '',
-			method: config?.method || 'uppercase',
-			new_column: config?.new_column || '',
-			start: config?.start || 0,
-			end: config?.end || null,
-			pattern: config?.pattern || '',
-			replacement: config?.replacement || '',
-			group_index: config?.group_index || 0,
-			delimiter: config?.delimiter || ' ',
-			index: config?.index || 0
-		};
 	}
 </script>
 
@@ -103,9 +70,9 @@
 
 	<div class="section">
 		<h4>Source Column</h4>
-		<select bind:value={localConfig.column}>
+		<select bind:value={config.column}>
 			<option value="">Select string column...</option>
-			{#each stringColumns as column}
+			{#each stringColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
@@ -116,8 +83,8 @@
 
 	<div class="section">
 		<h4>String Method</h4>
-		<select bind:value={localConfig.method}>
-			{#each methods as method}
+		<select bind:value={config.method}>
+			{#each methods as method (method.value)}
 				<option value={method.value}>{method.label}</option>
 			{/each}
 		</select>
@@ -128,12 +95,17 @@
 			<h4>Slice Parameters</h4>
 			<div class="inline-group">
 				<div class="input-group">
-					<label>Start Index:</label>
-					<input type="number" bind:value={localConfig.start} />
+					<label for="start-index">Start Index:</label>
+					<input id="start-index" type="number" bind:value={config.start} />
 				</div>
 				<div class="input-group">
-					<label>End Index (optional):</label>
-					<input type="number" bind:value={localConfig.end} placeholder="Leave empty for end" />
+					<label for="end-index">End Index (optional):</label>
+					<input
+						id="end-index"
+						type="number"
+						bind:value={config.end}
+						placeholder="Leave empty for end"
+					/>
 				</div>
 			</div>
 		</div>
@@ -143,12 +115,22 @@
 		<div class="section">
 			<h4>Replace Parameters</h4>
 			<div class="input-group">
-				<label>Pattern to find:</label>
-				<input type="text" bind:value={localConfig.pattern} placeholder="Text or regex pattern" />
+				<label for="replace-pattern">Pattern to find:</label>
+				<input
+					id="replace-pattern"
+					type="text"
+					bind:value={config.pattern}
+					placeholder="Text or regex pattern"
+				/>
 			</div>
 			<div class="input-group">
-				<label>Replacement:</label>
-				<input type="text" bind:value={localConfig.replacement} placeholder="Replacement text" />
+				<label for="replacement">Replacement:</label>
+				<input
+					id="replacement"
+					type="text"
+					bind:value={config.replacement}
+					placeholder="Replacement text"
+				/>
 			</div>
 		</div>
 	{/if}
@@ -157,16 +139,17 @@
 		<div class="section">
 			<h4>Extract Parameters</h4>
 			<div class="input-group">
-				<label>Regex Pattern:</label>
+				<label for="extract-pattern">Regex Pattern:</label>
 				<input
+					id="extract-pattern"
 					type="text"
-					bind:value={localConfig.pattern}
+					bind:value={config.pattern}
 					placeholder="e.g., @(.+)$ to extract domain"
 				/>
 			</div>
 			<div class="input-group">
-				<label>Group Index:</label>
-				<input type="number" bind:value={localConfig.group_index} min="0" />
+				<label for="group-index">Group Index:</label>
+				<input id="group-index" type="number" bind:value={config.group_index} min="0" />
 			</div>
 		</div>
 	{/if}
@@ -175,12 +158,17 @@
 		<div class="section">
 			<h4>Split Parameters</h4>
 			<div class="input-group">
-				<label>Delimiter:</label>
-				<input type="text" bind:value={localConfig.delimiter} placeholder="e.g., space, comma" />
+				<label for="delimiter">Delimiter:</label>
+				<input
+					id="delimiter"
+					type="text"
+					bind:value={config.delimiter}
+					placeholder="e.g., space, comma"
+				/>
 			</div>
 			<div class="input-group">
-				<label>Part Index:</label>
-				<input type="number" bind:value={localConfig.index} min="0" />
+				<label for="part-index">Part Index:</label>
+				<input id="part-index" type="number" bind:value={config.index} min="0" />
 			</div>
 		</div>
 	{/if}
@@ -189,16 +177,9 @@
 		<h4>New Column Name</h4>
 		<input
 			type="text"
-			bind:value={localConfig.new_column}
+			bind:value={config.new_column}
 			placeholder="e.g., name_upper, domain, first_name"
 		/>
-	</div>
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn" disabled={!localConfig.column || !localConfig.new_column}>
-			Save
-		</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
 	</div>
 </div>
 
@@ -264,34 +245,6 @@
 		font-size: 0.875rem;
 		font-weight: 500;
 		margin-bottom: 0.25rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.save-btn:disabled {
-		background-color: #ccc;
-		cursor: not-allowed;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

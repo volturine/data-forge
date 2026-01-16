@@ -48,14 +48,10 @@ class DatasourceStore {
 		const cached = this.schemas.get(id);
 		if (cached) return cached;
 
-		try {
-			const schema = await getDatasourceSchema(id);
-			this.schemas.set(id, schema);
-			this.schemas = new Map(this.schemas);
-			return schema;
-		} catch (err) {
-			throw err;
-		}
+		const schema = await getDatasourceSchema(id);
+		this.schemas.set(id, schema);
+		this.schemas = new Map(this.schemas);
+		return schema;
 	}
 
 	async deleteDatasource(id: string): Promise<void> {

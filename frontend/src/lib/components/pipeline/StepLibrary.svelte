@@ -60,6 +60,12 @@
 			label: 'Expression',
 			icon: '🧮',
 			description: 'Create computed columns'
+		},
+		{
+			type: 'view',
+			label: 'View',
+			icon: '🔍',
+			description: 'Preview data at this step'
 		}
 	];
 </script>
@@ -67,7 +73,7 @@
 <div class="step-library">
 	<h3>Operations</h3>
 	<div class="step-list">
-		{#each stepTypes as stepType}
+		{#each stepTypes as stepType (stepType.type)}
 			<button class="step-button" onclick={() => onAddStep(stepType.type)} type="button">
 				<span class="step-icon">{stepType.icon}</span>
 				<div class="step-info">
@@ -82,16 +88,16 @@
 <style>
 	.step-library {
 		width: 240px;
-		border-right: 1px solid #ddd;
+		border-right: 1px solid var(--border-primary);
 		padding: 1rem;
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
 		font-size: 1.125rem;
-		color: #333;
+		color: var(--fg-primary);
 	}
 
 	.step-list {
@@ -105,8 +111,8 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.75rem;
-		background-color: white;
-		border: 1px solid #ddd;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
 		border-radius: 6px;
 		cursor: pointer;
 		transition: all 0.2s;
@@ -114,8 +120,8 @@
 	}
 
 	.step-button:hover {
-		border-color: #007bff;
-		background-color: #f0f8ff;
+		border-color: var(--accent-primary);
+		background-color: var(--bg-hover);
 		transform: translateX(4px);
 	}
 
@@ -133,13 +139,13 @@
 
 	.step-label {
 		font-weight: 600;
-		color: #333;
+		color: var(--fg-primary);
 		font-size: 0.875rem;
 	}
 
 	.step-description {
 		font-size: 0.75rem;
-		color: #6c757d;
+		color: var(--fg-muted);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;

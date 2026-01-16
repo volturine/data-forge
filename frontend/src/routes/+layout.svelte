@@ -62,19 +62,20 @@
 	<div class="app">
 		<header class="header">
 			<div class="header-content">
-				<a href="/" class="logo">
+				<a href="/" class="logo" data-sveltekit-reload>
 					<span class="logo-text">polars</span>
 					<span class="logo-divider">/</span>
 					<span class="logo-sub">analysis</span>
 				</a>
 
 				<nav class="nav">
-					{#each navItems as item}
+					{#each navItems as item (item.href)}
 						<a
 							href={item.href}
 							class="nav-link"
 							class:active={$page.url.pathname === item.href ||
 								($page.url.pathname.startsWith('/analysis') && item.href === '/')}
+							data-sveltekit-reload
 						>
 							{item.label}
 						</a>
@@ -84,13 +85,27 @@
 				<div class="header-actions">
 					<button class="theme-toggle" onclick={cycleTheme} title="Toggle theme">
 						{#if theme === 'system'}
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<svg
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
 								<rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
 								<line x1="8" y1="21" x2="16" y2="21"></line>
 								<line x1="12" y1="17" x2="12" y2="21"></line>
 							</svg>
 						{:else if theme === 'light'}
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<svg
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
 								<circle cx="12" cy="12" r="5"></circle>
 								<line x1="12" y1="1" x2="12" y2="3"></line>
 								<line x1="12" y1="21" x2="12" y2="23"></line>
@@ -102,7 +117,14 @@
 								<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
 							</svg>
 						{:else}
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<svg
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
 								<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
 							</svg>
 						{/if}

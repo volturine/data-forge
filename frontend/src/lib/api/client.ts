@@ -1,4 +1,13 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// In dev, always use relative URLs so Vite's dev proxy handles /api
+// In prod, allow overriding via VITE_API_URL, otherwise default to current host:8000
+const apiEnv = import.meta.env.VITE_API_URL?.trim();
+
+const runtimeBase =
+	typeof window === 'undefined'
+		? 'http://localhost:8000'
+		: `${window.location.protocol}//${window.location.hostname}:8000`;
+
+export const BASE_URL = import.meta.env.DEV ? '' : apiEnv || runtimeBase;
 
 export class ApiError extends Error {
 	constructor(

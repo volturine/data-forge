@@ -40,7 +40,7 @@ export type PolarsDTypeValue = (typeof PolarsDType)[keyof typeof PolarsDType];
 
 // Check if dtype is numeric
 export function isNumericDType(dtype: string): boolean {
-	const numericTypes = [
+	const numericTypes: readonly string[] = [
 		PolarsDType.Int8,
 		PolarsDType.Int16,
 		PolarsDType.Int32,
@@ -51,13 +51,13 @@ export function isNumericDType(dtype: string): boolean {
 		PolarsDType.UInt64,
 		PolarsDType.Float32,
 		PolarsDType.Float64
-	] as const;
-	return numericTypes.includes(dtype as any);
+	];
+	return numericTypes.includes(dtype);
 }
 
 // Check if dtype is integer
 export function isIntegerDType(dtype: string): boolean {
-	const integerTypes = [
+	const integerTypes: readonly string[] = [
 		PolarsDType.Int8,
 		PolarsDType.Int16,
 		PolarsDType.Int32,
@@ -66,31 +66,35 @@ export function isIntegerDType(dtype: string): boolean {
 		PolarsDType.UInt16,
 		PolarsDType.UInt32,
 		PolarsDType.UInt64
-	] as const;
-	return integerTypes.includes(dtype as any);
+	];
+	return integerTypes.includes(dtype);
 }
 
 // Check if dtype is float
 export function isFloatDType(dtype: string): boolean {
-	const floatTypes = [PolarsDType.Float32, PolarsDType.Float64] as const;
-	return floatTypes.includes(dtype as any);
+	const floatTypes: readonly string[] = [PolarsDType.Float32, PolarsDType.Float64];
+	return floatTypes.includes(dtype);
 }
 
 // Check if dtype is temporal
 export function isTemporalDType(dtype: string): boolean {
-	const temporalTypes = [
+	const temporalTypes: readonly string[] = [
 		PolarsDType.Date,
 		PolarsDType.Datetime,
 		PolarsDType.Time,
 		PolarsDType.Duration
-	] as const;
-	return temporalTypes.includes(dtype as any);
+	];
+	return temporalTypes.includes(dtype);
 }
 
 // Check if dtype is string-like
 export function isStringDType(dtype: string): boolean {
-	const stringTypes = [PolarsDType.String, PolarsDType.Utf8, PolarsDType.Categorical] as const;
-	return stringTypes.includes(dtype as any);
+	const stringTypes: readonly string[] = [
+		PolarsDType.String,
+		PolarsDType.Utf8,
+		PolarsDType.Categorical
+	];
+	return stringTypes.includes(dtype);
 }
 
 // Aggregation result type mapping

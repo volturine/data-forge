@@ -9,17 +9,11 @@
 
 	interface Props {
 		schema: Schema;
-		config: FillNullConfigData;
-		onSave: (config: FillNullConfigData) => void;
+		config?: FillNullConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<FillNullConfigData>({
-		strategy: config?.strategy || 'literal',
-		columns: config?.columns ? [...config.columns] : null,
-		value: config?.value || ''
-	});
+	let { schema, config = $bindable({ strategy: 'literal', columns: null, value: '' }) }: Props =
+		$props();
 
 	const strategies = [
 		{ value: 'literal', label: 'Fill with Value', needsValue: true, needsColumns: true },
@@ -30,47 +24,26 @@
 		{ value: 'drop_rows', label: 'Drop Rows with Nulls', needsValue: false, needsColumns: true }
 	];
 
-	const currentStrategy = $derived(strategies.find((s) => s.value === localConfig.strategy));
+	const currentStrategy = $derived(strategies.find((s) => s.value === config.strategy));
 
 	function toggleColumn(columnName: string) {
-		if (!localConfig.columns) {
-			localConfig.columns = [];
+		if (!config.columns) {
+			config.columns = [];
 		}
-		const index = localConfig.columns.indexOf(columnName);
+		const index = config.columns.indexOf(columnName);
 		if (index > -1) {
-			localConfig.columns.splice(index, 1);
+			config.columns.splice(index, 1);
 		} else {
-			localConfig.columns.push(columnName);
+			config.columns.push(columnName);
 		}
 	}
 
 	function selectAllColumns() {
-		localConfig.columns = schema.columns.map((c) => c.name);
+		config.columns = schema.columns.map((c) => c.name);
 	}
 
 	function deselectAllColumns() {
-		localConfig.columns = [];
-	}
-
-	function handleSave() {
-		const saveConfig: FillNullConfigData = {
-			strategy: localConfig.strategy,
-			columns: localConfig.columns && localConfig.columns.length > 0 ? localConfig.columns : null
-		};
-
-		if (currentStrategy?.needsValue) {
-			saveConfig.value = localConfig.value;
-		}
-
-		onSave(saveConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			strategy: config?.strategy || 'literal',
-			columns: config?.columns ? [...config.columns] : null,
-			value: config?.value || ''
-		};
+		config.columns = [];
 	}
 </script>
 
@@ -79,8 +52,8 @@
 
 	<div class="section">
 		<h4>Fill Strategy</h4>
-		<select bind:value={localConfig.strategy}>
-			{#each strategies as strategy}
+		<select bind:value={config.strategy}>
+			{#each strategies as strategy (strategy.value)}
 				<option value={strategy.value}>{strategy.label}</option>
 			{/each}
 		</select>
@@ -89,7 +62,7 @@
 	{#if currentStrategy?.needsValue}
 		<div class="section">
 			<h4>Fill Value</h4>
-			<input type="text" bind:value={localConfig.value} placeholder="Enter value (e.g., 0, N/A)" />
+			<input type="text" bind:value={config.value} placeholder="Enter value (e.g., 0, N/A)" />
 		</div>
 	{/if}
 
@@ -101,11 +74,11 @@
 		</div>
 
 		<div class="column-list">
-			{#each schema.columns as column}
+			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
 						type="checkbox"
-						checked={localConfig.columns?.includes(column.name) || false}
+						checked={config.columns?.includes(column.name) || false}
 						onchange={() => toggleColumn(column.name)}
 					/>
 					<span>{column.name} ({column.dtype})</span>
@@ -113,19 +86,14 @@
 			{/each}
 		</div>
 
-		{#if localConfig.columns && localConfig.columns.length > 0}
+		{#if config.columns && config.columns.length > 0}
 			<div class="selected-info">
-				Selected {localConfig.columns.length} column{localConfig.columns.length !== 1 ? 's' : ''}:
-				{localConfig.columns.join(', ')}
+				Selected {config.columns.length} column{config.columns.length !== 1 ? 's' : ''}:
+				{config.columns.join(', ')}
 			</div>
 		{:else}
 			<div class="selected-info">No columns selected - will apply to all columns</div>
 		{/if}
-	</div>
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
 	</div>
 </div>
 
@@ -214,29 +182,6 @@
 		background-color: #e7f3ff;
 		border-radius: 4px;
 		font-size: 0.875rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

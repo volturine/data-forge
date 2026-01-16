@@ -10,53 +10,40 @@ class ComputeStore {
 	polling = $state(new Map<string, number>());
 
 	async executeAnalysis(id: string): Promise<ComputeJob> {
-		try {
-			const job = await executeAnalysisApi(id);
-			this.jobs.set(job.id, job);
-			this.jobs = new Map(this.jobs);
+		const job = await executeAnalysisApi(id);
+		this.jobs.set(job.id, job);
+		this.jobs = new Map(this.jobs);
 
-			// Start polling if job is pending or running
-			if (job.status === 'pending' || job.status === 'running') {
-				this.startPolling(job.id);
-			}
-
-			return job;
-		} catch (err) {
-			throw err;
+		// Start polling if job is pending or running
+		if (job.status === 'pending' || job.status === 'running') {
+			this.startPolling(job.id);
 		}
+
+		return job;
 	}
 
 	async pollJobStatus(jobId: string): Promise<ComputeJob> {
-		try {
-			const job = await getComputeStatus(jobId);
-			this.jobs.set(jobId, job);
-			this.jobs = new Map(this.jobs);
+		const job = await getComputeStatus(jobId);
+		this.jobs.set(jobId, job);
+		this.jobs = new Map(this.jobs);
 
-			// Stop polling if job is completed or failed
-			if (job.status === 'completed' || job.status === 'failed') {
-				this.stopPolling(jobId);
-			}
-
-			return job;
-		} catch (err) {
+		// Stop polling if job is completed or failed
+		if (job.status === 'completed' || job.status === 'failed') {
 			this.stopPolling(jobId);
-			throw err;
 		}
+
+		return job;
 	}
 
 	async cancelJob(jobId: string): Promise<void> {
-		try {
-			await cancelJobApi(jobId);
-			this.stopPolling(jobId);
+		await cancelJobApi(jobId);
+		this.stopPolling(jobId);
 
-			// Update job status
-			const job = this.jobs.get(jobId);
-			if (job) {
-				this.jobs.set(jobId, { ...job, status: 'failed', error: 'Cancelled by user' });
-				this.jobs = new Map(this.jobs);
-			}
-		} catch (err) {
-			throw err;
+		// Update job status
+		const job = this.jobs.get(jobId);
+		if (job) {
+			this.jobs.set(jobId, { ...job, status: 'failed', error: 'Cancelled by user' });
+			this.jobs = new Map(this.jobs);
 		}
 	}
 

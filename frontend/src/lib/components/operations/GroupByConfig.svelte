@@ -14,16 +14,10 @@
 
 	interface Props {
 		schema: Schema;
-		config: GroupByConfigData;
-		onSave: (config: GroupByConfigData) => void;
+		config?: GroupByConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<GroupByConfigData>({
-		groupBy: config?.groupBy ? [...config.groupBy] : [],
-		aggregations: config?.aggregations?.length > 0 ? [...config.aggregations] : []
-	});
+	let { schema, config = $bindable({ groupBy: [], aggregations: [] }) }: Props = $props();
 
 	let newAggregation = $state<Aggregation>({
 		column: '',
@@ -44,11 +38,11 @@
 	];
 
 	function toggleGroupByColumn(columnName: string) {
-		const index = localConfig.groupBy.indexOf(columnName);
+		const index = config.groupBy.indexOf(columnName);
 		if (index > -1) {
-			localConfig.groupBy.splice(index, 1);
+			config.groupBy.splice(index, 1);
 		} else {
-			localConfig.groupBy.push(columnName);
+			config.groupBy.push(columnName);
 		}
 	}
 
@@ -57,7 +51,7 @@
 
 		const alias = newAggregation.alias || `${newAggregation.column}_${newAggregation.function}`;
 
-		localConfig.aggregations.push({
+		config.aggregations.push({
 			column: newAggregation.column,
 			function: newAggregation.function,
 			alias
@@ -71,18 +65,7 @@
 	}
 
 	function removeAggregation(index: number) {
-		localConfig.aggregations.splice(index, 1);
-	}
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			groupBy: config?.groupBy ? [...config.groupBy] : [],
-			aggregations: config?.aggregations?.length > 0 ? [...config.aggregations] : []
-		};
+		config.aggregations.splice(index, 1);
 	}
 </script>
 
@@ -92,20 +75,20 @@
 	<div class="section">
 		<h4>Group By Columns</h4>
 		<div class="column-list">
-			{#each schema.columns as column}
+			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
 						type="checkbox"
-						checked={localConfig.groupBy.includes(column.name)}
+						checked={config.groupBy.includes(column.name)}
 						onchange={() => toggleGroupByColumn(column.name)}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
 			{/each}
 		</div>
-		{#if localConfig.groupBy.length > 0}
+		{#if config.groupBy.length > 0}
 			<div class="selected-info">
-				Selected: {localConfig.groupBy.join(', ')}
+				Selected: {config.groupBy.join(', ')}
 			</div>
 		{/if}
 	</div>
@@ -116,13 +99,13 @@
 		<div class="add-aggregation">
 			<select bind:value={newAggregation.column}>
 				<option value="">Select column...</option>
-				{#each schema.columns as column}
+				{#each schema.columns as column (column.name)}
 					<option value={column.name}>{column.name} ({column.dtype})</option>
 				{/each}
 			</select>
 
 			<select bind:value={newAggregation.function}>
-				{#each aggregationFunctions as func}
+				{#each aggregationFunctions as func (func)}
 					<option value={func}>{func}</option>
 				{/each}
 			</select>
@@ -134,9 +117,9 @@
 			</button>
 		</div>
 
-		{#if localConfig.aggregations.length > 0}
+		{#if config.aggregations.length > 0}
 			<div class="aggregations-list">
-				{#each localConfig.aggregations as agg, i}
+				{#each config.aggregations as agg, i (i)}
 					<div class="aggregation-item">
 						<span class="agg-details">
 							{agg.function}({agg.column}) as {agg.alias}
@@ -147,17 +130,12 @@
 			</div>
 		{/if}
 	</div>
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.groupby-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -175,17 +153,17 @@
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 		border-radius: 4px;
 	}
 
 	.column-list {
 		max-height: 200px;
 		overflow-y: auto;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		padding: 0.5rem;
-		background-color: white;
+		background-color: var(--bg-primary);
 	}
 
 	.column-item {
@@ -197,7 +175,7 @@
 	}
 
 	.column-item:hover {
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 	}
 
 	.column-item input[type='checkbox'] {
@@ -208,7 +186,7 @@
 	.selected-info {
 		margin-top: 0.5rem;
 		padding: 0.5rem;
-		background-color: #e7f3ff;
+		background-color: var(--accent-bg);
 		border-radius: 4px;
 		font-size: 0.875rem;
 	}
@@ -222,7 +200,7 @@
 	.add-aggregation select,
 	.add-aggregation input {
 		padding: 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -240,7 +218,7 @@
 
 	.add-aggregation button {
 		padding: 0.5rem 1rem;
-		background-color: #28a745;
+		background-color: var(--success-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -248,7 +226,7 @@
 	}
 
 	.add-aggregation button:disabled {
-		background-color: #ccc;
+		background-color: var(--border-primary);
 		cursor: not-allowed;
 	}
 
@@ -263,8 +241,8 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: white;
-		border: 1px solid #ddd;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -275,35 +253,12 @@
 
 	.aggregation-item button {
 		padding: 0.25rem 0.75rem;
-		background-color: #dc3545;
+		background-color: var(--error-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
 		cursor: pointer;
 		font-size: 0.875rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

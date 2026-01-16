@@ -8,16 +8,10 @@
 
 	interface Props {
 		schema: Schema;
-		config: DeduplicateConfigData;
-		onSave: (config: DeduplicateConfigData) => void;
+		config?: DeduplicateConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<DeduplicateConfigData>({
-		subset: config?.subset ? [...config.subset] : null,
-		keep: config?.keep || 'first'
-	});
+	let { schema, config = $bindable({ subset: null, keep: 'first' }) }: Props = $props();
 
 	const keepStrategies = [
 		{ value: 'first', label: 'Keep First' },
@@ -26,37 +20,23 @@
 	];
 
 	function toggleColumn(columnName: string) {
-		if (!localConfig.subset) {
-			localConfig.subset = [];
+		if (!config.subset) {
+			config.subset = [];
 		}
-		const index = localConfig.subset.indexOf(columnName);
+		const index = config.subset.indexOf(columnName);
 		if (index > -1) {
-			localConfig.subset.splice(index, 1);
+			config.subset.splice(index, 1);
 		} else {
-			localConfig.subset.push(columnName);
+			config.subset.push(columnName);
 		}
 	}
 
 	function selectAllColumns() {
-		localConfig.subset = schema.columns.map((c) => c.name);
+		config.subset = schema.columns.map((c) => c.name);
 	}
 
 	function deselectAllColumns() {
-		localConfig.subset = [];
-	}
-
-	function handleSave() {
-		onSave({
-			subset: localConfig.subset && localConfig.subset.length > 0 ? localConfig.subset : null,
-			keep: localConfig.keep
-		});
-	}
-
-	function handleCancel() {
-		localConfig = {
-			subset: config?.subset ? [...config.subset] : null,
-			keep: config?.keep || 'first'
-		};
+		config.subset = [];
 	}
 </script>
 
@@ -66,9 +46,9 @@
 	<div class="section">
 		<h4>Keep Strategy</h4>
 		<div class="strategy-grid">
-			{#each keepStrategies as strategy}
+			{#each keepStrategies as strategy (strategy.value)}
 				<label class="strategy-option">
-					<input type="radio" bind:group={localConfig.keep} value={strategy.value} />
+					<input type="radio" bind:group={config.keep} value={strategy.value} />
 					<span>{strategy.label}</span>
 				</label>
 			{/each}
@@ -84,11 +64,11 @@
 		</div>
 
 		<div class="column-list">
-			{#each schema.columns as column}
+			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
 						type="checkbox"
-						checked={localConfig.subset?.includes(column.name) || false}
+						checked={config.subset?.includes(column.name) || false}
 						onchange={() => toggleColumn(column.name)}
 					/>
 					<span>{column.name} ({column.dtype})</span>
@@ -96,19 +76,14 @@
 			{/each}
 		</div>
 
-		{#if localConfig.subset && localConfig.subset.length > 0}
+		{#if config.subset && config.subset.length > 0}
 			<div class="selected-info">
-				Checking {localConfig.subset.length} column{localConfig.subset.length !== 1 ? 's' : ''}:
-				{localConfig.subset.join(', ')}
+				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''}:
+				{config.subset.join(', ')}
 			</div>
 		{:else}
 			<div class="selected-info">No columns selected - will check all columns for duplicates</div>
 		{/if}
-	</div>
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
 	</div>
 </div>
 
@@ -217,29 +192,6 @@
 		background-color: #e7f3ff;
 		border-radius: 4px;
 		font-size: 0.875rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

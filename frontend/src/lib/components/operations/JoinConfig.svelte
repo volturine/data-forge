@@ -9,17 +9,10 @@
 
 	interface Props {
 		schema: Schema;
-		config: JoinConfigData;
-		onSave: (config: JoinConfigData) => void;
+		config?: JoinConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<JoinConfigData>({
-		how: config?.how || 'inner',
-		left_on: config?.left_on ? [...config.left_on] : [],
-		right_on: config?.right_on ? [...config.right_on] : []
-	});
+	let { schema, config = $bindable({ how: 'inner', left_on: [], right_on: [] }) }: Props = $props();
 
 	let newLeftKey = $state('');
 	let newRightKey = $state('');
@@ -34,30 +27,16 @@
 	function addJoinKey() {
 		if (!newLeftKey || !newRightKey) return;
 
-		localConfig.left_on.push(newLeftKey);
-		localConfig.right_on.push(newRightKey);
+		config.left_on.push(newLeftKey);
+		config.right_on.push(newRightKey);
 
 		newLeftKey = '';
 		newRightKey = '';
 	}
 
 	function removeJoinKey(index: number) {
-		localConfig.left_on.splice(index, 1);
-		localConfig.right_on.splice(index, 1);
-	}
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			how: config?.how || 'inner',
-			left_on: config?.left_on ? [...config.left_on] : [],
-			right_on: config?.right_on ? [...config.right_on] : []
-		};
-		newLeftKey = '';
-		newRightKey = '';
+		config.left_on.splice(index, 1);
+		config.right_on.splice(index, 1);
 	}
 </script>
 
@@ -66,7 +45,7 @@
 
 	<div class="section">
 		<h4>Join Type</h4>
-		<select bind:value={localConfig.how}>
+		<select bind:value={config.how}>
 			{#each joinTypes as joinType (joinType.value)}
 				<option value={joinType.value}>{joinType.label}</option>
 			{/each}
@@ -110,14 +89,14 @@
 			</button>
 		</div>
 
-		{#if localConfig.left_on.length > 0}
+		{#if config.left_on.length > 0}
 			<div class="keys-list">
-				{#each localConfig.left_on as leftKey, i (leftKey + '-' + i)}
+				{#each config.left_on as leftKey, i (leftKey + '-' + i)}
 					<div class="key-item">
 						<span class="key-details">
 							<span class="key-column">{leftKey}</span>
 							<span class="key-separator">=</span>
-							<span class="key-column">{localConfig.right_on[i]}</span>
+							<span class="key-column">{config.right_on[i]}</span>
 						</span>
 						<button type="button" onclick={() => removeJoinKey(i)}>Remove</button>
 					</div>
@@ -127,24 +106,12 @@
 			<div class="empty-state">No join keys configured. Add at least one join key.</div>
 		{/if}
 	</div>
-
-	<div class="actions">
-		<button
-			type="button"
-			onclick={handleSave}
-			class="save-btn"
-			disabled={localConfig.left_on.length === 0}
-		>
-			Save
-		</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.join-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -162,25 +129,25 @@
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 		border-radius: 4px;
 	}
 
 	.section select {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		margin-bottom: 0.5rem;
 	}
 
 	.help-text {
 		font-size: 0.875rem;
-		color: #6c757d;
+		color: var(--fg-muted);
 		line-height: 1.5;
 		padding: 0.75rem;
-		background-color: #fff;
-		border-left: 3px solid #007bff;
+		background-color: var(--bg-primary);
+		border-left: 3px solid var(--accent-primary);
 		border-radius: 4px;
 		margin-top: 0.5rem;
 	}
@@ -205,20 +172,20 @@
 	.key-input-group label {
 		font-size: 0.875rem;
 		font-weight: 500;
-		color: #495057;
+		color: var(--fg-primary);
 	}
 
 	.key-input-group select,
 	.key-input-group input {
 		padding: 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
 	.add-key > button {
 		width: 100%;
 		padding: 0.5rem 1rem;
-		background-color: #28a745;
+		background-color: var(--success-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -226,7 +193,7 @@
 	}
 
 	.add-key > button:disabled {
-		background-color: #ccc;
+		background-color: var(--border-primary);
 		cursor: not-allowed;
 	}
 
@@ -241,8 +208,8 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: white;
-		border: 1px solid #ddd;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -256,19 +223,19 @@
 
 	.key-column {
 		padding: 0.25rem 0.5rem;
-		background-color: #e7f3ff;
+		background-color: var(--accent-bg);
 		border-radius: 4px;
 		font-weight: 500;
 	}
 
 	.key-separator {
-		color: #6c757d;
+		color: var(--fg-muted);
 		font-weight: bold;
 	}
 
 	.key-item button {
 		padding: 0.25rem 0.75rem;
-		background-color: #dc3545;
+		background-color: var(--error-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -279,39 +246,11 @@
 	.empty-state {
 		padding: 1rem;
 		text-align: center;
-		color: #6c757d;
-		background-color: white;
-		border: 1px dashed #ddd;
+		color: var(--fg-muted);
+		background-color: var(--bg-primary);
+		border: 1px dashed var(--border-primary);
 		border-radius: 4px;
 		font-size: 0.875rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.save-btn:disabled {
-		background-color: #ccc;
-		cursor: not-allowed;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

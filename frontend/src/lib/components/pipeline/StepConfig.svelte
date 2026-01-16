@@ -1,6 +1,23 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
 	import type { Schema } from '$lib/types/schema';
+	import type {
+		FilterConfigData,
+		SelectConfigData,
+		GroupByConfigData,
+		SortConfigData,
+		RenameConfigData,
+		DropConfigData,
+		JoinConfigData,
+		ExpressionConfigData,
+		DeduplicateConfigData,
+		FillNullConfigData,
+		ExplodeConfigData,
+		PivotConfigData,
+		TimeSeriesConfigData,
+		StringMethodsConfigData,
+		ViewConfigData
+	} from '$lib/types/operation-config';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -15,33 +32,20 @@
 	import PivotConfig from '$lib/components/operations/PivotConfig.svelte';
 	import TimeSeriesConfig from '$lib/components/operations/TimeSeriesConfig.svelte';
 	import StringMethodsConfig from '$lib/components/operations/StringMethodsConfig.svelte';
+	import ViewConfig from '$lib/components/operations/ViewConfig.svelte';
 
 	interface Props {
 		step: PipelineStep | null;
 		schema: Schema | null;
-		onUpdateStep?: (stepId: string, config: Record<string, unknown>) => void;
 		onClose?: () => void;
-		onSave?: (config: Record<string, unknown>) => void;
-		onCancel?: () => void;
 	}
 
-	let { step, schema, onUpdateStep, onClose, onSave, onCancel }: Props = $props();
+	let { step, schema, onClose }: Props = $props();
 
 	let nonNullSchema = $derived<Schema>(schema || { columns: [], row_count: null });
 
-	function handleSave(config: unknown) {
-		if (onSave) {
-			onSave(config as Record<string, unknown>);
-		} else if (onUpdateStep && step) {
-			onUpdateStep(step.id, config as Record<string, unknown>);
-			if (onClose) onClose();
-		}
-	}
-
-	function handleCancel() {
-		if (onCancel) {
-			onCancel();
-		} else if (onClose) {
+	function handleClose() {
+		if (onClose) {
 			onClose();
 		}
 	}
@@ -59,47 +63,82 @@
 	<div class="step-config">
 		<div class="config-header">
 			<h3>Configure Step</h3>
-			<button class="close-button" onclick={handleCancel} type="button" title="Close">×</button>
+			<button class="close-button" onclick={handleClose} type="button" title="Close">×</button>
 		</div>
 
 		<div class="config-body">
 			{#if !schema}
 				<div class="warning-message">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
-					<button onclick={handleCancel} type="button">Close</button>
+					<button onclick={handleClose} type="button">Close</button>
 				</div>
 			{:else if step.type === 'filter'}
-				<FilterConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<FilterConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as FilterConfigData}
+				/>
 			{:else if step.type === 'select'}
-				<SelectConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<SelectConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as SelectConfigData}
+				/>
 			{:else if step.type === 'groupby'}
-				<GroupByConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<GroupByConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as GroupByConfigData}
+				/>
 			{:else if step.type === 'sort'}
-				<SortConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<SortConfig schema={nonNullSchema} bind:config={step.config as unknown as SortConfigData} />
 			{:else if step.type === 'rename'}
-				<RenameConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<RenameConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as RenameConfigData}
+				/>
 			{:else if step.type === 'drop'}
-				<DropConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<DropConfig schema={nonNullSchema} bind:config={step.config as unknown as DropConfigData} />
 			{:else if step.type === 'join'}
-				<JoinConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<JoinConfig schema={nonNullSchema} bind:config={step.config as unknown as JoinConfigData} />
 			{:else if step.type === 'expression' || step.type === 'with_columns'}
-				<ExpressionConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<ExpressionConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as ExpressionConfigData}
+				/>
 			{:else if step.type === 'deduplicate'}
-				<DeduplicateConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<DeduplicateConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as DeduplicateConfigData}
+				/>
 			{:else if step.type === 'fill_null'}
-				<FillNullConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<FillNullConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as FillNullConfigData}
+				/>
 			{:else if step.type === 'explode'}
-				<ExplodeConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<ExplodeConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as ExplodeConfigData}
+				/>
 			{:else if step.type === 'pivot'}
-				<PivotConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<PivotConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as PivotConfigData}
+				/>
 			{:else if step.type === 'timeseries'}
-				<TimeSeriesConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<TimeSeriesConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as TimeSeriesConfigData}
+				/>
 			{:else if step.type === 'string_transform'}
-				<StringMethodsConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+				<StringMethodsConfig
+					schema={nonNullSchema}
+					bind:config={step.config as unknown as StringMethodsConfigData}
+				/>
+			{:else if step.type === 'view'}
+				<ViewConfig schema={nonNullSchema} bind:config={step.config as unknown as ViewConfigData} />
 			{:else}
 				<div class="not-implemented">
 					<p>Configuration for {step.type} is not yet implemented</p>
-					<button onclick={handleCancel} type="button">Close</button>
+					<button onclick={handleClose} type="button">Close</button>
 				</div>
 			{/if}
 		</div>
@@ -109,8 +148,8 @@
 <style>
 	.step-config {
 		width: 400px;
-		border-left: 1px solid #ddd;
-		background-color: white;
+		border-left: 1px solid var(--border-primary);
+		background-color: var(--bg-primary);
 		display: flex;
 		flex-direction: column;
 		overflow-y: auto;
@@ -128,7 +167,7 @@
 		align-items: center;
 		justify-content: center;
 		padding: 2rem;
-		color: #6c757d;
+		color: var(--fg-muted);
 		text-align: center;
 	}
 
@@ -141,7 +180,7 @@
 	.empty-message h3 {
 		margin: 0 0 0.5rem 0;
 		font-size: 1.25rem;
-		color: #495057;
+		color: var(--fg-secondary);
 	}
 
 	.empty-message p {
@@ -154,14 +193,14 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 1rem;
-		border-bottom: 1px solid #ddd;
-		background-color: #f8f9fa;
+		border-bottom: 1px solid var(--border-primary);
+		background-color: var(--bg-tertiary);
 	}
 
 	.config-header h3 {
 		margin: 0;
 		font-size: 1.125rem;
-		color: #333;
+		color: var(--fg-primary);
 	}
 
 	.close-button {
@@ -174,15 +213,15 @@
 		cursor: pointer;
 		font-size: 1.5rem;
 		line-height: 1;
-		color: #6c757d;
+		color: var(--fg-muted);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
 
 	.close-button:hover {
-		background-color: #e9ecef;
-		color: #333;
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
 	}
 
 	.config-body {
@@ -197,13 +236,13 @@
 
 	.not-implemented p {
 		margin: 0 0 1rem 0;
-		color: #6c757d;
+		color: var(--fg-muted);
 	}
 
 	.not-implemented button {
 		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
 		border: none;
 		border-radius: 4px;
 		cursor: pointer;

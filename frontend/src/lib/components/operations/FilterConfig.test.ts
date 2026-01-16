@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import FilterConfig from './FilterConfig.svelte';
 import type { Schema } from '$lib/types/schema';
@@ -27,19 +27,12 @@ describe('FilterConfig', () => {
 		logic: 'OR' as const
 	};
 
-	let onSaveMock: ReturnType<typeof vi.fn>;
-
-	beforeEach(() => {
-		onSaveMock = vi.fn();
-	});
-
 	describe('rendering', () => {
 		it('should render with empty config', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -52,8 +45,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -65,8 +57,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: sampleConfig,
-					onSave: onSaveMock
+					config: sampleConfig
 				}
 			});
 
@@ -78,8 +69,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -95,8 +85,7 @@ describe('FilterConfig', () => {
 			const { container } = render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' },
-					onSave: onSaveMock
+					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' }
 				}
 			});
 
@@ -111,8 +100,7 @@ describe('FilterConfig', () => {
 			const { container } = render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: sampleConfig,
-					onSave: onSaveMock
+					config: sampleConfig
 				}
 			});
 
@@ -127,8 +115,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' },
-					onSave: onSaveMock
+					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' }
 				}
 			});
 
@@ -142,8 +129,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' },
-					onSave: onSaveMock
+					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' }
 				}
 			});
 
@@ -157,8 +143,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: { conditions: [{ column: 'age', operator: '>', value: '25' }], logic: 'AND' },
-					onSave: onSaveMock
+					config: { conditions: [{ column: 'age', operator: '>', value: '25' }], logic: 'AND' }
 				}
 			});
 
@@ -173,8 +158,7 @@ describe('FilterConfig', () => {
 					config: {
 						conditions: [{ column: 'name', operator: 'contains', value: 'John' }],
 						logic: 'AND'
-					},
-					onSave: onSaveMock
+					}
 				}
 			});
 
@@ -188,8 +172,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: emptyConfig,
-					onSave: onSaveMock
+					config: emptyConfig
 				}
 			});
 
@@ -201,8 +184,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: sampleConfig,
-					onSave: onSaveMock
+					config: sampleConfig
 				}
 			});
 
@@ -214,8 +196,7 @@ describe('FilterConfig', () => {
 			render(FilterConfig, {
 				props: {
 					schema: mockSchema,
-					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' },
-					onSave: onSaveMock
+					config: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' }
 				}
 			});
 
@@ -223,76 +204,6 @@ describe('FilterConfig', () => {
 			await fireEvent.change(logicSelect, { target: { value: 'OR' } });
 
 			expect(logicSelect).toHaveValue('OR');
-		});
-	});
-
-	describe('onSave callback', () => {
-		it('should call onSave with current config when Save is clicked', async () => {
-			render(FilterConfig, {
-				props: {
-					schema: mockSchema,
-					config: sampleConfig,
-					onSave: onSaveMock
-				}
-			});
-
-			const saveButton = screen.getByRole('button', { name: /^save$/i });
-			await fireEvent.click(saveButton);
-
-			expect(onSaveMock).toHaveBeenCalledTimes(1);
-			expect(onSaveMock).toHaveBeenCalledWith(
-				expect.objectContaining({
-					conditions: expect.arrayContaining([
-						expect.objectContaining({ column: 'age', operator: '>', value: '25' })
-					]),
-					logic: 'OR'
-				})
-			);
-		});
-
-		it('should not call onSave when Cancel is clicked', async () => {
-			render(FilterConfig, {
-				props: {
-					schema: mockSchema,
-					config: sampleConfig,
-					onSave: onSaveMock
-				}
-			});
-
-			const cancelButton = screen.getByRole('button', { name: /cancel/i });
-			await fireEvent.click(cancelButton);
-
-			expect(onSaveMock).not.toHaveBeenCalled();
-		});
-
-		it('should reset to original config when Cancel is clicked', async () => {
-			render(FilterConfig, {
-				props: {
-					schema: mockSchema,
-					config: { conditions: [{ column: 'age', operator: '=', value: '25' }], logic: 'AND' },
-					onSave: onSaveMock
-				}
-			});
-
-			// Add a condition
-			const addButton = screen.getByRole('button', { name: /add condition/i });
-			await fireEvent.click(addButton);
-
-			// Cancel
-			const cancelButton = screen.getByRole('button', { name: /cancel/i });
-			await fireEvent.click(cancelButton);
-
-			// Now save to see if config was reset
-			const saveButton = screen.getByRole('button', { name: /^save$/i });
-			await fireEvent.click(saveButton);
-
-			expect(onSaveMock).toHaveBeenCalledWith(
-				expect.objectContaining({
-					conditions: expect.arrayContaining([
-						expect.objectContaining({ column: 'age', operator: '=', value: '25' })
-					])
-				})
-			);
 		});
 	});
 });

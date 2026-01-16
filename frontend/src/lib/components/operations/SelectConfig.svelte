@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import { SvelteSet } from 'svelte/reactivity';
 
 	interface SelectConfigData {
 		columns: string[];
@@ -7,13 +8,24 @@
 
 	interface Props {
 		schema: Schema;
-		config: SelectConfigData;
-		onSave: (config: SelectConfigData) => void;
+		config?: SelectConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
+	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	let selectedColumns = $state<Set<string>>(new Set(config?.columns || []));
+	// Keep SvelteSet for UI
+	let selectedColumns = $state(new SvelteSet(config.columns));
+
+	// Bidirectional sync
+	$effect(() => {
+		// Sync SvelteSet → config.columns
+		config.columns = Array.from(selectedColumns);
+	});
+
+	$effect(() => {
+		// Sync config.columns → SvelteSet (when parent changes)
+		selectedColumns = new SvelteSet(config.columns);
+	});
 
 	function toggleColumn(columnName: string) {
 		if (selectedColumns.has(columnName)) {
@@ -21,23 +33,14 @@
 		} else {
 			selectedColumns.add(columnName);
 		}
-		selectedColumns = selectedColumns; // Trigger reactivity
 	}
 
 	function selectAll() {
-		selectedColumns = new Set(schema.columns.map((c) => c.name));
+		selectedColumns = new SvelteSet(schema.columns.map((c) => c.name));
 	}
 
 	function deselectAll() {
-		selectedColumns = new Set();
-	}
-
-	function handleSave() {
-		onSave({ columns: Array.from(selectedColumns) });
-	}
-
-	function handleCancel() {
-		selectedColumns = new Set(config?.columns || []);
+		selectedColumns = new SvelteSet();
 	}
 
 	let selectedColumnNames = $derived(Array.from(selectedColumns));
@@ -52,7 +55,7 @@
 	</div>
 
 	<div class="column-list">
-		{#each schema.columns as column}
+		{#each schema.columns as column (column.name)}
 			<label class="column-item">
 				<input
 					type="checkbox"
@@ -73,17 +76,12 @@
 			</div>
 		</div>
 	{/if}
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.select-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -100,7 +98,7 @@
 
 	.bulk-actions button {
 		padding: 0.5rem 1rem;
-		background-color: #6c757d;
+		background-color: var(--fg-muted);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -110,7 +108,7 @@
 	.column-list {
 		max-height: 300px;
 		overflow-y: auto;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		padding: 0.5rem;
 		margin-bottom: 1rem;
@@ -125,7 +123,7 @@
 	}
 
 	.column-item:hover {
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 	}
 
 	.column-item input[type='checkbox'] {
@@ -139,13 +137,13 @@
 	}
 
 	.column-type {
-		color: #6c757d;
+		color: var(--fg-muted);
 		font-size: 0.875rem;
 	}
 
 	.selected-summary {
 		padding: 1rem;
-		background-color: #e7f3ff;
+		background-color: var(--accent-bg);
 		border-radius: 4px;
 		margin-bottom: 1rem;
 	}
@@ -153,30 +151,7 @@
 	.selected-names {
 		margin-top: 0.5rem;
 		font-size: 0.875rem;
-		color: #495057;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
+		color: var(--fg-primary);
 	}
 
 	button:hover {

@@ -33,3 +33,15 @@ export async function deleteAnalysis(id: string): Promise<void> {
 		method: 'DELETE'
 	});
 }
+
+export async function linkDatasource(analysisId: string, datasourceId: string): Promise<void> {
+	await apiRequest<void>(`/api/v1/analysis/${analysisId}/datasource/${datasourceId}`, {
+		method: 'POST'
+	});
+}
+
+export async function unlinkDatasource(analysisId: string, datasourceId: string): Promise<void> {
+	await apiRequest<void>(`/api/v1/analysis/${analysisId}/datasources/${datasourceId}`, {
+		method: 'DELETE'
+	});
+}

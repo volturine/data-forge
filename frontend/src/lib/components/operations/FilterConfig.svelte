@@ -14,42 +14,22 @@
 
 	interface Props {
 		schema: Schema;
-		config: FilterConfigData;
-		onSave: (config: FilterConfigData) => void;
+		config?: FilterConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<FilterConfigData>({
-		conditions:
-			config?.conditions?.length > 0
-				? [...config.conditions]
-				: [{ column: '', operator: '=', value: '' }],
-		logic: config?.logic || 'AND'
-	});
+	let {
+		schema,
+		config = $bindable({ conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' })
+	}: Props = $props();
 
 	const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains'];
 
 	function addCondition() {
-		localConfig.conditions.push({ column: '', operator: '=', value: '' });
+		config.conditions.push({ column: '', operator: '=', value: '' });
 	}
 
 	function removeCondition(index: number) {
-		localConfig.conditions.splice(index, 1);
-	}
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			conditions:
-				config?.conditions?.length > 0
-					? [...config.conditions]
-					: [{ column: '', operator: '=', value: '' }],
-			logic: config?.logic || 'AND'
-		};
+		config.conditions.splice(index, 1);
 	}
 
 	function getInputType(columnName: string): string {
@@ -70,7 +50,7 @@
 	<div class="logic-selector">
 		<label>
 			Combine conditions with:
-			<select bind:value={localConfig.logic}>
+			<select bind:value={config.logic}>
 				<option value="AND">AND</option>
 				<option value="OR">OR</option>
 			</select>
@@ -78,17 +58,17 @@
 	</div>
 
 	<div class="conditions">
-		{#each localConfig.conditions as condition, i}
+		{#each config.conditions as condition, i (i)}
 			<div class="condition-row">
 				<select bind:value={condition.column}>
 					<option value="">Select column...</option>
-					{#each schema.columns as column}
+					{#each schema.columns as column (column.name)}
 						<option value={column.name}>{column.name} ({column.dtype})</option>
 					{/each}
 				</select>
 
 				<select bind:value={condition.operator}>
-					{#each operators as op}
+					{#each operators as op (op)}
 						<option value={op}>{op}</option>
 					{/each}
 				</select>
@@ -102,7 +82,7 @@
 				<button
 					type="button"
 					onclick={() => removeCondition(i)}
-					disabled={localConfig.conditions.length === 1}
+					disabled={config.conditions.length === 1}
 				>
 					Remove
 				</button>
@@ -111,17 +91,12 @@
 	</div>
 
 	<button type="button" onclick={addCondition} class="add-btn">Add Condition</button>
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.filter-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -155,7 +130,7 @@
 	.condition-row select,
 	.condition-row input {
 		padding: 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -173,7 +148,7 @@
 
 	.condition-row button {
 		padding: 0.5rem 1rem;
-		background-color: #dc3545;
+		background-color: var(--error-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -181,41 +156,18 @@
 	}
 
 	.condition-row button:disabled {
-		background-color: #ccc;
+		background-color: var(--border-primary);
 		cursor: not-allowed;
 	}
 
 	.add-btn {
 		padding: 0.5rem 1rem;
-		background-color: #28a745;
+		background-color: var(--success-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
 		cursor: pointer;
 		margin-bottom: 1rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

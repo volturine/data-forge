@@ -13,21 +13,21 @@
 
 	interface Props {
 		schema: Schema;
-		config: TimeSeriesConfigData;
-		onSave: (config: TimeSeriesConfigData) => void;
+		config?: TimeSeriesConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<TimeSeriesConfigData>({
-		column: config?.column || '',
-		operation_type: config?.operation_type || 'extract',
-		new_column: config?.new_column || '',
-		component: config?.component || 'year',
-		value: config?.value || 1,
-		unit: config?.unit || 'days',
-		column2: config?.column2 || ''
-	});
+	let {
+		schema,
+		config = $bindable({
+			column: '',
+			operation_type: 'extract',
+			new_column: '',
+			component: 'year',
+			value: 1,
+			unit: 'days',
+			column2: ''
+		})
+	}: Props = $props();
 
 	const operations = [
 		{ value: 'extract', label: 'Extract Component' },
@@ -59,40 +59,6 @@
 				col.dtype.toLowerCase() === 'datetime'
 		)
 	);
-
-	function handleSave() {
-		const saveConfig: TimeSeriesConfigData = {
-			column: localConfig.column,
-			operation_type: localConfig.operation_type,
-			new_column: localConfig.new_column
-		};
-
-		if (localConfig.operation_type === 'extract') {
-			saveConfig.component = localConfig.component;
-		} else if (
-			localConfig.operation_type === 'add' ||
-			localConfig.operation_type === 'subtract'
-		) {
-			saveConfig.value = localConfig.value;
-			saveConfig.unit = localConfig.unit;
-		} else if (localConfig.operation_type === 'diff') {
-			saveConfig.column2 = localConfig.column2;
-		}
-
-		onSave(saveConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			column: config?.column || '',
-			operation_type: config?.operation_type || 'extract',
-			new_column: config?.new_column || '',
-			component: config?.component || 'year',
-			value: config?.value || 1,
-			unit: config?.unit || 'days',
-			column2: config?.column2 || ''
-		};
-	}
 </script>
 
 <div class="timeseries-config">
@@ -100,9 +66,9 @@
 
 	<div class="section">
 		<h4>Source Column</h4>
-		<select bind:value={localConfig.column}>
+		<select bind:value={config.column}>
 			<option value="">Select date/time column...</option>
-			{#each dateColumns as column}
+			{#each dateColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
@@ -113,40 +79,40 @@
 
 	<div class="section">
 		<h4>Operation Type</h4>
-		<select bind:value={localConfig.operation_type}>
-			{#each operations as op}
+		<select bind:value={config.operation_type}>
+			{#each operations as op (op.value)}
 				<option value={op.value}>{op.label}</option>
 			{/each}
 		</select>
 	</div>
 
-	{#if localConfig.operation_type === 'extract'}
+	{#if config.operation_type === 'extract'}
 		<div class="section">
 			<h4>Extract Component</h4>
-			<select bind:value={localConfig.component}>
-				{#each extractComponents as comp}
+			<select bind:value={config.component}>
+				{#each extractComponents as comp (comp)}
 					<option value={comp}>{comp}</option>
 				{/each}
 			</select>
 		</div>
-	{:else if localConfig.operation_type === 'add' || localConfig.operation_type === 'subtract'}
+	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
 		<div class="section">
 			<h4>Time Period</h4>
 			<div class="inline-group">
-				<input type="number" bind:value={localConfig.value} min="0" />
-				<select bind:value={localConfig.unit}>
-					{#each timeUnits as unit}
+				<input type="number" bind:value={config.value} min="0" />
+				<select bind:value={config.unit}>
+					{#each timeUnits as unit (unit)}
 						<option value={unit}>{unit}</option>
 					{/each}
 				</select>
 			</div>
 		</div>
-	{:else if localConfig.operation_type === 'diff'}
+	{:else if config.operation_type === 'diff'}
 		<div class="section">
 			<h4>Second Date Column</h4>
-			<select bind:value={localConfig.column2}>
+			<select bind:value={config.column2}>
 				<option value="">Select column...</option>
-				{#each dateColumns as column}
+				{#each dateColumns as column (column.name)}
 					<option value={column.name}>{column.name} ({column.dtype})</option>
 				{/each}
 			</select>
@@ -155,14 +121,7 @@
 
 	<div class="section">
 		<h4>New Column Name</h4>
-		<input type="text" bind:value={localConfig.new_column} placeholder="e.g., year, future_date" />
-	</div>
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn" disabled={!localConfig.column || !localConfig.new_column}>
-			Save
-		</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
+		<input type="text" bind:value={config.new_column} placeholder="e.g., year, future_date" />
 	</div>
 </div>
 
@@ -225,34 +184,6 @@
 
 	.inline-group select {
 		flex: 1;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.save-btn:disabled {
-		background-color: #ccc;
-		cursor: not-allowed;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

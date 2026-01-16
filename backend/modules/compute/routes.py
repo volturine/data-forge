@@ -3,14 +3,23 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
+from modules.analysis import schemas as analysis_schemas, service as analysis_service
 from modules.compute import schemas, service
 
 router = APIRouter(prefix='/api/v1/compute', tags=['compute'])
 
 
 class ExecuteRequest(BaseModel):
-    datasource_id: str
-    pipeline_steps: list[dict]
+    analysis_id: str
+    execute_mode: str | None = None
+    step_id: str | None = None
+
+    class Config:
+        json_schema_extra = {
+            'examples': [
+                {'analysis_id': 'uuid', 'execute_mode': 'full', 'step_id': None},
+            ]
+        }
 
 
 class PreviewRequest(BaseModel):
@@ -24,13 +33,32 @@ async def execute_analysis(
     request: ExecuteRequest,
     session: AsyncSession = Depends(get_db),
 ):
-    """Execute a data analysis pipeline."""
+    """Execute a data analysis pipeline for a saved analysis."""
     try:
-        return await service.execute_analysis(
+        analysis = await analysis_service.get_analysis(session, request.analysis_id)
+        datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
+        if not datasource_ids:
+            raise HTTPException(status_code=400, detail='Analysis has no linked datasource')
+
+        datasource_id = datasource_ids[0]
+        pipeline_steps = analysis.pipeline_definition.get('steps', [])
+
+        job = await service.execute_analysis(
             session=session,
-            datasource_id=request.datasource_id,
-            pipeline_steps=request.pipeline_steps,
+            datasource_id=datasource_id,
+            pipeline_steps=pipeline_steps,
         )
+
+        # Mark analysis status running
+        await analysis_service.update_analysis(
+            session=session,
+            analysis_id=request.analysis_id,
+            data=analysis_schemas.AnalysisUpdateSchema(status='running'),
+        )
+
+        return job
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

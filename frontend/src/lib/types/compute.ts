@@ -6,6 +6,7 @@ export interface ComputeJob {
 	progress?: number;
 	error?: string | null;
 	result?: unknown;
-	created_at: string;
-	updated_at: string;
+	current_step?: string | null;
+	created_at?: string;
+	updated_at?: string;
 }

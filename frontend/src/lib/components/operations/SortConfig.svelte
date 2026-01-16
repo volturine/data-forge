@@ -8,13 +8,10 @@
 
 	interface Props {
 		schema: Schema;
-		config: SortRule[];
-		onSave: (config: SortRule[]) => void;
+		config?: SortRule[];
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let sortRules = $state<SortRule[]>(config?.length > 0 ? [...config] : []);
+	let { schema, config = $bindable([]) }: Props = $props();
 
 	let newRule = $state<SortRule>({
 		column: '',
@@ -25,10 +22,10 @@
 		if (!newRule.column) return;
 
 		// Check if column is already in sort rules
-		const exists = sortRules.some((rule) => rule.column === newRule.column);
+		const exists = config.some((rule) => rule.column === newRule.column);
 		if (exists) return;
 
-		sortRules.push({
+		config.push({
 			column: newRule.column,
 			descending: newRule.descending
 		});
@@ -40,37 +37,29 @@
 	}
 
 	function removeSortRule(index: number) {
-		sortRules.splice(index, 1);
+		config.splice(index, 1);
 	}
 
 	function toggleDirection(index: number) {
-		sortRules[index].descending = !sortRules[index].descending;
+		config[index].descending = !config[index].descending;
 	}
 
 	function moveUp(index: number) {
 		if (index === 0) return;
-		const temp = sortRules[index];
-		sortRules[index] = sortRules[index - 1];
-		sortRules[index - 1] = temp;
+		const temp = config[index];
+		config[index] = config[index - 1];
+		config[index - 1] = temp;
 	}
 
 	function moveDown(index: number) {
-		if (index === sortRules.length - 1) return;
-		const temp = sortRules[index];
-		sortRules[index] = sortRules[index + 1];
-		sortRules[index + 1] = temp;
-	}
-
-	function handleSave() {
-		onSave(sortRules);
-	}
-
-	function handleCancel() {
-		sortRules = config?.length > 0 ? [...config] : [];
+		if (index === config.length - 1) return;
+		const temp = config[index];
+		config[index] = config[index + 1];
+		config[index + 1] = temp;
 	}
 
 	let availableColumns = $derived(
-		schema.columns.filter((col) => !sortRules.some((rule) => rule.column === col.name))
+		schema.columns.filter((col) => !config.some((rule) => rule.column === col.name))
 	);
 </script>
 
@@ -80,7 +69,7 @@
 	<div class="add-rule">
 		<select bind:value={newRule.column}>
 			<option value="">Select column...</option>
-			{#each availableColumns as column}
+			{#each availableColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
@@ -93,10 +82,10 @@
 		<button type="button" onclick={addSortRule} disabled={!newRule.column}> Add Sort Rule </button>
 	</div>
 
-	{#if sortRules.length > 0}
+	{#if config.length > 0}
 		<div class="sort-rules">
 			<h4>Sort Order (top to bottom)</h4>
-			{#each sortRules as rule, i}
+			{#each config as rule, i (i)}
 				<div class="sort-rule-item">
 					<div class="rule-info">
 						<span class="rule-column">{rule.column}</span>
@@ -112,7 +101,7 @@
 						<button
 							type="button"
 							onclick={() => moveDown(i)}
-							disabled={i === sortRules.length - 1}
+							disabled={i === config.length - 1}
 							title="Move down"
 						>
 							↓
@@ -127,17 +116,12 @@
 	{:else}
 		<p class="empty-state">No sort rules configured. Add a column to sort by.</p>
 	{/if}
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.sort-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -150,7 +134,7 @@
 		margin-top: 0;
 		margin-bottom: 0.75rem;
 		font-size: 0.875rem;
-		color: #6c757d;
+		color: var(--fg-muted);
 		text-transform: uppercase;
 	}
 
@@ -164,7 +148,7 @@
 	.add-rule select {
 		flex: 2;
 		padding: 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -182,7 +166,7 @@
 
 	.add-rule button {
 		padding: 0.5rem 1rem;
-		background-color: #28a745;
+		background-color: var(--success-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -191,13 +175,13 @@
 	}
 
 	.add-rule button:disabled {
-		background-color: #ccc;
+		background-color: var(--border-primary);
 		cursor: not-allowed;
 	}
 
 	.sort-rules {
 		padding: 1rem;
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 		border-radius: 4px;
 		margin-bottom: 1rem;
 	}
@@ -207,8 +191,8 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: white;
-		border: 1px solid #ddd;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		margin-bottom: 0.5rem;
 	}
@@ -230,7 +214,7 @@
 
 	.direction-btn {
 		padding: 0.25rem 0.75rem;
-		background-color: #007bff;
+		background-color: var(--accent-primary);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -246,7 +230,7 @@
 
 	.rule-actions button {
 		padding: 0.25rem 0.5rem;
-		background-color: #6c757d;
+		background-color: var(--fg-muted);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -255,44 +239,21 @@
 	}
 
 	.rule-actions button:disabled {
-		background-color: #ccc;
+		background-color: var(--border-primary);
 		cursor: not-allowed;
 	}
 
 	.remove-btn {
-		background-color: #dc3545 !important;
+		background-color: var(--error-fg) !important;
 	}
 
 	.empty-state {
 		padding: 2rem;
 		text-align: center;
-		color: #6c757d;
-		background-color: #f8f9fa;
+		color: var(--fg-muted);
+		background-color: var(--bg-tertiary);
 		border-radius: 4px;
 		margin-bottom: 1rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

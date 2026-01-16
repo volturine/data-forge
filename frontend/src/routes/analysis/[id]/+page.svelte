@@ -4,7 +4,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { computeStore } from '$lib/stores/compute.svelte';
-	import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
+	import { getAnalysis } from '$lib/api/analysis';
 	import { getResultData } from '$lib/api/results';
 	import { getDatasourceSchema } from '$lib/api/datasource';
 	import type { PipelineStep } from '$lib/types/analysis';
@@ -66,9 +66,16 @@
 		enabled: currentJob?.status === 'completed'
 	}));
 
+	function makeId() {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return 'id-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+	}
+
 	function handleAddStep(type: string) {
 		const step: PipelineStep = {
-			id: crypto.randomUUID(),
+			id: makeId(),
 			type,
 			config: {},
 			depends_on: []
@@ -86,10 +93,6 @@
 		if (selectedStepId === stepId) {
 			selectedStepId = null;
 		}
-	}
-
-	function handleUpdateStep(stepId: string, config: Record<string, unknown>) {
-		analysisStore.updateStep(stepId, { config });
 	}
 
 	async function handleSave() {
@@ -119,7 +122,7 @@
 
 		isRunning = true;
 		try {
-			const job = await computeStore.executeAnalysis(analysisId);
+			const _job = await computeStore.executeAnalysis(analysisId);
 			showResults = true;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Failed to run analysis';
@@ -186,14 +189,27 @@
 		<div class="error-icon">!</div>
 		<h2>Error loading analysis</h2>
 		<p>{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}</p>
-		<button onclick={() => goto('/')} type="button">Back to Gallery</button>
+		<button onclick={() => goto('/', { invalidateAll: true })} type="button">Back to Gallery</button
+		>
 	</div>
 {:else if analysisQuery.data}
 	<div class="editor-container">
 		<header class="editor-header">
 			<div class="header-left">
-				<button class="back-button" onclick={() => goto('/')} type="button">
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<button
+					class="back-button"
+					onclick={() => goto('/', { invalidateAll: true })}
+					type="button"
+					aria-label="Go back to home"
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+					>
 						<path d="M19 12H5M12 19l-7-7 7-7" />
 					</svg>
 				</button>
@@ -205,7 +221,11 @@
 				</div>
 			</div>
 			<div class="header-right">
-				<span class="save-status" class:saved={saveStatus === 'saved'} class:unsaved={saveStatus === 'unsaved'}>
+				<span
+					class="save-status"
+					class:saved={saveStatus === 'saved'}
+					class:unsaved={saveStatus === 'unsaved'}
+				>
 					{#if saveStatus === 'saving'}
 						saving...
 					{:else if saveStatus === 'unsaved'}
@@ -245,7 +265,6 @@
 			<StepConfig
 				step={selectedStep}
 				schema={analysisStore.calculatedSchema}
-				onUpdateStep={handleUpdateStep}
 				onClose={handleCloseConfig}
 			/>
 		</div>
@@ -256,12 +275,28 @@
 					<h3>Results</h3>
 					<div class="results-actions">
 						{#if currentJob}
-							<span class="job-status" class:completed={currentJob?.status === 'completed'} class:failed={currentJob?.status === 'failed'}>
+							<span
+								class="job-status"
+								class:completed={currentJob?.status === 'completed'}
+								class:failed={currentJob?.status === 'failed'}
+							>
 								{currentJob?.status}
 							</span>
 						{/if}
-						<button class="btn-icon" onclick={() => (showResults = false)} type="button">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<button
+							class="btn-icon"
+							onclick={() => (showResults = false)}
+							type="button"
+							aria-label="Close results panel"
+						>
+							<svg
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
 								<path d="M18 6L6 18M6 6l12 12" />
 							</svg>
 						</button>
@@ -327,7 +362,9 @@
 	}
 
 	@keyframes spin {
-		to { transform: rotate(360deg); }
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.loading-container p {

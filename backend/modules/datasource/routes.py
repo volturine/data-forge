@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
@@ -101,7 +102,8 @@ async def list_datasources(session: AsyncSession = Depends(get_db)):
     try:
         return await service.list_datasources(session)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to list datasources: {str(e)}')
+        # Surface details in body while keeping 500 status
+        return JSONResponse(status_code=500, content={'detail': f'Failed to list datasources: {str(e)}'})
 
 
 @router.get('/{datasource_id}', response_model=schemas.DataSourceResponse)

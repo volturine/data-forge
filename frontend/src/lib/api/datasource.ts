@@ -1,18 +1,15 @@
-import type { DataSource, DataSourceCreate, SchemaInfo } from '$lib/types/datasource';
-import { apiRequest } from './client';
+import type { DataSource, SchemaInfo } from '$lib/types/datasource';
+import { BASE_URL, apiRequest } from './client';
 
 export async function uploadFile(file: File, name: string): Promise<DataSource> {
 	const formData = new FormData();
 	formData.append('file', file);
 	formData.append('name', name);
 
-	const response = await fetch(
-		`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/datasource/upload`,
-		{
-			method: 'POST',
-			body: formData
-		}
-	);
+	const response = await fetch(`${BASE_URL}/api/v1/datasource/upload`, {
+		method: 'POST',
+		body: formData
+	});
 
 	if (!response.ok) {
 		throw new Error(`Upload failed: ${response.statusText}`);
@@ -55,6 +52,10 @@ export async function connectApi(
 
 export async function listDatasources(): Promise<DataSource[]> {
 	return apiRequest<DataSource[]>('/api/v1/datasource');
+}
+
+export async function getDatasource(id: string): Promise<DataSource> {
+	return apiRequest<DataSource>(`/api/v1/datasource/${id}`);
 }
 
 export async function getDatasourceSchema(id: string): Promise<SchemaInfo> {

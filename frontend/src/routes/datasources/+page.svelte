@@ -54,8 +54,15 @@
 			<h1>Data Sources</h1>
 			<p class="subtitle">Manage your data connections and files</p>
 		</div>
-		<a href="/datasources/new" class="btn-new">
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+		<a href="/datasources/new" class="btn-new" data-sveltekit-reload>
+			<svg
+				width="16"
+				height="16"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+			>
 				<path d="M12 5v14M5 12h14" />
 			</svg>
 			Add Data Source
@@ -66,14 +73,18 @@
 		<div class="loading-state">Loading data sources...</div>
 	{:else if query.isError}
 		<div class="error-state">
-			Error loading data sources: {query.error instanceof Error ? query.error.message : 'Unknown error'}
+			Error loading data sources: {query.error instanceof Error
+				? query.error.message
+				: 'Unknown error'}
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
 			<div class="empty-state">
 				<div class="empty-icon">+</div>
 				<p>No data sources yet.</p>
-				<a href="/datasources/new" class="btn btn-primary">Create your first data source</a>
+				<a href="/datasources/new" class="btn btn-primary" data-sveltekit-reload
+					>Create your first data source</a
+				>
 			</div>
 		{:else}
 			<div class="table-container">
@@ -92,7 +103,12 @@
 							<tr>
 								<td class="name-cell">{datasource.name}</td>
 								<td>
-									<span class="type-badge" class:file={datasource.source_type === 'file'} class:database={datasource.source_type === 'database'} class:api={datasource.source_type === 'api'}>
+									<span
+										class="type-badge"
+										class:file={datasource.source_type === 'file'}
+										class:database={datasource.source_type === 'database'}
+										class:api={datasource.source_type === 'api'}
+									>
 										{datasource.source_type}
 									</span>
 								</td>

@@ -42,7 +42,7 @@
 				pipeline_steps: []
 			});
 
-			goto(`/analysis/${analysis.id}`);
+			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to create analysis';
 			creating = false;
@@ -79,12 +79,7 @@
 
 				<div class="form-group">
 					<label for="name">Name <span class="required">*</span></label>
-					<input
-						id="name"
-						type="text"
-						bind:value={name}
-						placeholder="My Data Analysis"
-					/>
+					<input id="name" type="text" bind:value={name} placeholder="My Data Analysis" />
 				</div>
 				<div class="form-group">
 					<label for="description">Description</label>
@@ -110,11 +105,13 @@
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
 					<div class="empty-state">
 						<p>No data sources available.</p>
-						<a href="/datasources/new" class="btn btn-secondary">Create Data Source</a>
+						<a href="/datasources/new" class="btn btn-secondary" data-sveltekit-reload
+							>Create Data Source</a
+						>
 					</div>
 				{:else if datasourcesQuery.data}
 					<div class="datasource-grid">
-						{#each datasourcesQuery.data as datasource}
+						{#each datasourcesQuery.data as datasource (datasource.id)}
 							<button
 								class="datasource-card"
 								class:selected={selectedDatasourceIds.includes(datasource.id)}
@@ -161,7 +158,7 @@
 					<h3>Data Sources ({selectedDatasourceIds.length})</h3>
 					<ul class="review-sources">
 						{#if datasourcesQuery.data}
-							{#each datasourcesQuery.data.filter((ds: DataSource) => selectedDatasourceIds.includes(ds.id)) as ds}
+							{#each datasourcesQuery.data.filter( (ds: DataSource) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
 								<li>
 									<span class="source-name">{ds.name}</span>
 									<span class="source-type">{ds.source_type}</span>
@@ -184,7 +181,7 @@
 				Back
 			</button>
 		{:else}
-			<a href="/" class="btn btn-secondary">Cancel</a>
+			<a href="/" class="btn btn-secondary" data-sveltekit-reload>Cancel</a>
 		{/if}
 
 		<div class="spacer"></div>

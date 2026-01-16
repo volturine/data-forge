@@ -45,7 +45,7 @@
 		<div class="column-stats">
 			<h4>Column Statistics</h4>
 			<div class="stats-grid">
-				{#each Object.entries(stats) as [column, columnStats]}
+				{#each Object.entries(stats) as [column, columnStats] (column)}
 					<div class="column-stat-card">
 						<div class="column-stat-header">{column}</div>
 						<div class="column-stat-details">

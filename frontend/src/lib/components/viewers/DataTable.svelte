@@ -1,7 +1,9 @@
 <script lang="ts">
+	import type { TableCellValue } from '$lib/types/api-responses';
+
 	interface Props {
 		columns: string[];
-		data: Record<string, any>[];
+		data: Record<string, unknown>[];
 		loading?: boolean;
 		onSort?: (column: string, direction: 'asc' | 'desc') => void;
 	}
@@ -48,7 +50,7 @@
 		}
 	}
 
-	function formatValue(value: any): string {
+	function formatValue(value: TableCellValue): string {
 		if (value === null || value === undefined) return '—';
 		if (typeof value === 'number') {
 			return value.toLocaleString();
@@ -77,7 +79,7 @@
 			<table class="data-table">
 				<thead>
 					<tr>
-						{#each columns as column}
+						{#each columns as column (column)}
 							<th>
 								<button class="column-header" onclick={() => handleSort(column)}>
 									<span class="column-name">{column}</span>
@@ -92,11 +94,11 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each sortedData() as row, rowIndex}
+					{#each sortedData() as row, _rowIndex (_rowIndex)}
 						<tr>
-							{#each columns as column}
+							{#each columns as column (column)}
 								<td>
-									{formatValue(row[column])}
+									{formatValue(row[column] as TableCellValue)}
 								</td>
 							{/each}
 						</tr>

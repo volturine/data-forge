@@ -83,11 +83,15 @@ ignore = [
     "D105",
     "D106",
     "D107",
+    "D205",   # 1 blank line required between summary line and description
+    "D212",   # Multi-line docstring summary should start at the first line
     "UP045",
     "N812",   # Imports as uppercase (e.g., functions as F)
     "COM812", # Missing trailing comma
     "RET504", # Unnecessary assignment to `df` before `return` statement
     "RUF100", # Unused `noqa` directive (unknown: `E814`) - not aligned with Foundry's checks
+    "B008",   # Do not perform function call in argument defaults (FastAPI Depends pattern is standard)
+    "B904",   # Within except clause, raise with from err or from None (handled in routes)
 ]
 
 [tool.ruff.lint.pydocstyle]

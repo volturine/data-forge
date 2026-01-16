@@ -5,7 +5,7 @@
 		totalSteps: number;
 	}
 
-	let { fromStepIndex, toStepIndex, totalSteps }: Props = $props();
+	let { fromStepIndex, toStepIndex, totalSteps: _totalSteps }: Props = $props();
 
 	const height = 32;
 	const strokeWidth = 2;
@@ -24,10 +24,7 @@
 				refY={arrowSize / 2}
 				orient="auto"
 			>
-				<polygon
-					points="0 0, {arrowSize} {arrowSize / 2}, 0 {arrowSize}"
-					fill="#d1d5db"
-				/>
+				<polygon points="0 0, {arrowSize} {arrowSize / 2}, 0 {arrowSize}" fill="#d1d5db" />
 			</marker>
 		</defs>
 

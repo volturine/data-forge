@@ -7,15 +7,10 @@
 
 	interface Props {
 		schema: Schema;
-		config: ExplodeConfigData;
-		onSave: (config: ExplodeConfigData) => void;
+		config?: ExplodeConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<ExplodeConfigData>({
-		columns: config?.columns ? [...config.columns] : []
-	});
+	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
 	const listColumns = $derived(
 		schema.columns.filter(
@@ -27,22 +22,12 @@
 	);
 
 	function toggleColumn(columnName: string) {
-		const index = localConfig.columns.indexOf(columnName);
+		const index = config.columns.indexOf(columnName);
 		if (index > -1) {
-			localConfig.columns.splice(index, 1);
+			config.columns.splice(index, 1);
 		} else {
-			localConfig.columns.push(columnName);
+			config.columns.push(columnName);
 		}
-	}
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			columns: config?.columns ? [...config.columns] : []
-		};
 	}
 </script>
 
@@ -68,11 +53,11 @@
 			</div>
 		{:else}
 			<div class="column-list">
-				{#each listColumns as column}
+				{#each listColumns as column (column.name)}
 					<label class="column-item">
 						<input
 							type="checkbox"
-							checked={localConfig.columns.includes(column.name)}
+							checked={config.columns.includes(column.name)}
 							onchange={() => toggleColumn(column.name)}
 						/>
 						<span>{column.name} ({column.dtype})</span>
@@ -80,10 +65,10 @@
 				{/each}
 			</div>
 
-			{#if localConfig.columns.length > 0}
+			{#if config.columns.length > 0}
 				<div class="selected-info">
-					Selected {localConfig.columns.length} column{localConfig.columns.length !== 1 ? 's' : ''}:
-					{localConfig.columns.join(', ')}
+					Selected {config.columns.length} column{config.columns.length !== 1 ? 's' : ''}:
+					{config.columns.join(', ')}
 				</div>
 			{/if}
 		{/if}
@@ -100,20 +85,8 @@
 	</div>
 
 	<div class="example">
-		<strong>Example:</strong> A row with tags=['python', 'data', 'ai'] becomes 3 rows, each with one
-		tag value.
-	</div>
-
-	<div class="actions">
-		<button
-			type="button"
-			onclick={handleSave}
-			class="save-btn"
-			disabled={localConfig.columns.length === 0}
-		>
-			Save
-		</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
+		<strong>Example:</strong> A row with tags=['python', 'data', 'ai'] becomes 3 rows, each with one tag
+		value.
 	</div>
 </div>
 
@@ -240,37 +213,5 @@
 		border-left: 3px solid #ffc107;
 		border-radius: 4px;
 		font-size: 0.875rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.save-btn:disabled {
-		background-color: #ccc;
-		cursor: not-allowed;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	button:hover:not(:disabled) {
-		opacity: 0.9;
 	}
 </style>

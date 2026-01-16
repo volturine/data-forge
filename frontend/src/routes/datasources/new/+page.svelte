@@ -43,7 +43,7 @@
 
 		try {
 			await uploadFile(file, fileName);
-			goto('/datasources');
+			goto('/datasources', { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Upload failed';
 		} finally {
@@ -62,7 +62,7 @@
 
 		try {
 			await connectDatabase(dbName, connectionString, query);
-			goto('/datasources');
+			goto('/datasources', { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Connection failed';
 		} finally {
@@ -81,7 +81,7 @@
 
 		try {
 			await connectApi(apiName, apiUrl, apiMethod);
-			goto('/datasources');
+			goto('/datasources', { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Connection failed';
 		} finally {
@@ -93,7 +93,7 @@
 <div class="container">
 	<header>
 		<h1>Add Data Source</h1>
-		<a href="/datasources" class="button">Cancel</a>
+		<a href="/datasources" class="button" data-sveltekit-reload>Cancel</a>
 	</header>
 
 	<div class="tabs">

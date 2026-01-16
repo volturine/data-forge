@@ -6,6 +6,7 @@ from queue import Empty
 import polars as pl
 
 from modules.compute.schemas import JobStatus
+from modules.compute.step_converter import convert_step_format
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +158,24 @@ class PolarsComputeEngine:
         total_steps = len(pipeline_steps)
 
         for idx, step in enumerate(pipeline_steps):
+            # Convert frontend format to backend format
+            try:
+                backend_step = convert_step_format(step)
+            except Exception as e:
+                logger.error(f'Failed to convert step {idx}: {e}')
+                result_queue.put(
+                    {
+                        'job_id': job_id,
+                        'status': JobStatus.FAILED,
+                        'progress': 0.0,
+                        'current_step': None,
+                        'error': f'Step conversion failed: {str(e)}',
+                    }
+                )
+                raise
+
             progress = (idx + 1) / total_steps
-            step_name = step.get('name', f'Step {idx + 1}')
+            step_name = backend_step.get('name', f'Step {idx + 1}')
 
             result_queue.put(
                 {
@@ -170,7 +187,7 @@ class PolarsComputeEngine:
                 }
             )
 
-            df = PolarsComputeEngine._apply_step(df, step)
+            df = PolarsComputeEngine._apply_step(df, backend_step)
 
         output = {
             'schema': {col: str(dtype) for col, dtype in df.schema.items()},
@@ -213,8 +230,60 @@ class PolarsComputeEngine:
         params = step.get('params', {})
 
         if operation == 'filter':
-            expr = params.get('expression')
-            return df.filter(pl.col(expr['column']) == expr['value'])
+            conditions = params.get('conditions', [])
+            logic = params.get('logic', 'AND')
+
+            if not conditions:
+                raise ValueError('Filter requires at least one condition')
+
+            # Build expression for each condition
+            exprs = []
+            for cond in conditions:
+                column = cond['column']
+                operator = cond.get('operator', '==')
+                value = cond['value']
+
+                col = pl.col(column)
+
+                # Build appropriate Polars expression based on operator
+                if operator == '=' or operator == '==':
+                    expr = col == value
+                elif operator == '!=':
+                    expr = col != value
+                elif operator == '>':
+                    expr = col > value
+                elif operator == '<':
+                    expr = col < value
+                elif operator == '>=':
+                    expr = col >= value
+                elif operator == '<=':
+                    expr = col <= value
+                elif operator == 'contains':
+                    expr = col.str.contains(value)
+                elif operator == 'starts_with':
+                    expr = col.str.starts_with(value)
+                elif operator == 'ends_with':
+                    expr = col.str.ends_with(value)
+                else:
+                    raise ValueError(f'Unsupported filter operator: {operator}')
+
+                exprs.append(expr)
+
+            # Combine expressions with AND or OR logic
+            if len(exprs) == 1:
+                final_expr = exprs[0]
+            elif logic == 'AND':
+                final_expr = exprs[0]
+                for expr in exprs[1:]:
+                    final_expr = final_expr & expr
+            elif logic == 'OR':
+                final_expr = exprs[0]
+                for expr in exprs[1:]:
+                    final_expr = final_expr | expr
+            else:
+                raise ValueError(f'Unsupported logic operator: {logic}')
+
+            return df.filter(final_expr)
 
         elif operation == 'select':
             columns = params.get('columns', [])
@@ -446,6 +515,11 @@ class PolarsComputeEngine:
             if isinstance(columns, str):
                 columns = [columns]
             return df.explode(columns)
+
+        elif operation == 'view':
+            # View is a passthrough operation for visualization purposes
+            # It doesn't modify the data, just allows previewing at this step
+            return df
 
         else:
             raise ValueError(f'Unsupported operation: {operation}')

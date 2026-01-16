@@ -8,34 +8,15 @@
 
 	interface Props {
 		schema: Schema;
-		config: ExpressionConfigData;
-		onSave: (config: ExpressionConfigData) => void;
+		config?: ExpressionConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<ExpressionConfigData>({
-		expression: config?.expression || '',
-		column_name: config?.column_name || ''
-	});
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			expression: config?.expression || '',
-			column_name: config?.column_name || ''
-		};
-	}
+	let { schema, config = $bindable({ expression: '', column_name: '' }) }: Props = $props();
 
 	function insertColumn(columnName: string) {
-		const cursorPos = 0;
+		const _cursorPos = 0;
 		const colRef = `col("${columnName}")`;
-		localConfig.expression = localConfig.expression
-			? `${localConfig.expression} ${colRef}`
-			: colRef;
+		config.expression = config.expression ? `${config.expression} ${colRef}` : colRef;
 	}
 </script>
 
@@ -45,8 +26,8 @@
 	<div class="section">
 		<h4>Expression</h4>
 		<textarea
-			bind:value={localConfig.expression}
-			placeholder='e.g., col("price") * 1.2 or col("first_name") + " " + col("last_name")'
+			bind:value={config.expression}
+			placeholder="e.g., col(&quot;price&quot;) * 1.2 or col(&quot;first_name&quot;) + &quot; &quot; + col(&quot;last_name&quot;)"
 			rows="4"
 		></textarea>
 
@@ -65,7 +46,7 @@
 		<h4>New Column Name</h4>
 		<input
 			type="text"
-			bind:value={localConfig.column_name}
+			bind:value={config.column_name}
 			placeholder="e.g., price_with_tax, full_name"
 		/>
 	</div>
@@ -86,18 +67,6 @@
 			{/each}
 		</div>
 		<div class="help-text">Click a column to insert it into the expression above.</div>
-	</div>
-
-	<div class="actions">
-		<button
-			type="button"
-			onclick={handleSave}
-			class="save-btn"
-			disabled={!localConfig.expression || !localConfig.column_name}
-		>
-			Save
-		</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
 	</div>
 </div>
 
@@ -205,34 +174,6 @@
 		font-size: 0.75rem;
 		color: #6c757d;
 		font-family: monospace;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.save-btn:disabled {
-		background-color: #ccc;
-		cursor: not-allowed;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

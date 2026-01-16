@@ -1,6 +1,7 @@
 // Schema Calculator - Client-side schema calculation for pipeline steps
 import type { Schema } from '$lib/types/schema';
 import type { PipelineStep } from '$lib/types/analysis';
+import { SvelteMap } from 'svelte/reactivity';
 import {
 	applyFilterRule,
 	applySelectRule,
@@ -17,7 +18,7 @@ import {
 
 class SchemaCalculator {
 	// Cache for calculated schemas
-	private cache = $state<Map<string, Schema>>(new Map());
+	private cache = $state(new SvelteMap<string, Schema>());
 
 	// Filter: returns same schema
 	applyFilter(schema: Schema, config: Record<string, unknown>): Schema {
@@ -77,20 +78,24 @@ class SchemaCalculator {
 	// Apply a single step transformation
 	applyStep(schema: Schema, step: PipelineStep, schemaMap?: Map<string, Schema>): Schema | null {
 		switch (step.type) {
-			case 'filter':
+			case 'filter': {
 				return this.applyFilter(schema, step.config);
+			}
 
-			case 'select':
+			case 'select': {
 				return this.applySelect(schema, step.config);
+			}
 
-			case 'rename':
+			case 'rename': {
 				return this.applyRename(schema, step.config);
+			}
 
 			case 'group_by':
-			case 'groupby':
+			case 'groupby': {
 				return this.applyGroupBy(schema, step.config);
+			}
 
-			case 'join':
+			case 'join': {
 				// Join requires two schemas
 				if (!schemaMap) return null;
 				const rightId = step.config.right as string | undefined;
@@ -98,27 +103,34 @@ class SchemaCalculator {
 				const rightSchema = schemaMap.get(rightId);
 				if (!rightSchema) return null;
 				return this.applyJoin(schema, rightSchema, step.config);
+			}
 
-			case 'sort':
+			case 'sort': {
 				return this.applySort(schema, step.config);
+			}
 
 			case 'expression':
 			case 'with_column':
-			case 'with_columns':
+			case 'with_columns': {
 				return this.applyExpression(schema, step.config);
+			}
 
-			case 'drop':
+			case 'drop': {
 				return this.applyDrop(schema, step.config);
+			}
 
-			case 'unique':
+			case 'unique': {
 				return this.applyUnique(schema, step.config);
+			}
 
-			case 'cast':
+			case 'cast': {
 				return this.applyCast(schema, step.config);
+			}
 
-			default:
+			default: {
 				// Unknown step type, return original schema
 				return schema;
+			}
 		}
 	}
 
@@ -128,7 +140,7 @@ class SchemaCalculator {
 		steps: PipelineStep[],
 		baseStepId?: string
 	): Schema | null {
-		const schemaMap = new Map<string, Schema>();
+		const schemaMap = new SvelteMap<string, Schema>();
 
 		// Set base schema
 		if (baseStepId) {
@@ -177,7 +189,7 @@ class SchemaCalculator {
 			return this.cache.get(cacheKey)!;
 		}
 
-		const schemaMap = new Map<string, Schema>();
+		const schemaMap = new SvelteMap<string, Schema>();
 
 		// Set base schema
 		if (baseStepId) {

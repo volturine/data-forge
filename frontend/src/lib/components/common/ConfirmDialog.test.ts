@@ -110,11 +110,11 @@ describe('ConfirmDialog', () => {
 			expect(document.body.style.overflow).toBe('hidden');
 		});
 
-	// Note: This test requires Svelte 5 component testing API which is still in development
-	// Skipping for now - body overflow behavior is tested manually
-	it.skip('should restore body scroll when dialog is hidden', async () => {
-		// This test will be re-enabled when @testing-library/svelte supports Svelte 5's new component API
-	});
+		// Note: This test requires Svelte 5 component testing API which is still in development
+		// Skipping for now - body overflow behavior is tested manually
+		it.skip('should restore body scroll when dialog is hidden', async () => {
+			// This test will be re-enabled when @testing-library/svelte supports Svelte 5's new component API
+		});
 	});
 
 	describe('confirm button', () => {

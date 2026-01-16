@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiRequest, BASE_URL } from './client';
 
 export interface ResultMetadata {
 	analysis_id: string;
@@ -10,7 +10,7 @@ export interface ResultMetadata {
 
 export interface ResultData {
 	columns: string[];
-	data: Record<string, any>[];
+	data: Record<string, unknown>[];
 	total_count: number;
 	page: number;
 	page_size: number;
@@ -34,18 +34,21 @@ export async function exportResult(
 	analysisId: string,
 	format: 'csv' | 'parquet' | 'excel' | 'json'
 ): Promise<Blob> {
-	const response = await fetch(
-		`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/results/${analysisId}/export`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ format })
-		}
-	);
+	const response = await fetch(`${BASE_URL}/api/v1/results/${analysisId}/export`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ format })
+	});
 
 	if (!response.ok) {
 		throw new Error(`Export failed: ${response.statusText}`);
 	}
 
 	return response.blob();
+}
+
+export async function deleteResult(analysisId: string): Promise<void> {
+	await apiRequest<void>(`/api/v1/results/${analysisId}`, {
+		method: 'DELETE'
+	});
 }

@@ -7,15 +7,10 @@
 
 	interface Props {
 		schema: Schema;
-		config: RenameConfigData;
-		onSave: (config: RenameConfigData) => void;
+		config?: RenameConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
-
-	let localConfig = $state<RenameConfigData>({
-		column_mapping: config?.column_mapping ? { ...config.column_mapping } : {}
-	});
+	let { schema, config = $bindable({ column_mapping: {} }) }: Props = $props();
 
 	let newMapping = $state({
 		oldName: '',
@@ -23,21 +18,19 @@
 	});
 
 	let mappings = $derived(
-		Object.entries(localConfig.column_mapping).map(([oldName, newName]) => ({
+		Object.entries(config.column_mapping).map(([oldName, newName]) => ({
 			oldName,
 			newName
 		}))
 	);
 
-	let availableColumns = $derived(
-		schema.columns.filter((col) => !localConfig.column_mapping[col.name])
-	);
+	let availableColumns = $derived(schema.columns.filter((col) => !config.column_mapping[col.name]));
 
 	function addMapping() {
 		if (!newMapping.oldName || !newMapping.newName) return;
 
-		localConfig.column_mapping = {
-			...localConfig.column_mapping,
+		config.column_mapping = {
+			...config.column_mapping,
 			[newMapping.oldName]: newMapping.newName
 		};
 
@@ -48,18 +41,8 @@
 	}
 
 	function removeMapping(oldName: string) {
-		const { [oldName]: _, ...rest } = localConfig.column_mapping;
-		localConfig.column_mapping = rest;
-	}
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			column_mapping: config?.column_mapping ? { ...config.column_mapping } : {}
-		};
+		const { [oldName]: _, ...rest } = config.column_mapping;
+		config.column_mapping = rest;
 	}
 </script>
 
@@ -102,17 +85,12 @@
 	{:else}
 		<p class="empty-state">No column renames configured. Add a mapping above.</p>
 	{/if}
-
-	<div class="actions">
-		<button type="button" onclick={handleSave} class="save-btn">Save</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
-	</div>
 </div>
 
 <style>
 	.rename-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -125,7 +103,7 @@
 		margin-top: 0;
 		margin-bottom: 0.75rem;
 		font-size: 0.875rem;
-		color: #6c757d;
+		color: var(--fg-muted);
 		text-transform: uppercase;
 	}
 
@@ -138,7 +116,7 @@
 	.add-mapping select,
 	.add-mapping input {
 		padding: 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 	}
 
@@ -152,7 +130,7 @@
 
 	.add-mapping button {
 		padding: 0.5rem 1rem;
-		background-color: #28a745;
+		background-color: var(--success-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -161,13 +139,13 @@
 	}
 
 	.add-mapping button:disabled {
-		background-color: #ccc;
+		background-color: var(--border-primary);
 		cursor: not-allowed;
 	}
 
 	.mappings-list {
 		padding: 1rem;
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 		border-radius: 4px;
 		margin-bottom: 1rem;
 	}
@@ -177,8 +155,8 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: white;
-		border: 1px solid #ddd;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
 		border-radius: 4px;
 		margin-bottom: 0.5rem;
 	}
@@ -196,22 +174,22 @@
 
 	.old-name {
 		font-weight: 500;
-		color: #495057;
+		color: var(--fg-primary);
 	}
 
 	.arrow {
-		color: #6c757d;
+		color: var(--fg-muted);
 		font-size: 1.2rem;
 	}
 
 	.new-name {
 		font-weight: 500;
-		color: #007bff;
+		color: var(--accent-primary);
 	}
 
 	.mapping-item button {
 		padding: 0.25rem 0.75rem;
-		background-color: #dc3545;
+		background-color: var(--error-fg);
 		color: white;
 		border: none;
 		border-radius: 4px;
@@ -222,33 +200,10 @@
 	.empty-state {
 		padding: 2rem;
 		text-align: center;
-		color: #6c757d;
-		background-color: #f8f9fa;
+		color: var(--fg-muted);
+		background-color: var(--bg-tertiary);
 		border-radius: 4px;
 		margin-bottom: 1rem;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {

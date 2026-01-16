@@ -10,50 +10,23 @@
 
 	interface Props {
 		schema: Schema;
-		config: PivotConfigData;
-		onSave: (config: PivotConfigData) => void;
+		config?: PivotConfigData;
 	}
 
-	let { schema, config, onSave }: Props = $props();
+	let {
+		schema,
+		config = $bindable({ index: [], columns: '', values: '', aggregate_function: 'first' })
+	}: Props = $props();
 
-	let localConfig = $state<PivotConfigData>({
-		index: config?.index ? [...config.index] : [],
-		columns: config?.columns || '',
-		values: config?.values || '',
-		aggregate_function: config?.aggregate_function || 'first'
-	});
-
-	const aggregateFunctions = [
-		'first',
-		'last',
-		'sum',
-		'mean',
-		'median',
-		'min',
-		'max',
-		'count'
-	];
+	const aggregateFunctions = ['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'count'];
 
 	function toggleIndexColumn(columnName: string) {
-		const index = localConfig.index.indexOf(columnName);
+		const index = config.index.indexOf(columnName);
 		if (index > -1) {
-			localConfig.index.splice(index, 1);
+			config.index.splice(index, 1);
 		} else {
-			localConfig.index.push(columnName);
+			config.index.push(columnName);
 		}
-	}
-
-	function handleSave() {
-		onSave(localConfig);
-	}
-
-	function handleCancel() {
-		localConfig = {
-			index: config?.index ? [...config.index] : [],
-			columns: config?.columns || '',
-			values: config?.values || '',
-			aggregate_function: config?.aggregate_function || 'first'
-		};
 	}
 </script>
 
@@ -63,27 +36,27 @@
 	<div class="section">
 		<h4>Index Columns</h4>
 		<div class="column-list">
-			{#each schema.columns as column}
+			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
 						type="checkbox"
-						checked={localConfig.index.includes(column.name)}
+						checked={config.index.includes(column.name)}
 						onchange={() => toggleIndexColumn(column.name)}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
 			{/each}
 		</div>
-		{#if localConfig.index.length > 0}
-			<div class="selected-info">Selected: {localConfig.index.join(', ')}</div>
+		{#if config.index.length > 0}
+			<div class="selected-info">Selected: {config.index.join(', ')}</div>
 		{/if}
 	</div>
 
 	<div class="section">
 		<h4>Pivot Column</h4>
-		<select bind:value={localConfig.columns}>
+		<select bind:value={config.columns}>
 			<option value="">Select column...</option>
-			{#each schema.columns as column}
+			{#each schema.columns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
@@ -91,9 +64,9 @@
 
 	<div class="section">
 		<h4>Values Column</h4>
-		<select bind:value={localConfig.values}>
+		<select bind:value={config.values}>
 			<option value="">Select column...</option>
-			{#each schema.columns as column}
+			{#each schema.columns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
@@ -101,23 +74,11 @@
 
 	<div class="section">
 		<h4>Aggregation Function</h4>
-		<select bind:value={localConfig.aggregate_function}>
-			{#each aggregateFunctions as func}
+		<select bind:value={config.aggregate_function}>
+			{#each aggregateFunctions as func (func)}
 				<option value={func}>{func}</option>
 			{/each}
 		</select>
-	</div>
-
-	<div class="actions">
-		<button
-			type="button"
-			onclick={handleSave}
-			class="save-btn"
-			disabled={!localConfig.columns || !localConfig.values || localConfig.index.length === 0}
-		>
-			Save
-		</button>
-		<button type="button" onclick={handleCancel} class="cancel-btn">Cancel</button>
 	</div>
 </div>
 
@@ -185,34 +146,6 @@
 		padding: 0.5rem;
 		border: 1px solid #ccc;
 		border-radius: 4px;
-	}
-
-	.actions {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.save-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #007bff;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-	}
-
-	.save-btn:disabled {
-		background-color: #ccc;
-		cursor: not-allowed;
-	}
-
-	.cancel-btn {
-		padding: 0.5rem 1.5rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
 	}
 
 	button:hover:not(:disabled) {
