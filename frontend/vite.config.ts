@@ -1,7 +1,8 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { VitePWA } from 'vite-plugin-pwa'
+import { VitePWA } from 'vite-plugin-pwa';
+import { defineConfig } from 'vitest/config';
 
-export default {
+export default defineConfig({
 	plugins: [
 		sveltekit(),
 		VitePWA({
@@ -23,22 +24,31 @@ export default {
 				lang: 'en',
 				dir: 'ltr',
 				categories: ['games', 'education'],
-				icons: [],
+				icons: []
 			}
 		})
 	],
 	server: {
 		host: '0.0.0.0',
 		port: 3000,
-		allowedHosts: [
-			"localhost",
-			"code-server.bee-justice.ts.net"
-		],
-		hmr: {
-			host: 'code-server.bee-justice.ts.net'
-		},
+		allowedHosts: true,
 		proxy: {
 			'/api': 'http://localhost:8000'
+		},
+		hmr: {
+			host: '0.0.0.0'
 		}
 	},
-};
+
+	test: {
+		include: ['src/**/*.{test,spec}.{js,ts}'],
+		environment: 'happy-dom',
+		globals: true,
+		setupFiles: ['./src/test/setup.ts'],
+		server: {
+			deps: {
+				inline: ['@sveltejs/kit']
+			}
+		}
+	}
+});

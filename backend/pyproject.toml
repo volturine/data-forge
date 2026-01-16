@@ -7,15 +7,21 @@ requires-python = "==3.13.*"
 dependencies = [
     "uvicorn",
     "fastapi",
-    "pydantic",
+    "pydantic>=2.0",
+    "pydantic-settings",
     "pytest",
     "httpx",
     "requests",
     "ruff>=0.14.7",
+    "polars",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite",
+    "alembic",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "ruff>=0.2.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff>=0.2.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -77,11 +83,15 @@ ignore = [
     "D105",
     "D106",
     "D107",
+    "D205",   # 1 blank line required between summary line and description
+    "D212",   # Multi-line docstring summary should start at the first line
     "UP045",
     "N812",   # Imports as uppercase (e.g., functions as F)
     "COM812", # Missing trailing comma
     "RET504", # Unnecessary assignment to `df` before `return` statement
     "RUF100", # Unused `noqa` directive (unknown: `E814`) - not aligned with Foundry's checks
+    "B008",   # Do not perform function call in argument defaults (FastAPI Depends pattern is standard)
+    "B904",   # Within except clause, raise with from err or from None (handled in routes)
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -93,3 +103,18 @@ combine-as-imports = true
 [tool.ruff.lint.pyupgrade]
 # Preserve types, even if a file imports `from __future__ import annotations`.
 keep-runtime-typing = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "asyncio: mark test as async",
+]

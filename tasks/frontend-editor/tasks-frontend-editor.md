@@ -14,23 +14,23 @@
 
 ## Tasks
 
-- [ ] 15.0 Implement Analysis Editor Page
-  - [ ] 15.1 Create `frontend/src/routes/analysis/[id]/+page.ts`:
-    - [ ] 15.1.1 Define load function:
+- [x] 15.0 Implement Analysis Editor Page
+  - [x] 15.1 Create `frontend/src/routes/analysis/[id]/+page.ts`:
+    - [x] 15.1.1 Define load function:
       - Get analysis ID from params
       - Return { analysisId } for client-side loading
-    - [ ] 15.1.2 Handle invalid ID format
-  - [ ] 15.2 Create `frontend/src/routes/analysis/[id]/+page.svelte`:
-    - [ ] 15.2.1 Import stores: analysisStore, computeStore
-    - [ ] 15.2.2 Import components: StepLibrary, PipelineCanvas, StepConfig, DataTable, SchemaViewer
-    - [ ] 15.2.3 Define local state:
+    - [x] 15.1.2 Handle invalid ID format
+  - [x] 15.2 Create `frontend/src/routes/analysis/[id]/+page.svelte`:
+    - [x] 15.2.1 Import stores: analysisStore, computeStore
+    - [x] 15.2.2 Import components: StepLibrary, PipelineCanvas, StepConfig, DataTable, SchemaViewer
+    - [x] 15.2.3 Define local state:
       - selectedStepId: string | null
       - showResultsPanel: boolean
       - resultsPanelHeight: number
-    - [ ] 15.2.4 Use $effect to load analysis on mount:
+    - [x] 15.2.4 Use $effect to load analysis on mount:
       - Call analysisStore.loadAnalysis(analysisId)
       - Handle loading/error states
-    - [ ] 15.2.5 Implement three-panel layout:
+    - [x] 15.2.5 Implement three-panel layout:
       ```
       +------------------+------------------------+------------------+
       |                  |                        |                  |
@@ -43,15 +43,15 @@
       |                  (collapsible, 300px)                        |
       +--------------------------------------------------------------+
       ```
-    - [ ] 15.2.6 Implement header:
+    - [x] 15.2.6 Implement header:
       - Back button to gallery
       - Analysis name (editable inline)
       - Save button (disabled if not dirty)
       - Run button
       - Status indicator
-    - [ ] 15.2.7 Wire up StepLibrary:
+    - [x] 15.2.7 Wire up StepLibrary:
       - Render StepLibrary component
-    - [ ] 15.2.8 Wire up PipelineCanvas:
+    - [x] 15.2.8 Wire up PipelineCanvas:
       - Pass pipeline from analysisStore
       - Pass schemas from analysisStore
       - Handle onSelectStep → set selectedStepId
@@ -59,41 +59,41 @@
       - Handle onDeleteStep → analysisStore.removeStep()
       - Handle onReorderStep → analysisStore.reorderSteps()
       - Handle onPreviewStep → trigger preview
-    - [ ] 15.2.9 Wire up StepConfig panel:
+    - [x] 15.2.9 Wire up StepConfig panel:
       - Show when selectedStepId is set
       - Pass selected step from pipeline
       - Pass current schema (calculated up to this step)
       - Pass dataSources for join config
       - Handle onChange → analysisStore.updateStep()
       - Handle onClose → set selectedStepId to null
-    - [ ] 15.2.10 Wire up Results panel:
+    - [x] 15.2.10 Wire up Results panel:
       - Toggle button to show/hide
       - Resizable height
       - Show DataTable with results data
       - Show SchemaViewer for result schema
       - Show StatsPanel for result stats
-    - [ ] 15.2.11 Implement save functionality:
+    - [x] 15.2.11 Implement save functionality:
       - Ctrl+S keyboard shortcut
       - Save button click
       - Call analysisStore.save()
       - Show success/error toast
-    - [ ] 15.2.12 Implement run functionality:
+    - [x] 15.2.12 Implement run functionality:
       - Ctrl+Enter keyboard shortcut
       - Run button click
       - Call computeStore.executeAnalysis()
       - Show progress indicator
       - Update results panel on completion
-    - [ ] 15.2.13 Implement preview functionality:
+    - [x] 15.2.13 Implement preview functionality:
       - Click preview button on step
       - Call compute.previewStep()
       - Show preview data in results panel
-    - [ ] 15.2.14 Handle execution status:
+    - [x] 15.2.14 Handle execution status:
       - Subscribe to computeStore.activeJobs
       - Show progress bar during execution
       - Show current step name
       - Disable run button while running
       - Show error message on failure
-    - [ ] 15.2.15 Implement autosave (optional):
+    - [x] 15.2.15 Implement autosave (optional):
       - Debounce pipeline changes (2 seconds)
       - Auto-save if dirty
       - Show "Saving..." indicator
@@ -141,15 +141,18 @@
 
 ## Completion Criteria
 
-- [ ] Editor loads analysis and displays pipeline
-- [ ] Can add steps from library
-- [ ] Can configure steps in config panel
-- [ ] Schema updates in real-time as pipeline changes
-- [ ] Can save analysis (button and Ctrl+S)
-- [ ] Can run analysis and see progress
-- [ ] Results display in bottom panel
-- [ ] Preview step shows sample data
-- [ ] Toasts show for success/error
-- [ ] Confirm dialogs work for destructive actions
-- [ ] Keyboard shortcuts work
-- [ ] OOM error displays friendly message
+- [x] Editor loads analysis and displays pipeline
+- [x] Can add steps from library
+- [x] Can configure steps in config panel
+- [x] Schema updates in real-time as pipeline changes
+- [x] Can save analysis (button and Ctrl+S)
+- [x] Can run analysis and see progress
+- [x] Results display in bottom panel
+- [x] Preview step shows sample data
+- [x] Toasts show for success/error
+- [ ] Confirm dialogs work for destructive actions (not yet implemented)
+- [x] Keyboard shortcuts work
+- [ ] OOM error displays friendly message (not yet implemented)
+- [x] Autosave functionality implemented
+
+**Overall Editor Page: ~95% complete** (core functionality + autosave done, missing some UX polish items)

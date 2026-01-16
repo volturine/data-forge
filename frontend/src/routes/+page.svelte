@@ -1,34 +1,354 @@
 <script lang="ts">
-	let health: { status: string; version: string } | null = $state(null);
-	let error: string | null = $state(null);
+	import { createQuery } from '@tanstack/svelte-query';
+	import { useQueryClient } from '@tanstack/svelte-query';
+	import { goto } from '$app/navigation';
+	import { listAnalyses, deleteAnalysis } from '$lib/api/analysis';
+	import { GalleryGrid, EmptyState, AnalysisFilters } from '$lib/components/gallery';
+	import { ConfirmDialog } from '$lib/components/common';
+	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
 
-	$effect(() => {
-		fetch('http://127.0.0.1:8000/api/v1/health')
-			.then((res) => res.json())
-			.then((data) => {
-				health = data;
-			})
-			.catch((err) => {
-				error = 'Failed to connect to backend';
-				console.error(err);
-			});
+	const queryClient = useQueryClient();
+
+	const query = createQuery(() => ({
+		queryKey: ['analyses'],
+		queryFn: listAnalyses
+	}));
+
+	let searchQuery = $state('');
+	let sortOption = $state<SortOption>('newest');
+	let deleteConfirmId = $state<string | null>(null);
+
+	const filteredAndSortedAnalyses = $derived.by(() => {
+		if (!query.data) return [];
+
+		let result = [...query.data];
+
+		if (searchQuery) {
+			const lowerQuery = searchQuery.toLowerCase();
+			result = result.filter((analysis) => analysis.name.toLowerCase().includes(lowerQuery));
+		}
+
+		result.sort((a, b) => {
+			switch (sortOption) {
+				case 'newest':
+					return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+				case 'oldest':
+					return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+				case 'name-asc':
+					return a.name.localeCompare(b.name);
+				case 'name-desc':
+					return b.name.localeCompare(a.name);
+				default:
+					return 0;
+			}
+		});
+
+		return result;
 	});
+
+	function createNew() {
+		goto('/analysis/new', { invalidateAll: true });
+	}
+
+	function handleSearch(query: string) {
+		searchQuery = query;
+	}
+
+	function handleSort(option: SortOption) {
+		sortOption = option;
+	}
+
+	function requestDelete(id: string) {
+		deleteConfirmId = id;
+	}
+
+	async function confirmDelete() {
+		if (!deleteConfirmId) return;
+
+		try {
+			await deleteAnalysis(deleteConfirmId);
+			queryClient.invalidateQueries({ queryKey: ['analyses'] });
+			deleteConfirmId = null;
+		} catch (err) {
+			console.error('Failed to delete analysis:', err);
+			alert('Failed to delete analysis. Please try again.');
+		}
+	}
+
+	function cancelDelete() {
+		deleteConfirmId = null;
+	}
 </script>
 
-<main style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-	<h1>Svelte 5 + FastAPI Template</h1>
+<div class="container">
+	<header class="page-header">
+		<div class="header-text">
+			<h1>Analyses</h1>
+			<p class="subtitle">Browse and manage your data analyses</p>
+		</div>
+		<button class="btn-new" onclick={createNew}>
+			<svg
+				width="16"
+				height="16"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+			>
+				<path d="M12 5v14M5 12h14" />
+			</svg>
+			New Analysis
+		</button>
+	</header>
 
-	{#if health}
-		<p style="color: green;">
-			Backend Status: <strong>{health.status}</strong> (v{health.version})
-		</p>
-	{:else if error}
-		<p style="color: red;">{error}</p>
-	{:else}
-		<p>Connecting to backend...</p>
-	{/if}
+	<main>
+		{#if query.isPending}
+			<div class="loading">
+				<div class="skeleton-grid">
+					{#each Array(6) as _, i (i)}
+						<div class="skeleton-card">
+							<div class="skeleton-thumbnail"></div>
+							<div class="skeleton-content">
+								<div class="skeleton-title"></div>
+								<div class="skeleton-text"></div>
+								<div class="skeleton-text small"></div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{:else if query.isError}
+			<div class="error-state">
+				<div class="error-icon">!</div>
+				<h2>Failed to load analyses</h2>
+				<p class="error-message">{query.error.message}</p>
+				<button class="btn-retry" onclick={() => query.refetch()}>Try again</button>
+			</div>
+		{:else if query.data}
+			{#if query.data.length === 0}
+				<EmptyState />
+			{:else}
+				<AnalysisFilters onSearch={handleSearch} onSort={handleSort} />
+				{#if filteredAndSortedAnalyses.length === 0}
+					<div class="no-results">
+						<p>No analyses match your search.</p>
+					</div>
+				{:else}
+					<GalleryGrid analyses={filteredAndSortedAnalyses} onDelete={requestDelete} />
+				{/if}
+			{/if}
+		{/if}
+	</main>
+</div>
 
-	<p>
-		Edit <code>frontend/src/routes/+page.svelte</code> to change this page.
-	</p>
-</main>
+<ConfirmDialog
+	show={deleteConfirmId !== null}
+	title="Delete Analysis"
+	message="Are you sure you want to delete this analysis? This action cannot be undone."
+	confirmText="Delete"
+	cancelText="Cancel"
+	onConfirm={confirmDelete}
+	onCancel={cancelDelete}
+/>
+
+<style>
+	.container {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: var(--space-7) var(--space-6);
+	}
+
+	.page-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: var(--space-6);
+		margin-bottom: var(--space-8);
+		padding-bottom: var(--space-6);
+		border-bottom: 1px solid var(--border-primary);
+	}
+
+	.header-text h1 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-2xl);
+		font-weight: 600;
+	}
+
+	.subtitle {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
+	}
+
+	.btn-new {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		font-weight: 500;
+		cursor: pointer;
+		transition: opacity var(--transition-fast);
+	}
+
+	.btn-new:hover {
+		opacity: 0.85;
+	}
+
+	.loading {
+		padding: var(--space-4) 0;
+	}
+
+	.skeleton-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+		gap: var(--space-4);
+	}
+
+	.skeleton-card {
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+		background: var(--bg-primary);
+	}
+
+	.skeleton-thumbnail {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		background: linear-gradient(
+			90deg,
+			var(--bg-tertiary) 25%,
+			var(--bg-hover) 50%,
+			var(--bg-tertiary) 75%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.5s infinite;
+	}
+
+	.skeleton-content {
+		padding: var(--space-4);
+	}
+
+	.skeleton-title,
+	.skeleton-text {
+		height: 14px;
+		background: linear-gradient(
+			90deg,
+			var(--bg-tertiary) 25%,
+			var(--bg-hover) 50%,
+			var(--bg-tertiary) 75%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.5s infinite;
+		border-radius: var(--radius-sm);
+		margin-bottom: var(--space-3);
+	}
+
+	.skeleton-title {
+		height: 16px;
+		width: 70%;
+	}
+
+	.skeleton-text.small {
+		width: 50%;
+	}
+
+	@keyframes shimmer {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
+		}
+	}
+
+	.error-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-12) var(--space-6);
+		text-align: center;
+		min-height: 400px;
+	}
+
+	.error-icon {
+		width: 48px;
+		height: 48px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xl);
+		font-weight: 700;
+		margin-bottom: var(--space-6);
+	}
+
+	.error-state h2 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-lg);
+		font-weight: 600;
+	}
+
+	.error-message {
+		margin: 0 0 var(--space-6) 0;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
+		max-width: 400px;
+	}
+
+	.btn-retry {
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		cursor: pointer;
+		transition: opacity var(--transition-fast);
+	}
+
+	.btn-retry:hover {
+		opacity: 0.85;
+	}
+
+	.no-results {
+		text-align: center;
+		padding: var(--space-12) var(--space-6);
+		border: 1px dashed var(--border-primary);
+		border-radius: var(--radius-sm);
+	}
+
+	.no-results p {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
+	}
+
+	@media (max-width: 768px) {
+		.container {
+			padding: var(--space-4);
+		}
+
+		.page-header {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.btn-new {
+			width: 100%;
+			justify-content: center;
+		}
+
+		.skeleton-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>
