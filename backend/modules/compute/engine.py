@@ -215,6 +215,8 @@ class PolarsComputeEngine:
                 return pl.scan_parquet(file_path)
             elif file_type == 'json':
                 return pl.scan_ndjson(file_path)
+            elif file_type == 'excel':
+                return pl.read_excel(file_path).lazy()
             else:
                 raise ValueError(f'Unsupported file type: {file_type}')
 
@@ -322,7 +324,11 @@ class PolarsComputeEngine:
             if isinstance(descending, list):
                 # Ensure descending list matches columns length
                 if len(descending) != len(columns):
-                    descending = descending[:len(columns)] if len(descending) > len(columns) else descending + [False] * (len(columns) - len(descending))
+                    descending = (
+                        descending[: len(columns)]
+                        if len(descending) > len(columns)
+                        else descending + [False] * (len(columns) - len(descending))
+                    )
             return lf.sort(columns, descending=descending)
 
         elif operation == 'rename':

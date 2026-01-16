@@ -133,6 +133,8 @@ async def _extract_schema(datasource: DataSource) -> SchemaInfo:
             df = pl.scan_parquet(file_path)
         elif file_type == 'json':
             df = pl.scan_ndjson(file_path)
+        elif file_type == 'excel':
+            df = pl.read_excel(file_path).lazy()
         else:
             raise ValueError(f'Unsupported file type: {file_type}')
 
