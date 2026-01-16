@@ -17,7 +17,7 @@ class Base(DeclarativeBase):
 
 engine = create_async_engine(
     settings.database_url,
-    echo=True,
+    echo=settings.debug,  # Only log SQL queries in debug mode
     connect_args={'check_same_thread': False} if 'sqlite' in settings.database_url else {},
 )
 

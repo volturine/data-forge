@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     app_name: str = 'Polars-FastAPI-Svelte Analysis Platform'
     app_version: str = '1.0.0'
 
+    # Debug mode - enables SQL echo, verbose logging
+    debug: bool = False
+
+    # CORS origins - comma-separated list of allowed origins
+    cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000'
+
     database_url: str = 'sqlite+aiosqlite:///./database/app.db'
 
     upload_dir: Path = Path('./data/uploads')
@@ -16,6 +22,14 @@ class Settings(BaseSettings):
 
     max_upload_size: int = 10 * 1024 * 1024 * 1024
     compute_timeout: int = 300
+
+    # Job cleanup TTL in seconds (default 1 hour)
+    job_ttl: int = 3600
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse CORS origins from comma-separated string."""
+        return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
 
 
 settings = Settings()

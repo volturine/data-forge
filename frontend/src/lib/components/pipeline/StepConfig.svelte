@@ -5,6 +5,16 @@
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
 	import SortConfig from '$lib/components/operations/SortConfig.svelte';
+	import RenameConfig from '$lib/components/operations/RenameConfig.svelte';
+	import DropConfig from '$lib/components/operations/DropConfig.svelte';
+	import JoinConfig from '$lib/components/operations/JoinConfig.svelte';
+	import ExpressionConfig from '$lib/components/operations/ExpressionConfig.svelte';
+	import DeduplicateConfig from '$lib/components/operations/DeduplicateConfig.svelte';
+	import FillNullConfig from '$lib/components/operations/FillNullConfig.svelte';
+	import ExplodeConfig from '$lib/components/operations/ExplodeConfig.svelte';
+	import PivotConfig from '$lib/components/operations/PivotConfig.svelte';
+	import TimeSeriesConfig from '$lib/components/operations/TimeSeriesConfig.svelte';
+	import StringMethodsConfig from '$lib/components/operations/StringMethodsConfig.svelte';
 
 	interface Props {
 		step: PipelineStep | null;
@@ -67,15 +77,25 @@
 			{:else if step.type === 'sort'}
 				<SortConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
 			{:else if step.type === 'rename'}
-				<div class="not-implemented">
-					<p>Rename configuration coming soon</p>
-					<button onclick={handleCancel} type="button">Close</button>
-				</div>
+				<RenameConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
 			{:else if step.type === 'drop'}
-				<div class="not-implemented">
-					<p>Drop configuration coming soon</p>
-					<button onclick={handleCancel} type="button">Close</button>
-				</div>
+				<DropConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'join'}
+				<JoinConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'expression' || step.type === 'with_columns'}
+				<ExpressionConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'deduplicate'}
+				<DeduplicateConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'fill_null'}
+				<FillNullConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'explode'}
+				<ExplodeConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'pivot'}
+				<PivotConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'timeseries'}
+				<TimeSeriesConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
+			{:else if step.type === 'string_transform'}
+				<StringMethodsConfig schema={nonNullSchema} config={step.config as any} onSave={handleSave} />
 			{:else}
 				<div class="not-implemented">
 					<p>Configuration for {step.type} is not yet implemented</p>

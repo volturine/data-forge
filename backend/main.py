@@ -1,8 +1,10 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.config import settings
 from core.database import init_db
 from modules.analysis import router as analysis_router
 from modules.compute import router as compute_router
@@ -11,25 +13,35 @@ from modules.datasource import router as datasource_router
 from modules.health.routes import router as health_router
 from modules.results import router as results_router
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info('Starting application...')
     await init_db()
     yield
     # Cleanup compute processes on shutdown
+    logger.info('Shutting down compute processes...')
     manager = get_manager()
     manager.shutdown_all()
+    logger.info('Application shutdown complete')
 
 
-app = FastAPI(title='Svelte-FastAPI Template', lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=['*'],
-    allow_methods=['*'],
-    allow_headers=['*'],
+    allow_origins=settings.cors_origins_list,
+    allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allow_headers=['Content-Type', 'Authorization'],
 )
 
 # Include Routers

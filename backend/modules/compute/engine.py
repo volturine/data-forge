@@ -1,9 +1,13 @@
+import logging
 import multiprocessing as mp
 import uuid
+from queue import Empty
 
 import polars as pl
 
 from modules.compute.schemas import JobStatus
+
+logger = logging.getLogger(__name__)
 
 
 class PolarsComputeEngine:
@@ -50,7 +54,10 @@ class PolarsComputeEngine:
         """Get result from result queue (non-blocking)."""
         try:
             return self.result_queue.get(timeout=timeout)
-        except:
+        except Empty:
+            return None
+        except Exception as e:
+            logger.warning(f'Error getting result from queue: {e}')
             return None
 
     def shutdown(self) -> None:

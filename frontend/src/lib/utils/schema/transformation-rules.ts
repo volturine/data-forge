@@ -40,9 +40,14 @@ export function applyRenameRule(schema: Schema, config: Record<string, unknown>)
 }
 
 // GroupBy transformation: returns group keys + aggregation columns
+// Handles both camelCase (frontend) and snake_case (backend) property names
 export function applyGroupByRule(schema: Schema, config: Record<string, unknown>): Schema {
-	const groupBy = config.group_by as string[] | undefined;
-	const aggregations = config.aggregations as Record<string, string> | undefined;
+	// Support both camelCase and snake_case
+	const groupBy = (config.groupBy || config.group_by) as string[] | undefined;
+	const aggregations = config.aggregations as
+		| Array<{ column: string; function: string; alias?: string }>
+		| Record<string, string>
+		| undefined;
 
 	if (!groupBy || !aggregations) {
 		return schema;
@@ -58,19 +63,37 @@ export function applyGroupByRule(schema: Schema, config: Record<string, unknown>
 		}
 	}
 
-	// Add aggregation columns (new dtype based on aggregation function)
-	for (const [colName, aggFunc] of Object.entries(aggregations)) {
-		const original = schema.columns.find((c) => c.name === colName);
-		if (!original) continue;
+	// Handle aggregations - can be array format or object format
+	if (Array.isArray(aggregations)) {
+		// Array format: [{column: 'col', function: 'sum', alias: 'col_sum'}]
+		for (const agg of aggregations) {
+			const original = schema.columns.find((c) => c.name === agg.column);
+			if (!original) continue;
 
-		const resultDType = getAggregationResultDType(aggFunc, original.dtype);
-		const resultName = `${colName}_${aggFunc}`;
+			const resultDType = getAggregationResultDType(agg.function, original.dtype);
+			const resultName = agg.alias || `${agg.column}_${agg.function}`;
 
-		columns.push({
-			name: resultName,
-			dtype: resultDType,
-			nullable: original.nullable || aggFunc === 'mean' || aggFunc === 'median'
-		});
+			columns.push({
+				name: resultName,
+				dtype: resultDType,
+				nullable: original.nullable || agg.function === 'mean' || agg.function === 'median'
+			});
+		}
+	} else {
+		// Object format: {colName: 'aggFunc'}
+		for (const [colName, aggFunc] of Object.entries(aggregations)) {
+			const original = schema.columns.find((c) => c.name === colName);
+			if (!original) continue;
+
+			const resultDType = getAggregationResultDType(aggFunc, original.dtype);
+			const resultName = `${colName}_${aggFunc}`;
+
+			columns.push({
+				name: resultName,
+				dtype: resultDType,
+				nullable: original.nullable || aggFunc === 'mean' || aggFunc === 'median'
+			});
+		}
 	}
 
 	return {
