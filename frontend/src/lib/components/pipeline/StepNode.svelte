@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
+	import { drag } from '$lib/stores/drag.svelte';
 	import { InlineDataTable } from '$lib/components/viewers';
 
 	interface Props {
@@ -9,22 +10,9 @@
 		allSteps?: PipelineStep[];
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
-		onDragStart: (type: string) => void;
-		onDragEnd: () => void;
-		onBranch: (type: string, parentId: string) => void;
 	}
 
-	let {
-		step,
-		index,
-		datasourceId,
-		allSteps = [],
-		onEdit,
-		onDelete,
-		onDragStart,
-		onDragEnd,
-		onBranch
-	}: Props = $props();
+	let { step, index, datasourceId, allSteps = [], onEdit, onDelete }: Props = $props();
 
 	const typeLabels: Record<string, string> = {
 		filter: 'filter',
@@ -44,10 +32,10 @@
 		string_transform: 'string'
 	};
 
-	function getConfigSummary(step: PipelineStep): string {
-		switch (step.type) {
+	function getConfigSummary(s: PipelineStep): string {
+		switch (s.type) {
 			case 'filter': {
-				const conditions = step.config.conditions as Array<{
+				const conditions = s.config.conditions as Array<{
 					column: string;
 					operator: string;
 					value: string;
@@ -57,20 +45,20 @@
 			}
 
 			case 'select': {
-				const columns = step.config.columns as string[];
+				const columns = s.config.columns as string[];
 				if (!columns || columns.length === 0) return 'no columns';
 				return `${columns.length} column${columns.length > 1 ? 's' : ''}`;
 			}
 
 			case 'groupby': {
-				const groupBy = step.config.groupBy as string[];
-				const aggregations = step.config.aggregations as Array<unknown>;
+				const groupBy = s.config.groupBy as string[];
+				const aggregations = s.config.aggregations as Array<unknown>;
 				if (!groupBy || groupBy.length === 0) return 'not configured';
 				return `${groupBy.length} key${groupBy.length > 1 ? 's' : ''}, ${aggregations?.length || 0} agg`;
 			}
 
 			case 'sort': {
-				const sortRules = step.config as unknown as Array<{ column: string; descending: boolean }>;
+				const sortRules = s.config as unknown as Array<{ column: string; descending: boolean }>;
 				if (!Array.isArray(sortRules) || sortRules.length === 0) return 'not configured';
 				return `${sortRules.length} column${sortRules.length > 1 ? 's' : ''}`;
 			}
@@ -84,29 +72,33 @@
 	let label = $derived(typeLabels[step.type] || step.type);
 	let summary = $derived(getConfigSummary(step));
 
-</script>
-	<div class="step-node" class:view-node={step.type === 'view'}>
-		<div class="connection-point top"></div>
+	// Is this node being dragged?
+	let isDragging = $state(false);
 
+	function handleDragStart(event: DragEvent) {
+		isDragging = true;
+		if (event.dataTransfer) {
+			event.dataTransfer.setData('application/x-pipeline-step', step.id);
+			event.dataTransfer.effectAllowed = 'move';
+		}
+		drag.startMove(step.id, step.type);
+	}
+
+	function handleDragEnd() {
+		isDragging = false;
+		drag.end();
+	}
+</script>
+
+<div class="step-node" class:view-node={step.type === 'view'} class:dragging={isDragging}>
+	<div class="connection-point top"></div>
 
 	<div
 		class="step-content"
 		role="listitem"
 		draggable="true"
-		ondragstart={(event) => {
-			onDragStart(step.type);
-			if (event.dataTransfer) {
-				event.dataTransfer.setData('text/plain', step.type);
-				event.dataTransfer.effectAllowed = 'move';
-			}
-		}}
-		ondragend={onDragEnd}
-		ondragover={(event) => event.preventDefault()}
-		ondrop={(event) => {
-			event.preventDefault();
-			const type = event.dataTransfer?.getData('text/plain') || step.type;
-			onBranch(type, step.id);
-		}}
+		ondragstart={handleDragStart}
+		ondragend={handleDragEnd}
 	>
 		<div class="step-header">
 			<span class="step-type">{label}</span>
@@ -134,9 +126,8 @@
 		{/if}
 	</div>
 
-
-		<div class="connection-point bottom"></div>
-	</div>
+	<div class="connection-point bottom"></div>
+</div>
 
 <style>
 	.step-node {
@@ -148,6 +139,10 @@
 		max-width: 100%;
 		width: min(75%, 960px);
 		min-width: 320px;
+	}
+
+	.step-node.dragging {
+		opacity: 0.5;
 	}
 
 	.connection-point {
@@ -177,6 +172,7 @@
 		padding: var(--space-4);
 		transition: all var(--transition-fast);
 		box-shadow: var(--card-shadow);
+		cursor: grab;
 	}
 
 	.step-content:active {
@@ -215,7 +211,6 @@
 		color: var(--fg-tertiary);
 		margin-bottom: var(--space-3);
 	}
-
 
 	.step-actions {
 		display: flex;

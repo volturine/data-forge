@@ -1,14 +1,8 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
+	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
 	import StepNode from './StepNode.svelte';
 	import ConnectionLine from './ConnectionLine.svelte';
-
-	interface DropTarget {
-		index: number;
-		parentId: string | null;
-		nextId: string | null;
-		valid: boolean;
-	}
 
 	interface Props {
 		steps: PipelineStep[];
@@ -16,85 +10,107 @@
 		onStepClick: (id: string) => void;
 		onStepDelete: (id: string) => void;
 		onInsertStep: (type: string, target: DropTarget) => void;
-		onBranchStep: (type: string, parentId: string) => void;
-		selectedType: string | null;
+		onMoveStep: (stepId: string, target: DropTarget) => void;
 	}
 
-	let {
-		steps,
-		datasourceId,
-		onStepClick,
-		onStepDelete,
-		onInsertStep,
-		onBranchStep,
-		selectedType
-	}: Props = $props();
+	let { steps, datasourceId, onStepClick, onStepDelete, onInsertStep, onMoveStep }: Props =
+		$props();
 
-	let draggedType = $state<string | null>(null);
-	let activeTarget = $state<DropTarget | null>(null);
+	// Derived: whether we can accept drops
+	let canDrop = $derived(drag.active);
 
-	let canDrop = $derived(!!draggedType || !!selectedType);
+	// Derived: current hovered target index
+	let hoverIndex = $derived(drag.target?.index ?? null);
 
-	function getParentId(indexValue: number): string | null {
-		if (indexValue <= 0) {
-			return null;
+	function getParentId(index: number): string | null {
+		if (index <= 0) return null;
+		return steps[index - 1]?.id ?? null;
+	}
+
+	function getNextId(index: number): string | null {
+		return steps[index]?.id ?? null;
+	}
+
+	function buildTarget(index: number): DropTarget {
+		const parentId = index === 0 ? null : getParentId(index);
+		const nextId = index < steps.length ? getNextId(index) : null;
+		return { index, parentId, nextId };
+	}
+
+	function isValidTarget(index: number): boolean {
+		// For reorder operations, check if we're dropping on ourselves
+		if (drag.isReorder && drag.stepId) {
+			const currentIndex = steps.findIndex((s) => s.id === drag.stepId);
+			// Can't drop on self (same position or adjacent)
+			if (index === currentIndex || index === currentIndex + 1) {
+				return false;
+			}
 		}
-		const prev = steps[indexValue - 1];
-		return prev ? prev.id : null;
-	}
 
-	function getNextId(indexValue: number): string | null {
-		const next = steps[indexValue];
-		return next ? next.id : null;
-	}
+		const nextId = index < steps.length ? getNextId(index) : null;
+		if (!nextId) return true;
 
-	function buildTarget(indexValue: number): DropTarget {
-		const parentId = indexValue === 0 ? null : getParentId(indexValue);
-		const nextId = indexValue < steps.length ? getNextId(indexValue) : null;
-		const nextStep = nextId ? steps.find((item) => item.id === nextId) : null;
-		const nextDeps = nextStep?.depends_on ?? [];
-		const valid = nextDeps.length <= 1 && (nextDeps.length === 0 || nextDeps[0] === parentId);
-		return { index: indexValue, parentId, nextId, valid };
-	}
-
-	function handleDragStart(type: string) {
-		draggedType = type;
-	}
-
-	function handleDragEnd() {
-		draggedType = null;
-		activeTarget = null;
-	}
-
-
-	function handleDrop(event: DragEvent | null, indexValue: number) {
-		const type = draggedType ?? selectedType ?? event?.dataTransfer?.getData('text/plain') ?? null;
-		if (!type) {
-			return;
+		// For reorder, the next step might be the one we're moving
+		if (drag.isReorder && nextId === drag.stepId) {
+			return true;
 		}
-		const target = buildTarget(indexValue);
-		activeTarget = target;
-		if (!target.valid) {
-			return;
-		}
-		onInsertStep(type, target);
-		handleDragEnd();
+
+		const nextStep = steps.find((s) => s.id === nextId);
+		if (!nextStep) return true;
+		const deps = nextStep.depends_on ?? [];
+		// Valid if no dependencies or single dependency matching expected parent
+		if (deps.length === 0) return true;
+		if (deps.length > 1) return false;
+		const parentId = index === 0 ? null : getParentId(index);
+		return deps[0] === parentId;
 	}
 
-	function handleDragOver(event: DragEvent, indexValue: number) {
-		const type = draggedType ?? event.dataTransfer?.getData('text/plain') ?? null;
-		if (!type) {
-			return;
-		}
-		draggedType = type;
+	function handleDragEnter(event: DragEvent, index: number) {
+		if (!drag.active) return;
 		event.preventDefault();
-		const target = buildTarget(indexValue);
-		activeTarget = target;
+		const target = buildTarget(index);
+		const valid = isValidTarget(index);
+		drag.setTarget(target, valid);
 	}
 
-	function handleBranch(type: string, parentId: string) {
-		onBranchStep(type, parentId);
-		handleDragEnd();
+	function handleDragOver(event: DragEvent) {
+		if (drag.active) {
+			event.preventDefault();
+			if (event.dataTransfer) {
+				event.dataTransfer.dropEffect = drag.isReorder ? 'move' : 'copy';
+			}
+		}
+	}
+
+	function handleDragLeave(event: DragEvent) {
+		const related = event.relatedTarget as Node | null;
+		const current = event.currentTarget as Node;
+		if (!related || !current.contains(related)) {
+			drag.clearTarget();
+		}
+	}
+
+	function handleDrop(event: DragEvent, index: number) {
+		event.preventDefault();
+		if (!drag.active) return;
+
+		const target = buildTarget(index);
+		const valid = isValidTarget(index);
+
+		if (!valid) {
+			drag.end();
+			return;
+		}
+
+		if (drag.isReorder && drag.stepId) {
+			// Moving existing step
+			onMoveStep(drag.stepId, target);
+		} else if (drag.isInsert && drag.type) {
+			// Inserting new step from library
+			onInsertStep(drag.type, target);
+		}
+
+		drag.end();
 	}
 </script>
 
@@ -113,25 +129,39 @@
 				<path d="M3 9h18M9 3v18" />
 			</svg>
 			<h3>No pipeline steps</h3>
-			<p>Add operations from the library to build your pipeline</p>
+			<p>Drag operations from the library and drop here</p>
+			<!-- svelte-ignore a11y_consider_explicit_label -->
+			<div
+				class="drop-target empty-drop"
+				class:ready={canDrop}
+				class:active={hoverIndex === 0}
+				role="button"
+				tabindex="0"
+				ondragenter={(e) => handleDragEnter(e, 0)}
+				ondragover={handleDragOver}
+				ondragleave={handleDragLeave}
+				ondrop={(e) => handleDrop(e, 0)}
+				data-label={canDrop ? 'Drop here to add first step' : ''}
+			></div>
 		</div>
 	{:else}
 		<div class="steps-container" role="list">
-			{#if steps.length > 0}
-				<button
-					type="button"
-					class="drop-target"
-					class:ready={canDrop}
-					aria-label="Insert step at start of pipeline"
-					ondragover={(event) => handleDragOver(event, 0)}
-					ondrop={(event) => handleDrop(event, 0)}
-					class:active={activeTarget?.index === 0}
-					class:invalid={activeTarget?.index === 0 && activeTarget && !activeTarget.valid}
-					data-label={canDrop ? 'Start' : 'Select an operation'}
-					onclick={() => handleDrop(null, 0)}
-				></button>
+			<!-- Drop zone before first step -->
+			<!-- svelte-ignore a11y_consider_explicit_label -->
+			<div
+				class="drop-target"
+				class:ready={canDrop}
+				class:active={hoverIndex === 0}
+				class:invalid={hoverIndex === 0 && !drag.valid}
+				role="button"
+				tabindex="0"
+				ondragenter={(e) => handleDragEnter(e, 0)}
+				ondragover={handleDragOver}
+				ondragleave={handleDragLeave}
+				ondrop={(e) => handleDrop(e, 0)}
+				data-label={canDrop ? 'Start' : ''}
+			></div>
 
-			{/if}
 			{#each steps as step, i (step.id)}
 				{#if i > 0}
 					<ConnectionLine fromStepIndex={i - 1} toStepIndex={i} totalSteps={steps.length} />
@@ -143,22 +173,22 @@
 					allSteps={steps}
 					onEdit={onStepClick}
 					onDelete={onStepDelete}
-					onDragStart={handleDragStart}
-					onDragEnd={handleDragEnd}
-					onBranch={handleBranch}
 				/>
-			<button
-				type="button"
-				class="drop-target"
-				class:ready={canDrop}
-				aria-label="Insert step after {step.type}"
-				ondragover={(event) => handleDragOver(event, i + 1)}
-				ondrop={(event) => handleDrop(event, i + 1)}
-				class:active={activeTarget?.index === i + 1}
-				class:invalid={activeTarget?.index === i + 1 && activeTarget && !activeTarget.valid}
-				data-label={canDrop ? `After ${step.type}` : ''}
-				onclick={() => handleDrop(null, i + 1)}
-			></button>
+				<!-- Drop zone after each step -->
+				<!-- svelte-ignore a11y_consider_explicit_label -->
+				<div
+					class="drop-target"
+					class:ready={canDrop}
+					class:active={hoverIndex === i + 1}
+					class:invalid={hoverIndex === i + 1 && !drag.valid}
+					role="button"
+					tabindex="0"
+					ondragenter={(e) => handleDragEnter(e, i + 1)}
+					ondragover={handleDragOver}
+					ondragleave={handleDragLeave}
+					ondrop={(e) => handleDrop(e, i + 1)}
+					data-label={canDrop ? `After ${step.type}` : ''}
+				></div>
 			{/each}
 		</div>
 	{/if}
@@ -258,4 +288,16 @@
 		cursor: not-allowed;
 	}
 
+	.drop-target.empty-drop {
+		width: 100%;
+		max-width: 400px;
+		height: 80px;
+		margin-top: var(--space-4);
+		border-style: dashed;
+		border-color: var(--border-secondary);
+	}
+
+	.drop-target.empty-drop.ready {
+		border-color: var(--accent-primary);
+	}
 </style>

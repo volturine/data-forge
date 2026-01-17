@@ -5,9 +5,8 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema } from '$lib/api/datasource';
-	import { spawnEngine, sendKeepalive } from '$lib/api/compute';
-	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
-	import type { EngineStatusResponse } from '$lib/types/compute';
+	import type { PipelineStep } from '$lib/types/analysis';
+	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
@@ -19,27 +18,7 @@
 	let saveStatus = $state<'saved' | 'unsaved' | 'saving'>('saved');
 	let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 	let initialPipeline: PipelineStep[] | null = null;
-	let initialTabs: AnalysisTab[] | null = null;
-	let tabName = $state('');
-
 	let isLoadingSchema = $state(false);
-	let selectedLibraryType = $state<string | null>(null);
-	let activeTarget = $state<{ index: number; parentId: string | null; nextId: string | null; valid: boolean } | null>(null);
-
-	// Engine state
-	let engineStatus = $state<EngineStatusResponse | null>(null);
-	let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
-
-	const store = analysisStore as unknown as {
-		insertStep: (step: PipelineStep, index: number, parentId: string | null, nextId: string | null) => boolean;
-		addBranchStep: (step: PipelineStep, parentId: string | null) => void;
-		setActiveTab: (id: string) => void;
-		addTab: (tab: AnalysisTab) => void;
-		updateTab: (id: string, updates: Partial<AnalysisTab>) => void;
-		removeTab: (id: string) => void;
-		activeTab: AnalysisTab | null;
-		tabs: AnalysisTab[];
-	};
 
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
@@ -47,44 +26,10 @@
 			if (!analysisId) throw new Error('Analysis ID is required');
 			const analysis = await getAnalysis(analysisId);
 			await analysisStore.loadAnalysis(analysisId);
-
 			return analysis;
 		},
 		retry: false
 	}));
-
-	// Spawn engine when analysis loads, set up keepalive, cleanup on unmount
-	$effect(() => {
-		const id = analysisId;
-		if (!id || !analysisQuery.data) return;
-
-		// Spawn engine on page load
-		spawnEngine(id)
-			.then((status) => {
-				engineStatus = status;
-			})
-			.catch((err) => {
-				console.error('Failed to spawn engine:', err);
-			});
-
-		// Set up keepalive interval (every 30 seconds to stay under 60s timeout)
-		keepaliveInterval = setInterval(() => {
-			sendKeepalive(id)
-				.then((status) => {
-					engineStatus = status;
-				})
-				.catch((err) => {
-					console.error('Keepalive failed:', err);
-				});
-		}, 30000);
-
-		return () => {
-			if (keepaliveInterval) {
-				clearInterval(keepaliveInterval);
-				keepaliveInterval = null;
-			}
-		};
-	});
 
 	$effect(() => {
 		const datasourceIdValue = datasourceId;
@@ -109,7 +54,8 @@
 	const datasourceId = $derived.by(() => {
 		const analysis = analysisQuery.data;
 		if (!analysis?.pipeline_definition) return undefined;
-		const datasourceIds = (analysis.pipeline_definition as { datasource_ids?: string[] }).datasource_ids;
+		const datasourceIds = (analysis.pipeline_definition as { datasource_ids?: string[] })
+			.datasource_ids;
 		return datasourceIds?.[0];
 	});
 
@@ -121,12 +67,7 @@
 	}
 
 	function buildStep(type: string): PipelineStep {
-		return {
-			id: makeId(),
-			type,
-			config: {},
-			depends_on: []
-		};
+		return { id: makeId(), type, config: {}, depends_on: [] };
 	}
 
 	function handleAddStep(type: string) {
@@ -135,68 +76,20 @@
 		selectedStepId = step.id;
 	}
 
-	function handleInsertStep(type: string, targetIndex: number, parentId: string | null, nextId: string | null) {
+	function handleInsertStep(type: string, target: DropTarget) {
 		const step = buildStep(type);
-		const inserted = store.insertStep(step, targetIndex, parentId, nextId);
-		if (!inserted) {
-			return;
+		const inserted = analysisStore.insertStep(step, target.index, target.parentId, target.nextId);
+		if (inserted) {
+			selectedStepId = step.id;
 		}
-		selectedLibraryType = null;
-		selectedStepId = step.id;
-		activeTarget = null;
 	}
 
-	function handleBranchStep(type: string, parentId: string | null) {
-		const step = buildStep(type);
-		store.addBranchStep(step, parentId);
-		selectedLibraryType = null;
-		selectedStepId = step.id;
-		activeTarget = null;
+	function handleMoveStep(stepId: string, target: DropTarget) {
+		analysisStore.moveStep(stepId, target.index, target.parentId, target.nextId);
 	}
 
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
-	}
-
-	function handleSelectTab(tabId: string) {
-		store.setActiveTab(tabId);
-	}
-
-	function getTabLabel(tab: AnalysisTab): string {
-		if (tab.type !== 'derived' || !tab.parent_id) {
-			return tab.name;
-		}
-		const parent = store.tabs.find((item: AnalysisTab) => item.id === tab.parent_id);
-		if (!parent) {
-			return tab.name;
-		}
-		return `${parent.name} → ${tab.name}`;
-	}
-
-	function handleAddDerived() {
-		const current = store.activeTab;
-		if (!current) {
-			return;
-		}
-		const count = store.tabs.filter((tab: AnalysisTab) => tab.type === 'derived').length + 1;
-		const tab: AnalysisTab = {
-			id: makeId(),
-			name: `Derived ${count}`,
-			type: 'derived',
-			parent_id: current.id,
-			datasource_id: null
-		};
-		store.addTab(tab);
-		tabName = tab.name;
-	}
-
-	function handleTabName(value: string) {
-		const current = store.activeTab;
-		if (!current) {
-			return;
-		}
-		store.updateTab(current.id, { name: value });
-		tabName = value;
 	}
 
 	function handleDeleteStep(stepId: string) {
@@ -232,45 +125,21 @@
 		selectedStepId = null;
 	}
 
-	function handleDragStart(type: string) {
-		selectedLibraryType = type;
-	}
-
-	function handleDragEnd() {
-		selectedLibraryType = null;
-	}
-
-	function handleSelectLibraryType(type: string | null) {
-		selectedLibraryType = type;
-	}
-
 	const selectedStep = $derived.by(() => {
 		if (!selectedStepId) return null;
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
 	});
 
-	$effect(() => {
-		const current = store.activeTab;
-		if (!current) {
-			tabName = '';
-			return;
-		}
-		tabName = current.name;
-	});
-
+	// Auto-save when pipeline changes
 	$effect(() => {
 		const pipeline = analysisStore.pipeline;
-		const tabs = store.tabs;
 
-		if (initialPipeline === null && initialTabs === null) {
+		if (initialPipeline === null) {
 			initialPipeline = pipeline;
-			initialTabs = tabs;
 			return;
 		}
 
-		if (pipeline === initialPipeline && tabs === initialTabs) {
-			return;
-		}
+		if (pipeline === initialPipeline) return;
 
 		if (saveTimeout) {
 			clearTimeout(saveTimeout);
@@ -339,23 +208,8 @@
 					{/if}
 				</div>
 			</div>
-			<div class="header-right">
-				{#if engineStatus}
-					<span
-						class="engine-status"
-						class:idle={engineStatus.status === 'idle'}
-						class:running={engineStatus.status === 'running'}
-						class:error={engineStatus.status === 'error'}
-						class:terminated={engineStatus.status === 'terminated'}
-						title={engineStatus.process_id ? `PID: ${engineStatus.process_id}` : 'No process'}
-					>
-						{engineStatus.status}
-						{#if engineStatus.process_id}
-							<span class="pid">#{engineStatus.process_id}</span>
-						{/if}
-					</span>
-				{/if}
-				<span
+		<div class="header-right">
+			<span
 					class="save-status"
 					class:saved={saveStatus === 'saved'}
 					class:unsaved={saveStatus === 'unsaved'}
@@ -379,66 +233,15 @@
 			</div>
 		</header>
 
-		<div class="analysis-tabs">
-			<div class="tabs">
-				{#each store.tabs as tab (tab.id)}
-					<button
-						class="tab"
-						class:active={store.activeTab?.id === tab.id}
-						onclick={() => handleSelectTab(tab.id)}
-						type="button"
-					>
-						{getTabLabel(tab)}
-					</button>
-				{/each}
-				{#if store.activeTab?.type === 'derived' && store.activeTab?.id}
-					<button
-					class="tab"
-					onclick={() => store.activeTab?.id && store.removeTab(store.activeTab.id)}
-					type="button"
-				>
-					Remove
-				</button>
-				{/if}
-				<button class="tab" onclick={handleAddDerived} type="button">
-					+ Derived
-				</button>
-			</div>
-			{#if store.activeTab}
-				<div class="tab-settings">
-					<label for="tab-name">Tab name</label>
-					<input
-						id="tab-name"
-						type="text"
-						value={tabName}
-						oninput={(event) => handleTabName(event.currentTarget.value)}
-					/>
-				</div>
-			{/if}
-		</div>
-
 		<div class="editor-workspace">
-			<StepLibrary
-				onAddStep={handleAddStep}
-				onInsertStep={(type, target) =>
-					handleInsertStep(type, target.index, target.parentId, target.nextId)
-				}
-				onBranchStep={(type, parentId) => handleBranchStep(type, parentId)}
-				onDragStart={handleDragStart}
-				onDragEnd={handleDragEnd}
-				selectedType={selectedLibraryType}
-				onSelectType={handleSelectLibraryType}
-			/>
+			<StepLibrary onAddStep={handleAddStep} onInsertStep={handleInsertStep} />
 			<PipelineCanvas
 				steps={analysisStore.pipeline}
-				datasourceId={datasourceId}
+				{datasourceId}
 				onStepClick={handleSelectStep}
 				onStepDelete={handleDeleteStep}
-				onInsertStep={(type, target) =>
-					handleInsertStep(type, target.index, target.parentId, target.nextId)
-				}
-				onBranchStep={(type, parentId) => handleBranchStep(type, parentId)}
-				selectedType={selectedLibraryType}
+				onInsertStep={handleInsertStep}
+				onMoveStep={handleMoveStep}
 			/>
 
 
@@ -616,42 +419,6 @@
 		background-color: var(--warning-bg);
 	}
 
-	.engine-status {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		padding: var(--space-1) var(--space-2);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-tertiary);
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-	}
-
-	.engine-status.idle {
-		color: var(--fg-secondary);
-		background-color: var(--bg-tertiary);
-	}
-
-	.engine-status.running {
-		color: var(--success-fg);
-		background-color: var(--success-bg);
-	}
-
-	.engine-status.error {
-		color: var(--error-fg);
-		background-color: var(--error-bg);
-	}
-
-	.engine-status.terminated {
-		color: var(--fg-muted);
-		background-color: var(--bg-tertiary);
-	}
-
-	.engine-status .pid {
-		font-size: var(--text-xs);
-		opacity: 0.7;
-	}
-
 	.btn {
 		padding: var(--space-2) var(--space-4);
 		border: 1px solid transparent;
@@ -676,66 +443,6 @@
 	.btn-secondary:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-	}
-
-	.analysis-tabs {
-		padding: 0 var(--space-5);
-	}
-
-	.tabs {
-		display: flex;
-		gap: var(--space-3);
-		border-bottom: 1px solid var(--border-primary);
-		padding-bottom: var(--space-2);
-		margin-bottom: var(--space-3);
-		flex-wrap: wrap;
-	}
-
-	.tab {
-		padding: var(--space-2) var(--space-3);
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		cursor: pointer;
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-		font-family: var(--font-mono);
-		transition: all var(--transition-fast);
-	}
-
-	.tab:hover {
-		color: var(--fg-secondary);
-	}
-
-	.tab.active {
-		color: var(--accent-primary);
-		border-bottom-color: var(--accent-primary);
-	}
-
-	.tab-settings {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		margin-bottom: var(--space-4);
-	}
-
-	.tab-settings label {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.tab-settings input {
-		flex: 1;
-		max-width: 320px;
-		padding: var(--space-2);
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-primary);
-		color: var(--fg-primary);
-		font-family: var(--font-mono);
-		font-size: var(--text-sm);
 	}
 
 	.editor-workspace {

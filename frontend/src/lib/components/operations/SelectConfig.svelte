@@ -16,6 +16,17 @@
 	// Keep SvelteSet for UI
 	let selectedColumns = $state(new SvelteSet(config.columns));
 
+	// Track the config reference to detect when a different step is selected
+	let prevConfig = $state(config);
+
+	// Sync config.columns → SvelteSet when config changes (different step selected)
+	$effect(() => {
+		if (config !== prevConfig) {
+			selectedColumns = new SvelteSet(config.columns);
+			prevConfig = config;
+		}
+	});
+
 	// Sync SvelteSet → config.columns when selectedColumns changes
 	$effect(() => {
 		config.columns = Array.from(selectedColumns);

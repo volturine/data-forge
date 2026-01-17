@@ -24,9 +24,9 @@
 	function toggleColumn(columnName: string) {
 		const index = config.columns.indexOf(columnName);
 		if (index > -1) {
-			config.columns.splice(index, 1);
+			config.columns = config.columns.filter((_, i) => i !== index);
 		} else {
-			config.columns.push(columnName);
+			config.columns = [...config.columns, columnName];
 		}
 	}
 </script>

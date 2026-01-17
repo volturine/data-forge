@@ -20,14 +20,12 @@
 	];
 
 	function toggleColumn(columnName: string) {
-		if (!config.subset) {
-			config.subset = [];
-		}
-		const index = config.subset.indexOf(columnName);
+		const base = config.subset ?? [];
+		const index = base.indexOf(columnName);
 		if (index > -1) {
-			config.subset.splice(index, 1);
+			config.subset = base.filter((_, i) => i !== index);
 		} else {
-			config.subset.push(columnName);
+			config.subset = [...base, columnName];
 		}
 	}
 

@@ -27,14 +27,12 @@
 	const currentStrategy = $derived(strategies.find((s) => s.value === config.strategy));
 
 	function toggleColumn(columnName: string) {
-		if (!config.columns) {
-			config.columns = [];
-		}
-		const index = config.columns.indexOf(columnName);
+		const base = config.columns ?? [];
+		const index = base.indexOf(columnName);
 		if (index > -1) {
-			config.columns.splice(index, 1);
+			config.columns = base.filter((_, i) => i !== index);
 		} else {
-			config.columns.push(columnName);
+			config.columns = [...base, columnName];
 		}
 	}
 

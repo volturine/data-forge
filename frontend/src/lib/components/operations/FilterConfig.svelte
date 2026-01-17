@@ -39,11 +39,11 @@
 	const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains'];
 
 	function addCondition() {
-		config.conditions.push({ column: '', operator: '=', value: '' });
+		config.conditions = [...config.conditions, { column: '', operator: '=', value: '' }];
 	}
 
 	function removeCondition(index: number) {
-		config.conditions.splice(index, 1);
+		config.conditions = config.conditions.filter((_, i) => i !== index);
 	}
 
 	function getInputType(columnName: string): string {

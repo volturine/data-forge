@@ -163,6 +163,61 @@ export class AnalysisStore {
 		this.pipeline = steps;
 	}
 
+	/**
+	 * Move an existing step to a new position in the pipeline.
+	 * Updates dependency chains accordingly.
+	 */
+	moveStep(stepId: string, toIndex: number, newParentId: string | null, newNextId: string | null): boolean {
+		const steps = [...this.pipeline];
+		const fromIndex = steps.findIndex((s) => s.id === stepId);
+		if (fromIndex < 0) return false;
+
+		const movingStep = { ...steps[fromIndex] };
+		const oldDeps = movingStep.depends_on ?? [];
+		const oldParentId = oldDeps[0] ?? null;
+
+		// Find the step that depended on the moving step (if any)
+		const dependentStep = steps.find((s) => s.depends_on?.includes(stepId));
+
+		// Remove from old position
+		steps.splice(fromIndex, 1);
+
+		// Update the dependent step to point to the moving step's old parent
+		if (dependentStep) {
+			const depIndex = steps.findIndex((s) => s.id === dependentStep.id);
+			if (depIndex >= 0) {
+				steps[depIndex] = {
+					...steps[depIndex],
+					depends_on: oldParentId ? [oldParentId] : []
+				};
+			}
+		}
+
+		// Update moving step's depends_on
+		movingStep.depends_on = newParentId ? [newParentId] : [];
+
+		// Calculate actual insert index (account for removal shifting indices)
+		const actualToIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+
+		// Insert at new position
+		steps.splice(actualToIndex, 0, movingStep);
+
+		// Update the next step to depend on the moved step
+		if (newNextId) {
+			const nextIndex = steps.findIndex((s) => s.id === newNextId);
+			if (nextIndex >= 0) {
+				steps[nextIndex] = {
+					...steps[nextIndex],
+					depends_on: [stepId]
+				};
+			}
+		}
+
+		this.pipeline = steps;
+		schemaCalculator.invalidateCache(steps, [stepId]);
+		return true;
+	}
+
 	async save(): Promise<void> {
 		if (!this.current) {
 			throw new Error('No analysis loaded');
@@ -182,7 +237,10 @@ export class AnalysisStore {
 			const tabs = updated.tabs ?? [];
 			if (tabs.length) {
 				this.tabs = tabs;
-				this.activeTabId = this.tabs[0]?.id ?? null;
+				// Preserve activeTabId if it still exists, otherwise fall back to first tab
+				if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
+					this.activeTabId = this.tabs[0]?.id ?? null;
+				}
 			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to save analysis';

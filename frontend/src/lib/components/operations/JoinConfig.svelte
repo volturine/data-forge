@@ -27,16 +27,16 @@
 	function addJoinKey() {
 		if (!newLeftKey || !newRightKey) return;
 
-		config.left_on.push(newLeftKey);
-		config.right_on.push(newRightKey);
+		config.left_on = [...config.left_on, newLeftKey];
+		config.right_on = [...config.right_on, newRightKey];
 
 		newLeftKey = '';
 		newRightKey = '';
 	}
 
 	function removeJoinKey(index: number) {
-		config.left_on.splice(index, 1);
-		config.right_on.splice(index, 1);
+		config.left_on = config.left_on.filter((_, i) => i !== index);
+		config.right_on = config.right_on.filter((_, i) => i !== index);
 	}
 </script>
 

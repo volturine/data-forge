@@ -44,14 +44,12 @@
 	const aggregateFunctions = ['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'count'];
 
 	function toggleIndexColumn(columnName: string) {
-		if (!Array.isArray(config.index)) {
-			config.index = [];
-		}
-		const index = config.index.indexOf(columnName);
-		if (index > -1) {
-			config.index.splice(index, 1);
+		const base = Array.isArray(config.index) ? config.index : [];
+		const idx = base.indexOf(columnName);
+		if (idx > -1) {
+			config.index = base.filter((_, i) => i !== idx);
 		} else {
-			config.index.push(columnName);
+			config.index = [...base, columnName];
 		}
 	}
 </script>

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
+
 	interface StepType {
 		type: string;
 		label: string;
@@ -6,181 +8,84 @@
 		description: string;
 	}
 
-
-	interface InsertTarget {
-		index: number;
-		parentId: string | null;
-		nextId: string | null;
-		valid: boolean;
-	}
-
 	interface Props {
 		onAddStep: (type: string) => void;
-		onInsertStep: (type: string, target: InsertTarget) => void;
-		onBranchStep: (type: string, parentId: string | null) => void;
-		onDragStart: (type: string) => void;
-		onDragEnd: () => void;
-		selectedType: string | null;
-		onSelectType: (type: string | null) => void;
+		onInsertStep: (type: string, target: DropTarget) => void;
 	}
 
-	let { onAddStep, onInsertStep, onBranchStep, onDragStart, onDragEnd, selectedType, onSelectType }: Props =
-		$props();
+	let { onAddStep, onInsertStep }: Props = $props();
+
+	// Track if we're dragging to prevent click from firing
+	let isDragging = $state(false);
 
 	function handleDragStart(event: DragEvent, stepType: string) {
+		isDragging = true;
 		if (event.dataTransfer) {
-			event.dataTransfer.setData('text/plain', stepType);
-			event.dataTransfer.effectAllowed = 'move';
+			event.dataTransfer.setData('application/x-pipeline-step', stepType);
+			event.dataTransfer.effectAllowed = 'copy';
 		}
-		onDragStart(stepType);
+		drag.start(stepType, 'library');
 	}
 
 	function handleDragEnd() {
-		onDragEnd();
+		// Small delay to prevent click from firing after drag
+		setTimeout(() => {
+			isDragging = false;
+		}, 0);
+		drag.end();
+	}
+
+	function handleClick(stepType: string) {
+		// Don't add step if we were dragging
+		if (isDragging) return;
+		onAddStep(stepType);
 	}
 
 	const stepTypes: StepType[] = [
-		{
-			type: 'filter',
-			label: 'Filter',
-			icon: '🔍',
-			description: 'Filter rows by conditions'
-		},
-		{
-			type: 'select',
-			label: 'Select',
-			icon: '📋',
-			description: 'Select specific columns'
-		},
-		{
-			type: 'groupby',
-			label: 'Group By',
-			icon: '📊',
-			description: 'Group and aggregate data'
-		},
-		{
-			type: 'sort',
-			label: 'Sort',
-			icon: '↕️',
-			description: 'Sort rows by columns'
-		},
-		{
-			type: 'rename',
-			label: 'Rename',
-			icon: '✏️',
-			description: 'Rename columns'
-		},
-		{
-			type: 'drop',
-			label: 'Drop',
-			icon: '🗑️',
-			description: 'Remove columns'
-		},
-		{
-			type: 'join',
-			label: 'Join',
-			icon: '🔗',
-			description: 'Join with another dataset'
-		},
-		{
-			type: 'expression',
-			label: 'Expression',
-			icon: '🧮',
-			description: 'Create computed columns'
-		},
-		{
-			type: 'pivot',
-			label: 'Pivot',
-			icon: '🔄',
-			description: 'Reshape data wide'
-		},
-		{
-			type: 'unpivot',
-			label: 'Unpivot',
-			icon: '🔃',
-			description: 'Reshape data long'
-		},
-		{
-			type: 'fill_null',
-			label: 'Fill Null',
-			icon: '🔧',
-			description: 'Handle missing values'
-		},
-		{
-			type: 'deduplicate',
-			label: 'Deduplicate',
-			icon: '🧹',
-			description: 'Remove duplicate rows'
-		},
-		{
-			type: 'explode',
-			label: 'Explode',
-			icon: '💥',
-			description: 'Expand list columns'
-		},
-		{
-			type: 'timeseries',
-			label: 'Time Series',
-			icon: '📅',
-			description: 'Date/time operations'
-		},
+		{ type: 'filter', label: 'Filter', icon: '🔍', description: 'Filter rows by conditions' },
+		{ type: 'select', label: 'Select', icon: '📋', description: 'Select specific columns' },
+		{ type: 'groupby', label: 'Group By', icon: '📊', description: 'Group and aggregate data' },
+		{ type: 'sort', label: 'Sort', icon: '↕️', description: 'Sort rows by columns' },
+		{ type: 'rename', label: 'Rename', icon: '✏️', description: 'Rename columns' },
+		{ type: 'drop', label: 'Drop', icon: '🗑️', description: 'Remove columns' },
+		{ type: 'join', label: 'Join', icon: '🔗', description: 'Join with another dataset' },
+		{ type: 'expression', label: 'Expression', icon: '🧮', description: 'Create computed columns' },
+		{ type: 'pivot', label: 'Pivot', icon: '🔄', description: 'Reshape data wide' },
+		{ type: 'unpivot', label: 'Unpivot', icon: '🔃', description: 'Reshape data long' },
+		{ type: 'fill_null', label: 'Fill Null', icon: '🔧', description: 'Handle missing values' },
+		{ type: 'deduplicate', label: 'Deduplicate', icon: '🧹', description: 'Remove duplicate rows' },
+		{ type: 'explode', label: 'Explode', icon: '💥', description: 'Expand list columns' },
+		{ type: 'timeseries', label: 'Time Series', icon: '📅', description: 'Date/time operations' },
 		{
 			type: 'string_transform',
 			label: 'String Transform',
 			icon: '📝',
 			description: 'Text manipulation'
 		},
-		{
-			type: 'sample',
-			label: 'Sample',
-			icon: '🎲',
-			description: 'Random sample rows'
-		},
-		{
-			type: 'limit',
-			label: 'Limit',
-			icon: '✂️',
-			description: 'Keep first N rows'
-		},
-		{
-			type: 'topk',
-			label: 'Top K',
-			icon: '🏆',
-			description: 'Get top K rows by column'
-		},
-		{
-			type: 'null_count',
-			label: 'Null Count',
-			icon: '❓',
-			description: 'Count null values per column'
-		},
-		{
-			type: 'value_counts',
-			label: 'Value Counts',
-			icon: '📊',
-			description: 'Get value frequencies'
-		},
-		{
-			type: 'view',
-			label: 'View',
-			icon: '👁️',
-			description: 'Preview data at this step'
-		}
+		{ type: 'sample', label: 'Sample', icon: '🎲', description: 'Random sample rows' },
+		{ type: 'limit', label: 'Limit', icon: '✂️', description: 'Keep first N rows' },
+		{ type: 'topk', label: 'Top K', icon: '🏆', description: 'Get top K rows by column' },
+		{ type: 'null_count', label: 'Null Count', icon: '❓', description: 'Count null values per column' },
+		{ type: 'value_counts', label: 'Value Counts', icon: '📊', description: 'Get value frequencies' },
+		{ type: 'view', label: 'View', icon: '👁️', description: 'Preview data at this step' }
 	];
+
+	// Quick insert selected type
+	let selectedType = $state<string | null>(null);
 </script>
 
 <div class="step-library">
 	<h3>Operations</h3>
-	<div class="step-list" role="list" ondragend={handleDragEnd}>
+	<div class="step-list" role="list">
 		{#each stepTypes as stepType (stepType.type)}
 			<button
 				class="step-button"
-				onclick={() => onAddStep(stepType.type)}
+				onclick={() => handleClick(stepType.type)}
 				ondragstart={(event) => handleDragStart(event, stepType.type)}
 				ondragend={handleDragEnd}
 				type="button"
 				draggable="true"
-				data-step="{stepType.type}"
+				data-step={stepType.type}
 			>
 				<span class="step-icon">{stepType.icon}</span>
 				<div class="step-info">
@@ -194,7 +99,10 @@
 	<div class="fallback-actions">
 		<h4>Quick Insert</h4>
 		<div class="fallback-controls">
-			<select value={selectedType ?? ''} onchange={(event) => onSelectType(event.currentTarget.value || null)}>
+			<select
+				value={selectedType ?? ''}
+				onchange={(event) => (selectedType = event.currentTarget.value || null)}
+			>
 				<option value="">Select operation...</option>
 				{#each stepTypes as stepType (stepType.type)}
 					<option value={stepType.type}>{stepType.label}</option>
@@ -206,8 +114,8 @@
 					disabled={!selectedType}
 					onclick={() => {
 						if (selectedType) {
-							onBranchStep(selectedType, null);
-							onSelectType(null);
+							onAddStep(selectedType);
+							selectedType = null;
 						}
 					}}
 				>
@@ -218,14 +126,8 @@
 					disabled={!selectedType}
 					onclick={() => {
 						if (selectedType) {
-							const target: InsertTarget = {
-								index: 0,
-								parentId: null,
-								nextId: null,
-								valid: true
-							};
-							onInsertStep(selectedType, target);
-							onSelectType(null);
+							onInsertStep(selectedType, { index: 0, parentId: null, nextId: null });
+							selectedType = null;
 						}
 					}}
 				>
@@ -264,7 +166,6 @@
 		min-height: 0;
 	}
 
-
 	.step-button {
 		display: flex;
 		align-items: center;
@@ -273,7 +174,7 @@
 		background-color: var(--bg-primary);
 		border: 1px solid var(--border-primary);
 		border-radius: 6px;
-		cursor: pointer;
+		cursor: grab;
 		transition: all 0.2s;
 		text-align: left;
 	}
@@ -282,6 +183,10 @@
 		border-color: var(--accent-primary);
 		background-color: var(--bg-hover);
 		transform: translateX(4px);
+	}
+
+	.step-button:active {
+		cursor: grabbing;
 	}
 
 	.step-icon {

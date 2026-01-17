@@ -28,14 +28,9 @@
 		const exists = safeConfig.some((rule) => rule.column === newRule.column);
 		if (exists) return;
 
-		// Ensure config is an array before pushing
-		if (!Array.isArray(config)) {
-			config = [] as unknown as SortRule[];
-		}
-		config.push({
-			column: newRule.column,
-			descending: newRule.descending
-		});
+		// Ensure config is an array before adding
+		const base = Array.isArray(config) ? config : [];
+		config = [...base, { column: newRule.column, descending: newRule.descending }];
 
 		newRule = {
 			column: '',
@@ -45,28 +40,30 @@
 
 	function removeSortRule(index: number) {
 		if (Array.isArray(config)) {
-			config.splice(index, 1);
+			config = config.filter((_, i) => i !== index);
 		}
 	}
 
 	function toggleDirection(index: number) {
 		if (Array.isArray(config) && config[index]) {
-			config[index].descending = !config[index].descending;
+			config = config.map((rule, i) =>
+				i === index ? { ...rule, descending: !rule.descending } : rule
+			);
 		}
 	}
 
 	function moveUp(index: number) {
 		if (!Array.isArray(config) || index === 0) return;
-		const temp = config[index];
-		config[index] = config[index - 1];
-		config[index - 1] = temp;
+		const newConfig = [...config];
+		[newConfig[index], newConfig[index - 1]] = [newConfig[index - 1], newConfig[index]];
+		config = newConfig;
 	}
 
 	function moveDown(index: number) {
 		if (!Array.isArray(config) || index === config.length - 1) return;
-		const temp = config[index];
-		config[index] = config[index + 1];
-		config[index + 1] = temp;
+		const newConfig = [...config];
+		[newConfig[index], newConfig[index + 1]] = [newConfig[index + 1], newConfig[index]];
+		config = newConfig;
 	}
 
 	let availableColumns = $derived(

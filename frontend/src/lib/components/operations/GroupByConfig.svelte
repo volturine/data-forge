@@ -56,31 +56,29 @@
 	];
 
 	function toggleGroupByColumn(columnName: string) {
-		if (!Array.isArray(config.groupBy)) {
-			config.groupBy = [];
-		}
-		const index = config.groupBy.indexOf(columnName);
+		const base = Array.isArray(config.groupBy) ? config.groupBy : [];
+		const index = base.indexOf(columnName);
 		if (index > -1) {
-			config.groupBy.splice(index, 1);
+			config.groupBy = base.filter((_, i) => i !== index);
 		} else {
-			config.groupBy.push(columnName);
+			config.groupBy = [...base, columnName];
 		}
 	}
 
 	function addAggregation() {
 		if (!newAggregation.column) return;
 
-		if (!Array.isArray(config.aggregations)) {
-			config.aggregations = [];
-		}
-
+		const base = Array.isArray(config.aggregations) ? config.aggregations : [];
 		const alias = newAggregation.alias || `${newAggregation.column}_${newAggregation.function}`;
 
-		config.aggregations.push({
-			column: newAggregation.column,
-			function: newAggregation.function,
-			alias
-		});
+		config.aggregations = [
+			...base,
+			{
+				column: newAggregation.column,
+				function: newAggregation.function,
+				alias
+			}
+		];
 
 		newAggregation = {
 			column: '',
@@ -91,7 +89,7 @@
 
 	function removeAggregation(index: number) {
 		if (Array.isArray(config.aggregations)) {
-			config.aggregations.splice(index, 1);
+			config.aggregations = config.aggregations.filter((_, i) => i !== index);
 		}
 	}
 </script>
