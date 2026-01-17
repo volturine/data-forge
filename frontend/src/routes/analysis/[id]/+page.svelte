@@ -933,6 +933,8 @@
 		flex-shrink: 0;
 		overflow: hidden;
 		display: flex;
+		min-width: 330px;
+		justify-content: left;
 	}
 
 	.left-pane :global(> *) {
@@ -954,6 +956,8 @@
 		flex-shrink: 0;
 		overflow: hidden;
 		display: flex;
+		min-width: 330px;
+		justify-content: left;
 	}
 
 	.right-pane :global(> *) {

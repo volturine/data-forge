@@ -65,8 +65,18 @@
 		{ type: 'sample', label: 'Sample', icon: '🎲', description: 'Random sample rows' },
 		{ type: 'limit', label: 'Limit', icon: '✂️', description: 'Keep first N rows' },
 		{ type: 'topk', label: 'Top K', icon: '🏆', description: 'Get top K rows by column' },
-		{ type: 'null_count', label: 'Null Count', icon: '❓', description: 'Count null values per column' },
-		{ type: 'value_counts', label: 'Value Counts', icon: '📊', description: 'Get value frequencies' },
+		{
+			type: 'null_count',
+			label: 'Null Count',
+			icon: '❓',
+			description: 'Count null values per column'
+		},
+		{
+			type: 'value_counts',
+			label: 'Value Counts',
+			icon: '📊',
+			description: 'Get value frequencies'
+		},
 		{ type: 'view', label: 'View', icon: '👁️', description: 'Preview data at this step' }
 	];
 
@@ -169,6 +179,7 @@
 	.step-button {
 		display: flex;
 		align-items: center;
+		justify-content: flex-start;
 		gap: 0.75rem;
 		padding: 0.75rem;
 		background-color: var(--bg-primary);
@@ -198,6 +209,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.125rem;
+		align-items: flex-start;
 		min-width: 0;
 	}
 
