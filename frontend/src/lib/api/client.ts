@@ -47,14 +47,3 @@ export async function apiRequest<T>(endpoint: string, options?: RequestInit): Pr
 		throw new Error(`Network error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 	}
 }
-
-export function buildQueryString(params: Record<string, unknown>): string {
-	const query = new URLSearchParams();
-	Object.entries(params).forEach(([key, value]) => {
-		if (value !== undefined && value !== null) {
-			query.append(key, String(value));
-		}
-	});
-	const queryString = query.toString();
-	return queryString ? `?${queryString}` : '';
-}

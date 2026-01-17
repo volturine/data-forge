@@ -83,23 +83,23 @@
 
 <style>
 	.stats-panel {
-		background: #fff;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
 		overflow: hidden;
 	}
 
 	.stats-header {
 		padding: 1rem 1.25rem;
-		border-bottom: 1px solid #e5e7eb;
-		background: #f9fafb;
+		border-bottom: 1px solid var(--border-primary);
+		background: var(--panel-header-bg);
 	}
 
 	.stats-header h3 {
 		margin: 0;
 		font-size: 1.125rem;
 		font-weight: 600;
-		color: #111827;
+		color: var(--fg-primary);
 	}
 
 	.primary-stats {
@@ -114,9 +114,9 @@
 		align-items: center;
 		gap: 1rem;
 		padding: 1rem;
-		background: #f9fafb;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
 		transition:
 			transform 0.15s ease,
 			box-shadow 0.15s ease;
@@ -124,7 +124,7 @@
 
 	.stat-card:hover {
 		transform: translateY(-2px);
-		box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+		box-shadow: var(--shadow-soft);
 	}
 
 	.stat-icon {
@@ -141,14 +141,14 @@
 		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #6b7280;
+		color: var(--fg-muted);
 		margin-bottom: 0.25rem;
 	}
 
 	.stat-value {
 		font-size: 1.5rem;
 		font-weight: 700;
-		color: #111827;
+		color: var(--fg-primary);
 		line-height: 1;
 	}
 
@@ -162,7 +162,7 @@
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #6b7280;
+		color: var(--fg-muted);
 	}
 
 	.stats-grid {
@@ -173,19 +173,19 @@
 
 	.column-stat-card {
 		padding: 0.875rem;
-		background: #f9fafb;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-md);
 	}
 
 	.column-stat-header {
 		font-size: 0.875rem;
 		font-weight: 600;
-		font-family: 'Courier New', monospace;
-		color: #111827;
+		font-family: var(--font-mono);
+		color: var(--fg-primary);
 		margin-bottom: 0.5rem;
 		padding-bottom: 0.5rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border-primary);
 	}
 
 	.column-stat-details {
@@ -201,17 +201,17 @@
 	}
 
 	.stat-key {
-		color: #6b7280;
+		color: var(--fg-muted);
 		font-weight: 500;
 	}
 
 	.stat-val {
-		color: #111827;
+		color: var(--fg-primary);
 		font-weight: 600;
-		font-family: 'Courier New', monospace;
+		font-family: var(--font-mono);
 	}
 
 	.null-count {
-		color: #dc2626;
+		color: var(--error-fg);
 	}
 </style>

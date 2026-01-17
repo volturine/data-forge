@@ -5,15 +5,9 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema } from '$lib/api/datasource';
-	import type { PipelineStep } from '$lib/types/analysis';
-
-	type AnalysisTab = {
-		id: string;
-		name: string;
-		type: 'datasource' | 'derived';
-		parent_id: string | null;
-		datasource_id: string | null;
-	};
+	import { spawnEngine, sendKeepalive } from '$lib/api/compute';
+	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
+	import type { EngineStatusResponse } from '$lib/types/compute';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
@@ -31,6 +25,11 @@
 	let isLoadingSchema = $state(false);
 	let selectedLibraryType = $state<string | null>(null);
 	let activeTarget = $state<{ index: number; parentId: string | null; nextId: string | null; valid: boolean } | null>(null);
+
+	// Engine state
+	let engineStatus = $state<EngineStatusResponse | null>(null);
+	let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+
 	const store = analysisStore as unknown as {
 		insertStep: (step: PipelineStep, index: number, parentId: string | null, nextId: string | null) => boolean;
 		addBranchStep: (step: PipelineStep, parentId: string | null) => void;
@@ -53,6 +52,39 @@
 		},
 		retry: false
 	}));
+
+	// Spawn engine when analysis loads, set up keepalive, cleanup on unmount
+	$effect(() => {
+		const id = analysisId;
+		if (!id || !analysisQuery.data) return;
+
+		// Spawn engine on page load
+		spawnEngine(id)
+			.then((status) => {
+				engineStatus = status;
+			})
+			.catch((err) => {
+				console.error('Failed to spawn engine:', err);
+			});
+
+		// Set up keepalive interval (every 30 seconds to stay under 60s timeout)
+		keepaliveInterval = setInterval(() => {
+			sendKeepalive(id)
+				.then((status) => {
+					engineStatus = status;
+				})
+				.catch((err) => {
+					console.error('Keepalive failed:', err);
+				});
+		}, 30000);
+
+		return () => {
+			if (keepaliveInterval) {
+				clearInterval(keepaliveInterval);
+				keepaliveInterval = null;
+			}
+		};
+	});
 
 	$effect(() => {
 		const datasourceIdValue = datasourceId;
@@ -308,6 +340,21 @@
 				</div>
 			</div>
 			<div class="header-right">
+				{#if engineStatus}
+					<span
+						class="engine-status"
+						class:idle={engineStatus.status === 'idle'}
+						class:running={engineStatus.status === 'running'}
+						class:error={engineStatus.status === 'error'}
+						class:terminated={engineStatus.status === 'terminated'}
+						title={engineStatus.process_id ? `PID: ${engineStatus.process_id}` : 'No process'}
+					>
+						{engineStatus.status}
+						{#if engineStatus.process_id}
+							<span class="pid">#{engineStatus.process_id}</span>
+						{/if}
+					</span>
+				{/if}
 				<span
 					class="save-status"
 					class:saved={saveStatus === 'saved'}
@@ -567,6 +614,42 @@
 	.save-status.unsaved {
 		color: var(--warning-fg);
 		background-color: var(--warning-bg);
+	}
+
+	.engine-status {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-tertiary);
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+	}
+
+	.engine-status.idle {
+		color: var(--fg-secondary);
+		background-color: var(--bg-tertiary);
+	}
+
+	.engine-status.running {
+		color: var(--success-fg);
+		background-color: var(--success-bg);
+	}
+
+	.engine-status.error {
+		color: var(--error-fg);
+		background-color: var(--error-bg);
+	}
+
+	.engine-status.terminated {
+		color: var(--fg-muted);
+		background-color: var(--bg-tertiary);
+	}
+
+	.engine-status .pid {
+		font-size: var(--text-xs);
+		opacity: 0.7;
 	}
 
 	.btn {

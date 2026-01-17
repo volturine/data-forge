@@ -181,8 +181,4 @@
 		background-color: var(--form-control-bg);
 		color: var(--fg-primary);
 	}
-
-	button:hover:not(:disabled) {
-		opacity: 0.9;
-	}
 </style>

@@ -1,30 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from modules.analysis import schemas as analysis_schemas, service as analysis_service
 from modules.compute import schemas, service
+from modules.compute.manager import get_manager
 
 router = APIRouter(prefix='/compute', tags=['compute'])
 
 
-class ExecuteRequest(BaseModel):
-    analysis_id: str
-    execute_mode: str | None = None
-    step_id: str | None = None
-
-    class Config:
-        json_schema_extra = {
-            'examples': [
-                {'analysis_id': 'uuid', 'execute_mode': 'full', 'step_id': None},
-            ]
-        }
-
-
 @router.post('/execute', response_model=schemas.ComputeStatusSchema)
 async def execute_analysis(
-    request: ExecuteRequest,
+    request: schemas.ComputeExecuteSchema,
     session: AsyncSession = Depends(get_db),
 ):
     """Execute a data analysis pipeline for a saved analysis."""
@@ -122,3 +109,45 @@ async def cleanup_job(job_id: str):
         return {'message': f'Job {job_id} cleaned up successfully'}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to cleanup job: {str(e)}')
+
+
+# Engine lifecycle endpoints
+
+
+@router.post('/engine/spawn/{analysis_id}', response_model=schemas.EngineStatusSchema)
+async def spawn_engine(analysis_id: str):
+    """Spawn a compute engine for an analysis (called when analysis page opens)."""
+    try:
+        manager = get_manager()
+        manager.spawn_engine(analysis_id)
+        return manager.get_engine_status(analysis_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to spawn engine: {str(e)}')
+
+
+@router.post('/engine/keepalive/{analysis_id}', response_model=schemas.EngineStatusSchema)
+async def keepalive(analysis_id: str):
+    """Send keepalive ping for an analysis engine."""
+    manager = get_manager()
+    info = manager.keepalive(analysis_id)
+    if not info:
+        raise HTTPException(status_code=404, detail=f'No engine found for analysis {analysis_id}')
+    return manager.get_engine_status(analysis_id)
+
+
+@router.get('/engine/status/{analysis_id}', response_model=schemas.EngineStatusSchema)
+async def get_engine_status(analysis_id: str):
+    """Get the status of an analysis engine."""
+    manager = get_manager()
+    return manager.get_engine_status(analysis_id)
+
+
+@router.delete('/engine/{analysis_id}')
+async def shutdown_engine(analysis_id: str):
+    """Shutdown an analysis engine."""
+    manager = get_manager()
+    engine = manager.get_engine(analysis_id)
+    if not engine:
+        raise HTTPException(status_code=404, detail=f'No engine found for analysis {analysis_id}')
+    manager.shutdown_engine(analysis_id)
+    return {'message': f'Engine for analysis {analysis_id} shutdown successfully'}

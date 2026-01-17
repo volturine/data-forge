@@ -387,14 +387,13 @@ class PolarsComputeEngine:
             columns = params.get('columns', [])
             descending = params.get('descending', False)
             # Handle both single boolean and list of booleans for descending
-            if isinstance(descending, list):
+            if isinstance(descending, list) and len(descending) != len(columns):
                 # Ensure descending list matches columns length
-                if len(descending) != len(columns):
-                    descending = (
-                        descending[: len(columns)]
-                        if len(descending) > len(columns)
-                        else descending + [False] * (len(columns) - len(descending))
-                    )
+                descending = (
+                    descending[: len(columns)]
+                    if len(descending) > len(columns)
+                    else descending + [False] * (len(columns) - len(descending))
+                )
             return lf.sort(columns, descending=descending)
 
         elif operation == 'rename':

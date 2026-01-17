@@ -127,9 +127,9 @@
 		line-height: 1.6;
 		padding: 0.75rem;
 		background-color: var(--form-help-bg);
+		border: 1px solid var(--form-help-border);
 		border-left: 3px solid var(--form-help-accent);
 		border-radius: var(--radius-sm);
-		border: 1px solid var(--form-help-border);
 	}
 
 	.help-text code {

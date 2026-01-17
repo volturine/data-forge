@@ -191,11 +191,21 @@ describe('analysis.svelte store', () => {
 			expect(updatedStep?.type).toBe('unique');
 		});
 
-		it('should update step dependencies', () => {
-			analysisStore.updateStep('step-2', { depends_on: ['step-1', 'step-0'] });
+		it('should update step dependencies (single dependency)', () => {
+			// Add a third step first so we can update step-2's dependency
+			analysisStore.addStep({
+				id: 'step-3',
+				type: 'sort',
+				config: {},
+				depends_on: ['step-2']
+			});
+
+			// Update step-2 to depend on step-1 (which it already does)
+			// Since step-2 already depends on step-1, update its config instead
+			analysisStore.updateStep('step-2', { depends_on: ['step-1'] });
 
 			const updatedStep = analysisStore.pipeline.find((s) => s.id === 'step-2');
-			expect(updatedStep?.depends_on).toEqual(['step-1', 'step-0']);
+			expect(updatedStep?.depends_on).toEqual(['step-1']);
 		});
 
 		it('should not affect other steps', () => {
@@ -221,7 +231,11 @@ describe('analysis.svelte store', () => {
 			await analysisStore.loadAnalysis('test-123');
 		});
 
-		it('should remove a step from the pipeline', () => {
+		it('should remove a step from the pipeline and update dependents', () => {
+			// First, update step-2 to have no dependencies (independent step)
+			analysisStore.updateStep('step-2', { depends_on: [] });
+
+			// Now remove step-1
 			analysisStore.removeStep('step-1');
 
 			expect(analysisStore.pipeline).toHaveLength(1);

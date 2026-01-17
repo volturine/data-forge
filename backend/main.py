@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api import router
 from core.config import settings
 from core.database import init_db
-from api import router
 from modules.compute.manager import get_manager
 
 # Configure logging

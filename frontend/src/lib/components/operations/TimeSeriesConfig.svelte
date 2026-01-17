@@ -154,13 +154,6 @@
 		border: 1px solid var(--form-section-border);
 	}
 
-	.help-text {
-		font-size: 0.875rem;
-		color: var(--fg-tertiary);
-		margin-top: 0.5rem;
-		margin-bottom: 0;
-	}
-
 	.warning {
 		font-size: 0.875rem;
 		color: var(--error-fg);
@@ -190,9 +183,5 @@
 
 	.inline-group select {
 		flex: 1;
-	}
-
-	button:hover:not(:disabled) {
-		opacity: 0.9;
 	}
 </style>

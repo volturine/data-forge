@@ -96,6 +96,11 @@
 	--info-bg: #dbeafe;
 	--info-border: #93c5fd;
 
+	/* Input elements */
+	--input-bg: var(--bg-primary);
+	--input-border: var(--border-primary);
+	--input-focus-border: var(--border-focus);
+
 	/* Component-specific */
 	--card-bg: var(--bg-primary);
 	--card-border: var(--border-primary);
@@ -177,6 +182,11 @@
 		--info-bg: #111a35;
 		--info-border: #1f2f63;
 
+		/* Input elements - dark */
+		--input-bg: var(--bg-tertiary);
+		--input-border: var(--border-secondary);
+		--input-focus-border: var(--border-focus);
+
 		--card-shadow: var(--shadow-soft);
 		--dialog-shadow: var(--shadow-strong);
 	}
@@ -221,6 +231,11 @@
 	--info-fg: #93c5fd;
 	--info-bg: #1e3a8a;
 	--info-border: #1e40af;
+
+	/* Input elements - dark */
+	--input-bg: var(--bg-tertiary);
+	--input-border: var(--border-secondary);
+	--input-focus-border: var(--border-focus);
 
 	--card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 	--dialog-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);

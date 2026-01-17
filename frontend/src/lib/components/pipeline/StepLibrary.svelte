@@ -171,7 +171,7 @@
 
 <div class="step-library">
 	<h3>Operations</h3>
-	<div class="step-list" ondragend={handleDragEnd}>
+	<div class="step-list" role="list" ondragend={handleDragEnd}>
 		{#each stepTypes as stepType (stepType.type)}
 			<button
 				class="step-button"

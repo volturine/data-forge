@@ -33,6 +33,8 @@
 	let draggedType = $state<string | null>(null);
 	let activeTarget = $state<DropTarget | null>(null);
 
+	let canDrop = $derived(!!draggedType || !!selectedType);
+
 	function getParentId(indexValue: number): string | null {
 		if (indexValue <= 0) {
 			return null;
@@ -114,17 +116,20 @@
 			<p>Add operations from the library to build your pipeline</p>
 		</div>
 	{:else}
-		<div class="steps-container">
+		<div class="steps-container" role="list">
 			{#if steps.length > 0}
-					<div
-						class="drop-target"
-						ondragover={(event) => handleDragOver(event, 0)}
-						ondrop={(event) => handleDrop(event, 0)}
-						class:active={activeTarget?.index === 0}
-						class:invalid={activeTarget?.index === 0 && activeTarget && !activeTarget.valid}
-						data-label="Start"
-						onclick={() => handleDrop(null, 0)}
-					></div>
+				<button
+					type="button"
+					class="drop-target"
+					class:ready={canDrop}
+					aria-label="Insert step at start of pipeline"
+					ondragover={(event) => handleDragOver(event, 0)}
+					ondrop={(event) => handleDrop(event, 0)}
+					class:active={activeTarget?.index === 0}
+					class:invalid={activeTarget?.index === 0 && activeTarget && !activeTarget.valid}
+					data-label={canDrop ? 'Start' : 'Select an operation'}
+					onclick={() => handleDrop(null, 0)}
+				></button>
 
 			{/if}
 			{#each steps as step, i (step.id)}
@@ -142,15 +147,18 @@
 					onDragEnd={handleDragEnd}
 					onBranch={handleBranch}
 				/>
-				<div
-					class="drop-target"
-					ondragover={(event) => handleDragOver(event, i + 1)}
-					ondrop={(event) => handleDrop(event, i + 1)}
-					class:active={activeTarget?.index === i + 1}
-					class:invalid={activeTarget?.index === i + 1 && activeTarget && !activeTarget.valid}
-					data-label="After {step.type}"
-					onclick={() => handleDrop(null, i + 1)}
-				></div>
+			<button
+				type="button"
+				class="drop-target"
+				class:ready={canDrop}
+				aria-label="Insert step after {step.type}"
+				ondragover={(event) => handleDragOver(event, i + 1)}
+				ondrop={(event) => handleDrop(event, i + 1)}
+				class:active={activeTarget?.index === i + 1}
+				class:invalid={activeTarget?.index === i + 1 && activeTarget && !activeTarget.valid}
+				data-label={canDrop ? `After ${step.type}` : ''}
+				onclick={() => handleDrop(null, i + 1)}
+			></button>
 			{/each}
 		</div>
 	{/if}
@@ -199,7 +207,8 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 0;
-		max-width: 400px;
+		width: 100%;
+		max-width: 960px;
 		margin: 0 auto;
 	}
 
@@ -211,15 +220,29 @@
 		justify-content: center;
 		border: 1px dashed transparent;
 		border-radius: var(--radius-sm);
-		color: var(--fg-muted);
+		color: var(--fg-faint);
 		font-size: var(--text-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		transition: all var(--transition-fast);
+		background: transparent;
+		cursor: default;
 	}
 
 	.drop-target::after {
 		content: attr(data-label);
+	}
+
+	.drop-target.ready {
+		border-color: var(--border-secondary);
+		color: var(--fg-muted);
+		cursor: pointer;
+	}
+
+	.drop-target.ready:hover {
+		border-color: var(--accent-primary);
+		background-color: var(--bg-hover);
+		color: var(--accent-primary);
 	}
 
 	.drop-target.active {
@@ -233,11 +256,6 @@
 		background-color: var(--error-bg);
 		color: var(--error-fg);
 		cursor: not-allowed;
-	}
-
-	.drop-target:hover {
-		border-color: var(--border-secondary);
-		background-color: var(--bg-hover);
 	}
 
 </style>

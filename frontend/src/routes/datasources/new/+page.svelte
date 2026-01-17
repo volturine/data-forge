@@ -334,7 +334,7 @@
 	label {
 		font-weight: 500;
 		font-size: 0.875rem;
-		color: #374151;
+		color: var(--fg-secondary);
 	}
 
 	input[type='text'],
@@ -342,9 +342,11 @@
 	select,
 	textarea {
 		padding: 0.5rem 0.75rem;
-		border: 1px solid #d1d5db;
-		border-radius: 0.375rem;
+		border: 1px solid var(--input-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.875rem;
+		background-color: var(--input-bg);
+		color: var(--fg-primary);
 		transition: border-color 0.15s;
 	}
 
@@ -353,39 +355,39 @@
 	select:focus,
 	textarea:focus {
 		outline: none;
-		border-color: #3b82f6;
-		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+		border-color: var(--border-focus);
+		box-shadow: 0 0 0 3px var(--accent-bg);
 	}
 
 	input[type='text']:disabled,
 	input[type='url']:disabled,
 	select:disabled,
 	textarea:disabled {
-		background: #f9fafb;
+		background: var(--bg-tertiary);
 		cursor: not-allowed;
 	}
 
 	input[type='file'] {
 		padding: 0.5rem;
-		border: 1px solid #d1d5db;
-		border-radius: 0.375rem;
+		border: 1px solid var(--input-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.875rem;
 	}
 
 	textarea {
 		resize: vertical;
-		font-family: monospace;
+		font-family: var(--font-mono);
 	}
 
 	.hint {
 		font-size: 0.75rem;
-		color: #6b7280;
+		color: var(--fg-muted);
 		margin: 0;
 	}
 
 	.file-info {
 		font-size: 0.875rem;
-		color: #374151;
+		color: var(--fg-secondary);
 		margin: 0;
 	}
 </style>

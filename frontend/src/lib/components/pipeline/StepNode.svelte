@@ -91,6 +91,7 @@
 
 	<div
 		class="step-content"
+		role="listitem"
 		draggable="true"
 		ondragstart={(event) => {
 			onDragStart(step.type);

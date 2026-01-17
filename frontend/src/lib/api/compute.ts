@@ -1,4 +1,4 @@
-import type { ComputeJob, ComputeStatus } from '$lib/types/compute';
+import type { ComputeJob, ComputeStatus, EngineStatusResponse } from '$lib/types/compute';
 import type { RawComputeJobResponse } from '$lib/types/api-responses';
 import { apiRequest } from './client';
 
@@ -92,6 +92,30 @@ export async function cancelJob(jobId: string): Promise<void> {
 
 export async function cleanupJob(jobId: string): Promise<void> {
 	await apiRequest<void>(`/api/v1/compute/${jobId}/cleanup`, {
+		method: 'DELETE'
+	});
+}
+
+// Engine lifecycle functions
+
+export async function spawnEngine(analysisId: string): Promise<EngineStatusResponse> {
+	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/spawn/${analysisId}`, {
+		method: 'POST'
+	});
+}
+
+export async function sendKeepalive(analysisId: string): Promise<EngineStatusResponse> {
+	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/keepalive/${analysisId}`, {
+		method: 'POST'
+	});
+}
+
+export async function getEngineStatus(analysisId: string): Promise<EngineStatusResponse> {
+	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/status/${analysisId}`);
+}
+
+export async function shutdownEngine(analysisId: string): Promise<void> {
+	await apiRequest<void>(`/api/v1/compute/engine/${analysisId}`, {
 		method: 'DELETE'
 	});
 }

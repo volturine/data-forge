@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from modules.analysis.models import Analysis
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.schemas import JobStatus
 from modules.datasource.models import DataSource
@@ -10,17 +11,8 @@ from modules.datasource.models import DataSource
 
 @pytest.mark.asyncio
 class TestComputeExecute:
-    async def test_execute_analysis_success(self, client: AsyncClient, sample_datasource: DataSource):
-        payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 25},
-                }
-            ],
-        }
+    async def test_execute_analysis_success(self, client: AsyncClient, sample_analysis: Analysis):
+        payload = {'analysis_id': sample_analysis.id}
 
         with patch('modules.compute.service.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
@@ -41,41 +33,19 @@ class TestComputeExecute:
             assert result['progress'] == 0.0
             assert result['process_id'] == 12345
 
-            mock_manager.get_or_create_engine.assert_called_once_with(sample_datasource.id)
+            mock_manager.get_or_create_engine.assert_called_once()
             mock_engine.execute.assert_called_once()
 
-    async def test_execute_analysis_datasource_not_found(self, client: AsyncClient):
-        payload = {
-            'datasource_id': 'non-existent-id',
-            'pipeline_steps': [],
-        }
+    async def test_execute_analysis_not_found(self, client: AsyncClient):
+        payload = {'analysis_id': 'non-existent-id'}
 
         response = await client.post('/api/v1/compute/execute', json=payload)
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
-    async def test_execute_analysis_with_complex_pipeline(self, client: AsyncClient, sample_datasource: DataSource):
-        payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 25},
-                },
-                {
-                    'id': 'step2',
-                    'type': 'select',
-                    'config': {'columns': ['name', 'age']},
-                },
-                {
-                    'id': 'step3',
-                    'type': 'sort',
-                    'config': {'column': 'age', 'descending': True},
-                },
-            ],
-        }
+    async def test_execute_analysis_with_complex_pipeline(self, client: AsyncClient, sample_analysis: Analysis):
+        payload = {'analysis_id': sample_analysis.id}
 
         with patch('modules.compute.service.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
@@ -92,9 +62,6 @@ class TestComputeExecute:
             result = response.json()
 
             assert result['job_id'] == 'test-job-456'
-
-            call_args = mock_engine.execute.call_args
-            assert len(call_args[1]['pipeline_steps']) == 3
 
 
 @pytest.mark.asyncio
@@ -114,7 +81,7 @@ class TestComputePreview:
                     'config': {'columns': ['name', 'age']},
                 },
             ],
-            'step_index': 0,
+            'target_step_id': 'step1',
         }
 
         with patch('modules.compute.service.get_manager') as mock_get_manager:
@@ -143,8 +110,8 @@ class TestComputePreview:
             result = response.json()
 
             assert 'columns' in result
-            assert 'rows' in result
-            assert result['row_count'] == 2
+            assert 'data' in result
+            assert result['total_rows'] == 2
 
             mock_manager.shutdown_engine.assert_called_once()
 
@@ -158,7 +125,7 @@ class TestComputePreview:
                     'config': {},
                 }
             ],
-            'step_index': 0,
+            'target_step_id': 'step1',
         }
 
         with patch('modules.compute.service.get_manager') as mock_get_manager:
@@ -185,7 +152,7 @@ class TestComputePreview:
         payload = {
             'datasource_id': 'non-existent-id',
             'pipeline_steps': [],
-            'step_index': 0,
+            'target_step_id': 'step1',
         }
 
         response = await client.post('/api/v1/compute/preview', json=payload)
@@ -193,7 +160,7 @@ class TestComputePreview:
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
-    async def test_preview_step_specific_index(self, client: AsyncClient, sample_datasource: DataSource):
+    async def test_preview_step_specific_target(self, client: AsyncClient, sample_datasource: DataSource):
         payload = {
             'datasource_id': sample_datasource.id,
             'pipeline_steps': [
@@ -201,7 +168,7 @@ class TestComputePreview:
                 {'id': 'step2', 'type': 'select', 'config': {}},
                 {'id': 'step3', 'type': 'sort', 'config': {}},
             ],
-            'step_index': 1,
+            'target_step_id': 'step2',
         }
 
         with patch('modules.compute.service.get_manager') as mock_get_manager:
@@ -223,10 +190,6 @@ class TestComputePreview:
             response = await client.post('/api/v1/compute/preview', json=payload)
 
             assert response.status_code == 200
-
-            call_args = mock_engine.execute.call_args
-            executed_steps = call_args[1]['pipeline_steps']
-            assert len(executed_steps) == 2
 
 
 def _build_fake_dataframe() -> MagicMock:

@@ -264,10 +264,10 @@
 		color: var(--fg-muted);
 	}
 
-	.remove-btn {
-		background-color: var(--error-bg) !important;
-		color: var(--error-fg) !important;
-		border: 1px solid var(--error-border) !important;
+	.rule-actions .remove-btn {
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
 	}
 
 	.empty-state {

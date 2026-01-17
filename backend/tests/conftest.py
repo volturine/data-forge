@@ -2,7 +2,6 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 import pytest
@@ -299,7 +298,7 @@ def sample_result_file(temp_results_dir: Path) -> tuple[str, Path]:
 
 
 @pytest.fixture(scope='function')
-def mock_file_upload() -> dict[str, Any]:
+def mock_file_upload() -> dict[str, str | bytes]:
     content = b'id,name,age\n1,Alice,25\n2,Bob,30\n'
     return {
         'filename': 'test.csv',

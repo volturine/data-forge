@@ -69,9 +69,9 @@
 
 <style>
 	.schema-viewer {
-		background: #fff;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
 		overflow: hidden;
 	}
 
@@ -80,20 +80,20 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 1rem 1.25rem;
-		border-bottom: 1px solid #e5e7eb;
-		background: #f9fafb;
+		border-bottom: 1px solid var(--border-primary);
+		background: var(--panel-header-bg);
 	}
 
 	.schema-header h3 {
 		margin: 0;
 		font-size: 1.125rem;
 		font-weight: 600;
-		color: #111827;
+		color: var(--fg-primary);
 	}
 
 	.row-count {
 		font-size: 0.875rem;
-		color: #6b7280;
+		color: var(--fg-muted);
 	}
 
 	.columns-list {
@@ -106,13 +106,13 @@
 		grid-template-columns: 2fr 1.5fr 1fr;
 		gap: 1rem;
 		padding: 0.75rem 1.25rem;
-		background: #f3f4f6;
-		border-bottom: 1px solid #e5e7eb;
+		background: var(--table-header-bg);
+		border-bottom: 1px solid var(--border-primary);
 		font-size: 0.75rem;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #6b7280;
+		color: var(--fg-muted);
 	}
 
 	.column-row {
@@ -120,12 +120,12 @@
 		grid-template-columns: 2fr 1.5fr 1fr;
 		gap: 1rem;
 		padding: 0.875rem 1.25rem;
-		border-bottom: 1px solid #f3f4f6;
+		border-bottom: 1px solid var(--border-primary);
 		transition: background-color 0.15s ease;
 	}
 
 	.column-row:hover {
-		background: #f9fafb;
+		background: var(--table-row-hover);
 	}
 
 	.column-row:last-child {
@@ -137,7 +137,7 @@
 		align-items: center;
 		gap: 0.5rem;
 		font-weight: 500;
-		color: #111827;
+		color: var(--fg-primary);
 	}
 
 	.dtype-icon {
@@ -145,7 +145,7 @@
 	}
 
 	.name-text {
-		font-family: 'Courier New', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.875rem;
 	}
 
@@ -157,40 +157,40 @@
 	.dtype-badge {
 		display: inline-block;
 		padding: 0.25rem 0.625rem;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		font-size: 0.75rem;
 		font-weight: 600;
-		font-family: 'Courier New', monospace;
+		font-family: var(--font-mono);
 	}
 
 	.badge-numeric {
-		background: #dbeafe;
-		color: #1e40af;
+		background: var(--info-bg);
+		color: var(--info-fg);
 	}
 
 	.badge-float {
-		background: #e0e7ff;
-		color: #4338ca;
+		background: var(--info-bg);
+		color: var(--info-fg);
 	}
 
 	.badge-string {
-		background: #dcfce7;
-		color: #15803d;
+		background: var(--success-bg);
+		color: var(--success-fg);
 	}
 
 	.badge-boolean {
-		background: #fef3c7;
-		color: #92400e;
+		background: var(--warning-bg);
+		color: var(--warning-fg);
 	}
 
 	.badge-datetime {
-		background: #fce7f3;
-		color: #9f1239;
+		background: var(--error-bg);
+		color: var(--error-fg);
 	}
 
 	.badge-other {
-		background: #f3f4f6;
-		color: #374151;
+		background: var(--badge-bg);
+		color: var(--badge-fg);
 	}
 
 	.column-nullable {
@@ -200,11 +200,11 @@
 	}
 
 	.nullable-yes {
-		color: #6b7280;
+		color: var(--fg-muted);
 	}
 
 	.nullable-no {
-		color: #374151;
+		color: var(--fg-secondary);
 		font-weight: 500;
 	}
 </style>

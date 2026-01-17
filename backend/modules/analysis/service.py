@@ -10,6 +10,7 @@ from modules.analysis.schemas import (
     AnalysisGalleryItemSchema,
     AnalysisResponseSchema,
     AnalysisUpdateSchema,
+    TabSchema,
 )
 from modules.datasource.models import DataSource
 
@@ -56,7 +57,7 @@ async def create_analysis(
     await session.refresh(analysis)
 
     response = AnalysisResponseSchema.model_validate(analysis)
-    response.tabs = analysis.pipeline_definition.get('tabs', [])
+    response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
     return response
 
 
@@ -71,7 +72,7 @@ async def get_analysis(
         raise ValueError(f'Analysis {analysis_id} not found')
 
     response = AnalysisResponseSchema.model_validate(analysis)
-    response.tabs = analysis.pipeline_definition.get('tabs', [])
+    response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
     return response
 
 
@@ -135,7 +136,7 @@ async def update_analysis(
     await session.refresh(analysis)
 
     response = AnalysisResponseSchema.model_validate(analysis)
-    response.tabs = analysis.pipeline_definition.get('tabs', [])
+    response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
     return response
 
 

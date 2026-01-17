@@ -42,13 +42,11 @@ export default defineConfig({
 
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}'],
-		environment: 'happy-dom',
+		environment: 'jsdom',
 		globals: true,
 		setupFiles: ['./src/test/setup.ts'],
-		server: {
-			deps: {
-				inline: ['@sveltejs/kit']
-			}
+		alias: {
+			$lib: new URL('./src/lib', import.meta.url).pathname
 		}
 	}
 });

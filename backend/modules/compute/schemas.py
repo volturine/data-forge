@@ -16,6 +16,22 @@ class JobStatus(str, Enum):
     CANCELLED = 'cancelled'
 
 
+class EngineStatus(str, Enum):
+    IDLE = 'idle'
+    RUNNING = 'running'
+    ERROR = 'error'
+    TERMINATED = 'terminated'
+
+
+class EngineStatusSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str
+    status: EngineStatus
+    process_id: int | None = None
+    last_activity: str | None = None
+
+
 class ComputeExecuteSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
