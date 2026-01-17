@@ -220,8 +220,8 @@
 <style>
 	.step-config {
 		width: 400px;
-		border-left: 1px solid var(--border-primary);
-		background-color: var(--bg-primary);
+		border-left: 1px solid var(--panel-border);
+		background-color: var(--panel-bg);
 		display: flex;
 		flex-direction: column;
 		overflow-y: auto;
@@ -265,14 +265,14 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 1rem;
-		border-bottom: 1px solid var(--border-primary);
-		background-color: var(--bg-tertiary);
+		border-bottom: 1px solid var(--panel-border);
+		background-color: var(--panel-header-bg);
 	}
 
 	.config-header h3 {
 		margin: 0;
 		font-size: 1.125rem;
-		color: var(--fg-primary);
+		color: var(--panel-header-fg);
 	}
 
 	.close-button {

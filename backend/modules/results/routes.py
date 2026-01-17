@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse
 
 from modules.results import schemas, service
 
-router = APIRouter(prefix='/api/v1/results', tags=['results'])
+router = APIRouter(prefix='/results', tags=['results'])
 
 
 @router.get('/{analysis_id}', response_model=schemas.ResultMetadataSchema)

@@ -52,13 +52,15 @@
 <style>
 	.value-counts-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	.form-group {
@@ -72,13 +74,16 @@
 	label {
 		display: block;
 		margin-bottom: 0.25rem;
+		color: var(--fg-secondary);
 	}
 
 	select {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.checkbox-label {
@@ -86,5 +91,6 @@
 		align-items: center;
 		gap: 0.5rem;
 		cursor: pointer;
+		color: var(--fg-secondary);
 	}
 </style>

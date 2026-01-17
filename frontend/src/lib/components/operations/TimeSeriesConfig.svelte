@@ -128,38 +128,42 @@
 <style>
 	.timeseries-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
 		margin-bottom: 0.5rem;
 		font-size: 1rem;
+		color: var(--fg-secondary);
 	}
 
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: #f8f9fa;
-		border-radius: 4px;
+		background-color: var(--form-section-bg);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--form-section-border);
 	}
 
 	.help-text {
 		font-size: 0.875rem;
-		color: #6c757d;
+		color: var(--fg-tertiary);
 		margin-top: 0.5rem;
 		margin-bottom: 0;
 	}
 
 	.warning {
 		font-size: 0.875rem;
-		color: #dc3545;
+		color: var(--error-fg);
 		margin-top: 0.5rem;
 		margin-bottom: 0;
 	}
@@ -169,8 +173,10 @@
 	input[type='number'] {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid #ccc;
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.inline-group {

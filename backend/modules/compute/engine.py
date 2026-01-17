@@ -1,7 +1,9 @@
 import logging
 import multiprocessing as mp
 import uuid
+from collections.abc import Callable
 from queue import Empty
+from typing import cast
 
 import polars as pl
 
@@ -155,9 +157,51 @@ class PolarsComputeEngine:
         """Execute the Polars transformation pipeline."""
         lf = PolarsComputeEngine._load_datasource(datasource_config)
 
-        total_steps = len(pipeline_steps)
+        step_map: dict[str, dict] = {}
+        for step in pipeline_steps:
+            step_id = step.get('id')
+            if not step_id:
+                raise ValueError('Each pipeline step must include an id')
+            step_map[step_id] = step
 
-        for idx, step in enumerate(pipeline_steps):
+        dependency_map: dict[str, str | None] = {}
+        dependents: dict[str, list[str]] = {}
+        in_degree: dict[str, int] = {step_id: 0 for step_id in step_map}
+
+        for step_id, step in step_map.items():
+            deps = step.get('depends_on') or []
+            if len(deps) > 1:
+                raise ValueError(f'Step {step_id} has multiple dependencies. Merge steps are not supported.')
+
+            if len(deps) == 0:
+                dependency_map[step_id] = None
+                continue
+
+            dep_id = deps[0]
+            if dep_id not in step_map:
+                raise ValueError(f'Step {step_id} depends on missing step {dep_id}.')
+
+            dependency_map[step_id] = dep_id
+            dependents.setdefault(dep_id, []).append(step_id)
+            in_degree[step_id] = in_degree.get(step_id, 0) + 1
+
+        queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
+        ordered_steps: list[dict] = []
+        while queue:
+            current_id = queue.pop(0)
+            ordered_steps.append(step_map[current_id])
+            for child_id in dependents.get(current_id, []):
+                in_degree[child_id] = in_degree.get(child_id, 0) - 1
+                if in_degree[child_id] == 0:
+                    queue.append(child_id)
+
+        if len(ordered_steps) != len(step_map):
+            raise ValueError('Pipeline contains a cycle. Remove cyclic dependencies to continue.')
+
+        schema_map: dict[str, pl.LazyFrame] = {}
+        total_steps = len(ordered_steps)
+
+        for idx, step in enumerate(ordered_steps):
             # Convert frontend format to backend format
             try:
                 backend_step = convert_step_format(step)
@@ -187,10 +231,32 @@ class PolarsComputeEngine:
                 }
             )
 
-            lf = PolarsComputeEngine._apply_step(lf, backend_step)
+            step_id = step.get('id')
+            if not step_id:
+                raise ValueError('Each pipeline step must include an id')
+
+            parent_id = dependency_map.get(step_id)
+            if parent_id is not None:
+                parent_frame = schema_map.get(parent_id)
+                if parent_frame is None:
+                    raise ValueError(f'Missing parent frame for step {step_id}')
+            else:
+                parent_frame = lf
+
+            schema_map[step_id] = PolarsComputeEngine._apply_step(parent_frame, backend_step)
 
         # Only collect at the very end
-        df = lf.collect()
+        last_step = ordered_steps[-1] if ordered_steps else None
+        if last_step:
+            last_id = last_step.get('id')
+            if not last_id:
+                raise ValueError('Each pipeline step must include an id')
+            last_frame = schema_map.get(last_id)
+            if last_frame is None:
+                raise ValueError(f'Missing frame for step {last_id}')
+            df = last_frame.collect()
+        else:
+            df = lf.collect()
 
         output = {
             'schema': {col: str(dtype) for col, dtype in df.schema.items()},
@@ -360,7 +426,11 @@ class PolarsComputeEngine:
             values = params.get('values')
             aggregate_function = params.get('aggregate_function', 'first')
 
-            return lf.pivot(on=on, index=index, values=values, aggregate_function=aggregate_function)
+            if not on:
+                raise ValueError('Pivot requires a column to pivot on')
+
+            pivot = cast(Callable[..., pl.LazyFrame], lf.pivot)
+            return pivot(on=on, index=index, values=values, aggregate_function=aggregate_function)
 
         elif operation == 'timeseries':
             column = params.get('column')

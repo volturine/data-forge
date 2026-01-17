@@ -15,13 +15,15 @@
 <style>
 	.null-count-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 0.5rem;
+		color: var(--panel-header-fg);
 	}
 
 	.description {
@@ -31,10 +33,11 @@
 
 	.info {
 		font-size: 0.875rem;
-		color: var(--fg-muted);
+		color: var(--fg-tertiary);
 		padding: 0.5rem;
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border: 1px solid var(--panel-muted-border);
+		border-radius: var(--radius-sm);
 		margin: 0;
 	}
 </style>

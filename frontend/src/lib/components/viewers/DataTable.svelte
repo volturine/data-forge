@@ -120,10 +120,11 @@
 <style>
 	.data-table-container {
 		position: relative;
-		background: #fff;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
 		overflow: hidden;
+		box-shadow: var(--panel-shadow);
 	}
 
 	.loading-overlay {
@@ -133,13 +134,14 @@
 		justify-content: center;
 		padding: 3rem;
 		gap: 1rem;
+		color: var(--fg-tertiary);
 	}
 
 	.spinner {
 		width: 40px;
 		height: 40px;
-		border: 4px solid #f3f4f6;
-		border-top-color: #3b82f6;
+		border: 4px solid var(--border-primary);
+		border-top-color: var(--accent-primary);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -152,7 +154,7 @@
 
 	.loading-overlay p {
 		margin: 0;
-		color: #6b7280;
+		color: var(--fg-tertiary);
 		font-size: 0.875rem;
 	}
 
@@ -163,7 +165,7 @@
 
 	.empty-state p {
 		margin: 0;
-		color: #9ca3af;
+		color: var(--fg-muted);
 		font-size: 0.875rem;
 	}
 
@@ -171,6 +173,7 @@
 		overflow-x: auto;
 		max-height: 600px;
 		overflow-y: auto;
+		background: var(--panel-bg);
 	}
 
 	.data-table {
@@ -182,13 +185,13 @@
 	thead {
 		position: sticky;
 		top: 0;
-		background: #f9fafb;
+		background: var(--table-header-bg);
 		z-index: 10;
 	}
 
 	th {
 		padding: 0;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--table-border);
 		font-weight: 600;
 		text-align: left;
 	}
@@ -204,31 +207,35 @@
 		cursor: pointer;
 		font-size: 0.875rem;
 		font-weight: 600;
-		color: #374151;
+		color: var(--fg-primary);
 		transition: background-color 0.15s ease;
 	}
 
 	.column-header:hover {
-		background: #f3f4f6;
+		background: var(--bg-hover);
 	}
 
 	.column-name {
-		font-family: 'Courier New', monospace;
+		font-family: var(--font-mono);
 	}
 
 	.sort-indicator {
 		margin-left: 0.5rem;
-		color: #3b82f6;
+		color: var(--accent-primary);
 		font-size: 1rem;
 	}
 
 	tbody tr {
-		border-bottom: 1px solid #f3f4f6;
+		border-bottom: 1px solid var(--table-border);
 		transition: background-color 0.15s ease;
 	}
 
+	tbody tr:nth-child(even) {
+		background: var(--table-row-alt);
+	}
+
 	tbody tr:hover {
-		background: #f9fafb;
+		background: var(--table-row-hover);
 	}
 
 	tbody tr:last-child {
@@ -237,21 +244,22 @@
 
 	td {
 		padding: 0.75rem 1rem;
-		color: #111827;
+		color: var(--fg-secondary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		max-width: 300px;
+		font-size: 0.8125rem;
 	}
 
 	.table-footer {
 		padding: 0.75rem 1rem;
-		border-top: 1px solid #e5e7eb;
-		background: #f9fafb;
+		border-top: 1px solid var(--panel-border);
+		background: var(--panel-header-bg);
 	}
 
 	.row-info {
 		font-size: 0.75rem;
-		color: #6b7280;
+		color: var(--fg-tertiary);
 	}
 </style>

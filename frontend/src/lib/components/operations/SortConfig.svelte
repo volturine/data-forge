@@ -132,13 +132,15 @@
 <style>
 	.sort-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
@@ -154,13 +156,16 @@
 		gap: 0.5rem;
 		align-items: center;
 		margin-bottom: 1.5rem;
+		flex-wrap: wrap;
 	}
 
 	.add-rule select {
 		flex: 2;
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.direction-toggle {
@@ -169,6 +174,7 @@
 		gap: 0.25rem;
 		cursor: pointer;
 		white-space: nowrap;
+		color: var(--fg-secondary);
 	}
 
 	.direction-toggle input[type='checkbox'] {
@@ -177,10 +183,10 @@
 
 	.add-rule button {
 		padding: 0.5rem 1rem;
-		background-color: var(--success-fg);
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		white-space: nowrap;
 	}
@@ -188,13 +194,15 @@
 	.add-rule button:disabled {
 		background-color: var(--border-primary);
 		cursor: not-allowed;
+		color: var(--fg-muted);
 	}
 
 	.sort-rules {
 		padding: 1rem;
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
+		border: 1px solid var(--panel-muted-border);
 	}
 
 	.sort-rule-item {
@@ -202,9 +210,9 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
 		margin-bottom: 0.5rem;
 	}
 
@@ -221,17 +229,18 @@
 	.rule-column {
 		font-weight: 500;
 		font-size: 0.95rem;
+		color: var(--fg-primary);
 	}
 
 	.direction-btn {
 		padding: 0.25rem 0.75rem;
 		background-color: var(--accent-primary);
-		color: white;
+		color: var(--bg-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.875rem;
-		font-family: monospace;
+		font-family: var(--font-mono);
 	}
 
 	.rule-actions {
@@ -241,30 +250,34 @@
 
 	.rule-actions button {
 		padding: 0.25rem 0.5rem;
-		background-color: var(--fg-muted);
-		color: white;
-		border: none;
-		border-radius: 4px;
+		background-color: var(--bg-tertiary);
+		color: var(--fg-primary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.875rem;
 	}
 
 	.rule-actions button:disabled {
-		background-color: var(--border-primary);
+		background-color: var(--bg-muted);
 		cursor: not-allowed;
+		color: var(--fg-muted);
 	}
 
 	.remove-btn {
-		background-color: var(--error-fg) !important;
+		background-color: var(--error-bg) !important;
+		color: var(--error-fg) !important;
+		border: 1px solid var(--error-border) !important;
 	}
 
 	.empty-state {
 		padding: 2rem;
 		text-align: center;
 		color: var(--fg-muted);
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
+		border: 1px solid var(--panel-muted-border);
 	}
 
 	button:hover:not(:disabled) {

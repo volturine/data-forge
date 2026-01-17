@@ -44,14 +44,15 @@
 <style>
 	.view-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
-		color: var(--fg-primary);
+		color: var(--panel-header-fg);
 	}
 
 	.config-section {
@@ -63,28 +64,28 @@
 		flex-direction: column;
 		gap: 0.5rem;
 		font-weight: 500;
-		color: var(--fg-primary);
+		color: var(--fg-secondary);
 	}
 
 	input[type='number'] {
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
-		background-color: var(--bg-primary);
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
 		color: var(--fg-primary);
 		font-size: 1rem;
 	}
 
 	input[type='number']:focus {
 		outline: none;
-		border-color: var(--accent-primary);
+		border-color: var(--input-focus-border);
 		box-shadow: 0 0 0 3px var(--accent-bg);
 	}
 
 	.help-text {
 		margin: 0.5rem 0 0 0;
 		font-size: 0.875rem;
-		color: var(--fg-muted);
+		color: var(--fg-tertiary);
 		font-weight: normal;
 	}
 </style>

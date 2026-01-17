@@ -90,13 +90,15 @@
 <style>
 	.rename-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
@@ -111,13 +113,16 @@
 		display: flex;
 		gap: 0.5rem;
 		margin-bottom: 1.5rem;
+		flex-wrap: wrap;
 	}
 
 	.add-mapping select,
 	.add-mapping input {
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.add-mapping select {
@@ -130,10 +135,10 @@
 
 	.add-mapping button {
 		padding: 0.5rem 1rem;
-		background-color: var(--success-fg);
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		white-space: nowrap;
 	}
@@ -141,13 +146,15 @@
 	.add-mapping button:disabled {
 		background-color: var(--border-primary);
 		cursor: not-allowed;
+		color: var(--fg-muted);
 	}
 
 	.mappings-list {
 		padding: 1rem;
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
+		border: 1px solid var(--panel-muted-border);
 	}
 
 	.mapping-item {
@@ -155,9 +162,9 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
 		margin-bottom: 0.5rem;
 	}
 
@@ -169,7 +176,7 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		font-family: monospace;
+		font-family: var(--font-mono);
 	}
 
 	.old-name {
@@ -189,10 +196,10 @@
 
 	.mapping-item button {
 		padding: 0.25rem 0.75rem;
-		background-color: var(--error-fg);
-		color: white;
-		border: none;
-		border-radius: 4px;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.875rem;
 	}
@@ -201,9 +208,10 @@
 		padding: 2rem;
 		text-align: center;
 		color: var(--fg-muted);
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
+		border: 1px solid var(--panel-muted-border);
 	}
 
 	button:hover:not(:disabled) {

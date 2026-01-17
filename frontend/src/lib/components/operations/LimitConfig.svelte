@@ -24,13 +24,15 @@
 <style>
 	.limit-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	.form-group {
@@ -40,7 +42,9 @@
 	input[type='number'] {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 </style>

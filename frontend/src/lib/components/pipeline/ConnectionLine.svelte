@@ -24,7 +24,10 @@
 				refY={arrowSize / 2}
 				orient="auto"
 			>
-				<polygon points="0 0, {arrowSize} {arrowSize / 2}, 0 {arrowSize}" fill="#d1d5db" />
+				<polygon
+					points="0 0, {arrowSize} {arrowSize / 2}, 0 {arrowSize}"
+					fill="var(--border-secondary)"
+				/>
 			</marker>
 		</defs>
 
@@ -33,7 +36,7 @@
 			y1="0"
 			x2="50%"
 			y2={height}
-			stroke="#d1d5db"
+			stroke="var(--border-secondary)"
 			stroke-width={strokeWidth}
 			stroke-dasharray={dashArray}
 			marker-end="url(#arrowhead-{fromStepIndex}-{toStepIndex})"

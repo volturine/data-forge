@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from modules.compute.engine import PolarsComputeEngine
 from modules.compute.schemas import JobStatus
 from modules.datasource.models import DataSource
 
@@ -226,6 +227,67 @@ class TestComputePreview:
             call_args = mock_engine.execute.call_args
             executed_steps = call_args[1]['pipeline_steps']
             assert len(executed_steps) == 2
+
+
+def _build_fake_dataframe() -> MagicMock:
+    fake_df = MagicMock()
+    fake_df.schema = {}
+    fake_df.__len__.return_value = 0
+    fake_head = MagicMock()
+    fake_head.to_dicts.return_value = []
+    fake_df.head.return_value = fake_head
+    return fake_df
+
+
+@patch('modules.compute.engine.PolarsComputeEngine._load_datasource')
+@patch('modules.compute.engine.PolarsComputeEngine._apply_step')
+def test_pipeline_cycle_detection(mock_apply_step: MagicMock, mock_load: MagicMock):
+    mock_load.return_value = MagicMock()
+    mock_apply_step.side_effect = lambda frame, _step: frame
+
+    pipeline_steps = [
+        {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': ['step2']},
+        {'id': 'step2', 'type': 'select', 'config': {}, 'depends_on': ['step1']},
+    ]
+
+    with pytest.raises(ValueError, match='cycle'):
+        PolarsComputeEngine._execute_pipeline({}, pipeline_steps, 'job', MagicMock())
+
+
+@patch('modules.compute.engine.PolarsComputeEngine._load_datasource')
+@patch('modules.compute.engine.PolarsComputeEngine._apply_step')
+def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: MagicMock):
+    mock_load.return_value = MagicMock()
+    mock_apply_step.side_effect = lambda frame, _step: frame
+
+    pipeline_steps = [
+        {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': []},
+        {'id': 'step2', 'type': 'select', 'config': {}, 'depends_on': ['step1', 'step3']},
+        {'id': 'step3', 'type': 'sort', 'config': {}, 'depends_on': []},
+    ]
+
+    with pytest.raises(ValueError, match='multiple dependencies'):
+        PolarsComputeEngine._execute_pipeline({}, pipeline_steps, 'job', MagicMock())
+
+
+@patch('modules.compute.engine.PolarsComputeEngine._load_datasource')
+@patch('modules.compute.engine.PolarsComputeEngine._apply_step')
+def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: MagicMock):
+    fake_df = _build_fake_dataframe()
+    fake_frame = MagicMock()
+    fake_frame.collect.return_value = fake_df
+
+    mock_load.return_value = fake_frame
+    mock_apply_step.return_value = fake_frame
+
+    pipeline_steps = [
+        {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': []},
+        {'id': 'step2', 'type': 'select', 'config': {}, 'depends_on': ['step1']},
+        {'id': 'step3', 'type': 'sort', 'config': {}, 'depends_on': ['step2']},
+    ]
+
+    result = PolarsComputeEngine._execute_pipeline({}, pipeline_steps, 'job', MagicMock())
+    assert result['row_count'] == len(result['sample_data'])
 
 
 @pytest.mark.asyncio

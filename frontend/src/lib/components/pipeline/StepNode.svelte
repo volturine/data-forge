@@ -9,9 +9,22 @@
 		allSteps?: PipelineStep[];
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
+		onDragStart: (type: string) => void;
+		onDragEnd: () => void;
+		onBranch: (type: string, parentId: string) => void;
 	}
 
-	let { step, index, datasourceId, allSteps = [], onEdit, onDelete }: Props = $props();
+	let {
+		step,
+		index,
+		datasourceId,
+		allSteps = [],
+		onEdit,
+		onDelete,
+		onDragStart,
+		onDragEnd,
+		onBranch
+	}: Props = $props();
 
 	const typeLabels: Record<string, string> = {
 		filter: 'filter',
@@ -70,12 +83,30 @@
 
 	let label = $derived(typeLabels[step.type] || step.type);
 	let summary = $derived(getConfigSummary(step));
+
 </script>
+	<div class="step-node" class:view-node={step.type === 'view'}>
+		<div class="connection-point top"></div>
 
-<div class="step-node" class:view-node={step.type === 'view'}>
-	<div class="connection-point top"></div>
 
-	<div class="step-content">
+	<div
+		class="step-content"
+		draggable="true"
+		ondragstart={(event) => {
+			onDragStart(step.type);
+			if (event.dataTransfer) {
+				event.dataTransfer.setData('text/plain', step.type);
+				event.dataTransfer.effectAllowed = 'move';
+			}
+		}}
+		ondragend={onDragEnd}
+		ondragover={(event) => event.preventDefault()}
+		ondrop={(event) => {
+			event.preventDefault();
+			const type = event.dataTransfer?.getData('text/plain') || step.type;
+			onBranch(type, step.id);
+		}}
+	>
 		<div class="step-header">
 			<span class="step-type">{label}</span>
 			<span class="step-number">#{index + 1}</span>
@@ -102,8 +133,9 @@
 		{/if}
 	</div>
 
-	<div class="connection-point bottom"></div>
-</div>
+
+		<div class="connection-point bottom"></div>
+	</div>
 
 <style>
 	.step-node {
@@ -112,9 +144,9 @@
 	}
 
 	.step-node.view-node {
-		max-width: none;
-		width: 75%;
-		min-width: 600px;
+		max-width: 100%;
+		width: min(75%, 960px);
+		min-width: 320px;
 	}
 
 	.connection-point {
@@ -144,6 +176,10 @@
 		padding: var(--space-4);
 		transition: all var(--transition-fast);
 		box-shadow: var(--card-shadow);
+	}
+
+	.step-content:active {
+		cursor: grabbing;
 	}
 
 	.step-content:hover {
@@ -178,6 +214,7 @@
 		color: var(--fg-tertiary);
 		margin-bottom: var(--space-3);
 	}
+
 
 	.step-actions {
 		display: flex;

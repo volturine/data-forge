@@ -9,7 +9,7 @@ from core.config import settings
 from core.database import get_db
 from modules.datasource import schemas, service
 
-router = APIRouter(prefix='/api/v1/datasource', tags=['datasource'])
+router = APIRouter(prefix='/datasource', tags=['datasource'])
 
 
 @router.post('/upload', response_model=schemas.DataSourceResponse)

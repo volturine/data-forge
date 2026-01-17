@@ -29,6 +29,7 @@ async def create_analysis(
     pipeline_definition = {
         'steps': [step.model_dump() for step in data.pipeline_steps],
         'datasource_ids': data.datasource_ids,
+        'tabs': [tab.model_dump() for tab in data.tabs],
     }
 
     now = datetime.now(UTC)
@@ -54,7 +55,9 @@ async def create_analysis(
     await session.commit()
     await session.refresh(analysis)
 
-    return AnalysisResponseSchema.model_validate(analysis)
+    response = AnalysisResponseSchema.model_validate(analysis)
+    response.tabs = analysis.pipeline_definition.get('tabs', [])
+    return response
 
 
 async def get_analysis(
@@ -67,7 +70,9 @@ async def get_analysis(
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
 
-    return AnalysisResponseSchema.model_validate(analysis)
+    response = AnalysisResponseSchema.model_validate(analysis)
+    response.tabs = analysis.pipeline_definition.get('tabs', [])
+    return response
 
 
 async def list_analyses(
@@ -109,11 +114,17 @@ async def update_analysis(
     if data.description is not None:
         analysis.description = data.description
 
-    if data.pipeline_steps is not None:
-        analysis.pipeline_definition = {
-            'steps': [step.model_dump() for step in data.pipeline_steps],
+    if data.pipeline_steps is not None or data.tabs is not None:
+        pipeline_definition = {
+            'steps': (
+                [step.model_dump() for step in data.pipeline_steps]
+                if data.pipeline_steps is not None
+                else analysis.pipeline_definition.get('steps', [])
+            ),
             'datasource_ids': analysis.pipeline_definition.get('datasource_ids', []),
+            'tabs': ([tab.model_dump() for tab in data.tabs] if data.tabs is not None else analysis.pipeline_definition.get('tabs', [])),
         }
+        analysis.pipeline_definition = pipeline_definition
 
     if data.status is not None:
         analysis.status = data.status
@@ -123,7 +134,9 @@ async def update_analysis(
     await session.commit()
     await session.refresh(analysis)
 
-    return AnalysisResponseSchema.model_validate(analysis)
+    response = AnalysisResponseSchema.model_validate(analysis)
+    response.tabs = analysis.pipeline_definition.get('tabs', [])
+    return response
 
 
 async def delete_analysis(

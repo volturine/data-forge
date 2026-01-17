@@ -6,7 +6,7 @@ from core.database import get_db
 from modules.analysis import schemas as analysis_schemas, service as analysis_service
 from modules.compute import schemas, service
 
-router = APIRouter(prefix='/api/v1/compute', tags=['compute'])
+router = APIRouter(prefix='/compute', tags=['compute'])
 
 
 class ExecuteRequest(BaseModel):

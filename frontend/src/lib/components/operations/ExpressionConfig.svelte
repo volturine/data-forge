@@ -73,63 +73,72 @@
 <style>
 	.expression-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
 		margin-bottom: 0.75rem;
 		font-size: 1rem;
+		color: var(--fg-secondary);
 	}
 
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: #f8f9fa;
-		border-radius: 4px;
+		background-color: var(--form-section-bg);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--form-section-border);
 	}
 
 	textarea {
 		width: 100%;
 		padding: 0.75rem;
-		border: 1px solid #ccc;
-		border-radius: 4px;
-		font-family: monospace;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		font-family: var(--font-mono);
 		font-size: 0.875rem;
 		resize: vertical;
 		margin-bottom: 0.5rem;
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	input[type='text'] {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid #ccc;
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.help-text {
 		font-size: 0.875rem;
-		color: #6c757d;
+		color: var(--fg-tertiary);
 		line-height: 1.6;
 		padding: 0.75rem;
-		background-color: #fff;
-		border-left: 3px solid #007bff;
-		border-radius: 4px;
+		background-color: var(--form-help-bg);
+		border-left: 3px solid var(--form-help-accent);
+		border-radius: var(--radius-sm);
+		border: 1px solid var(--form-help-border);
 	}
 
 	.help-text code {
-		background-color: #f8f9fa;
+		background-color: var(--bg-tertiary);
 		padding: 0.125rem 0.375rem;
 		border-radius: 3px;
-		font-family: monospace;
+		font-family: var(--font-mono);
 		font-size: 0.85em;
-		color: #e83e8c;
+		color: var(--accent-primary);
 	}
 
 	.columns-grid {
@@ -140,9 +149,9 @@
 		max-height: 200px;
 		overflow-y: auto;
 		padding: 0.5rem;
-		background-color: white;
-		border: 1px solid #ddd;
-		border-radius: 4px;
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 	}
 
 	.column-chip {
@@ -151,29 +160,30 @@
 		align-items: flex-start;
 		gap: 0.25rem;
 		padding: 0.5rem 0.75rem;
-		background-color: #e7f3ff;
-		border: 1px solid #bee5eb;
-		border-radius: 4px;
+		background-color: var(--info-bg);
+		border: 1px solid var(--info-border);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		transition: all 0.2s;
+		color: var(--info-fg);
 	}
 
 	.column-chip:hover {
-		background-color: #d1ecf1;
-		border-color: #007bff;
+		background-color: var(--bg-hover);
+		border-color: var(--border-focus);
 		transform: translateY(-1px);
 	}
 
 	.column-name {
 		font-weight: 500;
 		font-size: 0.875rem;
-		color: #212529;
+		color: var(--fg-primary);
 	}
 
 	.column-type {
 		font-size: 0.75rem;
-		color: #6c757d;
-		font-family: monospace;
+		color: var(--fg-tertiary);
+		font-family: var(--font-mono);
 	}
 
 	button:hover:not(:disabled) {

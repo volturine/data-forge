@@ -100,63 +100,70 @@
 <style>
 	.fill-null-config {
 		padding: 1rem;
-		border: 1px solid #ddd;
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
 		margin-bottom: 0.5rem;
 		font-size: 1rem;
+		color: var(--fg-secondary);
 	}
 
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: #f8f9fa;
-		border-radius: 4px;
+		background-color: var(--form-section-bg);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--form-section-border);
 	}
 
 	select,
 	input[type='text'] {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid #ccc;
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.column-actions {
 		display: flex;
 		gap: 0.5rem;
 		margin-bottom: 0.75rem;
+		flex-wrap: wrap;
 	}
 
 	.action-btn {
 		padding: 0.25rem 0.75rem;
-		background-color: #6c757d;
-		color: white;
-		border: none;
-		border-radius: 4px;
+		background-color: var(--bg-tertiary);
+		color: var(--fg-primary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.875rem;
 	}
 
 	.action-btn:hover {
-		opacity: 0.9;
+		background-color: var(--bg-hover);
 	}
 
 	.column-list {
 		max-height: 200px;
 		overflow-y: auto;
-		border: 1px solid #ddd;
-		border-radius: 4px;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		padding: 0.5rem;
-		background-color: white;
+		background-color: var(--bg-primary);
 	}
 
 	.column-item {
@@ -164,11 +171,11 @@
 		align-items: center;
 		padding: 0.5rem;
 		cursor: pointer;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 	}
 
 	.column-item:hover {
-		background-color: #f8f9fa;
+		background-color: var(--bg-hover);
 	}
 
 	.column-item input[type='checkbox'] {
@@ -179,9 +186,11 @@
 	.selected-info {
 		margin-top: 0.5rem;
 		padding: 0.5rem;
-		background-color: #e7f3ff;
-		border-radius: 4px;
+		background-color: var(--info-bg);
+		border: 1px solid var(--info-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.875rem;
+		color: var(--info-fg);
 	}
 
 	button:hover:not(:disabled) {

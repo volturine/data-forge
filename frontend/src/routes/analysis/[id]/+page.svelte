@@ -19,6 +19,12 @@
 	let initialPipeline: PipelineStep[] | null = null;
 
 	let isLoadingSchema = $state(false);
+	let selectedLibraryType = $state<string | null>(null);
+	let activeTarget = $state<{ index: number; parentId: string | null; nextId: string | null; valid: boolean } | null>(null);
+	const store = analysisStore as unknown as {
+		insertStep: (step: PipelineStep, index: number, parentId: string | null, nextId: string | null) => boolean;
+		addBranchStep: (step: PipelineStep, parentId: string | null) => void;
+	};
 
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
@@ -66,15 +72,38 @@
 		return 'id-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
 	}
 
-	function handleAddStep(type: string) {
-		const step: PipelineStep = {
+	function buildStep(type: string): PipelineStep {
+		return {
 			id: makeId(),
 			type,
 			config: {},
 			depends_on: []
 		};
+	}
+
+	function handleAddStep(type: string) {
+		const step = buildStep(type);
 		analysisStore.addStep(step);
 		selectedStepId = step.id;
+	}
+
+	function handleInsertStep(type: string, targetIndex: number, parentId: string | null, nextId: string | null) {
+		const step = buildStep(type);
+		const inserted = store.insertStep(step, targetIndex, parentId, nextId);
+		if (!inserted) {
+			return;
+		}
+		selectedLibraryType = null;
+		selectedStepId = step.id;
+		activeTarget = null;
+	}
+
+	function handleBranchStep(type: string, parentId: string | null) {
+		const step = buildStep(type);
+		store.addBranchStep(step, parentId);
+		selectedLibraryType = null;
+		selectedStepId = step.id;
+		activeTarget = null;
 	}
 
 	function handleSelectStep(stepId: string) {
@@ -112,6 +141,18 @@
 
 	function handleCloseConfig() {
 		selectedStepId = null;
+	}
+
+	function handleDragStart(type: string) {
+		selectedLibraryType = type;
+	}
+
+	function handleDragEnd() {
+		selectedLibraryType = null;
+	}
+
+	function handleSelectLibraryType(type: string | null) {
+		selectedLibraryType = type;
 	}
 
 	const selectedStep = $derived.by(() => {
@@ -224,14 +265,29 @@
 		</header>
 
 		<div class="editor-workspace">
-			<StepLibrary onAddStep={handleAddStep} />
-
+			<StepLibrary
+				onAddStep={handleAddStep}
+				onInsertStep={(type, target) =>
+					handleInsertStep(type, target.index, target.parentId, target.nextId)
+				}
+				onBranchStep={(type, parentId) => handleBranchStep(type, parentId)}
+				onDragStart={handleDragStart}
+				onDragEnd={handleDragEnd}
+				selectedType={selectedLibraryType}
+				onSelectType={handleSelectLibraryType}
+			/>
 			<PipelineCanvas
 				steps={analysisStore.pipeline}
-				{datasourceId}
+				datasourceId={datasourceId}
 				onStepClick={handleSelectStep}
 				onStepDelete={handleDeleteStep}
+				onInsertStep={(type, target) =>
+					handleInsertStep(type, target.index, target.parentId, target.nextId)
+				}
+				onBranchStep={(type, parentId) => handleBranchStep(type, parentId)}
+				selectedType={selectedLibraryType}
 			/>
+
 
 			<StepConfig
 				step={selectedStep}

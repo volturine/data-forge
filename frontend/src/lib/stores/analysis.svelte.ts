@@ -4,7 +4,7 @@ import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
 import { schemaCalculator } from '$lib/utils/schema';
 
-class AnalysisStore {
+export class AnalysisStore {
 	current = $state<Analysis | null>(null);
 	pipeline = $state<PipelineStep[]>([]);
 	sourceSchemas = $state(new Map<string, SchemaInfo>());
@@ -53,14 +53,60 @@ class AnalysisStore {
 
 	addStep(step: PipelineStep): void {
 		this.pipeline = [...this.pipeline, step];
+		schemaCalculator.invalidateCache(this.pipeline, [step.id]);
+	}
+
+	insertStep(
+		step: PipelineStep,
+		index: number,
+		parentId: string | null,
+		nextId: string | null
+	): boolean {
+		const nextPipeline = [...this.pipeline];
+		const normalizedParentId = parentId ?? null;
+		step.depends_on = normalizedParentId ? [normalizedParentId] : [];
+
+		if (nextId) {
+			const nextStepIndex = nextPipeline.findIndex((item) => item.id === nextId);
+			if (nextStepIndex < 0) {
+				return false;
+			}
+			const nextStep = nextPipeline[nextStepIndex];
+			const nextDeps = nextStep.depends_on ?? [];
+			if (nextDeps.length > 1) {
+				return false;
+			}
+			if (normalizedParentId && nextDeps.length > 0 && nextDeps[0] !== normalizedParentId) {
+				return false;
+			}
+			if (!normalizedParentId && nextDeps.length > 0) {
+				return false;
+			}
+			nextStep.depends_on = [step.id];
+		}
+
+		nextPipeline.splice(index, 0, step);
+		this.pipeline = nextPipeline;
+		const invalidated = nextId ? [step.id, nextId] : [step.id];
+		schemaCalculator.invalidateCache(nextPipeline, invalidated);
+		return true;
+	}
+
+	addBranchStep(step: PipelineStep, parentId: string | null): void {
+		step.depends_on = parentId ? [parentId] : [];
+		this.pipeline = [...this.pipeline, step];
+		schemaCalculator.invalidateCache(this.pipeline, [step.id]);
 	}
 
 	updateStep(id: string, updates: Partial<PipelineStep>): void {
-		this.pipeline = this.pipeline.map((step) => (step.id === id ? { ...step, ...updates } : step));
+		const nextPipeline = this.pipeline.map((step) => (step.id === id ? { ...step, ...updates } : step));
+		this.pipeline = nextPipeline;
+		schemaCalculator.invalidateCache(nextPipeline, [id]);
 	}
 
 	removeStep(id: string): void {
 		this.pipeline = this.pipeline.filter((step) => step.id !== id);
+		schemaCalculator.invalidateCache(this.pipeline, [id]);
 	}
 
 	reorderSteps(fromIndex: number, toIndex: number): void {
@@ -113,5 +159,10 @@ class AnalysisStore {
 		this.loading = false;
 	}
 }
+
+export type AnalysisStoreApi = {
+	insertStep: (step: PipelineStep, index: number, parentId: string | null, nextId: string | null) => boolean;
+	addBranchStep: (step: PipelineStep, parentId: string | null) => void;
+};
 
 export const analysisStore = new AnalysisStore();

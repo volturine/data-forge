@@ -111,45 +111,52 @@
 <style>
 	.join-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
 		margin-bottom: 0.75rem;
 		font-size: 1rem;
+		color: var(--fg-secondary);
 	}
 
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--form-section-bg);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--form-section-border);
 	}
 
 	.section select {
 		width: 100%;
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
 		margin-bottom: 0.5rem;
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.help-text {
 		font-size: 0.875rem;
-		color: var(--fg-muted);
+		color: var(--fg-tertiary);
 		line-height: 1.5;
 		padding: 0.75rem;
-		background-color: var(--bg-primary);
-		border-left: 3px solid var(--accent-primary);
-		border-radius: 4px;
+		background-color: var(--form-help-bg);
+		border-left: 3px solid var(--form-help-accent);
+		border-radius: var(--radius-sm);
 		margin-top: 0.5rem;
+		border: 1px solid var(--form-help-border);
 	}
 
 	.add-key {
@@ -178,23 +185,27 @@
 	.key-input-group select,
 	.key-input-group input {
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.add-key > button {
 		width: 100%;
 		padding: 0.5rem 1rem;
-		background-color: var(--success-fg);
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 
 	.add-key > button:disabled {
-		background-color: var(--border-primary);
+		background-color: var(--bg-muted);
 		cursor: not-allowed;
+		color: var(--fg-muted);
+		border: 1px solid var(--border-secondary);
 	}
 
 	.keys-list {
@@ -208,23 +219,25 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
 	}
 
 	.key-details {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		font-family: monospace;
+		font-family: var(--font-mono);
 		font-size: 0.875rem;
+		color: var(--fg-primary);
 	}
 
 	.key-column {
 		padding: 0.25rem 0.5rem;
-		background-color: var(--accent-bg);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border: 1px solid var(--panel-muted-border);
+		border-radius: var(--radius-sm);
 		font-weight: 500;
 	}
 
@@ -235,10 +248,10 @@
 
 	.key-item button {
 		padding: 0.25rem 0.75rem;
-		background-color: var(--error-fg);
-		color: white;
-		border: none;
-		border-radius: 4px;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.875rem;
 	}
@@ -247,9 +260,9 @@
 		padding: 1rem;
 		text-align: center;
 		color: var(--fg-muted);
-		background-color: var(--bg-primary);
-		border: 1px dashed var(--border-primary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border: 1px dashed var(--panel-muted-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.875rem;
 	}
 

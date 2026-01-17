@@ -127,12 +127,13 @@
 <style>
 	.inline-data-table {
 		width: 100%;
-		background: #fff;
-		border: 1px solid #e5e7eb;
-		border-radius: 6px;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
 		overflow: hidden;
-		margin: 8px 0;
+		margin: var(--space-2) 0;
 		font-size: 0.875rem;
+		box-shadow: var(--panel-shadow);
 	}
 
 	.loading-overlay {
@@ -142,13 +143,14 @@
 		justify-content: center;
 		padding: 2rem;
 		gap: 0.75rem;
+		color: var(--fg-tertiary);
 	}
 
 	.spinner {
 		width: 32px;
 		height: 32px;
-		border: 3px solid #f3f4f6;
-		border-top-color: #3b82f6;
+		border: 3px solid var(--border-primary);
+		border-top-color: var(--accent-primary);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -161,7 +163,7 @@
 
 	.loading-overlay p {
 		margin: 0;
-		color: #6b7280;
+		color: var(--fg-tertiary);
 		font-size: 0.875rem;
 	}
 
@@ -172,13 +174,13 @@
 
 	.error-title {
 		margin: 0 0 0.5rem 0;
-		color: #dc2626;
+		color: var(--error-fg);
 		font-weight: 600;
 	}
 
 	.error-message {
 		margin: 0;
-		color: #6b7280;
+		color: var(--fg-tertiary);
 		font-size: 0.875rem;
 	}
 
@@ -189,22 +191,23 @@
 
 	.empty-state p {
 		margin: 0;
-		color: #9ca3af;
+		color: var(--fg-muted);
 		font-size: 0.875rem;
 	}
 
 	.table-info {
 		padding: 0.75rem 1rem;
 		font-size: 0.75rem;
-		color: #6b7280;
-		background: #f9fafb;
-		border-bottom: 1px solid #e5e7eb;
+		color: var(--fg-tertiary);
+		background: var(--panel-header-bg);
+		border-bottom: 1px solid var(--panel-border);
 	}
 
 	.table-wrapper {
 		overflow-x: auto;
 		max-height: 400px;
 		overflow-y: auto;
+		background: var(--panel-bg);
 	}
 
 	table {
@@ -215,30 +218,37 @@
 	thead {
 		position: sticky;
 		top: 0;
-		background: #f9fafb;
+		background: var(--table-header-bg);
 		z-index: 10;
 	}
 
 	th {
 		padding: 0.75rem 1rem;
 		text-align: left;
-		border-bottom: 2px solid #e5e7eb;
+		border-bottom: 2px solid var(--table-border);
 		font-weight: 600;
-		color: #374151;
+		color: var(--fg-primary);
+		font-size: 0.8125rem;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
 	}
 
 	.column-name {
-		font-family: 'Courier New', monospace;
+		font-family: var(--font-mono);
 		font-size: 0.875rem;
 	}
 
 	tbody tr {
-		border-bottom: 1px solid #f3f4f6;
+		border-bottom: 1px solid var(--table-border);
 		transition: background-color 0.15s ease;
 	}
 
+	tbody tr:nth-child(even) {
+		background: var(--table-row-alt);
+	}
+
 	tbody tr:hover {
-		background: #f9fafb;
+		background: var(--table-row-hover);
 	}
 
 	tbody tr:last-child {
@@ -247,11 +257,12 @@
 
 	td {
 		padding: 0.75rem 1rem;
-		color: #111827;
+		color: var(--fg-secondary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		max-width: 250px;
+		font-size: 0.8125rem;
 	}
 
 	.pagination {
@@ -259,24 +270,24 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem 1rem;
-		background: #f9fafb;
-		border-top: 1px solid #e5e7eb;
+		background: var(--panel-header-bg);
+		border-top: 1px solid var(--panel-border);
 	}
 
 	.pagination button {
 		padding: 0.5rem 1rem;
-		border: 1px solid #d1d5db;
-		border-radius: 4px;
-		background: #fff;
-		color: #374151;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		background: var(--panel-bg);
+		color: var(--fg-primary);
 		font-size: 0.875rem;
 		cursor: pointer;
 		transition: all 0.15s ease;
 	}
 
 	.pagination button:hover:not(:disabled) {
-		background: #f9fafb;
-		border-color: #9ca3af;
+		background: var(--bg-hover);
+		border-color: var(--border-secondary);
 	}
 
 	.pagination button:disabled {
@@ -286,6 +297,6 @@
 
 	.page-info {
 		font-size: 0.75rem;
-		color: #6b7280;
+		color: var(--fg-tertiary);
 	}
 </style>

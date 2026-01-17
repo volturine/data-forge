@@ -81,19 +81,21 @@
 <style>
 	.drop-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 0.5rem;
+		color: var(--panel-header-fg);
 	}
 
 	.description {
 		margin-top: 0;
 		margin-bottom: 1rem;
-		color: var(--fg-muted);
+		color: var(--fg-tertiary);
 		font-size: 0.875rem;
 	}
 
@@ -101,14 +103,15 @@
 		display: flex;
 		gap: 0.5rem;
 		margin-bottom: 1rem;
+		flex-wrap: wrap;
 	}
 
 	.bulk-actions button {
 		padding: 0.5rem 1rem;
-		background-color: var(--fg-muted);
-		color: white;
-		border: none;
-		border-radius: 4px;
+		background-color: var(--bg-tertiary);
+		color: var(--fg-primary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 
@@ -116,9 +119,10 @@
 		max-height: 300px;
 		overflow-y: auto;
 		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		padding: 0.5rem;
 		margin-bottom: 1rem;
+		background-color: var(--bg-primary);
 	}
 
 	.column-item {
@@ -126,11 +130,11 @@
 		align-items: center;
 		padding: 0.5rem;
 		cursor: pointer;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 	}
 
 	.column-item:hover {
-		background-color: var(--bg-tertiary);
+		background-color: var(--bg-hover);
 	}
 
 	.column-item input[type='checkbox'] {
@@ -141,19 +145,21 @@
 	.column-name {
 		font-weight: 500;
 		margin-right: 0.5rem;
+		color: var(--fg-primary);
 	}
 
 	.column-type {
-		color: var(--fg-muted);
+		color: var(--fg-tertiary);
 		font-size: 0.875rem;
 	}
 
 	.selected-summary {
 		padding: 1rem;
 		background-color: var(--warning-bg);
-		border: 1px solid #ffc107;
-		border-radius: 4px;
+		border: 1px solid var(--warning-border);
+		border-radius: var(--radius-sm);
 		margin-bottom: 1rem;
+		color: var(--warning-fg);
 	}
 
 	.selected-names {
@@ -164,11 +170,11 @@
 
 	.warning-box {
 		padding: 1rem;
-		background-color: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		background-color: var(--panel-muted-bg);
+		border: 1px solid var(--panel-muted-border);
+		border-radius: var(--radius-sm);
 		margin-bottom: 1rem;
-		color: var(--fg-muted);
+		color: var(--fg-tertiary);
 	}
 
 	button:hover {

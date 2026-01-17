@@ -101,17 +101,35 @@
 	--card-border: var(--border-primary);
 	--card-shadow: var(--shadow-soft);
 
-	--input-bg: var(--bg-primary);
-	--input-border: var(--border-secondary);
-	--input-focus-border: var(--border-focus);
-	--input-hover-border: var(--border-tertiary);
+	--panel-bg: var(--bg-primary);
+	--panel-border: var(--border-primary);
+	--panel-muted-bg: var(--bg-tertiary);
+	--panel-muted-border: var(--border-primary);
+	--panel-header-bg: var(--bg-tertiary);
+	--panel-header-fg: var(--fg-primary);
+	--panel-shadow: var(--shadow-soft);
+
+	--form-section-bg: var(--bg-tertiary);
+	--form-section-border: var(--border-primary);
+	--form-help-bg: var(--bg-primary);
+	--form-help-border: var(--border-secondary);
+	--form-help-accent: var(--info-border);
+	--form-control-bg: var(--input-bg);
+	--form-control-border: var(--input-border);
 
 	--table-header-bg: var(--bg-tertiary);
 	--table-row-hover: var(--bg-hover);
+	--table-row-alt: var(--bg-secondary);
 	--table-border: var(--border-primary);
+
+	--badge-bg: var(--bg-tertiary);
+	--badge-border: var(--border-primary);
+	--badge-fg: var(--fg-tertiary);
 
 	--overlay-bg: rgba(0, 0, 0, 0.55);
 	--dialog-bg: var(--bg-primary);
+	--dialog-border: var(--border-primary);
+	--dialog-header-bg: var(--bg-tertiary);
 	--dialog-shadow: var(--shadow-strong);
 }
 

@@ -162,33 +162,37 @@
 <style>
 	.groupby-config {
 		padding: 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		background-color: var(--panel-bg);
 	}
 
 	h3 {
 		margin-top: 0;
 		margin-bottom: 1rem;
+		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
 		margin-bottom: 0.75rem;
 		font-size: 1rem;
+		color: var(--fg-secondary);
 	}
 
 	.section {
 		margin-bottom: 1.5rem;
 		padding: 1rem;
-		background-color: var(--bg-tertiary);
-		border-radius: 4px;
+		background-color: var(--form-section-bg);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--form-section-border);
 	}
 
 	.column-list {
 		max-height: 200px;
 		overflow-y: auto;
 		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		padding: 0.5rem;
 		background-color: var(--bg-primary);
 	}
@@ -198,11 +202,11 @@
 		align-items: center;
 		padding: 0.5rem;
 		cursor: pointer;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 	}
 
 	.column-item:hover {
-		background-color: var(--bg-tertiary);
+		background-color: var(--bg-hover);
 	}
 
 	.column-item input[type='checkbox'] {
@@ -213,48 +217,58 @@
 	.selected-info {
 		margin-top: 0.5rem;
 		padding: 0.5rem;
-		background-color: var(--accent-bg);
-		border-radius: 4px;
+		background-color: var(--info-bg);
+		border: 1px solid var(--info-border);
+		border-radius: var(--radius-sm);
 		font-size: 0.875rem;
+		color: var(--info-fg);
 	}
 
 	.add-aggregation {
 		display: flex;
 		gap: 0.5rem;
 		margin-bottom: 1rem;
+		flex-wrap: wrap;
 	}
 
 	.add-aggregation select,
 	.add-aggregation input {
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		border: 1px solid var(--form-control-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--form-control-bg);
+		color: var(--fg-primary);
 	}
 
 	.add-aggregation select:first-child {
 		flex: 2;
+		min-width: 160px;
 	}
 
 	.add-aggregation select:nth-child(2) {
 		flex: 1;
+		min-width: 120px;
 	}
 
 	.add-aggregation input {
 		flex: 2;
+		min-width: 160px;
 	}
 
 	.add-aggregation button {
 		padding: 0.5rem 1rem;
-		background-color: var(--success-fg);
-		color: white;
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 	}
 
 	.add-aggregation button:disabled {
-		background-color: var(--border-primary);
+		background-color: var(--bg-muted);
 		cursor: not-allowed;
+		color: var(--fg-muted);
+		border: 1px solid var(--border-secondary);
 	}
 
 	.aggregations-list {
@@ -268,22 +282,23 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: 0.75rem;
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: 4px;
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
 	}
 
 	.agg-details {
-		font-family: monospace;
+		font-family: var(--font-mono);
 		font-size: 0.875rem;
+		color: var(--fg-primary);
 	}
 
 	.aggregation-item button {
 		padding: 0.25rem 0.75rem;
-		background-color: var(--error-fg);
-		color: white;
-		border: none;
-		border-radius: 4px;
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 0.875rem;
 	}

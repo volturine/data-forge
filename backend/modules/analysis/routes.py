@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from modules.analysis import schemas, service
 
-router = APIRouter(prefix='/api/v1/analysis', tags=['analysis'])
+router = APIRouter(prefix='/analysis', tags=['analysis'])
 
 
 @router.post('', response_model=schemas.AnalysisResponseSchema)

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analysisStore } from './analysis.svelte';
 import * as analysisApi from '$lib/api/analysis';
+import { schemaCalculator } from '$lib/utils/schema';
 import type { Analysis, PipelineStep } from '$lib/types/analysis';
 import type { SchemaInfo } from '$lib/types/datasource';
 
@@ -153,10 +154,12 @@ describe('analysis.svelte store', () => {
 		});
 
 		it('should update a step config', () => {
+			const invalidateSpy = vi.spyOn(schemaCalculator, 'invalidateCache');
 			analysisStore.updateStep('step-1', { config: { conditions: [{ column: 'age' }] } });
 
 			const updatedStep = analysisStore.pipeline.find((s) => s.id === 'step-1');
 			expect(updatedStep?.config).toEqual({ conditions: [{ column: 'age' }] });
+			expect(invalidateSpy).toHaveBeenCalledWith(analysisStore.pipeline, ['step-1']);
 		});
 
 		it('should update step type', () => {
