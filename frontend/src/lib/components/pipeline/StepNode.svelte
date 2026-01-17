@@ -132,12 +132,12 @@
 <style>
 	.step-node {
 		position: relative;
-		width: 100%;
+		width: min(55%, 640px);
 	}
 
 	.step-node.view-node {
-		max-width: 100%;
-		width: min(75%, 960px);
+		max-width: 75%;
+		width: 75%;
 		min-width: 320px;
 	}
 

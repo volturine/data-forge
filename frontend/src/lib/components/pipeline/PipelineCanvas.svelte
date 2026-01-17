@@ -238,12 +238,12 @@
 		align-items: center;
 		gap: 0;
 		width: 100%;
-		max-width: 960px;
+		max-width: 100%;
 		margin: 0 auto;
 	}
 
 	.drop-target {
-		width: min(75%, 480px);
+		width: min(55%, 480px);
 		height: 36px;
 		display: flex;
 		align-items: center;
