@@ -5,11 +5,22 @@ export interface PipelineStep {
 	depends_on: string[];
 }
 
+export type AnalysisTabType = 'datasource' | 'derived';
+
+export interface AnalysisTab {
+	id: string;
+	name: string;
+	type: AnalysisTabType;
+	parent_id: string | null;
+	datasource_id: string | null;
+}
+
 export interface AnalysisCreate {
 	name: string;
 	description?: string | null;
 	datasource_ids: string[];
 	pipeline_steps: PipelineStep[];
+	tabs: AnalysisTab[];
 }
 
 export interface AnalysisUpdate {
@@ -17,6 +28,7 @@ export interface AnalysisUpdate {
 	description?: string | null;
 	pipeline_steps?: PipelineStep[] | null;
 	status?: string | null;
+	tabs?: AnalysisTab[] | null;
 }
 
 export interface Analysis {
@@ -29,6 +41,7 @@ export interface Analysis {
 	updated_at: string;
 	result_path: string | null;
 	thumbnail: string | null;
+	tabs: AnalysisTab[];
 }
 
 export interface AnalysisGalleryItem {

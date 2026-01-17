@@ -3,6 +3,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
+	import type { AnalysisCreate } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
 
 	let step = $state(1);
@@ -35,12 +36,21 @@
 		error = '';
 
 		try {
-			const analysis = await createAnalysis({
+			const payload = {
 				name: name.trim(),
 				description: description.trim() || null,
 				datasource_ids: selectedDatasourceIds,
-				pipeline_steps: []
-			});
+				pipeline_steps: [],
+				tabs: selectedDatasourceIds.map((datasourceId, index) => ({
+					id: `tab-${datasourceId}`,
+					name: `Source ${index + 1}`,
+					type: 'datasource',
+					parent_id: null,
+					datasource_id: datasourceId
+				}))
+			};
+
+			const analysis = await createAnalysis(payload as AnalysisCreate);
 
 			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
 		} catch (err) {

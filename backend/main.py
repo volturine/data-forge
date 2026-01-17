@@ -8,7 +8,6 @@ from core.config import settings
 from core.database import init_db
 from api import router
 from modules.compute.manager import get_manager
-from modules.health.routes import router as health_router
 
 # Configure logging
 logging.basicConfig(

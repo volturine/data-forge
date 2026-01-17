@@ -190,6 +190,20 @@ async def link_datasource(
         analysis.pipeline_definition['datasource_ids'] = analysis.pipeline_definition.get('datasource_ids', []) + [datasource_id]
         analysis.updated_at = datetime.now(UTC)
 
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    if not any(tab.get('datasource_id') == datasource_id for tab in tabs):
+        tabs.append(
+            {
+                'id': f'tab-{datasource_id}',
+                'name': f'Source {len(tabs) + 1}',
+                'type': 'datasource',
+                'parent_id': None,
+                'datasource_id': datasource_id,
+            }
+        )
+        analysis.pipeline_definition['tabs'] = tabs
+        analysis.updated_at = datetime.now(UTC)
+
     await session.commit()
 
 
@@ -219,6 +233,12 @@ async def unlink_datasource(
     if datasource_id in datasource_ids:
         datasource_ids.remove(datasource_id)
         analysis.pipeline_definition['datasource_ids'] = datasource_ids
+        analysis.updated_at = datetime.now(UTC)
+
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    next_tabs = [tab for tab in tabs if tab.get('datasource_id') != datasource_id]
+    if len(next_tabs) != len(tabs):
+        analysis.pipeline_definition['tabs'] = next_tabs
         analysis.updated_at = datetime.now(UTC)
 
     await session.commit()

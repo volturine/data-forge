@@ -6,6 +6,14 @@
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema } from '$lib/api/datasource';
 	import type { PipelineStep } from '$lib/types/analysis';
+
+	type AnalysisTab = {
+		id: string;
+		name: string;
+		type: 'datasource' | 'derived';
+		parent_id: string | null;
+		datasource_id: string | null;
+	};
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
@@ -17,6 +25,8 @@
 	let saveStatus = $state<'saved' | 'unsaved' | 'saving'>('saved');
 	let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 	let initialPipeline: PipelineStep[] | null = null;
+	let initialTabs: AnalysisTab[] | null = null;
+	let tabName = $state('');
 
 	let isLoadingSchema = $state(false);
 	let selectedLibraryType = $state<string | null>(null);
@@ -24,6 +34,12 @@
 	const store = analysisStore as unknown as {
 		insertStep: (step: PipelineStep, index: number, parentId: string | null, nextId: string | null) => boolean;
 		addBranchStep: (step: PipelineStep, parentId: string | null) => void;
+		setActiveTab: (id: string) => void;
+		addTab: (tab: AnalysisTab) => void;
+		updateTab: (id: string, updates: Partial<AnalysisTab>) => void;
+		removeTab: (id: string) => void;
+		activeTab: AnalysisTab | null;
+		tabs: AnalysisTab[];
 	};
 
 	const analysisQuery = createQuery(() => ({
@@ -110,6 +126,47 @@
 		selectedStepId = stepId;
 	}
 
+	function handleSelectTab(tabId: string) {
+		store.setActiveTab(tabId);
+	}
+
+	function getTabLabel(tab: AnalysisTab): string {
+		if (tab.type !== 'derived' || !tab.parent_id) {
+			return tab.name;
+		}
+		const parent = store.tabs.find((item: AnalysisTab) => item.id === tab.parent_id);
+		if (!parent) {
+			return tab.name;
+		}
+		return `${parent.name} → ${tab.name}`;
+	}
+
+	function handleAddDerived() {
+		const current = store.activeTab;
+		if (!current) {
+			return;
+		}
+		const count = store.tabs.filter((tab: AnalysisTab) => tab.type === 'derived').length + 1;
+		const tab: AnalysisTab = {
+			id: makeId(),
+			name: `Derived ${count}`,
+			type: 'derived',
+			parent_id: current.id,
+			datasource_id: null
+		};
+		store.addTab(tab);
+		tabName = tab.name;
+	}
+
+	function handleTabName(value: string) {
+		const current = store.activeTab;
+		if (!current) {
+			return;
+		}
+		store.updateTab(current.id, { name: value });
+		tabName = value;
+	}
+
 	function handleDeleteStep(stepId: string) {
 		analysisStore.removeStep(stepId);
 		if (selectedStepId === stepId) {
@@ -161,14 +218,25 @@
 	});
 
 	$effect(() => {
-		const pipeline = analysisStore.pipeline;
+		const current = store.activeTab;
+		if (!current) {
+			tabName = '';
+			return;
+		}
+		tabName = current.name;
+	});
 
-		if (initialPipeline === null) {
+	$effect(() => {
+		const pipeline = analysisStore.pipeline;
+		const tabs = store.tabs;
+
+		if (initialPipeline === null && initialTabs === null) {
 			initialPipeline = pipeline;
+			initialTabs = tabs;
 			return;
 		}
 
-		if (pipeline === initialPipeline) {
+		if (pipeline === initialPipeline && tabs === initialTabs) {
 			return;
 		}
 
@@ -263,6 +331,44 @@
 				</button>
 			</div>
 		</header>
+
+		<div class="analysis-tabs">
+			<div class="tabs">
+				{#each store.tabs as tab (tab.id)}
+					<button
+						class="tab"
+						class:active={store.activeTab?.id === tab.id}
+						onclick={() => handleSelectTab(tab.id)}
+						type="button"
+					>
+						{getTabLabel(tab)}
+					</button>
+				{/each}
+				{#if store.activeTab?.type === 'derived' && store.activeTab?.id}
+					<button
+					class="tab"
+					onclick={() => store.activeTab?.id && store.removeTab(store.activeTab.id)}
+					type="button"
+				>
+					Remove
+				</button>
+				{/if}
+				<button class="tab" onclick={handleAddDerived} type="button">
+					+ Derived
+				</button>
+			</div>
+			{#if store.activeTab}
+				<div class="tab-settings">
+					<label for="tab-name">Tab name</label>
+					<input
+						id="tab-name"
+						type="text"
+						value={tabName}
+						oninput={(event) => handleTabName(event.currentTarget.value)}
+					/>
+				</div>
+			{/if}
+		</div>
 
 		<div class="editor-workspace">
 			<StepLibrary
@@ -487,6 +593,66 @@
 	.btn-secondary:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.analysis-tabs {
+		padding: 0 var(--space-5);
+	}
+
+	.tabs {
+		display: flex;
+		gap: var(--space-3);
+		border-bottom: 1px solid var(--border-primary);
+		padding-bottom: var(--space-2);
+		margin-bottom: var(--space-3);
+		flex-wrap: wrap;
+	}
+
+	.tab {
+		padding: var(--space-2) var(--space-3);
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		cursor: pointer;
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
+		font-family: var(--font-mono);
+		transition: all var(--transition-fast);
+	}
+
+	.tab:hover {
+		color: var(--fg-secondary);
+	}
+
+	.tab.active {
+		color: var(--accent-primary);
+		border-bottom-color: var(--accent-primary);
+	}
+
+	.tab-settings {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		margin-bottom: var(--space-4);
+	}
+
+	.tab-settings label {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.tab-settings input {
+		flex: 1;
+		max-width: 320px;
+		padding: var(--space-2);
+		border: 1px solid var(--border-secondary);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-primary);
+		color: var(--fg-primary);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
 	}
 
 	.editor-workspace {

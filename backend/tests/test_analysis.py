@@ -21,6 +21,15 @@ class TestAnalysisCreate:
                     'depends_on': [],
                 }
             ],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': sample_datasource.id,
+                }
+            ],
         }
 
         response = await client.post('/api/v1/analysis', json=payload)
@@ -38,6 +47,7 @@ class TestAnalysisCreate:
         assert 'pipeline_definition' in result
         assert len(result['pipeline_definition']['steps']) == 1
         assert result['pipeline_definition']['datasource_ids'] == [sample_datasource.id]
+        assert result['tabs'][0]['datasource_id'] == sample_datasource.id
 
     async def test_create_analysis_with_multiple_datasources(self, client: AsyncClient, sample_datasources: list[DataSource]):
         datasource_ids = [ds.id for ds in sample_datasources]
@@ -53,6 +63,22 @@ class TestAnalysisCreate:
                     'config': {'left': datasource_ids[0], 'right': datasource_ids[1], 'on': 'id'},
                     'depends_on': [],
                 }
+            ],
+            'tabs': [
+                {
+                    'id': 'tab-left',
+                    'name': 'Left Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': datasource_ids[0],
+                },
+                {
+                    'id': 'tab-right',
+                    'name': 'Right Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': datasource_ids[1],
+                },
             ],
         }
 
@@ -70,6 +96,7 @@ class TestAnalysisCreate:
             'description': 'Test',
             'datasource_ids': ['non-existent-id'],
             'pipeline_steps': [],
+            'tabs': [],
         }
 
         response = await client.post('/api/v1/analysis', json=payload)
@@ -82,6 +109,15 @@ class TestAnalysisCreate:
             'name': 'Analysis Without Description',
             'datasource_ids': [sample_datasource.id],
             'pipeline_steps': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': sample_datasource.id,
+                }
+            ],
         }
 
         response = await client.post('/api/v1/analysis', json=payload)
@@ -91,6 +127,7 @@ class TestAnalysisCreate:
 
         assert result['name'] == 'Analysis Without Description'
         assert result['description'] is None
+        assert result['tabs']
 
     async def test_create_analysis_with_complex_pipeline(self, client: AsyncClient, sample_datasource: DataSource):
         payload = {
@@ -116,6 +153,15 @@ class TestAnalysisCreate:
                     'config': {'column': 'age', 'descending': True},
                     'depends_on': ['step2'],
                 },
+            ],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': sample_datasource.id,
+                }
             ],
         }
 
@@ -192,7 +238,7 @@ class TestAnalysisList:
 @pytest.mark.asyncio
 class TestAnalysisUpdate:
     async def test_update_analysis_name(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {'name': 'Updated Analysis Name'}
+        payload = {'name': 'Updated Analysis Name', 'tabs': []}
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
@@ -203,7 +249,7 @@ class TestAnalysisUpdate:
         assert result['description'] == sample_analysis.description
 
     async def test_update_analysis_description(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {'description': 'Updated description'}
+        payload = {'description': 'Updated description', 'tabs': []}
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
@@ -222,7 +268,16 @@ class TestAnalysisUpdate:
                     'config': {'column': 'age', 'operation': 'mean'},
                     'depends_on': [],
                 }
-            ]
+            ],
+            'tabs': [
+                {
+                    'id': 'tab-updated',
+                    'name': 'Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': sample_analysis.pipeline_definition['datasource_ids'][0],
+                }
+            ],
         }
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
@@ -233,9 +288,10 @@ class TestAnalysisUpdate:
         assert len(result['pipeline_definition']['steps']) == 1
         assert result['pipeline_definition']['steps'][0]['id'] == 'new_step'
         assert result['pipeline_definition']['steps'][0]['type'] == 'aggregate'
+        assert result['tabs']
 
     async def test_update_analysis_status(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {'status': 'completed'}
+        payload = {'status': 'completed', 'tabs': []}
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
@@ -249,6 +305,7 @@ class TestAnalysisUpdate:
             'name': 'Updated Name',
             'description': 'Updated Description',
             'status': 'running',
+            'tabs': [],
         }
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
@@ -261,7 +318,7 @@ class TestAnalysisUpdate:
         assert result['status'] == 'running'
 
     async def test_update_analysis_not_found(self, client: AsyncClient):
-        payload = {'name': 'Updated Name'}
+        payload = {'name': 'Updated Name', 'tabs': []}
 
         response = await client.put('/api/v1/analysis/non-existent-id', json=payload)
 
@@ -269,7 +326,7 @@ class TestAnalysisUpdate:
         assert 'not found' in response.json()['detail']
 
     async def test_update_analysis_empty_payload(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {}
+        payload = {'tabs': []}
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 

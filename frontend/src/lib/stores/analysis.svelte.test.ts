@@ -27,14 +27,34 @@ describe('analysis.svelte store', () => {
 					config: { columns: ['id', 'name'] },
 					depends_on: ['step-1']
 				}
+			],
+			datasource_ids: ['source-1'],
+			tabs: [
+				{
+					id: 'tab-1',
+					name: 'Source 1',
+					type: 'datasource',
+					parent_id: null,
+					datasource_id: 'source-1'
+				}
 			]
 		},
 		status: 'active',
 		created_at: '2024-01-15T10:00:00Z',
 		updated_at: '2024-01-16T15:30:00Z',
 		result_path: null,
-		thumbnail: null
+		thumbnail: null,
+		tabs: [
+			{
+				id: 'tab-1',
+				name: 'Source 1',
+				type: 'datasource',
+				parent_id: null,
+				datasource_id: 'source-1'
+			}
+		]
 	};
+
 
 	const mockSchema: SchemaInfo = {
 		columns: [
@@ -69,8 +89,10 @@ describe('analysis.svelte store', () => {
 		it('should handle empty pipeline definition', async () => {
 			const analysisWithoutSteps: Analysis = {
 				...mockAnalysis,
-				pipeline_definition: {}
+				pipeline_definition: {},
+				tabs: []
 			};
+
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(analysisWithoutSteps);
 
 			await analysisStore.loadAnalysis('test-456');
@@ -231,9 +253,13 @@ describe('analysis.svelte store', () => {
 						{ id: 'step-1', type: 'filter', config: {}, depends_on: [] },
 						{ id: 'step-2', type: 'select', config: {}, depends_on: [] },
 						{ id: 'step-3', type: 'sort', config: {}, depends_on: [] }
-					]
-				}
+					],
+					datasource_ids: ['source-1'],
+					tabs: mockAnalysis.tabs
+				},
+				tabs: mockAnalysis.tabs
 			};
+
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(analysisWithMultipleSteps);
 			await analysisStore.loadAnalysis('test-123');
 		});
@@ -276,7 +302,8 @@ describe('analysis.svelte store', () => {
 			await analysisStore.save();
 
 			expect(analysisApi.updateAnalysis).toHaveBeenCalledWith('test-123', {
-				pipeline_steps: analysisStore.pipeline
+				pipeline_steps: analysisStore.pipeline,
+				tabs: analysisStore.tabs
 			});
 			expect(analysisStore.current).toEqual(updatedAnalysis);
 			expect(analysisStore.loading).toBe(false);

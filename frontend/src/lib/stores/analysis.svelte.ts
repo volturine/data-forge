@@ -1,4 +1,4 @@
-import type { Analysis, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
+import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
@@ -7,9 +7,17 @@ import { schemaCalculator } from '$lib/utils/schema';
 export class AnalysisStore {
 	current = $state<Analysis | null>(null);
 	pipeline = $state<PipelineStep[]>([]);
+	tabs = $state<AnalysisTab[]>([]);
+	activeTabId = $state<string | null>(null);
 	sourceSchemas = $state(new Map<string, SchemaInfo>());
 	loading = $state(false);
 	error = $state<string | null>(null);
+
+	activeTab = $derived.by(() => {
+		const match = this.tabs.find((tab) => tab.id === this.activeTabId) ?? null;
+		if (match) return match;
+		return this.tabs[0] ?? null;
+	});
 
 	calculatedSchema = $derived.by(() => {
 		if (!this.pipeline.length || !this.sourceSchemas.size) return null;
@@ -37,12 +45,23 @@ export class AnalysisStore {
 			const analysis = await getAnalysis(id);
 			this.current = analysis;
 
-			// Extract pipeline steps from pipeline_definition
-			if (analysis.pipeline_definition && 'steps' in analysis.pipeline_definition) {
-				this.pipeline = analysis.pipeline_definition.steps as PipelineStep[];
-			} else {
-				this.pipeline = [];
+			const definition = analysis.pipeline_definition as {
+				steps?: PipelineStep[];
+				tabs?: AnalysisTab[];
+				datasource_ids?: string[];
+			};
+
+			const steps = definition?.steps ?? [];
+			this.pipeline = steps;
+
+					const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
+			if (tabs && tabs.length) {
+				this.setTabs(tabs);
+				return;
 			}
+
+			const defaults = this.buildTabs(definition?.datasource_ids ?? []);
+			this.setTabs(defaults);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to load analysis';
 			throw err;
@@ -54,6 +73,34 @@ export class AnalysisStore {
 	addStep(step: PipelineStep): void {
 		this.pipeline = [...this.pipeline, step];
 		schemaCalculator.invalidateCache(this.pipeline, [step.id]);
+	}
+
+	setTabs(tabs: AnalysisTab[]): void {
+		this.tabs = tabs;
+		if (this.activeTabId && tabs.some((tab) => tab.id === this.activeTabId)) {
+			return;
+		}
+		this.activeTabId = tabs[0]?.id ?? null;
+	}
+
+	setActiveTab(id: string): void {
+		this.activeTabId = id;
+	}
+
+	addTab(tab: AnalysisTab): void {
+		this.tabs = [...this.tabs, tab];
+		this.activeTabId = tab.id;
+	}
+
+	removeTab(id: string): void {
+		this.tabs = this.tabs.filter((tab) => tab.id !== id);
+		if (this.activeTabId === id) {
+			this.activeTabId = this.tabs[0]?.id ?? null;
+		}
+	}
+
+	updateTab(id: string, updates: Partial<AnalysisTab>): void {
+		this.tabs = this.tabs.map((tab) => (tab.id === id ? { ...tab, ...updates } : tab));
 	}
 
 	insertStep(
@@ -126,11 +173,17 @@ export class AnalysisStore {
 
 		try {
 			const update: AnalysisUpdate = {
-				pipeline_steps: this.pipeline
+				pipeline_steps: this.pipeline,
+				tabs: this.tabs
 			};
 
 			const updated = await updateAnalysis(this.current.id, update);
 			this.current = updated;
+			const tabs = updated.tabs ?? [];
+			if (tabs.length) {
+				this.tabs = tabs;
+				this.activeTabId = this.tabs[0]?.id ?? null;
+			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to save analysis';
 			throw err;
@@ -153,10 +206,22 @@ export class AnalysisStore {
 	reset(): void {
 		this.current = null;
 		this.pipeline = [];
+		this.tabs = [];
+		this.activeTabId = null;
 		this.sourceSchemas.clear();
 		this.sourceSchemas = new Map();
 		this.error = null;
 		this.loading = false;
+	}
+
+	buildTabs(datasourceIds: string[]): AnalysisTab[] {
+		return datasourceIds.map((datasourceId, index) => ({
+			id: `tab-${datasourceId}`,
+			name: `Source ${index + 1}`,
+			type: 'datasource',
+			parent_id: null,
+			datasource_id: datasourceId
+		}));
 	}
 }
 

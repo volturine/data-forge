@@ -188,6 +188,15 @@ async def sample_analysis(test_db_session: AsyncSession, sample_datasource: Data
             }
         ],
         'datasource_ids': [sample_datasource.id],
+        'tabs': [
+            {
+                'id': 'tab1',
+                'name': 'Source',
+                'type': 'datasource',
+                'parent_id': None,
+                'datasource_id': sample_datasource.id,
+            }
+        ],
     }
 
     now = datetime.now(UTC)
@@ -232,6 +241,15 @@ async def sample_analyses(test_db_session: AsyncSession, sample_datasources: lis
                 }
             ],
             'datasource_ids': [sample_datasources[0].id],
+            'tabs': [
+                {
+                    'id': f'tab-{idx}',
+                    'name': 'Source',
+                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource_id': sample_datasources[0].id,
+                }
+            ],
         }
 
         now = datetime.now(UTC)

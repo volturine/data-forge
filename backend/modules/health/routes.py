@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from .schemas import HealthResponse
 from .service import get_health_status
 
-router = APIRouter()
+router = APIRouter(prefix='/health', tags=['health'])
 
 
 @router.get('/', response_model=HealthResponse)
