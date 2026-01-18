@@ -103,11 +103,11 @@ app.add_middleware(
 
 ### File Storage
 
-| Variable          | Type   | Default                       | Description                                            |
-| ----------------- | ------ | ----------------------------- | ------------------------------------------------------ |
-| `upload_dir`      | string | `{project_root}/data/uploads` | Directory for uploaded CSV/data files                  |
-| `results_dir`     | string | `{project_root}/data/results` | Directory for computation results and analysis outputs |
-| `exports_dir`     | string | `{project_root}/data/exports` | Directory for exported data files                      |
+| Variable          | Type    | Default                       | Description                                            |
+| ----------------- | ------- | ----------------------------- | ------------------------------------------------------ |
+| `upload_dir`      | string  | `{project_root}/data/uploads` | Directory for uploaded CSV/data files                  |
+| `results_dir`     | string  | `{project_root}/data/results` | Directory for computation results and analysis outputs |
+| `exports_dir`     | string  | `{project_root}/data/exports` | Directory for exported data files                      |
 | `max_upload_size` | integer | `10737418240` (10GB)          | Maximum file upload size in bytes                      |
 
 #### Details
@@ -233,7 +233,7 @@ CORS_ORIGINS=http://localhost:3000
 DEBUG=false
 UPLOAD_DIR=/app/data/uploads
 RESULTS_DIR=/app/data/results
-COMPUTE_TIMEOUT=600
+COMPUTE_TIMEOUT=300
 JOB_TTL=7200
 
 # Frontend
