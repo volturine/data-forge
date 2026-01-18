@@ -390,7 +390,11 @@ class PolarsComputeEngine:
             # Handle both single boolean and list of booleans for descending
             if isinstance(descending, list) and len(descending) != len(columns):
                 # Ensure descending list matches columns length
-                descending = descending[: len(columns)] if len(descending) > len(columns) else descending + [False] * (len(columns) - len(descending))
+                descending = (
+                    descending[: len(columns)]
+                    if len(descending) > len(columns)
+                    else descending + [False] * (len(columns) - len(descending))
+                )
             return lf.sort(columns, descending=descending)
 
         elif operation == 'rename':
@@ -433,6 +437,9 @@ class PolarsComputeEngine:
             operation_type = params.get('operation_type')
             new_column = params.get('new_column')
 
+            if not new_column:
+                raise ValueError('timeseries operation requires new_column parameter')
+
             if operation_type == 'extract':
                 component = params.get('component')
                 if component == 'year':
@@ -460,39 +467,21 @@ class PolarsComputeEngine:
                 value = params.get('value')
                 unit = params.get('unit', 'days')
 
-                if unit == 'days':
-                    duration = pl.duration(days=value)
-                elif unit == 'weeks':
-                    duration = pl.duration(weeks=value)
-                elif unit == 'hours':
-                    duration = pl.duration(hours=value)
-                elif unit == 'minutes':
-                    duration = pl.duration(minutes=value)
-                elif unit == 'seconds':
-                    duration = pl.duration(seconds=value)
+                if unit == 'months':
+                    return lf.with_columns(pl.col(column).dt.offset_by(f'{value}mo').alias(new_column))
                 else:
-                    raise ValueError(f'Unsupported time unit: {unit}')
-
-                return lf.with_columns((pl.col(column) + duration).alias(new_column))
+                    duration = pl.duration(**{unit: value})
+                    return lf.with_columns((pl.col(column) + duration).alias(new_column))
 
             elif operation_type == 'subtract':
                 value = params.get('value')
                 unit = params.get('unit', 'days')
 
-                if unit == 'days':
-                    duration = pl.duration(days=value)
-                elif unit == 'weeks':
-                    duration = pl.duration(weeks=value)
-                elif unit == 'hours':
-                    duration = pl.duration(hours=value)
-                elif unit == 'minutes':
-                    duration = pl.duration(minutes=value)
-                elif unit == 'seconds':
-                    duration = pl.duration(seconds=value)
+                if unit == 'months':
+                    return lf.with_columns(pl.col(column).dt.offset_by(f'-{value}mo').alias(new_column))
                 else:
-                    raise ValueError(f'Unsupported time unit: {unit}')
-
-                return lf.with_columns((pl.col(column) - duration).alias(new_column))
+                    duration = pl.duration(**{unit: value})
+                    return lf.with_columns((pl.col(column) - duration).alias(new_column))
 
             elif operation_type == 'diff':
                 column2 = params.get('column2')

@@ -493,7 +493,7 @@ Date/time manipulation.
         'column': 'date',
         'operation_type': 'add',
         'value': 7,
-        'unit': 'days',  # days, weeks, hours, minutes, seconds
+        'unit': 'days',  # days, weeks, months, hours, minutes, seconds
         'new_column': 'date_plus_week'
     }
 }

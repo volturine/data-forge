@@ -466,7 +466,7 @@ Apply string transformations.
 | `rstrip` | Remove trailing whitespace | - |
 | `length` | Get string length | - |
 | `slice` | Extract substring | `start`, `end` |
-| `replace` | Replace pattern | `pattern`, `replacement` |
+| `replace` | Replace all matching patterns | `pattern`, `replacement` |
 | `extract` | Extract with regex | `pattern`, `group_index` |
 | `split` | Split and get element | `delimiter`, `index` |
 
@@ -496,7 +496,7 @@ Apply string transformations.
 }
 ```
 
-**Replace Example:**
+**Replace Example (replaces all occurrences):**
 ```json
 {
     "operation": "string_transform",
@@ -509,6 +509,8 @@ Apply string transformations.
     }
 }
 ```
+
+All matching patterns are replaced globally.
 
 ## Time Series Operations
 
@@ -559,6 +561,7 @@ Add or subtract time duration.
 |------|-------------|
 | `days` | Calendar days |
 | `weeks` | Weeks |
+| `months` | Calendar months |
 | `hours` | Hours |
 | `minutes` | Minutes |
 | `seconds` | Seconds |
