@@ -139,10 +139,7 @@ docs/
 │   └── compute-engine/         # Compute engine docs
 │       ├── README.md
 │       ├── architecture.md
-│       ├── polars-engine.md
-│       ├── process-manager.md
 │       ├── operations.md
-│       ├── step-converter.md
 │       └── pipeline-execution.md
 │
 ├── frontend/                    # Frontend documentation
@@ -156,58 +153,34 @@ docs/
 │   │   ├── viewers/
 │   │   └── gallery/
 │   ├── state-management/       # State documentation
-│   │   ├── README.md
-│   │   ├── svelte-runes.md
-│   │   ├── analysis-store.md
-│   │   ├── datasource-store.md
-│   │   ├── compute-store.md
-│   │   ├── drag-store.md
-│   │   └── schema-calculator.md
+│   │   └── README.md
 │   └── api-client/             # API client documentation
-│       ├── README.md
-│       ├── client.md
-│       └── modules.md
+│       └── README.md
 │
 ├── api/                         # API documentation
 │   ├── README.md               # API overview
 │   ├── endpoints/              # Endpoint documentation
-│   │   ├── analysis.md
-│   │   ├── datasource.md
-│   │   ├── compute.md
-│   │   ├── results.md
-│   │   └── health.md
+│   │   └── README.md
 │   └── schemas/                # Schema documentation
-│       ├── README.md
-│       ├── analysis-schemas.md
-│       ├── datasource-schemas.md
-│       ├── compute-schemas.md
-│       └── operation-configs.md
+│       └── README.md
 │
 ├── guides/                      # User guides
 │   ├── README.md               # Guides index
 │   ├── getting-started.md      # Quick start
 │   ├── development-workflow.md # Dev workflow
+│   ├── creating-datasources.md # Adding data sources
+│   ├── building-pipelines.md   # Pipeline tutorial
 │   ├── testing.md              # Testing guide
-│   ├── deployment.md           # Deployment guide
-│   ├── adding-operations.md    # Extending operations
-│   └── building-pipelines.md   # Pipeline tutorial
+│   └── adding-operations.md    # Extending operations
 │
 ├── reference/                   # Reference documentation
 │   ├── README.md               # Reference index
 │   ├── configuration.md        # All configuration
 │   ├── type-definitions.md     # TypeScript types
-│   ├── polars-operations.md    # All operations
-│   ├── filter-operators.md     # Filter operators
-│   ├── aggregation-functions.md
-│   ├── string-methods.md
-│   └── timeseries-operations.md
+│   └── polars-operations.md    # All operations
 │
 └── contributing/                # Contribution guides
-    ├── README.md               # Contributing overview
-    ├── code-style.md           # Style guide
-    ├── architecture-decisions.md # ADRs
-    ├── pull-request-guide.md   # PR process
-    └── testing-guidelines.md   # Testing standards
+    └── README.md               # Contributing overview
 ```
 
 ---
@@ -295,7 +268,7 @@ For detailed setup instructions, see the [Getting Started Guide](./guides/gettin
 
 ## License
 
-MIT License - See [LICENSE](../LICENSE) for details.
+MIT License
 
 ---
 

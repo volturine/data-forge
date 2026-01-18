@@ -40,7 +40,7 @@
 	let safeConditions = $derived(Array.isArray(config?.conditions) ? config.conditions : [{ column: '', operator: '=', value: '' }]);
 	let safeLogic = $derived(config?.logic ?? 'AND');
 
-	const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains'];
+	const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains', 'starts_with', 'ends_with'];
 
 	function addCondition() {
 		config.conditions = [...safeConditions, { column: '', operator: '=', value: '' }];

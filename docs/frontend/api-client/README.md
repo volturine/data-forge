@@ -434,4 +434,4 @@ result.match(
 
 - [State Management](../state-management/README.md) - Store integration
 - [API Endpoints](../../api/endpoints/README.md) - Backend API docs
-- [Types](../types.md) - TypeScript type definitions
+- [Type Definitions](../../reference/type-definitions.md) - TypeScript type definitions

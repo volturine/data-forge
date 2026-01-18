@@ -134,7 +134,7 @@ describe.skip('FilterConfig', () => {
 				}
 			});
 
-			const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains'];
+			const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains', 'starts_with', 'ends_with'];
 			operators.forEach((op) => {
 				expect(screen.getByText(op)).toBeInTheDocument();
 			});

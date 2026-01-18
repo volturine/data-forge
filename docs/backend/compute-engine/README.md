@@ -11,51 +11,19 @@ The compute engine handles data transformation execution using isolated multipro
 | Document | Description |
 |----------|-------------|
 | [Architecture](./architecture.md) | Engine architecture and design |
+| [Engine](./engine.md) | PolarsComputeEngine implementation |
+| [Manager](./manager.md) | ProcessManager lifecycle management |
+| [Step Converter](./step-converter.md) | Frontend to backend format conversion |
 | [Operations](./operations.md) | Supported Polars operations |
 | [Pipeline Execution](./pipeline-execution.md) | Execution flow and DAG processing |
 
 ## Key Components
 
-### ProcessManager (Singleton)
+See individual documentation for each component:
 
-Manages the pool of compute engines:
-
-```python
-class ProcessManager:
-    _instance = None
-    _engines: dict[str, EngineInfo]
-
-    def spawn_engine(analysis_id) -> EngineInfo
-    def shutdown_engine(analysis_id) -> bool
-    def cleanup_idle_engines() -> list[str]
-    def shutdown_all() -> None
-```
-
-### PolarsComputeEngine (Subprocess)
-
-Executes Polars transformations in isolation:
-
-```python
-class PolarsComputeEngine:
-    command_queue: Queue  # Input commands
-    result_queue: Queue   # Output results
-    process: Process      # Subprocess handle
-
-    def execute(job_id, config, steps) -> str
-    def get_result(timeout=1.0) -> dict | None
-    def shutdown() -> None
-```
-
-### StepConverter
-
-Converts frontend format to backend format:
-
-```python
-def convert_step(step: dict) -> dict
-def convert_filter_config(step) -> dict
-def convert_groupby_config(step) -> dict
-# ... more converters
-```
+- [Engine](./engine.md) - PolarsComputeEngine subprocess implementation
+- [Manager](./manager.md) - ProcessManager singleton for lifecycle management
+- [Step Converter](./step-converter.md) - Frontend to backend format conversion
 
 ## Engine Lifecycle
 
@@ -131,6 +99,9 @@ engine_idle_timeout: int = 300  # 5 minutes - engines without keepalive are term
 
 ## See Also
 
+- [Engine](./engine.md) - PolarsComputeEngine details
+- [Manager](./manager.md) - ProcessManager details
+- [Step Converter](./step-converter.md) - Conversion details
 - [Architecture](./architecture.md) - Detailed architecture
 - [Operations](./operations.md) - All operations
 - [Compute Module](../modules/compute.md) - Routes and service
