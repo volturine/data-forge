@@ -173,11 +173,13 @@
 				ondrop={(e) => handleDrop(e, 0)}
 			>
 				<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length + 1} highlighted={hoverIndex === 0} />
-				{#if hoverIndex === 0 && canDrop}
-					<div class="insert-preview" class:invalid={!drag.valid}>
-						<span class="insert-label">{drag.type ?? 'step'}</span>
+				{#if canDrop}
+					<div class="drop-slot" class:active={hoverIndex === 0} class:invalid={hoverIndex === 0 && !drag.valid}>
+						{#if hoverIndex === 0}
+							<span class="slot-label">{drag.type ?? 'step'}</span>
+						{/if}
 					</div>
-					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length + 1} highlighted />
+					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length + 1} highlighted={hoverIndex === 0} />
 				{/if}
 			</div>
 
@@ -205,11 +207,13 @@
 					ondrop={(e) => handleDrop(e, i + 1)}
 				>
 					<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} highlighted={hoverIndex === i + 1} />
-					{#if hoverIndex === i + 1 && canDrop}
-						<div class="insert-preview" class:invalid={!drag.valid}>
-							<span class="insert-label">{drag.type ?? 'step'}</span>
+					{#if canDrop}
+						<div class="drop-slot" class:active={hoverIndex === i + 1} class:invalid={hoverIndex === i + 1 && !drag.valid}>
+							{#if hoverIndex === i + 1}
+								<span class="slot-label">{drag.type ?? 'step'}</span>
+							{/if}
 						</div>
-						<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} highlighted />
+						<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} highlighted={hoverIndex === i + 1} />
 					{/if}
 				</div>
 			{/each}
@@ -283,32 +287,46 @@
 		color: var(--accent-primary);
 	}
 
-	/* Insert preview - shows where the node will be inserted */
-	.insert-preview {
+	/* Drop slot - always visible during drag, highlights on hover */
+	.drop-slot {
 		width: min(55%, 480px);
-		padding: var(--space-3) var(--space-4);
-		background-color: var(--accent-soft);
-		border: 2px dashed var(--accent-primary);
+		padding: var(--space-2) var(--space-4);
+		background-color: transparent;
+		border: 2px dashed var(--fg-faint);
 		border-radius: var(--radius-md);
 		text-align: center;
-		animation: fadeIn 0.15s ease-out;
+		min-height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all var(--transition-fast);
 	}
 
-	.insert-preview.invalid {
-		background-color: var(--error-bg);
+	.drop-slot:hover {
+		border-color: var(--fg-muted);
+		background-color: var(--bg-hover);
+	}
+
+	.drop-slot.active {
+		border-color: var(--fg-primary);
+		background-color: var(--bg-tertiary);
+	}
+
+	.drop-slot.invalid {
 		border-color: var(--error-border);
+		background-color: var(--error-bg);
 	}
 
-	.insert-preview.invalid .insert-label {
-		color: var(--error-fg);
-	}
-
-	.insert-label {
+	.slot-label {
 		font-family: var(--font-mono);
 		font-size: var(--text-sm);
 		font-weight: 500;
-		color: var(--accent-primary);
+		color: var(--fg-primary);
 		text-transform: lowercase;
+	}
+
+	.drop-slot.invalid .slot-label {
+		color: var(--error-fg);
 	}
 
 	@keyframes fadeIn {
