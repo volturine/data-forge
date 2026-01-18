@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { X } from 'lucide-svelte';
+
 	interface Props {
 		show: boolean;
 		title: string;
@@ -69,16 +71,7 @@
 			<div class="dialog-header">
 				<h2 id="dialog-title">{title}</h2>
 				<button class="close-btn" onclick={onCancel} aria-label="Close dialog">
-					<svg
-						width="16"
-						height="16"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-					>
-						<path d="M18 6L6 18M6 6l12 12" />
-					</svg>
+					<X size={16} />
 				</button>
 			</div>
 

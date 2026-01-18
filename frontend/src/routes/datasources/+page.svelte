@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
+	import { Plus } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
 
 	const queryClient = useQueryClient();
@@ -55,16 +56,7 @@
 			<p class="subtitle">Manage your data connections and files</p>
 		</div>
 		<a href="/datasources/new" class="btn-new" data-sveltekit-reload>
-			<svg
-				width="16"
-				height="16"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="2"
-			>
-				<path d="M12 5v14M5 12h14" />
-			</svg>
+			<Plus size={16} />
 			Add Data Source
 		</a>
 	</header>

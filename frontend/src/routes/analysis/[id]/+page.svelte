@@ -5,6 +5,7 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
+	import { ArrowLeft } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -21,8 +22,6 @@
 	let isLoadingSchema = $state(false);
 	let showDatasourceModal = $state(false);
 	let searchQuery = $state('');
-	let editingTabId = $state<string | null>(null);
-	let editingTabName = $state('');
 
 	// Resizable panes
 	let leftPaneWidth = $state(240);
@@ -198,16 +197,6 @@
 		analysisStore.removeTab(tabId);
 	}
 
-	function startRenameTab(tab: AnalysisTab) {
-		editingTabId = tab.id;
-		editingTabName = tab.name;
-	}
-
-	function cancelRenameTab() {
-		editingTabId = null;
-		editingTabName = '';
-	}
-
 	function scheduleSave() {
 		if (saveTimeout) {
 			clearTimeout(saveTimeout);
@@ -227,17 +216,13 @@
 		}, 3000);
 	}
 
-	function commitRenameTab(tab: AnalysisTab) {
-		const nextName = editingTabName.trim();
-		if (!nextName) {
-			cancelRenameTab();
-			return;
-		}
-		if (nextName !== tab.name) {
-			analysisStore.updateTab(tab.id, { name: nextName });
-			scheduleSave();
-		}
-		cancelRenameTab();
+	function handleRenameSourceTab(nextName: string) {
+		const active = analysisStore.activeTab;
+		if (!active) return;
+		const trimmed = nextName.trim();
+		if (!trimmed || trimmed === active.name) return;
+		analysisStore.updateTab(active.id, { name: trimmed });
+		scheduleSave();
 	}
 
 	function openDatasourceModal() {
@@ -308,16 +293,7 @@
 					type="button"
 					aria-label="Go back to home"
 				>
-					<svg
-						width="16"
-						height="16"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-					>
-						<path d="M19 12H5M12 19l-7-7 7-7" />
-					</svg>
+					<ArrowLeft size={16} />
 				</button>
 				<div class="header-title">
 					<h1>{analysisQuery.data.name}</h1>
@@ -361,51 +337,22 @@
 						type="button"
 					>
 						<span class="tab-label">
-							{#if editingTabId === tab.id}
-								<input
-									class="tab-rename-input"
-									bind:value={editingTabName}
-									onclick={(e) => e.stopPropagation()}
-									onkeydown={(e) => {
-										if (e.key === 'Enter') commitRenameTab(tab);
-										if (e.key === 'Escape') cancelRenameTab();
-									}}
-									onblur={() => commitRenameTab(tab)}
-									aria-label="Rename tab"
-								/>
-							{:else}
-								<span class="tab-name">{tab.name}</span>
-							{/if}
+							<span class="tab-name">{tab.name}</span>
 						</span>
-						<span class="tab-actions">
+						{#if analysisStore.tabs.length > 1}
 							<span
-								class="tab-rename"
+								class="tab-remove"
 								onclick={(e) => {
 									e.stopPropagation();
-									startRenameTab(tab);
+									handleRemoveTab(tab.id);
 								}}
 								role="button"
 								tabindex="0"
-								onkeydown={(e) => e.key === 'Enter' && startRenameTab(tab)}
-								aria-label="Rename tab"
+								onkeydown={(e) => e.key === 'Enter' && handleRemoveTab(tab.id)}
 							>
-								✎
+								&times;
 							</span>
-							{#if analysisStore.tabs.length > 1}
-								<span
-									class="tab-remove"
-									onclick={(e) => {
-										e.stopPropagation();
-										handleRemoveTab(tab.id);
-									}}
-									role="button"
-									tabindex="0"
-									onkeydown={(e) => e.key === 'Enter' && handleRemoveTab(tab.id)}
-								>
-									&times;
-								</span>
-							{/if}
-						</span>
+						{/if}
 					</button>
 				{/each}
 				<button class="tab add-tab" onclick={openDatasourceModal} type="button"> + </button>
@@ -435,11 +382,13 @@
 					steps={analysisStore.pipeline}
 					{datasourceId}
 					datasource={currentDatasource}
+					tabName={analysisStore.activeTab?.name}
 					onStepClick={handleSelectStep}
 					onStepDelete={handleDeleteStep}
 					onInsertStep={handleInsertStep}
 					onMoveStep={handleMoveStep}
 					onChangeDatasource={openDatasourceModal}
+					onRenameTab={handleRenameSourceTab}
 				/>
 			</div>
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -756,43 +705,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		max-width: 180px;
-	}
-
-	.tab-rename-input {
-		width: 160px;
-		max-width: 220px;
-		padding: 2px 6px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border-secondary);
-		background-color: var(--bg-secondary);
-		color: var(--fg-primary);
-		font-family: var(--font-mono);
-		font-size: var(--text-sm);
-	}
-
-	.tab-rename-input:focus {
-		outline: none;
-		border-color: var(--accent-primary);
-	}
-
-	.tab-actions {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-	}
-
-	.tab-rename {
-		color: var(--fg-muted);
-		cursor: pointer;
-		font-size: var(--text-xs);
-		padding: 0;
-		line-height: 1;
-		opacity: 0.7;
-	}
-
-	.tab-rename:hover {
-		opacity: 1;
-		color: var(--fg-secondary);
 	}
 
 	.tab-remove {

@@ -75,6 +75,9 @@
 	// Is this node being dragged?
 	let isDragging = $state(false);
 
+	// Is another node being dragged (not this one)?
+	let isOtherDragging = $derived(drag.active && drag.stepId !== step.id);
+
 	function handleDragStart(event: DragEvent) {
 		isDragging = true;
 		if (event.dataTransfer) {
@@ -90,7 +93,12 @@
 	}
 </script>
 
-<div class="step-node" class:view-node={step.type === 'view'} class:dragging={isDragging}>
+<div
+	class="step-node"
+	class:view-node={step.type === 'view'}
+	class:dragging={isDragging}
+	class:drag-target={isOtherDragging}
+>
 	<div class="connection-point top"></div>
 
 	<div
@@ -248,5 +256,13 @@
 		background-color: var(--error-bg);
 		border-color: var(--error-border);
 		color: var(--error-fg);
+	}
+
+	/* When another node is being dragged */
+	.step-node.drag-target .step-content {
+		border-style: dashed;
+		border-color: var(--accent-primary);
+		opacity: 0.7;
+		transform: scale(0.98);
 	}
 </style>

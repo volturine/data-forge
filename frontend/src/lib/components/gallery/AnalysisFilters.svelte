@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Search, X } from 'lucide-svelte';
+
 	interface Props {
 		onSearch: (query: string) => void;
 		onSort: (sortOption: SortOption) => void;
@@ -31,18 +33,7 @@
 
 <div class="filters">
 	<div class="search-box">
-		<svg
-			class="search-icon"
-			width="16"
-			height="16"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-		>
-			<circle cx="11" cy="11" r="8" />
-			<path d="M21 21l-4.35-4.35" />
-		</svg>
+		<Search class="search-icon" size={16} />
 		<input
 			type="text"
 			placeholder="Search analyses..."
@@ -52,16 +43,7 @@
 		/>
 		{#if searchQuery}
 			<button class="clear-btn" onclick={clearSearch} aria-label="Clear search">
-				<svg
-					width="14"
-					height="14"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-				>
-					<path d="M18 6L6 18M6 6l12 12" />
-				</svg>
+				<X size={14} />
 			</button>
 		{/if}
 	</div>
@@ -93,7 +75,7 @@
 		max-width: 420px;
 	}
 
-	.search-icon {
+	.search-box :global(.search-icon) {
 		position: absolute;
 		left: var(--space-3);
 		top: 50%;

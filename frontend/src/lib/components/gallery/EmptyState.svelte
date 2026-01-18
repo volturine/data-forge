@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { LayoutGrid, Plus } from 'lucide-svelte';
 
 	function createNew() {
 		goto('/analysis/new', { invalidateAll: true });
@@ -8,33 +9,14 @@
 
 <div class="empty">
 	<div class="icon">
-		<svg
-			width="32"
-			height="32"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.5"
-		>
-			<rect x="3" y="3" width="18" height="18" rx="1" />
-			<path d="M3 9h18M9 3v18" />
-		</svg>
+		<LayoutGrid size={32} strokeWidth={1.5} />
 	</div>
 
 	<h2>No analyses yet</h2>
 	<p>Create your first analysis to get started with data exploration.</p>
 
 	<button class="btn-create" onclick={createNew}>
-		<svg
-			width="16"
-			height="16"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-		>
-			<path d="M12 5v14M5 12h14" />
-		</svg>
+		<Plus size={16} />
 		Create Analysis
 	</button>
 </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
+	import { BarChart3, Trash2 } from 'lucide-svelte';
 
 	interface Props {
 		analysis: AnalysisGalleryItem;
@@ -41,17 +42,7 @@
 			<img src={analysis.thumbnail} alt={analysis.name} />
 		{:else}
 			<div class="placeholder">
-				<svg
-					width="32"
-					height="32"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="1.5"
-				>
-					<rect x="3" y="3" width="18" height="18" rx="1" />
-					<path d="M3 15l6-6 4 4 8-8" />
-				</svg>
+				<BarChart3 size={32} strokeWidth={1.5} />
 			</div>
 		{/if}
 	</div>
@@ -60,17 +51,7 @@
 		<div class="header">
 			<h3>{analysis.name}</h3>
 			<button class="btn-delete" onclick={handleDelete} aria-label="Delete analysis">
-				<svg
-					width="14"
-					height="14"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-				>
-					<path d="M3 6h18M8 6V4h8v2M19 6v14H5V6" />
-					<path d="M10 11v6M14 11v6" />
-				</svg>
+				<Trash2 size={14} />
 			</button>
 		</div>
 

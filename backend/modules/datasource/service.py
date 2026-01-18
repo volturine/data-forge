@@ -139,7 +139,8 @@ async def _extract_schema(datasource: DataSource) -> SchemaInfo:
             raise ValueError(f'Unsupported file type: {file_type}')
 
         schema = df.collect_schema()
-        row_count = None
+        # Calculate row count for file datasources
+        row_count = df.select(pl.len()).collect().item()
 
         columns = [
             ColumnSchema(
