@@ -5,7 +5,22 @@
   "mcp": {
     "svelte": {
       "type": "remote",
-      "url": "https://mcp.svelte.dev/mcp"
-    }
-  }
+      "url": "https://mcp.svelte.dev/mcp",
+    },
+    "perplexity": {
+      "type": "local",
+      "command": ["npx", "-y", "@perplexity-ai/mcp-server"],
+      "environment": {
+        "PERPLEXITY_API_KEY": "token",
+        "PERPLEXITY_TIMEOUT_MS": "600000",
+      },
+      "enabled": true,
+    },
+    "playwright": {
+      "type": "remote",
+      "url": "http://192.168.1.201:8931/mcp",
+      "enabled": true,
+      "oauth": false,
+    },
+  },
 }
