@@ -42,9 +42,11 @@ export interface DropConfigData {
 }
 
 export interface JoinConfigData {
-	how: 'inner' | 'left' | 'right' | 'outer';
-	left_on: string[];
-	right_on: string[];
+	how: 'inner' | 'left' | 'right' | 'outer' | 'cross';
+	left_on: string | null;
+	right_on: string | null;
+	datasource_id: string;
+	suffix: string;
 }
 
 export interface ExpressionConfigData {

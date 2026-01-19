@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { analysisStore } from './analysis.svelte';
 import * as analysisApi from '$lib/api/analysis';
-import { schemaCalculator } from '$lib/utils/schema';
 import type { Analysis, PipelineStep } from '$lib/types/analysis';
 import type { SchemaInfo } from '$lib/types/datasource';
 
@@ -181,12 +180,10 @@ describe('analysis.svelte store', () => {
 		});
 
 		it('should update a step config', () => {
-			const invalidateSpy = vi.spyOn(schemaCalculator, 'invalidateCache');
 			analysisStore.updateStep('step-1', { config: { conditions: [{ column: 'age' }] } });
 
 			const updatedStep = analysisStore.pipeline.find((s) => s.id === 'step-1');
 			expect(updatedStep?.config).toEqual({ conditions: [{ column: 'age' }] });
-			expect(invalidateSpy).toHaveBeenCalledWith(analysisStore.pipeline, ['step-1']);
 		});
 
 		it('should update step type', () => {
@@ -366,20 +363,6 @@ describe('analysis.svelte store', () => {
 			expect(analysisStore.pipeline[1].depends_on).toEqual(['step-1']);
 		});
 
-		it('should invalidate cache for removed step and dependents', async () => {
-			const invalidateSpy = vi.spyOn(schemaCalculator, 'invalidateCache');
-			
-			// step-1 -> step-2
-			analysisStore.removeStep('step-1');
-
-			// Should be called with the new pipeline and affected step IDs
-			expect(invalidateSpy).toHaveBeenCalled();
-			const calls = invalidateSpy.mock.calls;
-			const lastCall = calls[calls.length - 1];
-			// The affected IDs should include step-1 and step-2 (dependent)
-			expect(lastCall[1]).toContain('step-1');
-			expect(lastCall[1]).toContain('step-2');
-		});
 	});
 
 	describe('reorderSteps', () => {

@@ -2,7 +2,7 @@ import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/t
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
-import { schemaCalculator } from '$lib/utils/schema';
+import { schemaStore } from '$lib/stores/schema.svelte';
 
 export class AnalysisStore {
 	current = $state<Analysis | null>(null);
@@ -43,7 +43,7 @@ export class AnalysisStore {
 			row_count: sourceSchema.row_count
 		};
 
-		return schemaCalculator.calculatePipelineSchema(baseSchema, steps);
+		return schemaStore.getLastOutput() ?? baseSchema;
 	});
 
 	async loadAnalysis(id: string): Promise<void> {
@@ -95,7 +95,6 @@ export class AnalysisStore {
 		if (!this.activeTab) return;
 		const newSteps = [...this.activeTab.steps, step];
 		this.updateTabSteps(this.activeTab.id, newSteps);
-		schemaCalculator.invalidateCache(newSteps, [step.id]);
 	}
 
 	setTabs(tabs: AnalysisTab[]): void {
@@ -167,8 +166,6 @@ export class AnalysisStore {
 
 		nextPipeline.splice(index, 0, step);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
-		const invalidated = nextId ? [step.id, nextId] : [step.id];
-		schemaCalculator.invalidateCache(nextPipeline, invalidated);
 		return true;
 	}
 
@@ -177,7 +174,6 @@ export class AnalysisStore {
 		step.depends_on = parentId ? [parentId] : [];
 		const newSteps = [...this.activeTab.steps, step];
 		this.updateTabSteps(this.activeTab.id, newSteps);
-		schemaCalculator.invalidateCache(newSteps, [step.id]);
 	}
 
 	updateStep(id: string, updates: Partial<PipelineStep>): void {
@@ -186,7 +182,6 @@ export class AnalysisStore {
 			step.id === id ? { ...step, ...updates } : step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
-		schemaCalculator.invalidateCache(nextPipeline, [id]);
 	}
 
 	/**
@@ -199,7 +194,6 @@ export class AnalysisStore {
 			step.id === id ? { ...step, config: { ...config } } : step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
-		schemaCalculator.invalidateCache(nextPipeline, [id]);
 	}
 
 	removeStep(id: string): void {
@@ -237,8 +231,7 @@ export class AnalysisStore {
 		}
 		
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
-		// Invalidate cache for affected steps using the NEW pipeline (after removal)
-		schemaCalculator.invalidateCache(nextPipeline, affectedIds);
+		// No cache invalidation needed - SchemaStore uses $derived
 	}
 
 	reorderSteps(fromIndex: number, toIndex: number): void {
@@ -302,7 +295,6 @@ export class AnalysisStore {
 		}
 
 		this.updateTabSteps(this.activeTab.id, steps);
-		schemaCalculator.invalidateCache(steps, [stepId]);
 		return true;
 	}
 

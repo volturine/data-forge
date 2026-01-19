@@ -1,8 +1,12 @@
+import type { Schema } from './schema';
+
 export interface PipelineStep {
 	id: string;
 	type: string;
 	config: Record<string, unknown>;
 	depends_on: string[];
+	inputSchema?: Schema;
+	outputSchema?: Schema;
 }
 
 export type AnalysisTabType = 'datasource' | 'derived';

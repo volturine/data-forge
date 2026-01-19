@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { createQuery, useQueryClient } from '@tanstack/svelte-query'
+	import { createQuery } from '@tanstack/svelte-query'
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute'
 	import type { TableCellValue } from '$lib/types/api-responses'
-	import { onMount } from 'svelte'
 
 	interface Props {
 		datasourceId: string
@@ -18,32 +17,9 @@
 
 	let { datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props()
 	let currentPage = $state(1)
-	
-	const queryClient = useQueryClient()
-	
-	// Use a version number that we increment when config changes
-	let configVersion = $state(0)
-	
-	// Track config changes by polling - bind:config mutations don't trigger Svelte reactivity
-	let lastHash = ''
-	onMount(() => {
-		const interval = setInterval(() => {
-			const hash = JSON.stringify(pipeline.map(s => ({ id: s.id, type: s.type, config: s.config })))
-			if (lastHash && hash !== lastHash) {
-				configVersion++
-				queryClient.invalidateQueries({ queryKey: ['step-preview', datasourceId, stepId] })
-			}
-			lastHash = hash
-		}, 500) // Check every 500ms
-		
-		// Initial hash
-		lastHash = JSON.stringify(pipeline.map(s => ({ id: s.id, type: s.type, config: s.config })))
-		
-		return () => clearInterval(interval)
-	})
-	
+
 	const query = createQuery(() => ({
-		queryKey: ['step-preview', datasourceId, stepId, currentPage],
+		queryKey: ['step-preview', datasourceId, stepId, currentPage, pipeline],
 		queryFn: async (): Promise<StepPreviewResponse> => {
 			return await previewStepData({
 				datasource_id: datasourceId,

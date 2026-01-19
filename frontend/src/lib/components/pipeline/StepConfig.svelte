@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
-	import type { Schema, Column } from '$lib/types/schema';
+	import type { Schema } from '$lib/types/schema';
 	import type {
 		FilterConfigData,
 		SelectConfigData,
@@ -23,8 +23,7 @@
 		ValueCountsConfigData,
 		UnpivotConfigData
 	} from '$lib/types/operation-config';
-	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { schemaCalculator } from '$lib/utils/schema';
+	import { schemaStore } from '$lib/stores/schema.svelte';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -57,79 +56,7 @@
 
 	let { step, schema, isLoadingSchema = false, onClose }: Props = $props();
 
-	let nonNullSchema = $derived<Schema>(schema || { columns: [], row_count: null });
-
-	// Calculate the INPUT schema BEFORE the current step transformation
-	let inputSchema = $derived.by(() => {
-		if (!step) {
-			return nonNullSchema;
-		}
-
-		// Get source schema for active tab's datasource
-		const activeTab = analysisStore.activeTab;
-		const datasourceId = activeTab?.datasource_id;
-		const sourceSchemas = analysisStore.sourceSchemas;
-		
-		if (!sourceSchemas.size) {
-			return { columns: [], row_count: null };
-		}
-
-		// Get the correct datasource schema for this tab
-		const schemaInfo = datasourceId 
-			? sourceSchemas.get(datasourceId) 
-			: sourceSchemas.values().next().value;
-		
-		if (!schemaInfo) {
-			return { columns: [], row_count: null };
-		}
-
-		// Convert SchemaInfo to Schema format
-		const baseSchema: Schema = {
-			columns: schemaInfo.columns.map((col) => ({
-				name: col.name,
-				dtype: col.dtype,
-				nullable: col.nullable
-			})),
-			row_count: schemaInfo.row_count
-		};
-
-		// Get all steps in the pipeline (for active tab)
-		const allSteps = analysisStore.pipeline;
-
-		// Check if this step has a parent dependency
-		const parentId = step.depends_on?.[0] ?? null;
-		
-		if (!parentId) {
-			// This is a root step with no dependencies, use base schema
-			return baseSchema;
-		}
-
-		// Find the parent step and all its ancestors to build the dependency chain
-		const dependencyChain: PipelineStep[] = [];
-		const stepMap = new Map(allSteps.map(s => [s.id, s]));
-		
-		// Build the chain of steps from root to parent (not including current step)
-		let currentId: string | null = parentId;
-		while (currentId) {
-			const currentStep = stepMap.get(currentId);
-			if (!currentStep) break;
-			dependencyChain.unshift(currentStep); // Add to front to maintain order
-			currentId = currentStep.depends_on?.[0] ?? null;
-		}
-
-		if (dependencyChain.length === 0) {
-			// Parent step not found, use base schema
-			return baseSchema;
-		}
-
-		// Calculate schema by applying the dependency chain
-		const calculatedInputSchema = schemaCalculator.calculatePipelineSchema(
-			baseSchema,
-			dependencyChain
-		);
-
-		return calculatedInputSchema || { columns: [], row_count: null };
-	});
+	let inputSchema = $derived(step ? schemaStore.getInput(step.id) ?? { columns: [], row_count: null } : { columns: [], row_count: null });
 
 	function handleClose() {
 		if (onClose) {
