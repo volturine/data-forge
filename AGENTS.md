@@ -8,6 +8,12 @@ Default Model: minimax m2.1 free
 
 ## General Guidelines
 
+As an autonomous agent you will:
+
+1. Call vibe_check after planning and before major actions.
+2. Provide the full user request and your current plan.
+3. Optionally, record resolved issues with vibe_learn.
+
 ### Backend (Python/FastAPI)
 
 - Use async/await for all database operations
