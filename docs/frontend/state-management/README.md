@@ -214,15 +214,56 @@ class ComputeStore {
 Manages drag-and-drop state for pipeline builder.
 
 ```typescript
-class DragStore {
-    isDragging = $state(false);
-    draggedItem = $state<DragItem | null>(null);
-    dropTarget = $state<DropTarget | null>(null);
+type DragSource = 'library' | 'canvas';
 
-    startDrag(item: DragItem): void;
-    setDropTarget(target: DropTarget): void;
-    endDrag(): void;
+interface DropTarget {
+    index: number;
+    parentId: string | null;
+    nextId: string | null;
 }
+
+class DragState {
+    type = $state<string | null>(null);        // Step type (for library drags)
+    stepId = $state<string | null>(null);      // Step ID (for canvas reorders)
+    source = $state<DragSource | null>(null);  // 'library' or 'canvas'
+    target = $state<DropTarget | null>(null);  // Current drop target
+    valid = $state(true);                      // Is target valid?
+
+    active = $derived(this.type !== null || this.stepId !== null);
+    isReorder = $derived(this.source === 'canvas' && this.stepId !== null);
+    isInsert = $derived(this.source === 'library' && this.type !== null);
+
+    start(type: string, source: DragSource): void;
+    startMove(stepId: string, type: string): void;
+    setTarget(target: DropTarget, valid: boolean): void;
+    clearTarget(): void;
+    end(): void;
+}
+
+export const drag = new DragState();
+```
+
+#### Usage
+
+```typescript
+// Library drag
+drag.start('filter', 'library');
+
+// Canvas reorder
+drag.startMove('step-uuid', 'filter');
+
+// Check drag state
+if (drag.isReorder) {
+    // Reordering existing step
+} else if (drag.isInsert) {
+    // Adding new step from library
+}
+
+// Update drop target
+drag.setTarget({ index: 2, parentId: 'prev-step', nextId: 'next-step' }, true);
+
+// End drag
+drag.end();
 ```
 
 ## Usage Patterns

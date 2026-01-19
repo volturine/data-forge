@@ -35,7 +35,7 @@ interface Props {
 
 - **Empty state**: Shows instructions when no steps exist
 - **Drop zones**: Visual indicators for valid drop targets
-- **Drag validation**: Prevents invalid step placements
+- **Drag validation**: Prevents invalid step placements based on dependencies
 - **Connection lines**: Visual links between steps
 
 #### Usage
@@ -73,7 +73,7 @@ interface DropTarget {
 
 **Location:** `frontend/src/lib/components/pipeline/StepNode.svelte`
 
-Individual step representation in the pipeline.
+Individual step representation in the pipeline with drag handle for reordering.
 
 #### Props
 
@@ -90,34 +90,63 @@ interface Props {
 
 #### Features
 
-- **Type display**: Shows operation type with monospace font
+- **Type display**: Shows operation type with icon and monospace font
 - **Config summary**: Brief description of step configuration
-- **Draggable**: Native HTML5 drag support
+- **Drag handle**: 6-dot grip icon for reordering
 - **Actions**: Edit and delete buttons
 - **View preview**: Inline data preview for `view` steps
 
-#### Configuration Summaries
+#### Step Type Icons
 
-The component generates human-readable summaries:
+Each step type displays a unique icon:
 
-| Type | Summary Example |
-|------|-----------------|
-| `filter` | "2 conditions" |
-| `select` | "5 columns" |
-| `groupby` | "2 keys, 3 agg" |
-| `sort` | "2 columns" |
-| other | "click to configure" |
+| Type | Icon |
+|------|------|
+| filter | 🔍 |
+| select | 📋 |
+| groupby | 📊 |
+| sort | ↕️ |
+| rename | ✏️ |
+| drop | 🗑️ |
+| join | 🔗 |
+| expression | 🧮 |
+| pivot | 🔄 |
+| unpivot | 🔃 |
+| fill_null | 🔧 |
+| deduplicate | 🧹 |
+| explode | 💥 |
+| timeseries | 📅 |
+| string_transform | 📝 |
+| sample | 🎲 |
+| limit | ✂️ |
+| topk | 🏆 |
+| null_count | ❓ |
+| value_counts | 📊 |
+| view | 👁️ |
+| export | 📤 |
 
 #### Drag Events
 
 ```typescript
 function handleDragStart(event: DragEvent) {
-    isDragging = true;
     event.dataTransfer.setData('application/x-pipeline-step', step.id);
+    event.dataTransfer.setData('text/plain', step.id);
     event.dataTransfer.effectAllowed = 'move';
-    drag.startMove(step.id, step.type);
+    // Custom drag image suppresses native ghost
+    if (dragPreviewEl) {
+        event.dataTransfer.setDragImage(dragPreviewEl, 0, 0);
+    }
+    requestAnimationFrame(() => {
+        isDragging = true;
+        drag.startMove(step.id, step.type);
+    });
 }
 ```
+
+#### Drag State
+
+- **Greyed out**: Node is being dragged (opacity 0.4, grayscale filter)
+- **Dashed border**: Valid drop target when another node is being dragged
 
 ---
 
@@ -130,11 +159,11 @@ Sidebar panel containing available operations.
 #### Features
 
 - **Categorized operations**: Grouped by function
-- **Draggable items**: Drag to canvas to add
-- **Search/filter**: Find operations quickly
+- **Draggable items**: Drag to canvas to add new steps
+- **Quick insert**: Fallback dropdown controls
 
 #### Categories
- 
+
 | Category | Operations |
 |----------|------------|
 | Filter | filter, limit, sample, topk |
@@ -147,14 +176,51 @@ Sidebar panel containing available operations.
 | Export | export |
 | View | view |
 
-
 #### Drag Initialization
 
 ```typescript
 function handleDragStart(event: DragEvent, type: string) {
+    event.dataTransfer.setData('application/x-pipeline-step', type);
     event.dataTransfer.setData('text/plain', type);
     event.dataTransfer.effectAllowed = 'copy';
-    drag.startInsert(type);
+    // Suppress native drag ghost
+    if (dragImageEl) {
+        event.dataTransfer.setDragImage(dragImageEl, 0, 0);
+    }
+    requestAnimationFrame(() => {
+        isDragging = true;
+        drag.start(type, 'library');
+    });
+}
+```
+
+---
+
+### DragPreview
+
+**Location:** `frontend/src/lib/components/pipeline/DragPreview.svelte`
+
+Global floating drag preview that follows cursor during drag operations.
+
+#### Features
+
+- **Floating preview**: Positioned 12px offset from cursor
+- **Type-specific**: Shows icon + label for the dragged item
+- **Reorder badge**: Displays "Move" badge when reordering existing steps
+- **Visual distinction**: Yellow border for reorders, blue for inserts
+
+#### Styling
+
+```css
+.drag-preview {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+.drag-preview.reorder {
+    border-color: #f59e0b;
+    background: #fef3c7;
 }
 ```
 
@@ -230,8 +296,22 @@ interface Props {
 #### Features
 
 - **Dynamic component**: Loads appropriate config component
-- **Schema awareness**: Passes column info to configs
+- **Schema awareness**: Uses dependency chain to calculate input schema
 - **Debounced save**: Auto-saves with delay
+
+#### Schema Calculation
+
+The component builds a dependency chain from root to the parent step:
+
+```typescript
+const parentId = step.depends_on?.[0] ?? null;
+// Walk up the dependency tree to build the chain
+while (currentId) {
+    const currentStep = stepMap.get(currentId);
+    dependencyChain.unshift(currentStep);
+    currentId = currentStep.depends_on?.[0] ?? null;
+}
+```
 
 #### Component Mapping
 
@@ -253,26 +333,51 @@ const configComponents: Record<string, Component> = {
 
 ### Drag Store
 
-Pipeline components use a shared drag store:
+**Location:** `frontend/src/lib/stores/drag.svelte.ts`
+
+Centralized drag state for pipeline operations.
 
 ```typescript
-// $lib/stores/drag.svelte.ts
-class DragStore {
-    active = $state(false);
-    type = $state<string | null>(null);
-    stepId = $state<string | null>(null);
-    target = $state<DropTarget | null>(null);
-    valid = $state(false);
-    isInsert = $derived(this.active && !this.stepId);
-    isReorder = $derived(this.active && !!this.stepId);
+class DragState {
+    type = $state<string | null>(null);        // Step type (for library drags)
+    stepId = $state<string | null>(null);      // Step ID (for canvas reorders)
+    source = $state<DragSource | null>(null);  // 'library' or 'canvas'
+    target = $state<DropTarget | null>(null);  // Current drop target
+    valid = $state(true);                      // Is target valid?
 
-    startInsert(type: string) { /* ... */ }
+    active = $derived(this.type !== null || this.stepId !== null);
+    isReorder = $derived(this.source === 'canvas' && this.stepId !== null);
+    isInsert = $derived(this.source === 'library' && this.type !== null);
+
+    start(type: string, source: DragSource) { /* ... */ }
     startMove(stepId: string, type: string) { /* ... */ }
     setTarget(target: DropTarget, valid: boolean) { /* ... */ }
     clearTarget() { /* ... */ }
     end() { /* ... */ }
 }
+
+export const drag = new DragState();
 ```
+
+#### Usage
+
+```typescript
+// Library drag
+drag.start('filter', 'library');
+
+// Canvas reorder
+drag.startMove('step-uuid', 'filter');
+
+// On drop
+if (drag.isReorder && drag.stepId) {
+    onMoveStep(drag.stepId, drag.target);
+} else if (drag.isInsert && drag.type) {
+    onInsertStep(drag.type, drag.target);
+}
+drag.end();
+```
+
+---
 
 ### Analysis Store
 
@@ -289,6 +394,9 @@ analysisStore.addStep(tabId, {
 
 // Moving a step
 analysisStore.moveStep(tabId, stepId, newIndex, newDependsOn);
+
+// Updating config
+analysisStore.updateStepConfig(stepId, newConfig);
 ```
 
 ---
@@ -322,15 +430,26 @@ Pipeline components use these design tokens:
 ### Animations
 
 ```css
+/* Drag handle */
+.drag-handle {
+    opacity: 0.4;
+    transition: opacity 0.15s;
+}
+
+.drag-handle:hover {
+    opacity: 1;
+}
+
+/* Node drag state */
+.step-node.greyed-out {
+    opacity: 0.4;
+    filter: grayscale(50%);
+}
+
 /* Drop slot activation */
 .drop-slot.active {
     border-color: var(--fg-primary);
     background-color: var(--bg-tertiary);
-}
-
-/* Node drag state */
-.step-node.dragging {
-    opacity: 0.5;
 }
 
 /* Hover lift */
@@ -347,6 +466,7 @@ Pipeline components use these design tokens:
 - **ARIA roles**: `role="list"`, `role="listitem"`
 - **Focus indicators**: Visible focus states
 - **Screen reader labels**: Descriptive button labels
+- **Drag handle**: Title attribute "Drag to reorder"
 
 ---
 
