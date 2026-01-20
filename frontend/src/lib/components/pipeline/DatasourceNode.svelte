@@ -125,7 +125,7 @@
 		<div class="info-row">
 			<div class="info-label">
 				<PanelLeft size={12} />
-				<span>Tab</span>
+				<span>Tab name</span>
 			</div>
 			<div class="info-value">
 				{#if isEditing}

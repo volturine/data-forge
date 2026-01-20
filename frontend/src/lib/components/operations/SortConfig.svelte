@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import { X, Plus } from 'lucide-svelte';
 
 	interface Props {
 		schema: Schema;
@@ -34,29 +35,11 @@
 		};
 	}
 
-	function toggleDirection(index: number) {
+	function setDirection(index: number, descending: boolean) {
 		config = {
 			...safeConfig,
-			descending: safeConfig.descending.map((d, i) => (i === index ? !d : d))
+			descending: safeConfig.descending.map((d, i) => (i === index ? descending : d))
 		};
-	}
-
-	function moveUp(index: number) {
-		if (index === 0) return;
-		const columns = [...safeConfig.columns];
-		const descending = [...safeConfig.descending];
-		[columns[index], columns[index - 1]] = [columns[index - 1], columns[index]];
-		[descending[index], descending[index - 1]] = [descending[index - 1], descending[index]];
-		config = { columns, descending };
-	}
-
-	function moveDown(index: number) {
-		if (index === safeConfig.columns.length - 1) return;
-		const columns = [...safeConfig.columns];
-		const descending = [...safeConfig.descending];
-		[columns[index], columns[index + 1]] = [columns[index + 1], columns[index]];
-		[descending[index], descending[index + 1]] = [descending[index + 1], descending[index]];
-		config = { columns, descending };
 	}
 
 	let availableColumns = $derived(
@@ -75,40 +58,66 @@
 			{/each}
 		</select>
 
-		<label class="direction-toggle">
-			<input type="checkbox" bind:checked={newDescending} />
-			<span>Descending</span>
-		</label>
+		<div class="direction-select">
+			<button
+				type="button"
+				class="dir-btn"
+				class:active={!newDescending}
+				onclick={() => (newDescending = false)}
+				title="Ascending"
+			>
+				<span class="sort-icon">▲</span>
+			</button>
+			<button
+				type="button"
+				class="dir-btn"
+				class:active={newDescending}
+				onclick={() => (newDescending = true)}
+				title="Descending"
+			>
+				<span class="sort-icon">▼</span>
+			</button>
+		</div>
 
-		<button type="button" onclick={addSortRule} disabled={!newColumn}> Add Sort Rule </button>
+		<button type="button" class="add-btn" onclick={addSortRule} disabled={!newColumn}>
+			<Plus size={16} />
+			Add
+		</button>
 	</div>
 
 	{#if safeConfig.columns.length > 0}
 		<div class="sort-rules">
-			<h4>Sort Order (top to bottom)</h4>
+			<h4>Sort Order</h4>
 			{#each safeConfig.columns as column, i (column)}
 				<div class="sort-rule-item">
-					<div class="rule-info">
-						<span class="rule-column">{column}</span>
-						<button type="button" class="direction-btn" onclick={() => toggleDirection(i)}>
-							{safeConfig.descending[i] ? '↓ DESC' : '↑ ASC'}
-						</button>
-					</div>
+					<span class="rule-column">{column}</span>
 
 					<div class="rule-actions">
-						<button type="button" onclick={() => moveUp(i)} disabled={i === 0} title="Move up">
-							↑
+						<button
+							type="button"
+							class="dir-btn"
+							class:active={!safeConfig.descending[i]}
+							onclick={() => setDirection(i, false)}
+							title="Ascending"
+						>
+							<span class="sort-icon">▲</span>
 						</button>
 						<button
 							type="button"
-							onclick={() => moveDown(i)}
-							disabled={i === safeConfig.columns.length - 1}
-							title="Move down"
+							class="dir-btn"
+							class:active={safeConfig.descending[i]}
+							onclick={() => setDirection(i, true)}
+							title="Descending"
 						>
-							↓
+							<span class="sort-icon">▼</span>
 						</button>
-						<button type="button" class="remove-btn" onclick={() => removeSortRule(i)}>
-							Remove
+						<button
+							type="button"
+							class="remove-btn"
+							onclick={() => removeSortRule(i)}
+							title="Remove"
+						>
+							<X size={14} />
 						</button>
 					</div>
 				</div>
@@ -151,6 +160,7 @@
 
 	.add-rule select {
 		flex: 2;
+		min-width: 200px;
 		padding: 0.5rem;
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
@@ -158,20 +168,49 @@
 		color: var(--fg-primary);
 	}
 
-	.direction-toggle {
+	.direction-select {
+		display: flex;
+		gap: 0;
+	}
+
+	.dir-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		padding: 0;
+		background-color: var(--bg-tertiary);
+		color: var(--fg-secondary);
+		border: 1px solid var(--border-primary);
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.dir-btn:first-child {
+		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+		border-right: none;
+	}
+
+	.dir-btn:last-child {
+		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	}
+
+	.dir-btn:hover:not(.active) {
+		background-color: var(--bg-secondary);
+		color: var(--fg-primary);
+	}
+
+	.dir-btn.active {
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-color: var(--accent-primary);
+	}
+
+	.add-btn {
 		display: flex;
 		align-items: center;
 		gap: 0.25rem;
-		cursor: pointer;
-		white-space: nowrap;
-		color: var(--fg-secondary);
-	}
-
-	.direction-toggle input[type='checkbox'] {
-		cursor: pointer;
-	}
-
-	.add-rule button {
 		padding: 0.5rem 1rem;
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
@@ -179,9 +218,10 @@
 		border-radius: var(--radius-sm);
 		cursor: pointer;
 		white-space: nowrap;
+		font-size: 0.875rem;
 	}
 
-	.add-rule button:disabled {
+	.add-btn:disabled {
 		background-color: var(--border-primary);
 		cursor: not-allowed;
 		color: var(--fg-muted);
@@ -199,7 +239,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0.75rem;
+		padding: 0.5rem 0.75rem;
 		background-color: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
@@ -210,54 +250,68 @@
 		margin-bottom: 0;
 	}
 
-	.rule-info {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-	}
-
 	.rule-column {
 		font-weight: 500;
-		font-size: 0.95rem;
-		color: var(--fg-primary);
-	}
-
-	.direction-btn {
-		padding: 0.25rem 0.75rem;
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
 		font-size: 0.875rem;
-		font-family: var(--font-mono);
+		color: var(--fg-primary);
 	}
 
 	.rule-actions {
 		display: flex;
+		align-items: center;
 		gap: 0.25rem;
 	}
 
 	.rule-actions button {
-		padding: 0.25rem 0.5rem;
-		background-color: var(--bg-tertiary);
-		color: var(--fg-primary);
-		border: 1px solid var(--border-primary);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		background-color: transparent;
+		color: var(--fg-secondary);
+		border: 1px solid transparent;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 0.875rem;
+		transition: all 0.15s ease;
+	}
+
+	.rule-actions button:hover:not(:disabled) {
+		background-color: var(--bg-tertiary);
+		color: var(--fg-primary);
 	}
 
 	.rule-actions button:disabled {
-		background-color: var(--bg-muted);
+		opacity: 0.4;
 		cursor: not-allowed;
-		color: var(--fg-muted);
 	}
 
-	.rule-actions .remove-btn {
-		background-color: var(--error-bg);
-		color: var(--error-fg);
-		border: 1px solid var(--error-border);
+	.rule-actions .dir-btn {
+		width: 28px;
+		height: 28px;
+		background-color: transparent;
+		color: var(--fg-secondary);
+	}
+
+	.rule-actions .dir-btn:hover:not(.active) {
+		background-color: var(--bg-tertiary);
+	}
+
+	.rule-actions .dir-btn.active {
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+	}
+
+	.sort-icon {
+		font-size: 0.875rem;
+		line-height: 1;
+	}
+
+	.remove-btn:hover {
+		background-color: var(--error-bg) !important;
+		color: var(--error-fg) !important;
+		border-color: var(--error-border) !important;
 	}
 
 	.empty-state {
@@ -268,9 +322,5 @@
 		border-radius: var(--radius-md);
 		margin-bottom: 1rem;
 		border: 1px solid var(--panel-muted-border);
-	}
-
-	button:hover:not(:disabled) {
-		opacity: 0.9;
 	}
 </style>
