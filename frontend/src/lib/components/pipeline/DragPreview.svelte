@@ -42,6 +42,19 @@
 			return;
 		}
 
+		const state = drag as typeof drag & {
+			touchActive: boolean;
+			pointerX: number | null;
+			pointerY: number | null;
+		};
+		if (state.touchActive) {
+			position =
+				state.pointerX !== null && state.pointerY !== null
+					? { x: state.pointerX, y: state.pointerY }
+					: null;
+			return;
+		}
+
 		function onDragOver(event: DragEvent) {
 			position = { x: event.clientX, y: event.clientY };
 		}

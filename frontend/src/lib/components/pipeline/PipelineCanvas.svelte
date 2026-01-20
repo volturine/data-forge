@@ -140,6 +140,52 @@
 
 		drag.end();
 	}
+
+	function resolveTargetFromPoint(x: number, y: number): DropTarget | null {
+		const zones = Array.from(document.querySelectorAll<HTMLElement>('.insert-zone'));
+		const entries = zones
+			.map((zone) => {
+				const raw = zone.dataset.index;
+				const index = raw ? Number(raw) : Number.NaN;
+				const rect = zone.getBoundingClientRect();
+				return {
+					index,
+					rect,
+					center: rect.top + rect.height / 2
+				};
+			})
+			.filter((item) => Number.isFinite(item.index));
+
+		const entry = entries.find((item) => y >= item.rect.top && y <= item.rect.bottom);
+		if (entry) return buildTarget(entry.index);
+
+		const sorted = entries
+			.filter((item) => Number.isFinite(item.center))
+			.sort((a, b) => a.center - b.center);
+
+		const fallback = sorted.find((item) => y < item.center) ?? sorted.at(-1);
+		if (!fallback) return null;
+
+		return buildTarget(fallback.index);
+	}
+
+	$effect(() => {
+		const state = drag as typeof drag & {
+			touchActive: boolean;
+			pointerX: number | null;
+			pointerY: number | null;
+		};
+		if (!state.active) return;
+		if (!state.touchActive) return;
+		if (state.pointerX === null || state.pointerY === null) return;
+		const target = resolveTargetFromPoint(state.pointerX, state.pointerY);
+		if (!target) {
+			state.clearTarget();
+			return;
+		}
+		const valid = isValidTarget(target.index);
+		state.setTarget(target, valid);
+	});
 </script>
 
 <div class="pipeline-canvas">
@@ -149,25 +195,26 @@
 			<h3>No pipeline steps</h3>
 			<p>Drag operations from the library and drop here</p>
 			<div
-				class="insert-zone drop-target empty-drop"
+				class="insert-zone empty-drop"
 				class:ready={canDrop}
 				class:active={hoverIndex === 0}
 				class:invalid={hoverIndex === 0 && !drag.valid}
 				role="button"
 				tabindex="0"
+				data-index="0"
 				ondragenter={(e) => handleDragEnter(e, 0)}
 				ondragover={handleDragOver}
 				ondragleave={handleDragLeave}
 				ondrop={(e) => handleDrop(e, 0)}
 			>
-					{#if steps.length > 0 || canDrop}
-						<ConnectionLine
-							fromStepIndex={-1}
-							toStepIndex={0}
-							totalSteps={steps.length + 1}
-							highlighted={hoverIndex === 0}
-						/>
-					{/if}
+				{#if steps.length > 0 || canDrop}
+					<ConnectionLine
+						fromStepIndex={-1}
+						toStepIndex={0}
+						totalSteps={steps.length + 1}
+						highlighted={hoverIndex === 0}
+					/>
+				{/if}
 
 				{#if canDrop}
 					<div
@@ -197,36 +244,19 @@
 				onRenameTab={_onRenameTab}
 			/>
 			{#if shouldShowInsert(0)}
-			<div
-				class="insert-zone drop-target"
-				class:ready={canDrop}
-				class:active={hoverIndex === 0}
-				class:invalid={hoverIndex === 0 && !drag.valid}
-				role="button"
-				tabindex="0"
-				ondragenter={(e) => handleDragEnter(e, 0)}
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={(e) => handleDrop(e, 0)}
-			>
-				{#if steps.length > 0}
-					<ConnectionLine
-						fromStepIndex={-1}
-						toStepIndex={0}
-						totalSteps={steps.length + 1}
-						highlighted={hoverIndex === 0}
-					/>
-				{/if}
-				{#if canDrop}
-					<div
-						class="drop-slot"
-						class:active={hoverIndex === 0}
-						class:invalid={hoverIndex === 0 && !drag.valid}
-					>
-						{#if hoverIndex === 0}
-							<span class="slot-label">{drag.type ?? 'step'}</span>
-						{/if}
-					</div>
+				<div
+					class="insert-zone"
+					class:ready={canDrop}
+					class:active={hoverIndex === 0}
+					class:invalid={hoverIndex === 0 && !drag.valid}
+					role="button"
+					tabindex="0"
+					data-index="0"
+					ondragenter={(e) => handleDragEnter(e, 0)}
+					ondragover={handleDragOver}
+					ondragleave={handleDragLeave}
+					ondrop={(e) => handleDrop(e, 0)}
+				>
 					{#if steps.length > 0}
 						<ConnectionLine
 							fromStepIndex={-1}
@@ -235,9 +265,26 @@
 							highlighted={hoverIndex === 0}
 						/>
 					{/if}
-				{/if}
-			</div>
-
+					{#if canDrop}
+						<div
+							class="drop-slot"
+							class:active={hoverIndex === 0}
+							class:invalid={hoverIndex === 0 && !drag.valid}
+						>
+							{#if hoverIndex === 0}
+								<span class="slot-label">{drag.type ?? 'step'}</span>
+							{/if}
+						</div>
+						{#if steps.length > 0}
+							<ConnectionLine
+								fromStepIndex={-1}
+								toStepIndex={0}
+								totalSteps={steps.length + 1}
+								highlighted={hoverIndex === 0}
+							/>
+						{/if}
+					{/if}
+				</div>
 			{/if}
 			{#each steps as step, i (step.id)}
 				<StepNode
@@ -249,18 +296,20 @@
 					{saveStatus}
 					onEdit={onStepClick}
 					onDelete={onStepDelete}
+					onTouchMove={onMoveStep}
 				/>
 				<!-- Connection + Drop zone after each step -->
 				<!-- Only show connection line after last step when dragging -->
 				{#if i < steps.length - 1 || canDrop}
 					{#if shouldShowInsert(i + 1)}
 						<div
-							class="insert-zone drop-target"
+							class="insert-zone"
 							class:ready={canDrop}
 							class:active={hoverIndex === i + 1}
 							class:invalid={hoverIndex === i + 1 && !drag.valid}
 							role="button"
 							tabindex="0"
+							data-index={i + 1}
 							ondragenter={(e) => handleDragEnter(e, i + 1)}
 							ondragover={handleDragOver}
 							ondragleave={handleDragLeave}
@@ -346,7 +395,6 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: var(--space-5);
 		width: 100%;
 		max-width: 100%;
 		margin: 0 auto;
@@ -432,63 +480,5 @@
 			opacity: 1;
 			transform: scale(1);
 		}
-	}
-
-	.drop-target {
-		width: min(55%, 480px);
-		height: 8px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px dashed transparent;
-		border-radius: var(--radius-sm);
-		color: var(--fg-faint);
-		font-size: var(--text-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		transition: all var(--transition-fast);
-		background: transparent;
-		cursor: default;
-		margin: -4px 0;
-	}
-
-	.drop-target::after {
-		content: attr(data-label);
-	}
-
-	.drop-target.ready {
-		height: 24px;
-		margin: 0;
-		border-color: var(--border-secondary);
-		color: var(--fg-muted);
-		cursor: pointer;
-	}
-
-	.drop-target.ready:hover {
-		height: 32px;
-		border-color: var(--accent-primary);
-		background-color: var(--bg-hover);
-		color: var(--accent-primary);
-	}
-
-	.drop-target.active {
-		height: 32px;
-		margin: 0;
-		border-color: var(--accent-primary);
-		background-color: var(--accent-soft);
-		color: var(--accent-primary);
-	}
-
-	.drop-target.empty-drop {
-		width: 100%;
-		max-width: 400px;
-		height: 80px;
-		margin-top: var(--space-4);
-		border-style: dashed;
-		border-color: var(--border-secondary);
-	}
-
-	.drop-target.empty-drop.ready {
-		border-color: var(--accent-primary);
 	}
 </style>

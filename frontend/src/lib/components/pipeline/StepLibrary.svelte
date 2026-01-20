@@ -16,7 +16,16 @@
 	let { onAddStep, onInsertStep }: Props = $props();
 
 	let isDragging = $state(false);
-	let dragImageEl = $state<HTMLDivElement | null>(null);
+	let dragImageEl = $state<HTMLImageElement | null>(null);
+	let touchDragging = $state(false);
+	let touchConsumed = $state(false);
+	let touchMode = $state(false);
+	let longPressTimer = $state<number | null>(null);
+	let pointerStartX = $state<number | null>(null);
+	let pointerStartY = $state<number | null>(null);
+
+	const longPressDelay = 180;
+	const dragThreshold = 8;
 
 	function handleDragStart(event: DragEvent, stepType: string) {
 		if (event.dataTransfer) {
@@ -41,9 +50,100 @@
 	}
 
 	function handleClick(stepType: string) {
-		if (isDragging) return;
+		if (isDragging || touchDragging || touchConsumed) {
+			touchConsumed = false;
+			return;
+		}
 		onAddStep(stepType);
 	}
+
+	function shouldStartTouch(event: PointerEvent) {
+		return event.pointerType === 'touch';
+	}
+
+	function startLongPress(event: PointerEvent, stepType: string) {
+		if (!shouldStartTouch(event)) return;
+		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+		const target = event.currentTarget as HTMLElement | null;
+		const handle = target?.closest('[data-drag-handle]');
+		if (!handle) return;
+		touchMode = true;
+		pointerStartX = event.clientX;
+		pointerStartY = event.clientY;
+		longPressTimer = window.setTimeout(() => {
+			touchDragging = true;
+			touchConsumed = true;
+			if (event.cancelable) {
+				event.preventDefault();
+			}
+			const state = drag as typeof drag & {
+				startTouch: (
+					type: string,
+					source: 'library',
+					pointerId: number,
+					pointerX: number,
+					pointerY: number
+				) => void;
+			};
+			state.startTouch(stepType, 'library', event.pointerId, event.clientX, event.clientY);
+			if (event.currentTarget instanceof HTMLElement) {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			}
+		}, longPressDelay);
+	}
+
+	function cancelLongPress() {
+		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+		longPressTimer = null;
+		pointerStartX = null;
+		pointerStartY = null;
+		if (!touchDragging) touchMode = false;
+	}
+
+	function handleTouchMove(event: PointerEvent) {
+		if (!shouldStartTouch(event)) return;
+		if (pointerStartX !== null && pointerStartY !== null) {
+			const deltaX = Math.abs(event.clientX - pointerStartX);
+			const deltaY = Math.abs(event.clientY - pointerStartY);
+			const moved = deltaX > dragThreshold || deltaY > dragThreshold;
+			if (moved && !touchDragging) {
+				cancelLongPress();
+				return;
+			}
+		}
+		if (!touchDragging) return;
+		const state = drag as typeof drag & {
+			setPointer: (x: number, y: number) => void;
+		};
+		state.setPointer(event.clientX, event.clientY);
+		event.preventDefault();
+	}
+
+	function finishTouchDrag(event: PointerEvent) {
+		if (!shouldStartTouch(event)) return;
+		if (touchDragging && drag.active) {
+			if (drag.target && drag.type && drag.valid) {
+				onInsertStep(drag.type, drag.target);
+			}
+			drag.end();
+		}
+		const wasTouchDragging = touchDragging;
+		touchDragging = false;
+		touchConsumed = wasTouchDragging;
+		touchMode = false;
+		cancelLongPress();
+		if (event.currentTarget instanceof HTMLElement) {
+			event.currentTarget.releasePointerCapture(event.pointerId);
+		}
+	}
+
+	$effect(() => {
+		if (!touchDragging) return;
+		document.body.classList.add('touch-dragging');
+		return () => {
+			document.body.classList.remove('touch-dragging');
+		};
+	});
 
 	const stepTypes: StepType[] = [
 		{ type: 'filter', label: 'Filter', icon: '🔍', description: 'Filter rows by conditions' },
@@ -90,20 +190,26 @@
 </script>
 
 <div class="step-library">
-	<div class="drag-preview" bind:this={dragImageEl}></div>
+	<img class="drag-preview" alt="" bind:this={dragImageEl} />
 	<h3>Operations</h3>
 	<div class="step-list" role="list">
 		{#each stepTypes as stepType (stepType.type)}
 			<button
 				class="step-button"
+				class:touch-dragging={touchDragging}
 				onclick={() => handleClick(stepType.type)}
 				ondragstart={(event) => handleDragStart(event, stepType.type)}
 				ondragend={handleDragEnd}
+				onpointerdown={(event) => startLongPress(event, stepType.type)}
+				onpointermove={handleTouchMove}
+				onpointerup={finishTouchDrag}
+				onpointercancel={finishTouchDrag}
 				type="button"
-				draggable="true"
+				draggable={!touchMode}
 				data-step={stepType.type}
+				data-drag-handle="true"
 			>
-				<span class="step-icon">{stepType.icon}</span>
+				<span class="step-icon" data-drag-handle="true">{stepType.icon}</span>
 				<div class="step-info">
 					<span class="step-label">{stepType.label}</span>
 					<span class="step-description">{stepType.description}</span>
@@ -206,6 +312,17 @@
 		cursor: grab;
 		transition: all 0.2s;
 		text-align: left;
+		position: relative;
+	}
+
+	.step-button::before {
+		content: '';
+		position: absolute;
+		top: 6px;
+		left: 6px;
+		bottom: 6px;
+		right: 6px;
+		border-radius: 6px;
 	}
 
 	.step-button:hover {
@@ -216,6 +333,19 @@
 
 	.step-button:active {
 		cursor: grabbing;
+	}
+
+	.step-button.touch-dragging {
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
+		touch-action: none;
+	}
+
+	:global(body.touch-dragging) {
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 	}
 
 	.step-icon {

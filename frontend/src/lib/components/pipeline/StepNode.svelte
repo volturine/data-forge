@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
-	import { drag } from '$lib/stores/drag.svelte';
+	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
 	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
 	import { Download, Save } from 'lucide-svelte';
 	import { exportData, downloadBlob, type ExportRequest } from '$lib/api/compute';
@@ -14,6 +14,7 @@
 		saveStatus?: 'saved' | 'unsaved' | 'saving';
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
+		onTouchMove: (stepId: string, target: DropTarget) => void;
 	}
 
 	let {
@@ -24,13 +25,23 @@
 		savedSteps = [],
 		saveStatus = 'saved',
 		onEdit,
-		onDelete
+		onDelete,
+		onTouchMove
 	}: Props = $props();
 
 	let isExporting = $state(false);
 	let exportError = $state<string | null>(null);
 
-	let dragPreviewEl = $state<HTMLDivElement | null>(null);
+	let dragPreviewEl = $state<HTMLImageElement | null>(null);
+	let touchDragging = $state(false);
+	let touchConsumed = $state(false);
+	let touchMode = $state(false);
+	let longPressTimer = $state<number | null>(null);
+	let pointerStartX = $state<number | null>(null);
+	let pointerStartY = $state<number | null>(null);
+
+	const longPressDelay = 180;
+	const dragThreshold = 8;
 
 	const stepTypeInfo: Record<string, { label: string; icon: string }> = {
 		filter: { label: 'Filter', icon: '🔍' },
@@ -123,7 +134,9 @@
 	let currentStepInfo = $derived(stepTypeInfo[step.type] || { label: step.type, icon: '⚙️' });
 	let label = $derived(typeLabels[step.type] || step.type);
 	let summary = $derived(getConfigSummary(step));
-	let isSavedView = $derived(step.type === 'view' && savedSteps.some((item) => item.id === step.id));
+	let isSavedView = $derived(
+		step.type === 'view' && savedSteps.some((item) => item.id === step.id)
+	);
 
 	// Is this node being dragged?
 	let isDragging = $state(false);
@@ -152,6 +165,103 @@
 			drag.end();
 		}
 	}
+
+	function handleTouchClick(event: MouseEvent) {
+		if (!touchConsumed) return;
+		event.preventDefault();
+		event.stopPropagation();
+		touchConsumed = false;
+	}
+
+	function shouldStartTouch(event: PointerEvent) {
+		return event.pointerType === 'touch';
+	}
+
+	function startLongPress(event: PointerEvent) {
+		if (!shouldStartTouch(event)) return;
+		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+		const target = event.currentTarget as HTMLElement | null;
+		const handle = target?.closest('[data-drag-handle]');
+		if (!handle) return;
+		touchMode = true;
+		pointerStartX = event.clientX;
+		pointerStartY = event.clientY;
+		longPressTimer = window.setTimeout(() => {
+			touchDragging = true;
+			touchConsumed = true;
+			isDragging = true;
+			if (event.cancelable) {
+				event.preventDefault();
+			}
+			const state = drag as typeof drag & {
+				startMoveTouch: (
+					stepId: string,
+					type: string,
+					pointerId: number,
+					pointerX: number,
+					pointerY: number
+				) => void;
+			};
+			state.startMoveTouch(step.id, step.type, event.pointerId, event.clientX, event.clientY);
+			if (event.currentTarget instanceof HTMLElement) {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			}
+		}, longPressDelay);
+	}
+
+	function cancelLongPress() {
+		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+		longPressTimer = null;
+		pointerStartX = null;
+		pointerStartY = null;
+		if (!touchDragging) touchMode = false;
+	}
+
+	function handleTouchMove(event: PointerEvent) {
+		if (!shouldStartTouch(event)) return;
+		if (pointerStartX !== null && pointerStartY !== null) {
+			const deltaX = Math.abs(event.clientX - pointerStartX);
+			const deltaY = Math.abs(event.clientY - pointerStartY);
+			const moved = deltaX > dragThreshold || deltaY > dragThreshold;
+			if (moved && !touchDragging) {
+				cancelLongPress();
+				return;
+			}
+		}
+		if (!touchDragging) return;
+		const state = drag as typeof drag & {
+			setPointer: (x: number, y: number) => void;
+		};
+		state.setPointer(event.clientX, event.clientY);
+		event.preventDefault();
+	}
+
+	function finishTouchDrag(event: PointerEvent) {
+		if (!shouldStartTouch(event)) return;
+		if (touchDragging && drag.active) {
+			if (drag.target && drag.stepId && drag.valid) {
+				onTouchMove(drag.stepId, drag.target);
+			}
+			drag.end();
+		}
+		const wasTouchDragging = touchDragging;
+		touchDragging = false;
+		touchConsumed = wasTouchDragging;
+		touchMode = false;
+		isDragging = false;
+		cancelLongPress();
+		if (event.currentTarget instanceof HTMLElement) {
+			event.currentTarget.releasePointerCapture(event.pointerId);
+		}
+	}
+
+	$effect(() => {
+		if (!touchDragging) return;
+		document.body.classList.add('touch-dragging');
+		return () => {
+			document.body.classList.remove('touch-dragging');
+		};
+	});
 
 	async function handleExport() {
 		if (!datasourceId || isExporting) return;
@@ -192,11 +302,6 @@
 	}
 </script>
 
-<div class="drag-preview" bind:this={dragPreviewEl}>
-	<span class="preview-icon">{currentStepInfo.icon}</span>
-	<span class="preview-name">{currentStepInfo.label}</span>
-</div>
-
 <div
 	class="step-node"
 	class:view-node={step.type === 'view'}
@@ -210,11 +315,18 @@
 			<!-- Drag handle (6-dot grip) -->
 			<button
 				class="drag-handle"
+				class:touch-dragging={touchDragging}
 				title="Drag to reorder"
 				type="button"
 				draggable="true"
 				ondragstart={handleDragStart}
 				ondragend={handleDragEnd}
+				onpointerdown={startLongPress}
+				onpointermove={handleTouchMove}
+				onpointerup={finishTouchDrag}
+				onpointercancel={finishTouchDrag}
+				onclick={handleTouchClick}
+				data-drag-handle="true"
 			>
 				<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
 					<circle cx="2" cy="2" r="1.5" />
@@ -370,6 +482,19 @@
 
 	.drag-handle:active {
 		cursor: grabbing;
+	}
+
+	.drag-handle.touch-dragging {
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
+		touch-action: none;
+	}
+
+	:global(body.touch-dragging) {
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 	}
 
 	.step-icon {
@@ -536,35 +661,5 @@
 		border-color: var(--accent-primary);
 		opacity: 0.7;
 		transform: scale(0.98);
-	}
-
-	/* Hidden drag preview element - positioned off-screen */
-	.drag-preview {
-		position: fixed;
-		top: -9999px;
-		left: -9999px;
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		background: var(--bg-primary, #fff);
-		border: 2px solid var(--border-primary, #ccc);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-sm);
-		white-space: nowrap;
-		pointer-events: none;
-		z-index: 9999;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-		/* Use opacity 0 instead of display: none so browser can capture it */
-		opacity: 0;
-	}
-
-	.preview-icon {
-		font-size: var(--text-base);
-	}
-
-	.preview-name {
-		font-weight: 500;
-		color: var(--fg-primary);
 	}
 </style>

@@ -11,30 +11,40 @@ export interface DropTarget {
 	nextId: string | null;
 }
 
-class DragState {
+export class DragState {
 	/** The operation type being dragged (e.g., "filter", "select") - only for library drags */
-	type = $state<string | null>(null);
+	public type: string | null = $state<string | null>(null);
 
 	/** The step ID being moved - only for canvas reordering */
-	stepId = $state<string | null>(null);
+	public stepId: string | null = $state<string | null>(null);
 
 	/** Where the drag originated from */
-	source = $state<DragSource | null>(null);
+	public source: DragSource | null = $state<DragSource | null>(null);
 
 	/** Current drop target being hovered */
-	target = $state<DropTarget | null>(null);
+	public target: DropTarget | null = $state<DropTarget | null>(null);
 
 	/** Whether the current target is a valid drop location */
-	valid = $state(true);
+	public valid: boolean = $state(true);
 
 	/** Whether a drag operation is in progress */
-	active = $derived(this.type !== null || this.stepId !== null);
+	public active: boolean = $derived(this.type !== null || this.stepId !== null);
+
+	/** Whether this is a touch-based drag */
+	public touchActive: boolean = $state(false);
+
+	/** Pointer id for active touch drag */
+	public pointerId: number | null = $state<number | null>(null);
+
+	/** Pointer coordinates during touch drag */
+	public pointerX: number | null = $state<number | null>(null);
+	public pointerY: number | null = $state<number | null>(null);
 
 	/** Whether this is a reorder operation (moving existing step) */
-	isReorder = $derived(this.source === 'canvas' && this.stepId !== null);
+	public isReorder: boolean = $derived(this.source === 'canvas' && this.stepId !== null);
 
 	/** Whether this is an insert operation (adding new step from library) */
-	isInsert = $derived(this.source === 'library' && this.type !== null);
+	public isInsert: boolean = $derived(this.source === 'library' && this.type !== null);
 
 	/** Start a drag operation for a new step from library */
 	start(type: string, source: DragSource) {
@@ -43,15 +53,61 @@ class DragState {
 		this.source = source;
 		this.target = null;
 		this.valid = true;
+		this.touchActive = false;
+		this.pointerId = null;
+		this.pointerX = null;
+		this.pointerY = null;
+	}
+
+	/** Start a touch drag operation for a new step */
+	public startTouch(
+		type: string,
+		source: DragSource,
+		pointerId: number,
+		pointerX: number,
+		pointerY: number
+	) {
+		this.type = type;
+		this.stepId = null;
+		this.source = source;
+		this.target = null;
+		this.valid = true;
+		this.touchActive = true;
+		this.pointerId = pointerId;
+		this.pointerX = pointerX;
+		this.pointerY = pointerY;
 	}
 
 	/** Start a reorder operation for an existing step */
-	startMove(stepId: string, type: string) {
+	public startMove(stepId: string, type: string) {
 		this.stepId = stepId;
 		this.type = type;
 		this.source = 'canvas';
 		this.target = null;
 		this.valid = true;
+		this.touchActive = false;
+		this.pointerId = null;
+		this.pointerX = null;
+		this.pointerY = null;
+	}
+
+	/** Start a touch reorder operation for an existing step */
+	public startMoveTouch(
+		stepId: string,
+		type: string,
+		pointerId: number,
+		pointerX: number,
+		pointerY: number
+	) {
+		this.stepId = stepId;
+		this.type = type;
+		this.source = 'canvas';
+		this.target = null;
+		this.valid = true;
+		this.touchActive = true;
+		this.pointerId = pointerId;
+		this.pointerX = pointerX;
+		this.pointerY = pointerY;
 	}
 
 	/** Update the current drop target */
@@ -66,6 +122,12 @@ class DragState {
 		this.valid = true;
 	}
 
+	/** Update pointer position for touch drags */
+	public setPointer(x: number, y: number) {
+		this.pointerX = x;
+		this.pointerY = y;
+	}
+
 	/** End the drag operation and reset all state */
 	end() {
 		this.type = null;
@@ -73,6 +135,10 @@ class DragState {
 		this.source = null;
 		this.target = null;
 		this.valid = true;
+		this.touchActive = false;
+		this.pointerId = null;
+		this.pointerX = null;
+		this.pointerY = null;
 	}
 }
 
