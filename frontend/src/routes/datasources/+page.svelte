@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
 	import { Plus } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
@@ -55,7 +56,7 @@
 			<h1>Data Sources</h1>
 			<p class="subtitle">Manage your data connections and files</p>
 		</div>
-		<a href="/datasources/new" class="btn-new" data-sveltekit-reload>
+		<a href={resolve('/datasources/new')} class="btn-new" data-sveltekit-reload>
 			<Plus size={16} />
 			Add Data Source
 		</a>
@@ -74,7 +75,7 @@
 			<div class="empty-state">
 				<div class="empty-icon">+</div>
 				<p>No data sources yet.</p>
-				<a href="/datasources/new" class="btn btn-primary" data-sveltekit-reload
+				<a href={resolve('/datasources/new')} class="btn btn-primary" data-sveltekit-reload
 					>Create your first data source</a
 				>
 			</div>

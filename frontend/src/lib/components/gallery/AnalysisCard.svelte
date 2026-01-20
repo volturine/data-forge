@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { BarChart3, Trash2 } from 'lucide-svelte';
 
 	interface Props {
@@ -12,14 +13,14 @@
 
 	function handleClick(e: MouseEvent) {
 		if (!(e.target as HTMLElement).closest('button')) {
-			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
+			goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
 		}
 	}
 
 	function handleKeyPress(e: KeyboardEvent) {
 		if ((e.key === 'Enter' || e.key === ' ') && !(e.target as HTMLElement).closest('button')) {
 			e.preventDefault();
-			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
+			goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
 		}
 	}
 

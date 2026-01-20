@@ -8,7 +8,12 @@
 		highlighted?: boolean;
 	}
 
-	let { fromStepIndex, toStepIndex, totalSteps: _totalSteps, highlighted = false }: Props = $props();
+	let {
+		fromStepIndex: _fromStepIndex,
+		toStepIndex: _toStepIndex,
+		totalSteps: _totalSteps,
+		highlighted = false
+	}: Props = $props();
 
 	const width = 24;
 	const height = 32;
@@ -28,7 +33,7 @@
 	let isDragActive = $derived(drag.active);
 </script>
 
-<div class="connection-line" class:drag-active={isDragActive} class:highlighted={highlighted}>
+<div class="connection-line" class:drag-active={isDragActive} class:highlighted>
 	<svg {width} {height} xmlns="http://www.w3.org/2000/svg">
 		<!-- Dotted vertical line -->
 		{#each dots as y (y)}

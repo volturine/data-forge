@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { LayoutGrid, Plus } from 'lucide-svelte';
 
 	function createNew() {
-		goto('/analysis/new', { invalidateAll: true });
+		goto(resolve('/analysis/new'), { invalidateAll: true });
 	}
 </script>
 

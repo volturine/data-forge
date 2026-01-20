@@ -15,20 +15,20 @@ export function emptySchema(): Schema {
 
 export function getColumn(schema: Schema | null, name: string): Column | null {
 	if (!schema) return null;
-	return schema.columns.find(c => c.name === name) ?? null;
+	return schema.columns.find((c) => c.name === name) ?? null;
 }
 
 export function hasColumn(schema: Schema | null, name: string): boolean {
 	if (!schema) return false;
-	return schema.columns.some(c => c.name === name);
+	return schema.columns.some((c) => c.name === name);
 }
 
 export function columnNames(schema: Schema | null): string[] {
 	if (!schema) return [];
-	return schema.columns.map(c => c.name);
+	return schema.columns.map((c) => c.name);
 }
 
-export function unionByName(schemas: Schema[], allowMissing: boolean = true): Schema {
+export function unionByName(schemas: Schema[], _allowMissing: boolean = true): Schema {
 	const columnMap = new Map<string, { dtype: string; nullable: boolean }>();
 
 	for (const schema of schemas) {
@@ -55,11 +55,11 @@ export function unionByName(schemas: Schema[], allowMissing: boolean = true): Sc
 	};
 }
 
-export function intersectSchemas(left: Schema, right: Schema, suffix: string = ''): Schema {
+export function intersectSchemas(left: Schema, right: Schema, _suffix: string = ''): Schema {
 	const result: Column[] = [];
 
 	for (const lcol of left.columns) {
-		const rcol = right.columns.find(c => c.name === lcol.name);
+		const rcol = right.columns.find((c) => c.name === lcol.name);
 		if (rcol) {
 			result.push({
 				name: lcol.name,
@@ -79,7 +79,7 @@ export function leftJoinSchema(left: Schema, right: Schema, suffix: string = '_r
 		result.push({ ...lcol });
 	}
 
-	const rightColumns = right.columns.filter(c => !hasColumn(left, c.name));
+	const rightColumns = right.columns.filter((c) => !hasColumn(left, c.name));
 	for (const rcol of rightColumns) {
 		result.push({
 			name: rcol.name + suffix,
@@ -94,7 +94,7 @@ export function leftJoinSchema(left: Schema, right: Schema, suffix: string = '_r
 export function rightJoinSchema(left: Schema, right: Schema, suffix: string = '_left'): Schema {
 	const result: Column[] = [];
 
-	const leftColumns = left.columns.filter(c => !hasColumn(right, c.name));
+	const leftColumns = left.columns.filter((c) => !hasColumn(right, c.name));
 	for (const lcol of leftColumns) {
 		result.push({
 			name: lcol.name + suffix,
@@ -115,7 +115,7 @@ export function outerJoinSchema(left: Schema, right: Schema, suffix: string = '_
 	const rightSeen = new Set<string>();
 
 	for (const lcol of left.columns) {
-		const rcol = right.columns.find(c => c.name === lcol.name);
+		const rcol = right.columns.find((c) => c.name === lcol.name);
 		if (rcol) {
 			result.push({
 				name: lcol.name,
@@ -154,4 +154,3 @@ export function crossJoinSchema(left: Schema, right: Schema): Schema {
 
 	return { columns: result, row_count: null };
 }
-

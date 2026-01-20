@@ -1,4 +1,4 @@
-import { ok, err, Result, ResultAsync } from 'neverthrow';
+import { err, ResultAsync } from 'neverthrow';
 
 // In dev, always use relative URLs so Vite's dev proxy handles /api
 // In prod, allow overriding via VITE_API_URL, otherwise default to current host:8000
@@ -20,7 +20,12 @@ export interface ApiError {
 	statusText?: string;
 }
 
-function createApiError(type: ApiErrorType, message: string, status?: number, statusText?: string): ApiError {
+function createApiError(
+	type: ApiErrorType,
+	message: string,
+	status?: number,
+	statusText?: string
+): ApiError {
 	return { type, message, status, statusText };
 }
 
@@ -28,7 +33,10 @@ function createApiError(type: ApiErrorType, message: string, status?: number, st
  * Type-safe API request using neverthrow Result types.
  * Returns Result<T, ApiError> instead of throwing exceptions.
  */
-export function apiRequestSafe<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
+export function apiRequestSafe<T>(
+	endpoint: string,
+	options?: RequestInit
+): ResultAsync<T, ApiError> {
 	return ResultAsync.fromPromise(
 		fetch(`${BASE_URL}${endpoint}`, {
 			...options,
@@ -37,14 +45,22 @@ export function apiRequestSafe<T>(endpoint: string, options?: RequestInit): Resu
 				...options?.headers
 			}
 		}),
-		(error): ApiError => createApiError('network', error instanceof Error ? error.message : 'Network error')
+		(error): ApiError =>
+			createApiError('network', error instanceof Error ? error.message : 'Network error')
 	).andThen((response) => {
 		if (!response.ok) {
 			return ResultAsync.fromPromise(
 				response.text().catch(() => response.statusText),
 				() => createApiError('http', response.statusText, response.status, response.statusText)
 			).andThen((errorText) =>
-				err(createApiError('http', errorText || response.statusText, response.status, response.statusText))
+				err(
+					createApiError(
+						'http',
+						errorText || response.statusText,
+						response.status,
+						response.statusText
+					)
+				)
 			);
 		}
 		return ResultAsync.fromPromise(
@@ -60,11 +76,11 @@ export function apiRequestSafe<T>(endpoint: string, options?: RequestInit): Resu
  */
 export async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
 	const result = await apiRequestSafe<T>(endpoint, options);
-	
+
 	if (result.isErr()) {
 		const error = result.error;
 		throw new Error(`${error.type} error: ${error.message}`);
 	}
-	
+
 	return result.value;
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
@@ -53,7 +54,7 @@
 
 			const analysis = await createAnalysis(payload as AnalysisCreate);
 
-			goto(`/analysis/${analysis.id}`, { invalidateAll: true });
+			goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to create analysis';
 			creating = false;
@@ -116,7 +117,7 @@
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
 					<div class="empty-state">
 						<p>No data sources available.</p>
-						<a href="/datasources/new" class="btn btn-secondary" data-sveltekit-reload
+						<a href={resolve('/datasources/new')} class="btn btn-secondary" data-sveltekit-reload
 							>Create Data Source</a
 						>
 					</div>
@@ -192,7 +193,7 @@
 				Back
 			</button>
 		{:else}
-			<a href="/" class="btn btn-secondary" data-sveltekit-reload>Cancel</a>
+			<a href={resolve('/')} class="btn btn-secondary" data-sveltekit-reload>Cancel</a>
 		{/if}
 
 		<div class="spacer"></div>

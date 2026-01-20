@@ -16,7 +16,7 @@
 		config = {
 			...(column ? { column } : {}),
 			k,
-			...(descending ? { descending } : {}),
+			...(descending ? { descending } : {})
 		};
 	});
 </script>

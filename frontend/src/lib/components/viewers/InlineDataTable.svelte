@@ -1,32 +1,32 @@
 <script lang="ts">
-	import { createQuery } from '@tanstack/svelte-query'
-	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute'
-	import type { TableCellValue } from '$lib/types/api-responses'
+	import { createQuery } from '@tanstack/svelte-query';
+	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import type { TableCellValue } from '$lib/types/api-responses';
 
 	interface Props {
-		datasourceId: string
+		datasourceId: string;
 		pipeline: Array<{
-			id: string
-			type: string
-			config: Record<string, unknown>
-			depends_on?: string[]
-		}>
-		stepId: string
-		rowLimit?: number
+			id: string;
+			type: string;
+			config: Record<string, unknown>;
+			depends_on?: string[];
+		}>;
+		stepId: string;
+		rowLimit?: number;
 	}
 
-	let { datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props()
-	let currentPage = $state(1)
-	const pipelineKey = $derived(JSON.stringify(pipeline))
+	let { datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props();
+	let currentPage = $state(1);
+	const pipelineKey = $derived(JSON.stringify(pipeline));
 
 	$effect(() => {
-		pipelineKey
-		rowLimit
-		stepId
+		void pipelineKey;
+		void rowLimit;
+		void stepId;
 		if (currentPage !== 1) {
-			currentPage = 1
+			currentPage = 1;
 		}
-	})
+	});
 
 	const query = createQuery(() => ({
 		queryKey: ['step-preview', datasourceId, stepId, currentPage, rowLimit, pipelineKey],
@@ -37,56 +37,62 @@
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage
-			})
+			});
 		},
 		staleTime: 30000,
 		enabled: !!datasourceId && !!stepId && pipeline.length > 0
-	}))
+	}));
 
-	const data = $derived(query.data)
-	const isLoading = $derived(query.isLoading)
-	const error = $derived(query.error)
+	const data = $derived(query.data);
+	const isLoading = $derived(query.isLoading);
+	const error = $derived(query.error);
 
-	const totalPages = $derived(data ? Math.ceil(data.total_rows / rowLimit) : 0)
-	const startRow = $derived((currentPage - 1) * rowLimit + 1)
-	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0)
+	const totalPages = $derived(data ? Math.ceil(data.total_rows / rowLimit) : 0);
+	const startRow = $derived((currentPage - 1) * rowLimit + 1);
+	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0);
 
 	function nextPage() {
 		if (currentPage < totalPages) {
-			currentPage++
+			currentPage++;
 		}
 	}
 
 	function prevPage() {
 		if (currentPage > 1) {
-			currentPage--
+			currentPage--;
 		}
 	}
 
-	function formatValue(value: TableCellValue, columnType?: string): string {
-		if (value === null || value === undefined) return '—'
+	function formatValue(value: TableCellValue, _columnType?: string): string {
+		if (value === null || value === undefined) return '—';
 		if (typeof value === 'number') {
-			return value.toLocaleString()
+			return value.toLocaleString();
 		}
 		if (typeof value === 'boolean') {
-			return value ? 'true' : 'false'
+			return value ? 'true' : 'false';
 		}
 		if (Array.isArray(value)) {
-			return '[' + value.map(v => {
-				if (typeof v === 'number') return v.toLocaleString()
-				if (v === null || v === undefined) return 'null'
-				return String(v)
-			}).join(', ') + ']'
+			return (
+				'[' +
+				value
+					.map((v) => {
+						if (typeof v === 'number') return v.toLocaleString();
+						if (v === null || v === undefined) return 'null';
+						return String(v);
+					})
+					.join(', ') +
+				']'
+			);
 		}
-		return String(value)
+		return String(value);
 	}
 
 	function getColumnType(col: string): string {
-		return data?.column_types?.[col] || ''
+		return data?.column_types?.[col] || '';
 	}
 
 	function isListType(columnType: string): boolean {
-		return columnType.includes('List') || columnType === 'list'
+		return columnType.includes('List') || columnType === 'list';
 	}
 </script>
 
@@ -103,7 +109,8 @@
 		</div>
 	{:else if data}
 		<div class="table-info">
-			Showing {startRow.toLocaleString()}-{endRow.toLocaleString()} of {data.total_rows.toLocaleString()} rows
+			Showing {startRow.toLocaleString()}-{endRow.toLocaleString()} of {data.total_rows.toLocaleString()}
+			rows
 		</div>
 
 		<div class="table-wrapper">
@@ -138,15 +145,11 @@
 
 		{#if totalPages > 1}
 			<div class="pagination">
-				<button onclick={prevPage} disabled={currentPage === 1}>
-					Previous
-				</button>
+				<button onclick={prevPage} disabled={currentPage === 1}> Previous </button>
 				<span class="page-info">
 					Page {currentPage} of {totalPages}
 				</span>
-				<button onclick={nextPage} disabled={currentPage >= totalPages}>
-					Next
-				</button>
+				<button onclick={nextPage} disabled={currentPage >= totalPages}> Next </button>
 			</div>
 		{/if}
 	{:else}

@@ -26,6 +26,7 @@
 	let safeColumns = $derived(Array.isArray(config?.columns) ? config.columns : []);
 
 	// Keep SvelteSet for UI
+	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
 	let selectedColumns = $state(new SvelteSet<string>());
 
 	// Track config reference for detecting step changes

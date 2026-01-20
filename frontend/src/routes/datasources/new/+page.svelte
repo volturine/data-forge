@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { uploadFile, connectDatabase, connectApi } from '$lib/api/datasource';
 
 	type Tab = 'file' | 'database' | 'api';
@@ -43,7 +44,7 @@
 
 		try {
 			await uploadFile(file, fileName);
-			goto('/datasources', { invalidateAll: true });
+			goto(resolve('/datasources'), { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Upload failed';
 		} finally {
@@ -62,7 +63,7 @@
 
 		try {
 			await connectDatabase(dbName, connectionString, query);
-			goto('/datasources', { invalidateAll: true });
+			goto(resolve('/datasources'), { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Connection failed';
 		} finally {
@@ -81,7 +82,7 @@
 
 		try {
 			await connectApi(apiName, apiUrl, apiMethod);
-			goto('/datasources', { invalidateAll: true });
+			goto(resolve('/datasources'), { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Connection failed';
 		} finally {
@@ -93,7 +94,7 @@
 <div class="container">
 	<header>
 		<h1>Add Data Source</h1>
-		<a href="/datasources" class="button" data-sveltekit-reload>Cancel</a>
+		<a href={resolve('/datasources')} class="button" data-sveltekit-reload>Cancel</a>
 	</header>
 
 	<div class="tabs">

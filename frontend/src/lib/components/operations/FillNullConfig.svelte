@@ -13,8 +13,10 @@
 		config?: FillNullConfigData;
 	}
 
-	let { schema, config = $bindable({ strategy: 'literal', columns: null, value: '', value_type: 'Utf8' }) }: Props =
-		$props();
+	let {
+		schema,
+		config = $bindable({ strategy: 'literal', columns: null, value: '', value_type: 'Utf8' })
+	}: Props = $props();
 
 	const strategies = [
 		{ value: 'literal', label: 'Fill with Value', needsValue: true, needsColumns: true },

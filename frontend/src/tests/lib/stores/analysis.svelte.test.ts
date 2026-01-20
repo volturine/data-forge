@@ -48,7 +48,6 @@ describe('analysis.svelte store', () => {
 		]
 	};
 
-
 	const mockSchema: SchemaInfo = {
 		columns: [
 			{ name: 'id', dtype: 'Int64', nullable: false },
@@ -134,10 +133,12 @@ describe('analysis.svelte store', () => {
 			// Load analysis with empty steps first to have an active tab
 			const emptyAnalysis: Analysis = {
 				...mockAnalysis,
-				tabs: [{
-					...mockAnalysis.tabs[0],
-					steps: []
-				}]
+				tabs: [
+					{
+						...mockAnalysis.tabs[0],
+						steps: []
+					}
+				]
 			};
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(emptyAnalysis);
 			await analysisStore.loadAnalysis('test-123');
@@ -277,14 +278,16 @@ describe('analysis.svelte store', () => {
 			];
 			const chainAnalysis: Analysis = {
 				...mockAnalysis,
-				tabs: [{
-					id: 'tab-1',
-					name: 'Source 1',
-					type: 'datasource',
-					parent_id: null,
-					datasource_id: 'source-1',
-					steps: threeStepChain
-				}]
+				tabs: [
+					{
+						id: 'tab-1',
+						name: 'Source 1',
+						type: 'datasource',
+						parent_id: null,
+						datasource_id: 'source-1',
+						steps: threeStepChain
+					}
+				]
 			};
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(chainAnalysis);
 			await analysisStore.loadAnalysis('test-123');
@@ -308,14 +311,16 @@ describe('analysis.svelte store', () => {
 			];
 			const chainAnalysis: Analysis = {
 				...mockAnalysis,
-				tabs: [{
-					id: 'tab-1',
-					name: 'Source 1',
-					type: 'datasource',
-					parent_id: null,
-					datasource_id: 'source-1',
-					steps: threeStepChain
-				}]
+				tabs: [
+					{
+						id: 'tab-1',
+						name: 'Source 1',
+						type: 'datasource',
+						parent_id: null,
+						datasource_id: 'source-1',
+						steps: threeStepChain
+					}
+				]
 			};
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(chainAnalysis);
 			await analysisStore.loadAnalysis('test-123');
@@ -340,14 +345,16 @@ describe('analysis.svelte store', () => {
 			];
 			const chainAnalysis: Analysis = {
 				...mockAnalysis,
-				tabs: [{
-					id: 'tab-1',
-					name: 'Source 1',
-					type: 'datasource',
-					parent_id: null,
-					datasource_id: 'source-1',
-					steps: threeStepChain
-				}]
+				tabs: [
+					{
+						id: 'tab-1',
+						name: 'Source 1',
+						type: 'datasource',
+						parent_id: null,
+						datasource_id: 'source-1',
+						steps: threeStepChain
+					}
+				]
 			};
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(chainAnalysis);
 			await analysisStore.loadAnalysis('test-123');
@@ -362,7 +369,6 @@ describe('analysis.svelte store', () => {
 			expect(analysisStore.pipeline[1].id).toBe('step-2');
 			expect(analysisStore.pipeline[1].depends_on).toEqual(['step-1']);
 		});
-
 	});
 
 	describe('reorderSteps', () => {
@@ -379,14 +385,16 @@ describe('analysis.svelte store', () => {
 					steps: threeSteps,
 					datasource_ids: ['source-1']
 				},
-				tabs: [{
-					id: 'tab-1',
-					name: 'Source 1',
-					type: 'datasource',
-					parent_id: null,
-					datasource_id: 'source-1',
-					steps: threeSteps
-				}]
+				tabs: [
+					{
+						id: 'tab-1',
+						name: 'Source 1',
+						type: 'datasource',
+						parent_id: null,
+						datasource_id: 'source-1',
+						steps: threeSteps
+					}
+				]
 			};
 
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(analysisWithMultipleSteps);
@@ -430,8 +438,11 @@ describe('analysis.svelte store', () => {
 
 			await analysisStore.save();
 
+			const pipelineSteps = analysisStore.tabs.flatMap((tab) => tab.steps ?? []);
+
 			expect(analysisApi.updateAnalysis).toHaveBeenCalledWith('test-123', {
-				tabs: analysisStore.tabs
+				tabs: analysisStore.tabs,
+				pipeline_steps: pipelineSteps
 			});
 			expect(analysisStore.current).toEqual(updatedAnalysis);
 			expect(analysisStore.loading).toBe(false);
@@ -484,10 +495,12 @@ describe('analysis.svelte store', () => {
 			// Load analysis with empty steps
 			const emptyAnalysis = {
 				...mockAnalysis,
-				tabs: [{
-					...mockAnalysis.tabs[0],
-					steps: []
-				}]
+				tabs: [
+					{
+						...mockAnalysis.tabs[0],
+						steps: []
+					}
+				]
 			};
 			vi.mocked(analysisApi.getAnalysis).mockResolvedValue(emptyAnalysis);
 			await analysisStore.loadAnalysis('test-123');

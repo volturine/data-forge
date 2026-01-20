@@ -1,6 +1,4 @@
 <script lang="ts">
-	import type { Schema } from '$lib/types/schema';
-
 	interface Props {
 		config?: { n?: number; fraction?: number; shuffle?: boolean; seed?: number };
 	}
@@ -17,7 +15,7 @@
 			...(n !== null && n !== undefined ? { n } : {}),
 			...(fraction !== null && fraction !== undefined ? { fraction } : {}),
 			...(shuffle ? { shuffle } : {}),
-			...(seed !== null && seed !== undefined ? { seed } : {}),
+			...(seed !== null && seed !== undefined ? { seed } : {})
 		};
 	});
 </script>
@@ -27,11 +25,21 @@
 
 	<div class="form-group">
 		<label>
-			<input type="radio" name="sample-mode" checked={n !== null} onchange={() => (fraction = null)} />
+			<input
+				type="radio"
+				name="sample-mode"
+				checked={n !== null}
+				onchange={() => (fraction = null)}
+			/>
 			Fixed number (n)
 		</label>
 		<label>
-			<input type="radio" name="sample-mode" checked={fraction !== null} onchange={() => (n = null)} />
+			<input
+				type="radio"
+				name="sample-mode"
+				checked={fraction !== null}
+				onchange={() => (n = null)}
+			/>
 			Fraction (0-1)
 		</label>
 	</div>

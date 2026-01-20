@@ -7,7 +7,9 @@
 		};
 	}
 
-	let { config = $bindable({ format: 'csv', filename: 'export', destination: 'filesystem' }) }: Props = $props();
+	let {
+		config = $bindable({ format: 'csv', filename: 'export', destination: 'filesystem' })
+	}: Props = $props();
 
 	let format = $state(config.format ?? 'csv');
 	let filename = $state(config.filename ?? 'export');

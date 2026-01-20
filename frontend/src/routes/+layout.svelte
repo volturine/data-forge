@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { page } from '$app/stores';
+	import { resolve } from '$app/paths';
 	import { PersistedState } from 'runed';
 	import favicon from '$lib/assets/favicon.svg';
 	import { Sun, Moon } from 'lucide-svelte';
@@ -50,7 +51,7 @@
 	<div class="app">
 		<header class="header">
 			<div class="header-content">
-				<a href="/" class="logo" data-sveltekit-reload>
+				<a href={resolve('/')} class="logo" data-sveltekit-reload>
 					<span class="logo-text">polars</span>
 					<span class="logo-divider">/</span>
 					<span class="logo-sub">analysis</span>
@@ -59,7 +60,7 @@
 				<nav class="nav">
 					{#each navItems as item (item.href)}
 						<a
-							href={item.href}
+							href={resolve(item.href as '/' | '/datasources')}
 							class="nav-link"
 							class:active={$page.url.pathname === item.href ||
 								($page.url.pathname.startsWith('/analysis') && item.href === '/')}
@@ -72,7 +73,12 @@
 
 				<div class="header-actions">
 					<EngineMonitor />
-					<button class="theme-toggle" onclick={toggleTheme} title="Toggle theme" aria-label="Toggle theme">
+					<button
+						class="theme-toggle"
+						onclick={toggleTheme}
+						title="Toggle theme"
+						aria-label="Toggle theme"
+					>
 						{#if theme.current === 'light'}
 							<Sun size={16} />
 						{:else}

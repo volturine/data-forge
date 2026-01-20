@@ -132,21 +132,21 @@ async def _extract_schema(datasource: DataSource) -> SchemaInfo:
         file_type = datasource.config['file_type']
 
         if file_type == 'csv':
-            df = pl.scan_csv(file_path)
+            lazy = pl.scan_csv(file_path)
         elif file_type == 'parquet':
-            df = pl.scan_parquet(file_path)
+            lazy = pl.scan_parquet(file_path)
         elif file_type == 'json':
-            df = pl.read_json(file_path).lazy()
+            lazy = pl.read_json(file_path).lazy()
         elif file_type == 'ndjson':
-            df = pl.scan_ndjson(file_path)
+            lazy = pl.scan_ndjson(file_path)
         elif file_type == 'excel':
-            df = pl.read_excel(file_path).lazy()
+            lazy = pl.read_excel(file_path).lazy()
         else:
             raise ValueError(f'Unsupported file type: {file_type}')
 
-        schema = df.collect_schema()
+        schema = lazy.collect_schema()
         # Calculate row count for file datasources
-        row_count = df.select(pl.len()).collect().item()
+        row_count = lazy.select(pl.len()).collect().item()
 
         columns = [
             ColumnSchema(
@@ -163,9 +163,9 @@ async def _extract_schema(datasource: DataSource) -> SchemaInfo:
         connection_string = datasource.config['connection_string']
         query = datasource.config['query']
 
-        df = pl.read_database(query, connection_string)
-        schema = df.schema
-        row_count = len(df)
+        frame = pl.read_database(query, connection_string)
+        schema = frame.schema
+        row_count = frame.height
 
         columns = [
             ColumnSchema(

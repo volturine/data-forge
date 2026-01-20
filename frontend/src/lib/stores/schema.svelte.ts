@@ -3,7 +3,7 @@ import type { PipelineStep } from '$lib/types/analysis';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { emptySchema } from '$lib/types/schema';
 import { getStepTransform, joinTransform, type StepConfig } from '$lib/utils/transform';
-
+import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {
 	input: Schema;
@@ -11,7 +11,7 @@ export interface StepSchemas {
 }
 
 class SchemaStore {
-	joinSchemas = $state<Map<string, Schema>>(new Map());
+	joinSchemas = $state(new SvelteMap<string, Schema>());
 
 	get primaryDatasourceId(): string | null {
 		const activeTab = analysisStore.activeTab;
@@ -23,15 +23,11 @@ class SchemaStore {
 	}
 
 	async setJoinDatasource(datasourceId: string, schema: Schema): Promise<void> {
-		const next = new Map(this.joinSchemas);
-		next.set(datasourceId, schema);
-		this.joinSchemas = next;
+		this.joinSchemas.set(datasourceId, schema);
 	}
 
 	removeJoinDatasource(datasourceId: string): void {
-		const next = new Map(this.joinSchemas);
-		next.delete(datasourceId);
-		this.joinSchemas = next;
+		this.joinSchemas.delete(datasourceId);
 	}
 
 	getJoinSchema(datasourceId: string): Schema | null {
@@ -43,16 +39,18 @@ class SchemaStore {
 	}
 
 	getStepSchemas(): Map<string, StepSchemas> {
-		const schemas = new Map<string, StepSchemas>();
+		const schemas = new SvelteMap<string, StepSchemas>();
 		let currentSchema: Schema | null = null;
 
 		const activeTab = analysisStore.activeTab;
-		const sourceSchema = activeTab?.datasource_id 
-			? analysisStore.sourceSchemas.get(activeTab.datasource_id) ?? null
+		const sourceSchema = activeTab?.datasource_id
+			? (analysisStore.sourceSchemas.get(activeTab.datasource_id) ?? null)
 			: null;
 
 		for (const step of this.steps) {
-			const input = currentSchema ?? (sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
+			const input =
+				currentSchema ??
+				(sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
 			const config = step.config as StepConfig;
 			const transformer = getStepTransform(step);
 
@@ -96,7 +94,7 @@ class SchemaStore {
 	}
 
 	reset(): void {
-		this.joinSchemas = new Map();
+		this.joinSchemas = new SvelteMap();
 	}
 }
 

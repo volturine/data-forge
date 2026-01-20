@@ -16,7 +16,16 @@
 		onDelete: (id: string) => void;
 	}
 
-	let { step, index, datasourceId, allSteps = [], savedSteps = [], saveStatus = 'saved', onEdit, onDelete }: Props = $props();
+	let {
+		step,
+		index,
+		datasourceId,
+		allSteps = [],
+		savedSteps = [],
+		saveStatus = 'saved',
+		onEdit,
+		onDelete
+	}: Props = $props();
 
 	let isExporting = $state(false);
 	let exportError = $state<string | null>(null);
@@ -235,12 +244,7 @@
 				{#if exportError}
 					<div class="export-error">{exportError}</div>
 				{/if}
-				<button
-					class="export-btn"
-					onclick={handleExport}
-					disabled={isExporting}
-					type="button"
-				>
+				<button class="export-btn" onclick={handleExport} disabled={isExporting} type="button">
 					{#if isExporting}
 						<span class="spinner"></span>
 						Exporting...
@@ -411,7 +415,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
-
 
 	.action-btn {
 		flex: 1;

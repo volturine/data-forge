@@ -18,13 +18,9 @@
 			...(index.length > 0 ? { index } : {}),
 			...(on.length > 0 ? { on } : {}),
 			...(variableName !== 'variable' ? { variable_name: variableName } : {}),
-			...(valueName !== 'value' ? { value_name: valueName } : {}),
+			...(valueName !== 'value' ? { value_name: valueName } : {})
 		};
 	});
-
-	let availableColumns = $derived(
-		schema.columns.filter((col) => !index.includes(col.name) && !on.includes(col.name))
-	);
 </script>
 
 <div class="unpivot-config">

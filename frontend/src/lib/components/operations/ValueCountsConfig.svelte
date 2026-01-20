@@ -16,7 +16,7 @@
 		config = {
 			...(column ? { column } : {}),
 			...(normalize ? { normalize } : {}),
-			...(sort !== true ? { sort } : {}),
+			...(sort !== true ? { sort } : {})
 		};
 	});
 </script>

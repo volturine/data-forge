@@ -16,13 +16,16 @@
 		config?: JoinConfigData;
 	}
 
-	let { schema, config = $bindable({ 
-		how: 'inner', 
-		left_on: null, 
-		right_on: null, 
-		datasource_id: '',
-		suffix: '_right'
-	}) }: Props = $props();
+	let {
+		schema,
+		config = $bindable({
+			how: 'inner',
+			left_on: null,
+			right_on: null,
+			datasource_id: '',
+			suffix: '_right'
+		})
+	}: Props = $props();
 
 	let selectedDatasourceId = $state(config.datasource_id || '');
 	let rightSchema = $derived.by(() => {
@@ -59,16 +62,18 @@
 		if (!dsId) return;
 		const schemaInfo = await datasourceStore.getSchema(dsId);
 		const joinSchema: Schema = {
-			columns: schemaInfo.columns.map(c => ({
+			columns: schemaInfo.columns.map((c) => ({
 				name: c.name,
 				dtype: c.dtype,
 				nullable: c.nullable
 			})),
 			row_count: schemaInfo.row_count
 		};
-		const setJoinDatasource = schemaStore.setJoinDatasource as unknown as (id: string, schema: Schema) => void;
+		const setJoinDatasource = schemaStore.setJoinDatasource as unknown as (
+			id: string,
+			schema: Schema
+		) => void;
 		setJoinDatasource(dsId, joinSchema);
-
 	}
 </script>
 
@@ -141,14 +146,8 @@
 
 	<div class="section">
 		<h4>Column Suffix</h4>
-		<input 
-			type="text" 
-			bind:value={config.suffix} 
-			placeholder="_right"
-		/>
-		<div class="help-text">
-			Suffix for non-joining columns from the right dataset
-		</div>
+		<input type="text" bind:value={config.suffix} placeholder="_right" />
+		<div class="help-text">Suffix for non-joining columns from the right dataset</div>
 	</div>
 </div>
 

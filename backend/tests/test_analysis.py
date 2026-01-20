@@ -301,7 +301,7 @@ class TestAnalysisUpdate:
         assert result['status'] == 'completed'
 
     async def test_update_analysis_multiple_fields(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {
+        payload: dict[str, object] = {
             'name': 'Updated Name',
             'description': 'Updated Description',
             'status': 'running',
@@ -326,7 +326,7 @@ class TestAnalysisUpdate:
         assert 'not found' in response.json()['detail']
 
     async def test_update_analysis_empty_payload(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {'tabs': []}
+        payload: dict[str, object] = {'tabs': []}
 
         response = await client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 

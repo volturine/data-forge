@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -20,7 +21,6 @@
 	let selectedStepId = $state<string | null>(null);
 	let isSaving = $state(false);
 	let saveStatus = $state<'saved' | 'unsaved' | 'saving'>('saved');
-	let initialPipeline: PipelineStep[] | null = null;
 	let isLoadingSchema = $state(false);
 	let showDatasourceModal = $state(false);
 	let searchQuery = $state('');
@@ -32,12 +32,12 @@
 	let isResizingLeft = $state(false);
 	let isResizingRight = $state(false);
 
-	function startResizeLeft(e: MouseEvent) {
+	function startResizeLeft(e: Event) {
 		isResizingLeft = true;
 		e.preventDefault();
 	}
 
-	function startResizeRight(e: MouseEvent) {
+	function startResizeRight(e: Event) {
 		isResizingRight = true;
 		e.preventDefault();
 	}
@@ -273,7 +273,8 @@
 		<div class="error-icon">!</div>
 		<h2>Error loading analysis</h2>
 		<p>{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}</p>
-		<button onclick={() => goto('/', { invalidateAll: true })} type="button">Back to Gallery</button
+		<button onclick={() => goto(resolve('/'), { invalidateAll: true })} type="button"
+			>Back to Gallery</button
 		>
 	</div>
 {:else if analysisQuery.data}
@@ -282,7 +283,7 @@
 			<div class="header-left">
 				<button
 					class="back-button"
-					onclick={() => goto('/', { invalidateAll: true })}
+					onclick={() => goto(resolve('/'), { invalidateAll: true })}
 					type="button"
 					aria-label="Go back to home"
 				>
@@ -366,13 +367,14 @@
 			<div class="left-pane" style="width: {leftPaneWidth}px">
 				<StepLibrary onAddStep={handleAddStep} onInsertStep={handleInsertStep} />
 			</div>
-			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<div
 				class="resize-handle"
 				onmousedown={startResizeLeft}
 				role="separator"
 				aria-orientation="vertical"
+				aria-label="Resize left panel"
 			></div>
+
 			<div class="center-pane">
 				<PipelineCanvas
 					steps={analysisStore.pipeline}
@@ -389,13 +391,14 @@
 					onRenameTab={handleRenameSourceTab}
 				/>
 			</div>
-			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<div
 				class="resize-handle"
 				onmousedown={startResizeRight}
 				role="separator"
 				aria-orientation="vertical"
+				aria-label="Resize right panel"
 			></div>
+
 			<div class="right-pane" style="width: {rightPaneWidth}px">
 				<StepConfig
 					step={selectedStep}
@@ -410,14 +413,12 @@
 {/if}
 
 {#if showDatasourceModal}
-	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
 		class="modal-backdrop"
 		onclick={closeDatasourceModal}
 		onkeydown={handleModalKeydown}
 		role="presentation"
 	>
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div
 			class="modal"
 			onclick={(e) => e.stopPropagation()}

@@ -28,13 +28,13 @@
 		saveStatus = 'saved',
 		datasourceId,
 		datasource = null,
-		tabName,
+		tabName: _tabName,
 		onStepClick,
 		onStepDelete,
 		onInsertStep,
 		onMoveStep,
-		onChangeDatasource,
-		onRenameTab
+		onChangeDatasource: _onChangeDatasource,
+		onRenameTab: _onRenameTab
 	}: Props = $props();
 
 	// Derived: whether we can accept drops
@@ -141,31 +141,8 @@
 			<LayoutGrid size={32} strokeWidth={1.5} />
 			<h3>No pipeline steps</h3>
 			<p>Drag operations from the library and drop here</p>
-			<!-- svelte-ignore a11y_consider_explicit_label -->
 			<div
-				class="drop-target empty-drop"
-				class:ready={canDrop}
-				class:active={hoverIndex === 0}
-				role="button"
-				tabindex="0"
-				ondragenter={(e) => handleDragEnter(e, 0)}
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={(e) => handleDrop(e, 0)}
-				data-label={canDrop ? 'Drop here to add first step' : ''}
-			></div>
-		</div>
-	{:else}
-		<div class="steps-container" role="list">
-			<!-- Datasource node (non-removable root) -->
-			{#if datasource}
-				<DatasourceNode {datasource} {tabName} {onChangeDatasource} {onRenameTab} />
-			{/if}
-
-			<!-- Connection + Drop zone before first step (after datasource) -->
-			<!-- svelte-ignore a11y_consider_explicit_label -->
-			<div
-				class="insert-zone"
+				class="insert-zone drop-target empty-drop"
 				class:ready={canDrop}
 				class:active={hoverIndex === 0}
 				class:invalid={hoverIndex === 0 && !drag.valid}
@@ -176,34 +153,91 @@
 				ondragleave={handleDragLeave}
 				ondrop={(e) => handleDrop(e, 0)}
 			>
-				<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length + 1} highlighted={hoverIndex === 0} />
+				<ConnectionLine
+					fromStepIndex={-1}
+					toStepIndex={0}
+					totalSteps={steps.length + 1}
+					highlighted={hoverIndex === 0}
+				/>
 				{#if canDrop}
-					<div class="drop-slot" class:active={hoverIndex === 0} class:invalid={hoverIndex === 0 && !drag.valid}>
+					<div
+						class="drop-slot"
+						class:active={hoverIndex === 0}
+						class:invalid={hoverIndex === 0 && !drag.valid}
+					>
 						{#if hoverIndex === 0}
 							<span class="slot-label">{drag.type ?? 'step'}</span>
 						{/if}
 					</div>
-					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length + 1} highlighted={hoverIndex === 0} />
+					<ConnectionLine
+						fromStepIndex={-1}
+						toStepIndex={0}
+						totalSteps={steps.length + 1}
+						highlighted={hoverIndex === 0}
+					/>
 				{/if}
 			</div>
-
+		</div>
+	{:else}
+		<div class="steps-container" role="list">
+			<DatasourceNode
+				{datasource}
+				tabName={_tabName}
+				onChangeDatasource={_onChangeDatasource}
+				onRenameTab={_onRenameTab}
+			/>
+			<div
+				class="insert-zone drop-target"
+				class:ready={canDrop}
+				class:active={hoverIndex === 0}
+				class:invalid={hoverIndex === 0 && !drag.valid}
+				role="button"
+				tabindex="0"
+				ondragenter={(e) => handleDragEnter(e, 0)}
+				ondragover={handleDragOver}
+				ondragleave={handleDragLeave}
+				ondrop={(e) => handleDrop(e, 0)}
+			>
+				<ConnectionLine
+					fromStepIndex={-1}
+					toStepIndex={0}
+					totalSteps={steps.length + 1}
+					highlighted={hoverIndex === 0}
+				/>
+				{#if canDrop}
+					<div
+						class="drop-slot"
+						class:active={hoverIndex === 0}
+						class:invalid={hoverIndex === 0 && !drag.valid}
+					>
+						{#if hoverIndex === 0}
+							<span class="slot-label">{drag.type ?? 'step'}</span>
+						{/if}
+					</div>
+					<ConnectionLine
+						fromStepIndex={-1}
+						toStepIndex={0}
+						totalSteps={steps.length + 1}
+						highlighted={hoverIndex === 0}
+					/>
+				{/if}
+			</div>
 			{#each steps as step, i (step.id)}
 				<StepNode
 					{step}
 					index={i}
 					{datasourceId}
 					allSteps={steps}
-					savedSteps={savedSteps}
-					saveStatus={saveStatus}
+					{savedSteps}
+					{saveStatus}
 					onEdit={onStepClick}
 					onDelete={onStepDelete}
 				/>
 				<!-- Connection + Drop zone after each step -->
 				<!-- Only show connection line after last step when dragging -->
 				{#if i < steps.length - 1 || canDrop}
-					<!-- svelte-ignore a11y_consider_explicit_label -->
 					<div
-						class="insert-zone"
+						class="insert-zone drop-target"
 						class:ready={canDrop}
 						class:active={hoverIndex === i + 1}
 						class:invalid={hoverIndex === i + 1 && !drag.valid}
@@ -214,16 +248,30 @@
 						ondragleave={handleDragLeave}
 						ondrop={(e) => handleDrop(e, i + 1)}
 					>
-						<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} highlighted={hoverIndex === i + 1} />
+						<ConnectionLine
+							fromStepIndex={i}
+							toStepIndex={i + 1}
+							totalSteps={steps.length}
+							highlighted={hoverIndex === i + 1}
+						/>
 						{#if canDrop}
-							<div class="drop-slot" class:active={hoverIndex === i + 1} class:invalid={hoverIndex === i + 1 && !drag.valid}>
+							<div
+								class="drop-slot"
+								class:active={hoverIndex === i + 1}
+								class:invalid={hoverIndex === i + 1 && !drag.valid}
+							>
 								{#if hoverIndex === i + 1}
 									<span class="slot-label">{drag.type ?? 'step'}</span>
 								{/if}
 							</div>
 							<!-- Only show trailing connection if not the last position -->
 							{#if i < steps.length - 1}
-								<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} highlighted={hoverIndex === i + 1} />
+								<ConnectionLine
+									fromStepIndex={i}
+									toStepIndex={i + 1}
+									totalSteps={steps.length}
+									highlighted={hoverIndex === i + 1}
+								/>
 							{/if}
 						{/if}
 					</div>
@@ -275,7 +323,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0;
+		gap: var(--space-5);
 		width: 100%;
 		max-width: 100%;
 		margin: 0 auto;

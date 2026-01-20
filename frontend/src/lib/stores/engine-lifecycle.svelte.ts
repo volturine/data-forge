@@ -14,7 +14,6 @@ class EngineLifecycle {
 	private _intervalId: ReturnType<typeof setInterval> | null = null;
 	private _shutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
-
 	get analysisId(): string | null {
 		return this._analysisId;
 	}
@@ -75,7 +74,7 @@ class EngineLifecycle {
 		this._analysisId = null;
 		this._starting = false;
 		this.status = null;
-		
+
 		try {
 			await shutdownEngine(id);
 		} catch {

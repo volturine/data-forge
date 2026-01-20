@@ -9,7 +9,9 @@
 <div class="null-count-config">
 	<h3>Null Count</h3>
 	<p class="description">Count null values for each column in the dataset.</p>
-	<p class="info">This operation will return a single row with the count of null values for each column.</p>
+	<p class="info">
+		This operation will return a single row with the count of null values for each column.
+	</p>
 </div>
 
 <style>

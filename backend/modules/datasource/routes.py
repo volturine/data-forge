@@ -69,28 +69,27 @@ async def connect_datasource(
     """Create a database or API data source connection."""
     try:
         if datasource.source_type == 'database':
-            config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
+            db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
             return await service.create_database_datasource(
                 session=session,
                 name=datasource.name,
-                connection_string=config.connection_string,
-                query=config.query,
+                connection_string=db_config.connection_string,
+                query=db_config.query,
             )
-        elif datasource.source_type == 'api':
-            config = schemas.APIDataSourceConfig.model_validate(datasource.config)
+        if datasource.source_type == 'api':
+            api_config = schemas.APIDataSourceConfig.model_validate(datasource.config)
             return await service.create_api_datasource(
                 session=session,
                 name=datasource.name,
-                url=config.url,
-                method=config.method,
-                headers=config.headers,
-                auth=config.auth,
+                url=api_config.url,
+                method=api_config.method,
+                headers=api_config.headers,
+                auth=api_config.auth,
             )
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f'Unsupported source type: {datasource.source_type}. Use "database" or "api"',
-            )
+        raise HTTPException(
+            status_code=400,
+            detail=f'Unsupported source type: {datasource.source_type}. Use "database" or "api"',
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -2,6 +2,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { listAnalyses, deleteAnalysis } from '$lib/api/analysis';
 	import GalleryGrid from '$lib/components/gallery/GalleryGrid.svelte';
 	import EmptyState from '$lib/components/gallery/EmptyState.svelte';
@@ -50,7 +51,7 @@
 	});
 
 	function createNew() {
-		goto('/analysis/new', { invalidateAll: true });
+		goto(resolve('/analysis/new'), { invalidateAll: true });
 	}
 
 	function handleSearch(query: string) {

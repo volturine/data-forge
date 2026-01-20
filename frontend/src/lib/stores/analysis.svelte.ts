@@ -4,13 +4,14 @@ import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
 import { normalizeDtype } from '$lib/utils/transform';
 import { schemaStore } from '$lib/stores/schema.svelte';
+import { SvelteMap } from 'svelte/reactivity';
 
 export class AnalysisStore {
 	current = $state<Analysis | null>(null);
 	tabs = $state<AnalysisTab[]>([]);
 	savedTabs = $state<AnalysisTab[]>([]);
 	activeTabId = $state<string | null>(null);
-	sourceSchemas = $state(new Map<string, SchemaInfo>());
+	sourceSchemas = $state(new SvelteMap<string, SchemaInfo>());
 	loading = $state(false);
 	error = $state<string | null>(null);
 
@@ -28,11 +29,11 @@ export class AnalysisStore {
 	calculatedSchema = $derived.by(() => {
 		const steps = this.pipeline;
 		if (!steps.length || !this.sourceSchemas.size) return null;
-		
+
 		// Use the active tab's datasource schema
 		const datasourceId = this.activeTab?.datasource_id;
-		const sourceSchema = datasourceId 
-			? this.sourceSchemas.get(datasourceId) 
+		const sourceSchema = datasourceId
+			? this.sourceSchemas.get(datasourceId)
 			: this.sourceSchemas.values().next().value;
 		if (!sourceSchema) return null;
 
@@ -73,7 +74,7 @@ export class AnalysisStore {
 
 			// Legacy format: single pipeline shared across tabs
 			const legacySteps = definition?.steps ?? [];
-			
+
 			if (tabs && tabs.length) {
 				// Migrate: assign legacy steps to first tab only
 				const migratedTabs = tabs.map((tab, index) => ({
@@ -102,7 +103,7 @@ export class AnalysisStore {
 	addStep(step: PipelineStep): void {
 		if (!this.activeTab) return;
 		const steps = this.activeTab.steps;
-		const parentId = steps.length ? steps[steps.length - 1]?.id ?? null : null;
+		const parentId = steps.length ? (steps[steps.length - 1]?.id ?? null) : null;
 		step.depends_on = parentId ? [parentId] : [];
 		const newSteps = [...steps, step];
 		this.updateTabSteps(this.activeTab.id, newSteps);
@@ -160,9 +161,7 @@ export class AnalysisStore {
 	}
 
 	updateTabSteps(tabId: string, steps: PipelineStep[]): void {
-		this.tabs = this.tabs.map((tab) => 
-			tab.id === tabId ? { ...tab, steps } : tab
-		);
+		this.tabs = this.tabs.map((tab) => (tab.id === tabId ? { ...tab, steps } : tab));
 	}
 
 	insertStep(
@@ -172,7 +171,7 @@ export class AnalysisStore {
 		nextId: string | null
 	): boolean {
 		if (!this.activeTab) return false;
-		
+
 		const nextPipeline = [...this.activeTab.steps];
 		const normalizedParentId = parentId ?? null;
 		step.depends_on = normalizedParentId ? [normalizedParentId] : [];
@@ -210,7 +209,7 @@ export class AnalysisStore {
 
 	updateStep(id: string, updates: Partial<PipelineStep>): void {
 		if (!this.activeTab) return;
-		const nextPipeline = this.activeTab.steps.map((step) => 
+		const nextPipeline = this.activeTab.steps.map((step) =>
 			step.id === id ? { ...step, ...updates } : step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
@@ -222,7 +221,7 @@ export class AnalysisStore {
 	 */
 	updateStepConfig(id: string, config: Record<string, unknown>): void {
 		if (!this.activeTab) return;
-		const nextPipeline = this.activeTab.steps.map((step) => 
+		const nextPipeline = this.activeTab.steps.map((step) =>
 			step.id === id ? { ...step, config: { ...config } } : step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
@@ -230,15 +229,15 @@ export class AnalysisStore {
 
 	removeStep(id: string): void {
 		if (!this.activeTab) return;
-		
+
 		const steps = this.activeTab.steps;
 		const removedStep = steps.find((step) => step.id === id);
 		if (!removedStep) return;
-		
+
 		// Find the parent of the removed step
 		const removedDeps = removedStep.depends_on ?? [];
 		const removedParentId = removedDeps[0] ?? null;
-		
+
 		// Update steps that depended on the removed step to now depend on its parent
 		const nextPipeline = steps
 			.filter((step) => step.id !== id)
@@ -253,7 +252,7 @@ export class AnalysisStore {
 				}
 				return step;
 			});
-		
+
 		// Get all affected step IDs (the removed step and all its descendants)
 		const affectedIds = [id];
 		for (const step of steps) {
@@ -261,7 +260,7 @@ export class AnalysisStore {
 				affectedIds.push(step.id);
 			}
 		}
-		
+
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
 		// No cache invalidation needed - SchemaStore uses $derived
 	}
@@ -278,9 +277,14 @@ export class AnalysisStore {
 	 * Move an existing step to a new position in the pipeline.
 	 * Updates dependency chains accordingly.
 	 */
-	moveStep(stepId: string, toIndex: number, newParentId: string | null, newNextId: string | null): boolean {
+	moveStep(
+		stepId: string,
+		toIndex: number,
+		newParentId: string | null,
+		newNextId: string | null
+	): boolean {
 		if (!this.activeTab) return false;
-		
+
 		const steps = [...this.activeTab.steps];
 		const fromIndex = steps.findIndex((s) => s.id === stepId);
 		if (fromIndex < 0) return false;
@@ -366,23 +370,23 @@ export class AnalysisStore {
 
 	setSourceSchema(datasourceId: string, schema: SchemaInfo): void {
 		this.sourceSchemas.set(datasourceId, schema);
-		// Trigger reactivity by creating new Map
-		this.sourceSchemas = new Map(this.sourceSchemas);
 	}
 
 	clearSourceSchemas(): void {
 		this.sourceSchemas.clear();
-		this.sourceSchemas = new Map();
+
+		this.error = null;
+		this.loading = false;
 	}
 
 	reset(): void {
 		this.current = null;
 		this.tabs = [];
+		this.savedTabs = [];
 		this.activeTabId = null;
 		this.sourceSchemas.clear();
-		this.sourceSchemas = new Map();
-		this.error = null;
 		this.loading = false;
+		this.error = null;
 	}
 
 	buildTabs(datasourceIds: string[], initialSteps: PipelineStep[] = []): AnalysisTab[] {
@@ -398,7 +402,12 @@ export class AnalysisStore {
 }
 
 export type AnalysisStoreApi = {
-	insertStep: (step: PipelineStep, index: number, parentId: string | null, nextId: string | null) => boolean;
+	insertStep: (
+		step: PipelineStep,
+		index: number,
+		parentId: string | null,
+		nextId: string | null
+	) => boolean;
 	addBranchStep: (step: PipelineStep, parentId: string | null) => void;
 	updateStepConfig: (id: string, config: Record<string, unknown>) => void;
 };

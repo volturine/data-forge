@@ -62,7 +62,11 @@
 		configSnapshot = JSON.stringify(nextStep?.config ?? {});
 	}
 
-	let inputSchema = $derived(step ? schemaStore.getInput(step.id) ?? { columns: [], row_count: null } : { columns: [], row_count: null });
+	let inputSchema = $derived(
+		step
+			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
+			: { columns: [], row_count: null }
+	);
 
 	$effect(() => {
 		refreshSnapshot(step);
@@ -133,10 +137,7 @@
 			{:else if step.type === 'drop'}
 				<DropConfig schema={inputSchema} bind:config={step.config as unknown as DropConfigData} />
 			{:else if step.type === 'join'}
-				<JoinConfig
-					schema={inputSchema}
-					bind:config={step.config as unknown as JoinConfigData}
-				/>
+				<JoinConfig schema={inputSchema} bind:config={step.config as unknown as JoinConfigData} />
 			{:else if step.type === 'expression' || step.type === 'with_columns'}
 				<ExpressionConfig
 					schema={inputSchema}
@@ -158,10 +159,7 @@
 					bind:config={step.config as unknown as ExplodeConfigData}
 				/>
 			{:else if step.type === 'pivot'}
-				<PivotConfig
-					schema={inputSchema}
-					bind:config={step.config as unknown as PivotConfigData}
-				/>
+				<PivotConfig schema={inputSchema} bind:config={step.config as unknown as PivotConfigData} />
 			{:else if step.type === 'timeseries'}
 				<TimeSeriesConfig
 					schema={inputSchema}
@@ -183,11 +181,21 @@
 			{:else if step.type === 'null_count'}
 				<NullCountConfig bind:config={step.config as unknown as Record<string, never>} />
 			{:else if step.type === 'value_counts'}
-				<ValueCountsConfig schema={inputSchema} bind:config={step.config as unknown as ValueCountsConfigData} />
+				<ValueCountsConfig
+					schema={inputSchema}
+					bind:config={step.config as unknown as ValueCountsConfigData}
+				/>
 			{:else if step.type === 'unpivot'}
-				<UnpivotConfig schema={inputSchema} bind:config={step.config as unknown as UnpivotConfigData} />
+				<UnpivotConfig
+					schema={inputSchema}
+					bind:config={step.config as unknown as UnpivotConfigData}
+				/>
 			{:else if step.type === 'export'}
-				<ExportConfig bind:config={step.config as unknown as { format?: string; filename?: string; destination?: string }} />
+				<ExportConfig
+					bind:config={
+						step.config as unknown as { format?: string; filename?: string; destination?: string }
+					}
+				/>
 			{:else}
 				<div class="not-implemented">
 					<p>Configuration for {step.type} is not yet implemented</p>

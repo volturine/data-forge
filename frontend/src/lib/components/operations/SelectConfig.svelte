@@ -26,8 +26,9 @@
 	let safeColumns = $derived(Array.isArray(config?.columns) ? config.columns : []);
 
 	// Keep SvelteSet for UI - initialize from config
+	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
 	let selectedColumns = $state(new SvelteSet<string>(config?.columns ?? []));
-	
+
 	// Track if component has been initialized to avoid re-init on deselectAll
 	let initialized = $state(false);
 
