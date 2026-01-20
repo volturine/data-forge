@@ -58,6 +58,13 @@
 		return { index, parentId, nextId };
 	}
 
+	function shouldShowInsert(index: number): boolean {
+		if (!drag.isReorder || !drag.stepId) return true;
+		const currentIndex = steps.findIndex((step) => step.id === drag.stepId);
+		if (currentIndex === -1) return true;
+		return index !== currentIndex && index !== currentIndex + 1;
+	}
+
 	function isValidTarget(index: number): boolean {
 		// For reorder operations, check if we're dropping on ourselves
 		if (drag.isReorder && drag.stepId) {
@@ -186,42 +193,44 @@
 				onChangeDatasource={_onChangeDatasource}
 				onRenameTab={_onRenameTab}
 			/>
-			<div
-				class="insert-zone drop-target"
-				class:ready={canDrop}
-				class:active={hoverIndex === 0}
-				class:invalid={hoverIndex === 0 && !drag.valid}
-				role="button"
-				tabindex="0"
-				ondragenter={(e) => handleDragEnter(e, 0)}
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={(e) => handleDrop(e, 0)}
-			>
-				<ConnectionLine
-					fromStepIndex={-1}
-					toStepIndex={0}
-					totalSteps={steps.length + 1}
-					highlighted={hoverIndex === 0}
-				/>
-				{#if canDrop}
-					<div
-						class="drop-slot"
-						class:active={hoverIndex === 0}
-						class:invalid={hoverIndex === 0 && !drag.valid}
-					>
-						{#if hoverIndex === 0}
-							<span class="slot-label">{drag.type ?? 'step'}</span>
-						{/if}
-					</div>
+			{#if shouldShowInsert(0)}
+				<div
+					class="insert-zone drop-target"
+					class:ready={canDrop}
+					class:active={hoverIndex === 0}
+					class:invalid={hoverIndex === 0 && !drag.valid}
+					role="button"
+					tabindex="0"
+					ondragenter={(e) => handleDragEnter(e, 0)}
+					ondragover={handleDragOver}
+					ondragleave={handleDragLeave}
+					ondrop={(e) => handleDrop(e, 0)}
+				>
 					<ConnectionLine
 						fromStepIndex={-1}
 						toStepIndex={0}
 						totalSteps={steps.length + 1}
 						highlighted={hoverIndex === 0}
 					/>
-				{/if}
-			</div>
+					{#if canDrop}
+						<div
+							class="drop-slot"
+							class:active={hoverIndex === 0}
+							class:invalid={hoverIndex === 0 && !drag.valid}
+						>
+							{#if hoverIndex === 0}
+								<span class="slot-label">{drag.type ?? 'step'}</span>
+							{/if}
+						</div>
+						<ConnectionLine
+							fromStepIndex={-1}
+							toStepIndex={0}
+							totalSteps={steps.length + 1}
+							highlighted={hoverIndex === 0}
+						/>
+					{/if}
+				</div>
+			{/if}
 			{#each steps as step, i (step.id)}
 				<StepNode
 					{step}
@@ -236,45 +245,51 @@
 				<!-- Connection + Drop zone after each step -->
 				<!-- Only show connection line after last step when dragging -->
 				{#if i < steps.length - 1 || canDrop}
-					<div
-						class="insert-zone drop-target"
-						class:ready={canDrop}
-						class:active={hoverIndex === i + 1}
-						class:invalid={hoverIndex === i + 1 && !drag.valid}
-						role="button"
-						tabindex="0"
-						ondragenter={(e) => handleDragEnter(e, i + 1)}
-						ondragover={handleDragOver}
-						ondragleave={handleDragLeave}
-						ondrop={(e) => handleDrop(e, i + 1)}
-					>
-						<ConnectionLine
-							fromStepIndex={i}
-							toStepIndex={i + 1}
-							totalSteps={steps.length}
-							highlighted={hoverIndex === i + 1}
-						/>
-						{#if canDrop}
-							<div
-								class="drop-slot"
-								class:active={hoverIndex === i + 1}
-								class:invalid={hoverIndex === i + 1 && !drag.valid}
-							>
-								{#if hoverIndex === i + 1}
-									<span class="slot-label">{drag.type ?? 'step'}</span>
+					{#if shouldShowInsert(i + 1)}
+						<div
+							class="insert-zone drop-target"
+							class:ready={canDrop}
+							class:active={hoverIndex === i + 1}
+							class:invalid={hoverIndex === i + 1 && !drag.valid}
+							role="button"
+							tabindex="0"
+							ondragenter={(e) => handleDragEnter(e, i + 1)}
+							ondragover={handleDragOver}
+							ondragleave={handleDragLeave}
+							ondrop={(e) => handleDrop(e, i + 1)}
+						>
+							<ConnectionLine
+								fromStepIndex={i}
+								toStepIndex={i + 1}
+								totalSteps={steps.length}
+								highlighted={hoverIndex === i + 1}
+							/>
+							{#if canDrop}
+								<div
+									class="drop-slot"
+									class:active={hoverIndex === i + 1}
+									class:invalid={hoverIndex === i + 1 && !drag.valid}
+								>
+									{#if hoverIndex === i + 1}
+										<span class="slot-label">{drag.type ?? 'step'}</span>
+									{/if}
+								</div>
+								<!-- Only show trailing connection if not the last position -->
+								{#if i < steps.length - 1}
+									<ConnectionLine
+										fromStepIndex={i}
+										toStepIndex={i + 1}
+										totalSteps={steps.length}
+										highlighted={hoverIndex === i + 1}
+									/>
 								{/if}
-							</div>
-							<!-- Only show trailing connection if not the last position -->
-							{#if i < steps.length - 1}
-								<ConnectionLine
-									fromStepIndex={i}
-									toStepIndex={i + 1}
-									totalSteps={steps.length}
-									highlighted={hoverIndex === i + 1}
-								/>
 							{/if}
-						{/if}
-					</div>
+						</div>
+					{:else}
+						<div class="insert-spacer" aria-hidden="true">
+							<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
+						</div>
+					{/if}
 				{/if}
 			{/each}
 		</div>
@@ -337,6 +352,17 @@
 		width: 100%;
 		cursor: default;
 		transition: all var(--transition-fast);
+	}
+
+	.insert-spacer {
+		position: relative;
+		margin-top: 0;
+		margin-bottom: 0;
+	}
+
+	.insert-spacer :global(.connection-line) {
+		position: absolute;
+		transform: translateY(-50%);
 	}
 
 	.insert-zone.ready {
