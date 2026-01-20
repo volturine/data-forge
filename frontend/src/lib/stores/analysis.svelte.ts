@@ -5,6 +5,8 @@ import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
 import { normalizeDtype } from '$lib/utils/transform';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
+import { ResultAsync, err, ok } from 'neverthrow';
+import type { ApiError } from '$lib/api/client';
 
 export class AnalysisStore {
 	current = $state<Analysis | null>(null);
@@ -49,55 +51,55 @@ export class AnalysisStore {
 		return schemaStore.getLastOutput() ?? baseSchema;
 	});
 
-	async loadAnalysis(id: string): Promise<void> {
+	loadAnalysis(id: string): ResultAsync<void, ApiError> {
 		this.loading = true;
 		this.error = null;
 
-		try {
-			const analysis = await getAnalysis(id);
-			this.current = analysis;
+		return getAnalysis(id)
+			.andThen((analysis) => {
+				this.current = analysis;
 
-			const definition = analysis.pipeline_definition as {
-				steps?: PipelineStep[];
-				tabs?: AnalysisTab[];
-				datasource_ids?: string[];
-			};
+				const definition = analysis.pipeline_definition as {
+					steps?: PipelineStep[];
+					tabs?: AnalysisTab[];
+					datasource_ids?: string[];
+				};
 
-			// Check if tabs already have steps (new format)
-			const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
-			if (tabs && tabs.length && tabs[0].steps !== undefined) {
-				const normalized = this.normalizeTabSteps(tabs);
+				const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
+				if (tabs && tabs.length && tabs[0].steps !== undefined) {
+					const normalized = this.normalizeTabSteps(tabs);
+					this.setTabs(normalized);
+					this.savedTabs = normalized;
+					this.loading = false;
+					return ok(undefined);
+				}
+
+				const legacySteps = definition?.steps ?? [];
+
+				if (tabs && tabs.length) {
+					const migratedTabs = tabs.map((tab, index) => ({
+						...tab,
+						steps: index === 0 ? legacySteps : []
+					}));
+					const normalized = this.normalizeTabSteps(migratedTabs);
+					this.setTabs(normalized);
+					this.savedTabs = normalized;
+					this.loading = false;
+					return ok(undefined);
+				}
+
+				const defaults = this.buildTabs(definition?.datasource_ids ?? [], legacySteps);
+				const normalized = this.normalizeTabSteps(defaults);
 				this.setTabs(normalized);
 				this.savedTabs = normalized;
-				return;
-			}
-
-			// Legacy format: single pipeline shared across tabs
-			const legacySteps = definition?.steps ?? [];
-
-			if (tabs && tabs.length) {
-				// Migrate: assign legacy steps to first tab only
-				const migratedTabs = tabs.map((tab, index) => ({
-					...tab,
-					steps: index === 0 ? legacySteps : []
-				}));
-				const normalized = this.normalizeTabSteps(migratedTabs);
-				this.setTabs(normalized);
-				this.savedTabs = normalized;
-				return;
-			}
-
-			// Build default tabs from datasource_ids
-			const defaults = this.buildTabs(definition?.datasource_ids ?? [], legacySteps);
-			const normalized = this.normalizeTabSteps(defaults);
-			this.setTabs(normalized);
-			this.savedTabs = normalized;
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to load analysis';
-			throw err;
-		} finally {
-			this.loading = false;
-		}
+				this.loading = false;
+				return ok(undefined);
+			})
+			.mapErr((error) => {
+				this.error = error.message;
+				this.loading = false;
+				return error;
+			});
 	}
 
 	addStep(step: PipelineStep): void {
@@ -334,38 +336,44 @@ export class AnalysisStore {
 		return true;
 	}
 
-	async save(): Promise<void> {
+	save(): ResultAsync<void, ApiError> {
 		if (!this.current) {
-			throw new Error('No analysis loaded');
+			this.loading = false;
+			return err({
+				type: 'parse' as const,
+				message: 'No analysis loaded'
+			}) as unknown as ResultAsync<void, ApiError>;
 		}
 
 		this.loading = true;
 		this.error = null;
 
-		try {
-			const pipelineSteps = this.tabs.flatMap((tab) => tab.steps ?? []);
-			const update: AnalysisUpdate = {
-				tabs: this.tabs,
-				pipeline_steps: pipelineSteps
-			};
+		const pipelineSteps = this.tabs.flatMap((tab) => tab.steps ?? []);
+		const update: AnalysisUpdate = {
+			tabs: this.tabs,
+			pipeline_steps: pipelineSteps
+		};
 
-			const updated = await updateAnalysis(this.current.id, update);
-			this.current = updated;
-			const tabs = updated.tabs ?? [];
-			if (tabs.length) {
-				const normalized = this.normalizeTabSteps(tabs);
-				this.tabs = normalized;
-				this.savedTabs = normalized;
-				if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
-					this.activeTabId = this.tabs[0]?.id ?? null;
+		return updateAnalysis(this.current.id, update)
+			.andThen((updated) => {
+				this.current = updated;
+				const tabs = updated.tabs ?? [];
+				if (tabs.length) {
+					const normalized = this.normalizeTabSteps(tabs);
+					this.tabs = normalized;
+					this.savedTabs = normalized;
+					if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
+						this.activeTabId = this.tabs[0]?.id ?? null;
+					}
 				}
-			}
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to save analysis';
-			throw err;
-		} finally {
-			this.loading = false;
-		}
+				this.loading = false;
+				return ok(undefined);
+			})
+			.mapErr((error) => {
+				this.error = error.message;
+				this.loading = false;
+				return error;
+			});
 	}
 
 	setSourceSchema(datasourceId: string, schema: SchemaInfo): void {

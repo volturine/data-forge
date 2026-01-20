@@ -1,7 +1,7 @@
 import type { EngineStatusResponse } from '$lib/types/compute';
 import { listEngines, shutdownEngine as shutdownEngineApi } from '$lib/api/compute';
 
-const POLL_INTERVAL = 3000; // 3 seconds
+const POLL_INTERVAL = 3000;
 
 class EnginesStore {
 	engines = $state<EngineStatusResponse[]>([]);
@@ -23,32 +23,36 @@ class EnginesStore {
 	}
 
 	async fetch(): Promise<void> {
-		try {
-			this.loading = true;
-			this.error = null;
-			const response = await listEngines();
-			this.engines = response.engines;
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to fetch engines';
-		} finally {
-			this.loading = false;
-		}
+		this.loading = true;
+		this.error = null;
+
+		listEngines().match(
+			(response) => {
+				this.engines = response.engines;
+				this.loading = false;
+			},
+			(err) => {
+				this.error = err.message;
+				this.loading = false;
+			}
+		);
 	}
 
 	async shutdownEngine(analysisId: string): Promise<void> {
-		try {
-			await shutdownEngineApi(analysisId);
-			this.engines = this.engines.filter((e) => e.analysis_id !== analysisId);
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to shutdown engine';
-			throw err;
-		}
+		shutdownEngineApi(analysisId).match(
+			() => {
+				this.engines = this.engines.filter((e) => e.analysis_id !== analysisId);
+			},
+			(err) => {
+				this.error = err.message;
+				throw new Error(err.message);
+			}
+		);
 	}
 
 	startPolling(): void {
 		if (this.interval !== null) return;
 
-		// Fetch immediately
 		this.fetch();
 
 		this.interval = window.setInterval(() => {

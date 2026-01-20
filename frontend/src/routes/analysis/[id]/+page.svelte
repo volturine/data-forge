@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
+	import { PersistedState } from 'runed';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { engineLifecycle } from '$lib/stores/engine-lifecycle.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
@@ -27,9 +28,9 @@
 	let searchQuery = $state('');
 	let modalMode = $state<'add' | 'change'>('add');
 
-	// Resizable panes
-	let leftPaneWidth = $state(240);
-	let rightPaneWidth = $state(320);
+	// Resizable panes with persisted state
+	const leftPaneWidth = new PersistedState('analysis-leftPaneWidth', 240);
+	const rightPaneWidth = new PersistedState('analysis-rightPaneWidth', 320);
 	let isResizingLeft = $state(false);
 	let isResizingRight = $state(false);
 
@@ -46,10 +47,10 @@
 	function handleMouseMove(e: MouseEvent) {
 		if (isResizingLeft) {
 			const newWidth = e.clientX;
-			leftPaneWidth = Math.max(180, Math.min(400, newWidth));
+			leftPaneWidth.current = Math.max(180, Math.min(400, newWidth));
 		} else if (isResizingRight) {
 			const newWidth = window.innerWidth - e.clientX;
-			rightPaneWidth = Math.max(250, Math.min(500, newWidth));
+			rightPaneWidth.current = Math.max(250, Math.min(500, newWidth));
 		}
 	}
 
@@ -62,10 +63,13 @@
 		queryKey: ['analysis', analysisId],
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
-			const analysis = await getAnalysis(analysisId);
+			const result = await getAnalysis(analysisId);
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
 			await analysisStore.loadAnalysis(analysisId);
 			saveStatus = 'saved';
-			return analysis;
+			return result.value;
 		},
 		retry: false
 	}));
@@ -80,12 +84,20 @@
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
-		queryFn: listDatasources
+		queryFn: async () => {
+			const result = await listDatasources();
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value;
+		}
 	}));
 
 	// Filtered datasources based on search
 	const filteredDatasources = $derived.by(() => {
-		const all = datasourcesQuery.data ?? [];
+		const data = datasourcesQuery.data;
+		if (!data) return [];
+		const all = data;
 		const query = searchQuery.toLowerCase().trim();
 		if (!query) return all;
 		return all.filter((ds) => ds.name.toLowerCase().includes(query));
@@ -99,16 +111,16 @@
 		if (existingSchema) return;
 
 		isLoadingSchema = true;
-		getDatasourceSchema(datasourceIdValue)
-			.then((schema) => {
+		getDatasourceSchema(datasourceIdValue).match(
+			(schema) => {
 				analysisStore.setSourceSchema(datasourceIdValue, schema);
-			})
-			.catch((err) => {
-				console.error('Failed to load schema:', err);
-			})
-			.finally(() => {
 				isLoadingSchema = false;
-			});
+			},
+			(err) => {
+				console.error('Failed to load schema:', err);
+				isLoadingSchema = false;
+			}
+		);
 	});
 
 	// Use active tab's datasource
@@ -117,8 +129,9 @@
 	// Get the current datasource object for the active tab
 	const currentDatasource = $derived.by(() => {
 		if (!datasourceId) return null;
-		const all = datasourcesQuery.data ?? [];
-		return all.find((ds) => ds.id === datasourceId) ?? null;
+		const data = datasourcesQuery.data;
+		if (!data) return null;
+		return data.find((ds) => ds.id === datasourceId) ?? null;
 	});
 
 	function makeId() {
@@ -177,17 +190,20 @@
 
 		isSaving = true;
 		saveStatus = 'saving';
-		try {
-			await analysisStore.save();
-			saveStatus = 'saved';
-			selectedStepId = null;
-		} catch (err) {
-			saveStatus = 'unsaved';
-			const message = err instanceof Error ? err.message : 'Failed to save pipeline';
-			alert(message);
-		} finally {
-			isSaving = false;
-		}
+
+		analysisStore.save().match(
+			() => {
+				saveStatus = 'saved';
+				selectedStepId = null;
+				selectedStepState = null;
+				isSaving = false;
+			},
+			(error) => {
+				saveStatus = 'unsaved';
+				alert(`Failed to save pipeline: ${error.message}`);
+				isSaving = false;
+			}
+		);
 	}
 
 	function handleCloseConfig() {

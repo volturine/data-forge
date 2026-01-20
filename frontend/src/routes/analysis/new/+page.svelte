@@ -16,7 +16,13 @@
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
-		queryFn: listDatasources
+		queryFn: async () => {
+			const result = await listDatasources();
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value;
+		}
 	}));
 
 	const canProceedStep1 = $derived(name.trim().length > 0);
@@ -36,29 +42,31 @@
 		creating = true;
 		error = '';
 
-		try {
-			const payload = {
-				name: name.trim(),
-				description: description.trim() || null,
-				datasource_ids: selectedDatasourceIds,
-				pipeline_steps: [],
-				tabs: selectedDatasourceIds.map((datasourceId, index) => ({
-					id: `tab-${datasourceId}`,
-					name: `Source ${index + 1}`,
-					type: 'datasource' as const,
-					parent_id: null,
-					datasource_id: datasourceId,
-					steps: []
-				}))
-			};
+		const payload = {
+			name: name.trim(),
+			description: description.trim() || null,
+			datasource_ids: selectedDatasourceIds,
+			pipeline_steps: [],
+			tabs: selectedDatasourceIds.map((datasourceId, index) => ({
+				id: `tab-${datasourceId}`,
+				name: `Source ${index + 1}`,
+				type: 'datasource' as const,
+				parent_id: null,
+				datasource_id: datasourceId,
+				steps: []
+			}))
+		};
 
-			const analysis = await createAnalysis(payload as AnalysisCreate);
-
-			goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to create analysis';
-			creating = false;
-		}
+		const result = await createAnalysis(payload as AnalysisCreate);
+		result.match(
+			(analysis) => {
+				goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
+			},
+			(err) => {
+				error = err.message;
+				creating = false;
+			}
+		);
 	}
 </script>
 

@@ -10,41 +10,85 @@ class ComputeStore {
 	polling = $state(new Map<string, number>());
 
 	async executeAnalysis(id: string): Promise<ComputeJob> {
-		const job = await executeAnalysisApi(id);
-		this.jobs.set(job.id, job);
-		this.jobs = new Map(this.jobs);
+		return executeAnalysisApi(id).match(
+			(job) => {
+				this.jobs.set(job.id, job);
+				this.jobs = new Map(this.jobs);
 
-		// Start polling if job is pending or running
-		if (job.status === 'pending' || job.status === 'running') {
-			this.startPolling(job.id);
-		}
+				if (job.status === 'pending' || job.status === 'running') {
+					this.startPolling(job.id);
+				}
 
-		return job;
+				return job;
+			},
+			(_error) => {
+				const failedJob: ComputeJob = {
+					id,
+					status: 'failed',
+					progress: 0,
+					error: 'Failed to execute analysis',
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString()
+				};
+				this.jobs.set(id, failedJob);
+				this.jobs = new Map(this.jobs);
+				return failedJob;
+			}
+		);
 	}
 
 	async pollJobStatus(jobId: string): Promise<ComputeJob> {
-		const job = await getComputeStatus(jobId);
-		this.jobs.set(jobId, job);
-		this.jobs = new Map(this.jobs);
+		return getComputeStatus(jobId).match(
+			(job) => {
+				this.jobs.set(jobId, job);
+				this.jobs = new Map(this.jobs);
 
-		// Stop polling if job is completed or failed
-		if (job.status === 'completed' || job.status === 'failed') {
-			this.stopPolling(jobId);
-		}
+				if (job.status === 'completed' || job.status === 'failed') {
+					this.stopPolling(jobId);
+				}
 
-		return job;
+				return job;
+			},
+			(_error) => {
+				const job = this.jobs.get(jobId);
+				if (job) {
+					const failedJob = {
+						...job,
+						status: 'failed' as const,
+						error: 'Failed to poll job status'
+					};
+					this.jobs.set(jobId, failedJob);
+					this.jobs = new Map(this.jobs);
+					this.stopPolling(jobId);
+					return failedJob;
+				}
+				this.stopPolling(jobId);
+				throw new Error('Job not found');
+			}
+		);
 	}
 
 	async cancelJob(jobId: string): Promise<void> {
-		await cancelJobApi(jobId);
-		this.stopPolling(jobId);
+		cancelJobApi(jobId).match(
+			() => {
+				this.stopPolling(jobId);
 
-		// Update job status
-		const job = this.jobs.get(jobId);
-		if (job) {
-			this.jobs.set(jobId, { ...job, status: 'failed', error: 'Cancelled by user' });
-			this.jobs = new Map(this.jobs);
-		}
+				const job = this.jobs.get(jobId);
+				if (job) {
+					this.jobs.set(jobId, { ...job, status: 'failed', error: 'Cancelled by user' });
+					this.jobs = new Map(this.jobs);
+				}
+			},
+			(_error) => {
+				this.stopPolling(jobId);
+
+				const job = this.jobs.get(jobId);
+				if (job) {
+					this.jobs.set(jobId, { ...job, status: 'failed', error: 'Failed to cancel job' });
+					this.jobs = new Map(this.jobs);
+				}
+			}
+		);
 	}
 
 	getJob(jobId: string): ComputeJob | undefined {
@@ -52,14 +96,13 @@ class ComputeStore {
 	}
 
 	private startPolling(jobId: string): void {
-		// Don't start if already polling
 		if (this.polling.has(jobId)) return;
 
 		const intervalId = window.setInterval(() => {
 			this.pollJobStatus(jobId).catch(() => {
 				this.stopPolling(jobId);
 			});
-		}, 2000); // Poll every 2 seconds
+		}, 2000);
 
 		this.polling.set(jobId, intervalId);
 		this.polling = new Map(this.polling);
@@ -81,12 +124,10 @@ class ComputeStore {
 	}
 
 	clearAll(): void {
-		// Stop all polling
 		for (const jobId of this.polling.keys()) {
 			this.stopPolling(jobId);
 		}
 
-		// Clear all jobs
 		this.jobs.clear();
 		this.jobs = new Map();
 	}

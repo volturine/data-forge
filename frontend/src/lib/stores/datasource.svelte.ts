@@ -16,61 +16,68 @@ class DatasourceStore {
 		this.loading = true;
 		this.error = null;
 
-		try {
-			const datasources = await listDatasources();
-			this.datasources = datasources;
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to load datasources';
-			throw err;
-		} finally {
-			this.loading = false;
-		}
+		listDatasources().match(
+			(datasources) => {
+				this.datasources = datasources;
+				this.loading = false;
+			},
+			(err) => {
+				this.error = err.message;
+				this.loading = false;
+			}
+		);
 	}
 
 	async uploadFile(file: File, name: string): Promise<DataSource> {
 		this.loading = true;
 		this.error = null;
 
-		try {
-			const datasource = await uploadFileApi(file, name);
-			this.datasources = [...this.datasources, datasource];
-			return datasource;
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to upload file';
-			throw err;
-		} finally {
-			this.loading = false;
-		}
+		return uploadFileApi(file, name).match(
+			(datasource) => {
+				this.datasources = [...this.datasources, datasource];
+				this.loading = false;
+				return datasource;
+			},
+			(err) => {
+				this.error = err.message;
+				this.loading = false;
+				throw new Error(err.message);
+			}
+		);
 	}
 
 	async getSchema(id: string): Promise<SchemaInfo> {
-		// Return cached schema if available
 		const cached = this.schemas.get(id);
 		if (cached) return cached;
 
-		const schema = await getDatasourceSchema(id);
-		this.schemas.set(id, schema);
-		this.schemas = new Map(this.schemas);
-		return schema;
+		return getDatasourceSchema(id).match(
+			(schema) => {
+				this.schemas.set(id, schema);
+				this.schemas = new Map(this.schemas);
+				return schema;
+			},
+			(_err) => {
+				throw new Error('Failed to get schema');
+			}
+		);
 	}
 
 	async deleteDatasource(id: string): Promise<void> {
 		this.loading = true;
 		this.error = null;
 
-		try {
-			await deleteDatasourceApi(id);
-			this.datasources = this.datasources.filter((ds) => ds.id !== id);
-
-			// Remove cached schema
-			this.schemas.delete(id);
-			this.schemas = new Map(this.schemas);
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to delete datasource';
-			throw err;
-		} finally {
-			this.loading = false;
-		}
+		deleteDatasourceApi(id).match(
+			() => {
+				this.datasources = this.datasources.filter((ds) => ds.id !== id);
+				this.schemas.delete(id);
+				this.schemas = new Map(this.schemas);
+				this.loading = false;
+			},
+			(err) => {
+				this.error = err.message;
+				this.loading = false;
+			}
+		);
 	}
 
 	getDatasource(id: string): DataSource | undefined {

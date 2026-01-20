@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { createQuery } from '@tanstack/svelte-query';
-	import { useQueryClient } from '@tanstack/svelte-query';
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+	import { PersistedState } from 'runed';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { listAnalyses, deleteAnalysis } from '$lib/api/analysis';
@@ -15,11 +15,17 @@
 
 	const query = createQuery(() => ({
 		queryKey: ['analyses'],
-		queryFn: listAnalyses
+		queryFn: async () => {
+			const result = await listAnalyses();
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value;
+		}
 	}));
 
-	let searchQuery = $state('');
-	let sortOption = $state<SortOption>('newest');
+	const searchQuery = new PersistedState('analysis-search', '');
+	const sortOption = new PersistedState<SortOption>('analysis-sort', 'newest');
 	let deleteConfirmId = $state<string | null>(null);
 
 	const filteredAndSortedAnalyses = $derived.by(() => {
@@ -27,13 +33,13 @@
 
 		let result = [...query.data];
 
-		if (searchQuery) {
-			const lowerQuery = searchQuery.toLowerCase();
+		if (searchQuery.current) {
+			const lowerQuery = searchQuery.current.toLowerCase();
 			result = result.filter((analysis) => analysis.name.toLowerCase().includes(lowerQuery));
 		}
 
 		result.sort((a, b) => {
-			switch (sortOption) {
+			switch (sortOption.current) {
 				case 'newest':
 					return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
 				case 'oldest':
@@ -55,28 +61,30 @@
 	}
 
 	function handleSearch(query: string) {
-		searchQuery = query;
+		searchQuery.current = query;
 	}
 
 	function handleSort(option: SortOption) {
-		sortOption = option;
+		sortOption.current = option;
 	}
 
 	function requestDelete(id: string) {
 		deleteConfirmId = id;
 	}
 
-	async function confirmDelete() {
+	function confirmDelete() {
 		if (!deleteConfirmId) return;
 
-		try {
-			await deleteAnalysis(deleteConfirmId);
-			queryClient.invalidateQueries({ queryKey: ['analyses'] });
-			deleteConfirmId = null;
-		} catch (err) {
-			console.error('Failed to delete analysis:', err);
-			alert('Failed to delete analysis. Please try again.');
-		}
+		deleteAnalysis(deleteConfirmId).match(
+			() => {
+				queryClient.invalidateQueries({ queryKey: ['analyses'] });
+				deleteConfirmId = null;
+			},
+			(error) => {
+				alert(`Failed to delete: ${error.message}`);
+				deleteConfirmId = null;
+			}
+		);
 	}
 
 	function cancelDelete() {

@@ -116,9 +116,7 @@
 				const sortConfig = s.config as { columns: string[]; descending: boolean[] };
 				const columns = sortConfig?.columns;
 				if (!columns || columns.length === 0) return 'not configured';
-				return columns
-					.map((col, i) => `${col} ${sortConfig.descending[i] ? '↓' : '↑'}`)
-					.join(', ');
+				return columns.map((col, i) => `${col} ${sortConfig.descending[i] ? '↓' : '↑'}`).join(', ');
 			}
 
 			case 'export': {

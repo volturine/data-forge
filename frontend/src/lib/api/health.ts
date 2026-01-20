@@ -1,6 +1,8 @@
 import type { HealthResponse } from '$lib/types/api-responses';
 import { apiRequest } from './client';
+import type { ResultAsync } from 'neverthrow';
+import type { ApiError } from './client';
 
-export async function checkHealth(): Promise<HealthResponse> {
+export function checkHealth(): ResultAsync<HealthResponse, ApiError> {
 	return apiRequest<HealthResponse>('/api/v1/health/');
 }

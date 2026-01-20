@@ -5,31 +5,33 @@ import type {
 	AnalysisUpdate
 } from '$lib/types/analysis';
 import { apiRequest } from './client';
+import type { ResultAsync } from 'neverthrow';
+import type { ApiError } from './client';
 
-export async function createAnalysis(data: AnalysisCreate): Promise<Analysis> {
+export function createAnalysis(data: AnalysisCreate): ResultAsync<Analysis, ApiError> {
 	return apiRequest<Analysis>('/api/v1/analysis', {
 		method: 'POST',
 		body: JSON.stringify(data)
 	});
 }
 
-export async function listAnalyses(): Promise<AnalysisGalleryItem[]> {
+export function listAnalyses(): ResultAsync<AnalysisGalleryItem[], ApiError> {
 	return apiRequest<AnalysisGalleryItem[]>('/api/v1/analysis');
 }
 
-export async function getAnalysis(id: string): Promise<Analysis> {
+export function getAnalysis(id: string): ResultAsync<Analysis, ApiError> {
 	return apiRequest<Analysis>(`/api/v1/analysis/${id}`);
 }
 
-export async function updateAnalysis(id: string, data: AnalysisUpdate): Promise<Analysis> {
+export function updateAnalysis(id: string, data: AnalysisUpdate): ResultAsync<Analysis, ApiError> {
 	return apiRequest<Analysis>(`/api/v1/analysis/${id}`, {
 		method: 'PUT',
 		body: JSON.stringify(data)
 	});
 }
 
-export async function deleteAnalysis(id: string): Promise<void> {
-	await apiRequest<void>(`/api/v1/analysis/${id}`, {
+export function deleteAnalysis(id: string): ResultAsync<void, ApiError> {
+	return apiRequest<void>(`/api/v1/analysis/${id}`, {
 		method: 'DELETE'
 	});
 }

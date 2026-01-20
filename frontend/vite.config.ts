@@ -1,6 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [
@@ -37,16 +37,6 @@ export default defineConfig({
 		},
 		hmr: {
 			host: '0.0.0.0'
-		}
-	},
-
-	test: {
-		include: ['src/**/*.{test,spec}.{js,ts}'],
-		environment: 'jsdom',
-		globals: true,
-		setupFiles: ['./src/test/setup.ts'],
-		alias: {
-			$lib: new URL('./src/lib', import.meta.url).pathname
 		}
 	}
 });

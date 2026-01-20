@@ -9,11 +9,22 @@
 
 	const query = createQuery(() => ({
 		queryKey: ['datasources'],
-		queryFn: listDatasources
+		queryFn: async () => {
+			const result = await listDatasources();
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value;
+		}
 	}));
 
 	const deleteMutation = createMutation(() => ({
-		mutationFn: deleteDatasource,
+		mutationFn: async (id: string) => {
+			const result = await deleteDatasource(id);
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 		}

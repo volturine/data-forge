@@ -2,13 +2,12 @@ import { untrack } from 'svelte';
 import { spawnEngine, sendKeepalive, shutdownEngine, getEngineStatus } from '$lib/api/compute';
 import type { EngineStatusResponse } from '$lib/types/compute';
 
-const KEEPALIVE_INTERVAL = 30000; // 30 seconds
-const SHUTDOWN_GRACE_MS = 30000; // kill idle engine after navigation away
+const KEEPALIVE_INTERVAL = 30000;
+const SHUTDOWN_GRACE_MS = 30000;
 
 class EngineLifecycle {
 	status = $state<EngineStatusResponse | null>(null);
 	error = $state<string | null>(null);
-	// Non-reactive state to prevent infinite loops in effects
 	private _analysisId: string | null = null;
 	private _starting = false;
 	private _intervalId: ReturnType<typeof setInterval> | null = null;
@@ -27,7 +26,6 @@ class EngineLifecycle {
 	}
 
 	async start(analysisId: string): Promise<void> {
-		// Use non-reactive checks to prevent effect re-triggers
 		if (this._analysisId === analysisId && (this._starting || untrack(() => this.isActive))) return;
 
 		this.cancelShutdownTimer();
@@ -36,25 +34,31 @@ class EngineLifecycle {
 		this._starting = true;
 		this.error = null;
 
-		try {
-			this.status = await spawnEngine(analysisId);
-			this.startKeepalive();
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to spawn engine';
-			this.status = null;
-		} finally {
-			this._starting = false;
-		}
+		spawnEngine(analysisId).match(
+			(newStatus) => {
+				this.status = newStatus;
+				this.startKeepalive();
+				this._starting = false;
+			},
+			(err) => {
+				this.error = err.message;
+				this.status = null;
+				this._starting = false;
+			}
+		);
 	}
 
 	async refresh(): Promise<void> {
 		if (!this._analysisId) return;
 
-		try {
-			this.status = await getEngineStatus(this._analysisId);
-		} catch {
-			// Ignore refresh errors
-		}
+		getEngineStatus(this._analysisId).match(
+			(newStatus) => {
+				this.status = newStatus;
+			},
+			() => {
+				// Ignore refresh errors
+			}
+		);
 	}
 
 	stop(): void {
@@ -75,15 +79,13 @@ class EngineLifecycle {
 		this._starting = false;
 		this.status = null;
 
-		try {
-			await shutdownEngine(id);
-		} catch {
-			// Ignore shutdown errors
-		}
+		shutdownEngine(id).match(
+			() => {},
+			() => {}
+		);
 	}
 
 	private startKeepalive(): void {
-		// Always clear any existing interval first
 		this.stopKeepalive();
 		this.cancelShutdownTimer();
 
@@ -93,17 +95,22 @@ class EngineLifecycle {
 				return;
 			}
 
-			try {
-				this.status = await sendKeepalive(this._analysisId);
-			} catch {
-				// Engine may have been terminated, try to respawn
-				try {
-					this.status = await spawnEngine(this._analysisId);
-				} catch (err) {
-					this.error = err instanceof Error ? err.message : 'Failed to respawn engine';
-					this.stopKeepalive();
+			sendKeepalive(this._analysisId).match(
+				(newStatus) => {
+					this.status = newStatus;
+				},
+				() => {
+					spawnEngine(this._analysisId!).match(
+						(newStatus) => {
+							this.status = newStatus;
+						},
+						(err) => {
+							this.error = err.message;
+							this.stopKeepalive();
+						}
+					);
 				}
-			}
+			);
 		}, KEEPALIVE_INTERVAL);
 	}
 
@@ -128,17 +135,21 @@ class EngineLifecycle {
 		this.cancelShutdownTimer();
 
 		this._shutdownTimer = setTimeout(async () => {
-			try {
-				await shutdownEngine(id);
-			} catch {
-				// Ignore shutdown errors
-			} finally {
-				if (this._analysisId === id) {
-					this._analysisId = null;
-					this.status = null;
+			shutdownEngine(id).match(
+				() => {
+					if (this._analysisId === id) {
+						this._analysisId = null;
+						this.status = null;
+					}
+				},
+				() => {
+					if (this._analysisId === id) {
+						this._analysisId = null;
+						this.status = null;
+					}
 				}
-				this._shutdownTimer = null;
-			}
+			);
+			this._shutdownTimer = null;
 		}, SHUTDOWN_GRACE_MS);
 	}
 }

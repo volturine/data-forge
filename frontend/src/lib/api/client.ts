@@ -29,14 +29,7 @@ function createApiError(
 	return { type, message, status, statusText };
 }
 
-/**
- * Type-safe API request using neverthrow Result types.
- * Returns Result<T, ApiError> instead of throwing exceptions.
- */
-export function apiRequestSafe<T>(
-	endpoint: string,
-	options?: RequestInit
-): ResultAsync<T, ApiError> {
+export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
 	return ResultAsync.fromPromise(
 		fetch(`${BASE_URL}${endpoint}`, {
 			...options,
@@ -68,19 +61,4 @@ export function apiRequestSafe<T>(
 			(): ApiError => createApiError('parse', 'Failed to parse response JSON')
 		);
 	});
-}
-
-/**
- * Legacy API request function that throws on error.
- * @deprecated Use apiRequestSafe for better error handling.
- */
-export async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
-	const result = await apiRequestSafe<T>(endpoint, options);
-
-	if (result.isErr()) {
-		const error = result.error;
-		throw new Error(`${error.type} error: ${error.message}`);
-	}
-
-	return result.value;
 }

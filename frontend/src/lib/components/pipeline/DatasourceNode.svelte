@@ -73,16 +73,18 @@
 		if (!datasource?.id || isLoadingRowCount) return;
 
 		isLoadingRowCount = true;
-		try {
-			const schema = await getDatasourceSchema(datasource.id);
-			if (schema.row_count !== null && schema.row_count !== undefined) {
-				rowCount = schema.row_count;
+		getDatasourceSchema(datasource.id).match(
+			(schema) => {
+				if (schema.row_count !== null && schema.row_count !== undefined) {
+					rowCount = schema.row_count;
+				}
+				isLoadingRowCount = false;
+			},
+			(error) => {
+				console.error('Failed to get row count:', error);
+				isLoadingRowCount = false;
 			}
-		} catch (error) {
-			console.error('Failed to get row count:', error);
-		} finally {
-			isLoadingRowCount = false;
-		}
+		);
 	}
 
 	function getFileType(): string | null {

@@ -45,13 +45,17 @@
 	const query = createQuery(() => ({
 		queryKey: ['step-preview', datasourceId, stepId, currentPage, rowLimit, pipelineKey],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			return await previewStepData({
+			const result = await previewStepData({
 				datasource_id: datasourceId,
 				pipeline_steps: pipeline,
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage
 			});
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value;
 		},
 		staleTime: 30000,
 		enabled: !!datasourceId && !!stepId && pipeline.length > 0
