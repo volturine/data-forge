@@ -39,12 +39,18 @@ export interface DropConfigData {
 	columns: string[];
 }
 
+export interface JoinColumn {
+	id: string;
+	left_column: string;
+	right_column: string;
+}
+
 export interface JoinConfigData {
 	how: 'inner' | 'left' | 'right' | 'outer' | 'cross';
-	left_on: string | null;
-	right_on: string | null;
-	datasource_id?: string;
-	suffix?: string;
+	right_source?: string;
+	join_columns: JoinColumn[];
+	right_columns: string[];
+	suffix: string;
 }
 
 export interface ExpressionConfigData {

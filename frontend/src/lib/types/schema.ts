@@ -55,11 +55,16 @@ export function unionByName(schemas: Schema[], _allowMissing: boolean = true): S
 	};
 }
 
-export function intersectSchemas(left: Schema, right: Schema, _suffix: string = ''): Schema {
+export function intersectSchemas(
+	left: Schema,
+	right: Schema | null,
+	_suffix: string = '',
+	rightColumns?: string[]
+): Schema {
 	const result: Column[] = [];
 
 	for (const lcol of left.columns) {
-		const rcol = right.columns.find((c) => c.name === lcol.name);
+		const rcol = right?.columns.find((c) => c.name === lcol.name);
 		if (rcol) {
 			result.push({
 				name: lcol.name,
@@ -69,38 +74,77 @@ export function intersectSchemas(left: Schema, right: Schema, _suffix: string = 
 		}
 	}
 
+	// Add selected right columns that don't overlap with left
+	if (right && rightColumns && rightColumns.length > 0) {
+		for (const rcol of right.columns) {
+			if (!hasColumn(left, rcol.name) && rightColumns.includes(rcol.name)) {
+				result.push({
+					name: rcol.name + _suffix,
+					dtype: rcol.dtype,
+					nullable: true
+				});
+			}
+		}
+	}
+
 	return { columns: result, row_count: null };
 }
 
-export function leftJoinSchema(left: Schema, right: Schema, suffix: string = '_right'): Schema {
+export function leftJoinSchema(
+	left: Schema,
+	right: Schema | null,
+	suffix: string = '_right',
+	rightColumns?: string[]
+): Schema {
 	const result: Column[] = [];
 
 	for (const lcol of left.columns) {
 		result.push({ ...lcol });
 	}
 
-	const rightColumns = right.columns.filter((c) => !hasColumn(left, c.name));
-	for (const rcol of rightColumns) {
-		result.push({
-			name: rcol.name + suffix,
-			dtype: rcol.dtype,
-			nullable: true
-		});
+	if (right) {
+		const rightFiltered =
+			rightColumns && rightColumns.length > 0
+				? right.columns.filter((c) => rightColumns.includes(c.name))
+				: right.columns;
+
+		for (const rcol of rightFiltered) {
+			if (!hasColumn(left, rcol.name)) {
+				result.push({
+					name: rcol.name + suffix,
+					dtype: rcol.dtype,
+					nullable: true
+				});
+			}
+		}
 	}
 
 	return { columns: result, row_count: null };
 }
 
-export function rightJoinSchema(left: Schema, right: Schema, suffix: string = '_left'): Schema {
+export function rightJoinSchema(
+	left: Schema | null,
+	right: Schema,
+	suffix: string = '_left',
+	rightColumns?: string[]
+): Schema {
 	const result: Column[] = [];
 
-	const leftColumns = left.columns.filter((c) => !hasColumn(right, c.name));
-	for (const lcol of leftColumns) {
-		result.push({
-			name: lcol.name + suffix,
-			dtype: lcol.dtype,
-			nullable: true
-		});
+	if (left) {
+		const leftFiltered =
+			rightColumns && rightColumns.length > 0
+				? left.columns.filter((c) => rightColumns.includes(c.name))
+				: left.columns;
+
+		for (const lcol of leftFiltered) {
+			if (!hasColumn(right, lcol.name)) {
+				result.push({
+					name: lcol.name + suffix,
+					dtype: lcol.dtype,
+					nullable: true
+				});
+			}
+		}
 	}
 
 	for (const rcol of right.columns) {
@@ -110,12 +154,17 @@ export function rightJoinSchema(left: Schema, right: Schema, suffix: string = '_
 	return { columns: result, row_count: null };
 }
 
-export function outerJoinSchema(left: Schema, right: Schema, suffix: string = '_other'): Schema {
+export function outerJoinSchema(
+	left: Schema,
+	right: Schema | null,
+	suffix: string = '_other',
+	rightColumns?: string[]
+): Schema {
 	const result: Column[] = [];
 	const rightSeen = new Set<string>();
 
 	for (const lcol of left.columns) {
-		const rcol = right.columns.find((c) => c.name === lcol.name);
+		const rcol = right?.columns.find((c) => c.name === lcol.name);
 		if (rcol) {
 			result.push({
 				name: lcol.name,
@@ -128,13 +177,20 @@ export function outerJoinSchema(left: Schema, right: Schema, suffix: string = '_
 		}
 	}
 
-	for (const rcol of right.columns) {
-		if (!rightSeen.has(rcol.name)) {
-			result.push({
-				name: rcol.name + suffix,
-				dtype: rcol.dtype,
-				nullable: true
-			});
+	if (right) {
+		const rightFiltered =
+			rightColumns && rightColumns.length > 0
+				? right.columns.filter((c) => rightColumns.includes(c.name))
+				: right.columns;
+
+		for (const rcol of rightFiltered) {
+			if (!rightSeen.has(rcol.name)) {
+				result.push({
+					name: rcol.name + suffix,
+					dtype: rcol.dtype,
+					nullable: true
+				});
+			}
 		}
 	}
 

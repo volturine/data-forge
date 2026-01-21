@@ -50,7 +50,8 @@ class DatasourceStore {
 		const cached = this.schemas.get(id);
 		if (cached) return cached;
 
-		return getDatasourceSchema(id).match(
+		const result = await getDatasourceSchema(id);
+		return result.match(
 			(schema) => {
 				this.schemas.set(id, schema);
 				this.schemas = new Map(this.schemas);

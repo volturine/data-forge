@@ -26,6 +26,26 @@ def cleanup_jobs_for_engine(analysis_id: str) -> int:
     return cleaned
 
 
+async def _get_additional_datasources(session: AsyncSession, pipeline_steps: list[dict]) -> dict[str, dict]:
+    """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins)."""
+    additional: dict[str, dict] = {}
+
+    for step in pipeline_steps:
+        config = step.get('config', {})
+        right_source_id = config.get('right_source') or config.get('rightDataSource')
+
+        if right_source_id and right_source_id not in additional:
+            result = await session.execute(select(DataSource).where(DataSource.id == right_source_id))
+            datasource = result.scalar_one_or_none()
+            if datasource:
+                additional[right_source_id] = {
+                    'source_type': datasource.source_type,
+                    **datasource.config,
+                }
+
+    return additional
+
+
 async def execute_analysis(
     session: AsyncSession,
     analysis_id: str,
@@ -47,9 +67,12 @@ async def execute_analysis(
         **datasource.config,
     }
 
+    additional_datasources = await _get_additional_datasources(session, pipeline_steps)
+
     job_id = engine.execute(
         datasource_config=datasource_config,
         pipeline_steps=pipeline_steps,
+        additional_datasources=additional_datasources,
     )
 
     _job_status[job_id] = {
@@ -103,9 +126,12 @@ async def preview_step(
         **datasource.config,
     }
 
+    additional_datasources = await _get_additional_datasources(session, preview_steps)
+
     engine.execute(
         datasource_config=datasource_config,
         pipeline_steps=preview_steps,
+        additional_datasources=additional_datasources,
     )
 
     while True:
@@ -243,9 +269,12 @@ async def export_data(
         **datasource.config,
     }
 
+    additional_datasources = await _get_additional_datasources(session, export_steps)
+
     engine.execute(
         datasource_config=datasource_config,
         pipeline_steps=export_steps,
+        additional_datasources=additional_datasources,
     )
 
     while True:

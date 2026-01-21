@@ -34,6 +34,8 @@ export interface StepConfig {
 	explode_column?: string;
 	window?: Record<string, unknown>;
 	rowLimit?: number;
+	join_columns?: Array<{ id: string; left_column: string; right_column: string }>;
+	right_columns?: string[];
 	[key: string]: unknown;
 }
 
@@ -339,24 +341,27 @@ export function joinTransform(
 	rightSchema: Schema | null
 ): Schema {
 	if (!input) return rightSchema ?? { columns: [], row_count: null };
-	if (!rightSchema) return { columns: input.columns, row_count: null };
 
 	const how = (config.how as string) ?? 'inner';
 	const suffix = (config.suffix as string) ?? '_right';
 
+	const rightColumns = config.right_columns as string[] | undefined;
+
+	const safeRightSchema = rightSchema ?? { columns: [], row_count: null };
+
 	switch (how) {
 		case 'inner':
-			return intersectSchemas(input, rightSchema, suffix);
+			return intersectSchemas(input, safeRightSchema, suffix, rightColumns);
 		case 'left':
-			return leftJoinSchema(input, rightSchema, suffix);
+			return leftJoinSchema(input, safeRightSchema, suffix, rightColumns);
 		case 'right':
-			return rightJoinSchema(input, rightSchema, suffix);
+			return rightJoinSchema(input, safeRightSchema, suffix, rightColumns);
 		case 'outer':
-			return outerJoinSchema(input, rightSchema, suffix);
+			return outerJoinSchema(input, safeRightSchema, suffix, rightColumns);
 		case 'cross':
-			return crossJoinSchema(input, rightSchema);
+			return crossJoinSchema(input, safeRightSchema);
 		default:
-			return intersectSchemas(input, rightSchema, suffix);
+			return intersectSchemas(input, safeRightSchema, suffix, rightColumns);
 	}
 }
 

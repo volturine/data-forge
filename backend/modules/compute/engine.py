@@ -138,7 +138,9 @@ def _handle_sort(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     # Handle both single boolean and list of booleans for descending
     if isinstance(descending, list) and len(descending) != len(columns):
         # Ensure descending list matches columns length
-        descending = descending[: len(columns)] if len(descending) > len(columns) else descending + [False] * (len(columns) - len(descending))
+        descending = (
+            descending[: len(columns)] if len(descending) > len(columns) else descending + [False] * (len(columns) - len(descending))
+        )
     return lf.sort(columns, descending=descending)
 
 
@@ -393,30 +395,61 @@ def _handle_unpivot(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     )
 
 
-def _handle_join(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
-    """Handle join operation."""
-    # Join requires a second datasource
-    # For now, implement self-join (join with same datasource) or skip if no right_source
+def _handle_join(lf: pl.LazyFrame, params: dict, right_lf: pl.LazyFrame | None = None) -> pl.LazyFrame:
+    """Handle join operation with support for multiple join columns and column selection.
+
+    Args:
+        lf: The left LazyFrame (from parent step or main datasource)
+        params: Join parameters including join_columns, right_columns, etc.
+        right_lf: Optional right LazyFrame for cross-datasource joins. If None, self-join is performed.
+    """
     right_source = params.get('right_source')
-    left_on = params.get('left_on', [])
-    right_on = params.get('right_on', [])
     how = params.get('how', 'inner')
+    suffix = params.get('suffix', '_right')
+
+    join_columns = params.get('join_columns', [])
+    right_columns = params.get('right_columns', [])
+
+    if join_columns:
+        left_on = [col['left_column'] for col in join_columns if col.get('left_column')]
+        right_on = [col['right_column'] for col in join_columns if col.get('right_column')]
+    else:
+        left_on = params.get('left_on', [])
+        right_on = params.get('right_on', [])
 
     if not left_on or not right_on:
-        raise ValueError('Join requires left_on and right_on columns')
+        raise ValueError('Join requires at least one join column pair')
 
-    # If no right_source specified, this is a self-join (useful for deduplication patterns)
-    # Otherwise, we'd need to load the other datasource - not yet supported
-    if right_source:
-        raise ValueError(
-            'Cross-datasource joins are not yet supported. '
-            'Please use a single datasource and restructure your data, '
-            'or wait for multi-datasource support in a future update.'
-        )
+    if how == 'cross':
+        if right_lf is not None:
+            joined = lf.join(right_lf, how='cross')
+        else:
+            joined = lf.join(lf, how='cross')
+    else:
+        if right_lf is not None and right_source:
+            joined = lf.join(right_lf, left_on=left_on, right_on=right_on, how=how, suffix=suffix)
+        else:
+            joined = lf.join(lf, left_on=left_on, right_on=right_on, how=how, suffix=suffix)
 
-    # Self-join case: join the dataframe with itself
-    # This is useful for certain analytical patterns
-    return lf.join(lf, left_on=left_on, right_on=right_on, how=how, suffix='_right')
+    if right_columns and how != 'cross':
+        df = joined.collect()
+        all_columns = df.columns
+
+        right_suffix_columns = [f'{col}{suffix}' for col in right_columns if col not in left_on]
+
+        final_columns = []
+        for col in all_columns:
+            if col.endswith(suffix):
+                base_name = col[: -len(suffix)]
+                if base_name in right_columns:
+                    final_columns.append(col)
+            else:
+                final_columns.append(col)
+
+        if final_columns != all_columns:
+            return df.select(final_columns).lazy()
+
+    return joined
 
 
 def _handle_sample(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
@@ -531,8 +564,19 @@ class PolarsComputeEngine:
         self.process.start()
         self.is_running = True
 
-    def execute(self, datasource_config: dict, pipeline_steps: list[dict]) -> str:
-        """Execute a Polars pipeline in the subprocess."""
+    def execute(
+        self,
+        datasource_config: dict,
+        pipeline_steps: list[dict],
+        additional_datasources: dict[str, dict] | None = None,
+    ) -> str:
+        """Execute a Polars pipeline in the subprocess.
+
+        Args:
+            datasource_config: Configuration for the main datasource
+            pipeline_steps: List of pipeline transformation steps
+            additional_datasources: Dict of datasource_id -> config for additional datasources (e.g., for joins)
+        """
         job_id = str(uuid.uuid4())
         self.current_job_id = job_id
 
@@ -544,6 +588,7 @@ class PolarsComputeEngine:
             'job_id': job_id,
             'datasource_config': datasource_config,
             'pipeline_steps': pipeline_steps,
+            'additional_datasources': additional_datasources or {},
         }
 
         self.command_queue.put(command)
@@ -591,6 +636,7 @@ class PolarsComputeEngine:
                     job_id = command['job_id']
                     datasource_config = command['datasource_config']
                     pipeline_steps = command['pipeline_steps']
+                    additional_datasources = command.get('additional_datasources', {})
 
                     result_queue.put(
                         {
@@ -608,6 +654,7 @@ class PolarsComputeEngine:
                             pipeline_steps,
                             job_id,
                             result_queue,
+                            additional_datasources,
                         )
 
                         result_queue.put(
@@ -649,9 +696,19 @@ class PolarsComputeEngine:
         pipeline_steps: list[dict],
         job_id: str,
         result_queue: mp.Queue,
+        additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute the Polars transformation pipeline."""
         lf = PolarsComputeEngine._load_datasource(datasource_config)
+
+        right_sources: dict[str, pl.LazyFrame] = {}
+        if additional_datasources:
+            for ds_id, ds_config in additional_datasources.items():
+                try:
+                    right_sources[ds_id] = PolarsComputeEngine._load_datasource(ds_config)
+                except Exception as e:
+                    logger.error(f'Failed to load additional datasource {ds_id}: {e}')
+                    raise ValueError(f'Failed to load datasource {ds_id}: {e}')
 
         step_map: dict[str, dict] = {}
         for step in pipeline_steps:
@@ -739,7 +796,10 @@ class PolarsComputeEngine:
             else:
                 parent_frame = lf
 
-            schema_map[step_id] = PolarsComputeEngine._apply_step(parent_frame, backend_step)
+            right_source_id = backend_step.get('params', {}).get('right_source')
+            right_lf = right_sources.get(right_source_id) if right_source_id else None
+
+            schema_map[step_id] = PolarsComputeEngine._apply_step(parent_frame, backend_step, right_lf)
 
         # Only collect at the very end
         last_step = ordered_steps[-1] if ordered_steps else None
@@ -794,7 +854,7 @@ class PolarsComputeEngine:
             raise ValueError(f'Unsupported source type: {source_type}')
 
     @staticmethod
-    def _apply_step(lf: pl.LazyFrame, step: dict) -> pl.LazyFrame:
+    def _apply_step(lf: pl.LazyFrame, step: dict, right_lf: pl.LazyFrame | None = None) -> pl.LazyFrame:
         """Apply a single transformation step to the LazyFrame."""
         operation = step.get('operation')
         params = step.get('params', {})
@@ -804,5 +864,8 @@ class PolarsComputeEngine:
 
         if not handler:
             raise ValueError(f'Unsupported operation: {operation}')
+
+        if operation == 'join':
+            return handler(lf, params, right_lf)
 
         return handler(lf, params)

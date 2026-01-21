@@ -6,6 +6,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { PersistedState, Debounced, FiniteStateMachine, onClickOutside } from 'runed';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { engineLifecycle } from '$lib/stores/engine-lifecycle.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
@@ -99,6 +100,14 @@
 			return result.value;
 		}
 	}));
+
+	// Update datasourceStore when query data changes
+	$effect(() => {
+		const data = datasourcesQuery.data;
+		if (data) {
+			datasourceStore.datasources = data;
+		}
+	});
 
 	// Filtered datasources based on search
 	const filteredDatasources = $derived.by(() => {

@@ -364,3 +364,27 @@ When testing new features, verify:
 - [ ] Preview/data loads correctly
 - [ ] Error handling works
 - [ ] Update E2E_TEST_RESULTS.md
+
+### Frontend Responsiveness During Testing
+
+**CRITICAL**: During E2E testing with Playwright, if any operation times out or the UI becomes unresponsive:
+
+1. **IMMEDIATELY investigate** - An unresponsive frontend usually indicates:
+   - Infinite loop in JavaScript/TypeScript code
+   - Uncaught exception in event handlers
+   - Excessive re-rendering cycles
+   - Memory leak causing browser to freeze
+
+2. **Check for these common causes**:
+   - Missing dependency in `$derived` or `$effect` causing infinite recursion
+   - `$state` updates that trigger effects that update the same state
+   - Incorrect use of `$effect` without cleanup functions
+   - Too many concurrent reactive updates
+
+3. **If UI is unresponsive**:
+   - Open browser DevTools console for errors
+   - Check `page.snapshot()` for infinite loops in rendering
+   - Review recent code changes for potential issues
+   - Run `npm run check` for TypeScript errors that might cause runtime issues
+
+4. **Never ignore timeouts** - A timeout during testing is a signal that something is wrong, not just a slow operation. An infinite loop will cause the browser to become completely unresponsive, requiring a full restart.
