@@ -618,6 +618,29 @@
 		flex: 1;
 		min-width: 0;
 		overflow: hidden;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 var(--space-4);
+	}
+
+	.header-right {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--operations-panel-width, 280px);
+		height: 100%;
+		border-left: 1px solid var(--panel-border);
+		transition: width var(--transition);
+	}
+
+	.analysis-name {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		overflow: hidden;
+		text-align: center;
 	}
 
 	.header-right {
@@ -731,23 +754,24 @@
 	.header-tabs {
 		overflow: hidden;
 		flex: 1;
+		display: flex;
+		align-items: center;
 	}
 
 	.tabs {
 		display: flex;
-		gap: var(--space-2);
-		border-bottom: none;
-		padding-bottom: 0;
+		align-items: center;
+		gap: var(--space-1);
 		flex-wrap: nowrap;
 		overflow-x: auto;
-		padding-bottom: var(--space-1);
+		width: 100%;
 	}
 
 	.tab {
-		padding: var(--space-2) var(--space-3);
+		padding: var(--space-1) var(--space-2);
 		background: none;
 		border: none;
-		border-bottom: 2px solid transparent;
+		border-bottom: none !important;
 		cursor: pointer;
 		font-size: var(--text-sm);
 		color: var(--fg-muted);
@@ -755,18 +779,20 @@
 		transition: all var(--transition);
 		display: inline-flex;
 		align-items: center;
-		gap: var(--space-2);
+		gap: var(--space-1);
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
+		border-radius: var(--radius-sm);
 	}
 
 	.tab:hover {
 		color: var(--fg-secondary);
+		background-color: var(--bg-hover);
 	}
 
 	.tab.active {
 		color: var(--fg-primary);
-		border-bottom-color: var(--fg-primary);
+		background-color: var(--bg-secondary);
 	}
 
 	.tab-label {
@@ -779,11 +805,11 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		max-width: 200px;
+		max-width: 150px;
 	}
 
 	.tab-remove {
-		margin-left: var(--space-2);
+		margin-left: var(--space-1);
 		opacity: 0.5;
 		font-size: var(--text-base);
 		line-height: 1;
@@ -795,7 +821,7 @@
 	}
 
 	.add-tab {
-		padding: var(--space-2) var(--space-3);
+		padding: var(--space-1) var(--space-2);
 		font-weight: 600;
 	}
 
