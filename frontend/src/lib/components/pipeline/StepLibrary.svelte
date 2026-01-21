@@ -268,7 +268,7 @@
 
 <style>
 	.step-library {
-		width: 240px;
+		width: var(--operations-panel-width, 280px);
 		border-right: 1px solid var(--panel-border);
 		padding: var(--space-4) var(--space-3);
 		background-color: var(--panel-bg);

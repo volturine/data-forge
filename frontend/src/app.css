@@ -146,6 +146,9 @@
 	--panel-header-fg: var(--fg-primary);
 	--panel-shadow: var(--shadow-soft);
 
+	/* Panel widths */
+	--operations-panel-width: 340px;
+
 	--form-section-bg: var(--bg-tertiary);
 	--form-section-border: var(--border-primary);
 	--form-help-bg: var(--bg-primary);

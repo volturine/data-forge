@@ -225,7 +225,7 @@
 
 <style>
 	.step-config {
-		width: 400px;
+		width: var(--operations-panel-width, 280px);
 		border-left: 1px solid var(--panel-border);
 		background-color: var(--panel-bg);
 		display: flex;

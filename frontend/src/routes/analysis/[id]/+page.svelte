@@ -37,8 +37,7 @@
 	let modalMode = $state<'add' | 'change'>('add');
 
 	// Resizable panes with persisted state
-	const leftPaneWidth = new PersistedState('analysis-leftPaneWidth', 240);
-	const rightPaneWidth = new PersistedState('analysis-rightPaneWidth', 320);
+	const operationsPanelWidth = new PersistedState('analysis-operations-panel-width', 280);
 	let isResizingLeft = $state(false);
 	let isResizingRight = $state(false);
 
@@ -55,10 +54,10 @@
 	function handleMouseMove(e: MouseEvent) {
 		if (isResizingLeft) {
 			const newWidth = e.clientX;
-			leftPaneWidth.current = Math.max(180, Math.min(400, newWidth));
+			operationsPanelWidth.current = Math.max(180, Math.min(500, newWidth));
 		} else if (isResizingRight) {
 			const newWidth = window.innerWidth - e.clientX;
-			rightPaneWidth.current = Math.max(250, Math.min(500, newWidth));
+			operationsPanelWidth.current = Math.max(180, Math.min(500, newWidth));
 		}
 	}
 
@@ -341,14 +340,6 @@
 		<header class="editor-header">
 			<div class="header-top">
 				<div class="header-left">
-					<button
-						class="back-button"
-						onclick={() => goto(resolve('/'), { invalidateAll: true })}
-						type="button"
-						aria-label="Go back to home"
-					>
-						<ArrowLeft size={16} />
-					</button>
 					<div class="header-title">
 						<h1>{analysisQuery.data.name}</h1>
 						{#if analysisQuery.data.description}
@@ -424,7 +415,7 @@
 			role="application"
 			ondragover={(event) => event.preventDefault()}
 		>
-			<div class="left-pane" style="width: {leftPaneWidth}px">
+			<div class="left-pane" style="width: {operationsPanelWidth.current}px">
 				<StepLibrary onAddStep={handleAddStep} onInsertStep={handleInsertStep} />
 			</div>
 			<div
@@ -438,7 +429,7 @@
 			<div class="center-pane">
 				<PipelineCanvas
 					steps={analysisStore.pipeline}
-					savedSteps={savedSteps}
+					{savedSteps}
 					{previewDatasourceId}
 					saveStatus={saveStatus.current}
 					{datasourceId}
@@ -460,7 +451,7 @@
 				aria-label="Resize right panel"
 			></div>
 
-			<div class="right-pane" style="width: {rightPaneWidth}px">
+			<div class="right-pane" style="width: {operationsPanelWidth.current}px">
 				<StepConfig
 					bind:step={selectedStepState}
 					schema={analysisStore.calculatedSchema}
@@ -529,15 +520,15 @@
 									{:else if fileType === 'json'}
 										<FileJson size={12} />
 										JSON
-								{:else if fileType === 'parquet'}
-									<FileType size={12} />
-									Parquet
-								{:else if fileType === 'ndjson'}
-									<FileJson size={12} />
-									NDJSON
-								{:else if fileType === 'excel'}
-									<FileSpreadsheet size={12} />
-									Excel
+									{:else if fileType === 'parquet'}
+										<FileType size={12} />
+										Parquet
+									{:else if fileType === 'ndjson'}
+										<FileJson size={12} />
+										NDJSON
+									{:else if fileType === 'excel'}
+										<FileSpreadsheet size={12} />
+										Excel
 									{:else if ds.source_type === 'database'}
 										<Database size={12} />
 										Database
@@ -667,24 +658,6 @@
 		min-width: 0;
 		flex: 1;
 		overflow: hidden;
-	}
-
-	.back-button {
-		padding: var(--space-2);
-		background: transparent;
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		color: var(--fg-secondary);
-		transition: all var(--transition);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.back-button:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
 	}
 
 	.header-title {
@@ -971,7 +944,7 @@
 		flex-shrink: 0;
 		overflow: hidden;
 		display: flex;
-		min-width: 330px;
+		min-width: var(--operations-panel-width, 280px);
 		justify-content: left;
 		background-color: var(--panel-bg);
 	}
@@ -996,7 +969,7 @@
 		flex-shrink: 0;
 		overflow: hidden;
 		display: flex;
-		min-width: 330px;
+		min-width: var(--operations-panel-width, 280px);
 		justify-content: left;
 		background-color: var(--panel-bg);
 	}
