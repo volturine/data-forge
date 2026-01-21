@@ -312,7 +312,21 @@
 		<header class="editor-header">
 			<div class="header-left">
 				<div class="analysis-name">
-					<h1 contenteditable="true" class="editable-title">{analysisQuery.data.name}</h1>
+					<h1
+						contenteditable="true"
+						class="editable-title"
+						onblur={(e) => {
+							const newName = e.currentTarget.textContent?.trim();
+							if (newName && newName !== analysisQuery.data.name) {
+								analysisStore.update({ name: newName });
+								markUnsaved();
+							} else if (e.currentTarget) {
+								e.currentTarget.textContent = analysisQuery.data.name;
+							}
+						}}
+					>
+						{analysisQuery.data.name}
+					</h1>
 					{#if analysisQuery.data.description}
 						<span class="description">{analysisQuery.data.description}</span>
 					{/if}

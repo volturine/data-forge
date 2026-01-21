@@ -350,6 +350,8 @@ export class AnalysisStore {
 
 		const pipelineSteps = this.tabs.flatMap((tab) => tab.steps ?? []);
 		const update: AnalysisUpdate = {
+			name: this.current.name,
+			description: this.current.description,
 			tabs: this.tabs,
 			pipeline_steps: pipelineSteps
 		};
@@ -374,6 +376,11 @@ export class AnalysisStore {
 				this.loading = false;
 				return error;
 			});
+	}
+
+	update(updates: { name?: string; description?: string }): void {
+		if (!this.current) return;
+		this.current = { ...this.current, ...updates };
 	}
 
 	setSourceSchema(datasourceId: string, schema: SchemaInfo): void {
