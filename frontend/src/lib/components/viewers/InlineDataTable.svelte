@@ -30,8 +30,6 @@
 	let { datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props();
 	let currentPage = $state(1);
 	let sorting = $state<SortingState>([]);
-	let headerGroups = $state<HeaderGroup<RowData>[]>([]);
-	let rows = $state<Row<RowData>[]>([]);
 	const pipelineKey = $derived(JSON.stringify(pipeline));
 
 	const prevPipelineKey = new Previous(() => pipelineKey);
@@ -96,16 +94,10 @@
 		return columnType.includes('List') || columnType === 'list';
 	}
 
-	// Single effect that handles table creation and updates
-	$effect(() => {
-		// Dependencies: data, sorting
+	const table = $derived.by(() => {
 		const currentData = data;
-		const currentSorting = sorting;
-
 		if (!currentData || !currentData.columns || currentData.columns.length === 0) {
-			headerGroups = [];
-			rows = [];
-			return;
+			return null;
 		}
 
 		const columnDefs: ColumnDef<RowData>[] = currentData.columns.map((col) => ({
@@ -114,11 +106,11 @@
 			header: col
 		}));
 
-		const table = createTable({
+		return createTable({
 			data: currentData.data,
 			columns: columnDefs,
 			state: {
-				sorting: currentSorting,
+				sorting,
 				columnPinning: { left: [], right: [] },
 				columnVisibility: {},
 				expanded: {},
@@ -132,10 +124,11 @@
 			onStateChange: () => {},
 			renderFallbackValue: null
 		});
-
-		headerGroups = table.getHeaderGroups();
-		rows = table.getRowModel().rows;
 	});
+
+	const headerGroups = $derived<HeaderGroup<RowData>[]>(table ? table.getHeaderGroups() : []);
+
+	const rows = $derived<Row<RowData>[]>(table ? table.getRowModel().rows : []);
 
 	function nextPage() {
 		if (currentPage < totalPages) currentPage++;

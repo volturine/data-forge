@@ -16,7 +16,7 @@ export default {
 		adapter: adapter({
 			pages: 'build',
 			assets: 'build',
-			fallback: 'index.html', // SPA fallback for client-side routing
+			fallback: '404.html',
 			precompress: false,
 			strict: true
 		}),
