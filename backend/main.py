@@ -2,9 +2,11 @@ import asyncio
 import contextlib
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from api import router
 from core.config import settings
@@ -70,8 +72,8 @@ app.add_middleware(
     allow_headers=['Content-Type', 'Authorization'],
 )
 
-# Include Routers
-app.include_router(router, tags=['api'])
+# Include API Routers with /api prefix
+app.include_router(router, prefix='/api', tags=['api'])
 
 
 @app.get('/')
@@ -144,6 +146,16 @@ async def startup():
         return {'status': 'started'}
     except Exception as e:
         return {'status': 'starting', 'error': str(e)}, 503
+
+
+# Mount static files (frontend) - This must be LAST
+# Only mount if the frontend build directory exists (for Docker/production deployments)
+frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
+if frontend_build_dir.exists():
+    logger.info(f'Mounting frontend static files from {frontend_build_dir}')
+    app.mount('/', StaticFiles(directory=str(frontend_build_dir), html=True), name='frontend')
+else:
+    logger.info('Frontend build directory not found, skipping static file serving (development mode)')
 
 
 if __name__ == '__main__':

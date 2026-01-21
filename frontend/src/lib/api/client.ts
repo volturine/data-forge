@@ -1,15 +1,19 @@
 import { err, ResultAsync } from 'neverthrow';
 
-// In dev, always use relative URLs so Vite's dev proxy handles /api
-// In prod, allow overriding via VITE_API_URL, otherwise default to current host:8000
+// API URL configuration:
+// - In dev: Use empty string so Vite's proxy handles /api requests
+// - In prod: Use /api prefix if served from same origin, otherwise use VITE_API_URL
 const apiEnv = import.meta.env.VITE_API_URL?.trim();
 
+// For production builds served by FastAPI, use /api prefix
+// For separate deployments, use VITE_API_URL or fallback to :8000
 const runtimeBase =
 	typeof window === 'undefined'
 		? 'http://localhost:8000'
-		: `${window.location.protocol}//${window.location.hostname}:8000`;
+		: apiEnv ||
+		  (window.location.port === '8000' ? '/api' : `${window.location.protocol}//${window.location.hostname}:8000`);
 
-export const BASE_URL = import.meta.env.DEV ? '' : apiEnv || runtimeBase;
+export const BASE_URL = import.meta.env.DEV ? '' : runtimeBase;
 
 export type ApiErrorType = 'network' | 'http' | 'parse';
 
