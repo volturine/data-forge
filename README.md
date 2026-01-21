@@ -74,7 +74,7 @@ cp .env.example .env
 | `MAX_JOBS_IN_MEMORY` | `1000` | Maximum number of jobs to cache |
 | `MAX_UPLOAD_SIZE` | `10737418240` | Maximum file upload size (10GB) |
 
-See `backend/.env.example` for all available options with detailed descriptions.
+See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for complete reference of all 26 environment variables.
 
 ## Architecture
 
@@ -144,8 +144,13 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
 
 ## Documentation
 
+### Deployment & Configuration
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — Complete deployment guide with Docker
-- **[DOCKERIZATION_PLAN.md](DOCKERIZATION_PLAN.md)** — Technical architecture details
+- **[ENV_VARIABLES.md](ENV_VARIABLES.md)** — Complete environment variable reference (26 variables)
+- **[DOCKERIZATION_SUMMARY.md](DOCKERIZATION_SUMMARY.md)** — Dockerization implementation details
+- **[DOCKERIZATION_PLAN.md](DOCKERIZATION_PLAN.md)** — Technical architecture plan
+
+### Development
 - **[IMPROVEMENTS.md](IMPROVEMENTS.md)** — Code quality improvements summary
 - [PRD](docs/PRD.md) — Feature specs and architecture
 - [AGENTS.md](AGENTS.md) — Developer guidelines
