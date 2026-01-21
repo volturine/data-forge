@@ -23,10 +23,10 @@ services:
       # CORS
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
 
-      # File Storage (using container paths)
-      - UPLOAD_DIR=/app/data/uploads
-      - RESULTS_DIR=/app/data/results
-      - EXPORTS_DIR=/app/data/exports
+      # File Storage (using container paths - can override in .env if needed)
+      - UPLOAD_DIR=${UPLOAD_DIR:-/app/data/uploads}
+      - RESULTS_DIR=${RESULTS_DIR:-/app/data/results}
+      - EXPORTS_DIR=${EXPORTS_DIR:-/app/data/exports}
       - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-10737418240}
 
       # Polars Engine Resource Configuration
