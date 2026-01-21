@@ -1,8 +1,11 @@
+import logging
 import threading
 from datetime import UTC, datetime
 
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.schemas import EngineStatus
+
+logger = logging.getLogger(__name__)
 
 
 class EngineInfo:
@@ -44,12 +47,15 @@ class ProcessManager:
             if analysis_id in self._engines:
                 info = self._engines[analysis_id]
                 info.touch()
+                logger.debug(f'Reusing existing engine for analysis {analysis_id}')
                 return info
 
+            logger.info(f'Spawning new engine for analysis {analysis_id}')
             engine = PolarsComputeEngine(analysis_id)
             engine.start()
             info = EngineInfo(engine)
             self._engines[analysis_id] = info
+            logger.info(f'Engine spawned successfully for analysis {analysis_id}')
             return info
 
     def get_or_create_engine(self, analysis_id: str) -> PolarsComputeEngine:
@@ -126,9 +132,13 @@ class ProcessManager:
         """Shutdown and remove an engine."""
         with self._engines_lock:
             if analysis_id in self._engines:
+                logger.info(f'Shutting down engine for analysis {analysis_id}')
                 info = self._engines[analysis_id]
                 info.engine.shutdown()
                 del self._engines[analysis_id]
+                logger.info(f'Engine shutdown complete for analysis {analysis_id}')
+            else:
+                logger.debug(f'No engine found to shutdown for analysis {analysis_id}')
 
     def shutdown_all(self) -> None:
         """Shutdown all engines."""

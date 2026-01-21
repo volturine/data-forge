@@ -25,6 +25,7 @@ async def create_file_datasource(
     file_type: str,
     options: dict | None = None,
 ) -> DataSourceResponse:
+    """Create a file-based datasource."""
     datasource_id = str(uuid.uuid4())
 
     config = {
@@ -45,6 +46,7 @@ async def create_file_datasource(
     await session.commit()
     await session.refresh(datasource)
 
+    logger.info(f'Created file datasource {datasource_id} ({name}) with file {file_path}')
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -109,6 +111,7 @@ async def create_api_datasource(
 
 
 async def get_datasource_schema(session: AsyncSession, datasource_id: str) -> SchemaInfo:
+    """Get or extract schema for a datasource."""
     result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
     datasource = result.scalar_one_or_none()
 
@@ -120,13 +123,16 @@ async def get_datasource_schema(session: AsyncSession, datasource_id: str) -> Sc
         cached = SchemaInfo.model_validate(datasource.schema_cache)
         # If row_count is missing from cache, re-extract to get it
         if cached.row_count is not None:
+            logger.debug(f'Using cached schema for datasource {datasource_id}')
             return cached
 
+    logger.info(f'Extracting schema for datasource {datasource_id}')
     schema_info = await _extract_schema(datasource)
 
     datasource.schema_cache = schema_info.model_dump()
     await session.commit()
 
+    logger.info(f'Schema extracted and cached for datasource {datasource_id}: {len(schema_info.columns)} columns')
     return schema_info
 
 
