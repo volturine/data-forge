@@ -74,8 +74,8 @@ app.add_middleware(
     allow_headers=['Content-Type', 'Authorization'],
 )
 
-# Include API Routers with /api prefix
-app.include_router(router, prefix='/api', tags=['api'])
+# Include API Routers (prefix already defined in api/router.py)
+app.include_router(router, tags=['api'])
 
 
 @app.get('/')
@@ -173,6 +173,9 @@ if prod_mode_enabled and frontend_build_dir.exists():
 
     @app.get('/{full_path:path}', include_in_schema=False)
     async def serve_static_or_index(full_path: str):
+        if full_path.startswith('api/') or full_path == 'api':
+            raise HTTPException(status_code=404, detail='Not Found')
+
         path = frontend_build_dir / full_path
         if path.is_file():
             return FileResponse(str(path))

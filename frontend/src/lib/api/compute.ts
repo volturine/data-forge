@@ -59,7 +59,7 @@ function normalizeJob(raw: RawComputeJobResponse): ComputeJob {
 }
 
 export function executeAnalysis(analysisId: string): ResultAsync<ComputeJob, ApiError> {
-	return apiRequest<RawComputeJobResponse>('/api/v1/compute/execute', {
+	return apiRequest<RawComputeJobResponse>('/v1/compute/execute', {
 		method: 'POST',
 		body: JSON.stringify({
 			analysis_id: analysisId,
@@ -70,14 +70,14 @@ export function executeAnalysis(analysisId: string): ResultAsync<ComputeJob, Api
 }
 
 export function getComputeStatus(jobId: string): ResultAsync<ComputeJob, ApiError> {
-	return apiRequest<RawComputeJobResponse>(`/api/v1/compute/status/${jobId}`).map(normalizeJob);
+	return apiRequest<RawComputeJobResponse>(`/v1/compute/status/${jobId}`).map(normalizeJob);
 }
 
 export function previewStep(
 	analysisId: string,
 	stepId: string
 ): ResultAsync<PreviewResponse, ApiError> {
-	return apiRequest<PreviewResponse>('/api/v1/compute/preview', {
+	return apiRequest<PreviewResponse>('/v1/compute/preview', {
 		method: 'POST',
 		body: JSON.stringify({
 			analysis_id: analysisId,
@@ -90,20 +90,20 @@ export function previewStep(
 export function previewStepData(
 	request: StepPreviewRequest
 ): ResultAsync<StepPreviewResponse, ApiError> {
-	return apiRequest<StepPreviewResponse>('/api/v1/compute/preview', {
+	return apiRequest<StepPreviewResponse>('/v1/compute/preview', {
 		method: 'POST',
 		body: JSON.stringify(request)
 	});
 }
 
 export function cancelJob(jobId: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/compute/${jobId}`, {
+	return apiRequest<void>(`/v1/compute/${jobId}`, {
 		method: 'DELETE'
 	});
 }
 
 export function cleanupJob(jobId: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/compute/${jobId}/cleanup`, {
+	return apiRequest<void>(`/v1/compute/${jobId}/cleanup`, {
 		method: 'DELETE'
 	});
 }
@@ -111,29 +111,29 @@ export function cleanupJob(jobId: string): ResultAsync<void, ApiError> {
 // Engine lifecycle functions
 
 export function spawnEngine(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/spawn/${analysisId}`, {
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/spawn/${analysisId}`, {
 		method: 'POST'
 	});
 }
 
 export function sendKeepalive(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/keepalive/${analysisId}`, {
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/keepalive/${analysisId}`, {
 		method: 'POST'
 	});
 }
 
 export function getEngineStatus(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/status/${analysisId}`);
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/status/${analysisId}`);
 }
 
 export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/compute/engine/${analysisId}`, {
+	return apiRequest<void>(`/v1/compute/engine/${analysisId}`, {
 		method: 'DELETE'
 	});
 }
 
 export function listEngines(): ResultAsync<EngineListResponse, ApiError> {
-	return apiRequest<EngineListResponse>('/api/v1/compute/engines');
+	return apiRequest<EngineListResponse>('/v1/compute/engines');
 }
 
 export interface ExportRequest {
@@ -161,7 +161,7 @@ export interface ExportResponse {
 
 export function exportData(request: ExportRequest): ResultAsync<Blob | ExportResponse, ApiError> {
 	return ResultAsync.fromPromise(
-		fetch('/api/v1/compute/export', {
+		fetch('/v1/compute/export', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(request)

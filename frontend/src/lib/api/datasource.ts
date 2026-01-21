@@ -18,7 +18,7 @@ export function uploadFile(file: File, name: string): ResultAsync<DataSource, Ap
 	formData.append('name', name);
 
 	return ResultAsync.fromPromise(
-		fetch(`${BASE_URL}/api/v1/datasource/upload`, {
+		fetch(`${BASE_URL}/v1/datasource/upload`, {
 			method: 'POST',
 			body: formData
 		}),
@@ -40,7 +40,7 @@ export function connectDatabase(
 	connectionString: string,
 	query: string
 ): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/api/v1/datasource/connect', {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
 		method: 'POST',
 		body: JSON.stringify({
 			name,
@@ -57,7 +57,7 @@ export function connectApi(
 	headers?: Record<string, string>,
 	auth?: Record<string, string>
 ): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/api/v1/datasource/connect', {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
 		method: 'POST',
 		body: JSON.stringify({
 			name,
@@ -68,19 +68,19 @@ export function connectApi(
 }
 
 export function listDatasources(): ResultAsync<DataSource[], ApiError> {
-	return apiRequest<DataSource[]>('/api/v1/datasource');
+	return apiRequest<DataSource[]>('/v1/datasource');
 }
 
 export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>(`/api/v1/datasource/${id}`);
+	return apiRequest<DataSource>(`/v1/datasource/${id}`);
 }
 
 export function getDatasourceSchema(id: string): ResultAsync<SchemaInfo, ApiError> {
-	return apiRequest<SchemaInfo>(`/api/v1/datasource/${id}/schema`);
+	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema`);
 }
 
 export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/datasource/${id}`, {
+	return apiRequest<void>(`/v1/datasource/${id}`, {
 		method: 'DELETE'
 	});
 }
