@@ -407,7 +407,7 @@
 		align-items: center;
 		width: 100%;
 		cursor: default;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.insert-spacer {
@@ -441,7 +441,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.drop-slot:hover {

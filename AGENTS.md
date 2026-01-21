@@ -88,6 +88,49 @@ from core.config import settings
 from modules.auth.schemas import UserResponse
 ```
 
+### Runed Utilities
+
+This project uses [Runed](https://runed.dev/docs) for Svelte 5 utilities:
+
+```typescript
+import {
+  PersistedState,
+  Debounced,
+  FiniteStateMachine,
+  onClickOutside,
+  Previous,
+} from "runed";
+
+// Debounced state for search inputs
+const searchQuery = $state("");
+const debouncedSearch = new Debounced(() => searchQuery, 200);
+
+// Finite state machine for complex state transitions
+type SaveStates = "saved" | "unsaved" | "saving";
+type SaveEvents = "markUnsaved" | "startSave" | "saveComplete" | "saveError";
+const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>("saved", {
+  saved: { markUnsaved: "unsaved" },
+  unsaved: { startSave: "saving" },
+  saving: { saveComplete: "saved", saveError: "unsaved" },
+});
+
+// Persist state to localStorage
+const settings = new PersistedState("user-settings", { theme: "dark" });
+
+// Click outside detection for modals/dropdowns
+let modalRef = $state<HTMLElement>();
+onClickOutside(
+  () => modalRef,
+  () => closeModal(),
+);
+
+// Track previous values
+const prevValue = new Previous(() => someValue);
+if (prevValue.hasChanged()) {
+  /* react to change */
+}
+```
+
 ## Project Overview
 
 Full-stack template: SvelteKit 2 frontend + FastAPI backend + SQLite database.

@@ -74,7 +74,7 @@
 		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: opacity var(--transition-fast);
+		transition: opacity var(--transition);
 	}
 
 	.btn-create:hover {

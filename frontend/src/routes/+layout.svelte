@@ -153,7 +153,7 @@
 		color: var(--fg-tertiary);
 		font-size: var(--text-sm);
 		border-radius: var(--radius-sm);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		border: 1px solid transparent;
 	}
 
@@ -187,7 +187,7 @@
 		color: var(--fg-secondary);
 		cursor: pointer;
 		border-radius: var(--radius-sm);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		box-shadow: var(--card-shadow);
 	}
 

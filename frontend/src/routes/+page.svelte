@@ -195,7 +195,7 @@
 		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: opacity var(--transition-fast);
+		transition: opacity var(--transition);
 	}
 
 	.btn-new:hover {
@@ -315,7 +315,7 @@
 		border-radius: var(--radius-sm);
 		font-size: var(--text-sm);
 		cursor: pointer;
-		transition: opacity var(--transition-fast);
+		transition: opacity var(--transition);
 	}
 
 	.btn-retry:hover {

@@ -194,7 +194,7 @@
 		font-weight: 500;
 		text-decoration: none;
 		cursor: pointer;
-		transition: opacity var(--transition-fast);
+		transition: opacity var(--transition);
 		box-shadow: var(--card-shadow);
 	}
 
@@ -346,7 +346,7 @@
 		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		text-decoration: none;
 	}
 

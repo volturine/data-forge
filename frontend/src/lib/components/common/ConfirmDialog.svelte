@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
+	import { onClickOutside } from 'runed';
 
 	interface Props {
 		show: boolean;
@@ -22,6 +23,13 @@
 	}: Props = $props();
 
 	let dialogEl = $state<HTMLElement | null>(null);
+	let dialogRef = $state<HTMLElement>();
+
+	onClickOutside(
+		() => dialogRef,
+		() => onCancel(),
+		{ immediate: true }
+	);
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (!show) return;
@@ -58,7 +66,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#if show}
-	<div class="backdrop" onclick={handleBackdropClick} role="presentation">
+	<div class="backdrop" role="presentation">
 		<div
 			class="dialog"
 			role="dialog"
@@ -66,7 +74,7 @@
 			aria-labelledby="dialog-title"
 			aria-describedby="dialog-message"
 			tabindex="-1"
-			bind:this={dialogEl}
+			bind:this={dialogRef}
 		>
 			<div class="dialog-header">
 				<h2 id="dialog-title">{title}</h2>
@@ -101,7 +109,7 @@
 		justify-content: center;
 		z-index: 1000;
 		padding: var(--space-4);
-		animation: fadeIn var(--transition-base);
+		animation: fadeIn var(--transition);
 	}
 
 	@keyframes fadeIn {
@@ -120,7 +128,7 @@
 		box-shadow: var(--dialog-shadow);
 		max-width: 400px;
 		width: 100%;
-		animation: slideIn var(--transition-base);
+		animation: slideIn var(--transition);
 	}
 
 	@keyframes slideIn {
@@ -163,7 +171,7 @@
 		justify-content: center;
 		border-radius: var(--radius-sm);
 		color: var(--fg-muted);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.close-btn:hover {
@@ -198,7 +206,7 @@
 		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.btn-cancel {

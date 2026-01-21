@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import { Previous } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface SelectConfigData {
@@ -32,14 +33,13 @@
 	// Track if component has been initialized to avoid re-init on deselectAll
 	let initialized = $state(false);
 
-	// Track the config reference to detect when a different step is selected
-	let prevConfig = $state(config);
+	// Track config changes with Previous utility
+	const prevConfig = new Previous(() => config);
 
 	// Sync config.columns → SvelteSet when config changes (different step selected)
 	$effect(() => {
-		if (config !== prevConfig) {
+		if (prevConfig.current !== config) {
 			selectedColumns = new SvelteSet(safeColumns);
-			prevConfig = config;
 			initialized = true;
 		}
 	});

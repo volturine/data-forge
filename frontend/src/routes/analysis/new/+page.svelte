@@ -378,7 +378,7 @@
 		border-radius: var(--radius-sm);
 		background-color: var(--bg-primary);
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		text-align: left;
 		font-family: var(--font-mono);
 		box-shadow: var(--card-shadow);
@@ -548,7 +548,7 @@
 		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		text-decoration: none;
 		display: inline-flex;
 		align-items: center;

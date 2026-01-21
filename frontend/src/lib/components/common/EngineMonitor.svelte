@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
+	import { onClickOutside } from 'runed';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 
 	let expanded = $state(false);
@@ -34,11 +35,14 @@
 		expanded = !expanded;
 	}
 
-	function handleBackdrop(e: MouseEvent) {
-		if (e.target === e.currentTarget) {
+	let dropdownRef = $state<HTMLElement>();
+	onClickOutside(
+		() => dropdownRef,
+		() => {
 			expanded = false;
-		}
-	}
+		},
+		{ immediate: true }
+	);
 </script>
 
 <div class="engine-monitor">
@@ -57,7 +61,7 @@
 	</button>
 
 	{#if expanded}
-		<div class="dropdown">
+		<div class="dropdown" bind:this={dropdownRef}>
 			<div class="dropdown-header">
 				<span class="dropdown-title">Active Engines</span>
 				<button class="close-btn" onclick={() => (expanded = false)}>
@@ -117,7 +121,7 @@
 				<div class="error">{enginesStore.error}</div>
 			{/if}
 		</div>
-		<button class="backdrop" onclick={handleBackdrop} aria-label="Close engine monitor"></button>
+		<button class="backdrop" aria-label="Close engine monitor"></button>
 	{/if}
 </div>
 
@@ -137,7 +141,7 @@
 		font-size: var(--text-xs);
 		cursor: pointer;
 		border-radius: var(--radius-sm);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		box-shadow: var(--card-shadow);
 	}
 
@@ -163,7 +167,7 @@
 	}
 
 	.trigger :global(.chevron) {
-		transition: transform var(--transition-fast);
+		transition: transform var(--transition);
 	}
 
 	.trigger.active :global(.chevron) {
@@ -217,7 +221,7 @@
 		justify-content: center;
 		border-radius: var(--radius-sm);
 		color: var(--fg-muted);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.close-btn:hover {
@@ -317,7 +321,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.kill-btn:hover:not(:disabled) {

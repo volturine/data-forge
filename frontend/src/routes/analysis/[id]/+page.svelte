@@ -4,7 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { PersistedState } from 'runed';
+	import { PersistedState, Debounced, FiniteStateMachine, onClickOutside } from 'runed';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { engineLifecycle } from '$lib/stores/engine-lifecycle.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
@@ -22,10 +22,17 @@
 	let selectedStepId = $state<string | null>(null);
 	let selectedStepState = $state<PipelineStep | null>(null);
 	let isSaving = $state(false);
-	let saveStatus = $state<'saved' | 'unsaved' | 'saving'>('saved');
+	type SaveStates = 'saved' | 'unsaved' | 'saving';
+	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
+	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
+		saved: { markUnsaved: 'unsaved', saveComplete: 'saved' },
+		unsaved: { startSave: 'saving' },
+		saving: { saveComplete: 'saved', saveError: 'unsaved' }
+	});
 	let isLoadingSchema = $state(false);
 	let showDatasourceModal = $state(false);
 	let searchQuery = $state('');
+	const debouncedSearch = new Debounced(() => searchQuery, 200);
 	let modalMode = $state<'add' | 'change'>('add');
 
 	// Resizable panes with persisted state
@@ -68,7 +75,7 @@
 				throw new Error(result.error.message);
 			}
 			await analysisStore.loadAnalysis(analysisId);
-			saveStatus = 'saved';
+			saveStatus.send('saveComplete');
 			return result.value;
 		},
 		retry: false
@@ -98,7 +105,7 @@
 		const data = datasourcesQuery.data;
 		if (!data) return [];
 		const all = data;
-		const query = searchQuery.toLowerCase().trim();
+		const query = debouncedSearch.current.toLowerCase().trim();
 		if (!query) return all;
 		return all.filter((ds) => ds.name.toLowerCase().includes(query));
 	});
@@ -146,7 +153,7 @@
 	}
 
 	function markUnsaved() {
-		saveStatus = 'unsaved';
+		saveStatus.send('markUnsaved');
 	}
 
 	function handleAddStep(type: string) {
@@ -186,20 +193,20 @@
 	}
 
 	async function handleSave() {
-		if (isSaving || saveStatus === 'saving') return;
+		if (isSaving || saveStatus.current === 'saving') return;
 
 		isSaving = true;
-		saveStatus = 'saving';
+		saveStatus.send('startSave');
 
 		analysisStore.save().match(
 			() => {
-				saveStatus = 'saved';
+				saveStatus.send('saveComplete');
 				selectedStepId = null;
 				selectedStepState = null;
 				isSaving = false;
 			},
 			(error) => {
-				saveStatus = 'unsaved';
+				saveStatus.send('saveError');
 				alert(`Failed to save pipeline: ${error.message}`);
 				isSaving = false;
 			}
@@ -273,6 +280,13 @@
 		searchQuery = '';
 	}
 
+	let modalRef = $state<HTMLElement>();
+	onClickOutside(
+		() => modalRef,
+		() => closeDatasourceModal(),
+		{ immediate: true }
+	);
+
 	function handleModalKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') closeDatasourceModal();
 	}
@@ -323,12 +337,12 @@
 			<div class="header-right">
 				<span
 					class="save-status"
-					class:saved={saveStatus === 'saved'}
-					class:unsaved={saveStatus === 'unsaved'}
+					class:saved={saveStatus.current === 'saved'}
+					class:unsaved={saveStatus.current === 'unsaved'}
 				>
-					{#if saveStatus === 'saving'}
+					{#if saveStatus.current === 'saving'}
 						saving...
-					{:else if saveStatus === 'unsaved'}
+					{:else if saveStatus.current === 'unsaved'}
 						unsaved
 					{:else}
 						saved
@@ -337,7 +351,7 @@
 				<button
 					class="btn btn-secondary"
 					onclick={handleSave}
-					disabled={isSaving || saveStatus === 'saving' || analysisStore.loading}
+					disabled={isSaving || saveStatus.current === 'saving' || analysisStore.loading}
 					type="button"
 				>
 					Save
@@ -403,7 +417,7 @@
 				<PipelineCanvas
 					steps={analysisStore.pipeline}
 					savedSteps={analysisStore.savedTabs.flatMap((tab: AnalysisTab) => tab.steps ?? [])}
-					{saveStatus}
+					saveStatus={saveStatus.current}
 					{datasourceId}
 					datasource={currentDatasource}
 					tabName={analysisStore.activeTab?.name}
@@ -445,6 +459,7 @@
 	>
 		<div
 			class="modal"
+			bind:this={modalRef}
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
@@ -627,7 +642,7 @@
 		border-radius: var(--radius-sm);
 		cursor: pointer;
 		color: var(--fg-secondary);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -690,7 +705,7 @@
 		font-size: var(--text-sm);
 		font-weight: 500;
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.btn-secondary {
@@ -729,7 +744,7 @@
 		font-size: var(--text-sm);
 		color: var(--fg-muted);
 		font-family: var(--font-mono);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		display: inline-flex;
 		align-items: center;
 		gap: var(--space-2);
@@ -867,7 +882,7 @@
 		text-align: left;
 		font-family: var(--font-mono);
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.datasource-item:hover {
@@ -943,7 +958,7 @@
 		background-color: var(--border-primary);
 		cursor: col-resize;
 		flex-shrink: 0;
-		transition: background-color var(--transition-fast);
+		transition: background-color var(--transition);
 	}
 
 	.resize-handle:hover {

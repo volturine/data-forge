@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import { Previous } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface DropConfigData {
@@ -29,14 +30,13 @@
 	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
 	let selectedColumns = $state(new SvelteSet<string>());
 
-	// Track config reference for detecting step changes
-	let prevConfig = $state(config);
+	// Track config changes with Previous utility
+	const prevConfig = new Previous(() => config);
 
 	// Sync config → SvelteSet when config changes
 	$effect(() => {
-		if (config !== prevConfig) {
+		if (prevConfig.current !== config) {
 			selectedColumns = new SvelteSet(safeColumns);
-			prevConfig = config;
 		}
 	});
 

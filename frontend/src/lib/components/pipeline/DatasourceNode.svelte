@@ -246,7 +246,7 @@
 		border: 1px solid var(--border-secondary);
 		border-radius: var(--radius-md);
 		padding: var(--space-4);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 	}
 
@@ -365,7 +365,7 @@
 		color: var(--fg-muted);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		line-height: 1;
 	}
 
@@ -475,7 +475,7 @@
 		font-family: var(--font-mono);
 		font-size: 10px;
 		color: var(--fg-muted);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.calc-rows-btn:hover:not(:disabled) {
@@ -531,7 +531,7 @@
 		font-size: var(--text-xs);
 		font-weight: 500;
 		color: var(--fg-secondary);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.change-source-btn:hover {

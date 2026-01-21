@@ -254,7 +254,7 @@
 		color: var(--fg-primary);
 		font-size: var(--text-sm);
 		font-weight: 500;
-		transition: background-color var(--transition-fast);
+		transition: background-color var(--transition);
 	}
 
 	.button:hover:not(:disabled) {
@@ -293,7 +293,7 @@
 		font-weight: 500;
 		color: var(--fg-muted);
 		margin-bottom: -2px;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.tab:hover {

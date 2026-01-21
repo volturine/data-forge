@@ -18,9 +18,9 @@ Grid layout container for analysis cards.
 
 ```typescript
 interface Props {
-    analyses: AnalysisGalleryItem[];
-    loading?: boolean;
-    onDelete: (id: string) => void;
+  analyses: AnalysisGalleryItem[];
+  loading?: boolean;
+  onDelete: (id: string) => void;
 }
 ```
 
@@ -34,17 +34,17 @@ interface Props {
 
 ```css
 .gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-6);
-    padding: var(--space-6);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-6);
+  padding: var(--space-6);
 }
 
 /* Responsive breakpoints */
 @media (max-width: 640px) {
-    .gallery-grid {
-        grid-template-columns: 1fr;
-    }
+  .gallery-grid {
+    grid-template-columns: 1fr;
+  }
 }
 ```
 
@@ -70,8 +70,8 @@ Individual analysis card with preview and actions.
 
 ```typescript
 interface Props {
-    analysis: AnalysisGalleryItem;
-    onDelete: (id: string) => void;
+  analysis: AnalysisGalleryItem;
+  onDelete: (id: string) => void;
 }
 ```
 
@@ -79,13 +79,13 @@ interface Props {
 
 ```typescript
 interface AnalysisGalleryItem {
-    id: string;
-    name: string;
-    thumbnail: string | null;
-    created_at: string;
-    updated_at: string;
-    row_count: number | null;
-    column_count: number | null;
+  id: string;
+  name: string;
+  thumbnail: string | null;
+  created_at: string;
+  updated_at: string;
+  row_count: number | null;
+  column_count: number | null;
 }
 ```
 
@@ -101,10 +101,10 @@ interface AnalysisGalleryItem {
 
 ```typescript
 function handleClick(e: MouseEvent) {
-    // Don't navigate if clicking delete button
-    if (!(e.target as HTMLElement).closest('button')) {
-        goto(`/analysis/${analysis.id}`, { invalidateAll: true });
-    }
+  // Don't navigate if clicking delete button
+  if (!(e.target as HTMLElement).closest("button")) {
+    goto(`/analysis/${analysis.id}`, { invalidateAll: true });
+  }
 }
 ```
 
@@ -112,10 +112,10 @@ function handleClick(e: MouseEvent) {
 
 ```typescript
 function formatDate(date: string): string {
-    return new Date(date).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric'
-    });
+  return new Date(date).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 ```
 
@@ -123,30 +123,30 @@ function formatDate(date: string): string {
 
 ```css
 .card {
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    background-color: var(--bg-primary);
-    box-shadow: var(--card-shadow);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition);
+  background-color: var(--bg-primary);
+  box-shadow: var(--card-shadow);
 }
 
 .card:hover {
-    border-color: var(--border-tertiary);
-    transform: translateY(-1px);
+  border-color: var(--border-tertiary);
+  transform: translateY(-1px);
 }
 
 .thumbnail {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    background-color: var(--bg-tertiary);
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: var(--bg-tertiary);
 }
 
 .btn-delete:hover {
-    background-color: var(--error-bg);
-    border-color: var(--error-border);
-    color: var(--error-fg);
+  background-color: var(--error-bg);
+  border-color: var(--error-border);
+  color: var(--error-fg);
 }
 ```
 
@@ -162,11 +162,11 @@ Filtering and sorting controls for the gallery.
 
 ```typescript
 interface Props {
-    sortBy: 'name' | 'updated_at' | 'created_at';
-    sortDirection: 'asc' | 'desc';
-    searchQuery: string;
-    onSortChange: (sortBy: string, direction: string) => void;
-    onSearchChange: (query: string) => void;
+  sortBy: "name" | "updated_at" | "created_at";
+  sortDirection: "asc" | "desc";
+  searchQuery: string;
+  onSortChange: (sortBy: string, direction: string) => void;
+  onSearchChange: (query: string) => void;
 }
 ```
 
@@ -201,7 +201,7 @@ Placeholder when no analyses exist.
 
 ```typescript
 interface Props {
-    onCreate: () => void;
+  onCreate: () => void;
 }
 ```
 
@@ -215,28 +215,28 @@ interface Props {
 
 ```css
 .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-12);
-    text-align: center;
-    color: var(--fg-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12);
+  text-align: center;
+  color: var(--fg-muted);
 }
 
 .empty-state h3 {
-    margin: var(--space-4) 0 var(--space-2);
-    color: var(--fg-secondary);
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--fg-secondary);
 }
 
 .create-btn {
-    margin-top: var(--space-6);
-    padding: var(--space-3) var(--space-6);
-    background-color: var(--accent-primary);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
+  margin-top: var(--space-6);
+  padding: var(--space-3) var(--space-6);
+  background-color: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
 }
 ```
 
@@ -309,36 +309,36 @@ interface Props {
 ```typescript
 // Creating new analysis
 async function createNewAnalysis() {
-    const result = await createAnalysis({
-        name: 'Untitled Analysis',
-        datasource_ids: [],
-        pipeline_steps: [],
-        tabs: []
-    });
+  const result = await createAnalysis({
+    name: "Untitled Analysis",
+    datasource_ids: [],
+    pipeline_steps: [],
+    tabs: [],
+  });
 
-    if (result.isOk()) {
-        goto(`/analysis/${result.value.id}`);
-    }
+  if (result.isOk()) {
+    goto(`/analysis/${result.value.id}`);
+  }
 }
 
 // Deleting analysis
 async function handleDelete(id: string) {
-    if (confirm('Delete this analysis?')) {
-        await deleteAnalysis(id);
-        // Invalidate query to refresh list
-    }
+  if (confirm("Delete this analysis?")) {
+    await deleteAnalysis(id);
+    // Invalidate query to refresh list
+  }
 }
 ```
 
 ### TanStack Query
 
 ```typescript
-import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 
 const queryClient = useQueryClient();
 
 // After delete, invalidate the list
-queryClient.invalidateQueries({ queryKey: ['analyses'] });
+queryClient.invalidateQueries({ queryKey: ["analyses"] });
 ```
 
 ---
@@ -355,12 +355,12 @@ queryClient.invalidateQueries({ queryKey: ['analyses'] });
 
 ## Responsive Design
 
-| Breakpoint | Columns | Card Width |
-|------------|---------|------------|
-| < 640px | 1 | 100% |
-| 640px - 1024px | 2 | ~280px |
-| 1024px - 1280px | 3 | ~280px |
-| > 1280px | 4+ | ~280px |
+| Breakpoint      | Columns | Card Width |
+| --------------- | ------- | ---------- |
+| < 640px         | 1       | 100%       |
+| 640px - 1024px  | 2       | ~280px     |
+| 1024px - 1280px | 3       | ~280px     |
+| > 1280px        | 4+      | ~280px     |
 
 ---
 

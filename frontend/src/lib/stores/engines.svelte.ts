@@ -63,7 +63,7 @@ class EnginesStore {
 	stopPolling(): void {
 		if (this.interval === null) return;
 
-		window.clearInterval(this.interval);
+		clearInterval(this.interval);
 		this.interval = null;
 	}
 

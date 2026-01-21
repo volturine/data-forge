@@ -84,7 +84,7 @@
 		border-radius: var(--radius-sm);
 		overflow: hidden;
 		cursor: pointer;
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		background-color: var(--bg-primary);
 		box-shadow: var(--card-shadow);
 	}
@@ -167,7 +167,7 @@
 		align-items: center;
 		justify-content: center;
 		color: var(--fg-muted);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.btn-delete:hover {

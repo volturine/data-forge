@@ -35,12 +35,26 @@
 	let dragPreviewEl = $state<HTMLImageElement | null>(null);
 	let touchDragging = $state(false);
 	let touchConsumed = $state(false);
-	let longPressTimer = $state<number | null>(null);
 	let pointerStartX = $state<number | null>(null);
 	let pointerStartY = $state<number | null>(null);
 
 	const longPressDelay = 180;
 	const dragThreshold = 8;
+
+	// Throttled for touch move
+	let lastTouchMoveTime = $state(0);
+	const touchMoveThrottleMs = 16;
+
+	function throttledTouchMove(event: PointerEvent) {
+		const now = performance.now();
+		if (now - lastTouchMoveTime < touchMoveThrottleMs) return;
+		lastTouchMoveTime = now;
+		if (!touchDragging) return;
+		const state = drag as typeof drag & {
+			setPointer: (x: number, y: number) => void;
+		};
+		state.setPointer(event.clientX, event.clientY);
+	}
 
 	const stepTypeInfo: Record<string, { label: string; icon: string }> = {
 		filter: { label: 'Filter', icon: '🔍' },
@@ -179,13 +193,12 @@
 
 	function startLongPress(event: PointerEvent) {
 		if (!shouldStartTouch(event)) return;
-		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
 		const target = event.currentTarget as HTMLElement | null;
 		const handle = target?.closest('[data-drag-handle]');
 		if (!handle) return;
 		pointerStartX = event.clientX;
 		pointerStartY = event.clientY;
-		longPressTimer = window.setTimeout(() => {
+		window.setTimeout(() => {
 			touchDragging = true;
 			touchConsumed = true;
 			isDragging = true;
@@ -208,13 +221,6 @@
 		}, longPressDelay);
 	}
 
-	function cancelLongPress() {
-		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
-		longPressTimer = null;
-		pointerStartX = null;
-		pointerStartY = null;
-	}
-
 	function handleTouchMove(event: PointerEvent) {
 		if (!shouldStartTouch(event)) return;
 		if (pointerStartX !== null && pointerStartY !== null) {
@@ -222,15 +228,13 @@
 			const deltaY = Math.abs(event.clientY - pointerStartY);
 			const moved = deltaX > dragThreshold || deltaY > dragThreshold;
 			if (moved && !touchDragging) {
-				cancelLongPress();
+				pointerStartX = null;
+				pointerStartY = null;
 				return;
 			}
 		}
 		if (!touchDragging) return;
-		const state = drag as typeof drag & {
-			setPointer: (x: number, y: number) => void;
-		};
-		state.setPointer(event.clientX, event.clientY);
+		throttledTouchMove(event);
 		event.preventDefault();
 	}
 
@@ -246,7 +250,8 @@
 		touchDragging = false;
 		touchConsumed = wasTouchDragging;
 		isDragging = false;
-		cancelLongPress();
+		pointerStartX = null;
+		pointerStartY = null;
 		if (event.currentTarget instanceof HTMLElement) {
 			event.currentTarget.releasePointerCapture(event.pointerId);
 		}
@@ -436,7 +441,7 @@
 		border: 1px solid var(--border-primary);
 		border-radius: var(--radius-sm);
 		padding: var(--space-4);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 		box-shadow: var(--card-shadow);
 	}
 
@@ -580,7 +585,7 @@
 		font-size: var(--text-xs);
 		font-weight: 500;
 		color: var(--fg-secondary);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.action-btn:hover {
@@ -615,7 +620,7 @@
 		font-size: var(--text-xs);
 		font-weight: 500;
 		cursor: pointer;
-		transition: opacity var(--transition-fast);
+		transition: opacity var(--transition);
 	}
 
 	.export-btn:hover:not(:disabled) {

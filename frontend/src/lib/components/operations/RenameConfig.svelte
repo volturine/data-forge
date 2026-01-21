@@ -12,21 +12,9 @@
 
 	let { schema, config = $bindable({ column_mapping: {} }) }: Props = $props();
 
-	// Ensure config has proper structure
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { column_mapping: {} };
-		} else if (!config.column_mapping || typeof config.column_mapping !== 'object') {
-			config.column_mapping = {};
-		}
-	});
+	let formOldName = $state('');
+	let formNewName = $state('');
 
-	let newMapping = $state({
-		oldName: '',
-		newName: ''
-	});
-
-	// Safe accessor for column_mapping
 	let safeMapping = $derived(config?.column_mapping ?? {});
 
 	let mappings = $derived(
@@ -38,18 +26,18 @@
 
 	let availableColumns = $derived(schema.columns.filter((col) => !safeMapping[col.name]));
 
+	let canAdd = $derived(!!formOldName && !!formNewName);
+
 	function addMapping() {
-		if (!newMapping.oldName || !newMapping.newName) return;
-
-		config.column_mapping = {
-			...safeMapping,
-			[newMapping.oldName]: newMapping.newName
+		if (!canAdd) return;
+		config = {
+			column_mapping: {
+				...safeMapping,
+				[formOldName]: formNewName
+			}
 		};
-
-		newMapping = {
-			oldName: '',
-			newName: ''
-		};
+		formOldName = '';
+		formNewName = '';
 	}
 
 	function removeMapping(oldName: string) {
@@ -62,22 +50,16 @@
 	<h3>Rename Configuration</h3>
 
 	<div class="add-mapping">
-		<select bind:value={newMapping.oldName}>
+		<select bind:value={formOldName}>
 			<option value="">Select column to rename...</option>
 			{#each availableColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
 
-		<input type="text" bind:value={newMapping.newName} placeholder="New column name" />
+		<input type="text" bind:value={formNewName} placeholder="New column name" />
 
-		<button
-			type="button"
-			onclick={addMapping}
-			disabled={!newMapping.oldName || !newMapping.newName}
-		>
-			Add Rename
-		</button>
+		<button type="button" onclick={addMapping} disabled={!canAdd}> Add Rename </button>
 	</div>
 
 	{#if mappings.length > 0}

@@ -11,6 +11,7 @@
 	} from '@tanstack/table-core';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import type { TableCellValue } from '$lib/types/api-responses';
+	import { Previous } from 'runed';
 
 	interface Props {
 		datasourceId: string;
@@ -33,11 +34,9 @@
 	let rows = $state<Row<RowData>[]>([]);
 	const pipelineKey = $derived(JSON.stringify(pipeline));
 
+	const prevPipelineKey = new Previous(() => pipelineKey);
 	$effect(() => {
-		void pipelineKey;
-		void rowLimit;
-		void stepId;
-		if (currentPage !== 1) {
+		if (prevPipelineKey.current !== undefined && prevPipelineKey.current !== pipelineKey) {
 			currentPage = 1;
 		}
 	});

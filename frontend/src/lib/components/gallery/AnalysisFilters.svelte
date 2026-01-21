@@ -94,8 +94,8 @@
 		color: var(--fg-primary);
 		background-color: var(--bg-primary);
 		transition:
-			border-color var(--transition-fast),
-			box-shadow var(--transition-fast);
+			border-color var(--transition),
+			box-shadow var(--transition);
 		box-shadow: var(--card-shadow);
 	}
 
@@ -123,7 +123,7 @@
 		justify-content: center;
 		border-radius: var(--radius-sm);
 		color: var(--fg-muted);
-		transition: all var(--transition-fast);
+		transition: all var(--transition);
 	}
 
 	.clear-btn:hover {
@@ -157,7 +157,7 @@
 		background-position: right var(--space-2) center;
 		cursor: pointer;
 		appearance: none;
-		transition: border-color var(--transition-fast);
+		transition: border-color var(--transition);
 	}
 
 	.sort-select:focus {

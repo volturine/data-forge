@@ -58,7 +58,7 @@
 		justify-content: center;
 		align-items: center;
 		color: var(--fg-muted);
-		transition: color var(--transition-fast);
+		transition: color var(--transition);
 	}
 
 	.connection-line:hover {

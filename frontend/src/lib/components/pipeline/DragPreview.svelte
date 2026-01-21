@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
+	import { useEventListener } from 'runed';
 
 	// Step type metadata with icons and labels
 	const stepTypeInfo: Record<string, { label: string; icon: string }> = {
@@ -54,16 +55,17 @@
 					: null;
 			return;
 		}
-
-		function onDragOver(event: DragEvent) {
-			position = { x: event.clientX, y: event.clientY };
-		}
-
-		document.addEventListener('dragover', onDragOver, { passive: true });
-		return () => {
-			document.removeEventListener('dragover', onDragOver);
-		};
 	});
+
+	useEventListener(
+		() => document,
+		'dragover',
+		(event: DragEvent) => {
+			if (!active) return;
+			position = { x: event.clientX, y: event.clientY };
+		},
+		{ passive: true }
+	);
 </script>
 
 {#if active && info && position}
