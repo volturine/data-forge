@@ -231,12 +231,19 @@
 		display: flex;
 		flex-direction: column;
 		overflow-y: auto;
+		color: var(--fg-primary);
+	}
+
+	.step-config,
+	.step-config * {
+		box-sizing: border-box;
 	}
 
 	.step-config.empty {
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		background-color: var(--panel-bg);
 	}
 
 	.empty-message {
@@ -244,41 +251,49 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 2rem;
+		padding: var(--space-6);
 		color: var(--fg-muted);
 		text-align: center;
 	}
 
 	.empty-icon {
-		font-size: 3rem;
-		margin-bottom: 1rem;
+		font-size: 2.5rem;
+		margin-bottom: var(--space-4);
 		opacity: 0.5;
 	}
 
 	.empty-message h3 {
-		margin: 0 0 0.5rem 0;
-		font-size: 1.25rem;
-		color: var(--fg-secondary);
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-lg);
+		color: var(--fg-primary);
 	}
 
 	.empty-message p {
 		margin: 0;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.config-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 1rem;
-		border-bottom: 1px solid var(--panel-border);
-		background-color: var(--panel-header-bg);
+		padding: var(--space-4);
+		border-bottom: none;
+		background-color: var(--panel-bg);
+		position: relative;
+		box-shadow:
+			inset 0 -1px 0 var(--panel-border),
+			inset 0 -3px 0 var(--panel-border),
+			inset 0 -5px 0 var(--panel-border);
 	}
 
 	.config-header h3 {
 		margin: 0;
-		font-size: 1.125rem;
-		color: var(--panel-header-fg);
+		font-size: var(--text-sm);
+		font-weight: 600;
+		color: var(--fg-primary);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 
 	.close-button {
@@ -287,7 +302,7 @@
 		padding: 0;
 		background-color: transparent;
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
 		font-size: 1.5rem;
 		line-height: 1;
@@ -295,6 +310,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		transition: all var(--transition);
 	}
 
 	.close-button:hover {
@@ -305,25 +321,29 @@
 	.config-body {
 		flex: 1;
 		overflow-y: auto;
+		padding: var(--space-4);
+		background-color: var(--panel-bg);
 	}
 
 	.not-implemented {
-		padding: 2rem;
+		padding: var(--space-6);
 		text-align: center;
+		background-color: var(--panel-bg);
 	}
 
 	.not-implemented p {
-		margin: 0 0 1rem 0;
-		color: var(--fg-muted);
+		margin: 0 0 var(--space-4) 0;
+		color: var(--fg-tertiary);
 	}
 
 	.not-implemented button {
-		padding: 0.5rem 1.5rem;
+		padding: var(--space-2) var(--space-5);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		cursor: pointer;
+		font-family: var(--font-mono);
 	}
 
 	.not-implemented button:hover {
@@ -335,10 +355,11 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 2rem;
-		color: var(--fg-muted);
+		padding: var(--space-6);
+		color: var(--fg-tertiary);
 		text-align: center;
 		gap: var(--space-3);
+		background-color: var(--panel-bg);
 	}
 
 	.loading-message .spinner {

@@ -269,13 +269,14 @@
 <style>
 	.step-library {
 		width: 240px;
-		border-right: 1px solid var(--border-primary);
-		padding: 1rem;
-		background-color: var(--bg-tertiary);
+		border-right: 1px solid var(--panel-border);
+		padding: var(--space-4) var(--space-3);
+		background-color: var(--panel-bg);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
 		overflow-x: hidden;
+		gap: var(--space-3);
 	}
 
 	.drag-preview {
@@ -290,8 +291,10 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
-		font-size: 1.125rem;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-sm);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 		color: var(--fg-primary);
 		flex-shrink: 0;
 	}
@@ -311,12 +314,12 @@
 		align-items: center;
 		justify-content: flex-start;
 		gap: 0.75rem;
-		padding: 0.75rem;
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
+		padding: var(--space-3);
+		background-color: transparent;
+		border: 1px solid transparent;
 		border-radius: 6px;
 		cursor: grab;
-		transition: all 0.2s;
+		transition: background-color var(--transition), border-color var(--transition);
 		text-align: left;
 		position: relative;
 	}
@@ -332,9 +335,8 @@
 	}
 
 	.step-button:hover {
-		border-color: var(--accent-primary);
+		border-color: var(--border-secondary);
 		background-color: var(--bg-hover);
-		transform: translateX(4px);
 	}
 
 	.step-button:active {
@@ -355,7 +357,7 @@
 	}
 
 	.step-icon {
-		font-size: 1.5rem;
+		font-size: 1.25rem;
 		flex-shrink: 0;
 	}
 
@@ -370,7 +372,7 @@
 	.step-label {
 		font-weight: 600;
 		color: var(--fg-primary);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.step-description {
@@ -384,7 +386,7 @@
 	.fallback-actions {
 		margin-top: var(--space-4);
 		padding-top: var(--space-3);
-		border-top: 1px solid var(--border-primary);
+		border-top: 1px solid var(--panel-border);
 		flex-shrink: 0;
 	}
 
@@ -404,9 +406,9 @@
 
 	.fallback-controls select {
 		padding: 0.5rem;
-		border: 1px solid var(--form-control-border);
+		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
-		background-color: var(--form-control-bg);
+		background-color: var(--bg-secondary);
 		color: var(--fg-primary);
 	}
 
@@ -418,9 +420,9 @@
 
 	.fallback-controls button {
 		padding: 0.5rem;
-		border: 1px solid var(--border-primary);
+		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
-		background-color: var(--bg-primary);
+		background-color: transparent;
 		color: var(--fg-primary);
 		cursor: pointer;
 	}

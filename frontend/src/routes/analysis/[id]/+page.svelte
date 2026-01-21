@@ -339,80 +339,81 @@
 {:else if analysisQuery.data}
 	<div class="editor-container">
 		<header class="editor-header">
-			<div class="header-left">
-				<button
-					class="back-button"
-					onclick={() => goto(resolve('/'), { invalidateAll: true })}
-					type="button"
-					aria-label="Go back to home"
-				>
-					<ArrowLeft size={16} />
-				</button>
-				<div class="header-title">
-					<h1>{analysisQuery.data.name}</h1>
-					{#if analysisQuery.data.description}
-						<span class="description">{analysisQuery.data.description}</span>
-					{/if}
-				</div>
-			</div>
-			<div class="header-right">
-				<span
-					class="save-status"
-					class:saved={saveStatus.current === 'saved'}
-					class:unsaved={saveStatus.current === 'unsaved'}
-				>
-					{#if saveStatus.current === 'saving'}
-						saving...
-					{:else if saveStatus.current === 'unsaved'}
-						unsaved
-					{:else}
-						saved
-					{/if}
-				</span>
-				<button
-					class="btn btn-secondary"
-					onclick={handleSave}
-					disabled={isSaving || saveStatus.current === 'saving' || analysisStore.loading}
-					type="button"
-				>
-					Save
-				</button>
-			</div>
-		</header>
-
-		<div class="analysis-tabs">
-			<div class="tabs">
-				{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
+			<div class="header-top">
+				<div class="header-left">
 					<button
-						class="tab"
-						class:active={analysisStore.activeTab?.id === tab.id}
-						onclick={() => handleSelectTab(tab.id)}
+						class="back-button"
+						onclick={() => goto(resolve('/'), { invalidateAll: true })}
+						type="button"
+						aria-label="Go back to home"
+					>
+						<ArrowLeft size={16} />
+					</button>
+					<div class="header-title">
+						<h1>{analysisQuery.data.name}</h1>
+						{#if analysisQuery.data.description}
+							<span class="description">{analysisQuery.data.description}</span>
+						{/if}
+					</div>
+					<div class="header-tabs">
+						<div class="tabs">
+							{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
+								<button
+									class="tab"
+									class:active={analysisStore.activeTab?.id === tab.id}
+									onclick={() => handleSelectTab(tab.id)}
+									type="button"
+								>
+									<span class="tab-label">
+										<span class="tab-name">{tab.name}</span>
+									</span>
+									{#if analysisStore.tabs.length > 1}
+										<span
+											class="tab-remove"
+											onclick={(e) => {
+												e.stopPropagation();
+												handleRemoveTab(tab.id);
+											}}
+											role="button"
+											tabindex="0"
+											onkeydown={(e) => e.key === 'Enter' && handleRemoveTab(tab.id)}
+										>
+											&times;
+										</span>
+									{/if}
+								</button>
+							{/each}
+							<button class="tab add-tab" onclick={() => openDatasourceModal('add')} type="button">
+								+
+							</button>
+						</div>
+					</div>
+				</div>
+				<div class="header-right">
+					<span
+						class="save-status"
+						class:saved={saveStatus.current === 'saved'}
+						class:unsaved={saveStatus.current === 'unsaved'}
+					>
+						{#if saveStatus.current === 'saving'}
+							saving...
+						{:else if saveStatus.current === 'unsaved'}
+							unsaved
+						{:else}
+							saved
+						{/if}
+					</span>
+					<button
+						class="btn btn-secondary"
+						onclick={handleSave}
+						disabled={isSaving || saveStatus.current === 'saving' || analysisStore.loading}
 						type="button"
 					>
-						<span class="tab-label">
-							<span class="tab-name">{tab.name}</span>
-						</span>
-						{#if analysisStore.tabs.length > 1}
-							<span
-								class="tab-remove"
-								onclick={(e) => {
-									e.stopPropagation();
-									handleRemoveTab(tab.id);
-								}}
-								role="button"
-								tabindex="0"
-								onkeydown={(e) => e.key === 'Enter' && handleRemoveTab(tab.id)}
-							>
-								&times;
-							</span>
-						{/if}
+						Save
 					</button>
-				{/each}
-				<button class="tab add-tab" onclick={() => openDatasourceModal('add')} type="button">
-					+
-				</button>
+				</div>
 			</div>
-		</div>
+		</header>
 
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
@@ -638,18 +639,25 @@
 		flex-direction: column;
 		height: calc(100vh - 60px);
 		background-color: var(--bg-secondary);
-		gap: var(--space-4);
+		gap: 0;
 	}
 
 	.editor-header {
 		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		padding: var(--space-3) var(--space-5);
+		border-bottom: 1px solid var(--panel-border);
+		background-color: var(--panel-bg);
+		gap: var(--space-3);
+		box-shadow: none;
+	}
+
+	.header-top {
+		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: var(--space-4) var(--space-5);
-		border-bottom: 1px solid var(--border-primary);
-		background-color: var(--bg-primary);
 		gap: var(--space-4);
-		box-shadow: var(--shadow-soft);
 	}
 
 	.header-left {
@@ -658,12 +666,13 @@
 		gap: var(--space-3);
 		min-width: 0;
 		flex: 1;
+		overflow: hidden;
 	}
 
 	.back-button {
 		padding: var(--space-2);
 		background: transparent;
-		border: 1px solid var(--border-primary);
+		border: 1px solid var(--border-secondary);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
 		color: var(--fg-secondary);
@@ -684,8 +693,10 @@
 
 	.editor-header h1 {
 		margin: 0;
-		font-size: var(--text-base);
+		font-size: var(--text-sm);
 		font-weight: 600;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
 		color: var(--fg-primary);
 		white-space: nowrap;
 		overflow: hidden;
@@ -695,6 +706,7 @@
 	.description {
 		font-size: var(--text-xs);
 		color: var(--fg-muted);
+		letter-spacing: 0.02em;
 	}
 
 	.header-right {
@@ -709,7 +721,7 @@
 		color: var(--fg-muted);
 		padding: var(--space-1) var(--space-2);
 		border-radius: var(--radius-sm);
-		background-color: var(--bg-tertiary);
+		background-color: var(--panel-header-bg);
 	}
 
 	.save-status.saved {
@@ -748,16 +760,19 @@
 		cursor: not-allowed;
 	}
 
-	.analysis-tabs {
-		padding: 0 var(--space-5);
+	.header-tabs {
+		overflow: hidden;
+		flex: 1;
 	}
 
 	.tabs {
 		display: flex;
-		gap: var(--space-3);
-		border-bottom: 1px solid var(--border-primary);
-		padding-bottom: var(--space-2);
-		flex-wrap: wrap;
+		gap: var(--space-2);
+		border-bottom: none;
+		padding-bottom: 0;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		padding-bottom: var(--space-1);
 	}
 
 	.tab {
@@ -773,6 +788,8 @@
 		display: inline-flex;
 		align-items: center;
 		gap: var(--space-2);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 	}
 
 	.tab:hover {
@@ -780,8 +797,8 @@
 	}
 
 	.tab.active {
-		color: var(--accent-primary);
-		border-bottom-color: var(--accent-primary);
+		color: var(--fg-primary);
+		border-bottom-color: var(--fg-primary);
 	}
 
 	.tab-label {
@@ -794,7 +811,7 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		max-width: 180px;
+		max-width: 200px;
 	}
 
 	.tab-remove {
@@ -825,8 +842,8 @@
 	}
 
 	.modal {
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		box-shadow: var(--shadow-lg);
 		width: 100%;
@@ -841,13 +858,16 @@
 		justify-content: space-between;
 		align-items: center;
 		padding: var(--space-4);
-		border-bottom: 1px solid var(--border-primary);
+		border-bottom: 1px solid var(--panel-border);
+		background-color: var(--panel-header-bg);
 	}
 
 	.modal-header h2 {
 		margin: 0;
-		font-size: var(--text-base);
+		font-size: var(--text-sm);
 		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 		color: var(--fg-primary);
 	}
 
@@ -868,12 +888,13 @@
 	.modal-body {
 		padding: var(--space-4);
 		overflow-y: auto;
+		background-color: var(--panel-bg);
 	}
 
 	.search-input {
 		width: 100%;
 		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--border-secondary);
+		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--bg-secondary);
 		color: var(--fg-primary);
@@ -901,8 +922,8 @@
 		align-items: center;
 		width: 100%;
 		padding: var(--space-3);
-		background: none;
-		border: 1px solid var(--border-primary);
+		background-color: var(--bg-secondary);
+		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
 		text-align: left;
 		font-family: var(--font-mono);
@@ -912,11 +933,12 @@
 
 	.datasource-item:hover {
 		background-color: var(--bg-hover);
-		border-color: var(--accent-primary);
+		border-color: var(--border-tertiary);
 	}
 
 	.datasource-name {
 		font-size: var(--text-sm);
+		letter-spacing: 0.02em;
 		color: var(--fg-primary);
 	}
 
@@ -927,6 +949,7 @@
 		font-size: var(--text-xs);
 		color: var(--fg-muted);
 		text-transform: uppercase;
+		letter-spacing: 0.08em;
 	}
 
 	.list-empty {
@@ -941,6 +964,7 @@
 		flex: 1;
 		overflow: hidden;
 		user-select: none;
+		background-color: var(--bg-secondary);
 	}
 
 	.left-pane {
@@ -949,6 +973,7 @@
 		display: flex;
 		min-width: 330px;
 		justify-content: left;
+		background-color: var(--panel-bg);
 	}
 
 	.left-pane :global(> *) {
@@ -960,6 +985,7 @@
 		min-width: 200px;
 		overflow: hidden;
 		display: flex;
+		background-color: var(--bg-secondary);
 	}
 
 	.center-pane :global(> *) {
@@ -972,6 +998,7 @@
 		display: flex;
 		min-width: 330px;
 		justify-content: left;
+		background-color: var(--panel-bg);
 	}
 
 	.right-pane :global(> *) {
@@ -979,14 +1006,14 @@
 	}
 
 	.resize-handle {
-		width: 4px;
-		background-color: var(--border-primary);
+		width: 2px;
+		background-color: var(--panel-border);
 		cursor: col-resize;
 		flex-shrink: 0;
 		transition: background-color var(--transition);
 	}
 
 	.resize-handle:hover {
-		background-color: var(--accent-primary);
+		background-color: var(--border-tertiary);
 	}
 </style>

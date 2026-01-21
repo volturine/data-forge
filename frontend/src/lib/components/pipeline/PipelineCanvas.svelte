@@ -360,6 +360,15 @@
 		flex: 1;
 		padding: var(--space-6);
 		background-color: var(--bg-secondary);
+		background-image:
+			repeating-linear-gradient(
+				90deg,
+				rgba(0, 0, 0, 0.04) 0,
+				rgba(0, 0, 0, 0.04) 1px,
+				transparent 1px,
+				transparent 64px
+			),
+			linear-gradient(180deg, transparent 0%, var(--bg-tertiary) 100%);
 		overflow-y: auto;
 		min-height: 400px;
 	}
