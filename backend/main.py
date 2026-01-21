@@ -79,6 +79,73 @@ async def root():
     return {'message': 'Welcome to Svelte-FastAPI Template'}
 
 
+# Health Check Endpoints
+@app.get('/health')
+async def health():
+    """Basic liveness check - returns 200 if app is running."""
+    return {'status': 'healthy', 'service': settings.app_name, 'version': settings.app_version}
+
+
+@app.get('/health/ready')
+async def readiness():
+    """
+    Readiness check - verifies app can handle requests.
+    Checks database connectivity, engine manager, and filesystem.
+    """
+    from core.database import async_session_maker
+
+    checks = {}
+    is_ready = True
+
+    # Check database
+    try:
+        async with async_session_maker() as session:
+            await session.execute('SELECT 1')
+        checks['database'] = 'ok'
+    except Exception as e:
+        checks['database'] = f'error: {str(e)}'
+        is_ready = False
+
+    # Check engine manager
+    try:
+        manager = get_manager()
+        engine_count = len(manager.list_engines())
+        checks['engine_manager'] = 'ok'
+        checks['active_engines'] = engine_count
+    except Exception as e:
+        checks['engine_manager'] = f'error: {str(e)}'
+        is_ready = False
+
+    # Check filesystem (data directories)
+    try:
+        checks['upload_dir'] = 'ok' if settings.upload_dir.exists() else 'missing'
+        checks['results_dir'] = 'ok' if settings.results_dir.exists() else 'missing'
+        checks['exports_dir'] = 'ok' if settings.exports_dir.exists() else 'missing'
+
+        if not all(d.exists() for d in [settings.upload_dir, settings.results_dir, settings.exports_dir]):
+            is_ready = False
+    except Exception as e:
+        checks['filesystem'] = f'error: {str(e)}'
+        is_ready = False
+
+    status_code = 200 if is_ready else 503
+    return {'status': 'ready' if is_ready else 'not_ready', 'checks': checks}, status_code
+
+
+@app.get('/health/startup')
+async def startup():
+    """
+    Startup probe - quick check for container startup.
+    Returns 200 when app is initialized and ready to accept traffic.
+    """
+    try:
+        # Just check if we can import and access settings
+        _ = settings.app_name
+        return {'status': 'started'}
+    except Exception as e:
+        return {'status': 'starting', 'error': str(e)}, 503
+
+
 if __name__ == '__main__':
     import uvicorn
 
