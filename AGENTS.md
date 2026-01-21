@@ -225,9 +225,9 @@ This project uses Playwright MCP for end-to-end testing with a subagent-based ap
 
 ```bash
 # Start services
-cd /home/kripso/workspace/polars-fastapi-svelte
+cd /home/kripso/workspace/polars-fastapi-svelte/backend
 uv run main.py &    # Backend on port 8000
-cd frontend
+cd ../frontend
 npm run dev -- --port 5173 --host &  # Frontend on port 5173
 
 # Run tests via Playwright MCP
@@ -235,13 +235,7 @@ npm run dev -- --port 5173 --host &  # Frontend on port 5173
 
 #### Available as OpenCode Skill
 
-Create a skill `e2e-testing` that provides:
-
-- Prompt template for testing new features
-- Checklist for complete E2E coverage
-- Reporting format for test results
-
-#### Test Coverage Requirements
+This E2E Testing Skill is available as an OpenCode agent for automated testing.
 
 - ✅ New analysis creation flow
 - ✅ Data source selection
@@ -251,10 +245,6 @@ Create a skill `e2e-testing` that provides:
 - ✅ Engine lifecycle (creation, monitor, shutdown)
 - ✅ Export functionality
 - ✅ Error handling
-
-### E2E Testing Lessons Learned
-
-During comprehensive E2E testing of this project, the following patterns and lessons were documented:
 
 #### 1. Subagent Pattern for Testing
 
@@ -348,9 +338,9 @@ todowrite({
 **Start services**:
 
 ```bash
-cd /home/kripso/workspace/polars-fastapi-svelte
+cd /home/kripso/workspace/polars-fastapi-svelte/backend
 uv run main.py &    # Backend on port 8000
-cd frontend
+cd ../frontend
 npm run dev -- --port 5173 --host &  # Frontend on port 5173
 ```
 
