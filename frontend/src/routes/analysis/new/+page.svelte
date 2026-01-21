@@ -13,6 +13,8 @@
 	let selectedDatasourceIds = $state<string[]>([]);
 	let error = $state('');
 	let creating = $state(false);
+	let search = $state('');
+	let showPicker = $state(false);
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -27,6 +29,20 @@
 
 	const canProceedStep1 = $derived(name.trim().length > 0);
 	const canProceedStep2 = $derived(selectedDatasourceIds.length > 0);
+	const datasourceOptions = $derived.by(() => datasourcesQuery.data ?? []);
+	const filteredDatasources = $derived.by(() => {
+		const query = search.trim().toLowerCase();
+		if (!query) return datasourceOptions;
+		return datasourceOptions.filter((ds) => {
+			const nameValue = ds.name.toLowerCase();
+			const typeValue = ds.source_type.toLowerCase();
+			const fileValue =
+				ds.source_type === 'file' && ds.config?.file_type
+					? String(ds.config.file_type).toLowerCase()
+					: '';
+			return nameValue.includes(query) || typeValue.includes(query) || fileValue.includes(query);
+		});
+	});
 
 	function toggleDatasource(id: string) {
 		if (selectedDatasourceIds.includes(id)) {
@@ -34,6 +50,22 @@
 		} else {
 			selectedDatasourceIds = [...selectedDatasourceIds, id];
 		}
+	}
+
+	function handlePickerFocus() {
+		showPicker = true;
+	}
+
+	function handlePickerBlur() {
+		setTimeout(() => {
+			showPicker = false;
+		}, 100);
+	}
+
+	function getSourceLabel(datasource: DataSource): string {
+		if (datasource.source_type !== 'file') return datasource.source_type;
+		if (!datasource.config?.file_type) return 'file';
+		return String(datasource.config.file_type).toUpperCase();
 	}
 
 	async function handleCreate() {
@@ -130,26 +162,58 @@
 						>
 					</div>
 				{:else if datasourcesQuery.data}
-					<div class="datasource-grid">
-						{#each datasourcesQuery.data as datasource (datasource.id)}
-							<button
-								class="datasource-card"
-								class:selected={selectedDatasourceIds.includes(datasource.id)}
-								onclick={() => toggleDatasource(datasource.id)}
-								type="button"
-							>
-								<div class="card-row">
-									<span class="card-name">{datasource.name}</span>
-									<span class="type-badge">{datasource.source_type}</span>
-								</div>
-								<div class="card-meta">
-									Created {new Date(datasource.created_at).toLocaleDateString()}
-								</div>
-								{#if selectedDatasourceIds.includes(datasource.id)}
-									<span class="selected-check">✓</span>
+					<div
+						class="datasource-picker"
+						role="combobox"
+						aria-expanded={showPicker}
+						aria-controls="analysis-datasource-options"
+					>
+						<span class="sr-only">Search datasources</span>
+						<input
+							type="text"
+							class="search-input"
+							placeholder="Search datasources..."
+							bind:value={search}
+							onfocus={handlePickerFocus}
+							onblur={handlePickerBlur}
+						/>
+						{#if showPicker}
+							<div class="picker-list" id="analysis-datasource-options" role="listbox">
+								{#if filteredDatasources.length === 0}
+									<div class="picker-empty">No matching datasources.</div>
+								{:else}
+									{#each filteredDatasources as datasource (datasource.id)}
+										<button
+											type="button"
+											class="picker-item"
+											data-selected={selectedDatasourceIds.includes(datasource.id)}
+											onmousedown={() => toggleDatasource(datasource.id)}
+										>
+											<span class="picker-name">{datasource.name}</span>
+											<span class="type-badge">{getSourceLabel(datasource)}</span>
+										</button>
+									{/each}
 								{/if}
-							</button>
-						{/each}
+							</div>
+						{/if}
+					</div>
+					<div class="selected-sources">
+						{#if selectedDatasourceIds.length === 0}
+							<p class="empty-message">No datasources selected.</p>
+						{:else}
+							{#each datasourceOptions.filter((ds) => selectedDatasourceIds.includes(ds.id)) as datasource (datasource.id)}
+								<div class="source-chip">
+									<span>{datasource.name}</span>
+									<button
+										type="button"
+										onclick={() => toggleDatasource(datasource.id)}
+										aria-label={`Remove ${datasource.name}`}
+									>
+										×
+									</button>
+								</div>
+							{/each}
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -365,49 +429,115 @@
 		min-height: 100px;
 	}
 
-	.datasource-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-		gap: var(--space-3);
+
+	.datasource-picker {
+		position: relative;
+		margin-bottom: var(--space-4);
 	}
 
-	.datasource-card {
-		position: relative;
-		padding: var(--space-4);
-		border: 1px solid var(--border-primary);
+	.datasource-picker .search-input {
+		width: 100%;
+		padding: var(--space-3);
+		border: 1px solid var(--border-secondary);
 		border-radius: var(--radius-sm);
 		background-color: var(--bg-primary);
-		cursor: pointer;
-		transition: all var(--transition);
-		text-align: left;
+		color: var(--fg-primary);
+		font-size: var(--text-sm);
 		font-family: var(--font-mono);
-		box-shadow: var(--card-shadow);
 	}
 
-	.datasource-card:hover {
-		border-color: var(--border-tertiary);
+	.datasource-picker .search-input::placeholder {
+		color: var(--fg-muted);
+	}
+
+	.picker-list {
+		position: absolute;
+		z-index: var(--z-dropdown);
+		top: calc(100% + var(--space-2));
+		left: 0;
+		right: 0;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
+		box-shadow: var(--shadow-dropdown);
+		max-height: 240px;
+		overflow-y: auto;
+		padding: var(--space-2);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.picker-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-2);
+		border-radius: var(--radius-sm);
+		border: 1px solid transparent;
+		background: transparent;
+		cursor: pointer;
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+		text-align: left;
+	}
+
+	.picker-item[data-selected='true'] {
+		border-color: var(--accent-primary);
 		background-color: var(--bg-hover);
 	}
 
-	.datasource-card.selected {
-		border-color: var(--accent-primary);
-		background-color: var(--accent-bg);
-		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+	.picker-item:hover {
+		background-color: var(--bg-hover);
 	}
 
-	.card-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: var(--space-2);
-		margin-bottom: var(--space-2);
+	.picker-name {
+		font-weight: 600;
 	}
 
-	.card-name {
+	.picker-empty {
+		padding: var(--space-2);
+		color: var(--fg-muted);
 		font-size: var(--text-sm);
-		font-weight: 500;
+		font-style: italic;
+	}
+
+	.selected-sources {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		border: 1px solid var(--border-secondary);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-secondary);
+	}
+
+	.source-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: 0.25rem 0.5rem;
+		border-radius: var(--radius-full);
+		background-color: var(--bg-tertiary);
+		font-size: var(--text-xs);
+		font-weight: 600;
+	}
+
+	.source-chip button {
+		border: none;
+		background: none;
+		cursor: pointer;
+		color: var(--fg-muted);
+		font-size: var(--text-sm);
+		line-height: 1;
+		padding: 0;
+	}
+
+	.source-chip button:hover {
 		color: var(--fg-primary);
 	}
+
 
 	.type-badge {
 		padding: var(--space-1) var(--space-2);
@@ -418,25 +548,6 @@
 		color: var(--fg-tertiary);
 	}
 
-	.card-meta {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-
-	.selected-check {
-		position: absolute;
-		top: var(--space-2);
-		right: var(--space-2);
-		width: 20px;
-		height: 20px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xs);
-	}
 
 	.review-section {
 		margin-bottom: var(--space-6);

@@ -130,7 +130,7 @@
 
 <style>
 	.sort-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -138,30 +138,30 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
-		margin-bottom: 0.75rem;
-		font-size: 0.875rem;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-sm);
 		color: var(--fg-muted);
 		text-transform: uppercase;
 	}
 
 	.add-rule {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 		align-items: center;
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-6);
 		flex-wrap: wrap;
 	}
 
 	.add-rule select {
 		flex: 2;
 		min-width: 200px;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
@@ -184,7 +184,7 @@
 		color: var(--fg-secondary);
 		border: 1px solid var(--border-primary);
 		cursor: pointer;
-		transition: all 0.15s ease;
+		transition: all var(--transition);
 	}
 
 	.dir-btn:first-child {
@@ -210,15 +210,15 @@
 	.add-btn {
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
-		padding: 0.5rem 1rem;
+		gap: var(--space-1);
+		padding: var(--space-2) var(--space-4);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border: none;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
 		white-space: nowrap;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.add-btn:disabled {
@@ -228,10 +228,10 @@
 	}
 
 	.sort-rules {
-		padding: 1rem;
+		padding: var(--space-4);
 		background-color: var(--panel-muted-bg);
 		border-radius: var(--radius-md);
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		border: 1px solid var(--panel-muted-border);
 	}
 
@@ -239,11 +239,11 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0.5rem 0.75rem;
+		padding: var(--space-2) var(--space-3);
 		background-color: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-2);
 	}
 
 	.sort-rule-item:last-child {
@@ -251,15 +251,15 @@
 	}
 
 	.rule-column {
-		font-weight: 500;
-		font-size: 0.875rem;
+		font-weight: var(--font-medium);
+		font-size: var(--text-sm);
 		color: var(--fg-primary);
 	}
 
 	.rule-actions {
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-1);
 	}
 
 	.rule-actions button {
@@ -274,7 +274,7 @@
 		border: 1px solid transparent;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		transition: all 0.15s ease;
+		transition: all var(--transition);
 	}
 
 	.rule-actions button:hover:not(:disabled) {
@@ -304,7 +304,7 @@
 	}
 
 	.sort-icon {
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		line-height: 1;
 	}
 
@@ -315,12 +315,12 @@
 	}
 
 	.empty-state {
-		padding: 2rem;
+		padding: var(--space-8);
 		text-align: center;
 		color: var(--fg-muted);
 		background-color: var(--panel-muted-bg);
 		border-radius: var(--radius-md);
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		border: 1px solid var(--panel-muted-border);
 	}
 </style>

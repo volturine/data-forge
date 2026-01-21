@@ -83,7 +83,7 @@
 
 <style>
 	.rename-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -91,28 +91,28 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
-		margin-bottom: 0.75rem;
-		font-size: 0.875rem;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-sm);
 		color: var(--fg-muted);
 		text-transform: uppercase;
 	}
 
 	.add-mapping {
 		display: flex;
-		gap: 0.5rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-6);
 		flex-wrap: wrap;
 	}
 
 	.add-mapping select,
 	.add-mapping input {
-		padding: 0.5rem;
+		padding: var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
@@ -128,7 +128,7 @@
 	}
 
 	.add-mapping button {
-		padding: 0.5rem 1rem;
+		padding: var(--space-2) var(--space-4);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border: none;
@@ -144,10 +144,10 @@
 	}
 
 	.mappings-list {
-		padding: 1rem;
+		padding: var(--space-4);
 		background-color: var(--panel-muted-bg);
 		border-radius: var(--radius-md);
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		border: 1px solid var(--panel-muted-border);
 	}
 
@@ -155,11 +155,11 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0.75rem;
+		padding: var(--space-3);
 		background-color: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-2);
 	}
 
 	.mapping-item:last-child {
@@ -169,42 +169,42 @@
 	.mapping-info {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
+		gap: var(--space-3);
 		font-family: var(--font-mono);
 	}
 
 	.old-name {
-		font-weight: 500;
+		font-weight: var(--font-medium);
 		color: var(--fg-primary);
 	}
 
 	.arrow {
 		color: var(--fg-muted);
-		font-size: 1.2rem;
+		font-size: var(--text-lg);
 	}
 
 	.new-name {
-		font-weight: 500;
+		font-weight: var(--font-medium);
 		color: var(--accent-primary);
 	}
 
 	.mapping-item button {
-		padding: 0.25rem 0.75rem;
+		padding: var(--space-1) var(--space-3);
 		background-color: var(--error-bg);
 		color: var(--error-fg);
 		border: 1px solid var(--error-border);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.empty-state {
-		padding: 2rem;
+		padding: var(--space-8);
 		text-align: center;
 		color: var(--fg-muted);
 		background-color: var(--panel-muted-bg);
 		border-radius: var(--radius-md);
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		border: 1px solid var(--panel-muted-border);
 	}
 

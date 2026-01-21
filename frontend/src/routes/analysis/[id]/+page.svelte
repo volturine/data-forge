@@ -528,12 +528,15 @@
 									{:else if fileType === 'json'}
 										<FileJson size={12} />
 										JSON
-									{:else if fileType === 'parquet'}
-										<FileType size={12} />
-										Parquet
-									{:else if fileType === 'excel'}
-										<FileSpreadsheet size={12} />
-										Excel
+								{:else if fileType === 'parquet'}
+									<FileType size={12} />
+									Parquet
+								{:else if fileType === 'ndjson'}
+									<FileJson size={12} />
+									NDJSON
+								{:else if fileType === 'excel'}
+									<FileSpreadsheet size={12} />
+									Excel
 									{:else if ds.source_type === 'database'}
 										<Database size={12} />
 										Database
@@ -814,7 +817,7 @@
 	.modal-backdrop {
 		position: fixed;
 		inset: 0;
-		background-color: rgba(0, 0, 0, 0.5);
+		background-color: var(--overlay-bg);
 		display: flex;
 		align-items: center;
 		justify-content: center;

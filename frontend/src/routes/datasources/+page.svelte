@@ -59,6 +59,13 @@
 		const date = new Date(dateString);
 		return date.toLocaleDateString();
 	}
+
+	function getFileType(datasource: DataSource): string | null {
+		if (datasource.source_type !== 'file') return null;
+		if (!datasource.config || typeof datasource.config !== 'object') return null;
+		const config = datasource.config as { file_type?: string };
+		return config.file_type ?? null;
+	}
 </script>
 
 <div class="container">
@@ -106,16 +113,20 @@
 						{#each query.data as datasource (datasource.id)}
 							<tr>
 								<td class="name-cell">{datasource.name}</td>
-								<td>
-									<span
-										class="type-badge"
-										class:file={datasource.source_type === 'file'}
-										class:database={datasource.source_type === 'database'}
-										class:api={datasource.source_type === 'api'}
-									>
-										{datasource.source_type}
-									</span>
-								</td>
+						<td>
+							<span
+								class="type-badge"
+								class:file={datasource.source_type === 'file'}
+								class:database={datasource.source_type === 'database'}
+								class:api={datasource.source_type === 'api'}
+							>
+								{#if datasource.source_type === 'file'}
+									{getFileType(datasource) ?? 'file'}
+								{:else}
+									{datasource.source_type}
+								{/if}
+							</span>
+						</td>
 								<td class="num-cell">{getColumnCount(datasource)}</td>
 								<td class="date-cell">{formatDate(datasource.created_at)}</td>
 								<td class="actions-cell">

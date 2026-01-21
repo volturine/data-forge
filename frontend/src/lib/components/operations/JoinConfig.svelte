@@ -314,7 +314,7 @@ const selectedSource = $derived.by(() =>
 
 <style>
 	.join-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -322,20 +322,20 @@ const selectedSource = $derived.by(() =>
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
-		margin-bottom: 0.75rem;
-		font-size: 1rem;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-base);
 		color: var(--fg-secondary);
 	}
 
 	.section {
-		margin-bottom: 1.5rem;
-		padding: 1rem;
+		margin-bottom: var(--space-6);
+		padding: var(--space-4);
 		background-color: var(--form-section-bg);
 		border-radius: var(--radius-md);
 		border: 1px solid var(--form-section-border);
@@ -345,31 +345,31 @@ const selectedSource = $derived.by(() =>
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 	}
 
 	.column-actions {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 	}
 
 	.section select,
 	.section input {
 		width: 100%;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-2);
 		background-color: var(--form-control-bg);
 		color: var(--fg-primary);
 	}
 
 	.join-column-row {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 		align-items: flex-end;
-		margin-bottom: 0.75rem;
-		padding: 0.75rem;
+		margin-bottom: var(--space-3);
+		padding: var(--space-3);
 		background-color: var(--panel-bg);
 		border-radius: var(--radius-sm);
 	}
@@ -380,8 +380,8 @@ const selectedSource = $derived.by(() =>
 
 	.column-select label {
 		display: block;
-		font-size: 0.75rem;
-		margin-bottom: 0.25rem;
+		font-size: var(--text-xs);
+		margin-bottom: var(--space-1);
 		color: var(--fg-muted);
 	}
 
@@ -390,13 +390,13 @@ const selectedSource = $derived.by(() =>
 	}
 
 	.btn-add {
-		padding: 0.25rem 0.75rem;
+		padding: var(--space-1) var(--space-3);
 		background-color: var(--primary-bg);
 		color: var(--primary-fg);
 		border: none;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.btn-add:hover {
@@ -404,7 +404,7 @@ const selectedSource = $derived.by(() =>
 	}
 
 	.btn-remove {
-		padding: 0.5rem;
+		padding: var(--space-2);
 		background-color: transparent;
 		color: var(--error-fg);
 		border: 1px solid var(--error-fg);
@@ -419,20 +419,20 @@ const selectedSource = $derived.by(() =>
 	.btn-link {
 		background: none;
 		border: none;
-		color: var(--primary-fg);
+		color: var(--accent-primary);
 		cursor: pointer;
-		font-size: 0.75rem;
-		padding: 0.25rem;
+		font-size: var(--text-xs);
+		padding: var(--space-1);
 		text-decoration: underline;
 	}
 
 	.column-list {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-		gap: 0.5rem;
+		gap: var(--space-2);
 		max-height: 200px;
 		overflow-y: auto;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		background-color: var(--panel-bg);
 		border-radius: var(--radius-sm);
 	}
@@ -440,8 +440,8 @@ const selectedSource = $derived.by(() =>
 	.column-checkbox {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.875rem;
+		gap: var(--space-2);
+		font-size: var(--text-sm);
 		cursor: pointer;
 	}
 
@@ -452,59 +452,59 @@ const selectedSource = $derived.by(() =>
 
 	.dtype {
 		color: var(--fg-muted);
-		font-size: 0.75rem;
+		font-size: var(--text-xs);
 		margin-left: auto;
 	}
 
 	.schema-preview {
-		margin-top: 0.5rem;
-		padding: 0.5rem;
+		margin-top: var(--space-2);
+		padding: var(--space-2);
 		background-color: var(--panel-bg);
 		border-radius: var(--radius-sm);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.help-text {
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		color: var(--fg-tertiary);
 		line-height: 1.5;
-		padding: 0.75rem;
+		padding: var(--space-3);
 		background-color: var(--form-help-bg);
 		border-left: 3px solid var(--form-help-accent);
 		border-radius: var(--radius-sm);
-		margin-top: 0.5rem;
+		margin-top: var(--space-2);
 		border: 1px solid var(--form-help-border);
 	}
 
 	.warning {
-		padding: 0.5rem;
+		padding: var(--space-2);
 		background-color: var(--warning-bg);
 		color: var(--warning-fg);
 		border-radius: var(--radius-sm);
-		font-size: 0.875rem;
-		margin-top: 0.5rem;
+		font-size: var(--text-sm);
+		margin-top: var(--space-2);
 	}
 
 	.empty-message {
 		color: var(--fg-muted);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		font-style: italic;
-		margin: 0.5rem 0;
+		margin: var(--space-2) 0;
 	}
 
 	.search-picker {
 		position: relative;
-		margin-bottom: 0.75rem;
+		margin-bottom: var(--space-3);
 	}
 
 	.search-picker input {
 		width: 100%;
-		padding: 0.5rem 0.75rem;
+		padding: var(--space-2) var(--space-3);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
 		color: var(--fg-primary);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.search-picker input::placeholder {
@@ -513,29 +513,29 @@ const selectedSource = $derived.by(() =>
 
 	.picker-list {
 		position: absolute;
-		z-index: 10;
-		top: calc(100% + 0.25rem);
+		z-index: var(--z-dropdown);
+		top: calc(100% + var(--space-1));
 		left: 0;
 		right: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
+		gap: var(--space-1);
 		max-height: 220px;
 		overflow-y: auto;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		background-color: var(--panel-bg);
 		border-radius: var(--radius-sm);
 		border: 1px solid var(--panel-border);
-		box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-dropdown);
 	}
 
 	.picker-item {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.875rem;
+		gap: var(--space-2);
+		font-size: var(--text-sm);
 		cursor: pointer;
-		padding: 0.4rem 0.5rem;
+		padding: var(--space-1) var(--space-2);
 		border: 1px solid transparent;
 		border-radius: var(--radius-sm);
 		background-color: transparent;
@@ -553,9 +553,9 @@ const selectedSource = $derived.by(() =>
 	}
 
 	.picker-empty {
-		padding: 0.5rem;
+		padding: var(--space-2);
 		color: var(--fg-muted);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		font-style: italic;
 	}
 

@@ -49,7 +49,7 @@
 
 <style>
 	.topk-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -57,12 +57,12 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	.form-group {
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 	}
 
 	.form-group:last-child {
@@ -71,14 +71,14 @@
 
 	label {
 		display: block;
-		margin-bottom: 0.25rem;
+		margin-bottom: var(--space-1);
 		color: var(--fg-secondary);
 	}
 
 	select,
 	input[type='number'] {
 		width: 100%;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
@@ -88,7 +88,7 @@
 	.checkbox-label {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--space-2);
 		cursor: pointer;
 		color: var(--fg-secondary);
 	}

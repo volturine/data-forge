@@ -161,7 +161,7 @@
 
 <style>
 	.groupby-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -169,20 +169,20 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	h4 {
 		margin-top: 0;
-		margin-bottom: 0.75rem;
-		font-size: 1rem;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-base);
 		color: var(--fg-secondary);
 	}
 
 	.section {
-		margin-bottom: 1.5rem;
-		padding: 1rem;
+		margin-bottom: var(--space-6);
+		padding: var(--space-4);
 		background-color: var(--form-section-bg);
 		border-radius: var(--radius-md);
 		border: 1px solid var(--form-section-border);
@@ -193,14 +193,14 @@
 		overflow-y: auto;
 		border: 1px solid var(--border-primary);
 		border-radius: var(--radius-sm);
-		padding: 0.5rem;
+		padding: var(--space-2);
 		background-color: var(--bg-primary);
 	}
 
 	.column-item {
 		display: flex;
 		align-items: center;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		cursor: pointer;
 		border-radius: var(--radius-sm);
 	}
@@ -210,30 +210,30 @@
 	}
 
 	.column-item input[type='checkbox'] {
-		margin-right: 0.5rem;
+		margin-right: var(--space-2);
 		cursor: pointer;
 	}
 
 	.selected-info {
-		margin-top: 0.5rem;
-		padding: 0.5rem;
+		margin-top: var(--space-2);
+		padding: var(--space-2);
 		background-color: var(--info-bg);
 		border: 1px solid var(--info-border);
 		border-radius: var(--radius-sm);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		color: var(--info-fg);
 	}
 
 	.add-aggregation {
 		display: flex;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
 	}
 
 	.add-aggregation select,
 	.add-aggregation input {
-		padding: 0.5rem;
+		padding: var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
@@ -256,7 +256,7 @@
 	}
 
 	.add-aggregation button {
-		padding: 0.5rem 1rem;
+		padding: var(--space-2) var(--space-4);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border: none;
@@ -274,14 +274,14 @@
 	.aggregations-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--space-2);
 	}
 
 	.aggregation-item {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0.75rem;
+		padding: var(--space-3);
 		background-color: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
@@ -289,18 +289,18 @@
 
 	.agg-details {
 		font-family: var(--font-mono);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 		color: var(--fg-primary);
 	}
 
 	.aggregation-item button {
-		padding: 0.25rem 0.75rem;
+		padding: var(--space-1) var(--space-3);
 		background-color: var(--error-bg);
 		color: var(--error-fg);
 		border: 1px solid var(--error-border);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	button:hover:not(:disabled) {

@@ -112,7 +112,7 @@
 
 <style>
 	.select-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -120,19 +120,19 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	.bulk-actions {
 		display: flex;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
 	}
 
 	.bulk-actions button {
-		padding: 0.5rem 1rem;
+		padding: var(--space-2) var(--space-4);
 		background-color: var(--bg-tertiary);
 		color: var(--fg-primary);
 		border: 1px solid var(--border-primary);
@@ -145,15 +145,15 @@
 		overflow-y: auto;
 		border: 1px solid var(--border-primary);
 		border-radius: var(--radius-sm);
-		padding: 0.5rem;
-		margin-bottom: 1rem;
+		padding: var(--space-2);
+		margin-bottom: var(--space-4);
 		background-color: var(--bg-primary);
 	}
 
 	.column-item {
 		display: flex;
 		align-items: center;
-		padding: 0.5rem;
+		padding: var(--space-2);
 		cursor: pointer;
 		border-radius: var(--radius-sm);
 	}
@@ -163,33 +163,33 @@
 	}
 
 	.column-item input[type='checkbox'] {
-		margin-right: 0.5rem;
+		margin-right: var(--space-2);
 		cursor: pointer;
 	}
 
 	.column-name {
-		font-weight: 500;
-		margin-right: 0.5rem;
+		font-weight: var(--font-medium);
+		margin-right: var(--space-2);
 		color: var(--fg-primary);
 	}
 
 	.column-type {
 		color: var(--fg-tertiary);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.selected-summary {
-		padding: 1rem;
+		padding: var(--space-4);
 		background-color: var(--info-bg);
 		border: 1px solid var(--info-border);
 		border-radius: var(--radius-sm);
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--info-fg);
 	}
 
 	.selected-names {
-		margin-top: 0.5rem;
-		font-size: 0.875rem;
+		margin-top: var(--space-2);
+		font-size: var(--text-sm);
 		color: var(--fg-primary);
 	}
 

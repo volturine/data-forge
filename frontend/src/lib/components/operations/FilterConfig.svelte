@@ -117,7 +117,7 @@
 
 <style>
 	.filter-config {
-		padding: 1rem;
+		padding: var(--space-4);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
@@ -125,18 +125,18 @@
 
 	h3 {
 		margin-top: 0;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--panel-header-fg);
 	}
 
 	.logic-selector {
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 		color: var(--fg-secondary);
 	}
 
 	.logic-selector select {
-		margin-left: 0.5rem;
-		padding: 0.25rem 0.5rem;
+		margin-left: var(--space-2);
+		padding: var(--space-1) var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
@@ -146,20 +146,20 @@
 	.conditions {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
 	}
 
 	.condition-row {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--space-2);
 		align-items: center;
 		flex-wrap: wrap;
 	}
 
 	.condition-row select,
 	.condition-row input {
-		padding: 0.5rem;
+		padding: var(--space-2);
 		border: 1px solid var(--form-control-border);
 		border-radius: var(--radius-sm);
 		background-color: var(--form-control-bg);
@@ -182,7 +182,7 @@
 	}
 
 	.condition-row button {
-		padding: 0.5rem 1rem;
+		padding: var(--space-2) var(--space-4);
 		background-color: var(--error-bg);
 		color: var(--error-fg);
 		border: 1px solid var(--error-border);
@@ -198,13 +198,13 @@
 	}
 
 	.add-btn {
-		padding: 0.5rem 1rem;
+		padding: var(--space-2) var(--space-4);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border: none;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-4);
 	}
 
 	button:hover:not(:disabled) {

@@ -173,17 +173,19 @@
 					<div class="dataset-info">
 						<div class="dataset-name">{datasource.name}</div>
 						<div class="dataset-meta">
-							<span class="meta-badge">{datasource.source_type}</span>
+							<span class="meta-badge">{fileType ?? datasource.source_type}</span>
 							{#if fileType}
 								<span class="meta-badge file-type">
 									{#if fileType === 'csv'}
 										<FileSpreadsheet size={10} />
 									{:else if fileType === 'json'}
 										<FileJson size={10} />
-									{:else if fileType === 'parquet'}
-										<FileType size={10} />
-									{:else}
-										<FileText size={10} />
+							{:else if fileType === 'parquet'}
+								<FileType size={10} />
+							{:else if fileType === 'ndjson'}
+								<FileJson size={10} />
+							{:else}
+								<FileText size={10} />
 									{/if}
 									{fileType}
 								</span>
@@ -247,12 +249,12 @@
 		border-radius: var(--radius-md);
 		padding: var(--space-4);
 		transition: all var(--transition);
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+		box-shadow: var(--shadow-card);
 	}
 
 	.node-content:hover {
 		border-color: var(--accent-primary);
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+		box-shadow: var(--shadow-card-hover);
 	}
 
 	/* Header */

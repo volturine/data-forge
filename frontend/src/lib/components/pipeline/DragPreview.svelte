@@ -92,7 +92,7 @@
 		background: var(--bg-primary);
 		border: 2px solid var(--accent-primary);
 		border-radius: var(--radius-md);
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		box-shadow: var(--shadow-drag);
 		pointer-events: none;
 		z-index: 9999;
 		font-size: var(--text-sm);

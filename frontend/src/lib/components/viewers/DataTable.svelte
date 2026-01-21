@@ -172,8 +172,8 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 3rem;
-		gap: 1rem;
+		padding: var(--space-12);
+		gap: var(--space-4);
 		color: var(--fg-tertiary);
 	}
 
@@ -195,18 +195,18 @@
 	.loading-overlay p {
 		margin: 0;
 		color: var(--fg-tertiary);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.empty-state {
-		padding: 3rem;
+		padding: var(--space-12);
 		text-align: center;
 	}
 
 	.empty-state p {
 		margin: 0;
 		color: var(--fg-muted);
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	.table-wrapper {
@@ -219,20 +219,20 @@
 	.data-table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.875rem;
+		font-size: var(--text-sm);
 	}
 
 	thead {
 		position: sticky;
 		top: 0;
 		background: var(--table-header-bg);
-		z-index: 10;
+		z-index: var(--z-dropdown);
 	}
 
 	th {
 		padding: 0;
 		border-bottom: 2px solid var(--table-border);
-		font-weight: 600;
+		font-weight: var(--font-semibold);
 		text-align: left;
 	}
 
@@ -241,14 +241,14 @@
 		align-items: center;
 		justify-content: space-between;
 		width: 100%;
-		padding: 0.75rem 1rem;
+		padding: var(--space-3) var(--space-4);
 		background: none;
 		border: none;
 		cursor: pointer;
-		font-size: 0.875rem;
-		font-weight: 600;
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
 		color: var(--fg-primary);
-		transition: background-color 0.15s ease;
+		transition: background-color var(--transition);
 	}
 
 	.column-header:hover {
@@ -260,14 +260,14 @@
 	}
 
 	.sort-indicator {
-		margin-left: 0.5rem;
+		margin-left: var(--space-2);
 		color: var(--accent-primary);
-		font-size: 1rem;
+		font-size: var(--text-base);
 	}
 
 	tbody tr {
 		border-bottom: 1px solid var(--table-border);
-		transition: background-color 0.15s ease;
+		transition: background-color var(--transition);
 	}
 
 	tbody tr:nth-child(even) {
@@ -283,23 +283,23 @@
 	}
 
 	td {
-		padding: 0.75rem 1rem;
+		padding: var(--space-3) var(--space-4);
 		color: var(--fg-secondary);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		max-width: 300px;
-		font-size: 0.8125rem;
+		font-size: var(--text-sm);
 	}
 
 	.table-footer {
-		padding: 0.75rem 1rem;
+		padding: var(--space-3) var(--space-4);
 		border-top: 1px solid var(--panel-border);
 		background: var(--panel-header-bg);
 	}
 
 	.row-info {
-		font-size: 0.75rem;
+		font-size: var(--text-xs);
 		color: var(--fg-tertiary);
 	}
 </style>

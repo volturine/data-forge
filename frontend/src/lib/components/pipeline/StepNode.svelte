@@ -566,7 +566,7 @@
 		height: 8px;
 		border-radius: 999px;
 		background: var(--accent-primary);
-		box-shadow: 0 0 0 4px rgba(70, 120, 200, 0.12);
+		box-shadow: var(--accent-ring);
 	}
 
 	.preview-stale {
