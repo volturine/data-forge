@@ -53,7 +53,12 @@ class ProcessManager:
 
         Returns:
             EngineInfo containing the engine and metadata
+
+        Raises:
+            RuntimeError: If max concurrent engines limit is reached
         """
+        from core.config import settings
+
         with self._engines_lock:
             if analysis_id in self._engines:
                 info = self._engines[analysis_id]
@@ -61,7 +66,21 @@ class ProcessManager:
                 logger.debug(f'Reusing existing engine for analysis {analysis_id}')
                 return info
 
-            logger.info(f'Spawning new engine for analysis {analysis_id}')
+            # Check if we've reached max concurrent engines
+            if len(self._engines) >= settings.max_concurrent_engines:
+                logger.warning(
+                    f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), '
+                    f'cannot spawn engine for {analysis_id}'
+                )
+                raise RuntimeError(
+                    f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
+                    f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
+                )
+
+            logger.info(
+                f'Spawning new engine for analysis {analysis_id} '
+                f'({len(self._engines) + 1}/{settings.max_concurrent_engines})'
+            )
             engine = PolarsComputeEngine(analysis_id)
             engine.start()
             info = EngineInfo(engine)

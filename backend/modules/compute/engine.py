@@ -1,5 +1,6 @@
 import logging
 import multiprocessing as mp
+import os
 import uuid
 from collections.abc import Callable
 from queue import Empty
@@ -722,6 +723,19 @@ class PolarsComputeEngine:
     @staticmethod
     def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue) -> None:
         """Main compute loop running in subprocess."""
+        # Configure Polars environment variables for this subprocess
+        from core.config import settings
+
+        if settings.polars_max_threads > 0:
+            os.environ['POLARS_MAX_THREADS'] = str(settings.polars_max_threads)
+            logger.debug(f'Set POLARS_MAX_THREADS={settings.polars_max_threads}')
+
+        if settings.polars_streaming_chunk_size > 0:
+            os.environ['POLARS_STREAMING_CHUNK_SIZE'] = str(settings.polars_streaming_chunk_size)
+            logger.debug(f'Set POLARS_STREAMING_CHUNK_SIZE={settings.polars_streaming_chunk_size}')
+
+        logger.info(f'Polars engine started (PID: {os.getpid()}, threads: {settings.polars_max_threads or "auto"})')
+
         while True:
             try:
                 command = command_queue.get()

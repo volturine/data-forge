@@ -66,6 +66,38 @@ class Settings(BaseSettings):
     # Process terminate timeout in seconds (default 2 seconds)
     process_terminate_timeout: int = Field(default=2, alias='PROCESS_TERMINATE_TIMEOUT')
 
+    # Polars Engine Resource Configuration
+    # Maximum threads per engine (0 = auto-detect, uses all available cores)
+    polars_max_threads: int = Field(default=0, alias='POLARS_MAX_THREADS')
+
+    # Memory limit per engine in MB (0 = unlimited)
+    polars_max_memory_mb: int = Field(default=0, alias='POLARS_MAX_MEMORY_MB')
+
+    # Streaming chunk size for large datasets (0 = auto)
+    polars_streaming_chunk_size: int = Field(default=0, alias='POLARS_STREAMING_CHUNK_SIZE')
+
+    # Maximum number of concurrent engines allowed
+    max_concurrent_engines: int = Field(default=10, alias='MAX_CONCURRENT_ENGINES')
+
+    # Worker Configuration
+    # Number of Uvicorn/Gunicorn workers (0 = auto: 2 * cores + 1)
+    workers: int = Field(default=1, alias='WORKERS')
+
+    # Maximum connections per worker
+    worker_connections: int = Field(default=1000, alias='WORKER_CONNECTIONS')
+
+    # Worker timeout in seconds
+    timeout: int = Field(default=30, alias='TIMEOUT')
+
+    # Keep-alive timeout in seconds
+    keepalive: int = Field(default=5, alias='KEEPALIVE')
+
+    # Graceful shutdown timeout in seconds
+    graceful_timeout: int = Field(default=10, alias='GRACEFUL_TIMEOUT')
+
+    # Logging level (debug, info, warning, error)
+    log_level: str = Field(default='info', alias='LOG_LEVEL')
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
@@ -101,6 +133,43 @@ class Settings(BaseSettings):
         if value < 1024:  # At least 1KB
             raise ValueError(f'max_upload_size must be at least 1024 bytes, got {value}')
         return value
+
+    @field_validator('polars_max_threads', 'polars_max_memory_mb', 'polars_streaming_chunk_size')
+    @classmethod
+    def _validate_non_negative(cls, value: int, info) -> int:
+        """Ensure Polars resource values are non-negative."""
+        if value < 0:
+            raise ValueError(f'{info.field_name} must be non-negative (0 = unlimited/auto), got {value}')
+        return value
+
+    @field_validator('max_concurrent_engines')
+    @classmethod
+    def _validate_max_engines(cls, value: int) -> int:
+        """Ensure max concurrent engines is reasonable."""
+        if value < 1:
+            raise ValueError(f'max_concurrent_engines must be at least 1, got {value}')
+        if value > 100:
+            raise ValueError(f'max_concurrent_engines must be at most 100, got {value}')
+        return value
+
+    @field_validator('workers')
+    @classmethod
+    def _validate_workers(cls, value: int) -> int:
+        """Ensure workers count is valid."""
+        if value < 0:
+            raise ValueError(f'workers must be non-negative (0 = auto), got {value}')
+        if value > 32:
+            raise ValueError(f'workers must be at most 32, got {value}')
+        return value
+
+    @field_validator('log_level')
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        """Ensure log level is valid."""
+        valid_levels = ['debug', 'info', 'warning', 'error', 'critical']
+        if value.lower() not in valid_levels:
+            raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
+        return value.lower()
 
     @model_validator(mode='after')
     def _validate_directories_writable(self):
