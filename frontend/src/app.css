@@ -149,6 +149,9 @@
 	/* Panel widths */
 	--operations-panel-width: 280px;
 
+	/* Pipeline component spacing - controls the height/spacing of connection arrows between nodes */
+	--pipeline-connection-height: 18px;
+
 	--form-section-bg: var(--bg-tertiary);
 	--form-section-border: var(--border-primary);
 	--form-help-bg: var(--bg-primary);
