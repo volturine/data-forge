@@ -124,20 +124,20 @@
 		<h4>Aggregations</h4>
 
 		<div class="add-aggregation">
-			<select bind:value={newAggregation.column}>
+			<select id="agg-column" bind:value={newAggregation.column}>
 				<option value="">Select column...</option>
 				{#each schema.columns as column (column.name)}
 					<option value={column.name}>{column.name} ({column.dtype})</option>
 				{/each}
 			</select>
 
-			<select bind:value={newAggregation.function}>
+			<select id="agg-function" bind:value={newAggregation.function}>
 				{#each aggregationFunctions as func (func)}
 					<option value={func}>{func}</option>
 				{/each}
 			</select>
 
-			<input type="text" bind:value={newAggregation.alias} placeholder="Alias (optional)" />
+			<input id="agg-alias" type="text" bind:value={newAggregation.alias} placeholder="Alias (optional)" />
 
 			<button type="button" onclick={addAggregation} disabled={!newAggregation.column}>
 				Add

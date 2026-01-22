@@ -46,7 +46,7 @@
 		<div class="strategy-grid">
 			{#each keepStrategies as strategy (strategy.value)}
 				<label class="strategy-option">
-					<input type="radio" bind:group={config.keep} value={strategy.value} />
+					<input type="radio" name="keep-strategy" bind:group={config.keep} value={strategy.value} />
 					<span>{strategy.label}</span>
 				</label>
 			{/each}

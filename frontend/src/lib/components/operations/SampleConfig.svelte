@@ -1,19 +1,46 @@
 <script lang="ts">
 	interface Props {
-		config?: { n?: number; fraction?: number; shuffle?: boolean; seed?: number };
+		config?: {
+			mode?: 'n' | 'fraction';
+			n?: number;
+			fraction?: number;
+			shuffle?: boolean;
+			seed?: number;
+		};
 	}
 
 	let { config = $bindable({}) }: Props = $props();
 
 	let n = $state(config.n ?? null);
 	let fraction = $state(config.fraction ?? null);
+	const initialMode: 'n' | 'fraction' =
+		config.mode === 'fraction'
+			? 'fraction'
+			: config.mode === 'n'
+				? 'n'
+				: config.n !== null && config.n !== undefined
+					? 'n'
+					: config.fraction !== null && config.fraction !== undefined
+						? 'fraction'
+						: 'n';
+	let mode = $state<'n' | 'fraction'>(initialMode);
 	let shuffle = $state(config.shuffle ?? false);
 	let seed = $state(config.seed ?? null);
 
 	$effect(() => {
+		if (mode === 'n' && fraction !== null) {
+			fraction = null;
+		}
+		if (mode === 'fraction' && n !== null) {
+			n = null;
+		}
+	});
+
+	$effect(() => {
 		config = {
-			...(n !== null && n !== undefined ? { n } : {}),
-			...(fraction !== null && fraction !== undefined ? { fraction } : {}),
+			mode,
+			...(mode === 'n' && n !== null && n !== undefined ? { n } : {}),
+			...(mode === 'fraction' && fraction !== null && fraction !== undefined ? { fraction } : {}),
 			...(shuffle ? { shuffle } : {}),
 			...(seed !== null && seed !== undefined ? { seed } : {})
 		};
@@ -25,27 +52,22 @@
 
 	<div class="form-group">
 		<label>
-			<input
-				type="radio"
-				name="sample-mode"
-				checked={n !== null}
-				onchange={() => (fraction = null)}
-			/>
+			<input type="radio" name="sample-mode" checked={mode === 'n'} onchange={() => (mode = 'n')} />
 			Fixed number (n)
 		</label>
 		<label>
 			<input
 				type="radio"
 				name="sample-mode"
-				checked={fraction !== null}
-				onchange={() => (n = null)}
+				checked={mode === 'fraction'}
+				onchange={() => (mode = 'fraction')}
 			/>
 			Fraction (0-1)
 		</label>
 	</div>
 
 	<div class="form-group">
-		{#if n !== null}
+		{#if mode === 'n'}
 			<label for="n">Number of rows</label>
 			<input id="n" type="number" bind:value={n} min="1" placeholder="e.g., 100" />
 		{:else}
@@ -64,7 +86,7 @@
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input type="checkbox" bind:checked={shuffle} />
+			<input id="shuffle" type="checkbox" bind:checked={shuffle} />
 			<span>Shuffle rows</span>
 		</label>
 	</div>

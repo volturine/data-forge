@@ -1,6 +1,6 @@
 import type { DataSource, SchemaInfo } from '$lib/types/datasource';
-import { BASE_URL, apiRequest } from './client';
-import { ResultAsync, err } from 'neverthrow';
+import { apiRequest } from './client';
+import { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
 function createApiError(
@@ -17,21 +17,14 @@ export function uploadFile(file: File, name: string): ResultAsync<DataSource, Ap
 	formData.append('file', file);
 	formData.append('name', name);
 
-	return ResultAsync.fromPromise(
-		fetch(`${BASE_URL}/api/v1/datasource/upload`, {
-			method: 'POST',
-			body: formData
-		}),
-		(error): ApiError =>
-			createApiError('network', error instanceof Error ? error.message : 'Upload failed')
-	).andThen((response) => {
-		if (!response.ok) {
-			return err(createApiError('http', response.statusText, response.status));
+	return apiRequest<DataSource>('/v1/datasource/upload', {
+		method: 'POST',
+		body: formData
+	}).mapErr((error) => {
+		if (error.type === 'network') {
+			return createApiError('network', error.message || 'Upload failed');
 		}
-		return ResultAsync.fromPromise(
-			response.json() as Promise<DataSource>,
-			(): ApiError => createApiError('parse', 'Failed to parse upload response')
-		);
+		return error;
 	});
 }
 
@@ -40,7 +33,7 @@ export function connectDatabase(
 	connectionString: string,
 	query: string
 ): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/api/v1/datasource/connect', {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
 		method: 'POST',
 		body: JSON.stringify({
 			name,
@@ -57,7 +50,7 @@ export function connectApi(
 	headers?: Record<string, string>,
 	auth?: Record<string, string>
 ): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/api/v1/datasource/connect', {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
 		method: 'POST',
 		body: JSON.stringify({
 			name,
@@ -68,19 +61,19 @@ export function connectApi(
 }
 
 export function listDatasources(): ResultAsync<DataSource[], ApiError> {
-	return apiRequest<DataSource[]>('/api/v1/datasource');
+	return apiRequest<DataSource[]>('/v1/datasource');
 }
 
 export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>(`/api/v1/datasource/${id}`);
+	return apiRequest<DataSource>(`/v1/datasource/${id}`);
 }
 
 export function getDatasourceSchema(id: string): ResultAsync<SchemaInfo, ApiError> {
-	return apiRequest<SchemaInfo>(`/api/v1/datasource/${id}/schema`);
+	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema`);
 }
 
 export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/datasource/${id}`, {
+	return apiRequest<void>(`/v1/datasource/${id}`, {
 		method: 'DELETE'
 	});
 }

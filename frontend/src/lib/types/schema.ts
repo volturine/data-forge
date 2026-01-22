@@ -4,6 +4,9 @@ export interface Column {
 	nullable: boolean;
 }
 
+// Alias for Column used in some places
+export type ColumnInfo = Column;
+
 export interface Schema {
 	columns: Column[];
 	row_count: number | null;

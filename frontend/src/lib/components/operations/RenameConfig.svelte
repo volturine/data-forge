@@ -50,14 +50,14 @@
 	<h3>Rename Configuration</h3>
 
 	<div class="add-mapping">
-		<select bind:value={formOldName}>
+		<select id="old-name" bind:value={formOldName}>
 			<option value="">Select column to rename...</option>
 			{#each availableColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
 
-		<input type="text" bind:value={formNewName} placeholder="New column name" />
+		<input id="new-name" type="text" bind:value={formNewName} placeholder="New column name" />
 
 		<button type="button" onclick={addMapping} disabled={!canAdd}> Add Rename </button>
 	</div>

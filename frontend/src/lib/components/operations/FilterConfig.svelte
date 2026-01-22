@@ -50,6 +50,13 @@
 		config.conditions = [...safeConditions, { column: '', operator: '=', value: '' }];
 	}
 
+	function updateCondition(index: number, updates: Partial<FilterCondition>) {
+		const next = safeConditions.map((condition, i) =>
+			i === index ? { ...condition, ...updates } : condition
+		);
+		config.conditions = next;
+	}
+
 	function removeCondition(index: number) {
 		config.conditions = safeConditions.filter((_, i) => i !== index);
 	}
@@ -82,14 +89,26 @@
 	<div class="conditions">
 		{#each safeConditions as condition, i (i)}
 			<div class="condition-row">
-				<select bind:value={condition.column}>
+				<select
+					value={condition.column}
+					onchange={(event) =>
+						updateCondition(i, {
+							column: (event.currentTarget as HTMLSelectElement).value
+						})}
+				>
 					<option value="">Select column...</option>
 					{#each schema.columns as column (column.name)}
 						<option value={column.name}>{column.name} ({column.dtype})</option>
 					{/each}
 				</select>
 
-				<select bind:value={condition.operator}>
+				<select
+					value={condition.operator}
+					onchange={(event) =>
+						updateCondition(i, {
+							operator: (event.currentTarget as HTMLSelectElement).value
+						})}
+				>
 					{#each operators as op (op)}
 						<option value={op}>{op}</option>
 					{/each}
@@ -97,7 +116,11 @@
 
 				<input
 					type={getInputType(condition.column)}
-					bind:value={condition.value}
+					value={condition.value}
+					oninput={(event) =>
+						updateCondition(i, {
+							value: (event.currentTarget as HTMLInputElement).value
+						})}
 					placeholder="Value"
 				/>
 

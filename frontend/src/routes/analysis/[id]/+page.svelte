@@ -27,7 +27,7 @@
 	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
 	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
 		saved: { markUnsaved: 'unsaved', saveComplete: 'saved' },
-		unsaved: { startSave: 'saving' },
+		unsaved: { markUnsaved: 'unsaved', startSave: 'saving' },
 		saving: { saveComplete: 'saved', saveError: 'unsaved' }
 	});
 	let isLoadingSchema = $state(false);
@@ -415,6 +415,7 @@
 					{savedSteps}
 					{previewDatasourceId}
 					saveStatus={saveStatus.current}
+					{analysisId}
 					{datasourceId}
 					datasource={currentDatasource}
 					tabName={analysisStore.activeTab?.name}
@@ -753,11 +754,9 @@
 	}
 
 	.save-button.unsaved {
-		color: var(--fg-primary);
-	}
-
-	.save-button.unsaved:hover {
-		background-color: var(--bg-hover);
+		background-color: var(--warning-bg);
+		color: var(--warning-fg);
+		border-left: 1px solid var(--warning-border);
 	}
 
 	.save-button:disabled {

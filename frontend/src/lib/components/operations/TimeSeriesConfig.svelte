@@ -66,7 +66,7 @@
 
 	<div class="section">
 		<h4>Source Column</h4>
-		<select bind:value={config.column}>
+		<select id="ts-column" bind:value={config.column}>
 			<option value="">Select date/time column...</option>
 			{#each dateColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
@@ -79,7 +79,7 @@
 
 	<div class="section">
 		<h4>Operation Type</h4>
-		<select bind:value={config.operation_type}>
+		<select id="ts-operation" bind:value={config.operation_type}>
 			{#each operations as op (op.value)}
 				<option value={op.value}>{op.label}</option>
 			{/each}
@@ -89,7 +89,7 @@
 	{#if config.operation_type === 'extract'}
 		<div class="section">
 			<h4>Extract Component</h4>
-			<select bind:value={config.component}>
+			<select id="ts-component" bind:value={config.component}>
 				{#each extractComponents as comp (comp)}
 					<option value={comp}>{comp}</option>
 				{/each}
@@ -99,8 +99,8 @@
 		<div class="section">
 			<h4>Time Period</h4>
 			<div class="inline-group">
-				<input type="number" bind:value={config.value} min="0" />
-				<select bind:value={config.unit}>
+				<input id="ts-value" type="number" bind:value={config.value} min="0" />
+				<select id="ts-unit" bind:value={config.unit}>
 					{#each timeUnits as unit (unit)}
 						<option value={unit}>{unit}</option>
 					{/each}
@@ -110,7 +110,7 @@
 	{:else if config.operation_type === 'diff'}
 		<div class="section">
 			<h4>Second Date Column</h4>
-			<select bind:value={config.column2}>
+			<select id="ts-column2" bind:value={config.column2}>
 				<option value="">Select column...</option>
 				{#each dateColumns as column (column.name)}
 					<option value={column.name}>{column.name} ({column.dtype})</option>
@@ -121,7 +121,7 @@
 
 	<div class="section">
 		<h4>New Column Name</h4>
-		<input type="text" bind:value={config.new_column} placeholder="e.g., year, future_date" />
+		<input id="ts-new-column" type="text" bind:value={config.new_column} placeholder="e.g., year, future_date" />
 	</div>
 </div>
 

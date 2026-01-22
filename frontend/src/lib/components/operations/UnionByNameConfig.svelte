@@ -110,9 +110,7 @@
 
 <div class="union-config">
 	<h3>Union By Name</h3>
-	<p class="description">
-		Combine rows from multiple datasources using matching column names.
-	</p>
+	<p class="description">Combine rows from multiple datasources using matching column names.</p>
 
 	<div class="section">
 		<h4>Base Datasource</h4>
@@ -135,7 +133,12 @@
 			</div>
 		</div>
 
-		<div class="search-picker" role="combobox" aria-expanded={showPicker} aria-controls="union-source-options">
+		<div
+			class="search-picker"
+			role="combobox"
+			aria-expanded={showPicker}
+			aria-controls="union-source-options"
+		>
 			<span class="sr-only">Search datasources</span>
 			<input
 				type="text"
@@ -181,7 +184,11 @@
 				{#each datasourceOptions.filter((ds) => selectedSources.includes(ds.id)) as ds (ds.id)}
 					<div class="source-chip">
 						<span>{ds.name}</span>
-						<button type="button" onclick={() => toggleSource(ds.id)} aria-label={`Remove ${ds.name}`}>
+						<button
+							type="button"
+							onclick={() => toggleSource(ds.id)}
+							aria-label={`Remove ${ds.name}`}
+						>
 							×
 						</button>
 					</div>
@@ -197,12 +204,12 @@
 	<div class="section">
 		<h4>Column Matching</h4>
 		<label class="toggle">
-			<input type="checkbox" bind:checked={config.allow_missing} />
+			<input id="allow-missing" type="checkbox" bind:checked={config.allow_missing} />
 			<span>Allow missing columns (fill with nulls)</span>
 		</label>
 		<p class="help-text">
-			When enabled, missing columns are created with null values to keep all rows.
-			Disable to require identical schemas.
+			When enabled, missing columns are created with null values to keep all rows. Disable to
+			require identical schemas.
 		</p>
 	</div>
 </div>

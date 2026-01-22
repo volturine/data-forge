@@ -71,6 +71,7 @@ class ComputeResultSchema(BaseModel):
 class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    analysis_id: str | None = None
     datasource_id: str
     pipeline_steps: list[dict]
     target_step_id: str
@@ -105,6 +106,7 @@ class ExportDestination(str, Enum):
 class ExportRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    analysis_id: str | None = None
     datasource_id: str
     pipeline_steps: list[dict]
     target_step_id: str
@@ -122,3 +124,20 @@ class ExportResponse(BaseModel):
     destination: str
     file_path: str | None = None
     message: str | None = None
+
+
+class StepSchemaRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str
+    datasource_id: str
+    pipeline_steps: list[dict]
+    target_step_id: str
+
+
+class StepSchemaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    step_id: str
+    columns: list[str]
+    column_types: dict[str, str]

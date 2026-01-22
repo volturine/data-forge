@@ -1,10 +1,14 @@
 import asyncio
 import contextlib
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from api import router
 from core.config import settings
@@ -23,15 +27,18 @@ logger = logging.getLogger(__name__)
 async def engine_cleanup_loop():
     """Periodically clean up idle engines."""
     while True:
-        await asyncio.sleep(30)  # Check every 30 seconds
+        await asyncio.sleep(settings.engine_cleanup_interval)
         try:
             manager = get_manager()
             cleaned = manager.cleanup_idle_engines()
-            for analysis_id in cleaned:
-                count = cleanup_jobs_for_engine(analysis_id)
-                logger.info(f'Cleaned up engine {analysis_id} and {count} associated jobs')
+            if cleaned:
+                for analysis_id in cleaned:
+                    count = cleanup_jobs_for_engine(analysis_id)
+                    logger.info(f'Cleaned up engine {analysis_id} and {count} associated jobs')
+            else:
+                logger.debug('No idle engines to clean up')
         except Exception as e:
-            logger.error(f'Error in engine cleanup: {e}')
+            logger.error(f'Error in engine cleanup: {e}', exc_info=True)
 
 
 @asynccontextmanager
@@ -67,13 +74,119 @@ app.add_middleware(
     allow_headers=['Content-Type', 'Authorization'],
 )
 
-# Include Routers
+# Include API Routers (prefix already defined in api/router.py)
 app.include_router(router, tags=['api'])
 
 
 @app.get('/')
 async def root():
+    prod_mode_enabled = os.getenv('PROD_MODE_ENABLED', 'false').lower() in ['true', '1', 'yes']
+    frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
+    index_path = frontend_build_dir / 'index.html'
+
+    if prod_mode_enabled and index_path.exists():
+        return FileResponse(str(index_path))
+
     return {'message': 'Welcome to Svelte-FastAPI Template'}
+
+
+# Health Check Endpoints
+@app.get('/health')
+async def health():
+    """Basic liveness check - returns 200 if app is running."""
+    return {'status': 'healthy', 'service': settings.app_name, 'version': settings.app_version}
+
+
+@app.get('/health/ready')
+async def readiness():
+    """
+    Readiness check - verifies app can handle requests.
+    Checks database connectivity, engine manager, and filesystem.
+    """
+    from core.database import async_session_maker
+
+    checks = {}
+    is_ready = True
+
+    # Check database
+    try:
+        async with async_session_maker() as session:
+            await session.execute('SELECT 1')
+        checks['database'] = 'ok'
+    except Exception as e:
+        checks['database'] = f'error: {str(e)}'
+        is_ready = False
+
+    # Check engine manager
+    try:
+        manager = get_manager()
+        engine_count = len(manager.list_engines())
+        checks['engine_manager'] = 'ok'
+        checks['active_engines'] = engine_count
+    except Exception as e:
+        checks['engine_manager'] = f'error: {str(e)}'
+        is_ready = False
+
+    # Check filesystem (data directories)
+    try:
+        checks['upload_dir'] = 'ok' if settings.upload_dir.exists() else 'missing'
+        checks['results_dir'] = 'ok' if settings.results_dir.exists() else 'missing'
+        checks['exports_dir'] = 'ok' if settings.exports_dir.exists() else 'missing'
+
+        if not all(d.exists() for d in [settings.upload_dir, settings.results_dir, settings.exports_dir]):
+            is_ready = False
+    except Exception as e:
+        checks['filesystem'] = f'error: {str(e)}'
+        is_ready = False
+
+    status_code = 200 if is_ready else 503
+    return {'status': 'ready' if is_ready else 'not_ready', 'checks': checks}, status_code
+
+
+@app.get('/health/startup')
+async def startup():
+    """
+    Startup probe - quick check for container startup.
+    Returns 200 when app is initialized and ready to accept traffic.
+    """
+    try:
+        # Just check if we can import and access settings
+        _ = settings.app_name
+        return {'status': 'started'}
+    except Exception as e:
+        return {'status': 'starting', 'error': str(e)}, 503
+
+
+# Mount static files (frontend) - This must be LAST
+# Only mount if PROD_MODE_ENABLED is true and frontend build exists
+prod_mode_enabled = os.getenv('PROD_MODE_ENABLED', 'false').lower() in ['true', '1', 'yes']
+frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
+
+if prod_mode_enabled and frontend_build_dir.exists():
+    logger.info(f'PROD_MODE_ENABLED=true. Serving frontend from {frontend_build_dir}')
+
+    app.mount(
+        '/_app',
+        StaticFiles(directory=str(frontend_build_dir / '_app')),
+        name='frontend-assets',
+    )
+
+    @app.get('/{full_path:path}', include_in_schema=False)
+    async def serve_static_or_index(full_path: str):
+        if full_path.startswith('api/') or full_path == 'api':
+            raise HTTPException(status_code=404, detail='Not Found')
+
+        path = frontend_build_dir / full_path
+        if path.is_file():
+            return FileResponse(str(path))
+
+        index_path = frontend_build_dir / 'index.html'
+        if index_path.exists():
+            return FileResponse(str(index_path))
+
+        raise HTTPException(status_code=404, detail='File not found')
+else:
+    logger.info('Frontend build not served (development mode or build missing)')
 
 
 if __name__ == '__main__':

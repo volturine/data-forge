@@ -216,10 +216,20 @@ export function withColumnsTransform(input: Schema | null, config: StepConfig): 
 	};
 }
 
-export function pivotTransform(input: Schema | null, _config: StepConfig): Schema {
+export function pivotTransform(input: Schema | null, config: StepConfig): Schema {
 	if (!input) return { columns: [], row_count: null };
 
-	return { columns: input.columns, row_count: null };
+	const index = config.index as string[] | undefined;
+	
+	// Pivot output includes index columns, plus dynamic columns from pivot values
+	// We can only know the index columns at design time
+	if (!index || index.length === 0) {
+		return { columns: [], row_count: null };
+	}
+
+	const indexColumns = input.columns.filter((col) => index.includes(col.name));
+	
+	return { columns: indexColumns, row_count: null };
 }
 
 export function unpivotTransform(input: Schema | null, _config: StepConfig): Schema {

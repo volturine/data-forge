@@ -24,6 +24,8 @@
 		UnpivotConfigData
 	} from '$lib/types/operation-config';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -69,6 +71,7 @@
 		onConfigChange
 	}: Props = $props();
 	let configSnapshot = $state('');
+	let fetchingPivotSchema = $state(false);
 
 	function refreshSnapshot(nextStep: PipelineStep | null) {
 		configSnapshot = JSON.stringify(nextStep?.config ?? {});
@@ -79,6 +82,45 @@
 			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
 			: { columns: [], row_count: null }
 	);
+
+	// Manual refresh function for pivot schema
+	function handleRefreshPivotSchema() {
+		if (!step || step.type !== 'pivot') return;
+		
+		const config = step.config as Record<string, unknown>;
+		if (!config || typeof config !== 'object') return;
+		const columns = config.columns;
+		const index = config.index;
+		if (!(columns && Array.isArray(index) && index.length > 0)) return;
+
+		const analysis = analysisStore.current;
+		const datasourceId = analysisStore.activeTab?.datasource_id;
+		if (!analysis?.id || !datasourceId) return;
+
+		fetchingPivotSchema = true;
+
+		const pipelineSteps = analysisStore.pipeline.map((s) => ({
+			id: s.id,
+			type: s.type,
+			config: s.config,
+			depends_on: s.depends_on
+		}));
+
+		getStepSchema({
+			analysis_id: analysis.id,
+			datasource_id: datasourceId,
+			pipeline_steps: pipelineSteps,
+			target_step_id: step.id
+		})
+			.map((response: StepSchemaResponse) => {
+				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);
+				fetchingPivotSchema = false;
+			})
+			.mapErr((error: unknown) => {
+				console.error('Failed to fetch pivot schema:', error);
+				fetchingPivotSchema = false;
+			});
+	}
 
 	$effect(() => {
 		refreshSnapshot(step);
@@ -171,7 +213,12 @@
 					bind:config={step.config as unknown as ExplodeConfigData}
 				/>
 			{:else if step.type === 'pivot'}
-				<PivotConfig schema={inputSchema} bind:config={step.config as unknown as PivotConfigData} />
+				<PivotConfig 
+					schema={inputSchema} 
+					bind:config={step.config as unknown as PivotConfigData}
+					onRefreshSchema={handleRefreshPivotSchema}
+					isRefreshing={fetchingPivotSchema}
+				/>
 			{:else if step.type === 'timeseries'}
 				<TimeSeriesConfig
 					schema={inputSchema}

@@ -5,8 +5,8 @@ import type {
 	EngineStatusResponse
 } from '$lib/types/compute';
 import type { RawComputeJobResponse } from '$lib/types/api-responses';
-import { apiRequest } from './client';
-import { err, ResultAsync } from 'neverthrow';
+import { apiBlobRequest, apiRequest } from './client';
+import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
 export interface PreviewResponse {
@@ -16,6 +16,7 @@ export interface PreviewResponse {
 }
 
 export interface StepPreviewRequest {
+	analysis_id: string;
 	datasource_id: string;
 	pipeline_steps: Array<{
 		id: string;
@@ -59,7 +60,7 @@ function normalizeJob(raw: RawComputeJobResponse): ComputeJob {
 }
 
 export function executeAnalysis(analysisId: string): ResultAsync<ComputeJob, ApiError> {
-	return apiRequest<RawComputeJobResponse>('/api/v1/compute/execute', {
+	return apiRequest<RawComputeJobResponse>('/v1/compute/execute', {
 		method: 'POST',
 		body: JSON.stringify({
 			analysis_id: analysisId,
@@ -70,14 +71,14 @@ export function executeAnalysis(analysisId: string): ResultAsync<ComputeJob, Api
 }
 
 export function getComputeStatus(jobId: string): ResultAsync<ComputeJob, ApiError> {
-	return apiRequest<RawComputeJobResponse>(`/api/v1/compute/status/${jobId}`).map(normalizeJob);
+	return apiRequest<RawComputeJobResponse>(`/v1/compute/status/${jobId}`).map(normalizeJob);
 }
 
 export function previewStep(
 	analysisId: string,
 	stepId: string
 ): ResultAsync<PreviewResponse, ApiError> {
-	return apiRequest<PreviewResponse>('/api/v1/compute/preview', {
+	return apiRequest<PreviewResponse>('/v1/compute/preview', {
 		method: 'POST',
 		body: JSON.stringify({
 			analysis_id: analysisId,
@@ -90,20 +91,20 @@ export function previewStep(
 export function previewStepData(
 	request: StepPreviewRequest
 ): ResultAsync<StepPreviewResponse, ApiError> {
-	return apiRequest<StepPreviewResponse>('/api/v1/compute/preview', {
+	return apiRequest<StepPreviewResponse>('/v1/compute/preview', {
 		method: 'POST',
 		body: JSON.stringify(request)
 	});
 }
 
 export function cancelJob(jobId: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/compute/${jobId}`, {
+	return apiRequest<void>(`/v1/compute/${jobId}`, {
 		method: 'DELETE'
 	});
 }
 
 export function cleanupJob(jobId: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/compute/${jobId}/cleanup`, {
+	return apiRequest<void>(`/v1/compute/${jobId}/cleanup`, {
 		method: 'DELETE'
 	});
 }
@@ -111,32 +112,33 @@ export function cleanupJob(jobId: string): ResultAsync<void, ApiError> {
 // Engine lifecycle functions
 
 export function spawnEngine(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/spawn/${analysisId}`, {
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/spawn/${analysisId}`, {
 		method: 'POST'
 	});
 }
 
 export function sendKeepalive(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/keepalive/${analysisId}`, {
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/keepalive/${analysisId}`, {
 		method: 'POST'
 	});
 }
 
 export function getEngineStatus(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/api/v1/compute/engine/status/${analysisId}`);
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/status/${analysisId}`);
 }
 
 export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/api/v1/compute/engine/${analysisId}`, {
+	return apiRequest<void>(`/v1/compute/engine/${analysisId}`, {
 		method: 'DELETE'
 	});
 }
 
 export function listEngines(): ResultAsync<EngineListResponse, ApiError> {
-	return apiRequest<EngineListResponse>('/api/v1/compute/engines');
+	return apiRequest<EngineListResponse>('/v1/compute/engines');
 }
 
 export interface ExportRequest {
+	analysis_id?: string;
 	datasource_id: string;
 	pipeline_steps: Array<{
 		id: string;
@@ -160,49 +162,19 @@ export interface ExportResponse {
 }
 
 export function exportData(request: ExportRequest): ResultAsync<Blob | ExportResponse, ApiError> {
-	return ResultAsync.fromPromise(
-		fetch('/api/v1/compute/export', {
+	if (request.destination === 'download') {
+		return apiBlobRequest('/v1/compute/export', {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(request)
-		}),
-		(error): ApiError => ({
-			type: 'network' as const,
-			message: error instanceof Error ? error.message : 'Export failed'
-		})
-	).andThen((response) => {
-		if (!response.ok) {
-			return ResultAsync.fromPromise(
-				response.json().catch(() => ({ detail: 'Export failed' })),
-				(): ApiError => ({
-					type: 'http' as const,
-					message: response.statusText,
-					status: response.status
-				})
-			).andThen((errorData) =>
-				err({
-					type: 'http' as const,
-					message: (errorData as { detail?: string }).detail || 'Export failed',
-					status: response.status
-				})
-			);
-		}
-		if (request.destination === 'download') {
-			return ResultAsync.fromPromise(
-				response.blob(),
-				(): ApiError => ({
-					type: 'parse' as const,
-					message: 'Failed to parse blob'
-				})
-			);
-		}
-		return ResultAsync.fromPromise(
-			response.json() as Promise<ExportResponse>,
-			(): ApiError => ({
-				type: 'parse' as const,
-				message: 'Failed to parse export response'
-			})
-		);
+		}).andThen((blob) => {
+			const ext = request.format.startsWith('.') ? request.format : `.${request.format}`;
+			downloadBlob(blob, `${request.filename}${ext}`);
+			return okAsync(blob);
+		});
+	}
+	return apiRequest<ExportResponse>('/v1/compute/export', {
+		method: 'POST',
+		body: JSON.stringify(request)
 	});
 }
 
@@ -215,4 +187,31 @@ export function downloadBlob(blob: Blob, filename: string): void {
 	link.click();
 	document.body.removeChild(link);
 	URL.revokeObjectURL(url);
+}
+
+export interface StepSchemaRequest {
+	analysis_id: string;
+	datasource_id: string;
+	pipeline_steps: Array<{
+		id: string;
+		type: string;
+		config: Record<string, unknown>;
+		depends_on?: string[];
+	}>;
+	target_step_id: string;
+}
+
+export interface StepSchemaResponse {
+	step_id: string;
+	columns: string[];
+	column_types: Record<string, string>;
+}
+
+export function getStepSchema(
+	request: StepSchemaRequest
+): ResultAsync<StepSchemaResponse, ApiError> {
+	return apiRequest<StepSchemaResponse>('/v1/compute/schema', {
+		method: 'POST',
+		body: JSON.stringify(request)
+	});
 }

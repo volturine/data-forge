@@ -1,15 +1,7 @@
 import { err, ResultAsync } from 'neverthrow';
 
-// In dev, always use relative URLs so Vite's dev proxy handles /api
-// In prod, allow overriding via VITE_API_URL, otherwise default to current host:8000
-const apiEnv = import.meta.env.VITE_API_URL?.trim();
-
-const runtimeBase =
-	typeof window === 'undefined'
-		? 'http://localhost:8000'
-		: `${window.location.protocol}//${window.location.hostname}:8000`;
-
-export const BASE_URL = import.meta.env.DEV ? '' : apiEnv || runtimeBase;
+// Always use relative paths - works in both dev (via proxy) and prod
+export const BASE_URL = '/api';
 
 export type ApiErrorType = 'network' | 'http' | 'parse';
 
@@ -30,13 +22,17 @@ function createApiError(
 }
 
 export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
+	const isFormData = options?.body instanceof FormData;
+	const headers = new Headers(options?.headers);
+
+	if (!isFormData && !headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json');
+	}
+
 	return ResultAsync.fromPromise(
 		fetch(`${BASE_URL}${endpoint}`, {
 			...options,
-			headers: {
-				'Content-Type': 'application/json',
-				...options?.headers
-			}
+			headers
 		}),
 		(error): ApiError =>
 			createApiError('network', error instanceof Error ? error.message : 'Network error')
@@ -59,6 +55,39 @@ export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAs
 		return ResultAsync.fromPromise(
 			response.json() as Promise<T>,
 			(): ApiError => createApiError('parse', 'Failed to parse response JSON')
+		);
+	});
+}
+
+export function apiBlobRequest(endpoint: string, options?: RequestInit): ResultAsync<Blob, ApiError> {
+	const headers = new Headers(options?.headers);
+	if (!headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json');
+	}
+
+	return ResultAsync.fromPromise(
+		fetch(`${BASE_URL}${endpoint}`, { ...options, headers }),
+		(error): ApiError =>
+			createApiError('network', error instanceof Error ? error.message : 'Network error')
+	).andThen((response) => {
+		if (!response.ok) {
+			return ResultAsync.fromPromise(
+				response.text().catch(() => response.statusText),
+				() => createApiError('http', response.statusText, response.status, response.statusText)
+			).andThen((errorText) =>
+				err(
+					createApiError(
+						'http',
+						errorText || response.statusText,
+						response.status,
+						response.statusText
+					)
+				)
+			);
+		}
+		return ResultAsync.fromPromise(
+			response.blob(),
+			(): ApiError => createApiError('parse', 'Failed to read response')
 		);
 	});
 }

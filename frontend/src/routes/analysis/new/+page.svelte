@@ -201,7 +201,7 @@
 						{#if selectedDatasourceIds.length === 0}
 							<p class="empty-message">No datasources selected.</p>
 						{:else}
-							{#each datasourceOptions.filter((ds) => selectedDatasourceIds.includes(ds.id)) as datasource (datasource.id)}
+							{#each datasourceOptions.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as datasource (datasource.id)}
 								<div class="source-chip">
 									<span>{datasource.name}</span>
 									<button
@@ -429,7 +429,6 @@
 		min-height: 100px;
 	}
 
-
 	.datasource-picker {
 		position: relative;
 		margin-bottom: var(--space-4);
@@ -538,7 +537,6 @@
 		color: var(--fg-primary);
 	}
 
-
 	.type-badge {
 		padding: var(--space-1) var(--space-2);
 		background-color: var(--bg-tertiary);
@@ -547,7 +545,6 @@
 		font-size: var(--text-xs);
 		color: var(--fg-tertiary);
 	}
-
 
 	.review-section {
 		margin-bottom: var(--space-6);

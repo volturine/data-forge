@@ -11,6 +11,7 @@
 		steps: PipelineStep[];
 		savedSteps?: PipelineStep[];
 		saveStatus?: 'saved' | 'unsaved' | 'saving';
+		analysisId?: string;
 		datasourceId?: string;
 		previewDatasourceId?: string;
 		datasource?: DataSource | null;
@@ -27,6 +28,7 @@
 		steps,
 		savedSteps = [],
 		saveStatus = 'saved',
+		analysisId,
 		datasourceId,
 		previewDatasourceId,
 		datasource = null,
@@ -259,14 +261,12 @@
 					ondragleave={handleDragLeave}
 					ondrop={(e) => handleDrop(e, 0)}
 				>
-					{#if steps.length > 0}
-						<ConnectionLine
-							fromStepIndex={-1}
-							toStepIndex={0}
-							totalSteps={steps.length + 1}
-							highlighted={hoverIndex === 0}
-						/>
-					{/if}
+					<ConnectionLine
+						fromStepIndex={-1}
+						toStepIndex={0}
+						totalSteps={steps.length + 1}
+						highlighted={hoverIndex === 0}
+					/>
 					{#if canDrop}
 						<div
 							class="drop-slot"
@@ -287,21 +287,25 @@
 						{/if}
 					{/if}
 				</div>
+			{:else if steps.length > 0}
+				<div class="insert-spacer" aria-hidden="true">
+					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
+				</div>
 			{/if}
-			{#each steps as step, i (step.id)}
-				<StepNode
-					{step}
-					index={i}
-					datasourceId={previewDatasourceId ?? datasourceId}
-					allSteps={steps}
-					{savedSteps}
-					{saveStatus}
-					onEdit={onStepClick}
-					onDelete={onStepDelete}
-					onTouchMove={onMoveStep}
-				/>
+		{#each steps as step, i (step.id)}
+			<StepNode
+				{step}
+				index={i}
+				{analysisId}
+				datasourceId={previewDatasourceId ?? datasourceId}
+				allSteps={steps}
+				{savedSteps}
+				{saveStatus}
+				onEdit={onStepClick}
+				onDelete={onStepDelete}
+				onTouchMove={onMoveStep}
+			/>
 				<!-- Connection + Drop zone after each step -->
-				<!-- Only show connection line after last step when dragging -->
 				{#if i < steps.length - 1 || canDrop}
 					{#if shouldShowInsert(i + 1)}
 						<div
@@ -317,12 +321,14 @@
 							ondragleave={handleDragLeave}
 							ondrop={(e) => handleDrop(e, i + 1)}
 						>
-							<ConnectionLine
-								fromStepIndex={i}
-								toStepIndex={i + 1}
-								totalSteps={steps.length}
-								highlighted={hoverIndex === i + 1}
-							/>
+							{#if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
+								<ConnectionLine
+									fromStepIndex={i}
+									toStepIndex={i + 1}
+									totalSteps={steps.length}
+									highlighted={hoverIndex === i + 1}
+								/>
+							{/if}
 							{#if canDrop}
 								<div
 									class="drop-slot"
@@ -333,7 +339,6 @@
 										<span class="slot-label">{drag.type ?? 'step'}</span>
 									{/if}
 								</div>
-								<!-- Only show trailing connection if not the last position -->
 								{#if i < steps.length - 1}
 									<ConnectionLine
 										fromStepIndex={i}
@@ -344,7 +349,7 @@
 								{/if}
 							{/if}
 						</div>
-					{:else}
+					{:else if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
 						<div class="insert-spacer" aria-hidden="true">
 							<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
 						</div>
@@ -419,17 +424,20 @@
 		width: 100%;
 		cursor: default;
 		transition: all var(--transition);
+		padding: var(--space-2) 0;
 	}
 
 	.insert-spacer {
-		position: relative;
-		margin-top: 0;
-		margin-bottom: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-2) 0;
 	}
 
+	/* Ensure connection lines never stretch */
+	.insert-zone :global(.connection-line),
 	.insert-spacer :global(.connection-line) {
-		position: absolute;
-		transform: translateY(-50%);
+		flex-shrink: 0;
 	}
 
 	.insert-zone.ready {
@@ -448,11 +456,13 @@
 		border: 2px dashed var(--fg-faint);
 		border-radius: var(--radius-md);
 		text-align: center;
-		min-height: 32px;
+		min-height: 28px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		transition: all var(--transition);
+		margin: var(--space-2) 0;
+		flex-shrink: 0;
 	}
 
 	.drop-slot:hover {

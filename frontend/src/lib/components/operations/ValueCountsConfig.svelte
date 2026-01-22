@@ -36,14 +36,14 @@
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input type="checkbox" bind:checked={normalize} />
+			<input id="normalize" type="checkbox" bind:checked={normalize} />
 			<span>Normalize (show proportions instead of counts)</span>
 		</label>
 	</div>
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input type="checkbox" bind:checked={sort} />
+			<input id="sort" type="checkbox" bind:checked={sort} />
 			<span>Sort by count</span>
 		</label>
 	</div>

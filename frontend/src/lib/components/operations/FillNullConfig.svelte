@@ -53,7 +53,7 @@
 
 	<div class="section">
 		<h4>Fill Strategy</h4>
-		<select bind:value={config.strategy}>
+		<select id="fill-strategy" bind:value={config.strategy}>
 			{#each strategies as strategy (strategy.value)}
 				<option value={strategy.value}>{strategy.label}</option>
 			{/each}
@@ -63,8 +63,8 @@
 	{#if currentStrategy?.needsValue}
 		<div class="section">
 			<h4>Fill Value</h4>
-			<input type="text" bind:value={config.value} placeholder="Enter value (e.g., 0, N/A)" />
-			<select bind:value={config.value_type}>
+			<input id="fill-value" type="text" bind:value={config.value} placeholder="Enter value (e.g., 0, N/A)" />
+			<select id="fill-value-type" bind:value={config.value_type}>
 				<option value="Utf8">String</option>
 				<option value="Int64">Integer</option>
 				<option value="Float64">Float</option>

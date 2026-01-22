@@ -41,7 +41,7 @@
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input type="checkbox" bind:checked={descending} />
+			<input id="descending" type="checkbox" bind:checked={descending} />
 			<span>Descending (largest first)</span>
 		</label>
 	</div>

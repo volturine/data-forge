@@ -1,8 +1,13 @@
-import type { Schema } from '$lib/types/schema';
+import type { Schema, ColumnInfo } from '$lib/types/schema';
 import type { PipelineStep } from '$lib/types/analysis';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { emptySchema } from '$lib/types/schema';
-import { getStepTransform, joinTransform, unionByNameTransform, type StepConfig } from '$lib/utils/transform';
+import {
+	getStepTransform,
+	joinTransform,
+	unionByNameTransform,
+	type StepConfig
+} from '$lib/utils/transform';
 import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {
@@ -12,6 +17,8 @@ export interface StepSchemas {
 
 class SchemaStore {
 	joinSchemas = $state(new SvelteMap<string, Schema>());
+	// Cache for actual output schemas from preview (for dynamic steps like pivot)
+	previewSchemas = $state(new SvelteMap<string, Schema>());
 
 	get primaryDatasourceId(): string | null {
 		const activeTab = analysisStore.activeTab;
@@ -38,6 +45,20 @@ class SchemaStore {
 		return this.joinSchemas.get(stepId) ?? null;
 	}
 
+	// Store actual schema from preview response
+	setPreviewSchema(stepId: string, columns: string[], columnTypes?: Record<string, string>): void {
+		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
+			name,
+			dtype: columnTypes?.[name] ?? 'Unknown',
+			nullable: true
+		}));
+		this.previewSchemas.set(stepId, { columns: schemaColumns, row_count: null });
+	}
+
+	clearPreviewSchema(stepId: string): void {
+		this.previewSchemas.delete(stepId);
+	}
+
 	getStepSchemas(): Map<string, StepSchemas> {
 		const schemas = new SvelteMap<string, StepSchemas>();
 		let currentSchema: Schema | null = null;
@@ -56,7 +77,11 @@ class SchemaStore {
 
 			let output: Schema;
 
-			if (step.type === 'join') {
+			// Check if we have a cached preview schema for dynamic steps
+			const cachedSchema = this.previewSchemas.get(step.id);
+			if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
+				output = cachedSchema;
+			} else if (step.type === 'join') {
 				const rightSchema = this.joinSchemas.get(step.id) ?? emptySchema();
 				const config = step.config as StepConfig;
 				output = joinTransform(input, config, rightSchema);
@@ -102,6 +127,7 @@ class SchemaStore {
 
 	reset(): void {
 		this.joinSchemas = new SvelteMap();
+		this.previewSchemas = new SvelteMap();
 	}
 }
 

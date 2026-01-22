@@ -119,6 +119,7 @@
 	--warning-fg: #854d0e;
 	--warning-bg: #fef9c3;
 	--warning-border: #fde047;
+	--warning-hover: #fde047;
 
 	--error-fg: #991b1b;
 	--error-bg: #fee2e2;
@@ -147,7 +148,10 @@
 	--panel-shadow: var(--shadow-soft);
 
 	/* Panel widths */
-	--operations-panel-width: 280px;
+	--operations-panel-width: 340px;
+
+	/* Pipeline component spacing - controls the height/spacing of connection arrows between nodes */
+	--pipeline-connection-height: 18px;
 
 	--form-section-bg: var(--bg-tertiary);
 	--form-section-border: var(--border-primary);

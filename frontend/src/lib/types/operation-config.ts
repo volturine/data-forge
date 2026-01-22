@@ -77,7 +77,7 @@ export interface ExplodeConfigData {
 export interface PivotConfigData {
 	index: string[];
 	columns: string;
-	values: string;
+	values?: string;
 	aggregate_function: string;
 }
 

@@ -4,10 +4,12 @@
 	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
 	import { Download, Save } from 'lucide-svelte';
 	import { exportData, downloadBlob, type ExportRequest } from '$lib/api/compute';
+	import { defaultStepType, stepTypes } from '$lib/components/pipeline/utils';
 
 	interface Props {
 		step: PipelineStep;
 		index: number;
+		analysisId?: string;
 		datasourceId?: string;
 		allSteps?: PipelineStep[];
 		savedSteps?: PipelineStep[];
@@ -20,6 +22,7 @@
 	let {
 		step,
 		index,
+		analysisId,
 		datasourceId,
 		allSteps = [],
 		savedSteps = [],
@@ -56,106 +59,11 @@
 		state.setPointer(event.clientX, event.clientY);
 	}
 
-	const stepTypeInfo: Record<string, { label: string; icon: string }> = {
-		filter: { label: 'Filter', icon: '🔍' },
-		select: { label: 'Select', icon: '📋' },
-		groupby: { label: 'Group By', icon: '📊' },
-		sort: { label: 'Sort', icon: '↕️' },
-		rename: { label: 'Rename', icon: '✏️' },
-		drop: { label: 'Drop', icon: '🗑️' },
-		join: { label: 'Join', icon: '🔗' },
-		expression: { label: 'Expression', icon: '🧮' },
-		with_columns: { label: 'With Columns', icon: '🧮' },
-		pivot: { label: 'Pivot', icon: '🔄' },
-		unpivot: { label: 'Unpivot', icon: '🔃' },
-		fill_null: { label: 'Fill Null', icon: '🔧' },
-		deduplicate: { label: 'Deduplicate', icon: '🧹' },
-		explode: { label: 'Explode', icon: '💥' },
-		timeseries: { label: 'Time Series', icon: '📅' },
-		string_transform: { label: 'String Transform', icon: '📝' },
-		sample: { label: 'Sample', icon: '🎲' },
-		limit: { label: 'Limit', icon: '✂️' },
-		topk: { label: 'Top K', icon: '🏆' },
-		null_count: { label: 'Null Count', icon: '❓' },
-		value_counts: { label: 'Value Counts', icon: '📊' },
-		view: { label: 'View', icon: '👁️' },
-		union_by_name: { label: 'Union By Name', icon: '🧩' },
-		export: { label: 'Export', icon: '📤' }
-	};
-
-	const typeLabels: Record<string, string> = {
-		filter: 'filter',
-		select: 'select',
-		groupby: 'group_by',
-		sort: 'sort',
-		rename: 'rename',
-		drop: 'drop',
-		join: 'join',
-		expression: 'expression',
-		with_columns: 'with_columns',
-		deduplicate: 'deduplicate',
-		fill_null: 'fill_null',
-		explode: 'explode',
-		pivot: 'pivot',
-		timeseries: 'timeseries',
-		string_transform: 'string',
-		union_by_name: 'union_by_name',
-		export: 'export'
-	};
-
-	function getConfigSummary(s: PipelineStep): string {
-		switch (s.type) {
-			case 'filter': {
-				const conditions = s.config.conditions as Array<{
-					column: string;
-					operator: string;
-					value: string;
-				}>;
-				if (!conditions || conditions.length === 0) return 'no conditions';
-				return `${conditions.length} condition${conditions.length > 1 ? 's' : ''}`;
-			}
-
-			case 'select': {
-				const columns = s.config.columns as string[];
-				if (!columns || columns.length === 0) return 'no columns';
-				return `${columns.length} column${columns.length > 1 ? 's' : ''}`;
-			}
-
-			case 'groupby': {
-				const groupBy = s.config.groupBy as string[];
-				const aggregations = s.config.aggregations as Array<unknown>;
-				if (!groupBy || groupBy.length === 0) return 'not configured';
-				return `${groupBy.length} key${groupBy.length > 1 ? 's' : ''}, ${aggregations?.length || 0} agg`;
-			}
-
-			case 'sort': {
-				const sortConfig = s.config as { columns: string[]; descending: boolean[] };
-				const columns = sortConfig?.columns;
-				if (!columns || columns.length === 0) return 'not configured';
-				return columns.map((col, i) => `${col} ${sortConfig.descending[i] ? '▼' : '▲'}`).join(', ');
-			}
-
-			case 'export': {
-				const format = (s.config.format as string) || 'csv';
-				const filename = (s.config.filename as string) || 'export';
-				return `${filename}.${format}`;
-			}
-
-			case 'union_by_name': {
-				const sources = s.config.sources as string[];
-				if (!sources || sources.length === 0) return 'no sources';
-				return `${sources.length} source${sources.length > 1 ? 's' : ''}`;
-			}
-
-			default: {
-				return 'click to configure';
-			}
-		}
-	}
-
-	let currentStepInfo = $derived(stepTypeInfo[step.type] || { label: step.type, icon: '⚙️' });
-	let label = $derived(typeLabels[step.type] || step.type);
-	let summary = $derived(getConfigSummary(step));
+	// Derived values from declarative config
+	let stepConfig = $derived(stepTypes[step.type] || defaultStepType);
+	let currentStepInfo = $derived({ label: stepConfig.label, icon: stepConfig.icon });
+	let label = $derived(stepConfig.typeLabel);
+	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
 	let isSavedView = $derived(
 		step.type === 'view' && savedSteps.some((item) => item.id === step.id)
 	);
@@ -283,32 +191,34 @@
 		const filename = (step.config.filename as string) || 'export';
 		const destination = (step.config.destination as string) || 'filesystem';
 
-		try {
-			const request: ExportRequest = {
-				datasource_id: datasourceId,
-				pipeline_steps: allSteps.map((s) => ({
-					id: s.id,
-					type: s.type,
-					config: s.config,
-					depends_on: s.depends_on
-				})),
-				target_step_id: step.id,
-				format: format as 'csv' | 'parquet' | 'json',
-				filename,
-				destination: destination as 'download' | 'filesystem'
-			};
+		const request: ExportRequest = {
+			analysis_id: analysisId,
+			datasource_id: datasourceId,
+			pipeline_steps: allSteps.map((s) => ({
+				id: s.id,
+				type: s.type,
+				config: s.config,
+				depends_on: s.depends_on
+			})),
+			target_step_id: step.id,
+			format: format as 'csv' | 'parquet' | 'json',
+			filename,
+			destination: destination as 'download' | 'filesystem'
+		};
 
-			const result = await exportData(request);
-
-			if (destination === 'download' && result instanceof Blob) {
-				const ext = format === 'csv' ? '.csv' : format === 'parquet' ? '.parquet' : '.json';
-				downloadBlob(result, `${filename}${ext}`);
+		exportData(request).match(
+			(result) => {
+				if (destination === 'download' && result instanceof Blob) {
+					const ext = format === 'csv' ? '.csv' : format === 'parquet' ? '.parquet' : '.json';
+					downloadBlob(result, `${filename}${ext}`);
+				}
+				isExporting = false;
+			},
+			(err) => {
+				exportError = err.message;
+				isExporting = false;
 			}
-		} catch (err) {
-			exportError = err instanceof Error ? err.message : 'Export failed';
-		} finally {
-			isExporting = false;
-		}
+		);
 	}
 </script>
 
@@ -383,26 +293,29 @@
 		{/if}
 
 		{#if step.type === 'view' && datasourceId}
-			<div class="view-preview expanded">
-				{#if isSavedView}
-					{#if saveStatus === 'unsaved'}
-						<div class="preview-stale">Preview shows last saved state</div>
-					{/if}
+		<div class="view-preview expanded">
+			{#if isSavedView}
+				{#if saveStatus === 'unsaved'}
+					<div class="preview-stale">Preview shows last saved state</div>
+				{/if}
+				{#if analysisId && datasourceId}
 					<InlineDataTable
+						{analysisId}
 						{datasourceId}
 						pipeline={savedSteps}
 						stepId={step.id}
 						rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
 					/>
-				{:else}
-					<div class="preview-pending">
-						<div class="pending-dot"></div>
-						<span>Save to preview data</span>
-					</div>
 				{/if}
-			</div>
-		{/if}
-	</div>
+			{:else}
+				<div class="preview-pending">
+					<div class="pending-dot"></div>
+					<span>Save to preview data</span>
+				</div>
+			{/if}
+		</div>
+	{/if}
+</div>
 
 	<div class="connection-point bottom"></div>
 </div>

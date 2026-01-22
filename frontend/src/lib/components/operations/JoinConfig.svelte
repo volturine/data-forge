@@ -132,19 +132,19 @@
 	const currentDatasource = $derived(
 		datasourceStore.datasources.find((ds) => ds.id === currentTabDatasource)
 	);
-const datasourceOptions = $derived.by(() => datasourceStore.datasources);
-const filteredOptions = $derived.by(() => {
-	const query = search.trim().toLowerCase();
-	if (!query) return datasourceOptions;
-	return datasourceOptions.filter((ds) => {
-		const name = ds.name.toLowerCase();
-		const type = ds.source_type.toLowerCase();
-		return name.includes(query) || type.includes(query);
+	const datasourceOptions = $derived.by(() => datasourceStore.datasources);
+	const filteredOptions = $derived.by(() => {
+		const query = search.trim().toLowerCase();
+		if (!query) return datasourceOptions;
+		return datasourceOptions.filter((ds) => {
+			const name = ds.name.toLowerCase();
+			const type = ds.source_type.toLowerCase();
+			return name.includes(query) || type.includes(query);
+		});
 	});
-});
-const selectedSource = $derived.by(() =>
-	datasourceOptions.find((ds) => ds.id === selectedRightSource)
-);
+	const selectedSource = $derived.by(() =>
+		datasourceOptions.find((ds) => ds.id === selectedRightSource)
+	);
 </script>
 
 <div class="join-config">
@@ -152,55 +152,60 @@ const selectedSource = $derived.by(() =>
 
 	<div class="section">
 		<h4>Right Datasource</h4>
-	<div class="search-picker" role="combobox" aria-expanded={showPicker} aria-controls="join-right-options">
-		<span class="sr-only">Search datasources</span>
-		<input
-			type="text"
-			placeholder="Search datasources..."
-			bind:value={search}
-			onfocus={handlePickerFocus}
-			onblur={handlePickerBlur}
-		/>
-		{#if showPicker}
-			<div
-				class="picker-list"
-				id="join-right-options"
-				role="listbox"
-				aria-label="Right datasource options"
-			>
-				{#if datasourceOptions.length === 0}
-					<div class="picker-empty">No datasources available.</div>
-				{:else if filteredOptions.length === 0}
-					<div class="picker-empty">No matching datasources.</div>
-				{:else}
-					{#if currentDatasource && filteredOptions.some((ds) => ds.id === currentDatasource.id)}
-						<button
-							type="button"
-							class="picker-item"
-							data-selected={selectedRightSource === currentDatasource.id}
-							onmousedown={() => pickSource(currentDatasource.id, currentDatasource.name)}
-						>
-							<span class="source-name">{currentDatasource.name}</span>
-							<span class="meta">current</span>
-						</button>
-					{/if}
-					{#each filteredOptions as ds (ds.id)}
-						{#if ds.id !== currentTabDatasource}
+		<div
+			class="search-picker"
+			role="combobox"
+			aria-expanded={showPicker}
+			aria-controls="join-right-options"
+		>
+			<span class="sr-only">Search datasources</span>
+			<input
+				type="text"
+				placeholder="Search datasources..."
+				bind:value={search}
+				onfocus={handlePickerFocus}
+				onblur={handlePickerBlur}
+			/>
+			{#if showPicker}
+				<div
+					class="picker-list"
+					id="join-right-options"
+					role="listbox"
+					aria-label="Right datasource options"
+				>
+					{#if datasourceOptions.length === 0}
+						<div class="picker-empty">No datasources available.</div>
+					{:else if filteredOptions.length === 0}
+						<div class="picker-empty">No matching datasources.</div>
+					{:else}
+						{#if currentDatasource && filteredOptions.some((ds) => ds.id === currentDatasource.id)}
 							<button
 								type="button"
 								class="picker-item"
-								data-selected={selectedRightSource === ds.id}
-								onmousedown={() => pickSource(ds.id, ds.name)}
+								data-selected={selectedRightSource === currentDatasource.id}
+								onmousedown={() => pickSource(currentDatasource.id, currentDatasource.name)}
 							>
-								<span class="source-name">{ds.name}</span>
-								<span class="meta">{ds.source_type}</span>
+								<span class="source-name">{currentDatasource.name}</span>
+								<span class="meta">current</span>
 							</button>
 						{/if}
-					{/each}
-				{/if}
-			</div>
-		{/if}
-	</div>
+						{#each filteredOptions as ds (ds.id)}
+							{#if ds.id !== currentTabDatasource}
+								<button
+									type="button"
+									class="picker-item"
+									data-selected={selectedRightSource === ds.id}
+									onmousedown={() => pickSource(ds.id, ds.name)}
+								>
+									<span class="source-name">{ds.name}</span>
+									<span class="meta">{ds.source_type}</span>
+								</button>
+							{/if}
+						{/each}
+					{/if}
+				</div>
+			{/if}
+		</div>
 		{#if rightSchema}
 			<div class="schema-preview">
 				<strong>{rightSchema.columns.length} columns</strong>
@@ -240,20 +245,20 @@ const selectedSource = $derived.by(() =>
 			{#each config.join_columns ?? [] as joinCol, _index (joinCol.id)}
 				<div class="join-column-row">
 					<div class="column-select">
-				<label for={`join-left-${joinCol.id}`}>Left Column</label>
-				<select id={`join-left-${joinCol.id}`} bind:value={joinCol.left_column}>
-					<option value="">Select...</option>
-					{#each schema.columns as col (col.name)}
-						<option value={col.name}>{col.name}</option>
-					{/each}
-				</select>
-			</div>
-			<div class="column-select">
-				<label for={`join-right-${joinCol.id}`}>Right Column</label>
-				<select id={`join-right-${joinCol.id}`} bind:value={joinCol.right_column}>
-					<option value="">Select...</option>
-					{#each rightColumns as col (col.name)}
-						<option value={col.name}>{col.name}</option>
+						<label for={`join-left-${joinCol.id}`}>Left Column</label>
+						<select id={`join-left-${joinCol.id}`} bind:value={joinCol.left_column}>
+							<option value="">Select...</option>
+							{#each schema.columns as col (col.name)}
+								<option value={col.name}>{col.name}</option>
+							{/each}
+						</select>
+					</div>
+					<div class="column-select">
+						<label for={`join-right-${joinCol.id}`}>Right Column</label>
+						<select id={`join-right-${joinCol.id}`} bind:value={joinCol.right_column}>
+							<option value="">Select...</option>
+							{#each rightColumns as col (col.name)}
+								<option value={col.name}>{col.name}</option>
 							{/each}
 						</select>
 					</div>
@@ -307,7 +312,7 @@ const selectedSource = $derived.by(() =>
 
 	<div class="section">
 		<h4>Column Suffix</h4>
-		<input type="text" bind:value={config.suffix} placeholder="_right" />
+		<input id="suffix" type="text" bind:value={config.suffix} placeholder="_right" />
 		<div class="help-text">Suffix for columns from the right dataset (when names collide)</div>
 	</div>
 </div>

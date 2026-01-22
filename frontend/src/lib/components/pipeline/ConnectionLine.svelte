@@ -59,6 +59,8 @@
 		align-items: center;
 		color: var(--fg-muted);
 		transition: color var(--transition);
+		height: var(--pipeline-connection-height);
+		flex-shrink: 0;
 	}
 
 	.connection-line:hover {

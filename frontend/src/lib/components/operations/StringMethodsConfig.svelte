@@ -70,7 +70,7 @@
 
 	<div class="section">
 		<h4>Source Column</h4>
-		<select bind:value={config.column}>
+		<select id="str-column" bind:value={config.column}>
 			<option value="">Select string column...</option>
 			{#each stringColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
@@ -83,7 +83,7 @@
 
 	<div class="section">
 		<h4>String Method</h4>
-		<select bind:value={config.method}>
+		<select id="str-method" bind:value={config.method}>
 			{#each methods as method (method.value)}
 				<option value={method.value}>{method.label}</option>
 			{/each}
@@ -176,6 +176,7 @@
 	<div class="section">
 		<h4>New Column Name</h4>
 		<input
+			id="str-new-column"
 			type="text"
 			bind:value={config.new_column}
 			placeholder="e.g., name_upper, domain, first_name"

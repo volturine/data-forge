@@ -40,7 +40,7 @@ Report results in table format with status, feature, and notes.
 
 ```bash
 # Terminal 1 - Backend
-cd /home/kripso/workspace/polars-fastapi-svelte
+cd /home/kripso/workspace/polars-fastapi-svelte/backend
 uv run main.py
 
 # Terminal 2 - Frontend
@@ -177,19 +177,6 @@ For each operation type (filter, group_by, aggregate, etc.):
 1. Fix filter operation column dropdown issue
 2. Add streaming for large file exports
 3. Consider adding progress indicator for data preview
-
-## Quick Test Script
-
-```bash
-# Start services
-cd /home/kripso/workspace/polars-fastapi-svelte
-uv run main.py &
-cd frontend
-npm run dev -- --port 5173 --host &
-
-# Run Playwright tests
-npx playwright test
-```
 
 ## Testing Node (Operation) Patterns
 

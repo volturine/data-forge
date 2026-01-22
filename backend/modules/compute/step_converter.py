@@ -205,12 +205,15 @@ def convert_string_transform_config(config: dict) -> dict:
 def convert_sample_config(config: dict) -> dict:
     """Convert sample config from frontend to backend format.
 
-    Frontend: {n, fraction, shuffle, seed}
+    Frontend: {mode, n, fraction, shuffle, seed}
     Backend: {n, fraction, shuffle, seed}
     """
+    mode = config.get('mode')
+    n = config.get('n') if mode != 'fraction' else None
+    fraction = config.get('fraction') if mode != 'n' else None
     return {
-        'n': config.get('n'),
-        'fraction': config.get('fraction'),
+        'n': n,
+        'fraction': fraction,
         'shuffle': config.get('shuffle', False),
         'seed': config.get('seed'),
     }

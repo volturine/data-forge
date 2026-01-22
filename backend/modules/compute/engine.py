@@ -1,5 +1,6 @@
 import logging
 import multiprocessing as mp
+import os
 import uuid
 from collections.abc import Callable
 from queue import Empty
@@ -139,9 +140,7 @@ def _handle_sort(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     if isinstance(descending, list) and len(descending) != len(columns):
         # Ensure descending list matches columns length
         descending = (
-            descending[: len(columns)]
-            if len(descending) > len(columns)
-            else descending + [False] * (len(columns) - len(descending))
+            descending[: len(columns)] if len(descending) > len(columns) else descending + [False] * (len(columns) - len(descending))
         )
     return lf.sort(columns, descending=descending)
 
@@ -178,15 +177,26 @@ def _handle_drop(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
 def _handle_pivot(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     """Handle pivot operation."""
     index = params.get('index', [])
-    on = params.get('columns')
+    on_column = params.get('columns')
     values = params.get('values')
     aggregate_function = params.get('aggregate_function', 'first')
 
-    if not on:
-        raise ValueError('Pivot requires a column to pivot on')
+    if not on_column:
+        raise ValueError('Pivot requires a pivot column')
 
-    pivot = cast(Callable[..., pl.LazyFrame], lf.pivot)
-    return pivot(on=on, index=index, values=values, aggregate_function=aggregate_function)
+    if not index:
+        raise ValueError('Pivot requires at least one index column')
+
+    # Get unique values from the pivot column to use as on_columns
+    # This is needed because LazyFrame.pivot() requires both 'on' and 'on_columns'
+    df_temp = lf.collect()
+    on_columns = df_temp.select(on_column).to_series().unique().to_list()
+
+    # Return a lazy pivot using the collected unique values
+    if values:
+        return lf.pivot(on=on_column, on_columns=on_columns, index=index, values=values, aggregate_function=aggregate_function)
+    else:
+        return lf.pivot(on=on_column, on_columns=on_columns, index=index, aggregate_function=aggregate_function)
 
 
 def _handle_timeseries(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
@@ -701,16 +711,18 @@ class PolarsComputeEngine:
 
     def shutdown(self) -> None:
         """Shutdown the compute subprocess."""
+        from core.config import settings
+
         if not self.is_running:
             return
 
         self.command_queue.put({'type': 'shutdown'})
 
         if self.process and self.process.is_alive():
-            self.process.join(timeout=5)
+            self.process.join(timeout=settings.process_shutdown_timeout)
             if self.process.is_alive():
                 self.process.terminate()
-                self.process.join(timeout=2)
+                self.process.join(timeout=settings.process_terminate_timeout)
             if self.process.is_alive():
                 self.process.kill()
 
@@ -720,6 +732,19 @@ class PolarsComputeEngine:
     @staticmethod
     def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue) -> None:
         """Main compute loop running in subprocess."""
+        # Configure Polars environment variables for this subprocess
+        from core.config import settings
+
+        if settings.polars_max_threads > 0:
+            os.environ['POLARS_MAX_THREADS'] = str(settings.polars_max_threads)
+            logger.debug(f'Set POLARS_MAX_THREADS={settings.polars_max_threads}')
+
+        if settings.polars_streaming_chunk_size > 0:
+            os.environ['POLARS_STREAMING_CHUNK_SIZE'] = str(settings.polars_streaming_chunk_size)
+            logger.debug(f'Set POLARS_STREAMING_CHUNK_SIZE={settings.polars_streaming_chunk_size}')
+
+        logger.info(f'Polars engine started (PID: {os.getpid()}, threads: {settings.polars_max_threads or "auto"})')
+
         while True:
             try:
                 command = command_queue.get()
