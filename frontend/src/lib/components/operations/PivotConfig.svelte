@@ -57,42 +57,59 @@
 	}
 </script>
 
-<div class="pivot-config">
+<div class="pivot-config" role="region" aria-label="Pivot configuration">
 	<h3>Pivot Configuration</h3>
 
 	<div class="field-group">
-		<label for="pivot-column">Pivot Column <span class="hint">(values become new columns)</span></label>
-		<select id="pivot-column" bind:value={config.columns}>
+		<label for="pivot-select-column"
+			>Pivot Column <span class="hint">(values become new columns)</span></label
+		>
+		<select
+			id="pivot-select-column"
+			data-testid="pivot-column-select"
+			bind:value={config.columns}
+			aria-describedby="pivot-column-help"
+		>
 			<option value="">Select column...</option>
 			{#each schema.columns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
+		<span id="pivot-column-help" class="hint"
+			>Select the column whose unique values will become new columns</span
+		>
 	</div>
 
 	<div class="field-group" role="group" aria-labelledby="index-columns-label">
-		<span id="index-columns-label" class="group-label">Index Columns <span class="hint">(rows)</span></span>
-		<div class="checkbox-grid">
+		<span id="index-columns-label" class="group-label"
+			>Index Columns <span class="hint">(rows)</span></span
+		>
+		<div id="pivot-index-grid" class="checkbox-grid" role="group" aria-label="Select index columns">
 			{#each schema.columns as column (column.name)}
 				<label class="checkbox-label">
 					<input
+						id={`pivot-checkbox-index-${column.name}`}
+						data-testid={`pivot-index-checkbox-${column.name}`}
 						type="checkbox"
 						name="pivot-index"
 						checked={safeIndex.includes(column.name)}
 						onchange={() => toggleIndexColumn(column.name)}
+						aria-label={`Include ${column.name} as index column`}
 					/>
 					<span>{column.name}</span>
 				</label>
 			{/each}
 		</div>
 		{#if safeIndex.length > 0}
-			<div class="selection-summary">{safeIndex.length} selected</div>
+			<div id="pivot-index-summary" class="selection-summary" aria-live="polite">
+				{safeIndex.length} selected
+			</div>
 		{/if}
 	</div>
 
 	<div class="field-group">
-		<label for="values-column">Values Column</label>
-		<select id="values-column" bind:value={config.values}>
+		<label for="pivot-select-values">Values Column</label>
+		<select id="pivot-select-values" data-testid="pivot-values-select" bind:value={config.values}>
 			<option value="">All remaining columns</option>
 			{#each schema.columns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
@@ -101,8 +118,12 @@
 	</div>
 
 	<div class="field-group">
-		<label for="agg-func">Aggregation</label>
-		<select id="agg-func" bind:value={config.aggregate_function}>
+		<label for="pivot-select-agg">Aggregation</label>
+		<select
+			id="pivot-select-agg"
+			data-testid="pivot-agg-select"
+			bind:value={config.aggregate_function}
+		>
 			{#each aggregateFunctions as func (func)}
 				<option value={func}>{func}</option>
 			{/each}
@@ -112,13 +133,16 @@
 	{#if onRefreshSchema}
 		<div class="field-group">
 			<button
+				id="pivot-btn-refresh"
+				data-testid="pivot-refresh-button"
 				class="refresh-button"
 				onclick={onRefreshSchema}
 				disabled={!isConfigValid || isRefreshing}
 				type="button"
+				aria-busy={isRefreshing}
 			>
 				{#if isRefreshing}
-					<span class="spinner"></span>
+					<span class="spinner" aria-hidden="true"></span>
 					Refreshing...
 				{:else}
 					Refresh Output Columns

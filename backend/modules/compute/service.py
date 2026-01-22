@@ -1,8 +1,13 @@
+import io
 import logging
+import os
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
 
+import duckdb
+import polars as pl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -196,7 +201,8 @@ async def preview_step(
         timeout = settings.job_timeout
 
     if not analysis_id:
-        raise ValueError('analysis_id is required for preview')
+        # Create a temporary analysis_id for datasource preview
+        analysis_id = f'__preview__{datasource_id}'
 
     result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
     datasource = result.scalar_one_or_none()
@@ -211,10 +217,13 @@ async def preview_step(
             step_index = idx
             break
 
-    if step_index is None:
+    # Special case: previewing raw datasource (no pipeline steps, target is "source")
+    if target_step_id == 'source' and len(pipeline_steps) == 0:
+        preview_steps = []
+    elif step_index is None:
         raise StepNotFoundError(target_step_id)
-
-    preview_steps = pipeline_steps[: step_index + 1]
+    else:
+        preview_steps = pipeline_steps[: step_index + 1]
 
     manager = get_manager()
     engine = manager.get_engine(analysis_id)
@@ -442,10 +451,6 @@ async def export_data(
     Export pipeline result to file.
     Returns (file_bytes, filename_with_ext, content_type).
     """
-    import io
-
-    import polars as pl
-
     if timeout is None:
         timeout = settings.job_timeout
 
@@ -527,6 +532,30 @@ async def export_data(
                     df.write_ndjson(buffer)
                     ext = '.ndjson'
                     content_type = 'application/x-ndjson'
+                elif export_format == 'duckdb':
+                    tmp_db_path = tempfile.mktemp(suffix='.duckdb')
+                    tmp_parquet_path = tempfile.mktemp(suffix='.parquet')
+
+                    try:
+                        # Write to parquet first (no pyarrow needed)
+                        df.write_parquet(tmp_parquet_path)
+
+                        # Import parquet into DuckDB
+                        conn = duckdb.connect(tmp_db_path)
+                        conn.execute('CREATE TABLE data AS SELECT * FROM read_parquet(?)', [tmp_parquet_path])
+                        conn.close()
+
+                        with open(tmp_db_path, 'rb') as f:
+                            buffer = f.read()
+                    finally:
+                        if os.path.exists(tmp_parquet_path):
+                            os.unlink(tmp_parquet_path)
+                        if os.path.exists(tmp_db_path):
+                            os.unlink(tmp_db_path)
+
+                    ext = '.duckdb'
+                    content_type = 'application/octet-stream'
+                    return buffer, f'{filename}{ext}', content_type
                 else:
                     raise UnsupportedExportFormatError(export_format)
 

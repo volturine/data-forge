@@ -15,6 +15,11 @@ router = APIRouter(prefix='/datasource', tags=['datasource'])
 async def upload_file(
     file: UploadFile,
     name: str = Form(...),
+    delimiter: str = Form(','),
+    quote_char: str = Form('"'),
+    has_header: bool = Form(True),
+    skip_rows: int = Form(0),
+    encoding: str = Form('utf-8'),
     session: AsyncSession = Depends(get_db),
 ):
     """Upload a file and create a data source."""
@@ -48,12 +53,23 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}')
 
+    csv_options = None
+    if file_type == 'csv':
+        csv_options = schemas.CSVOptions(
+            delimiter=delimiter,
+            quote_char=quote_char,
+            has_header=has_header,
+            skip_rows=skip_rows,
+            encoding=encoding,
+        )
+
     try:
         return await service.create_file_datasource(
             session=session,
             name=name,
             file_path=str(file_path),
             file_type=file_type,
+            csv_options=csv_options,
         )
     except Exception as e:
         if file_path.exists():
@@ -86,9 +102,18 @@ async def connect_datasource(
                 headers=api_config.headers,
                 auth=api_config.auth,
             )
+        if datasource.source_type == 'duckdb':
+            duckdb_config = schemas.DuckDBDataSourceConfig.model_validate(datasource.config)
+            return await service.create_duckdb_datasource(
+                session=session,
+                name=datasource.name,
+                db_path=duckdb_config.db_path,
+                query=duckdb_config.query,
+                read_only=duckdb_config.read_only,
+            )
         raise HTTPException(
             status_code=400,
-            detail=f'Unsupported source type: {datasource.source_type}. Use "database" or "api"',
+            detail=f'Unsupported source type: {datasource.source_type}. Use "database", "api", or "duckdb"',
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

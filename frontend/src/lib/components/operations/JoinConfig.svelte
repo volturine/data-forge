@@ -100,7 +100,7 @@
 		config.right_columns = [];
 	}
 
-	function setRightSource(sourceId: string) {
+	function _setRightSource(sourceId: string) {
 		selectedRightSource = sourceId;
 	}
 
@@ -147,24 +147,27 @@
 	);
 </script>
 
-<div class="join-config">
+<div class="join-config" role="region" aria-label="Join configuration">
 	<h3>Join Configuration</h3>
 
-	<div class="section">
-		<h4>Right Datasource</h4>
+	<div class="section" role="group" aria-labelledby="right-datasource-heading">
+		<h4 id="right-datasource-heading">Right Datasource</h4>
 		<div
 			class="search-picker"
 			role="combobox"
 			aria-expanded={showPicker}
 			aria-controls="join-right-options"
 		>
-			<span class="sr-only">Search datasources</span>
+			<label for="join-input-search" class="sr-only">Search datasources</label>
 			<input
+				id="join-input-search"
+				data-testid="join-datasource-search"
 				type="text"
 				placeholder="Search datasources..."
 				bind:value={search}
 				onfocus={handlePickerFocus}
 				onblur={handlePickerBlur}
+				aria-autocomplete="list"
 			/>
 			{#if showPicker}
 				<div
@@ -184,6 +187,8 @@
 								class="picker-item"
 								data-selected={selectedRightSource === currentDatasource.id}
 								onmousedown={() => pickSource(currentDatasource.id, currentDatasource.name)}
+								role="option"
+								aria-selected={selectedRightSource === currentDatasource.id}
 							>
 								<span class="source-name">{currentDatasource.name}</span>
 								<span class="meta">current</span>
@@ -196,6 +201,8 @@
 									class="picker-item"
 									data-selected={selectedRightSource === ds.id}
 									onmousedown={() => pickSource(ds.id, ds.name)}
+									role="option"
+									aria-selected={selectedRightSource === ds.id}
 								>
 									<span class="source-name">{ds.name}</span>
 									<span class="meta">{ds.source_type}</span>
@@ -207,20 +214,21 @@
 			{/if}
 		</div>
 		{#if rightSchema}
-			<div class="schema-preview">
+			<div id="join-schema-preview" class="schema-preview" aria-live="polite">
 				<strong>{rightSchema.columns.length} columns</strong>
 			</div>
 		{/if}
 	</div>
 
-	<div class="section">
-		<h4>Join Type</h4>
-		<select bind:value={config.how}>
+	<div class="section" role="group" aria-labelledby="join-type-heading">
+		<h4 id="join-type-heading">Join Type</h4>
+		<label for="join-select-type" class="sr-only">Select join type</label>
+		<select id="join-select-type" data-testid="join-type-select" bind:value={config.how}>
 			{#each joinTypes as joinType (joinType.value)}
 				<option value={joinType.value}>{joinType.label}</option>
 			{/each}
 		</select>
-		<div class="help-text">
+		<div id="join-type-help" class="help-text" aria-describedby="join-type-help">
 			<strong>Inner:</strong> Only matching rows from both.<br />
 			<strong>Left:</strong> All left rows, matching right rows.<br />
 			<strong>Right:</strong> All right rows, matching left rows.<br />
@@ -230,23 +238,37 @@
 	</div>
 
 	{#if !isCrossJoin}
-		<div class="section">
+		<div class="section" role="group" aria-labelledby="join-columns-heading">
 			<div class="section-header">
-				<h4>Join Columns</h4>
-				<button type="button" class="btn-add" onclick={addJoinColumn}> + Add Join Column </button>
+				<h4 id="join-columns-heading">Join Columns</h4>
+				<button
+					id="join-btn-add-column"
+					data-testid="join-add-column-button"
+					type="button"
+					class="btn-add"
+					onclick={addJoinColumn}
+					aria-label="Add join column pair"
+				>
+					+ Add Join Column
+				</button>
 			</div>
 
 			{#if (config.join_columns ?? []).length === 0}
-				<p class="empty-message">
+				<p id="join-columns-empty" class="empty-message">
 					No join columns configured. Click "+ Add Join Column" to add one.
 				</p>
 			{/if}
 
 			{#each config.join_columns ?? [] as joinCol, _index (joinCol.id)}
-				<div class="join-column-row">
+				<div class="join-column-row" role="group" aria-label={`Join column pair ${_index + 1}`}>
 					<div class="column-select">
 						<label for={`join-left-${joinCol.id}`}>Left Column</label>
-						<select id={`join-left-${joinCol.id}`} bind:value={joinCol.left_column}>
+						<select
+							id={`join-left-${joinCol.id}`}
+							data-testid={`join-left-select-${_index}`}
+							bind:value={joinCol.left_column}
+							aria-label="Left column for join"
+						>
 							<option value="">Select...</option>
 							{#each schema.columns as col (col.name)}
 								<option value={col.name}>{col.name}</option>
@@ -255,14 +277,26 @@
 					</div>
 					<div class="column-select">
 						<label for={`join-right-${joinCol.id}`}>Right Column</label>
-						<select id={`join-right-${joinCol.id}`} bind:value={joinCol.right_column}>
+						<select
+							id={`join-right-${joinCol.id}`}
+							data-testid={`join-right-select-${_index}`}
+							bind:value={joinCol.right_column}
+							aria-label="Right column for join"
+						>
 							<option value="">Select...</option>
 							{#each rightColumns as col (col.name)}
 								<option value={col.name}>{col.name}</option>
 							{/each}
 						</select>
 					</div>
-					<button type="button" class="btn-remove" onclick={() => removeJoinColumn(joinCol.id)}>
+					<button
+						id={`join-btn-remove-${_index}`}
+						data-testid={`join-remove-button-${_index}`}
+						type="button"
+						class="btn-remove"
+						onclick={() => removeJoinColumn(joinCol.id)}
+						aria-label={`Remove join column pair ${_index + 1}`}
+					>
 						✕
 					</button>
 				</div>
@@ -270,33 +304,59 @@
 
 			{#if (config.join_columns ?? []).length > 0}
 				{#if !(config.join_columns ?? []).some((c) => c.left_column && c.right_column)}
-					<div class="warning">Configure at least one join column pair</div>
+					<div id="join-columns-warning" class="warning" role="alert">
+						Configure at least one join column pair
+					</div>
 				{/if}
 			{/if}
 		</div>
 	{/if}
 
-	<div class="section">
+	<div class="section" role="group" aria-labelledby="right-columns-heading">
 		<div class="section-header">
-			<h4>Columns from Right Dataset</h4>
+			<h4 id="right-columns-heading">Columns from Right Dataset</h4>
 			<div class="column-actions">
-				<button type="button" class="btn-link" onclick={selectAllRightColumns}>Select All</button>
-				<button type="button" class="btn-link" onclick={deselectAllRightColumns}
-					>Deselect All</button
+				<button
+					id="join-btn-select-all-right"
+					data-testid="join-select-all-right-button"
+					type="button"
+					class="btn-link"
+					onclick={selectAllRightColumns}
+					aria-label="Select all right columns"
 				>
+					Select All
+				</button>
+				<button
+					id="join-btn-deselect-all-right"
+					data-testid="join-deselect-all-right-button"
+					type="button"
+					class="btn-link"
+					onclick={deselectAllRightColumns}
+					aria-label="Deselect all right columns"
+				>
+					Deselect All
+				</button>
 			</div>
 		</div>
 
 		{#if rightColumns.length === 0}
-			<p class="empty-message">Select a right datasource first</p>
+			<p id="join-right-columns-empty" class="empty-message">Select a right datasource first</p>
 		{:else}
-			<div class="column-list">
+			<div
+				id="join-right-columns-list"
+				class="column-list"
+				role="group"
+				aria-label="Right dataset columns"
+			>
 				{#each rightColumns as col (col.name)}
 					<label class="column-checkbox">
 						<input
+							id={`join-checkbox-${col.name}`}
+							data-testid={`join-right-column-checkbox-${col.name}`}
 							type="checkbox"
 							checked={(config.right_columns ?? []).includes(col.name)}
 							onchange={() => toggleRightColumn(col.name)}
+							aria-label={`Include column ${col.name} from right dataset`}
 						/>
 						<span>{col.name}</span>
 						<span class="dtype">{col.dtype}</span>
@@ -306,14 +366,26 @@
 		{/if}
 
 		{#if rightColumns.length > 0 && (config.right_columns ?? []).length === 0}
-			<div class="warning">Select at least one column from the right dataset</div>
+			<div id="join-right-columns-warning" class="warning" role="alert">
+				Select at least one column from the right dataset
+			</div>
 		{/if}
 	</div>
 
-	<div class="section">
-		<h4>Column Suffix</h4>
-		<input id="suffix" type="text" bind:value={config.suffix} placeholder="_right" />
-		<div class="help-text">Suffix for columns from the right dataset (when names collide)</div>
+	<div class="section" role="group" aria-labelledby="suffix-heading">
+		<h4 id="suffix-heading">Column Suffix</h4>
+		<label for="join-input-suffix" class="sr-only">Suffix for right dataset columns</label>
+		<input
+			id="join-input-suffix"
+			data-testid="join-suffix-input"
+			type="text"
+			bind:value={config.suffix}
+			placeholder="_right"
+			aria-describedby="join-suffix-hint"
+		/>
+		<div id="join-suffix-hint" class="help-text">
+			Suffix for columns from the right dataset (when names collide)
+		</div>
 	</div>
 </div>
 
@@ -323,6 +395,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

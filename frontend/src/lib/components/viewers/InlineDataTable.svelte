@@ -42,7 +42,15 @@
 	});
 
 	const query = createQuery(() => ({
-		queryKey: ['step-preview', analysisId, datasourceId, stepId, currentPage, rowLimit, pipelineKey],
+		queryKey: [
+			'step-preview',
+			analysisId,
+			datasourceId,
+			stepId,
+			currentPage,
+			rowLimit,
+			pipelineKey
+		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
 			const result = await previewStepData({
 				analysis_id: analysisId,

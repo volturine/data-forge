@@ -73,28 +73,32 @@
 	}
 </script>
 
-<div class="filter-config">
+<div class="filter-config" role="region" aria-label="Filter configuration">
 	<h3>Filter Configuration</h3>
 
 	<div class="logic-selector">
-		<label>
+		<label for="filter-select-logic">
 			Combine conditions with:
-			<select bind:value={config.logic}>
+			<select id="filter-select-logic" data-testid="filter-logic-select" bind:value={config.logic}>
 				<option value="AND" selected={safeLogic === 'AND'}>AND</option>
 				<option value="OR" selected={safeLogic === 'OR'}>OR</option>
 			</select>
 		</label>
 	</div>
 
-	<div class="conditions">
+	<div class="conditions" role="group" aria-label="Filter conditions">
 		{#each safeConditions as condition, i (i)}
-			<div class="condition-row">
+			<div class="condition-row" role="group" aria-label={`Condition ${i + 1}`}>
+				<label for={`filter-select-column-${i}`} class="sr-only">Column</label>
 				<select
+					id={`filter-select-column-${i}`}
+					data-testid={`filter-column-select-${i}`}
 					value={condition.column}
 					onchange={(event) =>
 						updateCondition(i, {
 							column: (event.currentTarget as HTMLSelectElement).value
 						})}
+					aria-label="Select column"
 				>
 					<option value="">Select column...</option>
 					{#each schema.columns as column (column.name)}
@@ -102,19 +106,26 @@
 					{/each}
 				</select>
 
+				<label for={`filter-select-operator-${i}`} class="sr-only">Operator</label>
 				<select
+					id={`filter-select-operator-${i}`}
+					data-testid={`filter-operator-select-${i}`}
 					value={condition.operator}
 					onchange={(event) =>
 						updateCondition(i, {
 							operator: (event.currentTarget as HTMLSelectElement).value
 						})}
+					aria-label="Select operator"
 				>
 					{#each operators as op (op)}
 						<option value={op}>{op}</option>
 					{/each}
 				</select>
 
+				<label for={`filter-input-value-${i}`} class="sr-only">Value</label>
 				<input
+					id={`filter-input-value-${i}`}
+					data-testid={`filter-value-input-${i}`}
 					type={getInputType(condition.column)}
 					value={condition.value}
 					oninput={(event) =>
@@ -122,12 +133,16 @@
 							value: (event.currentTarget as HTMLInputElement).value
 						})}
 					placeholder="Value"
+					aria-label="Filter value"
 				/>
 
 				<button
+					id={`filter-btn-remove-${i}`}
+					data-testid={`filter-remove-button-${i}`}
 					type="button"
 					onclick={() => removeCondition(i)}
 					disabled={safeConditions.length === 1}
+					aria-label={`Remove condition ${i + 1}`}
 				>
 					Remove
 				</button>
@@ -135,7 +150,16 @@
 		{/each}
 	</div>
 
-	<button type="button" onclick={addCondition} class="add-btn">Add Condition</button>
+	<button
+		id="filter-btn-add-condition"
+		data-testid="filter-add-condition-button"
+		type="button"
+		onclick={addCondition}
+		class="add-btn"
+		aria-label="Add new filter condition"
+	>
+		Add Condition
+	</button>
 </div>
 
 <style>
@@ -144,6 +168,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

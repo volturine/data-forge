@@ -293,29 +293,29 @@
 		{/if}
 
 		{#if step.type === 'view' && datasourceId}
-		<div class="view-preview expanded">
-			{#if isSavedView}
-				{#if saveStatus === 'unsaved'}
-					<div class="preview-stale">Preview shows last saved state</div>
+			<div class="view-preview expanded">
+				{#if isSavedView}
+					{#if saveStatus === 'unsaved'}
+						<div class="preview-stale">Preview shows last saved state</div>
+					{/if}
+					{#if analysisId && datasourceId}
+						<InlineDataTable
+							{analysisId}
+							{datasourceId}
+							pipeline={savedSteps}
+							stepId={step.id}
+							rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
+						/>
+					{/if}
+				{:else}
+					<div class="preview-pending">
+						<div class="pending-dot"></div>
+						<span>Save to preview data</span>
+					</div>
 				{/if}
-				{#if analysisId && datasourceId}
-					<InlineDataTable
-						{analysisId}
-						{datasourceId}
-						pipeline={savedSteps}
-						stepId={step.id}
-						rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
-					/>
-				{/if}
-			{:else}
-				<div class="preview-pending">
-					<div class="pending-dot"></div>
-					<span>Save to preview data</span>
-				</div>
-			{/if}
-		</div>
-	{/if}
-</div>
+			</div>
+		{/if}
+	</div>
 
 	<div class="connection-point bottom"></div>
 </div>

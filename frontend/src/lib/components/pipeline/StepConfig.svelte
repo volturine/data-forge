@@ -86,7 +86,7 @@
 	// Manual refresh function for pivot schema
 	function handleRefreshPivotSchema() {
 		if (!step || step.type !== 'pivot') return;
-		
+
 		const config = step.config as Record<string, unknown>;
 		if (!config || typeof config !== 'object') return;
 		const columns = config.columns;
@@ -213,8 +213,8 @@
 					bind:config={step.config as unknown as ExplodeConfigData}
 				/>
 			{:else if step.type === 'pivot'}
-				<PivotConfig 
-					schema={inputSchema} 
+				<PivotConfig
+					schema={inputSchema}
 					bind:config={step.config as unknown as PivotConfigData}
 					onRefreshSchema={handleRefreshPivotSchema}
 					isRefreshing={fetchingPivotSchema}

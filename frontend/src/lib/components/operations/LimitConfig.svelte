@@ -12,12 +12,23 @@
 	});
 </script>
 
-<div class="limit-config">
+<div class="limit-config" role="region" aria-label="Limit configuration">
 	<h3>Limit Configuration</h3>
 
 	<div class="form-group">
-		<label for="n">Number of rows to keep</label>
-		<input id="n" type="number" bind:value={n} min="1" placeholder="e.g., 10" />
+		<label for="limit-input-n">Number of rows to keep</label>
+		<input
+			id="limit-input-n"
+			data-testid="limit-rows-input"
+			type="number"
+			bind:value={n}
+			min="1"
+			placeholder="e.g., 10"
+			aria-describedby="limit-n-help"
+		/>
+		<span id="limit-n-help" class="hint"
+			>Enter the maximum number of rows to keep in the dataset</span
+		>
 	</div>
 </div>
 

@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { uploadFile, connectDatabase, connectApi } from '$lib/api/datasource';
+	import { uploadFile, connectDatabase, connectApi, connectDuckDB } from '$lib/api/datasource';
+	import type { CSVOptions } from '$lib/types/datasource';
 
 	type Tab = 'file' | 'database' | 'api';
+	type DatabaseType = 'duckdb' | 'other';
 
 	let activeTab = $state<Tab>('file');
+	let databaseType = $state<DatabaseType>('duckdb');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -13,7 +16,21 @@
 	let file = $state<File | null>(null);
 	let fileName = $state('');
 
-	// Database state
+	// CSV options state
+	let delimiter = $state(',');
+	let quoteChar = $state('"');
+	let hasHeader = $state(true);
+	let skipRows = $state(0);
+	let encoding = $state('utf8');
+	let showCsvOptions = $state(false);
+
+	// DuckDB state
+	let duckdbName = $state('');
+	let duckdbPath = $state('');
+	let duckdbQuery = $state('');
+	let duckdbReadOnly = $state(true);
+
+	// Generic database state
 	let dbName = $state('');
 	let connectionString = $state('');
 	let query = $state('');
@@ -30,6 +47,11 @@
 			if (!fileName) {
 				fileName = file.name.replace(/\.[^/.]+$/, '');
 			}
+			if (file.name.endsWith('.csv')) {
+				showCsvOptions = true;
+			} else {
+				showCsvOptions = false;
+			}
 		}
 	}
 
@@ -42,14 +64,50 @@
 		loading = true;
 		error = null;
 
+		let csvOptions: CSVOptions | undefined;
+		if (file.name.endsWith('.csv')) {
+			csvOptions = {
+				delimiter,
+				quote_char: quoteChar,
+				has_header: hasHeader,
+				skip_rows: skipRows,
+				encoding
+			};
+		}
+
 		try {
-			await uploadFile(file, fileName);
+			await uploadFile(file, fileName, csvOptions);
 			goto(resolve('/datasources'), { invalidateAll: true });
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Upload failed';
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function handleDuckDBConnect() {
+		if (!duckdbName || !duckdbQuery) {
+			error = 'Please fill in name and query';
+			return;
+		}
+
+		loading = true;
+		error = null;
+
+		const result = await connectDuckDB(
+			duckdbName,
+			duckdbQuery,
+			duckdbPath.trim() || undefined,
+			duckdbReadOnly
+		);
+
+		if (result.isErr()) {
+			error = result.error.message || 'Connection failed';
+			loading = false;
+			return;
+		}
+
+		goto(resolve('/datasources'), { invalidateAll: true });
 	}
 
 	async function handleDatabaseConnect() {
@@ -139,6 +197,67 @@
 					{/if}
 				</div>
 
+				{#if showCsvOptions}
+					<div class="csv-options">
+						<h3>CSV Options</h3>
+						<div class="form-row">
+							<div class="form-group">
+								<label for="delimiter">Delimiter</label>
+								<select id="delimiter" bind:value={delimiter} disabled={loading}>
+									<option value=",">Comma (,)</option>
+									<option value=";">Semicolon (;)</option>
+									<option value="\t">Tab (\t)</option>
+									<option value="|">Pipe (|)</option>
+								</select>
+							</div>
+
+							<div class="form-group">
+								<label for="quote-char">Quote Character</label>
+								<input
+									id="quote-char"
+									type="text"
+									bind:value={quoteChar}
+									maxlength="1"
+									disabled={loading}
+								/>
+							</div>
+						</div>
+
+						<div class="form-row">
+							<div class="form-group checkbox-group">
+								<input
+									id="has-header"
+									type="checkbox"
+									bind:checked={hasHeader}
+									disabled={loading}
+								/>
+								<label for="has-header">Has Header Row</label>
+							</div>
+
+							<div class="form-group">
+								<label for="skip-rows">Skip Rows</label>
+								<input
+									id="skip-rows"
+									type="number"
+									bind:value={skipRows}
+									min="0"
+									disabled={loading}
+								/>
+							</div>
+						</div>
+
+						<div class="form-group">
+							<label for="encoding">Encoding</label>
+							<select id="encoding" bind:value={encoding} disabled={loading}>
+								<option value="utf8">UTF-8</option>
+								<option value="utf8-lossy">UTF-8 (lossy)</option>
+								<option value="latin1">Latin-1 (ISO-8859-1)</option>
+								<option value="cp1252">Windows-1252</option>
+							</select>
+						</div>
+					</div>
+				{/if}
+
 				<button class="button primary" onclick={handleFileUpload} disabled={loading || !file}>
 					{loading ? 'Uploading...' : 'Upload'}
 				</button>
@@ -146,42 +265,124 @@
 		{:else if activeTab === 'database'}
 			<div class="form">
 				<div class="form-group">
-					<label for="db-name">Name</label>
-					<input
-						id="db-name"
-						type="text"
-						bind:value={dbName}
-						placeholder="My Database"
-						disabled={loading}
-					/>
+					<label for="db-type">Database Type</label>
+					<div class="radio-group">
+						<label class="radio-option">
+							<input
+								type="radio"
+								name="db-type"
+								value="duckdb"
+								bind:group={databaseType}
+								disabled={loading}
+							/>
+							<span class="radio-label">DuckDB</span>
+							<span class="radio-desc">In-memory or file-based analytics database</span>
+						</label>
+						<label class="radio-option">
+							<input
+								type="radio"
+								name="db-type"
+								value="other"
+								bind:group={databaseType}
+								disabled={loading}
+							/>
+							<span class="radio-label">Other Database</span>
+							<span class="radio-desc">PostgreSQL, MySQL, SQLite via connection string</span>
+						</label>
+					</div>
 				</div>
 
-				<div class="form-group">
-					<label for="connection-string">Connection String</label>
-					<input
-						id="connection-string"
-						type="text"
-						bind:value={connectionString}
-						placeholder="postgresql://user:pass@localhost/db"
-						disabled={loading}
-					/>
-					<p class="hint">Example: postgresql://user:pass@localhost/dbname</p>
-				</div>
+				{#if databaseType === 'duckdb'}
+					<div class="form-group">
+						<label for="duckdb-name">Name</label>
+						<input
+							id="duckdb-name"
+							type="text"
+							bind:value={duckdbName}
+							placeholder="My DuckDB Data"
+							disabled={loading}
+						/>
+					</div>
 
-				<div class="form-group">
-					<label for="query">Query</label>
-					<textarea
-						id="query"
-						bind:value={query}
-						placeholder="SELECT * FROM table"
-						rows="5"
-						disabled={loading}
-					></textarea>
-				</div>
+					<div class="form-group">
+						<label for="duckdb-path">Database Path (optional)</label>
+						<input
+							id="duckdb-path"
+							type="text"
+							bind:value={duckdbPath}
+							placeholder="/path/to/database.duckdb"
+							disabled={loading}
+						/>
+						<p class="hint">Leave empty for in-memory database</p>
+					</div>
 
-				<button class="button primary" onclick={handleDatabaseConnect} disabled={loading}>
-					{loading ? 'Connecting...' : 'Connect'}
-				</button>
+					<div class="form-group">
+						<label for="duckdb-query">Query</label>
+						<textarea
+							id="duckdb-query"
+							bind:value={duckdbQuery}
+							placeholder="SELECT * FROM read_csv_auto('data.csv')"
+							rows="5"
+							disabled={loading}
+						></textarea>
+						<p class="hint">
+							DuckDB can read CSV, Parquet, JSON directly: read_csv_auto(), read_parquet(),
+							read_json_auto()
+						</p>
+					</div>
+
+					<div class="form-group checkbox-group">
+						<input
+							id="duckdb-readonly"
+							type="checkbox"
+							bind:checked={duckdbReadOnly}
+							disabled={loading}
+						/>
+						<label for="duckdb-readonly">Read-only mode</label>
+					</div>
+
+					<button class="button primary" onclick={handleDuckDBConnect} disabled={loading}>
+						{loading ? 'Connecting...' : 'Connect'}
+					</button>
+				{:else}
+					<div class="form-group">
+						<label for="db-name">Name</label>
+						<input
+							id="db-name"
+							type="text"
+							bind:value={dbName}
+							placeholder="My Database"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="connection-string">Connection String</label>
+						<input
+							id="connection-string"
+							type="text"
+							bind:value={connectionString}
+							placeholder="postgresql://user:pass@localhost/db"
+							disabled={loading}
+						/>
+						<p class="hint">Example: postgresql://user:pass@localhost/dbname</p>
+					</div>
+
+					<div class="form-group">
+						<label for="query">Query</label>
+						<textarea
+							id="query"
+							bind:value={query}
+							placeholder="SELECT * FROM table"
+							rows="5"
+							disabled={loading}
+						></textarea>
+					</div>
+
+					<button class="button primary" onclick={handleDatabaseConnect} disabled={loading}>
+						{loading ? 'Connecting...' : 'Connect'}
+					</button>
+				{/if}
 			</div>
 		{:else if activeTab === 'api'}
 			<div class="form">
@@ -390,5 +591,112 @@
 		font-size: 0.875rem;
 		color: var(--fg-secondary);
 		margin: 0;
+	}
+
+	.csv-options {
+		background-color: var(--bg-tertiary);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--border-primary);
+	}
+
+	.csv-options h3 {
+		font-size: var(--text-sm);
+		font-weight: 600;
+		margin: 0 0 var(--space-4) 0;
+		color: var(--fg-secondary);
+	}
+
+	.form-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-4);
+	}
+
+	.checkbox-group {
+		flex-direction: row;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.checkbox-group input {
+		width: auto;
+	}
+
+	.checkbox-group label {
+		margin: 0;
+	}
+
+	input[type='number'] {
+		padding: 0.5rem 0.75rem;
+		border: 1px solid var(--input-border);
+		border-radius: var(--radius-sm);
+		font-size: 0.875rem;
+		background-color: var(--input-bg);
+		color: var(--fg-primary);
+	}
+
+	input[type='number']:focus {
+		outline: none;
+		border-color: var(--border-focus);
+		box-shadow: 0 0 0 3px var(--accent-bg);
+	}
+
+	input[type='number']:disabled {
+		background: var(--bg-tertiary);
+		cursor: not-allowed;
+	}
+
+	input[type='checkbox'] {
+		width: 1rem;
+		height: 1rem;
+		cursor: pointer;
+	}
+
+	.radio-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.radio-option {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		grid-template-rows: auto auto;
+		gap: 0 0.75rem;
+		padding: 0.75rem 1rem;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+
+	.radio-option:hover {
+		background: var(--bg-hover);
+		border-color: var(--border-secondary);
+	}
+
+	.radio-option:has(input:checked) {
+		background: var(--accent-bg);
+		border-color: var(--accent-border);
+	}
+
+	.radio-option input[type='radio'] {
+		grid-row: span 2;
+		align-self: center;
+		width: 1rem;
+		height: 1rem;
+		cursor: pointer;
+	}
+
+	.radio-label {
+		font-weight: 500;
+		color: var(--fg-primary);
+		font-size: 0.875rem;
+	}
+
+	.radio-desc {
+		font-size: 0.75rem;
+		color: var(--fg-muted);
 	}
 </style>

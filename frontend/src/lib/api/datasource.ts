@@ -1,4 +1,4 @@
-import type { DataSource, SchemaInfo } from '$lib/types/datasource';
+import type { CSVOptions, DataSource, SchemaInfo } from '$lib/types/datasource';
 import { apiRequest } from './client';
 import { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
@@ -12,10 +12,22 @@ function createApiError(
 	return { type, message, status, statusText };
 }
 
-export function uploadFile(file: File, name: string): ResultAsync<DataSource, ApiError> {
+export function uploadFile(
+	file: File,
+	name: string,
+	csvOptions?: CSVOptions
+): ResultAsync<DataSource, ApiError> {
 	const formData = new FormData();
 	formData.append('file', file);
 	formData.append('name', name);
+
+	if (csvOptions) {
+		formData.append('delimiter', csvOptions.delimiter);
+		formData.append('quote_char', csvOptions.quote_char);
+		formData.append('has_header', String(csvOptions.has_header));
+		formData.append('skip_rows', String(csvOptions.skip_rows));
+		formData.append('encoding', csvOptions.encoding);
+	}
 
 	return apiRequest<DataSource>('/v1/datasource/upload', {
 		method: 'POST',
@@ -56,6 +68,22 @@ export function connectApi(
 			name,
 			source_type: 'api',
 			config: { url, method, headers, auth }
+		})
+	});
+}
+
+export function connectDuckDB(
+	name: string,
+	query: string,
+	dbPath?: string,
+	readOnly: boolean = true
+): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
+		method: 'POST',
+		body: JSON.stringify({
+			name,
+			source_type: 'duckdb',
+			config: { db_path: dbPath, query, read_only: readOnly }
 		})
 	});
 }

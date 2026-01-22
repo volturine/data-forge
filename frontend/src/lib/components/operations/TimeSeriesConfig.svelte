@@ -61,25 +61,33 @@
 	);
 </script>
 
-<div class="timeseries-config">
+<div class="timeseries-config" role="region" aria-label="Time series configuration">
 	<h3>Time Series Configuration</h3>
 
-	<div class="section">
-		<h4>Source Column</h4>
-		<select id="ts-column" bind:value={config.column}>
+	<div class="section" role="group" aria-labelledby="ts-source-column-heading">
+		<h4 id="ts-source-column-heading">Source Column</h4>
+		<label for="ts-select-column" class="sr-only">Select date/time column</label>
+		<select id="ts-select-column" data-testid="ts-column-select" bind:value={config.column}>
 			<option value="">Select date/time column...</option>
 			{#each dateColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
 		{#if dateColumns.length === 0}
-			<p class="warning">No date/time columns detected in schema</p>
+			<p id="ts-no-columns-warning" class="warning" role="alert">
+				No date/time columns detected in schema
+			</p>
 		{/if}
 	</div>
 
-	<div class="section">
-		<h4>Operation Type</h4>
-		<select id="ts-operation" bind:value={config.operation_type}>
+	<div class="section" role="group" aria-labelledby="ts-operation-heading">
+		<h4 id="ts-operation-heading">Operation Type</h4>
+		<label for="ts-select-operation" class="sr-only">Select operation type</label>
+		<select
+			id="ts-select-operation"
+			data-testid="ts-operation-select"
+			bind:value={config.operation_type}
+		>
 			{#each operations as op (op.value)}
 				<option value={op.value}>{op.label}</option>
 			{/each}
@@ -87,30 +95,49 @@
 	</div>
 
 	{#if config.operation_type === 'extract'}
-		<div class="section">
-			<h4>Extract Component</h4>
-			<select id="ts-component" bind:value={config.component}>
+		<div class="section" role="group" aria-labelledby="ts-component-heading">
+			<h4 id="ts-component-heading">Extract Component</h4>
+			<label for="ts-select-component" class="sr-only">Select component to extract</label>
+			<select
+				id="ts-select-component"
+				data-testid="ts-component-select"
+				bind:value={config.component}
+			>
 				{#each extractComponents as comp (comp)}
 					<option value={comp}>{comp}</option>
 				{/each}
 			</select>
 		</div>
 	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
-		<div class="section">
-			<h4>Time Period</h4>
+		<div class="section" role="group" aria-labelledby="ts-period-heading">
+			<h4 id="ts-period-heading">Time Period</h4>
 			<div class="inline-group">
-				<input id="ts-value" type="number" bind:value={config.value} min="0" />
-				<select id="ts-unit" bind:value={config.unit}>
-					{#each timeUnits as unit (unit)}
-						<option value={unit}>{unit}</option>
-					{/each}
-				</select>
+				<div class="input-group">
+					<label for="ts-input-value">Value:</label>
+					<input
+						id="ts-input-value"
+						data-testid="ts-value-input"
+						type="number"
+						bind:value={config.value}
+						min="0"
+						aria-label="Time period value"
+					/>
+				</div>
+				<div class="input-group">
+					<label for="ts-select-unit">Unit:</label>
+					<select id="ts-select-unit" data-testid="ts-unit-select" bind:value={config.unit}>
+						{#each timeUnits as unit (unit)}
+							<option value={unit}>{unit}</option>
+						{/each}
+					</select>
+				</div>
 			</div>
 		</div>
 	{:else if config.operation_type === 'diff'}
-		<div class="section">
-			<h4>Second Date Column</h4>
-			<select id="ts-column2" bind:value={config.column2}>
+		<div class="section" role="group" aria-labelledby="ts-column2-heading">
+			<h4 id="ts-column2-heading">Second Date Column</h4>
+			<label for="ts-select-column2" class="sr-only">Select second date column</label>
+			<select id="ts-select-column2" data-testid="ts-column2-select" bind:value={config.column2}>
 				<option value="">Select column...</option>
 				{#each dateColumns as column (column.name)}
 					<option value={column.name}>{column.name} ({column.dtype})</option>
@@ -119,9 +146,16 @@
 		</div>
 	{/if}
 
-	<div class="section">
-		<h4>New Column Name</h4>
-		<input id="ts-new-column" type="text" bind:value={config.new_column} placeholder="e.g., year, future_date" />
+	<div class="section" role="group" aria-labelledby="ts-new-column-heading">
+		<h4 id="ts-new-column-heading">New Column Name</h4>
+		<label for="ts-input-new-column" class="sr-only">New column name</label>
+		<input
+			id="ts-input-new-column"
+			data-testid="ts-new-column-input"
+			type="text"
+			bind:value={config.new_column}
+			placeholder="e.g., year, future_date"
+		/>
 	</div>
 </div>
 
@@ -131,6 +165,29 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	.input-group {
+		flex: 1;
+	}
+
+	.input-group label {
+		display: block;
+		font-size: 0.875rem;
+		margin-bottom: 0.25rem;
+		color: var(--fg-secondary);
 	}
 
 	h3 {

@@ -65,25 +65,29 @@
 	}
 </script>
 
-<div class="string-methods-config">
+<div class="string-methods-config" role="region" aria-label="String methods configuration">
 	<h3>String Methods Configuration</h3>
 
-	<div class="section">
-		<h4>Source Column</h4>
-		<select id="str-column" bind:value={config.column}>
+	<div class="section" role="group" aria-labelledby="str-column-heading">
+		<h4 id="str-column-heading">Source Column</h4>
+		<label for="str-select-column" class="sr-only">Select string column</label>
+		<select id="str-select-column" data-testid="str-column-select" bind:value={config.column}>
 			<option value="">Select string column...</option>
 			{#each stringColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
 		{#if stringColumns.length === 0}
-			<p class="warning">No string columns detected in schema</p>
+			<p id="str-no-columns-warning" class="warning" role="alert">
+				No string columns detected in schema
+			</p>
 		{/if}
 	</div>
 
-	<div class="section">
-		<h4>String Method</h4>
-		<select id="str-method" bind:value={config.method}>
+	<div class="section" role="group" aria-labelledby="str-method-heading">
+		<h4 id="str-method-heading">String Method</h4>
+		<label for="str-select-method" class="sr-only">Select string method</label>
+		<select id="str-select-method" data-testid="str-method-select" bind:value={config.method}>
 			{#each methods as method (method.value)}
 				<option value={method.value}>{method.label}</option>
 			{/each}
@@ -91,96 +95,154 @@
 	</div>
 
 	{#if needsParam('start') || needsParam('end')}
-		<div class="section">
-			<h4>Slice Parameters</h4>
+		<div class="section" role="group" aria-labelledby="slice-params-heading">
+			<h4 id="slice-params-heading">Slice Parameters</h4>
 			<div class="inline-group">
 				<div class="input-group">
-					<label for="start-index">Start Index:</label>
-					<input id="start-index" type="number" bind:value={config.start} />
+					<label for="str-input-start">Start Index:</label>
+					<input
+						id="str-input-start"
+						data-testid="str-start-input"
+						type="number"
+						bind:value={config.start}
+						aria-describedby="str-start-help"
+					/>
+					<span id="str-start-help" class="sr-only">Starting index for substring</span>
 				</div>
 				<div class="input-group">
-					<label for="end-index">End Index (optional):</label>
+					<label for="str-input-end">End Index (optional):</label>
 					<input
-						id="end-index"
+						id="str-input-end"
+						data-testid="str-end-input"
 						type="number"
 						bind:value={config.end}
 						placeholder="Leave empty for end"
+						aria-describedby="str-end-help"
 					/>
+					<span id="str-end-help" class="sr-only"
+						>Ending index for substring (leave empty for end of string)</span
+					>
 				</div>
 			</div>
 		</div>
 	{/if}
 
 	{#if needsParam('pattern') && needsParam('replacement')}
-		<div class="section">
-			<h4>Replace Parameters</h4>
+		<div class="section" role="group" aria-labelledby="replace-params-heading">
+			<h4 id="replace-params-heading">Replace Parameters</h4>
 			<div class="input-group">
-				<label for="replace-pattern">Pattern to find:</label>
+				<label for="str-input-pattern">Pattern to find:</label>
 				<input
-					id="replace-pattern"
+					id="str-input-pattern"
+					data-testid="str-pattern-input"
 					type="text"
 					bind:value={config.pattern}
 					placeholder="Text or regex pattern"
+					aria-describedby="str-pattern-help"
 				/>
+				<span id="str-pattern-help" class="sr-only"
+					>Text or regular expression pattern to find and replace</span
+				>
 			</div>
 			<div class="input-group">
-				<label for="replacement">Replacement:</label>
+				<label for="str-input-replacement">Replacement:</label>
 				<input
-					id="replacement"
+					id="str-input-replacement"
+					data-testid="str-replacement-input"
 					type="text"
 					bind:value={config.replacement}
 					placeholder="Replacement text"
+					aria-describedby="str-replacement-help"
 				/>
+				<span id="str-replacement-help" class="sr-only"
+					>Text to replace the matched pattern with</span
+				>
 			</div>
 		</div>
 	{/if}
 
 	{#if needsParam('pattern') && needsParam('group_index')}
-		<div class="section">
-			<h4>Extract Parameters</h4>
+		<div class="section" role="group" aria-labelledby="extract-params-heading">
+			<h4 id="extract-params-heading">Extract Parameters</h4>
 			<div class="input-group">
-				<label for="extract-pattern">Regex Pattern:</label>
+				<label for="str-input-extract-pattern">Regex Pattern:</label>
 				<input
-					id="extract-pattern"
+					id="str-input-extract-pattern"
+					data-testid="str-extract-pattern-input"
 					type="text"
 					bind:value={config.pattern}
 					placeholder="e.g., @(.+)$ to extract domain"
+					aria-describedby="str-extract-pattern-help"
 				/>
+				<span id="str-extract-pattern-help" class="sr-only"
+					>Regular expression with capture group to extract</span
+				>
 			</div>
 			<div class="input-group">
-				<label for="group-index">Group Index:</label>
-				<input id="group-index" type="number" bind:value={config.group_index} min="0" />
+				<label for="str-input-group-index">Group Index:</label>
+				<input
+					id="str-input-group-index"
+					data-testid="str-group-index-input"
+					type="number"
+					bind:value={config.group_index}
+					min="0"
+					aria-describedby="str-group-index-help"
+				/>
+				<span id="str-group-index-help" class="sr-only"
+					>Index of the capture group to extract (0-based)</span
+				>
 			</div>
 		</div>
 	{/if}
 
 	{#if needsParam('delimiter') && needsParam('index')}
-		<div class="section">
-			<h4>Split Parameters</h4>
+		<div class="section" role="group" aria-labelledby="split-params-heading">
+			<h4 id="split-params-heading">Split Parameters</h4>
 			<div class="input-group">
-				<label for="delimiter">Delimiter:</label>
+				<label for="str-input-delimiter">Delimiter:</label>
 				<input
-					id="delimiter"
+					id="str-input-delimiter"
+					data-testid="str-delimiter-input"
 					type="text"
 					bind:value={config.delimiter}
 					placeholder="e.g., space, comma"
+					aria-describedby="str-delimiter-help"
 				/>
+				<span id="str-delimiter-help" class="sr-only"
+					>Delimiter character or string to split on</span
+				>
 			</div>
 			<div class="input-group">
-				<label for="part-index">Part Index:</label>
-				<input id="part-index" type="number" bind:value={config.index} min="0" />
+				<label for="str-input-part-index">Part Index:</label>
+				<input
+					id="str-input-part-index"
+					data-testid="str-part-index-input"
+					type="number"
+					bind:value={config.index}
+					min="0"
+					aria-describedby="str-part-index-help"
+				/>
+				<span id="str-part-index-help" class="sr-only"
+					>Index of the part to keep after splitting (0-based)</span
+				>
 			</div>
 		</div>
 	{/if}
 
-	<div class="section">
-		<h4>New Column Name</h4>
+	<div class="section" role="group" aria-labelledby="new-column-heading">
+		<h4 id="new-column-heading">New Column Name</h4>
+		<label for="str-input-new-column" class="sr-only">New column name</label>
 		<input
-			id="str-new-column"
+			id="str-input-new-column"
+			data-testid="str-new-column-input"
 			type="text"
 			bind:value={config.new_column}
 			placeholder="e.g., name_upper, domain, first_name"
+			aria-describedby="str-new-column-help"
 		/>
+		<span id="str-new-column-help" class="sr-only"
+			>Name for the new column that will contain the result</span
+		>
 	</div>
 </div>
 
@@ -190,6 +252,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

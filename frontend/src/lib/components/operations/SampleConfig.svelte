@@ -47,33 +47,51 @@
 	});
 </script>
 
-<div class="sample-config">
+<div class="sample-config" role="region" aria-label="Sample configuration">
 	<h3>Sample Configuration</h3>
 
-	<div class="form-group">
+	<div class="form-group" role="radiogroup" aria-labelledby="sample-mode-heading">
+		<span id="sample-mode-heading" class="sr-only">Sample mode</span>
 		<label>
-			<input type="radio" name="sample-mode" checked={mode === 'n'} onchange={() => (mode = 'n')} />
-			Fixed number (n)
+			<input
+				id="sample-radio-n"
+				data-testid="sample-mode-n"
+				type="radio"
+				name="sample-mode"
+				checked={mode === 'n'}
+				onchange={() => (mode = 'n')}
+			/>
+			<span>Fixed number (n)</span>
 		</label>
 		<label>
 			<input
+				id="sample-radio-fraction"
+				data-testid="sample-mode-fraction"
 				type="radio"
 				name="sample-mode"
 				checked={mode === 'fraction'}
 				onchange={() => (mode = 'fraction')}
 			/>
-			Fraction (0-1)
+			<span>Fraction (0-1)</span>
 		</label>
 	</div>
 
 	<div class="form-group">
 		{#if mode === 'n'}
-			<label for="n">Number of rows</label>
-			<input id="n" type="number" bind:value={n} min="1" placeholder="e.g., 100" />
-		{:else}
-			<label for="fraction">Fraction</label>
+			<label for="sample-input-n">Number of rows</label>
 			<input
-				id="fraction"
+				id="sample-input-n"
+				data-testid="sample-n-input"
+				type="number"
+				bind:value={n}
+				min="1"
+				placeholder="e.g., 100"
+			/>
+		{:else}
+			<label for="sample-input-fraction">Fraction</label>
+			<input
+				id="sample-input-fraction"
+				data-testid="sample-fraction-input"
 				type="number"
 				bind:value={fraction}
 				min="0"
@@ -86,14 +104,26 @@
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input id="shuffle" type="checkbox" bind:checked={shuffle} />
+			<input
+				id="sample-checkbox-shuffle"
+				data-testid="sample-shuffle-checkbox"
+				type="checkbox"
+				bind:checked={shuffle}
+			/>
 			<span>Shuffle rows</span>
 		</label>
 	</div>
 
 	<div class="form-group">
-		<label for="seed">Random seed (optional)</label>
-		<input id="seed" type="number" bind:value={seed} min="0" placeholder="e.g., 42" />
+		<label for="sample-input-seed">Random seed (optional)</label>
+		<input
+			id="sample-input-seed"
+			data-testid="sample-seed-input"
+			type="number"
+			bind:value={seed}
+			min="0"
+			placeholder="e.g., 42"
+		/>
 	</div>
 </div>
 
@@ -103,6 +133,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

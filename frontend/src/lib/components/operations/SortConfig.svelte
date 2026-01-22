@@ -47,84 +47,114 @@
 	);
 </script>
 
-<div class="sort-config">
+<div class="sort-config" role="region" aria-label="Sort configuration">
 	<h3>Sort Configuration</h3>
 
-	<div class="add-rule">
-		<select bind:value={newColumn}>
+	<div class="add-rule" role="group" aria-label="Add sort rule form">
+		<label for="sort-select-column" class="sr-only">Select column to sort</label>
+		<select id="sort-select-column" data-testid="sort-column-select" bind:value={newColumn}>
 			<option value="">Select column...</option>
 			{#each availableColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
 
-		<div class="direction-select">
+		<div class="direction-select" role="group" aria-label="Sort direction">
 			<button
+				id="sort-btn-ascending"
+				data-testid="sort-ascending-button"
 				type="button"
 				class="dir-btn"
 				class:active={!newDescending}
 				onclick={() => (newDescending = false)}
 				title="Ascending"
+				aria-pressed={!newDescending}
+				aria-label="Sort ascending"
 			>
-				<span class="sort-icon">▲</span>
+				<span class="sort-icon" aria-hidden="true">▲</span>
 			</button>
 			<button
+				id="sort-btn-descending"
+				data-testid="sort-descending-button"
 				type="button"
 				class="dir-btn"
 				class:active={newDescending}
 				onclick={() => (newDescending = true)}
 				title="Descending"
+				aria-pressed={newDescending}
+				aria-label="Sort descending"
 			>
-				<span class="sort-icon">▼</span>
+				<span class="sort-icon" aria-hidden="true">▼</span>
 			</button>
 		</div>
 
-		<button type="button" class="add-btn" onclick={addSortRule} disabled={!newColumn}>
-			<Plus size={16} />
+		<button
+			id="sort-btn-add"
+			data-testid="sort-add-button"
+			type="button"
+			class="add-btn"
+			onclick={addSortRule}
+			disabled={!newColumn}
+			aria-label="Add sort rule"
+		>
+			<Plus size={16} aria-hidden="true" />
 			Add
 		</button>
 	</div>
 
 	{#if safeConfig.columns.length > 0}
-		<div class="sort-rules">
-			<h4>Sort Order</h4>
+		<div id="sort-rules-list" class="sort-rules" role="region" aria-labelledby="sort-order-heading">
+			<h4 id="sort-order-heading">Sort Order</h4>
 			{#each safeConfig.columns as column, i (column)}
-				<div class="sort-rule-item">
+				<div class="sort-rule-item" role="group" aria-label={`Sort rule ${i + 1}: ${column}`}>
 					<span class="rule-column">{column}</span>
 
-					<div class="rule-actions">
+					<div class="rule-actions" role="group" aria-label={`Sort direction for ${column}`}>
 						<button
+							id={`sort-btn-asc-${i}`}
+							data-testid={`sort-ascending-rule-${i}`}
 							type="button"
 							class="dir-btn"
 							class:active={!safeConfig.descending[i]}
 							onclick={() => setDirection(i, false)}
 							title="Ascending"
+							aria-pressed={!safeConfig.descending[i]}
+							aria-label={`Sort ${column} ascending`}
 						>
-							<span class="sort-icon">▲</span>
+							<span class="sort-icon" aria-hidden="true">▲</span>
 						</button>
 						<button
+							id={`sort-btn-desc-${i}`}
+							data-testid={`sort-descending-rule-${i}`}
 							type="button"
 							class="dir-btn"
 							class:active={safeConfig.descending[i]}
 							onclick={() => setDirection(i, true)}
 							title="Descending"
+							aria-pressed={safeConfig.descending[i]}
+							aria-label={`Sort ${column} descending`}
 						>
-							<span class="sort-icon">▼</span>
+							<span class="sort-icon" aria-hidden="true">▼</span>
 						</button>
 						<button
+							id={`sort-btn-remove-${i}`}
+							data-testid={`sort-remove-rule-${i}`}
 							type="button"
 							class="remove-btn"
 							onclick={() => removeSortRule(i)}
 							title="Remove"
+							aria-label={`Remove sort rule for ${column}`}
 						>
-							<X size={14} />
+							<X size={14} aria-hidden="true" />
 						</button>
 					</div>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<p class="empty-state">No sort rules configured. Add a column to sort by.</p>
+		<p id="sort-empty-state" class="empty-state" role="status">
+			No sort rules configured. Add a column to sort by.
+		</p>
 	{/if}
 </div>
 
@@ -134,6 +164,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

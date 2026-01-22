@@ -96,6 +96,7 @@ class ExportFormat(str, Enum):
     PARQUET = 'parquet'
     JSON = 'json'
     NDJSON = 'ndjson'
+    DUCKDB = 'duckdb'
 
 
 class ExportDestination(str, Enum):

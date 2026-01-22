@@ -292,19 +292,19 @@
 					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
 				</div>
 			{/if}
-		{#each steps as step, i (step.id)}
-			<StepNode
-				{step}
-				index={i}
-				{analysisId}
-				datasourceId={previewDatasourceId ?? datasourceId}
-				allSteps={steps}
-				{savedSteps}
-				{saveStatus}
-				onEdit={onStepClick}
-				onDelete={onStepDelete}
-				onTouchMove={onMoveStep}
-			/>
+			{#each steps as step, i (step.id)}
+				<StepNode
+					{step}
+					index={i}
+					{analysisId}
+					datasourceId={previewDatasourceId ?? datasourceId}
+					allSteps={steps}
+					{savedSteps}
+					{saveStatus}
+					onEdit={onStepClick}
+					onDelete={onStepDelete}
+					onTouchMove={onMoveStep}
+				/>
 				<!-- Connection + Drop zone after each step -->
 				{#if i < steps.length - 1 || canDrop}
 					{#if shouldShowInsert(i + 1)}

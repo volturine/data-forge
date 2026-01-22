@@ -9,10 +9,19 @@ export interface SchemaInfo {
 	row_count: number | null;
 }
 
+export interface CSVOptions {
+	delimiter: string;
+	quote_char: string;
+	has_header: boolean;
+	skip_rows: number;
+	encoding: string;
+}
+
 export interface FileDataSourceConfig {
 	file_path: string;
 	file_type: string;
 	options?: Record<string, unknown>;
+	csv_options?: CSVOptions | null;
 }
 
 export interface DatabaseDataSourceConfig {
@@ -25,6 +34,12 @@ export interface APIDataSourceConfig {
 	method?: string;
 	headers?: Record<string, string> | null;
 	auth?: Record<string, unknown> | null;
+}
+
+export interface DuckDBDataSourceConfig {
+	db_path: string | null;
+	query: string;
+	read_only?: boolean;
 }
 
 export interface DataSourceCreate {

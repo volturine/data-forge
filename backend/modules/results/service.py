@@ -60,6 +60,11 @@ async def get_result_data(analysis_id: str, page: int = 1, page_size: int = 100)
 
 async def export_result(analysis_id: str, format: str) -> Path:
     """Export result to requested format."""
+    import os
+    import tempfile
+
+    import duckdb
+
     result_path = _get_result_path(analysis_id)
 
     if not result_path.exists():
@@ -77,6 +82,19 @@ async def export_result(analysis_id: str, format: str) -> Path:
         df.write_excel(export_path)
     elif format == 'json':
         df.write_json(export_path)
+    elif format == 'duckdb':
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            conn = duckdb.connect(tmp_path)
+            conn.execute('CREATE TABLE data AS SELECT * FROM df')
+            conn.close()
+
+            with open(tmp_path, 'rb') as f:
+                export_path.write_bytes(f.read())
+        finally:
+            os.unlink(tmp_path)
     else:
         raise ValueError(f'Unsupported format: {format}')
 

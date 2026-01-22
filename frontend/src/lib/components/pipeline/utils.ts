@@ -46,7 +46,10 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			const aggs = c.aggregations as Array<{ column: string; function: string }>;
 			if (!keys?.length) return 'not configured';
 			const aggStr =
-				aggs?.slice(0, 2).map((a) => `${a.function}(${a.column})`).join(', ') || '';
+				aggs
+					?.slice(0, 2)
+					.map((a) => `${a.function}(${a.column})`)
+					.join(', ') || '';
 			const extra = aggs?.length > 2 ? ` +${aggs.length - 2}` : '';
 			return `by ${truncate(keys, 2)} → ${aggStr}${extra}`;
 		}
@@ -191,11 +194,7 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			const value = c.value as number;
 			const unit = c.unit as string;
 			if (!col || !op) return 'not configured';
-			const detail = component
-				? `.${component}`
-				: value && unit
-					? `(${value} ${unit})`
-					: '';
+			const detail = component ? `.${component}` : value && unit ? `(${value} ${unit})` : '';
 			return `${col}.${op}${detail} → ${newCol}`;
 		}
 	},

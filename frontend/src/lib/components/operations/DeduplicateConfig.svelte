@@ -38,36 +38,65 @@
 	}
 </script>
 
-<div class="deduplicate-config">
+<div class="deduplicate-config" role="region" aria-label="Deduplicate configuration">
 	<h3>Deduplicate Configuration</h3>
 
-	<div class="section">
-		<h4>Keep Strategy</h4>
+	<div class="section" role="radiogroup" aria-labelledby="keep-strategy-heading">
+		<h4 id="keep-strategy-heading">Keep Strategy</h4>
 		<div class="strategy-grid">
 			{#each keepStrategies as strategy (strategy.value)}
 				<label class="strategy-option">
-					<input type="radio" name="keep-strategy" bind:group={config.keep} value={strategy.value} />
+					<input
+						id={`dedup-radio-${strategy.value}`}
+						data-testid={`dedup-keep-${strategy.value}`}
+						type="radio"
+						name="keep-strategy"
+						bind:group={config.keep}
+						value={strategy.value}
+						aria-label={strategy.label}
+					/>
 					<span>{strategy.label}</span>
 				</label>
 			{/each}
 		</div>
 	</div>
 
-	<div class="section">
-		<h4>Column Subset</h4>
+	<div class="section" role="group" aria-labelledby="column-subset-heading">
+		<h4 id="column-subset-heading">Column Subset</h4>
 
 		<div class="column-actions">
-			<button type="button" onclick={selectAllColumns} class="action-btn">Select All</button>
-			<button type="button" onclick={deselectAllColumns} class="action-btn">Deselect All</button>
+			<button
+				id="dedup-btn-select-all"
+				data-testid="dedup-select-all-button"
+				type="button"
+				onclick={selectAllColumns}
+				class="action-btn"
+				aria-label="Select all columns"
+			>
+				Select All
+			</button>
+			<button
+				id="dedup-btn-deselect-all"
+				data-testid="dedup-deselect-all-button"
+				type="button"
+				onclick={deselectAllColumns}
+				class="action-btn"
+				aria-label="Deselect all columns"
+			>
+				Deselect All
+			</button>
 		</div>
 
-		<div class="column-list">
+		<div id="dedup-column-list" class="column-list" role="group" aria-label="Available columns">
 			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
+						id={`dedup-checkbox-${column.name}`}
+						data-testid={`dedup-column-checkbox-${column.name}`}
 						type="checkbox"
 						checked={config.subset?.includes(column.name) || false}
 						onchange={() => toggleColumn(column.name)}
+						aria-label={`Check ${column.name} for duplicate detection`}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
@@ -75,12 +104,14 @@
 		</div>
 
 		{#if config.subset && config.subset.length > 0}
-			<div class="selected-info">
+			<div id="dedup-selected-info" class="selected-info" aria-live="polite">
 				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''}:
 				{config.subset.join(', ')}
 			</div>
 		{:else}
-			<div class="selected-info">No columns selected - will check all columns for duplicates</div>
+			<div id="dedup-no-columns-info" class="selected-info">
+				No columns selected - will check all columns for duplicates
+			</div>
 		{/if}
 	</div>
 </div>

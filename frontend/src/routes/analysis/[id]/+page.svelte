@@ -4,13 +4,13 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { PersistedState, Debounced, FiniteStateMachine, onClickOutside } from 'runed';
+	import { Debounced, FiniteStateMachine, onClickOutside } from 'runed';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { engineLifecycle } from '$lib/stores/engine-lifecycle.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { ArrowLeft, FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
+	import { FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -403,7 +403,6 @@
 			</div>
 		</header>
 
-		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div class="editor-workspace" role="application">
 			<div class="left-pane" class:collapsed={leftPaneCollapsed}>
 				<StepLibrary onAddStep={handleAddStep} onInsertStep={handleInsertStep} />

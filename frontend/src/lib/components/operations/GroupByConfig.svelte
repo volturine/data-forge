@@ -96,62 +96,103 @@
 	}
 </script>
 
-<div class="groupby-config">
+<div class="groupby-config" role="region" aria-label="Group by configuration">
 	<h3>Group By Configuration</h3>
 
-	<div class="section">
-		<h4>Group By Columns</h4>
+	<div class="section" role="group" aria-labelledby="groupby-columns-heading">
+		<h4 id="groupby-columns-heading">Group By Columns</h4>
 		<div class="column-list">
 			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
+						id={`groupby-checkbox-${column.name}`}
+						data-testid={`groupby-checkbox-${column.name}`}
 						type="checkbox"
 						checked={safeGroupBy.includes(column.name)}
 						onchange={() => toggleGroupByColumn(column.name)}
+						aria-label={`Group by ${column.name}`}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
 			{/each}
 		</div>
 		{#if safeGroupBy.length > 0}
-			<div class="selected-info">
+			<div id="groupby-selected-info" class="selected-info" aria-live="polite">
 				Selected: {safeGroupBy.join(', ')}
 			</div>
 		{/if}
 	</div>
 
-	<div class="section">
-		<h4>Aggregations</h4>
+	<div class="section" role="group" aria-labelledby="aggregations-heading">
+		<h4 id="aggregations-heading">Aggregations</h4>
 
-		<div class="add-aggregation">
-			<select id="agg-column" bind:value={newAggregation.column}>
+		<div class="add-aggregation" role="group" aria-label="Add aggregation form">
+			<label for="agg-select-column" class="sr-only">Select column</label>
+			<select
+				id="agg-select-column"
+				data-testid="agg-column-select"
+				bind:value={newAggregation.column}
+			>
 				<option value="">Select column...</option>
 				{#each schema.columns as column (column.name)}
 					<option value={column.name}>{column.name} ({column.dtype})</option>
 				{/each}
 			</select>
 
-			<select id="agg-function" bind:value={newAggregation.function}>
+			<label for="agg-select-function" class="sr-only">Aggregation function</label>
+			<select
+				id="agg-select-function"
+				data-testid="agg-function-select"
+				bind:value={newAggregation.function}
+			>
 				{#each aggregationFunctions as func (func)}
 					<option value={func}>{func}</option>
 				{/each}
 			</select>
 
-			<input id="agg-alias" type="text" bind:value={newAggregation.alias} placeholder="Alias (optional)" />
+			<label for="agg-input-alias" class="sr-only">Alias (optional)</label>
+			<input
+				id="agg-input-alias"
+				data-testid="agg-alias-input"
+				type="text"
+				bind:value={newAggregation.alias}
+				placeholder="Alias (optional)"
+				aria-label="Aggregation alias (optional)"
+			/>
 
-			<button type="button" onclick={addAggregation} disabled={!newAggregation.column}>
+			<button
+				id="agg-btn-add"
+				data-testid="agg-add-button"
+				type="button"
+				onclick={addAggregation}
+				disabled={!newAggregation.column}
+				aria-label="Add aggregation"
+			>
 				Add
 			</button>
 		</div>
 
 		{#if safeAggregations.length > 0}
-			<div class="aggregations-list">
+			<div
+				id="aggregations-list"
+				class="aggregations-list"
+				role="list"
+				aria-label="Configured aggregations"
+			>
 				{#each safeAggregations as agg, i (i)}
-					<div class="aggregation-item">
+					<div class="aggregation-item" role="listitem">
 						<span class="agg-details">
 							{agg.function}({agg.column}) as {agg.alias}
 						</span>
-						<button type="button" onclick={() => removeAggregation(i)}>Remove</button>
+						<button
+							id={`agg-btn-remove-${i}`}
+							data-testid={`agg-remove-button-${i}`}
+							type="button"
+							onclick={() => removeAggregation(i)}
+							aria-label={`Remove aggregation ${agg.alias}`}
+						>
+							Remove
+						</button>
 					</div>
 				{/each}
 			</div>
@@ -165,6 +206,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

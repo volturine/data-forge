@@ -43,7 +43,7 @@
 		}
 	}
 
-	function handleBackdropClick(e: MouseEvent) {
+	function _handleBackdropClick(e: MouseEvent) {
 		if (e.target === e.currentTarget) {
 			onCancel();
 		}

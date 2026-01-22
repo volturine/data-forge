@@ -46,38 +46,71 @@
 	}
 </script>
 
-<div class="rename-config">
+<div class="rename-config" role="region" aria-label="Rename configuration">
 	<h3>Rename Configuration</h3>
 
-	<div class="add-mapping">
-		<select id="old-name" bind:value={formOldName}>
+	<div class="add-mapping" role="group" aria-label="Add rename mapping form">
+		<label for="rename-select-old" class="sr-only">Select column to rename</label>
+		<select id="rename-select-old" data-testid="rename-old-column-select" bind:value={formOldName}>
 			<option value="">Select column to rename...</option>
 			{#each availableColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
 			{/each}
 		</select>
 
-		<input id="new-name" type="text" bind:value={formNewName} placeholder="New column name" />
+		<label for="rename-input-new" class="sr-only">New column name</label>
+		<input
+			id="rename-input-new"
+			data-testid="rename-new-name-input"
+			type="text"
+			bind:value={formNewName}
+			placeholder="New column name"
+			aria-label="Enter new column name"
+		/>
 
-		<button type="button" onclick={addMapping} disabled={!canAdd}> Add Rename </button>
+		<button
+			id="rename-btn-add"
+			data-testid="rename-add-button"
+			type="button"
+			onclick={addMapping}
+			disabled={!canAdd}
+			aria-label="Add rename mapping"
+		>
+			Add Rename
+		</button>
 	</div>
 
 	{#if mappings.length > 0}
-		<div class="mappings-list">
+		<div
+			id="rename-mappings-list"
+			class="mappings-list"
+			role="list"
+			aria-label="Configured renames"
+		>
 			<h4>Column Renames</h4>
 			{#each mappings as mapping (mapping.oldName)}
-				<div class="mapping-item">
+				<div class="mapping-item" role="listitem">
 					<div class="mapping-info">
 						<span class="old-name">{mapping.oldName}</span>
-						<span class="arrow">→</span>
+						<span class="arrow" aria-hidden="true">→</span>
 						<span class="new-name">{mapping.newName}</span>
 					</div>
-					<button type="button" onclick={() => removeMapping(mapping.oldName)}>Remove</button>
+					<button
+						id={`rename-btn-remove-${mapping.oldName}`}
+						data-testid={`rename-remove-button-${mapping.oldName}`}
+						type="button"
+						onclick={() => removeMapping(mapping.oldName)}
+						aria-label={`Remove rename: ${mapping.oldName} to ${mapping.newName}`}
+					>
+						Remove
+					</button>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<p class="empty-state">No column renames configured. Add a mapping above.</p>
+		<p id="rename-empty-state" class="empty-state" role="status">
+			No column renames configured. Add a mapping above.
+		</p>
 	{/if}
 </div>
 
@@ -87,6 +120,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {

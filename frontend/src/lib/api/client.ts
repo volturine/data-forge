@@ -59,7 +59,10 @@ export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAs
 	});
 }
 
-export function apiBlobRequest(endpoint: string, options?: RequestInit): ResultAsync<Blob, ApiError> {
+export function apiBlobRequest(
+	endpoint: string,
+	options?: RequestInit
+): ResultAsync<Blob, ApiError> {
 	const headers = new Headers(options?.headers);
 	if (!headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');

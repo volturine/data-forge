@@ -2,8 +2,9 @@
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
-	import { Plus } from 'lucide-svelte';
+	import { Plus, ChevronDown, ChevronUp } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
+	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 
 	const queryClient = useQueryClient();
 
@@ -31,6 +32,7 @@
 	}));
 
 	let confirmingDelete = $state<string | null>(null);
+	let expandedPreview = $state<string | null>(null);
 
 	function handleDelete(id: string) {
 		confirmingDelete = id;
@@ -43,6 +45,14 @@
 
 	function cancelDelete() {
 		confirmingDelete = null;
+	}
+
+	function togglePreview(id: string) {
+		expandedPreview = expandedPreview === id ? null : id;
+	}
+
+	function isExpanded(id: string): boolean {
+		return expandedPreview === id;
 	}
 
 	function getColumnCount(datasource: DataSource): number {
@@ -117,67 +127,83 @@
 				>
 			</div>
 		{:else}
-			<div class="table-container">
-				<table>
-					<thead>
-						<tr>
-							<th>Name</th>
-							<th>Type</th>
-							<th>Rows</th>
-							<th>Columns</th>
-							<th>Created</th>
-							<th class="actions-col">Actions</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each query.data as datasource (datasource.id)}
-							<tr>
-								<td class="name-cell">{datasource.name}</td>
-								<td>
-									<span
-										class="type-badge"
-										class:file={datasource.source_type === 'file'}
-										class:database={datasource.source_type === 'database'}
-										class:api={datasource.source_type === 'api'}
-									>
-										{#if datasource.source_type === 'file'}
-											{getFileType(datasource) ?? 'file'}
-										{:else}
-											{datasource.source_type}
-										{/if}
-									</span>
-								</td>
-								<td class="num-cell">{formatRowCount(getRowCount(datasource))}</td>
-								<td class="num-cell">{getColumnCount(datasource)}</td>
-								<td class="date-cell">{formatDate(datasource.created_at)}</td>
-								<td class="actions-cell">
-									{#if confirmingDelete === datasource.id}
-										<div class="confirm-actions">
-											<button
-												onclick={() => confirmDelete(datasource.id)}
-												class="btn btn-danger btn-sm"
-												disabled={deleteMutation.isPending}
-											>
-												Confirm
-											</button>
-											<button onclick={cancelDelete} class="btn btn-secondary btn-sm">
-												Cancel
-											</button>
-										</div>
+			<div class="list-container">
+				<div class="list-header">
+					<span class="col-expand"></span>
+					<span class="col-name">Name</span>
+					<span class="col-type">Type</span>
+					<span class="col-rows">Rows</span>
+					<span class="col-columns">Columns</span>
+					<span class="col-created">Created</span>
+					<span class="col-actions">Actions</span>
+				</div>
+				{#each query.data as datasource (datasource.id)}
+					<div class="list-item" class:expanded={isExpanded(datasource.id)}>
+						<div class="list-row">
+							<span class="col-expand">
+								<button
+									class="expand-btn"
+									onclick={() => togglePreview(datasource.id)}
+									aria-expanded={isExpanded(datasource.id)}
+									aria-label={isExpanded(datasource.id) ? 'Collapse preview' : 'Expand preview'}
+								>
+									{#if isExpanded(datasource.id)}
+										<ChevronUp size={16} />
 									{:else}
+										<ChevronDown size={16} />
+									{/if}
+								</button>
+							</span>
+							<span class="col-name">{datasource.name}</span>
+							<span class="col-type">
+								<span
+									class="type-badge"
+									class:file={datasource.source_type === 'file'}
+									class:database={datasource.source_type === 'database'}
+									class:api={datasource.source_type === 'api'}
+								>
+									{#if datasource.source_type === 'file'}
+										{getFileType(datasource) ?? 'file'}
+									{:else}
+										{datasource.source_type}
+									{/if}
+								</span>
+							</span>
+							<span class="col-rows">{formatRowCount(getRowCount(datasource))}</span>
+							<span class="col-columns">{getColumnCount(datasource)}</span>
+							<span class="col-created">{formatDate(datasource.created_at)}</span>
+							<span class="col-actions">
+								{#if confirmingDelete === datasource.id}
+									<div class="confirm-actions">
 										<button
-											onclick={() => handleDelete(datasource.id)}
-											class="btn btn-ghost btn-sm"
+											onclick={() => confirmDelete(datasource.id)}
+											class="btn btn-danger btn-sm"
 											disabled={deleteMutation.isPending}
 										>
-											Delete
+											Confirm
 										</button>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+										<button onclick={cancelDelete} class="btn btn-secondary btn-sm">
+											Cancel
+										</button>
+									</div>
+								{:else}
+									<button
+										onclick={() => handleDelete(datasource.id)}
+										class="btn btn-ghost btn-sm"
+										disabled={deleteMutation.isPending}
+									>
+										Delete
+									</button>
+								{/if}
+							</span>
+						</div>
+						{#if isExpanded(datasource.id)}
+							<div class="preview-panel">
+								<DatasourcePreview datasourceId={datasource.id} datasourceName={datasource.name} />
+							</div>
+						{/if}
+					</div>
+				{/each}
 			</div>
 		{/if}
 	{/if}
@@ -278,21 +304,23 @@
 		color: var(--fg-tertiary);
 	}
 
-	.table-container {
+	.list-container {
 		background-color: var(--bg-primary);
 		border: 1px solid var(--border-primary);
 		border-radius: var(--radius-sm);
 		overflow: hidden;
 	}
 
-	table {
-		width: 100%;
-		border-collapse: collapse;
+	.list-header,
+	.list-row {
+		display: grid;
+		grid-template-columns: 48px 1fr 100px 90px 90px 110px 140px;
+		align-items: center;
+		gap: var(--space-4);
 	}
 
-	th {
-		text-align: left;
-		padding: var(--space-3) var(--space-4);
+	.list-header {
+		padding: var(--space-4) var(--space-5);
 		font-size: var(--text-xs);
 		font-weight: 600;
 		color: var(--fg-tertiary);
@@ -302,40 +330,70 @@
 		border-bottom: 1px solid var(--border-primary);
 	}
 
-	td {
-		padding: var(--space-4);
-		font-size: var(--text-sm);
+	.list-item {
 		border-bottom: 1px solid var(--border-primary);
-		color: var(--fg-secondary);
 	}
 
-	tr:last-child td {
+	.list-item:last-child {
 		border-bottom: none;
 	}
 
-	tr:hover td {
+	.list-row {
+		padding: var(--space-4) var(--space-5);
+		font-size: var(--text-sm);
+		color: var(--fg-secondary);
+	}
+
+	.list-row:hover {
 		background-color: var(--bg-hover);
 	}
 
-	.name-cell {
+	.col-name {
 		font-weight: 500;
 		color: var(--fg-primary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.num-cell {
+	.col-rows,
+	.col-columns {
 		font-variant-numeric: tabular-nums;
 	}
 
-	.date-cell {
+	.col-created {
 		color: var(--fg-muted);
 	}
 
-	.actions-col {
-		width: 150px;
+	.col-actions {
+		white-space: nowrap;
 	}
 
-	.actions-cell {
-		white-space: nowrap;
+	.expand-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		color: var(--fg-tertiary);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+
+	.expand-btn:hover {
+		background: var(--bg-hover);
+		color: var(--fg-primary);
+		border-color: var(--border-secondary);
+	}
+
+	.preview-panel {
+		padding: var(--space-4);
+		background: var(--bg-secondary);
+		border-top: 1px solid var(--border-primary);
 	}
 
 	.type-badge {

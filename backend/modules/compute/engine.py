@@ -2,9 +2,8 @@ import logging
 import multiprocessing as mp
 import os
 import uuid
-from collections.abc import Callable
 from queue import Empty
-from typing import Any, cast
+from typing import Any
 
 import polars as pl
 
@@ -955,8 +954,18 @@ class PolarsComputeEngine:
         if source_type == 'file':
             file_path = config['file_path']
             file_type = config['file_type']
+            csv_options_dict = config.get('csv_options')
 
             if file_type == 'csv':
+                if csv_options_dict:
+                    return pl.scan_csv(
+                        file_path,
+                        separator=csv_options_dict.get('delimiter', ','),
+                        quote_char=csv_options_dict.get('quote_char', '"'),
+                        has_header=csv_options_dict.get('has_header', True),
+                        skip_rows=csv_options_dict.get('skip_rows', 0),
+                        encoding=csv_options_dict.get('encoding', 'utf8'),
+                    )
                 return pl.scan_csv(file_path)
             elif file_type == 'parquet':
                 return pl.scan_parquet(file_path)
@@ -974,6 +983,19 @@ class PolarsComputeEngine:
             query = config['query']
             # Database reads need to be collected, then converted to lazy
             return pl.read_database(query, connection_string).lazy()
+
+        elif source_type == 'duckdb':
+            import duckdb
+
+            db_path = config.get('db_path')
+            query = config['query']
+
+            if db_path:
+                conn = duckdb.connect(database=db_path, read_only=config.get('read_only', True))
+            else:
+                conn = duckdb.connect(database=':memory:')
+
+            return conn.execute(query).fetch_df().lazy()
 
         else:
             raise ValueError(f'Unsupported source type: {source_type}')

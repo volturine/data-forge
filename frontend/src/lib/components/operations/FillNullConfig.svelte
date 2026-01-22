@@ -48,12 +48,17 @@
 	}
 </script>
 
-<div class="fill-null-config">
+<div class="fill-null-config" role="region" aria-label="Fill null configuration">
 	<h3>Fill Null Configuration</h3>
 
-	<div class="section">
-		<h4>Fill Strategy</h4>
-		<select id="fill-strategy" bind:value={config.strategy}>
+	<div class="section" role="group" aria-labelledby="fill-strategy-heading">
+		<h4 id="fill-strategy-heading">Fill Strategy</h4>
+		<label for="fill-select-strategy" class="sr-only">Select fill strategy</label>
+		<select
+			id="fill-select-strategy"
+			data-testid="fill-strategy-select"
+			bind:value={config.strategy}
+		>
 			{#each strategies as strategy (strategy.value)}
 				<option value={strategy.value}>{strategy.label}</option>
 			{/each}
@@ -61,10 +66,23 @@
 	</div>
 
 	{#if currentStrategy?.needsValue}
-		<div class="section">
-			<h4>Fill Value</h4>
-			<input id="fill-value" type="text" bind:value={config.value} placeholder="Enter value (e.g., 0, N/A)" />
-			<select id="fill-value-type" bind:value={config.value_type}>
+		<div class="section" role="group" aria-labelledby="fill-value-heading">
+			<h4 id="fill-value-heading">Fill Value</h4>
+			<label for="fill-input-value" class="sr-only">Fill value</label>
+			<input
+				id="fill-input-value"
+				data-testid="fill-value-input"
+				type="text"
+				bind:value={config.value}
+				placeholder="Enter value (e.g., 0, N/A)"
+				aria-describedby="fill-value-type"
+			/>
+			<label for="fill-select-value-type" class="sr-only">Value type</label>
+			<select
+				id="fill-select-value-type"
+				data-testid="fill-value-type-select"
+				bind:value={config.value_type}
+			>
 				<option value="Utf8">String</option>
 				<option value="Int64">Integer</option>
 				<option value="Float64">Float</option>
@@ -76,20 +94,41 @@
 		</div>
 	{/if}
 
-	<div class="section">
-		<h4>Target Columns</h4>
+	<div class="section" role="group" aria-labelledby="target-columns-heading">
+		<h4 id="target-columns-heading">Target Columns</h4>
 		<div class="column-actions">
-			<button type="button" onclick={selectAllColumns} class="action-btn">Select All</button>
-			<button type="button" onclick={deselectAllColumns} class="action-btn">Deselect All</button>
+			<button
+				id="fill-btn-select-all"
+				data-testid="fill-select-all-button"
+				type="button"
+				onclick={selectAllColumns}
+				class="action-btn"
+				aria-label="Select all columns"
+			>
+				Select All
+			</button>
+			<button
+				id="fill-btn-deselect-all"
+				data-testid="fill-deselect-all-button"
+				type="button"
+				onclick={deselectAllColumns}
+				class="action-btn"
+				aria-label="Deselect all columns"
+			>
+				Deselect All
+			</button>
 		</div>
 
-		<div class="column-list">
+		<div id="fill-column-list" class="column-list" role="group" aria-label="Available columns">
 			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
+						id={`fill-checkbox-${column.name}`}
+						data-testid={`fill-column-checkbox-${column.name}`}
 						type="checkbox"
 						checked={config.columns?.includes(column.name) || false}
 						onchange={() => toggleColumn(column.name)}
+						aria-label={`Fill nulls in ${column.name}`}
 					/>
 					<span>{column.name} ({column.dtype})</span>
 				</label>
@@ -97,12 +136,14 @@
 		</div>
 
 		{#if config.columns && config.columns.length > 0}
-			<div class="selected-info">
+			<div id="fill-selected-info" class="selected-info" aria-live="polite">
 				Selected {config.columns.length} column{config.columns.length !== 1 ? 's' : ''}:
 				{config.columns.join(', ')}
 			</div>
 		{:else}
-			<div class="selected-info">No columns selected - will apply to all columns</div>
+			<div id="fill-no-columns-info" class="selected-info">
+				No columns selected - will apply to all columns
+			</div>
 		{/if}
 	</div>
 </div>
@@ -113,6 +154,18 @@
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-md);
 		background-color: var(--panel-bg);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	h3 {
