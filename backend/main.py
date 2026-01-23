@@ -5,13 +5,14 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import router
 from core.config import settings
-from core.database import init_db
+from core.database import get_db, init_db
 from modules.compute.manager import get_manager
 from modules.compute.service import cleanup_jobs_for_engine
 
@@ -98,7 +99,7 @@ async def health():
 
 
 @app.get('/health/ready')
-async def readiness():
+async def readiness(session: AsyncSession = Depends(get_db)):
     """
     Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
@@ -106,15 +107,12 @@ async def readiness():
     from fastapi.responses import JSONResponse
     from sqlalchemy import text
 
-    from core.database import AsyncSessionLocal
-
     checks = {}
     is_ready = True
 
     # Check database
     try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(text('SELECT 1'))
+        await session.execute(text('SELECT 1'))
         checks['database'] = 'ok'
     except Exception as e:
         checks['database'] = f'error: {str(e)}'
