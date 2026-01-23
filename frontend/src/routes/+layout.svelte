@@ -96,10 +96,16 @@
 </QueryClientProvider>
 
 <style>
+	:global(html, body) {
+		height: 100%;
+		overflow: hidden;
+	}
+
 	.app {
-		min-height: 100vh;
+		height: 100vh;
 		display: flex;
 		flex-direction: column;
+		overflow: hidden;
 	}
 
 	.header {
@@ -198,5 +204,6 @@
 	.main {
 		flex: 1;
 		background-color: var(--bg-secondary);
+		overflow: hidden;
 	}
 </style>

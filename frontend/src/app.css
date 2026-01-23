@@ -910,29 +910,27 @@ tr:hover {
 /* ============================================
    SCROLLBAR STYLING
    ============================================ */
-
-::-webkit-scrollbar {
-	width: 8px;
-	height: 8px;
+:global(*::-webkit-scrollbar) {
+	width: 0;
+	height: 0;
 }
 
-::-webkit-scrollbar-track {
-	background: var(--bg-secondary);
+:global(*::-webkit-scrollbar-thumb) {
+	background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-	background: var(--border-tertiary);
-	border-radius: var(--radius-sm);
-}
-
-::-webkit-scrollbar-thumb:hover {
-	background: var(--fg-muted);
+:global(*::-webkit-scrollbar-track) {
+	background: transparent;
 }
 
 /* Firefox */
-* {
-	scrollbar-width: thin;
-	scrollbar-color: var(--border-tertiary) var(--bg-secondary);
+:global(*) {
+	scrollbar-width: none;
+}
+
+/* Legacy Edge/IE */
+:global(*) {
+	-ms-overflow-style: none;
 }
 
 /* ============================================

@@ -214,6 +214,9 @@
 		max-width: 1000px;
 		margin: 0 auto;
 		padding: var(--space-6);
+		height: 100%;
+		overflow: auto;
+		box-sizing: border-box;
 	}
 
 	.page-header {
