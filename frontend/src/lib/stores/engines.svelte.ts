@@ -13,14 +13,6 @@ class EnginesStore {
 		return this.engines.length;
 	}
 
-	get running(): EngineStatusResponse[] {
-		return this.engines.filter((e) => e.status === 'running');
-	}
-
-	get idle(): EngineStatusResponse[] {
-		return this.engines.filter((e) => e.status === 'idle');
-	}
-
 	async fetch(): Promise<void> {
 		this.loading = true;
 		this.error = null;

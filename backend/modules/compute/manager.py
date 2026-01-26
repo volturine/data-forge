@@ -9,12 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 class EngineInfo:
-    """Tracks engine state and activity."""
+    """Tracks engine and activity timestamp."""
 
     def __init__(self, engine: PolarsComputeEngine):
         self.engine = engine
         self.last_activity = datetime.now(UTC)
-        self.status = EngineStatus.IDLE
 
     def touch(self) -> None:
         """Update last activity timestamp."""
@@ -29,6 +28,7 @@ class EngineInfo:
 class ProcessManager:
     _instance: 'ProcessManager | None' = None
     _engines: dict[str, EngineInfo]
+    _engines_lock: threading.Lock
     _lock = threading.Lock()
 
     def __new__(cls) -> 'ProcessManager':
@@ -68,7 +68,9 @@ class ProcessManager:
 
             # Check if we've reached max concurrent engines
             if len(self._engines) >= settings.max_concurrent_engines:
-                logger.warning(f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}')
+                logger.warning(
+                    f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}'
+                )
                 raise RuntimeError(
                     f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
                     f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
@@ -120,45 +122,17 @@ class ProcessManager:
                 }
 
             engine = info.engine
-
-            # Check health and reset state if process died
             engine.check_health()
 
-            process = engine.process
             is_alive = engine.is_process_alive()
-            current_job_id = engine.current_job_id
-
-            if is_alive:
-                status = EngineStatus.RUNNING if current_job_id else EngineStatus.IDLE
-                pid = process.pid if process else None
-            else:
-                status = EngineStatus.TERMINATED
-                pid = None
-                current_job_id = None
 
             return {
                 'analysis_id': analysis_id,
-                'status': status,
-                'process_id': pid,
+                'status': EngineStatus.HEALTHY if is_alive else EngineStatus.TERMINATED,
+                'process_id': engine.process.pid if is_alive and engine.process else None,
                 'last_activity': info.last_activity.isoformat(),
-                'current_job_id': current_job_id,
+                'current_job_id': engine.current_job_id,
             }
-
-    def mark_running(self, analysis_id: str) -> None:
-        """Mark engine as running a job."""
-        with self._engines_lock:
-            info = self._engines.get(analysis_id)
-            if info:
-                info.status = EngineStatus.RUNNING
-                info.touch()
-
-    def mark_idle(self, analysis_id: str) -> None:
-        """Mark engine as idle."""
-        with self._engines_lock:
-            info = self._engines.get(analysis_id)
-            if info:
-                info.status = EngineStatus.IDLE
-                info.touch()
 
     def shutdown_engine(self, analysis_id: str) -> None:
         """Shutdown and remove an engine."""

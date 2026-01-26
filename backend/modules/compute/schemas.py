@@ -3,23 +3,8 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict
 
 
-class ExecuteMode(str, Enum):
-    FULL = 'full'
-    PREVIEW = 'preview'
-
-
-class JobStatus(str, Enum):
-    PENDING = 'pending'
-    RUNNING = 'running'
-    COMPLETED = 'completed'
-    FAILED = 'failed'
-    CANCELLED = 'cancelled'
-
-
 class EngineStatus(str, Enum):
-    IDLE = 'idle'
-    RUNNING = 'running'
-    ERROR = 'error'
+    HEALTHY = 'healthy'
     TERMINATED = 'terminated'
 
 
@@ -38,34 +23,6 @@ class EngineListSchema(BaseModel):
 
     engines: list[EngineStatusSchema]
     total: int
-
-
-class ComputeExecuteSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str
-    execute_mode: ExecuteMode = ExecuteMode.FULL
-    step_id: str | None = None
-
-
-class ComputeStatusSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    job_id: str
-    status: JobStatus
-    progress: float
-    current_step: str | None = None
-    error_message: str | None = None
-    process_id: int | None = None
-
-
-class ComputeResultSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    job_id: str
-    status: JobStatus
-    data: dict | None = None
-    error: str | None = None
 
 
 class StepPreviewRequest(BaseModel):

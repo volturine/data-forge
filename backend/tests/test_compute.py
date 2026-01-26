@@ -3,70 +3,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-from modules.analysis.models import Analysis
 from modules.compute.engine import PolarsComputeEngine
-from modules.compute.schemas import JobStatus
 from modules.datasource.models import DataSource
-
-
-@pytest.mark.asyncio
-class TestComputeExecute:
-    async def test_execute_analysis_success(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {'analysis_id': sample_analysis.id}
-
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
-            mock_manager = MagicMock()
-            mock_engine = MagicMock()
-            mock_engine.preview.return_value = 'test-job-123'
-            mock_engine.process.pid = 12345
-
-            mock_manager.get_or_create_engine.return_value = mock_engine
-            mock_get_manager.return_value = mock_manager
-
-            response = await client.post('/api/v1/compute/execute', json=payload)
-
-            assert response.status_code == 200
-            result = response.json()
-
-            assert result['job_id'] == 'test-job-123'
-            assert result['status'] == JobStatus.PENDING
-            assert result['progress'] == 0.0
-            assert result['process_id'] == 12345
-
-            mock_manager.get_or_create_engine.assert_called_once()
-            mock_engine.preview.assert_called_once()
-
-    async def test_execute_analysis_not_found(self, client: AsyncClient):
-        payload = {'analysis_id': 'non-existent-id'}
-
-        response = await client.post('/api/v1/compute/execute', json=payload)
-
-        assert response.status_code in [404, 500]  # May be 500 if analysis service throws
-        result = response.json()
-        detail = result.get('detail', result)
-        if isinstance(detail, dict):
-            assert 'not found' in detail.get('message', '')
-        else:
-            assert 'not found' in str(detail)
-
-    async def test_execute_analysis_with_complex_pipeline(self, client: AsyncClient, sample_analysis: Analysis):
-        payload = {'analysis_id': sample_analysis.id}
-
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
-            mock_manager = MagicMock()
-            mock_engine = MagicMock()
-            mock_engine.preview.return_value = 'test-job-456'
-            mock_engine.process.pid = 12346
-
-            mock_manager.get_or_create_engine.return_value = mock_engine
-            mock_get_manager.return_value = mock_manager
-
-            response = await client.post('/api/v1/compute/execute', json=payload)
-
-            assert response.status_code == 200
-            result = response.json()
-
-            assert result['job_id'] == 'test-job-456'
 
 
 @pytest.mark.asyncio
@@ -97,12 +35,12 @@ class TestComputePreview:
             mock_engine.get_result.side_effect = [
                 None,
                 {
-                    'status': JobStatus.COMPLETED,
                     'data': {
                         'schema': {'name': 'String', 'age': 'Int64'},
                         'data': [{'name': 'Bob', 'age': 30}, {'name': 'Charlie', 'age': 35}],
                         'row_count': 2,
                     },
+                    'error': None,
                 },
             ]
 
@@ -140,7 +78,7 @@ class TestComputePreview:
             mock_engine.get_result.side_effect = [
                 None,
                 {
-                    'status': JobStatus.FAILED,
+                    'data': None,
                     'error': 'Invalid operation type',
                 },
             ]
@@ -190,8 +128,8 @@ class TestComputePreview:
             mock_engine.get_result.side_effect = [
                 None,
                 {
-                    'status': JobStatus.COMPLETED,
                     'data': {'schema': {}, 'data': [], 'row_count': 0},
+                    'error': None,
                 },
             ]
 
@@ -266,186 +204,122 @@ def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: Magic
 
 
 @pytest.mark.asyncio
-class TestJobStatus:
-    async def test_get_job_status_success(self, client: AsyncClient):
-        job_id = 'test-job-789'
+class TestEngineLifecycle:
+    async def test_spawn_engine(self, client: AsyncClient):
+        analysis_id = 'test-analysis-123'
 
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
+        with patch('modules.compute.routes.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
-            mock_engine = MagicMock()
-            mock_engine.current_job_id = job_id
-            mock_engine.get_result.return_value = {
-                'job_id': job_id,
-                'status': JobStatus.RUNNING,
-                'progress': 0.5,
-                'current_step': 'step2',
-                'error_message': None,
-                'process_id': 12347,
+            mock_manager.spawn_engine.return_value = MagicMock()
+            mock_manager.get_engine_status.return_value = {
+                'analysis_id': analysis_id,
+                'status': 'healthy',
+                'process_id': 12345,
+                'last_activity': '2024-01-01T00:00:00',
+                'current_job_id': None,
             }
-
-            mock_manager.list_engines.return_value = ['datasource-1']
-            mock_manager.get_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.get(f'/api/v1/compute/status/{job_id}')
+            response = await client.post(f'/api/v1/compute/engine/spawn/{analysis_id}')
 
             assert response.status_code == 200
             result = response.json()
+            assert result['analysis_id'] == analysis_id
+            assert result['status'] == 'healthy'
 
-            assert result['job_id'] == job_id
-            assert result['status'] == JobStatus.RUNNING
-            assert result['progress'] == 0.5
-            assert result['current_step'] == 'step2'
+    async def test_keepalive_engine(self, client: AsyncClient):
+        analysis_id = 'test-analysis-123'
 
-    async def test_get_job_status_not_found(self, client: AsyncClient):
-        job_id = 'non-existent-job'
-
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
+        with patch('modules.compute.routes.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
-            mock_manager.list_engines.return_value = []
-            mock_get_manager.return_value = mock_manager
-
-            response = await client.get(f'/api/v1/compute/status/{job_id}')
-
-            assert response.status_code == 404
-            result = response.json()
-            detail = result.get('detail', result)
-            if isinstance(detail, dict):
-                assert 'not found' in detail.get('message', '')
-            else:
-                assert 'not found' in str(detail)
-
-    async def test_get_job_status_completed(self, client: AsyncClient):
-        job_id = 'completed-job-123'
-
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
-            mock_manager = MagicMock()
-            mock_engine = MagicMock()
-            mock_engine.current_job_id = job_id
-            mock_engine.get_result.return_value = {
-                'job_id': job_id,
-                'status': JobStatus.COMPLETED,
-                'progress': 1.0,
-                'current_step': None,
-                'error_message': None,
-                'process_id': None,
-                'data': {'result': 'success'},
+            mock_manager.keepalive.return_value = MagicMock()
+            mock_manager.get_engine_status.return_value = {
+                'analysis_id': analysis_id,
+                'status': 'healthy',
+                'process_id': 12345,
+                'last_activity': '2024-01-01T00:00:00',
+                'current_job_id': None,
             }
-
-            mock_manager.list_engines.return_value = ['datasource-1']
-            mock_manager.get_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.get(f'/api/v1/compute/status/{job_id}')
+            response = await client.post(f'/api/v1/compute/engine/keepalive/{analysis_id}')
 
             assert response.status_code == 200
             result = response.json()
+            assert result['analysis_id'] == analysis_id
 
-            assert result['status'] == JobStatus.COMPLETED
-            assert result['progress'] == 1.0
+    async def test_get_engine_status(self, client: AsyncClient):
+        analysis_id = 'test-analysis-123'
 
+        with patch('modules.compute.routes.get_manager') as mock_get_manager:
+            mock_manager = MagicMock()
+            mock_manager.get_engine_status.return_value = {
+                'analysis_id': analysis_id,
+                'status': 'healthy',
+                'process_id': 12345,
+                'last_activity': '2024-01-01T00:00:00',
+                'current_job_id': None,
+            }
+            mock_get_manager.return_value = mock_manager
 
-@pytest.mark.asyncio
-class TestJobResult:
-    async def test_get_job_result_success(self, client: AsyncClient):
-        job_id = 'completed-job-456'
-
-        with patch(
-            'modules.compute.service._job_results',
-            {
-                job_id: {
-                    'status': JobStatus.COMPLETED,
-                    'data': {
-                        'columns': ['name', 'age'],
-                        'rows': [['Alice', 25], ['Bob', 30]],
-                    },
-                    'error': None,
-                }
-            },
-        ):
-            response = await client.get(f'/api/v1/compute/result/{job_id}')
+            response = await client.get(f'/api/v1/compute/engine/status/{analysis_id}')
 
             assert response.status_code == 200
             result = response.json()
+            assert result['analysis_id'] == analysis_id
+            assert result['status'] == 'healthy'
 
-            assert result['job_id'] == job_id
-            assert result['status'] == JobStatus.COMPLETED
-            assert 'data' in result
-            assert result['data']['columns'] == ['name', 'age']
+    async def test_shutdown_engine(self, client: AsyncClient):
+        analysis_id = 'test-analysis-123'
 
-    async def test_get_job_result_not_found(self, client: AsyncClient):
-        job_id = 'non-existent-result'
-
-        with patch('modules.compute.service._job_results', {}):
-            response = await client.get(f'/api/v1/compute/result/{job_id}')
-
-            assert response.status_code == 404
-            result = response.json()
-            detail = result.get('detail', result)
-            if isinstance(detail, dict):
-                assert 'not found' in detail.get('message', '')
-            else:
-                assert 'not found' in str(detail)
-
-
-@pytest.mark.asyncio
-class TestCancelJob:
-    async def test_cancel_job_success(self, client: AsyncClient):
-        job_id = 'running-job-789'
-
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
+        with patch('modules.compute.routes.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
             mock_engine = MagicMock()
-            mock_engine.current_job_id = job_id
-
-            mock_manager.list_engines.return_value = ['datasource-1']
             mock_manager.get_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.delete(f'/api/v1/compute/{job_id}')
+            response = await client.delete(f'/api/v1/compute/engine/{analysis_id}')
 
             assert response.status_code == 200
-            assert 'cancelled successfully' in response.json()['message']
+            assert 'shutdown successfully' in response.json()['message']
+            mock_manager.shutdown_engine.assert_called_once_with(analysis_id)
 
-            mock_manager.shutdown_engine.assert_called_once_with('datasource-1')
+    async def test_shutdown_engine_not_found(self, client: AsyncClient):
+        analysis_id = 'non-existent-analysis'
 
-    async def test_cancel_job_not_found(self, client: AsyncClient):
-        job_id = 'non-existent-job'
-
-        with patch('modules.compute.service.get_manager') as mock_get_manager:
+        with patch('modules.compute.routes.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
-            mock_manager.list_engines.return_value = []
+            mock_manager.get_engine.return_value = None
             mock_get_manager.return_value = mock_manager
 
-            response = await client.delete(f'/api/v1/compute/{job_id}')
+            response = await client.delete(f'/api/v1/compute/engine/{analysis_id}')
 
             assert response.status_code == 404
+
+    async def test_list_engines(self, client: AsyncClient):
+        with patch('modules.compute.routes.get_manager') as mock_get_manager:
+            mock_manager = MagicMock()
+            mock_manager.list_all_engine_statuses.return_value = [
+                {
+                    'analysis_id': 'analysis-1',
+                    'status': 'healthy',
+                    'process_id': 12345,
+                    'last_activity': '2024-01-01T00:00:00',
+                    'current_job_id': None,
+                },
+                {
+                    'analysis_id': 'analysis-2',
+                    'status': 'healthy',
+                    'process_id': 12346,
+                    'last_activity': '2024-01-01T00:00:00',
+                    'current_job_id': None,
+                },
+            ]
+            mock_get_manager.return_value = mock_manager
+
+            response = await client.get('/api/v1/compute/engines')
+
+            assert response.status_code == 200
             result = response.json()
-            detail = result.get('detail', result)
-            if isinstance(detail, dict):
-                assert 'not found' in detail.get('message', '')
-            else:
-                assert 'not found' in str(detail)
-
-
-@pytest.mark.asyncio
-class TestCleanupJob:
-    async def test_cleanup_job_success(self, client: AsyncClient):
-        job_id = 'cleanup-job-123'
-
-        with (
-            patch('modules.compute.service._job_status', {job_id: {'status': 'completed'}}),
-            patch('modules.compute.service._job_results', {job_id: {'data': 'result'}}),
-        ):
-            response = await client.delete(f'/api/v1/compute/{job_id}/cleanup')
-
-            assert response.status_code == 200
-            assert 'cleaned up successfully' in response.json()['message']
-
-    async def test_cleanup_nonexistent_job(self, client: AsyncClient):
-        job_id = 'non-existent-job'
-
-        with patch('modules.compute.service._job_status', {}), patch('modules.compute.service._job_results', {}):
-            response = await client.delete(f'/api/v1/compute/{job_id}/cleanup')
-
-            assert response.status_code == 200
+            assert result['total'] == 2
+            assert len(result['engines']) == 2

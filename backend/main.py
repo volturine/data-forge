@@ -14,7 +14,6 @@ from api import router
 from core.config import settings
 from core.database import get_db, init_db
 from modules.compute.manager import get_manager
-from modules.compute.service import cleanup_jobs_for_engine
 
 # Configure logging
 logging.basicConfig(
@@ -35,8 +34,7 @@ async def engine_cleanup_loop():
             cleaned = manager.cleanup_idle_engines()
             if cleaned:
                 for analysis_id in cleaned:
-                    count = cleanup_jobs_for_engine(analysis_id)
-                    logger.info(f'Cleaned up engine {analysis_id} and {count} associated jobs')
+                    logger.info(f'Cleaned up idle engine {analysis_id}')
             else:
                 logger.debug('No idle engines to clean up')
         except Exception as e:

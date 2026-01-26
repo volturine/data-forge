@@ -9,7 +9,6 @@ from queue import Empty
 import polars as pl
 
 from modules.compute.polars_functions import get_operation_handlers
-from modules.compute.schemas import JobStatus
 from modules.compute.step_converter import convert_step_format
 
 logger = logging.getLogger(__name__)
@@ -198,21 +197,18 @@ class PolarsComputeEngine:
         """Get result from result queue (non-blocking)."""
         # Check if process died while we were waiting for a result
         if self.current_job_id and not self.is_process_alive():
-            job_id = self.current_job_id
             exit_code = self.process.exitcode if self.process else None
             self._reset_state()
             return {
-                'job_id': job_id,
-                'status': JobStatus.FAILED,
-                'progress': 0.0,
-                'current_step': None,
-                'error': f'Compute process died unexpectedly (exit code: {exit_code}). This may be due to out of memory or another system error.',
+                'data': None,
+                'error': f'Compute process died unexpectedly (exit code: {exit_code}). '
+                'This may be due to out of memory or another system error.',
             }
 
         try:
             result = self.result_queue.get(timeout=timeout)
-            # Clear current_job_id when job reaches terminal state
-            if result and result.get('status') in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
+            # Clear current_job_id when job completes (has data or error)
+            if result and (result.get('data') is not None or result.get('error')):
                 self.current_job_id = None
             return result
         except Empty:
@@ -256,7 +252,8 @@ class PolarsComputeEngine:
                 logger.warning(f'Failed to set memory limit: {e}')
 
         logger.info(
-            f'Polars engine started (PID: {os.getpid()}, threads: {settings.polars_max_threads or "auto"}, memory: {settings.polars_max_memory_mb or "unlimited"} MB)'  # noqa
+            f'Polars engine started (PID: {os.getpid()}, threads: {settings.polars_max_threads or "auto"}, '
+            f'memory: {settings.polars_max_memory_mb or "unlimited"} MB)'
         )
 
         while True:
@@ -271,15 +268,7 @@ class PolarsComputeEngine:
                 pipeline_steps = command['pipeline_steps']
                 additional_datasources = command.get('additional_datasources', {})
 
-                result_queue.put(
-                    {
-                        'job_id': job_id,
-                        'status': JobStatus.RUNNING,
-                        'progress': 0.0,
-                        'current_step': 'Loading data',
-                        'error': None,
-                    }
-                )
+                logger.debug(f'Job {job_id}: Starting {command["type"]} operation')
 
                 try:
                     if command['type'] == 'preview':
@@ -291,7 +280,6 @@ class PolarsComputeEngine:
                             row_limit,
                             offset,
                             job_id,
-                            result_queue,
                             additional_datasources,
                         )
                     elif command['type'] == 'export':
@@ -303,7 +291,6 @@ class PolarsComputeEngine:
                             output_path,
                             export_format,
                             job_id,
-                            result_queue,
                             additional_datasources,
                         )
                     elif command['type'] == 'schema':
@@ -311,51 +298,27 @@ class PolarsComputeEngine:
                             datasource_config,
                             pipeline_steps,
                             job_id,
-                            result_queue,
                             additional_datasources,
                         )
                     else:
                         raise ValueError(f'Unknown command type: {command["type"]}')
 
-                    result_queue.put(
-                        {
-                            'job_id': job_id,
-                            'status': JobStatus.COMPLETED,
-                            'progress': 1.0,
-                            'current_step': None,
-                            'data': result_data,
-                            'error': None,
-                        }
-                    )
+                    logger.debug(f'Job {job_id}: Completed successfully')
+                    result_queue.put({'data': result_data, 'error': None})
 
                 except Exception as e:
-                    result_queue.put(
-                        {
-                            'job_id': job_id,
-                            'status': JobStatus.FAILED,
-                            'progress': 0.0,
-                            'current_step': None,
-                            'error': str(e),
-                        }
-                    )
+                    logger.error(f'Job {job_id}: Failed with error: {e}')
+                    result_queue.put({'data': None, 'error': str(e)})
 
             except Exception as e:
-                result_queue.put(
-                    {
-                        'job_id': 'unknown',
-                        'status': JobStatus.FAILED,
-                        'progress': 0.0,
-                        'current_step': None,
-                        'error': f'Compute loop error: {str(e)}',
-                    }
-                )
+                logger.error(f'Compute loop error: {e}')
+                result_queue.put({'data': None, 'error': f'Compute loop error: {str(e)}'})
 
     @staticmethod
     def _build_pipeline(
         datasource_config: dict,
         pipeline_steps: list[dict],
         job_id: str,
-        result_queue: mp.Queue,
         additional_datasources: dict[str, dict] | None = None,
     ) -> pl.LazyFrame:
         """Build the Polars transformation pipeline and return the final LazyFrame."""
@@ -424,29 +387,11 @@ class PolarsComputeEngine:
                 backend_step = convert_step_format(step)
             except Exception as e:
                 logger.error(f'Failed to convert step {idx}: {e}')
-                result_queue.put(
-                    {
-                        'job_id': job_id,
-                        'status': JobStatus.FAILED,
-                        'progress': 0.0,
-                        'current_step': None,
-                        'error': f'Step conversion failed: {str(e)}',
-                    }
-                )
-                raise
+                raise ValueError(f'Step conversion failed: {str(e)}')
 
             progress = (idx + 1) / total_steps
             step_name = backend_step.get('name', f'Step {idx + 1}')
-
-            result_queue.put(
-                {
-                    'job_id': job_id,
-                    'status': JobStatus.RUNNING,
-                    'progress': progress,
-                    'current_step': step_name,
-                    'error': None,
-                }
-            )
+            logger.debug(f'Job {job_id}: Processing {step_name} ({progress:.0%})')
 
             step_id = step.get('id')
             if not step_id:
@@ -487,7 +432,6 @@ class PolarsComputeEngine:
         row_limit: int,
         offset: int,
         job_id: str,
-        result_queue: mp.Queue,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and return limited rows for preview."""
@@ -495,7 +439,6 @@ class PolarsComputeEngine:
             datasource_config,
             pipeline_steps,
             job_id,
-            result_queue,
             additional_datasources,
         )
 
@@ -523,7 +466,6 @@ class PolarsComputeEngine:
         output_path: str,
         export_format: str,
         job_id: str,
-        result_queue: mp.Queue,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and write full results to file."""
@@ -531,19 +473,10 @@ class PolarsComputeEngine:
             datasource_config,
             pipeline_steps,
             job_id,
-            result_queue,
             additional_datasources,
         )
 
-        result_queue.put(
-            {
-                'job_id': job_id,
-                'status': JobStatus.RUNNING,
-                'progress': 0.9,
-                'current_step': 'Writing export file',
-                'error': None,
-            }
-        )
+        logger.debug(f'Job {job_id}: Writing export file')
 
         # Collect full dataset and write to file
         df = lf.collect()
@@ -571,7 +504,6 @@ class PolarsComputeEngine:
         datasource_config: dict,
         pipeline_steps: list[dict],
         job_id: str,
-        result_queue: mp.Queue,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and return schema without collecting full data."""
@@ -579,7 +511,6 @@ class PolarsComputeEngine:
             datasource_config,
             pipeline_steps,
             job_id,
-            result_queue,
             additional_datasources,
         )
 

@@ -1,50 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from core.error_handlers import handle_errors
 from core.exceptions import EngineNotFoundError
-from modules.analysis import schemas as analysis_schemas, service as analysis_service
 from modules.compute import schemas, service
 from modules.compute.manager import get_manager
 
 router = APIRouter(prefix='/compute', tags=['compute'])
-
-
-@router.post('/execute', response_model=schemas.ComputeStatusSchema)
-@handle_errors(operation='execute analysis')
-async def execute_analysis(
-    request: schemas.ComputeExecuteSchema,
-    session: AsyncSession = Depends(get_db),
-):
-    """Execute a data analysis pipeline for a saved analysis."""
-    analysis = await analysis_service.get_analysis(session, request.analysis_id)
-    datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
-    if not datasource_ids:
-        raise HTTPException(status_code=400, detail='Analysis has no linked datasource')
-
-    datasource_id = datasource_ids[0]
-    pipeline_steps = analysis.pipeline_definition.get('steps', [])
-    if not pipeline_steps:
-        tabs = analysis.pipeline_definition.get('tabs', [])
-        pipeline_steps = [step for tab in tabs for step in tab.get('steps', [])]
-
-    job = await service.execute_analysis(
-        session=session,
-        analysis_id=request.analysis_id,
-        datasource_id=datasource_id,
-        pipeline_steps=pipeline_steps,
-    )
-
-    # Mark analysis status running
-    await analysis_service.update_analysis(
-        session=session,
-        analysis_id=request.analysis_id,
-        data=analysis_schemas.AnalysisUpdateSchema(status='running'),
-    )
-
-    return job
 
 
 @router.post('/preview', response_model=schemas.StepPreviewResponse)
@@ -79,36 +43,6 @@ async def get_step_schema(
         target_step_id=request.target_step_id,
         analysis_id=request.analysis_id,
     )
-
-
-@router.get('/status/{job_id}', response_model=schemas.ComputeStatusSchema)
-@handle_errors(operation='get job status')
-def get_job_status(job_id: str):
-    """Get the status of a compute job."""
-    return service.get_job_status(job_id)
-
-
-@router.get('/result/{job_id}', response_model=schemas.ComputeResultSchema)
-@handle_errors(operation='get job result')
-def get_job_result(job_id: str):
-    """Get the result of a completed job."""
-    return service.get_job_result(job_id)
-
-
-@router.delete('/{job_id}')
-@handle_errors(operation='cancel job')
-def cancel_job(job_id: str):
-    """Cancel a running compute job."""
-    service.cancel_job(job_id)
-    return {'message': f'Job {job_id} cancelled successfully'}
-
-
-@router.delete('/{job_id}/cleanup')
-@handle_errors(operation='cleanup job')
-def cleanup_job(job_id: str):
-    """Clean up job data from memory."""
-    service.cleanup_job(job_id)
-    return {'message': f'Job {job_id} cleaned up successfully'}
 
 
 # Engine lifecycle endpoints

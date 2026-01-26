@@ -92,8 +92,8 @@
 										</span>
 										<span
 											class="engine-status"
-											class:running={engine.status === 'running'}
-											class:idle={engine.status === 'idle'}
+											class:healthy={engine.status === 'healthy'}
+											class:terminated={engine.status === 'terminated'}
 										>
 											{engine.status}
 										</span>
@@ -296,14 +296,14 @@
 		font-weight: 500;
 	}
 
-	.engine-status.running {
+	.engine-status.healthy {
 		background-color: var(--success-bg);
 		color: var(--success-fg);
 	}
 
-	.engine-status.idle {
-		background-color: var(--bg-secondary);
-		color: var(--fg-secondary);
+	.engine-status.terminated {
+		background-color: var(--bg-tertiary);
+		color: var(--fg-muted);
 	}
 
 	.engine-meta {
