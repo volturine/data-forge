@@ -22,6 +22,20 @@
 	let selectedStepId = $state<string | null>(null);
 	let selectedStepState = $state<PipelineStep | null>(null);
 	let isSaving = $state(false);
+	let previewVersion = $state(0);
+
+	// Track pipeline state at last preview to detect staleness
+	let lastPreviewPipeline = $state<string>('');
+	const currentPipelineKey = $derived(JSON.stringify(analysisStore.pipeline));
+	const isPreviewStale = $derived(!!previewVersion && lastPreviewPipeline !== currentPipelineKey);
+
+	function handlePreview() {
+		previewVersion++;
+		lastPreviewPipeline = currentPipelineKey;
+		if (analysisId) {
+			sendKeepalive(analysisId);
+		}
+	}
 	type SaveStates = 'saved' | 'unsaved' | 'saving';
 	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
 	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
@@ -384,6 +398,7 @@
 				>
 					{rightPaneCollapsed ? '›' : '‹'}
 				</button>
+				<button class="preview-button" onclick={handlePreview} type="button"> Preview </button>
 				<button
 					class="save-button"
 					class:saved={saveStatus.current === 'saved'}
@@ -411,6 +426,8 @@
 					steps={analysisStore.pipeline}
 					{savedSteps}
 					{previewDatasourceId}
+					{previewVersion}
+					{isPreviewStale}
 					saveStatus={saveStatus.current}
 					{analysisId}
 					{datasourceId}
@@ -742,6 +759,26 @@
 	.save-button:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.preview-button {
+		flex: 1;
+		height: 100%;
+		padding: 0 var(--space-4);
+		background: none;
+		border: none;
+		border-right: 1px solid var(--panel-border);
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
+		color: var(--fg-secondary);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+
+	.preview-button:hover {
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
 	}
 
 	.header-tabs {

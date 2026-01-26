@@ -14,6 +14,8 @@
 		analysisId?: string;
 		datasourceId?: string;
 		previewDatasourceId?: string;
+		previewVersion?: number;
+		isPreviewStale?: boolean;
 		datasource?: DataSource | null;
 		tabName?: string;
 		onStepClick: (id: string) => void;
@@ -31,6 +33,8 @@
 		analysisId,
 		datasourceId,
 		previewDatasourceId,
+		previewVersion = 0,
+		isPreviewStale = false,
 		datasource = null,
 		tabName: _tabName,
 		onStepClick,
@@ -301,6 +305,8 @@
 					allSteps={steps}
 					{savedSteps}
 					{saveStatus}
+					{previewVersion}
+					{isPreviewStale}
 					onEdit={onStepClick}
 					onDelete={onStepDelete}
 					onTouchMove={onMoveStep}

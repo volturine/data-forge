@@ -11,7 +11,6 @@
 	} from '@tanstack/table-core';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import type { TableCellValue } from '$lib/types/api-responses';
-	import { Previous } from 'runed';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 
 	interface Props {
@@ -25,19 +24,28 @@
 		}>;
 		stepId: string;
 		rowLimit?: number;
+		previewVersion?: number;
 	}
 
 	type RowData = Record<string, unknown>;
 
-	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props();
+	let {
+		analysisId,
+		datasourceId,
+		pipeline,
+		stepId,
+		rowLimit = 1000,
+		previewVersion = 0
+	}: Props = $props();
 	let currentPage = $state(1);
 	let sorting = $state<SortingState>([]);
-	const pipelineKey = $derived(JSON.stringify(pipeline));
 
-	const prevPipelineKey = new Previous(() => pipelineKey);
+	// Reset page when previewVersion changes (new preview requested)
+	let lastPreviewVersion = $state(0);
 	$effect(() => {
-		if (prevPipelineKey.current !== undefined && prevPipelineKey.current !== pipelineKey) {
+		if (previewVersion !== lastPreviewVersion) {
 			currentPage = 1;
+			lastPreviewVersion = previewVersion;
 		}
 	});
 
@@ -49,7 +57,7 @@
 			stepId,
 			currentPage,
 			rowLimit,
-			pipelineKey
+			previewVersion
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
 			const result = await previewStepData({
@@ -65,8 +73,8 @@
 			}
 			return result.value;
 		},
-		staleTime: 30000,
-		enabled: !!analysisId && !!datasourceId && !!stepId && pipeline.length > 0
+		staleTime: Infinity,
+		enabled: !!previewVersion && !!analysisId && !!datasourceId && !!stepId && pipeline.length > 0
 	}));
 
 	const data = $derived(query.data);
@@ -175,7 +183,11 @@
 </script>
 
 <div class="inline-data-table">
-	{#if isLoading}
+	{#if !previewVersion}
+		<div class="not-loaded-state">
+			<p>Click Preview button to load data</p>
+		</div>
+	{:else if isLoading}
 		<div class="loading-overlay">
 			<div class="spinner-md"></div>
 			<p class="text-tertiary">Loading preview...</p>
@@ -273,6 +285,17 @@
 
 	.loading-overlay p {
 		margin: 0;
+	}
+
+	.not-loaded-state {
+		padding: var(--space-6);
+		text-align: center;
+		color: var(--fg-muted);
+	}
+
+	.not-loaded-state p {
+		margin: 0;
+		font-size: var(--text-sm);
 	}
 
 	.error-state {

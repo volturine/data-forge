@@ -14,6 +14,8 @@
 		allSteps?: PipelineStep[];
 		savedSteps?: PipelineStep[];
 		saveStatus?: 'saved' | 'unsaved' | 'saving';
+		previewVersion?: number;
+		isPreviewStale?: boolean;
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
 		onTouchMove: (stepId: string, target: DropTarget) => void;
@@ -27,6 +29,8 @@
 		allSteps = [],
 		savedSteps = [],
 		saveStatus = 'saved',
+		previewVersion = 0,
+		isPreviewStale = false,
 		onEdit,
 		onDelete,
 		onTouchMove
@@ -64,9 +68,6 @@
 	let currentStepInfo = $derived({ label: stepConfig.label, icon: stepConfig.icon });
 	let label = $derived(stepConfig.typeLabel);
 	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
-	let isSavedView = $derived(
-		step.type === 'view' && savedSteps.some((item) => item.id === step.id)
-	);
 
 	// Is this node being dragged?
 	let isDragging = $state(false);
@@ -294,24 +295,18 @@
 
 		{#if step.type === 'view' && datasourceId}
 			<div class="view-preview expanded">
-				{#if isSavedView}
-					{#if saveStatus === 'unsaved'}
-						<div class="preview-stale">Preview shows last saved state</div>
-					{/if}
-					{#if analysisId && datasourceId}
-						<InlineDataTable
-							{analysisId}
-							{datasourceId}
-							pipeline={savedSteps}
-							stepId={step.id}
-							rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
-						/>
-					{/if}
-				{:else}
-					<div class="preview-pending">
-						<div class="pending-dot"></div>
-						<span>Save to preview data</span>
-					</div>
+				{#if isPreviewStale}
+					<div class="preview-stale">Preview is stale - click Preview to refresh</div>
+				{/if}
+				{#if analysisId && datasourceId}
+					<InlineDataTable
+						{analysisId}
+						{datasourceId}
+						pipeline={allSteps}
+						stepId={step.id}
+						rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
+						{previewVersion}
+					/>
 				{/if}
 			</div>
 		{/if}
@@ -457,29 +452,6 @@
 		margin-top: var(--space-3);
 		border-top: 1px solid var(--border-secondary);
 		padding-top: var(--space-3);
-	}
-
-	.preview-pending {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		border: 1px dashed var(--border-secondary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-tertiary);
-		color: var(--fg-tertiary);
-		font-size: var(--text-xs);
-		font-weight: 600;
-		letter-spacing: 0.02em;
-		text-transform: uppercase;
-	}
-
-	.pending-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 999px;
-		background: var(--accent-primary);
-		box-shadow: var(--accent-ring);
 	}
 
 	.preview-stale {
