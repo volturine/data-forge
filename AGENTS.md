@@ -193,16 +193,29 @@ npm run lint && npm run format  # Lint and format
 
 | Server | Description |
 |--------|-------------|
-| **Svelte** | Svelte documentation, autofixer, and playground links |
+| **Svelte** | Svelte documentation, autofixer, and playground links (remote) |
 | **Perplexity** | AI search, research, and reasoning capabilities |
-| **Playwright** | Remote browser automation for E2E testing |
+| **Playwright** | Remote browser automation for E2E testing (remote) |
 | **Vibe Check** | Metacognitive oversight to prevent tunnel vision and over-engineering |
+| **Filesystem** | File system operations (read, write, list, search within project directory) |
+| **Memory** | Knowledge graph for storing and retrieving entities, relations, and observations |
+| **Fetch** | HTTP requests to fetch URLs from the internet |
+| **Sequential Thinking** | Dynamic reflective problem-solving with adaptive chain-of-thought |
 
 ### Vibe Check Tools
 
 - `vibe_check` - Pattern interrupt that challenges assumptions during planning/implementation/review
 - `vibe_distill` - Simplifies complex plans back to minimal viable approach
 - `vibe_learn` - Records mistakes and solutions for future pattern recognition
+
+### Sequential Thinking
+
+Use `sequential-thinking` for:
+- Complex multi-step problem solving
+- Planning and design with room for revision
+- Breaking down complex problems
+- Analysis that might need course correction
+- Hypothesis generation and verification
 
 ## Recommended Workflows
 
