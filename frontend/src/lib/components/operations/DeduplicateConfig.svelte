@@ -113,10 +113,35 @@
 </div>
 
 <style>
-	.column-list { max-height: 200px; margin-bottom: var(--space-2); }
-	.info-box { margin-top: var(--space-2); }
-	.strategy-grid { display: flex; flex-direction: column; gap: var(--space-3); }
-	.strategy-option { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3); background-color: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); }
-	.strategy-option:hover { border-color: var(--border-focus); background-color: var(--bg-hover); }
-	.strategy-option input[type='radio'] { margin-right: var(--space-2); cursor: pointer; }
+	.column-list {
+		max-height: 200px;
+		margin-bottom: var(--space-2);
+	}
+	.info-box {
+		margin-top: var(--space-2);
+	}
+	.strategy-grid {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
+	.strategy-option {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-3);
+		padding: var(--space-3);
+		background-color: var(--bg-primary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+	.strategy-option:hover {
+		border-color: var(--border-focus);
+		background-color: var(--bg-hover);
+	}
+	.strategy-option input[type='radio'] {
+		margin-right: var(--space-2);
+		cursor: pointer;
+	}
 </style>

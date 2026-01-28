@@ -76,8 +76,19 @@
 </div>
 
 <style>
-	.form-group { margin-bottom: var(--space-4); }
-	.form-group:last-child { margin-bottom: 0; }
-	select[multiple] { height: 80px; }
-	.hint { font-size: var(--text-xs); color: var(--fg-tertiary); display: block; margin-top: var(--space-1); }
+	.form-group {
+		margin-bottom: var(--space-4);
+	}
+	.form-group:last-child {
+		margin-bottom: 0;
+	}
+	select[multiple] {
+		height: 80px;
+	}
+	.hint {
+		font-size: var(--text-xs);
+		color: var(--fg-tertiary);
+		display: block;
+		margin-top: var(--space-1);
+	}
 </style>

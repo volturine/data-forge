@@ -238,7 +238,10 @@
 </div>
 
 <style>
-	.datasource-node { position: relative; width: min(55%, 640px); }
+	.datasource-node {
+		position: relative;
+		width: min(55%, 640px);
+	}
 
 	.node-content {
 		background-color: var(--bg-primary);
@@ -248,7 +251,10 @@
 		transition: all var(--transition);
 		box-shadow: var(--shadow-card);
 	}
-	.node-content:hover { border-color: var(--accent-primary); box-shadow: var(--shadow-card-hover); }
+	.node-content:hover {
+		border-color: var(--accent-primary);
+		box-shadow: var(--shadow-card-hover);
+	}
 
 	.node-header {
 		display: flex;
@@ -259,7 +265,11 @@
 		border-bottom: 1px solid var(--border-primary);
 	}
 
-	.header-left { display: flex; align-items: center; gap: var(--space-2); }
+	.header-left {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
 
 	.source-icon {
 		display: flex;
@@ -272,7 +282,10 @@
 		border-radius: var(--radius-sm);
 	}
 
-	.node-type { font-size: var(--text-sm); font-weight: 600; }
+	.node-type {
+		font-size: var(--text-sm);
+		font-weight: 600;
+	}
 
 	.node-badge {
 		font-size: 10px;
@@ -296,7 +309,8 @@
 		border: 1px solid var(--border-primary);
 	}
 
-	.info-label, .dataset-header {
+	.info-label,
+	.dataset-header {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
@@ -305,10 +319,20 @@
 		letter-spacing: 0.04em;
 		color: var(--fg-muted);
 	}
-	.info-label :global(svg), .dataset-header :global(svg) { opacity: 0.6; }
+	.info-label :global(svg),
+	.dataset-header :global(svg) {
+		opacity: 0.6;
+	}
 
-	.info-value { display: flex; align-items: center; gap: var(--space-2); }
-	.tab-name { font-size: var(--text-sm); font-weight: 500; }
+	.info-value {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.tab-name {
+		font-size: var(--text-sm);
+		font-weight: 500;
+	}
 
 	.tab-name-input {
 		padding: 2px 8px;
@@ -335,11 +359,21 @@
 		transition: all var(--transition);
 		line-height: 1;
 	}
-	.icon-btn :global(svg) { flex-shrink: 0; }
-	.icon-btn:hover { border-color: var(--accent-primary); color: var(--fg-primary); background-color: var(--bg-tertiary); }
+	.icon-btn :global(svg) {
+		flex-shrink: 0;
+	}
+	.icon-btn:hover {
+		border-color: var(--accent-primary);
+		color: var(--fg-primary);
+		background-color: var(--bg-tertiary);
+	}
 
-	.dataset-section { margin-bottom: var(--space-3); }
-	.dataset-header { margin-bottom: var(--space-2); }
+	.dataset-section {
+		margin-bottom: var(--space-3);
+	}
+	.dataset-header {
+		margin-bottom: var(--space-2);
+	}
 
 	.dataset-card {
 		display: flex;
@@ -351,9 +385,20 @@
 		border: 1px solid var(--border-primary);
 	}
 
-	.dataset-info { display: flex; align-items: center; justify-content: space-between; }
-	.dataset-name { font-size: var(--text-sm); font-weight: 600; }
-	.dataset-meta { display: flex; align-items: center; gap: var(--space-2); }
+	.dataset-info {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.dataset-name {
+		font-size: var(--text-sm);
+		font-weight: 600;
+	}
+	.dataset-meta {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
 
 	.meta-badge {
 		display: flex;
@@ -366,7 +411,10 @@
 		border-radius: var(--radius-sm);
 		border: 1px solid var(--border-secondary);
 	}
-	.meta-badge.file-type { color: var(--fg-tertiary); text-transform: uppercase; }
+	.meta-badge.file-type {
+		color: var(--fg-tertiary);
+		text-transform: uppercase;
+	}
 
 	.row-count-section {
 		display: flex;
@@ -375,7 +423,13 @@
 		border-top: 1px solid var(--border-primary);
 	}
 
-	.row-count { display: flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--fg-muted); }
+	.row-count {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
 
 	.calc-rows-btn {
 		display: flex;
@@ -390,10 +444,18 @@
 		color: var(--fg-muted);
 		transition: all var(--transition);
 	}
-	.calc-rows-btn:hover:not(:disabled) { border-color: var(--accent-primary); color: var(--fg-primary); }
-	.calc-rows-btn:disabled { cursor: not-allowed; opacity: 0.7; }
+	.calc-rows-btn:hover:not(:disabled) {
+		border-color: var(--accent-primary);
+		color: var(--fg-primary);
+	}
+	.calc-rows-btn:disabled {
+		cursor: not-allowed;
+		opacity: 0.7;
+	}
 
-	:global(.spinning) { animation: spin 1s linear infinite; }
+	:global(.spinning) {
+		animation: spin 1s linear infinite;
+	}
 
 	.dataset-empty {
 		padding: var(--space-3);
@@ -401,7 +463,10 @@
 		border-radius: var(--radius-sm);
 		text-align: center;
 	}
-	.dataset-empty span { font-size: var(--text-xs); color: var(--fg-muted); }
+	.dataset-empty span {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
 
 	.change-source-btn {
 		display: flex;
@@ -419,9 +484,17 @@
 		color: var(--fg-secondary);
 		transition: all var(--transition);
 	}
-	.change-source-btn:hover { background-color: var(--bg-tertiary); color: var(--fg-primary); border-color: var(--accent-primary); }
-	.change-source-btn :global(svg) { opacity: 0.7; }
-	.change-source-btn:hover :global(svg) { opacity: 1; }
+	.change-source-btn:hover {
+		background-color: var(--bg-tertiary);
+		color: var(--fg-primary);
+		border-color: var(--accent-primary);
+	}
+	.change-source-btn :global(svg) {
+		opacity: 0.7;
+	}
+	.change-source-btn:hover :global(svg) {
+		opacity: 1;
+	}
 
 	.connection-point {
 		position: absolute;
@@ -436,13 +509,35 @@
 		z-index: 2;
 	}
 
-	.edit-group { display: flex; align-items: center; gap: var(--space-1); }
-	.icon-btn.edit { opacity: 0.5; }
-	.icon-btn.edit:hover { opacity: 1; }
-	.icon-btn.save { border-color: var(--success-border); color: var(--success-fg); }
-	.icon-btn.save:hover { background-color: var(--success-bg); }
-	.icon-btn.cancel { border-color: var(--error-border); color: var(--error-fg); }
-	.icon-btn.cancel:hover { background-color: var(--error-bg); }
+	.edit-group {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+	}
+	.icon-btn.edit {
+		opacity: 0.5;
+	}
+	.icon-btn.edit:hover {
+		opacity: 1;
+	}
+	.icon-btn.save {
+		border-color: var(--success-border);
+		color: var(--success-fg);
+	}
+	.icon-btn.save:hover {
+		background-color: var(--success-bg);
+	}
+	.icon-btn.cancel {
+		border-color: var(--error-border);
+		color: var(--error-fg);
+	}
+	.icon-btn.cancel:hover {
+		background-color: var(--error-bg);
+	}
 
-	.datasource-node.drag-active .node-content { border-color: var(--accent-primary); border-style: dashed; opacity: 0.85; }
+	.datasource-node.drag-active .node-content {
+		border-color: var(--accent-primary);
+		border-style: dashed;
+		opacity: 0.85;
+	}
 </style>

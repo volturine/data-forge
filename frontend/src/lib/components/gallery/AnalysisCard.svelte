@@ -79,17 +79,86 @@
 </div>
 
 <style>
-	.card { border: 1px solid var(--border-primary); border-radius: var(--radius-sm); overflow: hidden; cursor: pointer; transition: all var(--transition); background-color: var(--bg-primary); box-shadow: var(--card-shadow); }
-	.card:hover { border-color: var(--border-tertiary); transform: translateY(-1px); }
-	.card:focus { outline: none; border-color: var(--border-focus); }
-	.thumbnail { width: 100%; aspect-ratio: 16 / 9; background-color: var(--bg-tertiary); display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-primary); }
-	.thumbnail img { width: 100%; height: 100%; object-fit: cover; }
-	.placeholder { color: var(--fg-faint); }
-	.content { padding: var(--space-4); }
-	.header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); margin-bottom: var(--space-3); }
-	h3 { margin: 0; font-size: var(--text-sm); font-weight: var(--font-semibold); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.metadata { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--fg-muted); }
-	.divider { color: var(--fg-faint); }
-	.btn-delete { flex-shrink: 0; background-color: transparent; border: 1px solid var(--border-primary); border-radius: var(--radius-sm); padding: var(--space-1); cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); transition: all var(--transition); }
-	.btn-delete:hover { background-color: var(--error-bg); border-color: var(--error-border); color: var(--error-fg); }
+	.card {
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+		cursor: pointer;
+		transition: all var(--transition);
+		background-color: var(--bg-primary);
+		box-shadow: var(--card-shadow);
+	}
+	.card:hover {
+		border-color: var(--border-tertiary);
+		transform: translateY(-1px);
+	}
+	.card:focus {
+		outline: none;
+		border-color: var(--border-focus);
+	}
+	.thumbnail {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		background-color: var(--bg-tertiary);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-bottom: 1px solid var(--border-primary);
+	}
+	.thumbnail img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.placeholder {
+		color: var(--fg-faint);
+	}
+	.content {
+		padding: var(--space-4);
+	}
+	.header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: var(--space-3);
+		margin-bottom: var(--space-3);
+	}
+	h3 {
+		margin: 0;
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.metadata {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
+	.divider {
+		color: var(--fg-faint);
+	}
+	.btn-delete {
+		flex-shrink: 0;
+		background-color: transparent;
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		padding: var(--space-1);
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--fg-muted);
+		transition: all var(--transition);
+	}
+	.btn-delete:hover {
+		background-color: var(--error-bg);
+		border-color: var(--error-border);
+		color: var(--error-fg);
+	}
 </style>

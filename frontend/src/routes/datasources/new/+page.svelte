@@ -425,37 +425,188 @@
 </div>
 
 <style>
-	.container { max-width: 800px; margin: 0 auto; padding: var(--space-8); }
-	header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-8); }
-	h1 { font-size: var(--text-2xl); font-weight: var(--font-semibold); margin: 0; }
-	.btn-secondary { text-decoration: none; }
-	.tabs { display: flex; gap: var(--space-2); border-bottom: 2px solid var(--border-primary); margin-bottom: var(--space-8); }
-	.tab { padding: var(--space-3) var(--space-6); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-size: var(--text-sm); font-weight: var(--font-medium); color: var(--fg-muted); margin-bottom: -2px; transition: all var(--transition); }
-	.tab:hover { color: var(--fg-secondary); }
-	.tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
-	.content { background-color: var(--card-bg); padding: var(--space-8); border-radius: var(--radius-md); box-shadow: var(--card-shadow); }
-	.form { display: flex; flex-direction: column; gap: var(--space-6); }
-	.form-group { display: flex; flex-direction: column; gap: var(--space-2); }
-	label { font-weight: var(--font-medium); font-size: var(--text-sm); color: var(--fg-secondary); }
-	input[type='text'], input[type='url'], input[type='number'], select, textarea { padding: var(--space-2) var(--space-3); border: 1px solid var(--input-border); border-radius: var(--radius-sm); font-size: var(--text-sm); background-color: var(--input-bg); transition: border-color var(--transition); }
-	input[type='text']:focus, input[type='url']:focus, input[type='number']:focus, select:focus, textarea:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--accent-bg); }
-	input[type='text']:disabled, input[type='url']:disabled, input[type='number']:disabled, select:disabled, textarea:disabled { background: var(--bg-tertiary); cursor: not-allowed; }
-	input[type='file'] { padding: var(--space-2); border: 1px solid var(--input-border); border-radius: var(--radius-sm); }
-	textarea { resize: vertical; }
-	.hint, .file-info { font-size: var(--text-xs); color: var(--fg-muted); margin: 0; }
-	.file-info { font-size: var(--text-sm); color: var(--fg-secondary); }
-	.csv-options { background-color: var(--bg-tertiary); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-primary); }
-	.csv-options h3 { font-size: var(--text-sm); font-weight: var(--font-semibold); margin: 0 0 var(--space-4) 0; color: var(--fg-secondary); }
-	.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-	.checkbox-group { flex-direction: row; align-items: center; gap: var(--space-2); }
-	.checkbox-group input { width: auto; }
-	.checkbox-group label { margin: 0; }
-	input[type='checkbox'] { width: 1rem; height: 1rem; cursor: pointer; }
-	.radio-group { display: flex; flex-direction: column; gap: var(--space-3); }
-	.radio-option { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 0 var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border-primary); border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); }
-	.radio-option:hover { background: var(--bg-hover); border-color: var(--border-secondary); }
-	.radio-option:has(input:checked) { background: var(--accent-bg); border-color: var(--accent-border); }
-	.radio-option input[type='radio'] { grid-row: span 2; align-self: center; width: 1rem; height: 1rem; cursor: pointer; }
-	.radio-label { font-weight: var(--font-medium); font-size: var(--text-sm); }
-	.radio-desc { font-size: var(--text-xs); color: var(--fg-muted); }
+	.container {
+		max-width: 800px;
+		margin: 0 auto;
+		padding: var(--space-8);
+	}
+	header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: var(--space-8);
+	}
+	h1 {
+		font-size: var(--text-2xl);
+		font-weight: var(--font-semibold);
+		margin: 0;
+	}
+	.btn-secondary {
+		text-decoration: none;
+	}
+	.tabs {
+		display: flex;
+		gap: var(--space-2);
+		border-bottom: 2px solid var(--border-primary);
+		margin-bottom: var(--space-8);
+	}
+	.tab {
+		padding: var(--space-3) var(--space-6);
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		cursor: pointer;
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
+		color: var(--fg-muted);
+		margin-bottom: -2px;
+		transition: all var(--transition);
+	}
+	.tab:hover {
+		color: var(--fg-secondary);
+	}
+	.tab.active {
+		color: var(--accent-primary);
+		border-bottom-color: var(--accent-primary);
+	}
+	.content {
+		background-color: var(--card-bg);
+		padding: var(--space-8);
+		border-radius: var(--radius-md);
+		box-shadow: var(--card-shadow);
+	}
+	.form {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-6);
+	}
+	.form-group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+	label {
+		font-weight: var(--font-medium);
+		font-size: var(--text-sm);
+		color: var(--fg-secondary);
+	}
+	input[type='text'],
+	input[type='url'],
+	input[type='number'],
+	select,
+	textarea {
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--input-border);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		background-color: var(--input-bg);
+		transition: border-color var(--transition);
+	}
+	input[type='text']:focus,
+	input[type='url']:focus,
+	input[type='number']:focus,
+	select:focus,
+	textarea:focus {
+		outline: none;
+		border-color: var(--border-focus);
+		box-shadow: 0 0 0 3px var(--accent-bg);
+	}
+	input[type='text']:disabled,
+	input[type='url']:disabled,
+	input[type='number']:disabled,
+	select:disabled,
+	textarea:disabled {
+		background: var(--bg-tertiary);
+		cursor: not-allowed;
+	}
+	input[type='file'] {
+		padding: var(--space-2);
+		border: 1px solid var(--input-border);
+		border-radius: var(--radius-sm);
+	}
+	textarea {
+		resize: vertical;
+	}
+	.hint,
+	.file-info {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		margin: 0;
+	}
+	.file-info {
+		font-size: var(--text-sm);
+		color: var(--fg-secondary);
+	}
+	.csv-options {
+		background-color: var(--bg-tertiary);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--border-primary);
+	}
+	.csv-options h3 {
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		margin: 0 0 var(--space-4) 0;
+		color: var(--fg-secondary);
+	}
+	.form-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-4);
+	}
+	.checkbox-group {
+		flex-direction: row;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.checkbox-group input {
+		width: auto;
+	}
+	.checkbox-group label {
+		margin: 0;
+	}
+	input[type='checkbox'] {
+		width: 1rem;
+		height: 1rem;
+		cursor: pointer;
+	}
+	.radio-group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
+	.radio-option {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		grid-template-rows: auto auto;
+		gap: 0 var(--space-3);
+		padding: var(--space-3) var(--space-4);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+	.radio-option:hover {
+		background: var(--bg-hover);
+		border-color: var(--border-secondary);
+	}
+	.radio-option:has(input:checked) {
+		background: var(--accent-bg);
+		border-color: var(--accent-border);
+	}
+	.radio-option input[type='radio'] {
+		grid-row: span 2;
+		align-self: center;
+		width: 1rem;
+		height: 1rem;
+		cursor: pointer;
+	}
+	.radio-label {
+		font-weight: var(--font-medium);
+		font-size: var(--text-sm);
+	}
+	.radio-desc {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
 </style>

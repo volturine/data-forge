@@ -159,12 +159,25 @@
 </div>
 
 <style>
-	h4 { text-transform: uppercase; }
+	h4 {
+		text-transform: uppercase;
+	}
 
-	.add-rule { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-6); flex-wrap: wrap; }
-	.add-rule select { flex: 2; min-width: 200px; }
+	.add-rule {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+		margin-bottom: var(--space-6);
+		flex-wrap: wrap;
+	}
+	.add-rule select {
+		flex: 2;
+		min-width: 200px;
+	}
 
-	.direction-select { display: flex; }
+	.direction-select {
+		display: flex;
+	}
 
 	.dir-btn {
 		display: flex;
@@ -179,31 +192,130 @@
 		cursor: pointer;
 		transition: all var(--transition);
 	}
-	.dir-btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); border-right: none; }
-	.dir-btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-	.dir-btn:hover:not(.active) { background-color: var(--bg-secondary); color: var(--fg-primary); }
-	.dir-btn.active { background-color: var(--accent-primary); color: var(--bg-primary); border-color: var(--accent-primary); }
+	.dir-btn:first-child {
+		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+		border-right: none;
+	}
+	.dir-btn:last-child {
+		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	}
+	.dir-btn:hover:not(.active) {
+		background-color: var(--bg-secondary);
+		color: var(--fg-primary);
+	}
+	.dir-btn.active {
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-color: var(--accent-primary);
+	}
 
-	.add-btn { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-4); background-color: var(--accent-primary); color: var(--bg-primary); border: none; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
-	.add-btn:disabled { background-color: var(--border-primary); cursor: not-allowed; color: var(--fg-muted); }
+	.add-btn {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: none;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.add-btn:disabled {
+		background-color: var(--border-primary);
+		cursor: not-allowed;
+		color: var(--fg-muted);
+	}
 
-	.sort-rules { padding: var(--space-4); background-color: var(--panel-muted-bg); border-radius: var(--radius-md); margin-bottom: var(--space-4); border: 1px solid var(--panel-muted-border); }
-	.sort-rules h4 { margin-top: 0; margin-bottom: var(--space-3); font-size: var(--text-sm); color: var(--fg-muted); }
+	.sort-rules {
+		padding: var(--space-4);
+		background-color: var(--panel-muted-bg);
+		border-radius: var(--radius-md);
+		margin-bottom: var(--space-4);
+		border: 1px solid var(--panel-muted-border);
+	}
+	.sort-rules h4 {
+		margin-top: 0;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
+	}
 
-	.sort-rule-item { display: flex; justify-content: space-between; align-items: center; padding: var(--space-2) var(--space-3); background-color: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); margin-bottom: var(--space-2); }
-	.sort-rule-item:last-child { margin-bottom: 0; }
+	.sort-rule-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-2) var(--space-3);
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
+		margin-bottom: var(--space-2);
+	}
+	.sort-rule-item:last-child {
+		margin-bottom: 0;
+	}
 
-	.rule-column { font-weight: var(--font-medium); }
-	.rule-actions { display: flex; align-items: center; gap: var(--space-1); }
-	.rule-actions button { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background-color: transparent; color: var(--fg-secondary); border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); }
-	.rule-actions button:hover:not(:disabled) { background-color: var(--bg-tertiary); color: var(--fg-primary); }
-	.rule-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+	.rule-column {
+		font-weight: var(--font-medium);
+	}
+	.rule-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+	}
+	.rule-actions button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		background-color: transparent;
+		color: var(--fg-secondary);
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+	.rule-actions button:hover:not(:disabled) {
+		background-color: var(--bg-tertiary);
+		color: var(--fg-primary);
+	}
+	.rule-actions button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
 
-	.rule-actions .dir-btn { width: 28px; height: 28px; background-color: transparent; color: var(--fg-secondary); }
-	.rule-actions .dir-btn:hover:not(.active) { background-color: var(--bg-tertiary); }
-	.rule-actions .dir-btn.active { background-color: var(--accent-primary); color: var(--bg-primary); }
+	.rule-actions .dir-btn {
+		width: 28px;
+		height: 28px;
+		background-color: transparent;
+		color: var(--fg-secondary);
+	}
+	.rule-actions .dir-btn:hover:not(.active) {
+		background-color: var(--bg-tertiary);
+	}
+	.rule-actions .dir-btn.active {
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+	}
 
-	.sort-icon { font-size: var(--text-sm); line-height: 1; }
-	.remove-btn:hover { background-color: var(--error-bg) !important; color: var(--error-fg) !important; border-color: var(--error-border) !important; }
-	.empty-state { padding: var(--space-8); text-align: center; color: var(--fg-muted); background-color: var(--panel-muted-bg); border-radius: var(--radius-md); margin-bottom: var(--space-4); border: 1px solid var(--panel-muted-border); }
+	.sort-icon {
+		font-size: var(--text-sm);
+		line-height: 1;
+	}
+	.remove-btn:hover {
+		background-color: var(--error-bg) !important;
+		color: var(--error-fg) !important;
+		border-color: var(--error-border) !important;
+	}
+	.empty-state {
+		padding: var(--space-8);
+		text-align: center;
+		color: var(--fg-muted);
+		background-color: var(--panel-muted-bg);
+		border-radius: var(--radius-md);
+		margin-bottom: var(--space-4);
+		border: 1px solid var(--panel-muted-border);
+	}
 </style>

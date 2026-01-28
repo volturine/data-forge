@@ -199,15 +199,67 @@
 </div>
 
 <style>
-	.add-aggregation { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); flex-wrap: wrap; }
-	.add-aggregation select:first-child { flex: 2; min-width: 160px; }
-	.add-aggregation select:nth-child(2) { flex: 1; min-width: 120px; }
-	.add-aggregation input { flex: 2; min-width: 160px; }
-	.add-aggregation button { padding: var(--space-2) var(--space-4); background-color: var(--accent-primary); color: var(--bg-primary); border: none; border-radius: var(--radius-sm); cursor: pointer; }
-	.add-aggregation button:disabled { background-color: var(--bg-muted); cursor: not-allowed; color: var(--fg-muted); border: 1px solid var(--border-secondary); }
-	.aggregations-list { display: flex; flex-direction: column; gap: var(--space-2); }
-	.aggregation-item { display: flex; justify-content: space-between; align-items: center; padding: var(--space-3); background-color: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); }
-	.agg-details { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--fg-primary); }
-	.aggregation-item button { padding: var(--space-1) var(--space-3); background-color: var(--error-bg); color: var(--error-fg); border: 1px solid var(--error-border); border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm); }
-	button:hover:not(:disabled) { opacity: 0.9; }
+	.add-aggregation {
+		display: flex;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
+		flex-wrap: wrap;
+	}
+	.add-aggregation select:first-child {
+		flex: 2;
+		min-width: 160px;
+	}
+	.add-aggregation select:nth-child(2) {
+		flex: 1;
+		min-width: 120px;
+	}
+	.add-aggregation input {
+		flex: 2;
+		min-width: 160px;
+	}
+	.add-aggregation button {
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: none;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+	}
+	.add-aggregation button:disabled {
+		background-color: var(--bg-muted);
+		cursor: not-allowed;
+		color: var(--fg-muted);
+		border: 1px solid var(--border-secondary);
+	}
+	.aggregations-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+	.aggregation-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-3);
+		background-color: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
+	}
+	.agg-details {
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+	}
+	.aggregation-item button {
+		padding: var(--space-1) var(--space-3);
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		font-size: var(--text-sm);
+	}
+	button:hover:not(:disabled) {
+		opacity: 0.9;
+	}
 </style>

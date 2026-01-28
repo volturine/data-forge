@@ -267,25 +267,148 @@
 </div>
 
 <style>
-	.step-library { width: var(--operations-panel-width, 280px); padding: var(--space-4) var(--space-3); background-color: var(--panel-bg); display: flex; flex-direction: column; overflow: hidden; gap: var(--space-3); }
-	.drag-preview { position: fixed; top: -9999px; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-	h3 { margin-top: 0; margin-bottom: var(--space-3); font-size: var(--text-sm); letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-primary); flex-shrink: 0; }
-	.step-list { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; }
-	.step-button { display: flex; align-items: center; justify-content: flex-start; gap: 0.75rem; padding: var(--space-3); background-color: transparent; border: 1px solid transparent; border-radius: 6px; cursor: grab; transition: background-color var(--transition), border-color var(--transition); text-align: left; position: relative; }
-	.step-button::before { content: ''; position: absolute; top: 6px; left: 6px; bottom: 6px; right: 6px; border-radius: 6px; }
-	.step-button:hover { border-color: var(--border-secondary); background-color: var(--bg-hover); }
-	.step-button:active { cursor: grabbing; }
-	.step-button.touch-dragging { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
-	:global(body.touch-dragging) { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-	.step-icon { font-size: 1.25rem; flex-shrink: 0; }
-	.step-info { display: flex; flex-direction: column; gap: 0.125rem; align-items: flex-start; min-width: 0; }
-	.step-label { font-weight: 600; color: var(--fg-primary); font-size: var(--text-sm); }
-	.step-description { font-size: 0.75rem; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-	.fallback-actions { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--panel-border); flex-shrink: 0; }
-	.fallback-actions h4 { margin: 0 0 var(--space-2) 0; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
-	.fallback-controls { display: flex; flex-direction: column; gap: var(--space-2); }
-	.fallback-controls select { padding: 0.5rem; border: 1px solid var(--panel-border); border-radius: var(--radius-sm); background-color: var(--bg-secondary); color: var(--fg-primary); }
-	.fallback-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
-	.fallback-controls button { padding: 0.5rem; border: 1px solid var(--panel-border); border-radius: var(--radius-sm); background-color: transparent; color: var(--fg-primary); cursor: pointer; }
-	.fallback-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+	.step-library {
+		width: var(--operations-panel-width, 280px);
+		padding: var(--space-4) var(--space-3);
+		background-color: var(--panel-bg);
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		gap: var(--space-3);
+	}
+	.drag-preview {
+		position: fixed;
+		top: -9999px;
+		left: -9999px;
+		width: 1px;
+		height: 1px;
+		opacity: 0;
+		pointer-events: none;
+	}
+	h3 {
+		margin-top: 0;
+		margin-bottom: var(--space-3);
+		font-size: var(--text-sm);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--fg-primary);
+		flex-shrink: 0;
+	}
+	.step-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		overflow-y: auto;
+		overflow-x: hidden;
+		flex: 1;
+		min-height: 0;
+	}
+	.step-button {
+		display: flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 0.75rem;
+		padding: var(--space-3);
+		background-color: transparent;
+		border: 1px solid transparent;
+		border-radius: 6px;
+		cursor: grab;
+		transition:
+			background-color var(--transition),
+			border-color var(--transition);
+		text-align: left;
+		position: relative;
+	}
+	.step-button::before {
+		content: '';
+		position: absolute;
+		top: 6px;
+		left: 6px;
+		bottom: 6px;
+		right: 6px;
+		border-radius: 6px;
+	}
+	.step-button:hover {
+		border-color: var(--border-secondary);
+		background-color: var(--bg-hover);
+	}
+	.step-button:active {
+		cursor: grabbing;
+	}
+	.step-button.touch-dragging {
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
+		touch-action: none;
+	}
+	:global(body.touch-dragging) {
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
+	}
+	.step-icon {
+		font-size: 1.25rem;
+		flex-shrink: 0;
+	}
+	.step-info {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+		align-items: flex-start;
+		min-width: 0;
+	}
+	.step-label {
+		font-weight: 600;
+		color: var(--fg-primary);
+		font-size: var(--text-sm);
+	}
+	.step-description {
+		font-size: 0.75rem;
+		color: var(--fg-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.fallback-actions {
+		margin-top: var(--space-4);
+		padding-top: var(--space-3);
+		border-top: 1px solid var(--panel-border);
+		flex-shrink: 0;
+	}
+	.fallback-actions h4 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-xs);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--fg-muted);
+	}
+	.fallback-controls {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+	.fallback-controls select {
+		padding: 0.5rem;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-secondary);
+		color: var(--fg-primary);
+	}
+	.fallback-buttons {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-2);
+	}
+	.fallback-controls button {
+		padding: 0.5rem;
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
+		background-color: transparent;
+		color: var(--fg-primary);
+		cursor: pointer;
+	}
+	.fallback-controls button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
 </style>

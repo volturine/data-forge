@@ -50,7 +50,16 @@
 </div>
 
 <style>
-	.form-group { margin-bottom: var(--space-4); }
-	.form-group:last-child { margin-bottom: 0; }
-	.checkbox-label { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+	.form-group {
+		margin-bottom: var(--space-4);
+	}
+	.form-group:last-child {
+		margin-bottom: 0;
+	}
+	.checkbox-label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		cursor: pointer;
+	}
 </style>

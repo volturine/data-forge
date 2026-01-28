@@ -158,24 +158,111 @@
 </div>
 
 <style>
-	.data-table-container { position: relative; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--panel-shadow); }
-	.loading-overlay { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-12); gap: var(--space-4); color: var(--fg-tertiary); }
-	.loading-overlay p { margin: 0; }
-	.empty-state { padding: var(--space-12); text-align: center; color: var(--fg-muted); }
-	.empty-state p { margin: 0; }
-	.table-wrapper { overflow-x: auto; max-height: 600px; overflow-y: auto; background: var(--panel-bg); }
-	.data-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-	thead { position: sticky; top: 0; background: var(--table-header-bg); z-index: var(--z-dropdown); }
-	th { padding: 0; border-bottom: 2px solid var(--table-border); font-weight: var(--font-semibold); text-align: left; }
-	.column-header { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: var(--space-3) var(--space-4); background: none; border: none; cursor: pointer; font-size: var(--text-sm); font-weight: var(--font-semibold); color: var(--fg-primary); transition: background-color var(--transition); }
-	.column-header:hover { background: var(--bg-hover); }
-	.column-name { font-family: var(--font-mono); }
-	.sort-indicator { margin-left: var(--space-2); color: var(--accent-primary); font-size: var(--text-base); }
-	tbody tr { border-bottom: 1px solid var(--table-border); transition: background-color var(--transition); }
-	tbody tr:nth-child(even) { background: var(--table-row-alt); }
-	tbody tr:hover { background: var(--table-row-hover); }
-	tbody tr:last-child { border-bottom: none; }
-	td { padding: var(--space-3) var(--space-4); color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; font-size: var(--text-sm); }
-	.table-footer { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--panel-border); background: var(--panel-header-bg); }
-	.row-info { font-size: var(--text-xs); color: var(--fg-tertiary); }
+	.data-table-container {
+		position: relative;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		overflow: hidden;
+		box-shadow: var(--panel-shadow);
+	}
+	.loading-overlay {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-12);
+		gap: var(--space-4);
+		color: var(--fg-tertiary);
+	}
+	.loading-overlay p {
+		margin: 0;
+	}
+	.empty-state {
+		padding: var(--space-12);
+		text-align: center;
+		color: var(--fg-muted);
+	}
+	.empty-state p {
+		margin: 0;
+	}
+	.table-wrapper {
+		overflow-x: auto;
+		max-height: 600px;
+		overflow-y: auto;
+		background: var(--panel-bg);
+	}
+	.data-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--text-sm);
+	}
+	thead {
+		position: sticky;
+		top: 0;
+		background: var(--table-header-bg);
+		z-index: var(--z-dropdown);
+	}
+	th {
+		padding: 0;
+		border-bottom: 2px solid var(--table-border);
+		font-weight: var(--font-semibold);
+		text-align: left;
+	}
+	.column-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: var(--space-3) var(--space-4);
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		color: var(--fg-primary);
+		transition: background-color var(--transition);
+	}
+	.column-header:hover {
+		background: var(--bg-hover);
+	}
+	.column-name {
+		font-family: var(--font-mono);
+	}
+	.sort-indicator {
+		margin-left: var(--space-2);
+		color: var(--accent-primary);
+		font-size: var(--text-base);
+	}
+	tbody tr {
+		border-bottom: 1px solid var(--table-border);
+		transition: background-color var(--transition);
+	}
+	tbody tr:nth-child(even) {
+		background: var(--table-row-alt);
+	}
+	tbody tr:hover {
+		background: var(--table-row-hover);
+	}
+	tbody tr:last-child {
+		border-bottom: none;
+	}
+	td {
+		padding: var(--space-3) var(--space-4);
+		color: var(--fg-secondary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 300px;
+		font-size: var(--text-sm);
+	}
+	.table-footer {
+		padding: var(--space-3) var(--space-4);
+		border-top: 1px solid var(--panel-border);
+		background: var(--panel-header-bg);
+	}
+	.row-info {
+		font-size: var(--text-xs);
+		color: var(--fg-tertiary);
+	}
 </style>

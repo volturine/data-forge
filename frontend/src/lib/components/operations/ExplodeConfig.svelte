@@ -105,11 +105,42 @@
 </div>
 
 <style>
-	.help-banner { background-color: var(--info-bg); padding: var(--space-3); border-left: 3px solid var(--info-border); border-radius: var(--radius-sm); margin-bottom: var(--space-4); font-size: var(--text-sm); color: var(--info-fg); }
-	.help-text { font-size: var(--text-sm); color: var(--fg-tertiary); margin-bottom: var(--space-3); }
-	.warning-box strong { display: block; margin-bottom: var(--space-2); }
-	.warning-box p { margin: 0; font-size: var(--text-sm); }
-	.success-box ul { margin: 0; padding-left: var(--space-6); }
-	.success-box li { margin-bottom: var(--space-1); }
-	.example { margin-bottom: var(--space-4); padding: var(--space-3); background-color: var(--warning-bg); border-left: 3px solid var(--warning-border); border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--warning-fg); }
+	.help-banner {
+		background-color: var(--info-bg);
+		padding: var(--space-3);
+		border-left: 3px solid var(--info-border);
+		border-radius: var(--radius-sm);
+		margin-bottom: var(--space-4);
+		font-size: var(--text-sm);
+		color: var(--info-fg);
+	}
+	.help-text {
+		font-size: var(--text-sm);
+		color: var(--fg-tertiary);
+		margin-bottom: var(--space-3);
+	}
+	.warning-box strong {
+		display: block;
+		margin-bottom: var(--space-2);
+	}
+	.warning-box p {
+		margin: 0;
+		font-size: var(--text-sm);
+	}
+	.success-box ul {
+		margin: 0;
+		padding-left: var(--space-6);
+	}
+	.success-box li {
+		margin-bottom: var(--space-1);
+	}
+	.example {
+		margin-bottom: var(--space-4);
+		padding: var(--space-3);
+		background-color: var(--warning-bg);
+		border-left: 3px solid var(--warning-border);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		color: var(--warning-fg);
+	}
 </style>

@@ -163,15 +163,62 @@
 </div>
 
 <style>
-	.logic-selector { margin-bottom: var(--space-4); color: var(--fg-secondary); }
-	.logic-selector select { margin-left: var(--space-2); padding: var(--space-1) var(--space-2); }
-	.conditions { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
-	.condition-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-	.condition-row select:first-child { flex: 2; min-width: 160px; }
-	.condition-row select:nth-child(2) { flex: 1; min-width: 120px; }
-	.condition-row input { flex: 2; min-width: 160px; }
-	.condition-row button { padding: var(--space-2) var(--space-4); background-color: var(--error-bg); color: var(--error-fg); border: 1px solid var(--error-border); border-radius: var(--radius-sm); cursor: pointer; }
-	.condition-row button:disabled { background-color: var(--bg-muted); cursor: not-allowed; color: var(--fg-muted); border-color: var(--border-secondary); }
-	.add-btn { padding: var(--space-2) var(--space-4); background-color: var(--accent-primary); color: var(--bg-primary); border: none; border-radius: var(--radius-sm); cursor: pointer; margin-bottom: var(--space-4); }
-	button:hover:not(:disabled) { opacity: 0.9; }
+	.logic-selector {
+		margin-bottom: var(--space-4);
+		color: var(--fg-secondary);
+	}
+	.logic-selector select {
+		margin-left: var(--space-2);
+		padding: var(--space-1) var(--space-2);
+	}
+	.conditions {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
+	}
+	.condition-row {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+		flex-wrap: wrap;
+	}
+	.condition-row select:first-child {
+		flex: 2;
+		min-width: 160px;
+	}
+	.condition-row select:nth-child(2) {
+		flex: 1;
+		min-width: 120px;
+	}
+	.condition-row input {
+		flex: 2;
+		min-width: 160px;
+	}
+	.condition-row button {
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--error-bg);
+		color: var(--error-fg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+	}
+	.condition-row button:disabled {
+		background-color: var(--bg-muted);
+		cursor: not-allowed;
+		color: var(--fg-muted);
+		border-color: var(--border-secondary);
+	}
+	.add-btn {
+		padding: var(--space-2) var(--space-4);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: none;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		margin-bottom: var(--space-4);
+	}
+	button:hover:not(:disabled) {
+		opacity: 0.9;
+	}
 </style>

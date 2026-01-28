@@ -149,15 +149,73 @@
 </div>
 
 <style>
-	.field-group { margin-bottom: var(--space-4); }
-	.hint { color: var(--fg-muted); font-size: var(--text-xs); }
-	.checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--border-primary); border-radius: var(--radius-sm); background-color: var(--bg-secondary); max-height: 150px; overflow-y: auto; }
-	.checkbox-label { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm); }
-	.checkbox-label:hover { background-color: var(--bg-hover); }
-	.checkbox-label input { accent-color: var(--accent-primary); }
-	.selection-summary { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--fg-muted); }
-	.refresh-button { width: 100%; padding: var(--space-2) var(--space-3); background-color: var(--accent-primary); color: var(--bg-primary); border: none; border-radius: var(--radius-sm); font-size: var(--text-sm); font-weight: var(--font-medium); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: var(--space-2); transition: all var(--transition); }
-	.refresh-button:hover:not(:disabled) { opacity: 0.9; }
-	.refresh-button:disabled { opacity: 0.5; cursor: not-allowed; }
-	.refresh-button .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+	.field-group {
+		margin-bottom: var(--space-4);
+	}
+	.hint {
+		color: var(--fg-muted);
+		font-size: var(--text-xs);
+	}
+	.checkbox-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+		gap: var(--space-2);
+		padding: var(--space-2);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		background-color: var(--bg-secondary);
+		max-height: 150px;
+		overflow-y: auto;
+	}
+	.checkbox-label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		font-size: var(--text-sm);
+	}
+	.checkbox-label:hover {
+		background-color: var(--bg-hover);
+	}
+	.checkbox-label input {
+		accent-color: var(--accent-primary);
+	}
+	.selection-summary {
+		margin-top: var(--space-2);
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
+	.refresh-button {
+		width: 100%;
+		padding: var(--space-2) var(--space-3);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: none;
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-2);
+		transition: all var(--transition);
+	}
+	.refresh-button:hover:not(:disabled) {
+		opacity: 0.9;
+	}
+	.refresh-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.refresh-button .spinner {
+		width: 14px;
+		height: 14px;
+		border: 2px solid currentColor;
+		border-top-color: transparent;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
 </style>

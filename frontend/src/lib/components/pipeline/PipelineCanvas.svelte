@@ -367,21 +367,115 @@
 </div>
 
 <style>
-	.pipeline-canvas { flex: 1; padding: var(--space-6); background-color: var(--bg-secondary); background-image: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.04) 0, rgba(0, 0, 0, 0.04) 1px, transparent 1px, transparent 64px), linear-gradient(180deg, transparent 0%, var(--bg-tertiary) 100%); overflow-y: auto; min-height: 400px; }
-	.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 400px; color: var(--fg-muted); text-align: center; }
-	.empty-state :global(svg) { color: var(--fg-faint); margin-bottom: var(--space-4); }
-	.empty-state h3 { margin: 0 0 var(--space-2) 0; font-size: var(--text-base); font-weight: 600; color: var(--fg-secondary); }
-	.empty-state p { margin: 0; font-size: var(--text-sm); color: var(--fg-muted); }
-	.steps-container { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 100%; margin: 0 auto; }
-	.insert-zone { display: flex; flex-direction: column; align-items: center; width: 100%; cursor: default; transition: all var(--transition); padding: var(--space-2) 0; }
-	.insert-spacer { display: flex; align-items: center; justify-content: center; padding: var(--space-2) 0; }
-	.insert-zone :global(.connection-line), .insert-spacer :global(.connection-line) { flex-shrink: 0; }
-	.insert-zone.ready { cursor: pointer; }
-	.insert-zone.ready:hover :global(.connection-line) { color: var(--accent-primary); }
-	.drop-slot { width: min(55%, 480px); padding: var(--space-2) var(--space-4); background-color: transparent; border: 2px dashed var(--fg-faint); border-radius: var(--radius-md); text-align: center; min-height: 28px; display: flex; align-items: center; justify-content: center; transition: all var(--transition); margin: var(--space-2) 0; flex-shrink: 0; }
-	.drop-slot:hover { border-color: var(--fg-muted); background-color: var(--bg-hover); }
-	.drop-slot.active { border-color: var(--fg-primary); background-color: var(--bg-tertiary); }
-	.drop-slot.invalid { border-color: var(--error-border); background-color: var(--error-bg); }
-	.slot-label { font-family: var(--font-mono); font-size: var(--text-sm); font-weight: 500; color: var(--fg-primary); text-transform: lowercase; }
-	.drop-slot.invalid .slot-label { color: var(--error-fg); }
+	.pipeline-canvas {
+		flex: 1;
+		padding: var(--space-6);
+		background-color: var(--bg-secondary);
+		background-image:
+			repeating-linear-gradient(
+				90deg,
+				rgba(0, 0, 0, 0.04) 0,
+				rgba(0, 0, 0, 0.04) 1px,
+				transparent 1px,
+				transparent 64px
+			),
+			linear-gradient(180deg, transparent 0%, var(--bg-tertiary) 100%);
+		overflow-y: auto;
+		min-height: 400px;
+	}
+	.empty-state {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+		min-height: 400px;
+		color: var(--fg-muted);
+		text-align: center;
+	}
+	.empty-state :global(svg) {
+		color: var(--fg-faint);
+		margin-bottom: var(--space-4);
+	}
+	.empty-state h3 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-base);
+		font-weight: 600;
+		color: var(--fg-secondary);
+	}
+	.empty-state p {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
+	}
+	.steps-container {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 100%;
+		max-width: 100%;
+		margin: 0 auto;
+	}
+	.insert-zone {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 100%;
+		cursor: default;
+		transition: all var(--transition);
+		padding: var(--space-2) 0;
+	}
+	.insert-spacer {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-2) 0;
+	}
+	.insert-zone :global(.connection-line),
+	.insert-spacer :global(.connection-line) {
+		flex-shrink: 0;
+	}
+	.insert-zone.ready {
+		cursor: pointer;
+	}
+	.insert-zone.ready:hover :global(.connection-line) {
+		color: var(--accent-primary);
+	}
+	.drop-slot {
+		width: min(55%, 480px);
+		padding: var(--space-2) var(--space-4);
+		background-color: transparent;
+		border: 2px dashed var(--fg-faint);
+		border-radius: var(--radius-md);
+		text-align: center;
+		min-height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all var(--transition);
+		margin: var(--space-2) 0;
+		flex-shrink: 0;
+	}
+	.drop-slot:hover {
+		border-color: var(--fg-muted);
+		background-color: var(--bg-hover);
+	}
+	.drop-slot.active {
+		border-color: var(--fg-primary);
+		background-color: var(--bg-tertiary);
+	}
+	.drop-slot.invalid {
+		border-color: var(--error-border);
+		background-color: var(--error-bg);
+	}
+	.slot-label {
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		font-weight: 500;
+		color: var(--fg-primary);
+		text-transform: lowercase;
+	}
+	.drop-slot.invalid .slot-label {
+		color: var(--error-fg);
+	}
 </style>

@@ -271,21 +271,124 @@
 {/if}
 
 <style>
-	.step-config { width: var(--operations-panel-width, 280px); background-color: var(--panel-bg); display: flex; flex-direction: column; overflow-y: auto; color: var(--fg-primary); }
-	.step-config, .step-config * { box-sizing: border-box; }
-	.step-config.empty { display: flex; align-items: center; justify-content: center; background-color: var(--panel-bg); }
-	.empty-message { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-6); color: var(--fg-muted); text-align: center; }
-	.empty-icon { font-size: 2.5rem; margin-bottom: var(--space-4); opacity: 0.5; }
-	.empty-message h3 { margin: 0 0 var(--space-2) 0; font-size: var(--text-lg); color: var(--fg-primary); }
-	.empty-message p { margin: 0; font-size: var(--text-sm); }
-	.config-header { display: flex; justify-content: space-between; align-items: center; padding: var(--space-4); border-bottom: none; background-color: var(--panel-bg); position: relative; box-shadow: inset 0 -1px 0 var(--panel-border), inset 0 -3px 0 var(--panel-border), inset 0 -5px 0 var(--panel-border); }
-	.config-header h3 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--fg-primary); letter-spacing: 0.08em; text-transform: uppercase; }
-	.close-button { width: 32px; height: 32px; padding: 0; background-color: transparent; border: none; border-radius: var(--radius-sm); cursor: pointer; font-size: 1.5rem; line-height: 1; color: var(--fg-muted); display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
-	.close-button:hover { background-color: var(--bg-hover); color: var(--fg-primary); }
-	.config-body { flex: 1; overflow-y: auto; padding: var(--space-4); background-color: var(--panel-bg); }
-	.not-implemented { padding: var(--space-6); text-align: center; background-color: var(--panel-bg); }
-	.not-implemented p { margin: 0 0 var(--space-4) 0; color: var(--fg-tertiary); }
-	.not-implemented button { padding: var(--space-2) var(--space-5); background-color: var(--accent-primary); color: var(--bg-primary); border: none; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font-mono); }
-	.not-implemented button:hover { opacity: 0.9; }
-	.loading-message { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-6); color: var(--fg-tertiary); text-align: center; gap: var(--space-3); background-color: var(--panel-bg); }
+	.step-config {
+		width: var(--operations-panel-width, 280px);
+		background-color: var(--panel-bg);
+		display: flex;
+		flex-direction: column;
+		overflow-y: auto;
+		color: var(--fg-primary);
+	}
+	.step-config,
+	.step-config * {
+		box-sizing: border-box;
+	}
+	.step-config.empty {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: var(--panel-bg);
+	}
+	.empty-message {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-6);
+		color: var(--fg-muted);
+		text-align: center;
+	}
+	.empty-icon {
+		font-size: 2.5rem;
+		margin-bottom: var(--space-4);
+		opacity: 0.5;
+	}
+	.empty-message h3 {
+		margin: 0 0 var(--space-2) 0;
+		font-size: var(--text-lg);
+		color: var(--fg-primary);
+	}
+	.empty-message p {
+		margin: 0;
+		font-size: var(--text-sm);
+	}
+	.config-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-4);
+		border-bottom: none;
+		background-color: var(--panel-bg);
+		position: relative;
+		box-shadow:
+			inset 0 -1px 0 var(--panel-border),
+			inset 0 -3px 0 var(--panel-border),
+			inset 0 -5px 0 var(--panel-border);
+	}
+	.config-header h3 {
+		margin: 0;
+		font-size: var(--text-sm);
+		font-weight: 600;
+		color: var(--fg-primary);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.close-button {
+		width: 32px;
+		height: 32px;
+		padding: 0;
+		background-color: transparent;
+		border: none;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		font-size: 1.5rem;
+		line-height: 1;
+		color: var(--fg-muted);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: all var(--transition);
+	}
+	.close-button:hover {
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
+	}
+	.config-body {
+		flex: 1;
+		overflow-y: auto;
+		padding: var(--space-4);
+		background-color: var(--panel-bg);
+	}
+	.not-implemented {
+		padding: var(--space-6);
+		text-align: center;
+		background-color: var(--panel-bg);
+	}
+	.not-implemented p {
+		margin: 0 0 var(--space-4) 0;
+		color: var(--fg-tertiary);
+	}
+	.not-implemented button {
+		padding: var(--space-2) var(--space-5);
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border: none;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		font-family: var(--font-mono);
+	}
+	.not-implemented button:hover {
+		opacity: 0.9;
+	}
+	.loading-message {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-6);
+		color: var(--fg-tertiary);
+		text-align: center;
+		gap: var(--space-3);
+		background-color: var(--panel-bg);
+	}
 </style>

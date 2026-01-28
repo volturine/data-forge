@@ -159,9 +159,27 @@
 </div>
 
 <style>
-	.warning-box { font-size: var(--text-sm); color: var(--error-fg); margin-top: var(--space-2); margin-bottom: 0; }
-	.input-group { flex: 1; }
-	.input-group label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); color: var(--fg-secondary); }
-	.inline-group { display: flex; gap: var(--space-2); }
-	.inline-group input, .inline-group select { flex: 1; }
+	.warning-box {
+		font-size: var(--text-sm);
+		color: var(--error-fg);
+		margin-top: var(--space-2);
+		margin-bottom: 0;
+	}
+	.input-group {
+		flex: 1;
+	}
+	.input-group label {
+		display: block;
+		font-size: var(--text-sm);
+		margin-bottom: var(--space-1);
+		color: var(--fg-secondary);
+	}
+	.inline-group {
+		display: flex;
+		gap: var(--space-2);
+	}
+	.inline-group input,
+	.inline-group select {
+		flex: 1;
+	}
 </style>

@@ -33,5 +33,7 @@
 </div>
 
 <style>
-	.form-group { margin-bottom: 0; }
+	.form-group {
+		margin-bottom: 0;
+	}
 </style>
