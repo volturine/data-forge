@@ -10,9 +10,11 @@ Default Model: minimax m2.1 free
 
 As an autonomous agent you will:
 
-1. Call vibe_check after planning and before major actions.
-2. Provide the full user request and your current plan.
-3. Optionally, record resolved issues with vibe_learn.
+1. Follow the **Explore → Plan → Code → Commit** workflow for complex tasks
+2. Use `vibe_check` after planning and before major actions
+3. Use `vibe_distill` when plans become overly complex
+4. Record resolved issues with `vibe_learn` to improve future sessions
+5. Use the **Second Opinion** agent before completing any significant task
 
 ### Backend (Python/FastAPI)
 
@@ -164,23 +166,65 @@ npm run lint && npm run format  # Lint and format
 
 ## Available Agents
 
-### PRD Generator
+### Subagents
 
-Creates detailed Product Requirements Documents from feature requests.
+| Agent | Description | When to Use |
+|-------|-------------|-------------|
+| **Second Opinion** | Validates implementations, provides independent code review | Before completing ANY task |
+| **E2E Testing** | Playwright-based end-to-end testing with structured reporting | Automated UI testing |
+| **Docks** | Technical documentation writer with concise, friendly tone | Always use when writing docs |
+| **Learn** | Extracts non-obvious learnings to AGENTS.md files | After sessions to record discoveries |
+| **Researcher** | Web research using Perplexity for docs and best practices | When current information is needed |
+| **Debugger** | Systematic investigation and root cause analysis | When debugging complex issues |
 
-Usage: Run the "PRD Generator" agent when you need to document a new feature.
+### Slash Commands
 
-### Task List Generator
+| Command | Description |
+|---------|-------------|
+| `/prd-generator` | Creates detailed PRDs from feature requests |
+| `/tasklist-generator` | Creates implementation task lists from PRDs |
+| `/plan` | Create implementation plan before coding |
+| `/review` | Quick code review using Second Opinion agent |
+| `/clarify` | Ask clarifying questions before starting work |
+| `/rmslop` | Removes AI-generated code slop (extra comments, defensive checks) |
+| `/spellcheck` | Checks spelling/grammar in markdown file changes |
 
-Creates implementation task lists from PRDs or feature requirements.
+## MCP Servers
 
-Usage: Run the "Task List Generator" agent after creating a PRD or when you have clear requirements.
+| Server | Description |
+|--------|-------------|
+| **Svelte** | Svelte documentation, autofixer, and playground links |
+| **Perplexity** | AI search, research, and reasoning capabilities |
+| **Playwright** | Remote browser automation for E2E testing |
+| **Vibe Check** | Metacognitive oversight to prevent tunnel vision and over-engineering |
 
-### Code Reviewer
+### Vibe Check Tools
 
-Automated code review following project conventions.
+- `vibe_check` - Pattern interrupt that challenges assumptions during planning/implementation/review
+- `vibe_distill` - Simplifies complex plans back to minimal viable approach
+- `vibe_learn` - Records mistakes and solutions for future pattern recognition
 
-Usage: Automatic via OpenCode integration. Reviews Python and Svelte/TypeScript files.
+## Recommended Workflows
+
+### Explore → Plan → Code → Commit
+
+For most features and bug fixes:
+
+1. **Explore**: Read relevant files, understand the codebase context
+2. **Plan**: Create a plan (use `/plan`), get approval before coding
+3. **Code**: Implement the solution
+4. **Review**: Use Second Opinion agent to validate
+5. **Commit**: Create a well-formed commit
+
+### Test-Driven Development
+
+For algorithmic or well-defined work:
+
+1. Write tests based on expected input/output
+2. Run tests, confirm they fail
+3. Implement code to pass tests
+4. Refactor if needed
+5. Commit tests and implementation together
 
 ## Environment Setup
 
@@ -198,153 +242,22 @@ Copy `.env.example` to `.env` in both `backend/` and `frontend/` directories.
 
 This project uses Playwright MCP for end-to-end testing with a subagent-based approach to keep the main processing agent uncluttered.
 
-#### Philosophy
-
-- Use subagents for testing to avoid cluttering main processing agents
-- Test every functionality by creating a new analysis for each test session
-- Test compute pipeline nodes (operations) thoroughly
-- Subagents run Playwright tests in parallel while the main agent coordinates
-
-#### Testing Workflow
-
-1. **Per-Feature Testing**: Each new feature gets its own analysis to avoid state pollution
-2. **Node Testing**: Test compute nodes (operations) by adding them to pipelines and verifying:
-   - Config panel opens correctly
-   - Step appears in pipeline
-   - Save succeeds
-   - Preview/data loads correctly
-
-3. **Subagent Pattern**:
-   ```typescript
-   // Main agent coordinates
-   await task((subagent_type = "general"), (command = "/test-feature-x"));
-   // Subagent runs Playwright, reports results back
-   ```
-
-#### Quick Test Script
+#### Quick Start
 
 ```bash
 # Start services
-cd /home/kripso/workspace/polars-fastapi-svelte/backend
-uv run main.py &    # Backend on port 8000
-cd ../frontend
-npm run dev -- --port 5173 --host &  # Frontend on port 5173
-
-# Run tests via Playwright MCP
+cd backend && uv run main.py &
+cd frontend && npm run dev -- --port 5173 --host &
 ```
 
-#### Available as OpenCode Skill
+#### Testing Workflow
 
-This E2E Testing Skill is available as an OpenCode agent for automated testing.
+1. Create a new analysis for each test session (avoid state pollution)
+2. Use descriptive names like `E2E Test - Phase 5 Operations`
+3. Report results in table format with status, feature, and notes
+4. Update `E2E_TEST_RESULTS.md` after each session
 
-- ✅ New analysis creation flow
-- ✅ Data source selection
-- ✅ All operation config panels
-- ✅ Pipeline step management (add, edit, delete, reorder)
-- ✅ Save/load state persistence
-- ✅ Engine lifecycle (creation, monitor, shutdown)
-- ✅ Export functionality
-- ✅ Error handling
-
-#### 1. Subagent Pattern for Testing
-
-**Why**: Avoids cluttering main processing agent with Playwright interactions.
-
-**How**:
-
-```typescript
-// Main agent coordinates testing
-await task((subagent_type = "general"), (command = "/test-phase-5-operations"));
-// Subagent runs Playwright, reports results back
-```
-
-**Benefits**:
-
-- Parallel test execution possible
-- Clean separation of concerns
-- Each test gets fresh analysis (no state pollution)
-- Standardized reporting format
-
-#### 2. File Upload Monitoring
-
-**Check uploads directory**:
-
-```bash
-ls -la /home/kripso/workspace/polars-fastapi-svelte/data/uploads/
-```
-
-Files are renamed to UUIDs when uploaded (e.g., `6ce4c9e9-b4de-4dde-a143-80f772390972.csv`).
-
-#### 3. Test Organization
-
-**Use Phases Structure**:
-
-- Phase 1: Home Page
-- Phase 2: Create Analysis Wizard
-- Phase 3: Data Sources Management
-- Phase 4: Analysis Editor
-- Phase 5: Operations Pipeline
-- Phase 6: Engine Lifecycle
-- Phase 7: Export Functionality
-- Phase 8: Error Handling
-
-**Analysis Naming**: Use descriptive names like `E2E Test - Phase 5 Operations` to avoid confusion.
-
-#### 4. Status Tracking
-
-**Use todo list** to track progress across sessions:
-
-```typescript
-todowrite({
-  todos: [
-    { id: "1", content: "Test Phase 5 operations", status: "in_progress" },
-    { id: "2", content: "Update E2E_TEST_RESULTS.md", status: "pending" },
-  ],
-});
-```
-
-#### 5. Documentation
-
-**E2E_TEST_RESULTS.md is source of truth**:
-
-- Track completed/blocked tests per phase
-- Document bugs found and fixes applied
-- Note Docker MCP limitations
-- Update after each testing session
-
-**Sections to include**:
-
-- Test execution log
-- Phase-by-phase results
-- Key findings (what works, what needs testing)
-- Known issues
-- Session notes
-
-#### 6. Playwright MCP Limitations
-
-| Feature                 | Status                 | Workaround                       |
-| ----------------------- | ---------------------- | -------------------------------- |
-| Host file access        | ❌ Blocked             | check the ./data local directory |
-| Slow network simulation | ❌ Blocked             | Manual test                      |
-| Drag-drop operations    | ⚠️ Partial             | Manual verification              |
-| WebSocket connections   | ⚠️ Errors non-critical | Ignore HMR errors                |
-
-#### 7. Frontend URLs for Testing
-
-- **Development**: http://192.168.1.140:5173 (network-accessible)
-- **Local**: http://localhost:5173
-- **Backend**: http://localhost:8000
-
-**Start services**:
-
-```bash
-cd /home/kripso/workspace/polars-fastapi-svelte/backend
-uv run main.py &    # Backend on port 8000
-cd ../frontend
-npm run dev -- --port 5173 --host &  # Frontend on port 5173
-```
-
-#### 8. Testing Checklist Template
+#### Testing Checklist
 
 When testing new features, verify:
 
@@ -355,26 +268,19 @@ When testing new features, verify:
 - [ ] Error handling works
 - [ ] Update E2E_TEST_RESULTS.md
 
+#### Playwright MCP Limitations
+
+| Feature | Status | Workaround |
+|---------|--------|------------|
+| Host file access | Blocked | Check `./data` local directory |
+| Drag-drop operations | Partial | Manual verification |
+| WebSocket connections | Errors non-critical | Ignore HMR errors |
+
 ### Frontend Responsiveness During Testing
 
-**CRITICAL**: During E2E testing with Playwright, if any operation times out or the UI becomes unresponsive:
+**CRITICAL**: If any operation times out or UI becomes unresponsive during testing:
 
-1. **IMMEDIATELY investigate** - An unresponsive frontend usually indicates:
-   - Infinite loop in JavaScript/TypeScript code
-   - Uncaught exception in event handlers
-   - Excessive re-rendering cycles
-   - Memory leak causing browser to freeze
-
-2. **Check for these common causes**:
-   - Missing dependency in `$derived` or `$effect` causing infinite recursion
-   - `$state` updates that trigger effects that update the same state
-   - Incorrect use of `$effect` without cleanup functions
-   - Too many concurrent reactive updates
-
-3. **If UI is unresponsive**:
-   - Open browser DevTools console for errors
-   - Check `page.snapshot()` for infinite loops in rendering
-   - Review recent code changes for potential issues
-   - Run `npm run check` for TypeScript errors that might cause runtime issues
-
-4. **Never ignore timeouts** - A timeout during testing is a signal that something is wrong, not just a slow operation. An infinite loop will cause the browser to become completely unresponsive, requiring a full restart.
+1. **Investigate immediately** - likely indicates infinite loop or uncaught exception
+2. Check for: missing dependencies in `$derived`/`$effect`, `$state` update loops
+3. Open DevTools console, run `npm run check` for TypeScript errors
+4. **Never ignore timeouts** - they signal something is wrong
