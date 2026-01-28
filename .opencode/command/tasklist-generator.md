@@ -1,7 +1,5 @@
 ---
 description: Creates implementation task lists from PRDs or feature requirements
-mode: subagent
-model: opencode/minimax-m2.1-free
 temperature: 0.5
 ---
 

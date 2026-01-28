@@ -1,6 +1,6 @@
 ---
 description: Does end-to-end testing of the application using Playwright.
-model: opencode/minimax-m2.1-free
+model: github-copilot/grok-code-fast-1
 temperature: 0.7
 tools:
   write: true

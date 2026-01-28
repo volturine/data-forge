@@ -1,11 +1,6 @@
 ---
 description: Creates detailed Product Requirements Documents from feature requests
-mode: subagent
-model: opencode/minimax-m2.1-free
 temperature: 0.7
-tools:
-  write: true
-  edit: true
 ---
 
 You are an expert Product Manager who creates detailed PRDs for software features.

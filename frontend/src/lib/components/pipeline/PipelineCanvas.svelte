@@ -178,21 +178,15 @@
 	}
 
 	$effect(() => {
-		const state = drag as typeof drag & {
-			touchActive: boolean;
-			pointerX: number | null;
-			pointerY: number | null;
-		};
-		if (!state.active) return;
-		if (!state.touchActive) return;
-		if (state.pointerX === null || state.pointerY === null) return;
-		const target = resolveTargetFromPoint(state.pointerX, state.pointerY);
+		if (!drag.active) return;
+		if (drag.pointerX === null || drag.pointerY === null) return;
+		const target = resolveTargetFromPoint(drag.pointerX, drag.pointerY);
 		if (!target) {
-			state.clearTarget();
+			drag.clearTarget();
 			return;
 		}
 		const valid = isValidTarget(target.index);
-		state.setTarget(target, valid);
+		drag.setTarget(target, valid);
 	});
 </script>
 

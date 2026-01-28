@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
-	import { useEventListener } from 'runed';
 
 	// Step type metadata with icons and labels
 	const stepTypeInfo: Record<string, { label: string; icon: string }> = {
@@ -29,42 +28,17 @@
 		export: { label: 'Export', icon: '📤' }
 	};
 
-	let position = $state<{ x: number; y: number } | null>(null);
-
-	// Derive local reactive values from drag store
+	// Derive reactive values from drag store
 	let active = $derived(drag.active);
 	let type = $derived(drag.type);
 	let info = $derived(type ? stepTypeInfo[type] : null);
 	let isReorder = $derived(drag.isReorder);
+	let pointerX = $derived(drag.pointerX);
+	let pointerY = $derived(drag.pointerY);
 
-	$effect(() => {
-		if (!active) {
-			position = null;
-			return;
-		}
-
-		const state = drag as typeof drag & {
-			touchActive: boolean;
-			pointerX: number | null;
-			pointerY: number | null;
-		};
-		if (state.touchActive) {
-			position =
-				state.pointerX !== null && state.pointerY !== null
-					? { x: state.pointerX, y: state.pointerY }
-					: null;
-			return;
-		}
-	});
-
-	useEventListener(
-		() => document,
-		'dragover',
-		(event: DragEvent) => {
-			if (!active) return;
-			position = { x: event.clientX, y: event.clientY };
-		},
-		{ passive: true }
+	// Position is simply the tracked pointer coordinates
+	let position = $derived(
+		active && pointerX !== null && pointerY !== null ? { x: pointerX, y: pointerY } : null
 	);
 </script>
 

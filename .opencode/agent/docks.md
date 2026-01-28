@@ -1,6 +1,6 @@
 ---
 description: ALWAYS use this when writing docs
-model: opencode/minimax-m2.1-free
+model: github-copilot/grok-code-fast-1
 color: "#38A3EE"
 ---
 

@@ -40,28 +40,14 @@
 	let exportError = $state<string | null>(null);
 
 	let dragPreviewEl = $state<HTMLImageElement | null>(null);
-	let touchDragging = $state(false);
-	let touchConsumed = $state(false);
+	let dragging = $state(false);
+	let clickConsumed = $state(false);
+	let longPressTimer = $state<number | null>(null);
 	let pointerStartX = $state<number | null>(null);
 	let pointerStartY = $state<number | null>(null);
 
 	const longPressDelay = 180;
 	const dragThreshold = 8;
-
-	// Throttled for touch move
-	let lastTouchMoveTime = $state(0);
-	const touchMoveThrottleMs = 16;
-
-	function throttledTouchMove(event: PointerEvent) {
-		const now = performance.now();
-		if (now - lastTouchMoveTime < touchMoveThrottleMs) return;
-		lastTouchMoveTime = now;
-		if (!touchDragging) return;
-		const state = drag as typeof drag & {
-			setPointer: (x: number, y: number) => void;
-		};
-		state.setPointer(event.clientX, event.clientY);
-	}
 
 	// Derived values from declarative config
 	let stepConfig = $derived(stepTypes[step.type] || defaultStepType);
@@ -75,107 +61,89 @@
 	// Is another node being dragged (not this one)?
 	let isOtherDragging = $derived(drag.active && drag.stepId !== step.id);
 
-	function handleDragStart(event: DragEvent) {
-		if (event.dataTransfer) {
-			event.dataTransfer.setData('application/x-pipeline-step', step.id);
-			event.dataTransfer.setData('text/plain', step.id);
-			event.dataTransfer.effectAllowed = 'move';
-			if (dragPreviewEl) {
-				event.dataTransfer.setDragImage(dragPreviewEl, 0, 0);
-			}
-		}
-		requestAnimationFrame(() => {
-			isDragging = true;
-			drag.startMove(step.id, step.type);
-		});
-	}
-
-	function handleDragEnd() {
-		isDragging = false;
-		if (drag.active) {
-			drag.end();
-		}
-	}
-
-	function handleTouchClick(event: MouseEvent) {
-		if (!touchConsumed) return;
+	function handleClick(event: MouseEvent) {
+		if (!clickConsumed) return;
 		event.preventDefault();
 		event.stopPropagation();
-		touchConsumed = false;
+		clickConsumed = false;
 	}
 
-	function shouldStartTouch(event: PointerEvent) {
-		return event.pointerType === 'touch';
-	}
-
-	function startLongPress(event: PointerEvent) {
-		if (!shouldStartTouch(event)) return;
+	function startDrag(event: PointerEvent) {
 		const target = event.currentTarget as HTMLElement | null;
 		const handle = target?.closest('[data-drag-handle]');
 		if (!handle) return;
+
 		pointerStartX = event.clientX;
 		pointerStartY = event.clientY;
-		window.setTimeout(() => {
-			touchDragging = true;
-			touchConsumed = true;
-			isDragging = true;
-			if (event.cancelable) {
-				event.preventDefault();
-			}
-			const state = drag as typeof drag & {
-				startMoveTouch: (
-					stepId: string,
-					type: string,
-					pointerId: number,
-					pointerX: number,
-					pointerY: number
-				) => void;
-			};
-			state.startMoveTouch(step.id, step.type, event.pointerId, event.clientX, event.clientY);
-			if (event.currentTarget instanceof HTMLElement) {
-				event.currentTarget.setPointerCapture(event.pointerId);
-			}
-		}, longPressDelay);
+
+		// For touch inputs, require long press to prevent accidental drags
+		if (event.pointerType === 'touch') {
+			longPressTimer = window.setTimeout(() => {
+				initiateDrag(event);
+			}, longPressDelay);
+		} else {
+			// For mouse/trackpad, start drag immediately
+			initiateDrag(event);
+		}
 	}
 
-	function handleTouchMove(event: PointerEvent) {
-		if (!shouldStartTouch(event)) return;
-		if (pointerStartX !== null && pointerStartY !== null) {
+	function initiateDrag(event: PointerEvent) {
+		dragging = true;
+		clickConsumed = true;
+		isDragging = true;
+		if (event.cancelable) {
+			event.preventDefault();
+		}
+		drag.startMove(step.id, step.type, event.pointerId, event.clientX, event.clientY);
+		if (event.currentTarget instanceof HTMLElement) {
+			event.currentTarget.setPointerCapture(event.pointerId);
+		}
+	}
+
+	function cancelLongPress() {
+		if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+		longPressTimer = null;
+		pointerStartX = null;
+		pointerStartY = null;
+	}
+
+	function handlePointerMove(event: PointerEvent) {
+		// If we haven't started dragging yet, check if pointer moved too much (cancel long press)
+		if (pointerStartX !== null && pointerStartY !== null && !dragging) {
 			const deltaX = Math.abs(event.clientX - pointerStartX);
 			const deltaY = Math.abs(event.clientY - pointerStartY);
 			const moved = deltaX > dragThreshold || deltaY > dragThreshold;
-			if (moved && !touchDragging) {
-				pointerStartX = null;
-				pointerStartY = null;
+			if (moved) {
+				cancelLongPress();
 				return;
 			}
 		}
-		if (!touchDragging) return;
-		throttledTouchMove(event);
+
+		// If we're dragging, update pointer position
+		if (!dragging) return;
+		drag.setPointer(event.clientX, event.clientY);
 		event.preventDefault();
 	}
 
-	function finishTouchDrag(event: PointerEvent) {
-		if (!shouldStartTouch(event)) return;
-		if (touchDragging && drag.active) {
+	function finishDrag(event: PointerEvent) {
+		if (dragging && drag.active) {
 			if (drag.target && drag.stepId && drag.valid) {
 				onTouchMove(drag.stepId, drag.target);
 			}
 			drag.end();
 		}
-		const wasTouchDragging = touchDragging;
-		touchDragging = false;
-		touchConsumed = wasTouchDragging;
+		const wasDragging = dragging;
+		dragging = false;
+		clickConsumed = wasDragging;
 		isDragging = false;
-		pointerStartX = null;
-		pointerStartY = null;
+		cancelLongPress();
 		if (event.currentTarget instanceof HTMLElement) {
 			event.currentTarget.releasePointerCapture(event.pointerId);
 		}
 	}
 
 	$effect(() => {
-		if (!touchDragging) return;
+		if (!dragging) return;
 		document.body.classList.add('touch-dragging');
 		return () => {
 			document.body.classList.remove('touch-dragging');
@@ -236,17 +204,14 @@
 			<!-- Drag handle (6-dot grip) -->
 			<button
 				class="drag-handle"
-				class:touch-dragging={touchDragging}
+				class:dragging
 				title="Drag to reorder"
 				type="button"
-				draggable="true"
-				ondragstart={handleDragStart}
-				ondragend={handleDragEnd}
-				onpointerdown={startLongPress}
-				onpointermove={handleTouchMove}
-				onpointerup={finishTouchDrag}
-				onpointercancel={finishTouchDrag}
-				onclick={handleTouchClick}
+				onpointerdown={startDrag}
+				onpointermove={handlePointerMove}
+				onpointerup={finishDrag}
+				onpointercancel={finishDrag}
+				onclick={handleClick}
 				data-drag-handle="true"
 			>
 				<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
@@ -394,7 +359,7 @@
 	.drag-handle:active {
 		cursor: grabbing;
 	}
-	.drag-handle.touch-dragging {
+	.drag-handle.dragging {
 		user-select: none;
 		-webkit-user-select: none;
 		-webkit-touch-callout: none;
