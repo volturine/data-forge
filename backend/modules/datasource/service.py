@@ -212,9 +212,9 @@ async def _extract_schema(datasource: DataSource) -> SchemaInfo:
             'source_type': datasource.source_type,
             **datasource.config,
         }
-        frame = load_datasource(config).collect()
-        schema = frame.schema
-        row_count = frame.height
+        lazy = load_datasource(config)
+        schema = lazy.collect_schema()
+        row_count = lazy.select(pl.len()).collect().item()
 
         columns = [
             ColumnSchema(

@@ -19,6 +19,7 @@ dependencies = [
     "aiosqlite",
     "alembic",
     "python-multipart",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [project.optional-dependencies]

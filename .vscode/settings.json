@@ -12,7 +12,9 @@
     "editor.defaultFormatter": "svelte.svelte-vscode"
   },
   "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
-  "python.testing.pytestArgs": ["backend/tests"],
+  "python.envFile": "${workspaceFolder}/backend/.env",
+  "python.testing.pytestArgs": ["${workspaceFolder}/backend/tests"],
+  "python.testing.cwd": "${workspaceFolder}/backend/tests",
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
   "svelte.enable-ts-plugin": true,
@@ -29,5 +31,6 @@
     "**/.ruff_cache": true,
     "**/node_modules": true,
     "**/.svelte-kit": true
-  }
+  },
+  "python-envs.pythonProjects": []
 }

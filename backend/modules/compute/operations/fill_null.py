@@ -59,7 +59,7 @@ class FillNullHandler(OperationHandler):
 
             if columns:
                 return lf.with_columns([build_expr(col) for col in columns])
-            return lf.with_columns([build_expr(col) for col in lf.columns])
+            return lf.with_columns([build_expr(col) for col in lf.collect_schema().names()])
 
         if validated.strategy in {'forward', 'backward', 'mean', 'median', 'zero'}:
             strategy = self._get_fill_strategy(validated.strategy)
@@ -67,7 +67,7 @@ class FillNullHandler(OperationHandler):
                 raise ValueError(f'Unsupported fill_null strategy: {validated.strategy}')
             if columns:
                 return lf.with_columns([strategy(pl.col(col)) for col in columns])
-            return lf.with_columns([strategy(pl.col(col)) for col in lf.columns])
+            return lf.with_columns([strategy(pl.col(col)) for col in lf.collect_schema().names()])
 
         if validated.strategy == 'drop_rows':
             if columns:

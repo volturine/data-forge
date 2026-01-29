@@ -5,7 +5,8 @@ from modules.compute.operations.filter import FilterHandler
 from modules.compute.operations.groupby import GroupByHandler
 from modules.compute.operations.join import JoinHandler
 from modules.compute.operations.pivot import PivotHandler
-from modules.compute.operations.simple import SelectHandler, SortHandler
+from modules.compute.operations.select import SelectHandler
+from modules.compute.operations.sort import SortHandler
 from modules.compute.operations.strings import StringTransformHandler
 from modules.compute.operations.timeseries import TimeseriesHandler
 from modules.compute.operations.union import UnionByNameHandler
@@ -125,8 +126,6 @@ def test_pivot_handler():
 
 
 def test_select_and_sort_handlers():
-    select = SelectHandler()
-    sort = SortHandler()
-    lf = select(_frame(), {'columns': ['age']})
-    lf = sort(lf, {'columns': ['age'], 'descending': [True]})
+    lf = SelectHandler(_frame(), {'columns': ['age']})
+    lf = SortHandler(lf, {'columns': ['age'], 'descending': [True]})
     assert lf.collect()['age'].to_list()[0] == 40
