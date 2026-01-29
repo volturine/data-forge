@@ -11,6 +11,7 @@
 	import { sendKeepalive, spawnEngine } from '$lib/api/compute';
 	import { FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
+	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
@@ -25,6 +26,7 @@
 	let isSaving = $state(false);
 	let previewVersions = $state(new SvelteMap<string, number>());
 	let lastPreviewPipelines = $state(new SvelteMap<string, string>());
+	let draftLoaded = $state(false);
 
 	// Track pipeline state at last preview to detect staleness
 	const activeTabId = $derived(analysisStore.activeTab?.id ?? null);
@@ -32,6 +34,7 @@
 	const previewVersion = $derived(activeTabId ? previewVersions.get(activeTabId) ?? 0 : 0);
 	const lastPreviewPipeline = $derived(activeTabId ? lastPreviewPipelines.get(activeTabId) ?? '' : '');
 	const isPreviewStale = $derived(!!previewVersion && lastPreviewPipeline !== currentPipelineKey);
+	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
 	function handlePreview() {
 		if (!activeTabId) return;
@@ -45,6 +48,90 @@
 			}, 1000);
 		}
 	}
+
+	$effect(() => {
+		if (!analysisId) return;
+		draftLoaded = false;
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		if (!storageKey || draftLoaded) return;
+		if (!analysisStore.tabs.length) return;
+		const raw = window.localStorage.getItem(storageKey);
+		if (!raw) {
+			draftLoaded = true;
+			return;
+		}
+		const parsed = JSON.parse(raw) as {
+			analysisId: string;
+			tabs: AnalysisTab[];
+			activeTabId: string | null;
+			resourceConfig: EngineResourceConfig | null;
+			engineDefaults: EngineDefaults | null;
+			previewVersions: Record<string, number>;
+			lastPreviewPipelines: Record<string, string>;
+			selectedStepId: string | null;
+			leftPaneCollapsed: boolean;
+			rightPaneCollapsed: boolean;
+			saveStatus: SaveStates;
+		};
+		if (parsed.analysisId !== analysisId) {
+			draftLoaded = true;
+			return;
+		}
+		analysisStore.setTabs(parsed.tabs);
+		analysisStore.activeTabId = parsed.activeTabId;
+		analysisStore.setResourceConfig(parsed.resourceConfig);
+		analysisStore.setEngineDefaults(parsed.engineDefaults);
+		selectedStepId = parsed.selectedStepId;
+		leftPaneCollapsed = parsed.leftPaneCollapsed;
+		rightPaneCollapsed = parsed.rightPaneCollapsed;
+		const versions = new SvelteMap<string, number>();
+		for (const [key, value] of Object.entries(parsed.previewVersions ?? {})) {
+			versions.set(key, value);
+		}
+		previewVersions = versions;
+		const pipelines = new SvelteMap<string, string>();
+		for (const [key, value] of Object.entries(parsed.lastPreviewPipelines ?? {})) {
+			pipelines.set(key, value);
+		}
+		lastPreviewPipelines = pipelines;
+		if (parsed.saveStatus === 'unsaved') {
+			saveStatus.send('markUnsaved');
+		} else {
+			saveStatus.send('saveComplete');
+		}
+		draftLoaded = true;
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		if (!storageKey || !draftLoaded) return;
+		if (!analysisStore.tabs.length) return;
+		const payload = {
+			analysisId,
+			tabs: analysisStore.tabs,
+			activeTabId: analysisStore.activeTabId,
+			resourceConfig: analysisStore.resourceConfig,
+			engineDefaults: analysisStore.engineDefaults,
+			previewVersions: Object.fromEntries(previewVersions.entries()),
+			lastPreviewPipelines: Object.fromEntries(lastPreviewPipelines.entries()),
+			selectedStepId,
+			leftPaneCollapsed,
+			rightPaneCollapsed,
+			saveStatus: saveStatus.current
+		};
+		window.localStorage.setItem(storageKey, JSON.stringify(payload));
+	});
+
+	$effect(() => {
+		if (!selectedStepId) {
+			selectedStepState = null;
+			return;
+		}
+		selectedStepState = analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
+	});
 	type SaveStates = 'saved' | 'unsaved' | 'saving';
 	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
 	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
