@@ -239,12 +239,12 @@
 		</div>
 	{:else}
 		<div class="steps-container" role="list">
-			<DatasourceNode
-				{datasource}
-				tabName={_tabName}
-				onChangeDatasource={_onChangeDatasource}
-				onRenameTab={_onRenameTab}
-			/>
+		<DatasourceNode
+			{datasource}
+			tabName={_tabName}
+			onChangeDatasource={_onChangeDatasource}
+			onRenameTab={_onRenameTab}
+		/>
 			{#if shouldShowInsert(0)}
 				<div
 					class="insert-zone"

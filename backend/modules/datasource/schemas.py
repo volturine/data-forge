@@ -16,6 +16,31 @@ class SchemaInfo(BaseModel):
 
     columns: list[ColumnSchema]
     row_count: int | None = None
+    sheet_names: list[str] | None = None
+
+
+class ExcelPreflightResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    preflight_id: str
+    sheet_names: list[str]
+    tables: dict[str, list[str]]
+    named_ranges: list[str]
+    preview: list[list[str | None]]
+    start_row: int
+    start_col: int
+    end_col: int
+    detected_end_row: int | None
+
+
+class ExcelPreflightPreviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    preview: list[list[str | None]]
+    start_row: int
+    start_col: int
+    end_col: int
+    detected_end_row: int | None
 
 
 class CSVOptions(BaseModel):
@@ -35,6 +60,14 @@ class FileDataSourceConfig(BaseModel):
     file_type: str
     options: dict = {}
     csv_options: CSVOptions | None = None
+    sheet_name: str | None = None
+    start_row: int | None = None
+    start_col: int | None = None
+    end_col: int | None = None
+    end_row: int | None = None
+    has_header: bool | None = None
+    table_name: str | None = None
+    named_range: str | None = None
 
 
 class DatabaseDataSourceConfig(BaseModel):

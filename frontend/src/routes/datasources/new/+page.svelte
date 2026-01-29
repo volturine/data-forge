@@ -2,6 +2,8 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { uploadFile, connectDatabase, connectApi, connectDuckDB } from '$lib/api/datasource';
+	import { preflightExcel, previewExcel, confirmExcel } from '$lib/api/excel';
+	import type { ExcelPreflightResponse, ExcelPreviewResponse } from '$lib/api/excel';
 	import type { CSVOptions } from '$lib/types/datasource';
 
 	type Tab = 'file' | 'database' | 'api';
@@ -15,6 +17,20 @@
 	// File upload state
 	let file = $state<File | null>(null);
 	let fileName = $state('');
+	let preflightId = $state<string | null>(null);
+	let sheetNames = $state<string[]>([]);
+	let tableMap = $state<Record<string, string[]>>({});
+	let namedRanges = $state<string[]>([]);
+	let previewGrid = $state<Array<Array<string | null>>>([]);
+	let selectedSheet = $state<string>('');
+	let selectedTable = $state<string>('');
+	let selectedRange = $state<string>('');
+	let startRow = $state(0);
+	let startCol = $state(0);
+	let endCol = $state(0);
+	let detectedEndRow = $state<number | null>(null);
+	let excelHeader = $state(true);
+	let previewLoading = $state(false);
 
 	// CSV options state
 	let delimiter = $state(',');
@@ -44,6 +60,18 @@
 		const target = event.target as HTMLInputElement;
 		if (target.files && target.files.length > 0) {
 			file = target.files[0];
+			preflightId = null;
+			sheetNames = [];
+			tableMap = {};
+			namedRanges = [];
+			previewGrid = [];
+			selectedSheet = '';
+			selectedTable = '';
+			selectedRange = '';
+			startRow = 0;
+			startCol = 0;
+			endCol = 0;
+			detectedEndRow = null;
 			if (!fileName) {
 				fileName = file.name.replace(/\.[^/.]+$/, '');
 			}
@@ -53,6 +81,126 @@
 				showCsvOptions = false;
 			}
 		}
+	}
+
+	function cellLabel(col: number): string {
+		let idx = col + 1;
+		let label = '';
+		while (idx > 0) {
+			const rem = (idx - 1) % 26;
+			label = String.fromCharCode(65 + rem) + label;
+			idx = Math.floor((idx - 1) / 26);
+		}
+		return label;
+	}
+
+	async function runPreflight(): Promise<void> {
+		if (!file) return;
+		previewLoading = true;
+		const result = await preflightExcel(file, {
+			start_row: startRow,
+			start_col: startCol,
+			end_col: endCol,
+			has_header: excelHeader,
+			table_name: selectedTable || undefined,
+			named_range: selectedRange || undefined
+		});
+		result.match(
+			(data: ExcelPreflightResponse) => {
+				preflightId = data.preflight_id;
+				sheetNames = data.sheet_names;
+				tableMap = data.tables;
+				namedRanges = data.named_ranges;
+				previewGrid = data.preview;
+				selectedSheet = data.sheet_names[0] ?? '';
+				startRow = data.start_row;
+				startCol = data.start_col;
+				endCol = data.end_col;
+				detectedEndRow = data.detected_end_row;
+				previewLoading = false;
+			},
+			(err) => {
+				error = err.message || 'Preflight failed';
+				previewLoading = false;
+			}
+		);
+	}
+
+	async function refreshPreview(): Promise<void> {
+		if (!preflightId || !selectedSheet) return;
+		previewLoading = true;
+		const result = await previewExcel(preflightId, {
+			sheet_name: selectedSheet,
+			start_row: startRow,
+			start_col: startCol,
+			end_col: endCol,
+			has_header: excelHeader,
+			table_name: selectedTable || undefined,
+			named_range: selectedRange || undefined
+		});
+		result.match(
+			(data: ExcelPreviewResponse) => {
+				previewGrid = data.preview;
+				startRow = data.start_row;
+				startCol = data.start_col;
+				endCol = data.end_col;
+				detectedEndRow = data.detected_end_row;
+				previewLoading = false;
+			},
+			(err) => {
+				error = err.message || 'Preview failed';
+				previewLoading = false;
+			}
+		);
+	}
+
+	function applySheet(sheet: string) {
+		selectedSheet = sheet;
+		startRow = 0;
+		startCol = 0;
+		endCol = 0;
+		selectedTable = '';
+		selectedRange = '';
+		refreshPreview();
+	}
+
+	function applyTable(table: string) {
+		selectedTable = table;
+		selectedRange = '';
+		startRow = 0;
+		startCol = 0;
+		endCol = 0;
+		refreshPreview();
+	}
+
+	function applyNamedRange(range: string) {
+		selectedRange = range;
+		selectedTable = '';
+		startRow = 0;
+		startCol = 0;
+		endCol = 0;
+		refreshPreview();
+	}
+
+	function handleStartRow(row: number) {
+		startRow = row;
+		selectedTable = '';
+		selectedRange = '';
+		refreshPreview();
+	}
+
+	function handleStartCol(col: number) {
+		startCol = col;
+		selectedTable = '';
+		selectedRange = '';
+		refreshPreview();
+	}
+
+	function handleEndCol(col: number) {
+		endCol = col;
+		selectedTable = '';
+		selectedRange = '';
+		refreshPreview();
 	}
 
 	async function handleFileUpload() {
@@ -76,8 +224,31 @@
 		}
 
 		try {
-			await uploadFile(file, fileName, csvOptions);
-			goto(resolve('/datasources'), { invalidateAll: true });
+			if (file.name.endsWith('.xlsx')) {
+				if (!preflightId) {
+					error = 'Run preflight to select table bounds before uploading';
+					loading = false;
+					return;
+				}
+				const result = await confirmExcel(preflightId, fileName, {
+					sheet_name: selectedSheet,
+					start_row: startRow,
+					start_col: startCol,
+					end_col: endCol,
+					has_header: excelHeader,
+					table_name: selectedTable || undefined,
+					named_range: selectedRange || undefined
+				});
+				if (result.isErr()) {
+					error = result.error.message || 'Upload failed';
+					loading = false;
+					return;
+				}
+				goto(resolve('/datasources'), { invalidateAll: true });
+			} else {
+				await uploadFile(file, fileName, csvOptions);
+				goto(resolve('/datasources'), { invalidateAll: true });
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Upload failed';
 		} finally {
@@ -255,6 +426,121 @@
 								<option value="cp1252">Windows-1252</option>
 							</select>
 						</div>
+					</div>
+				{/if}
+
+				{#if file?.name.endsWith('.xlsx')}
+					<div class="excel-preflight">
+						<h3>Excel Table Selection</h3>
+						<div class="form-row">
+							<div class="form-group">
+								<label for="excel-sheet">Sheet</label>
+								<select
+									id="excel-sheet"
+									value={selectedSheet}
+									onchange={(event) => applySheet(event.currentTarget.value)}
+									disabled={loading || previewLoading || !sheetNames.length}
+								>
+									<option value="">Select sheet</option>
+									{#each sheetNames as sheet}
+										<option value={sheet}>{sheet}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="form-group">
+								<label for="excel-table">Excel Table</label>
+								<select
+									id="excel-table"
+									value={selectedTable}
+									onchange={(event) => applyTable(event.currentTarget.value)}
+									disabled={loading || previewLoading || !selectedSheet}
+								>
+									<option value="">Manual selection</option>
+									{#each (tableMap[selectedSheet] ?? []) as table}
+										<option value={table}>{table}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="form-group">
+								<label for="excel-range">Named Range</label>
+								<select
+									id="excel-range"
+									value={selectedRange}
+									onchange={(event) => applyNamedRange(event.currentTarget.value)}
+									disabled={loading || previewLoading}
+								>
+									<option value="">None</option>
+									{#each namedRanges as range}
+										<option value={range}>{range}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+
+						<div class="form-row">
+							<div class="form-group checkbox-group">
+								<input
+									id="excel-header"
+									type="checkbox"
+									bind:checked={excelHeader}
+									onchange={() => refreshPreview()}
+									disabled={loading || previewLoading}
+								/>
+								<label for="excel-header">First row is header</label>
+							</div>
+							<button
+								type="button"
+								class="btn-secondary"
+								onclick={runPreflight}
+								disabled={loading || previewLoading}
+							>
+								{previewLoading ? 'Loading preview…' : 'Run preflight'}
+							</button>
+						</div>
+
+						{#if preflightId}
+							<div class="preview-panel">
+								<div class="preview-meta">
+									<span>Start row: {startRow + 1}</span>
+									<span>Start col: {cellLabel(startCol)}</span>
+									<span>End col: {cellLabel(endCol)}</span>
+									{#if detectedEndRow !== null}
+										<span>Detected end row: {detectedEndRow + 1}</span>
+									{/if}
+								</div>
+								<div class="preview-grid">
+									<div class="preview-row header">
+										<div class="cell corner"></div>
+									{#each previewGrid[0] ?? [] as _cell, index}
+										<button
+											class="cell header"
+											onclick={() => handleEndCol(startCol + index)}
+										>
+											{cellLabel(startCol + index)}
+										</button>
+									{/each}
+									</div>
+									{#each previewGrid as row, rowIndex}
+										<div class="preview-row">
+											<button
+												class="cell header"
+												onclick={() => handleStartRow(startRow + rowIndex)}
+											>
+												{startRow + rowIndex + 1}
+											</button>
+											{#each row as cell, colIndex}
+												<button
+													class="cell"
+													onclick={() => handleStartCol(startCol + colIndex)}
+												>
+													{cell ?? ''}
+												</button>
+											{/each}
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
 					</div>
 				{/if}
 
@@ -553,6 +839,63 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: var(--space-4);
+	}
+	.excel-preflight {
+		background-color: var(--bg-tertiary);
+		padding: var(--space-4);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--border-primary);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+	}
+	.excel-preflight h3 {
+		margin: 0;
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		color: var(--fg-secondary);
+	}
+	.preview-panel {
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+		background: var(--bg-primary);
+	}
+	.preview-meta {
+		display: flex;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-3);
+		background: var(--bg-tertiary);
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		flex-wrap: wrap;
+	}
+	.preview-grid {
+		overflow: auto;
+		max-height: 320px;
+	}
+	.preview-row {
+		display: grid;
+		grid-auto-flow: column;
+		grid-auto-columns: minmax(120px, 1fr);
+	}
+	.cell {
+		padding: var(--space-2);
+		border-bottom: 1px solid var(--border-primary);
+		border-right: 1px solid var(--border-primary);
+		background: transparent;
+		text-align: left;
+		font-size: var(--text-xs);
+		color: var(--fg-secondary);
+		cursor: pointer;
+	}
+	.cell.header {
+		background: var(--bg-tertiary);
+		font-weight: var(--font-semibold);
+		color: var(--fg-primary);
+	}
+	.cell.corner {
+		background: var(--bg-tertiary);
 	}
 	.checkbox-group {
 		flex-direction: row;

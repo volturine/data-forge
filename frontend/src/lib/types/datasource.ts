@@ -7,6 +7,7 @@ export interface ColumnSchema {
 export interface SchemaInfo {
 	columns: ColumnSchema[];
 	row_count: number | null;
+	sheet_names?: string[] | null;
 }
 
 export interface CSVOptions {
@@ -22,6 +23,14 @@ export interface FileDataSourceConfig {
 	file_type: string;
 	options?: Record<string, unknown>;
 	csv_options?: CSVOptions | null;
+	sheet_name?: string | null;
+	start_row?: number | null;
+	start_col?: number | null;
+	end_col?: number | null;
+	end_row?: number | null;
+	has_header?: boolean | null;
+	table_name?: string | null;
+	named_range?: string | null;
 }
 
 export interface DatabaseDataSourceConfig {

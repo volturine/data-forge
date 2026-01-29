@@ -46,15 +46,17 @@ class DatasourceStore {
 		);
 	}
 
-	async getSchema(id: string): Promise<SchemaInfo> {
+	async getSchema(id: string, sheetName?: string): Promise<SchemaInfo> {
 		const cached = this.schemas.get(id);
-		if (cached) return cached;
+		if (cached && !sheetName) return cached;
 
-		const result = await getDatasourceSchema(id);
+		const result = await getDatasourceSchema(id, sheetName);
 		return result.match(
 			(schema) => {
-				this.schemas.set(id, schema);
-				this.schemas = new Map(this.schemas);
+				if (!sheetName) {
+					this.schemas.set(id, schema);
+					this.schemas = new Map(this.schemas);
+				}
 				return schema;
 			},
 			(_err) => {

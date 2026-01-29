@@ -183,6 +183,7 @@
 		markUnsaved();
 	}
 
+
 	function handleDeleteStep(stepId: string) {
 		analysisStore.removeStep(stepId);
 		if (selectedStepId === stepId) {
