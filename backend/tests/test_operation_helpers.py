@@ -1,12 +1,11 @@
 import polars as pl
 import pytest
 
-from modules.compute.registries.aggregations import get_aggregation
-from modules.compute.registries.exports import get_export_format
-from modules.compute.registries.fill_strategies import get_fill_strategy
-from modules.compute.registries.operators import get_operator
-from modules.compute.registries.timeseries import get_duration, get_extractor
-from modules.compute.registries.types import cast_value, get_polars_type
+from modules.compute.operations.exports import get_export_format
+from modules.compute.operations.fill_null import cast_value, get_fill_strategy, get_polars_type
+from modules.compute.operations.filter import get_operator
+from modules.compute.operations.groupby import get_aggregation
+from modules.compute.operations.timeseries import get_duration, get_extractor
 
 
 def test_get_operator():
@@ -65,4 +64,4 @@ def test_export_format_invalid():
 
 def test_type_casting():
     assert cast_value('1', 'Int64') == 1
-    assert get_polars_type('Float64') == pl.Float64
+    assert get_polars_type('Float64') == pl.Float64()

@@ -1,4 +1,5 @@
 from modules.compute.operations.base import OperationHandler
+from modules.compute.operations.datasource import DatasourceHandler
 from modules.compute.operations.fill_null import FillNullHandler
 from modules.compute.operations.filter import FilterHandler
 from modules.compute.operations.groupby import GroupByHandler
@@ -25,6 +26,37 @@ from modules.compute.operations.strings import StringTransformHandler
 from modules.compute.operations.timeseries import TimeseriesHandler
 from modules.compute.operations.union import UnionByNameHandler
 
+__all__ = [
+    'OperationHandler',
+    'DatasourceHandler',
+    'FillNullHandler',
+    'FilterHandler',
+    'GroupByHandler',
+    'JoinHandler',
+    'PivotHandler',
+    'DeduplicateHandler',
+    'DropHandler',
+    'ExplodeHandler',
+    'ExportHandler',
+    'LimitHandler',
+    'NullCountHandler',
+    'RenameHandler',
+    'SampleHandler',
+    'SelectHandler',
+    'SortHandler',
+    'TopKHandler',
+    'UnpivotHandler',
+    'ValueCountsHandler',
+    'ViewHandler',
+    'WithColumnsHandler',
+    'StringTransformHandler',
+    'TimeseriesHandler',
+    'UnionByNameHandler',
+    'DatasourceHandler',
+    'register_operation',
+    'get_operation_handlers',
+]
+
 _OPERATION_REGISTRY: dict[str, OperationHandler] = {}
 
 
@@ -41,6 +73,7 @@ def get_operation_handlers() -> dict[str, OperationHandler]:
 
 
 def _register_defaults() -> None:
+    register_operation('datasource', DatasourceHandler())
     register_operation('filter', FilterHandler())
     register_operation('select', SelectHandler())
     register_operation('groupby', GroupByHandler())

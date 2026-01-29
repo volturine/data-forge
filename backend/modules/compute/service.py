@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, PipelineExecutionError
 from modules.compute.manager import get_manager
-from modules.compute.registries.exports import get_export_format
+from modules.compute.operations.exports import get_export_format
 from modules.compute.utils import await_engine_result, build_datasource_config, find_step_index
 from modules.datasource.models import DataSource
 

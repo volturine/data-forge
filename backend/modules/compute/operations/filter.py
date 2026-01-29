@@ -1,10 +1,10 @@
+from collections.abc import Callable
 from typing import Any
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
 from modules.compute.operations.base import OperationHandler, OperationParams
-from modules.compute.registries.operators import get_operator
 
 
 class FilterCondition(BaseModel):
@@ -21,6 +21,23 @@ class FilterParams(OperationParams):
 
 
 class FilterHandler(OperationHandler):
+    OPERATORS: dict[str, Callable[[pl.Expr, Any], pl.Expr]] = {
+        '=': lambda col, value: col == value,
+        '==': lambda col, value: col == value,
+        '!=': lambda col, value: col != value,
+        '>': lambda col, value: col > value,
+        '<': lambda col, value: col < value,
+        '>=': lambda col, value: col >= value,
+        '<=': lambda col, value: col <= value,
+        'contains': lambda col, value: col.str.contains(value),
+        'starts_with': lambda col, value: col.str.starts_with(value),
+        'ends_with': lambda col, value: col.str.ends_with(value),
+        'is_null': lambda col, _: col.is_null(),
+        'is_not_null': lambda col, _: col.is_not_null(),
+        'in': lambda col, value: col.is_in(value),
+        'not_in': lambda col, value: ~col.is_in(value),
+    }
+
     @property
     def name(self) -> str:
         return 'filter'
@@ -37,22 +54,31 @@ class FilterHandler(OperationHandler):
 
         exprs: list[pl.Expr] = []
         for cond in validated.conditions:
-            op = get_operator(cond.operator)
+            op = self._get_operator(cond.operator)
             exprs.append(op(pl.col(cond.column), cond.value))
 
         if len(exprs) == 1:
             return lf.filter(exprs[0])
 
+        combined = exprs[0]
         if validated.logic == 'AND':
-            combined = exprs[0]
             for expr in exprs[1:]:
                 combined = combined & expr
             return lf.filter(combined)
 
         if validated.logic == 'OR':
-            combined = exprs[0]
             for expr in exprs[1:]:
                 combined = combined | expr
             return lf.filter(combined)
 
         raise ValueError(f'Unsupported logic operator: {validated.logic}')
+
+    def _get_operator(self, name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
+        op = self.OPERATORS.get(name)
+        if not op:
+            raise ValueError(f'Unsupported filter operator: {name}')
+        return op
+
+
+def get_operator(name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
+    return FilterHandler()._get_operator(name)

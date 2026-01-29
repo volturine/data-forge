@@ -1,7 +1,8 @@
+from collections.abc import Callable
+
 import polars as pl
 
 from modules.compute.operations.base import OperationHandler, OperationParams
-from modules.compute.registries.timeseries import get_duration, get_extractor
 
 
 class TimeseriesParams(OperationParams):
@@ -16,6 +17,26 @@ class TimeseriesParams(OperationParams):
 
 
 class TimeseriesHandler(OperationHandler):
+    DT_EXTRACTORS: dict[str, str] = {
+        'year': 'year',
+        'month': 'month',
+        'day': 'day',
+        'hour': 'hour',
+        'minute': 'minute',
+        'second': 'second',
+        'quarter': 'quarter',
+        'week': 'week',
+        'dayofweek': 'weekday',
+    }
+
+    DURATION_BUILDERS: dict[str, Callable[[int], pl.Expr]] = {
+        'seconds': lambda value: pl.duration(seconds=value),
+        'minutes': lambda value: pl.duration(minutes=value),
+        'hours': lambda value: pl.duration(hours=value),
+        'days': lambda value: pl.duration(days=value),
+        'weeks': lambda value: pl.duration(weeks=value),
+    }
+
     @property
     def name(self) -> str:
         return 'timeseries'
@@ -31,7 +52,7 @@ class TimeseriesHandler(OperationHandler):
         validated = TimeseriesParams.model_validate(params)
 
         if validated.operation_type == 'extract':
-            method = get_extractor(validated.component or '')
+            method = self._get_extractor(validated.component or '')
             return lf.with_columns(getattr(pl.col(validated.column).dt, method)().alias(validated.new_column))
 
         if validated.operation_type in {'add', 'subtract', 'offset'}:
@@ -41,11 +62,11 @@ class TimeseriesHandler(OperationHandler):
                 raise ValueError('timeseries operation requires unit parameter')
 
             if validated.unit == 'months':
-                if validated.operation_type == 'subtract' or validated.direction == 'subtract':
-                    return lf.with_columns(pl.col(validated.column).dt.offset_by(f'-{validated.value}mo').alias(validated.new_column))
-                return lf.with_columns(pl.col(validated.column).dt.offset_by(f'{validated.value}mo').alias(validated.new_column))
+                subtracting = validated.operation_type == 'subtract' or validated.direction == 'subtract'
+                offset = f'-{validated.value}mo' if subtracting else f'{validated.value}mo'
+                return lf.with_columns(pl.col(validated.column).dt.offset_by(offset).alias(validated.new_column))
 
-            duration = get_duration(validated.unit, int(validated.value))
+            duration = self._get_duration(validated.unit, int(validated.value))
             subtracting = validated.operation_type == 'subtract' or validated.direction == 'subtract'
             expr = pl.col(validated.column) - duration if subtracting else pl.col(validated.column) + duration
             return lf.with_columns(expr.alias(validated.new_column))
@@ -56,3 +77,23 @@ class TimeseriesHandler(OperationHandler):
             return lf.with_columns((pl.col(validated.column2) - pl.col(validated.column)).alias(validated.new_column))
 
         raise ValueError(f'Unsupported timeseries operation: {validated.operation_type}')
+
+    def _get_extractor(self, component: str) -> str:
+        method = self.DT_EXTRACTORS.get(component)
+        if not method:
+            raise ValueError(f'Unsupported time component: {component}')
+        return method
+
+    def _get_duration(self, unit: str, value: int) -> pl.Expr:
+        builder = self.DURATION_BUILDERS.get(unit)
+        if not builder:
+            raise ValueError(f'Unsupported duration unit: {unit}')
+        return builder(value)
+
+
+def get_extractor(component: str) -> str:
+    return TimeseriesHandler()._get_extractor(component)
+
+
+def get_duration(unit: str, value: int) -> pl.Expr:
+    return TimeseriesHandler()._get_duration(unit, value)

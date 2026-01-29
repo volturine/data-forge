@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError, FileError
-from modules.compute.registries.datasources import load_datasource
+from modules.compute.operations.datasource import load_datasource
 from modules.datasource.models import DataSource
 from modules.datasource.schemas import ColumnSchema, CSVOptions, DataSourceResponse, SchemaInfo
 
