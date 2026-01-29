@@ -9,8 +9,6 @@
 
 	interface Props {
 		steps: PipelineStep[];
-		savedSteps?: PipelineStep[];
-		saveStatus?: 'saved' | 'unsaved' | 'saving';
 		analysisId?: string;
 		datasourceId?: string;
 		previewDatasourceId?: string;
@@ -28,8 +26,6 @@
 
 	let {
 		steps,
-		savedSteps = [],
-		saveStatus = 'saved',
 		analysisId,
 		datasourceId,
 		previewDatasourceId,
@@ -239,12 +235,13 @@
 		</div>
 	{:else}
 		<div class="steps-container" role="list">
-		<DatasourceNode
-			{datasource}
-			tabName={_tabName}
-			onChangeDatasource={_onChangeDatasource}
-			onRenameTab={_onRenameTab}
-		/>
+			<DatasourceNode
+				{datasource}
+				{analysisId}
+				tabName={_tabName}
+				onChangeDatasource={_onChangeDatasource}
+				onRenameTab={_onRenameTab}
+			/>
 			{#if shouldShowInsert(0)}
 				<div
 					class="insert-zone"
@@ -291,18 +288,16 @@
 				</div>
 			{/if}
 			{#each steps as step, i (step.id)}
-				<StepNode
-					{step}
-					index={i}
-					{analysisId}
-					datasourceId={previewDatasourceId ?? datasourceId}
-					allSteps={steps}
-					{savedSteps}
-					{saveStatus}
-					{previewVersion}
-					{isPreviewStale}
-					onEdit={onStepClick}
-					onDelete={onStepDelete}
+						<StepNode
+							{step}
+							index={i}
+							{analysisId}
+							datasourceId={previewDatasourceId ?? datasourceId}
+							allSteps={steps}
+							{previewVersion}
+							{isPreviewStale}
+							onEdit={onStepClick}
+							onDelete={onStepDelete}
 					onTouchMove={onMoveStep}
 				/>
 				<!-- Connection + Drop zone after each step -->

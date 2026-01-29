@@ -25,7 +25,7 @@ def create_preflight(file_path: Path) -> tuple[str, ExcelPreflight]:
             continue
         tables[sheet.title] = list(sheet.tables.keys())
 
-    named_ranges = [name for name in workbook.defined_names.keys()]
+    named_ranges = [name for name in workbook.defined_names]
 
     preflight_id = str(uuid.uuid4())
     preflight = ExcelPreflight(temp_path=file_path, sheets=sheets, tables=tables, named_ranges=named_ranges)
@@ -37,9 +37,9 @@ def get_preflight(preflight_id: str) -> ExcelPreflight | None:
     return _PREFLIGHTS.get(preflight_id)
 
 
-def clear_preflight(preflight_id: str) -> None:
+def clear_preflight(preflight_id: str, *, delete_file: bool = True) -> None:
     preflight = _PREFLIGHTS.pop(preflight_id, None)
     if not preflight:
         return
-    if preflight.temp_path.exists():
+    if delete_file and preflight.temp_path.exists():
         preflight.temp_path.unlink()

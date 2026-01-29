@@ -121,7 +121,7 @@ async def readiness(session: AsyncSession = Depends(get_db)):
         manager = get_manager()
         engine_count = len(manager.list_engines())
         checks['engine_manager'] = 'ok'
-        checks['active_engines'] = engine_count
+        checks['active_engines'] = str(engine_count)
     except Exception as e:
         checks['engine_manager'] = f'error: {str(e)}'
         is_ready = False

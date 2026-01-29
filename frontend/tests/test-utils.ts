@@ -14,7 +14,7 @@ export function createMockApiClient() {
 /**
  * Mock fetch responses
  */
-export function mockFetch(data: any, status = 200) {
+export function mockFetch(data: unknown, status = 200) {
 	global.fetch = vi.fn().mockResolvedValue({
 		ok: status >= 200 && status < 300,
 		status,
@@ -53,7 +53,7 @@ export async function waitFor(
 /**
  * Create mock datasource
  */
-export function createMockDataSource(overrides = {}) {
+export function createMockDataSource(overrides: Record<string, unknown> = {}) {
 	return {
 		id: 'ds-123',
 		name: 'Test DataSource',
@@ -72,7 +72,7 @@ export function createMockDataSource(overrides = {}) {
 /**
  * Create mock analysis
  */
-export function createMockAnalysis(overrides = {}) {
+export function createMockAnalysis(overrides: Record<string, unknown> = {}) {
 	return {
 		id: 'analysis-123',
 		name: 'Test Analysis',

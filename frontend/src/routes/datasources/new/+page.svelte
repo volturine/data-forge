@@ -442,7 +442,7 @@
 									disabled={loading || previewLoading || !sheetNames.length}
 								>
 									<option value="">Select sheet</option>
-									{#each sheetNames as sheet}
+									{#each sheetNames as sheet (sheet)}
 										<option value={sheet}>{sheet}</option>
 									{/each}
 								</select>
@@ -456,7 +456,7 @@
 									disabled={loading || previewLoading || !selectedSheet}
 								>
 									<option value="">Manual selection</option>
-									{#each (tableMap[selectedSheet] ?? []) as table}
+									{#each tableMap[selectedSheet] ?? [] as table (table)}
 										<option value={table}>{table}</option>
 									{/each}
 								</select>
@@ -470,7 +470,7 @@
 									disabled={loading || previewLoading}
 								>
 									<option value="">None</option>
-									{#each namedRanges as range}
+									{#each namedRanges as range (range)}
 										<option value={range}>{range}</option>
 									{/each}
 								</select>
@@ -511,16 +511,13 @@
 								<div class="preview-grid">
 									<div class="preview-row header">
 										<div class="cell corner"></div>
-									{#each previewGrid[0] ?? [] as _cell, index}
-										<button
-											class="cell header"
-											onclick={() => handleEndCol(startCol + index)}
-										>
-											{cellLabel(startCol + index)}
-										</button>
-									{/each}
+										{#each previewGrid[0] ?? [] as _cell, index (index)}
+											<button class="cell header" onclick={() => handleEndCol(startCol + index)}>
+												{cellLabel(startCol + index)}
+											</button>
+										{/each}
 									</div>
-									{#each previewGrid as row, rowIndex}
+									{#each previewGrid as row, rowIndex (rowIndex)}
 										<div class="preview-row">
 											<button
 												class="cell header"
@@ -528,11 +525,8 @@
 											>
 												{startRow + rowIndex + 1}
 											</button>
-											{#each row as cell, colIndex}
-												<button
-													class="cell"
-													onclick={() => handleStartCol(startCol + colIndex)}
-												>
+											{#each row as cell, colIndex (colIndex)}
+												<button class="cell" onclick={() => handleStartCol(startCol + colIndex)}>
 													{cell ?? ''}
 												</button>
 											{/each}

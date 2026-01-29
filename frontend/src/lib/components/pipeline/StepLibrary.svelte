@@ -90,7 +90,7 @@
 		event.preventDefault();
 	}
 
-	function finishDrag(event: PointerEvent) {
+	function finishDrag(): void {
 		if (dragging && drag.active) {
 			if (drag.target && drag.type && drag.valid) {
 				onInsertStep(drag.type, drag.target);

@@ -12,8 +12,6 @@
 		analysisId?: string;
 		datasourceId?: string;
 		allSteps?: PipelineStep[];
-		savedSteps?: PipelineStep[];
-		saveStatus?: 'saved' | 'unsaved' | 'saving';
 		previewVersion?: number;
 		isPreviewStale?: boolean;
 		onEdit: (id: string) => void;
@@ -27,8 +25,6 @@
 		analysisId,
 		datasourceId,
 		allSteps = [],
-		savedSteps = [],
-		saveStatus = 'saved',
 		previewVersion = 0,
 		isPreviewStale = false,
 		onEdit,
@@ -39,7 +35,6 @@
 	let isExporting = $state(false);
 	let exportError = $state<string | null>(null);
 
-	let dragPreviewEl = $state<HTMLImageElement | null>(null);
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
 	let longPressTimer = $state<number | null>(null);
@@ -126,7 +121,7 @@
 		event.preventDefault();
 	}
 
-	function finishDrag(event: PointerEvent) {
+	function finishDrag(): void {
 		if (dragging && drag.active) {
 			if (drag.target && drag.stepId && drag.valid) {
 				onTouchMove(drag.stepId, drag.target);

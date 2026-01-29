@@ -60,6 +60,7 @@ async def preview_step(
     page: int = 1,
     timeout: int | None = None,
     analysis_id: str | None = None,
+    resource_config: dict | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from modules.compute.schemas import StepPreviewResponse
@@ -86,9 +87,8 @@ async def preview_step(
         preview_steps = pipeline_steps[: step_index + 1]
 
     manager = get_manager()
-    engine = manager.get_engine(analysis_id)
-    if not engine:
-        engine = manager.get_or_create_engine(analysis_id)
+    # get_or_create_engine will restart the engine if resource_config changed
+    engine = manager.get_or_create_engine(analysis_id, resource_config=resource_config)
 
     datasource_config = build_datasource_config(datasource)
 

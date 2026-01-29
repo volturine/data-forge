@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 import polars as pl
+from openpyxl import load_workbook
 
 from modules.compute.operations.base import OperationHandler, OperationParams
 
@@ -72,6 +73,8 @@ class DatasourceHandler(OperationHandler):
     def _load_file(self, config: DatasourceParams) -> pl.LazyFrame:
         if not config.file_path or not config.file_type:
             raise ValueError('Datasource file loading requires file_path and file_type')
+        if config.file_type == 'excel' and _has_bounds(config):
+            return self._read_excel_bounds(config)
         opts = config.csv_options or config.options or {}
         opts = self._merge_excel_opts(config, opts)
         loader = self.FILE_LOADERS.get(config.file_type)
@@ -102,8 +105,6 @@ class DatasourceHandler(OperationHandler):
         sheet_name = opts.get('sheet_name')
         table_name = opts.get('table_name')
         named_range = opts.get('named_range')
-        cell_range = opts.get('cell_range')
-
         next_opts: dict = {}
         if sheet_name is not None:
             next_opts['sheet_name'] = sheet_name
@@ -111,8 +112,6 @@ class DatasourceHandler(OperationHandler):
             next_opts['table_name'] = table_name
         if named_range is not None:
             next_opts['named_range'] = named_range
-        if cell_range is not None:
-            next_opts['cell_range'] = cell_range
         return pl.read_excel(path, **next_opts).lazy()
 
     @staticmethod
@@ -124,31 +123,65 @@ class DatasourceHandler(OperationHandler):
             next_opts = {**next_opts, 'table_name': config.table_name}
         if config.named_range:
             next_opts = {**next_opts, 'named_range': config.named_range}
-        if config.start_row is not None and config.start_col is not None and config.end_col is not None and config.end_row is not None:
-            next_opts = {
-                **next_opts,
-                'cell_range': _build_range(config.start_row, config.start_col, config.end_col, config.end_row),
-            }
         if config.has_header is not None:
             next_opts = {**next_opts, 'has_header': config.has_header}
         return next_opts
 
+    @staticmethod
+    def _read_excel_bounds(config: DatasourceParams) -> pl.LazyFrame:
+        file_path = config.file_path
+        sheet_name = config.sheet_name
+        start_row = config.start_row
+        start_col = config.start_col
+        end_row = config.end_row
+        end_col = config.end_col
+        has_header = config.has_header if config.has_header is not None else True
+        if not file_path or start_row is None or start_col is None or end_row is None or end_col is None:
+            raise ValueError('Excel bounds require file_path, start_row, start_col, end_row, end_col')
 
-def _build_range(start_row: int, start_col: int, end_col: int, end_row: int) -> str:
-    start_row_index = start_row + 1
-    end_row_index = end_row + 1
-    start_cell = f'{_col_label(start_col)}{start_row_index}'
-    end_cell = f'{_col_label(end_col)}{end_row_index}'
-    return f'{start_cell}:{end_cell}'
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        target_sheet = sheet_name or workbook.sheetnames[0]
+        sheet = workbook[target_sheet]
+        rows = list(
+            sheet.iter_rows(
+                min_row=start_row + 1,
+                max_row=end_row + 1,
+                min_col=start_col + 1,
+                max_col=end_col + 1,
+                values_only=True,
+            )
+        )
+
+        if not rows:
+            return pl.DataFrame().lazy()
+
+        if has_header:
+            header = rows[0]
+            columns = _normalize_headers(header)
+            data_rows = rows[1:]
+        else:
+            columns = [f'column_{index + 1}' for index in range(len(rows[0]))]
+            data_rows = rows
+        frame = pl.DataFrame(data_rows, schema=columns)
+        return frame.lazy()
 
 
-def _col_label(index: int) -> str:
-    idx = index + 1
-    label = ''
-    while idx > 0:
-        idx, rem = divmod(idx - 1, 26)
-        label = chr(65 + rem) + label
-    return label
+def _normalize_headers(values: tuple[object | None, ...]) -> list[str]:
+    names: list[str] = []
+    seen: dict[str, int] = {}
+    for index, value in enumerate(values):
+        base = str(value).strip() if value is not None else f'column_{index + 1}'
+        if base not in seen:
+            seen[base] = 0
+            names.append(base)
+            continue
+        seen[base] += 1
+        names.append(f'{base}_{seen[base]}')
+    return names
+
+
+def _has_bounds(config: DatasourceParams) -> bool:
+    return config.start_row is not None and config.start_col is not None and config.end_col is not None and config.end_row is not None
 
 
 def load_datasource(config: dict) -> pl.LazyFrame:

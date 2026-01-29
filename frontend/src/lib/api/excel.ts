@@ -70,7 +70,9 @@ export function previewExcel(
 	if (params.has_header !== undefined) query.set('has_header', String(params.has_header));
 	if (params.table_name) query.set('table_name', params.table_name);
 	if (params.named_range) query.set('named_range', params.named_range);
-	return apiRequest<ExcelPreviewResponse>(`/v1/datasource/preflight/${preflightId}/preview?${query}`);
+	return apiRequest<ExcelPreviewResponse>(
+		`/v1/datasource/preflight/${preflightId}/preview?${query}`
+	);
 }
 
 export function confirmExcel(

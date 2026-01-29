@@ -1,5 +1,6 @@
 import uuid
 from pathlib import Path
+from shutil import copy2
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -191,7 +192,12 @@ async def confirm_excel(
         clear_preflight(preflight_id)
         raise HTTPException(status_code=400, detail='No sheet selected')
 
+    file_extension = preflight.temp_path.suffix.lower()
+    target_filename = f'{uuid.uuid4()}{file_extension}'
+    target_path = settings.upload_dir / target_filename
+
     try:
+        copy2(preflight.temp_path, target_path)
         resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = service.resolve_excel_selection(
             preflight.temp_path,
             target_sheet,
@@ -204,7 +210,7 @@ async def confirm_excel(
         datasource = await service.create_file_datasource(
             session=session,
             name=name,
-            file_path=str(preflight.temp_path),
+            file_path=str(target_path),
             file_type='excel',
             sheet_name=resolved_sheet,
             start_row=resolved_start_row,
@@ -216,6 +222,8 @@ async def confirm_excel(
             named_range=named_range,
         )
     except Exception as e:
+        if target_path.exists():
+            target_path.unlink()
         clear_preflight(preflight_id)
         raise HTTPException(status_code=500, detail=f'Failed to create datasource: {str(e)}')
 

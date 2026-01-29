@@ -1,5 +1,6 @@
 import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
 import type { SchemaInfo } from '$lib/types/datasource';
+import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
 import { normalizeDtype } from '$lib/utils/transform';
@@ -14,6 +15,8 @@ export class AnalysisStore {
 	savedTabs = $state<AnalysisTab[]>([]);
 	activeTabId = $state<string | null>(null);
 	sourceSchemas = $state(new SvelteMap<string, SchemaInfo>());
+	resourceConfig = $state<EngineResourceConfig | null>(null);
+	engineDefaults = $state<EngineDefaults | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);
 
@@ -394,12 +397,22 @@ export class AnalysisStore {
 		this.loading = false;
 	}
 
+	setResourceConfig(config: EngineResourceConfig | null): void {
+		this.resourceConfig = config;
+	}
+
+	setEngineDefaults(defaults: EngineDefaults | null): void {
+		this.engineDefaults = defaults;
+	}
+
 	reset(): void {
 		this.current = null;
 		this.tabs = [];
 		this.savedTabs = [];
 		this.activeTabId = null;
 		this.sourceSchemas.clear();
+		this.resourceConfig = null;
+		this.engineDefaults = null;
 		this.loading = false;
 		this.error = null;
 	}
@@ -417,6 +430,10 @@ export class AnalysisStore {
 }
 
 export type AnalysisStoreApi = {
+	resourceConfig: EngineResourceConfig | null;
+	engineDefaults: EngineDefaults | null;
+	setResourceConfig: (config: EngineResourceConfig | null) => void;
+	setEngineDefaults: (defaults: EngineDefaults | null) => void;
 	insertStep: (
 		step: PipelineStep,
 		index: number,

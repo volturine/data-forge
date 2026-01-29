@@ -8,7 +8,7 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { sendKeepalive } from '$lib/api/compute';
+	import { sendKeepalive, spawnEngine } from '$lib/api/compute';
 	import { FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
@@ -16,22 +16,28 @@
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	const analysisId = $derived($page.params.id);
 
 	let selectedStepId = $state<string | null>(null);
 	let selectedStepState = $state<PipelineStep | null>(null);
 	let isSaving = $state(false);
-	let previewVersion = $state(0);
+	let previewVersions = $state(new SvelteMap<string, number>());
+	let lastPreviewPipelines = $state(new SvelteMap<string, string>());
 
 	// Track pipeline state at last preview to detect staleness
-	let lastPreviewPipeline = $state<string>('');
+	const activeTabId = $derived(analysisStore.activeTab?.id ?? null);
 	const currentPipelineKey = $derived(JSON.stringify(analysisStore.pipeline));
+	const previewVersion = $derived(activeTabId ? previewVersions.get(activeTabId) ?? 0 : 0);
+	const lastPreviewPipeline = $derived(activeTabId ? lastPreviewPipelines.get(activeTabId) ?? '' : '');
 	const isPreviewStale = $derived(!!previewVersion && lastPreviewPipeline !== currentPipelineKey);
 
 	function handlePreview() {
-		previewVersion++;
-		lastPreviewPipeline = currentPipelineKey;
+		if (!activeTabId) return;
+		const next = (previewVersions.get(activeTabId) ?? 0) + 1;
+		previewVersions.set(activeTabId, next);
+		lastPreviewPipelines.set(activeTabId, currentPipelineKey);
 		if (analysisId) {
 			// wait 1 second
 			setTimeout(() => {
@@ -96,6 +102,19 @@
 		const query = debouncedSearch.current.toLowerCase().trim();
 		if (!query) return all;
 		return all.filter((ds) => ds.name.toLowerCase().includes(query));
+	});
+
+	// Spawn engine on load to get defaults
+	$effect(() => {
+		if (!analysisId || analysisStore.engineDefaults) return;
+		spawnEngine(analysisId).match(
+			(status) => {
+				if (status.defaults) {
+					analysisStore.setEngineDefaults(status.defaults);
+				}
+			},
+			() => {} // Ignore errors, defaults just won't be shown
+		);
 	});
 
 	$effect(() => {
@@ -180,9 +199,7 @@
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
 		selectedStepState = analysisStore.pipeline.find((step) => step.id === stepId) || null;
-		markUnsaved();
 	}
-
 
 	function handleDeleteStep(stepId: string) {
 		analysisStore.removeStep(stepId);
@@ -228,6 +245,7 @@
 
 	function handleSelectTab(tabId: string) {
 		analysisStore.setActiveTab(tabId);
+		saveStatus.send('saveComplete');
 	}
 
 	function handleAddTab(datasourceId: string, name: string) {
@@ -430,11 +448,9 @@
 			<div class="center-pane">
 				<PipelineCanvas
 					steps={analysisStore.pipeline}
-					{savedSteps}
 					{previewDatasourceId}
 					{previewVersion}
 					{isPreviewStale}
-					saveStatus={saveStatus.current}
 					{analysisId}
 					{datasourceId}
 					datasource={currentDatasource}

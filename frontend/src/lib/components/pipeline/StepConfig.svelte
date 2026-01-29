@@ -83,7 +83,6 @@
 			: { columns: [], row_count: null }
 	);
 
-
 	// Manual refresh function for pivot schema
 	function handleRefreshPivotSchema() {
 		if (!step || step.type !== 'pivot') return;

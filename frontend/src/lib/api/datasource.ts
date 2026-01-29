@@ -60,7 +60,6 @@ export interface ExcelPreviewResponse {
 	detected_end_row: number | null;
 }
 
-
 export function preflightExcel(
 	file: File,
 	params: {
@@ -108,7 +107,9 @@ export function previewExcel(
 	if (params.has_header !== undefined) query.set('has_header', String(params.has_header));
 	if (params.table_name) query.set('table_name', params.table_name);
 	if (params.named_range) query.set('named_range', params.named_range);
-	return apiRequest<ExcelPreviewResponse>(`/v1/datasource/preflight/${preflightId}/preview?${query}`);
+	return apiRequest<ExcelPreviewResponse>(
+		`/v1/datasource/preflight/${preflightId}/preview?${query}`
+	);
 }
 
 export function confirmExcel(
@@ -196,7 +197,10 @@ export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
 	return apiRequest<DataSource>(`/v1/datasource/${id}`);
 }
 
-export function getDatasourceSchema(id: string, sheetName?: string): ResultAsync<SchemaInfo, ApiError> {
+export function getDatasourceSchema(
+	id: string,
+	sheetName?: string
+): ResultAsync<SchemaInfo, ApiError> {
 	const params = sheetName ? `?sheet_name=${encodeURIComponent(sheetName)}` : '';
 	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema${params}`);
 }
