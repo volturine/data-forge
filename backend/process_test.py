@@ -1,4 +1,5 @@
 import contextlib
+import contextlib
 import multiprocessing as mp
 import os
 import resource
@@ -6,7 +7,7 @@ import sys
 import time
 
 
-def worker_with_queue(msg_queue, limit_mb):
+def worker_with_queue(msg_queue: mp.Queue, limit_mb: int) -> None:
     """Child process that communicates progress before hitting OOM."""
     try:
         # Set address space limit
@@ -31,7 +32,7 @@ def worker_with_queue(msg_queue, limit_mb):
         sys.exit(1)
 
 
-def listen_for_messages(msg_queue):
+def listen_for_messages(msg_queue: mp.Queue) -> None:
     """Function to listen for messages from the child process."""
     while True:
         try:
@@ -43,7 +44,7 @@ def listen_for_messages(msg_queue):
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
-    queue = mp.Queue()
+    queue: mp.Queue = mp.Queue()
 
     # 150MB limit: iteration 7-8 should trigger OOM
     p = mp.Process(target=worker_with_queue, args=(queue, 150))

@@ -8,30 +8,39 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { sendKeepalive } from '$lib/api/compute';
+	import { sendKeepalive, spawnEngine } from '$lib/api/compute';
 	import { FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
+	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	const analysisId = $derived($page.params.id);
 
 	let selectedStepId = $state<string | null>(null);
 	let selectedStepState = $state<PipelineStep | null>(null);
 	let isSaving = $state(false);
-	let previewVersion = $state(0);
+	let previewVersions = $state(new SvelteMap<string, number>());
+	let lastPreviewPipelines = $state(new SvelteMap<string, string>());
+	let draftLoaded = $state(false);
 
 	// Track pipeline state at last preview to detect staleness
-	let lastPreviewPipeline = $state<string>('');
+	const activeTabId = $derived(analysisStore.activeTab?.id ?? null);
 	const currentPipelineKey = $derived(JSON.stringify(analysisStore.pipeline));
+	const previewVersion = $derived(activeTabId ? previewVersions.get(activeTabId) ?? 0 : 0);
+	const lastPreviewPipeline = $derived(activeTabId ? lastPreviewPipelines.get(activeTabId) ?? '' : '');
 	const isPreviewStale = $derived(!!previewVersion && lastPreviewPipeline !== currentPipelineKey);
+	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
 	function handlePreview() {
-		previewVersion++;
-		lastPreviewPipeline = currentPipelineKey;
+		if (!activeTabId) return;
+		const next = (previewVersions.get(activeTabId) ?? 0) + 1;
+		previewVersions.set(activeTabId, next);
+		lastPreviewPipelines.set(activeTabId, currentPipelineKey);
 		if (analysisId) {
 			// wait 1 second
 			setTimeout(() => {
@@ -39,6 +48,90 @@
 			}, 1000);
 		}
 	}
+
+	$effect(() => {
+		if (!analysisId) return;
+		draftLoaded = false;
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		if (!storageKey || draftLoaded) return;
+		if (!analysisStore.tabs.length) return;
+		const raw = window.localStorage.getItem(storageKey);
+		if (!raw) {
+			draftLoaded = true;
+			return;
+		}
+		const parsed = JSON.parse(raw) as {
+			analysisId: string;
+			tabs: AnalysisTab[];
+			activeTabId: string | null;
+			resourceConfig: EngineResourceConfig | null;
+			engineDefaults: EngineDefaults | null;
+			previewVersions: Record<string, number>;
+			lastPreviewPipelines: Record<string, string>;
+			selectedStepId: string | null;
+			leftPaneCollapsed: boolean;
+			rightPaneCollapsed: boolean;
+			saveStatus: SaveStates;
+		};
+		if (parsed.analysisId !== analysisId) {
+			draftLoaded = true;
+			return;
+		}
+		analysisStore.setTabs(parsed.tabs);
+		analysisStore.activeTabId = parsed.activeTabId;
+		analysisStore.setResourceConfig(parsed.resourceConfig);
+		analysisStore.setEngineDefaults(parsed.engineDefaults);
+		selectedStepId = parsed.selectedStepId;
+		leftPaneCollapsed = parsed.leftPaneCollapsed;
+		rightPaneCollapsed = parsed.rightPaneCollapsed;
+		const versions = new SvelteMap<string, number>();
+		for (const [key, value] of Object.entries(parsed.previewVersions ?? {})) {
+			versions.set(key, value);
+		}
+		previewVersions = versions;
+		const pipelines = new SvelteMap<string, string>();
+		for (const [key, value] of Object.entries(parsed.lastPreviewPipelines ?? {})) {
+			pipelines.set(key, value);
+		}
+		lastPreviewPipelines = pipelines;
+		if (parsed.saveStatus === 'unsaved') {
+			saveStatus.send('markUnsaved');
+		} else {
+			saveStatus.send('saveComplete');
+		}
+		draftLoaded = true;
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		if (!storageKey || !draftLoaded) return;
+		if (!analysisStore.tabs.length) return;
+		const payload = {
+			analysisId,
+			tabs: analysisStore.tabs,
+			activeTabId: analysisStore.activeTabId,
+			resourceConfig: analysisStore.resourceConfig,
+			engineDefaults: analysisStore.engineDefaults,
+			previewVersions: Object.fromEntries(previewVersions.entries()),
+			lastPreviewPipelines: Object.fromEntries(lastPreviewPipelines.entries()),
+			selectedStepId,
+			leftPaneCollapsed,
+			rightPaneCollapsed,
+			saveStatus: saveStatus.current
+		};
+		window.localStorage.setItem(storageKey, JSON.stringify(payload));
+	});
+
+	$effect(() => {
+		if (!selectedStepId) {
+			selectedStepState = null;
+			return;
+		}
+		selectedStepState = analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
+	});
 	type SaveStates = 'saved' | 'unsaved' | 'saving';
 	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
 	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
@@ -96,6 +189,19 @@
 		const query = debouncedSearch.current.toLowerCase().trim();
 		if (!query) return all;
 		return all.filter((ds) => ds.name.toLowerCase().includes(query));
+	});
+
+	// Spawn engine on load to get defaults
+	$effect(() => {
+		if (!analysisId || analysisStore.engineDefaults) return;
+		spawnEngine(analysisId).match(
+			(status) => {
+				if (status.defaults) {
+					analysisStore.setEngineDefaults(status.defaults);
+				}
+			},
+			() => {} // Ignore errors, defaults just won't be shown
+		);
 	});
 
 	$effect(() => {
@@ -180,7 +286,6 @@
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
 		selectedStepState = analysisStore.pipeline.find((step) => step.id === stepId) || null;
-		markUnsaved();
 	}
 
 	function handleDeleteStep(stepId: string) {
@@ -227,6 +332,7 @@
 
 	function handleSelectTab(tabId: string) {
 		analysisStore.setActiveTab(tabId);
+		saveStatus.send('saveComplete');
 	}
 
 	function handleAddTab(datasourceId: string, name: string) {
@@ -429,11 +535,9 @@
 			<div class="center-pane">
 				<PipelineCanvas
 					steps={analysisStore.pipeline}
-					{savedSteps}
 					{previewDatasourceId}
 					{previewVersion}
 					{isPreviewStale}
-					saveStatus={saveStatus.current}
 					{analysisId}
 					{datasourceId}
 					datasource={currentDatasource}

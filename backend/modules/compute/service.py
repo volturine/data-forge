@@ -1,22 +1,16 @@
-import asyncio
 import logging
 import os
 import tempfile
-import time
 
 import duckdb
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from core.exceptions import (
-    DataSourceNotFoundError,
-    EngineTimeoutError,
-    PipelineExecutionError,
-    StepNotFoundError,
-    UnsupportedExportFormatError,
-)
+from core.exceptions import DataSourceNotFoundError, PipelineExecutionError
 from modules.compute.manager import get_manager
+from modules.compute.operations.exports import get_export_format
+from modules.compute.utils import await_engine_result, build_datasource_config, find_step_index
 from modules.datasource.models import DataSource
 
 logger = logging.getLogger(__name__)
@@ -66,6 +60,7 @@ async def preview_step(
     page: int = 1,
     timeout: int | None = None,
     analysis_id: str | None = None,
+    resource_config: dict | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from modules.compute.schemas import StepPreviewResponse
@@ -84,29 +79,18 @@ async def preview_step(
         raise DataSourceNotFoundError(datasource_id)
 
     # Find the step index by step_id
-    step_index = None
-    for idx, step in enumerate(pipeline_steps):
-        if step.get('id') == target_step_id:
-            step_index = idx
-            break
-
     # Special case: previewing raw datasource (no pipeline steps, target is "source")
     if target_step_id == 'source' and len(pipeline_steps) == 0:
         preview_steps = []
-    elif step_index is None:
-        raise StepNotFoundError(target_step_id)
     else:
+        step_index = find_step_index(pipeline_steps, target_step_id)
         preview_steps = pipeline_steps[: step_index + 1]
 
     manager = get_manager()
-    engine = manager.get_engine(analysis_id)
-    if not engine:
-        engine = manager.get_or_create_engine(analysis_id)
+    # get_or_create_engine will restart the engine if resource_config changed
+    engine = manager.get_or_create_engine(analysis_id, resource_config=resource_config)
 
-    datasource_config = {
-        'source_type': datasource.source_type,
-        **datasource.config,
-    }
+    datasource_config = build_datasource_config(datasource)
 
     additional_datasources = await _get_additional_datasources(session, preview_steps)
 
@@ -122,34 +106,24 @@ async def preview_step(
         additional_datasources=additional_datasources,
     )
 
-    start_time = time.time()
-    while True:
-        # Check timeout
-        if time.time() - start_time > timeout:
-            raise EngineTimeoutError(f'Preview operation timed out after {timeout} seconds', timeout)
+    result_data = await await_engine_result(engine, timeout)
+    error = result_data.get('error')
+    if error:
+        raise PipelineExecutionError(
+            f'Preview failed: {error}',
+            details={'operation': 'preview', 'datasource_id': datasource_id},
+        )
 
-        result_data = engine.get_result(timeout=0.1)
-        if result_data:
-            error = result_data.get('error')
-            if error:
-                raise PipelineExecutionError(
-                    f'Preview failed: {error}',
-                    details={'operation': 'preview', 'datasource_id': datasource_id},
-                )
-
-            data = result_data.get('data', {})
-            return StepPreviewResponse(
-                step_id=target_step_id,
-                columns=list(data.get('schema', {}).keys()),
-                column_types=data.get('schema', {}),
-                data=data.get('data', []),
-                total_rows=data.get('row_count', 0),
-                page=page,
-                page_size=len(data.get('data', [])),
-            )
-
-        # Yield control to event loop to prevent blocking
-        await asyncio.sleep(0.1)
+    data = result_data.get('data', {})
+    return StepPreviewResponse(
+        step_id=target_step_id,
+        columns=list(data.get('schema', {}).keys()),
+        column_types=data.get('schema', {}),
+        data=data.get('data', []),
+        total_rows=data.get('row_count', 0),
+        page=page,
+        page_size=len(data.get('data', [])),
+    )
 
 
 async def get_step_schema(
@@ -173,15 +147,7 @@ async def get_step_schema(
         raise DataSourceNotFoundError(datasource_id)
 
     # Find the step index by step_id
-    step_index = None
-    for idx, step in enumerate(pipeline_steps):
-        if step.get('id') == target_step_id:
-            step_index = idx
-            break
-
-    if step_index is None:
-        raise StepNotFoundError(target_step_id)
-
+    step_index = find_step_index(pipeline_steps, target_step_id)
     schema_steps = pipeline_steps[: step_index + 1]
 
     manager = get_manager()
@@ -189,10 +155,7 @@ async def get_step_schema(
     if not engine:
         engine = manager.get_or_create_engine(analysis_id)
 
-    datasource_config = {
-        'source_type': datasource.source_type,
-        **datasource.config,
-    }
+    datasource_config = build_datasource_config(datasource)
 
     additional_datasources = await _get_additional_datasources(session, schema_steps)
 
@@ -203,30 +166,21 @@ async def get_step_schema(
         additional_datasources=additional_datasources,
     )
 
-    start_time = time.time()
-    while True:
-        if time.time() - start_time > timeout:
-            raise EngineTimeoutError(f'Schema operation timed out after {timeout} seconds', timeout)
+    result_data = await await_engine_result(engine, timeout)
+    error = result_data.get('error')
+    if error:
+        raise PipelineExecutionError(
+            f'Schema fetch failed: {error}',
+            details={'operation': 'schema', 'datasource_id': datasource_id},
+        )
 
-        result_data = engine.get_result(timeout=0.1)
-        if result_data:
-            error = result_data.get('error')
-            if error:
-                raise PipelineExecutionError(
-                    f'Schema fetch failed: {error}',
-                    details={'operation': 'schema', 'datasource_id': datasource_id},
-                )
-
-            data = result_data.get('data', {})
-            schema = data.get('schema', {})
-            return StepSchemaResponse(
-                step_id=target_step_id,
-                columns=list(schema.keys()),
-                column_types=schema,
-            )
-
-        # Yield control to event loop to prevent blocking
-        await asyncio.sleep(0.1)
+    data = result_data.get('data', {})
+    schema = data.get('schema', {})
+    return StepSchemaResponse(
+        step_id=target_step_id,
+        columns=list(schema.keys()),
+        column_types=schema,
+    )
 
 
 async def export_data(
@@ -257,15 +211,7 @@ async def export_data(
         raise DataSourceNotFoundError(datasource_id)
 
     # Find steps up to target
-    step_index = None
-    for idx, step in enumerate(pipeline_steps):
-        if step.get('id') == target_step_id:
-            step_index = idx
-            break
-
-    if step_index is None:
-        raise StepNotFoundError(target_step_id)
-
+    step_index = find_step_index(pipeline_steps, target_step_id)
     export_steps = pipeline_steps[: step_index + 1]
 
     manager = get_manager()
@@ -281,26 +227,21 @@ async def export_data(
         engine = manager.get_or_create_engine(temp_engine_id)
         temp_engine = True
 
-    datasource_config = {
-        'source_type': datasource.source_type,
-        **datasource.config,
-    }
+    datasource_config = build_datasource_config(datasource)
 
     additional_datasources = await _get_additional_datasources(session, export_steps)
 
     # Determine file extension and content type
     format_config = {
-        'csv': ('.csv', 'text/csv'),
-        'parquet': ('.parquet', 'application/octet-stream'),
-        'json': ('.json', 'application/json'),
-        'ndjson': ('.ndjson', 'application/x-ndjson'),
-        'duckdb': ('.parquet', 'application/octet-stream'),  # Export as parquet first
+        'duckdb': ('.parquet', 'application/octet-stream'),
     }
 
-    if export_format not in format_config:
-        raise UnsupportedExportFormatError(export_format)
-
-    ext, content_type = format_config[export_format]
+    if export_format == 'duckdb':
+        ext, content_type = format_config['duckdb']
+    else:
+        fmt = get_export_format(export_format)
+        ext = fmt.extension
+        content_type = fmt.content_type
 
     # For duckdb, we first export to parquet then convert
     actual_format = 'parquet' if export_format == 'duckdb' else export_format
@@ -318,55 +259,44 @@ async def export_data(
             additional_datasources=additional_datasources,
         )
 
-        start_time = time.time()
-        while True:
-            if time.time() - start_time > timeout:
-                if temp_engine:
-                    manager.shutdown_engine(temp_engine_id)
-                raise EngineTimeoutError(f'Export operation timed out after {timeout} seconds', timeout)
+        result_data = await await_engine_result(engine, timeout)
+        error = result_data.get('error')
+        if error:
+            if temp_engine:
+                manager.shutdown_engine(temp_engine_id)
+            raise PipelineExecutionError(
+                f'Export failed: {error}',
+                details={'operation': 'export', 'datasource_id': datasource_id, 'export_format': export_format},
+            )
 
-            result_data = engine.get_result(timeout=0.1)
-            if result_data:
-                error = result_data.get('error')
-                if error:
-                    if temp_engine:
-                        manager.shutdown_engine(temp_engine_id)
-                    raise PipelineExecutionError(
-                        f'Export failed: {error}',
-                        details={'operation': 'export', 'datasource_id': datasource_id, 'export_format': export_format},
-                    )
+        if temp_engine:
+            manager.shutdown_engine(temp_engine_id)
 
-                if temp_engine:
-                    manager.shutdown_engine(temp_engine_id)
+        data = result_data.get('data', {})
+        row_count = data.get('row_count', 0)
+        logger.info(f'Export completed: {row_count} rows written to {export_format}')
 
-                data = result_data.get('data', {})
-                row_count = data.get('row_count', 0)
-                logger.info(f'Export completed: {row_count} rows written to {export_format}')
+        # Handle DuckDB conversion
+        if export_format == 'duckdb':
+            tmp_db_path = tempfile.mktemp(suffix='.duckdb')
+            try:
+                conn = duckdb.connect(tmp_db_path)
+                conn.execute('CREATE TABLE data AS SELECT * FROM read_parquet(?)', [tmp_output])
+                conn.close()
 
-                # Handle DuckDB conversion
-                if export_format == 'duckdb':
-                    tmp_db_path = tempfile.mktemp(suffix='.duckdb')
-                    try:
-                        conn = duckdb.connect(tmp_db_path)
-                        conn.execute('CREATE TABLE data AS SELECT * FROM read_parquet(?)', [tmp_output])
-                        conn.close()
-
-                        with open(tmp_db_path, 'rb') as f:
-                            file_bytes = f.read()
-
-                        return file_bytes, f'{filename}.duckdb', 'application/octet-stream'
-                    finally:
-                        if os.path.exists(tmp_db_path):
-                            os.unlink(tmp_db_path)
-
-                # Read the exported file
-                with open(tmp_output, 'rb') as f:
+                with open(tmp_db_path, 'rb') as f:
                     file_bytes = f.read()
 
-                return file_bytes, f'{filename}{ext}', content_type
+                return file_bytes, f'{filename}.duckdb', 'application/octet-stream'
+            finally:
+                if os.path.exists(tmp_db_path):
+                    os.unlink(tmp_db_path)
 
-            # Yield control to event loop to prevent blocking
-            await asyncio.sleep(0.1)
+        # Read the exported file
+        with open(tmp_output, 'rb') as f:
+            file_bytes = f.read()
+
+        return file_bytes, f'{filename}{ext}', content_type
     finally:
         # Clean up temp file
         if os.path.exists(tmp_output):

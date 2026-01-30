@@ -18,6 +18,10 @@ async def preview_step(
     session: AsyncSession = Depends(get_db),
 ):
     """Preview the result of a pipeline step with pagination."""
+    resource_config = None
+    if request.resource_config:
+        resource_config = request.resource_config.model_dump()
+
     return await service.preview_step(
         session=session,
         datasource_id=request.datasource_id,
@@ -26,6 +30,7 @@ async def preview_step(
         row_limit=request.row_limit,
         page=request.page,
         analysis_id=request.analysis_id,
+        resource_config=resource_config,
     )
 
 
@@ -50,10 +55,16 @@ async def get_step_schema(
 
 @router.post('/engine/spawn/{analysis_id}', response_model=schemas.EngineStatusSchema)
 @handle_errors(operation='spawn engine')
-def spawn_engine(analysis_id: str):
-    """Spawn a compute engine for an analysis (called when analysis page opens)."""
+def spawn_engine(analysis_id: str, request: schemas.SpawnEngineRequest | None = None):
+    """Spawn a compute engine for an analysis (called when analysis page opens).
+
+    Optionally accepts resource configuration overrides.
+    """
     manager = get_manager()
-    manager.spawn_engine(analysis_id)
+    resource_config = None
+    if request and request.resource_config:
+        resource_config = request.resource_config.model_dump()
+    manager.spawn_engine(analysis_id, resource_config=resource_config)
     return manager.get_engine_status(analysis_id)
 
 
@@ -65,6 +76,20 @@ def keepalive(analysis_id: str):
     info = manager.keepalive(analysis_id)
     if not info:
         raise EngineNotFoundError(analysis_id)
+    return manager.get_engine_status(analysis_id)
+
+
+@router.post('/engine/configure/{analysis_id}', response_model=schemas.EngineStatusSchema)
+@handle_errors(operation='configure engine')
+def configure_engine(analysis_id: str, request: schemas.EngineResourceConfig):
+    """Update engine resource configuration (restarts the engine).
+
+    This will terminate any running jobs and restart the engine with the new
+    resource configuration. Values set to null will use the default from settings.
+    """
+    manager = get_manager()
+    resource_config = request.model_dump()
+    manager.restart_engine_with_config(analysis_id, resource_config)
     return manager.get_engine_status(analysis_id)
 
 
@@ -95,6 +120,19 @@ def list_engines():
     manager = get_manager()
     statuses = manager.list_all_engine_statuses()
     return {'engines': statuses, 'total': len(statuses)}
+
+
+@router.get('/defaults', response_model=schemas.EngineDefaultsResponse)
+@handle_errors(operation='get engine defaults')
+def get_engine_defaults():
+    """Get default engine resource settings from environment configuration."""
+    from core.config import settings
+
+    return schemas.EngineDefaultsResponse(
+        max_threads=settings.polars_max_threads,
+        max_memory_mb=settings.polars_max_memory_mb,
+        streaming_chunk_size=settings.polars_streaming_chunk_size,
+    )
 
 
 @router.post('/export')

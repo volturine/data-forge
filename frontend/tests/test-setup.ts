@@ -26,20 +26,26 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // Mock IntersectionObserver
-global.IntersectionObserver = class IntersectionObserver {
-	constructor() {}
+const IntersectionObserverMock = class implements IntersectionObserver {
+	root: Element | Document | null = null;
+	rootMargin = '';
+	thresholds: number[] = [];
+
+	constructor(_callback: IntersectionObserverCallback) {}
+
 	disconnect() {}
 	observe() {}
 	takeRecords() {
 		return [];
 	}
 	unobserve() {}
-} as any;
+};
+global.IntersectionObserver = IntersectionObserverMock;
 
 // Mock ResizeObserver
 global.ResizeObserver = class ResizeObserver {
-	constructor() {}
+	constructor(_callback: ResizeObserverCallback) {}
 	disconnect() {}
 	observe() {}
 	unobserve() {}
-} as any;
+};

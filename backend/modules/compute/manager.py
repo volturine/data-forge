@@ -41,15 +41,17 @@ class ProcessManager:
                     cls._instance._engines_lock = threading.Lock()
         return cls._instance
 
-    def spawn_engine(self, analysis_id: str) -> EngineInfo:
+    def spawn_engine(self, analysis_id: str, resource_config: dict | None = None) -> EngineInfo:
         """
         Spawn a new compute engine for an analysis or return existing one.
 
         This method is thread-safe and will reuse an existing engine if one
-        is already running for the given analysis_id.
+        is already running for the given analysis_id with the same config.
+        If the config differs, the existing engine will be restarted.
 
         Args:
             analysis_id: Unique identifier for the analysis
+            resource_config: Optional resource overrides (max_threads, max_memory_mb, streaming_chunk_size)
 
         Returns:
             EngineInfo containing the engine and metadata
@@ -59,13 +61,31 @@ class ProcessManager:
         """
         from core.config import settings
 
+        normalized_config = self._normalize_config(resource_config)
+
         with self._engines_lock:
             if analysis_id in self._engines:
                 info = self._engines[analysis_id]
-                info.touch()
-                logger.debug(f'Reusing existing engine for analysis {analysis_id}')
-                return info
+                existing_config = self._normalize_config(info.engine.resource_config)
+                new_config = normalized_config
 
+                # Check if config changed (compare non-None values)
+                config_changed = self._configs_differ(existing_config, new_config)
+
+                if not config_changed:
+                    info.touch()
+                    logger.debug(f'Reusing existing engine for analysis {analysis_id}')
+                    return info
+
+                # Config changed - need to restart
+                logger.info(f'Resource config changed for analysis {analysis_id}, restarting engine')
+                logger.debug(f'Old config: {existing_config}, new config: {new_config}')
+
+        # Shutdown outside lock to avoid deadlock
+        if analysis_id in self._engines:
+            self.shutdown_engine(analysis_id)
+
+        with self._engines_lock:
             # Check if we've reached max concurrent engines
             if len(self._engines) >= settings.max_concurrent_engines:
                 logger.warning(
@@ -77,17 +97,61 @@ class ProcessManager:
                 )
 
             logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
-            engine = PolarsComputeEngine(analysis_id)
+            engine = PolarsComputeEngine(analysis_id, resource_config=normalized_config)
             engine.start()
             info = EngineInfo(engine)
             self._engines[analysis_id] = info
             logger.info(f'Engine spawned successfully for analysis {analysis_id}')
             return info
 
-    def get_or_create_engine(self, analysis_id: str) -> PolarsComputeEngine:
+    def _configs_differ(self, old_config: dict, new_config: dict) -> bool:
+        """Check if two resource configs differ in meaningful ways."""
+        keys = {'max_threads', 'max_memory_mb', 'streaming_chunk_size'}
+        for key in keys:
+            old_val = old_config.get(key)
+            new_val = new_config.get(key)
+            if old_val != new_val:
+                return True
+        return False
+
+    def _normalize_config(self, config: dict | None) -> dict:
+        """Normalize resource config by stripping default values."""
+        if not config:
+            return {}
+
+        defaults = self._get_defaults()
+        normalized: dict = {}
+        keys = {'max_threads', 'max_memory_mb', 'streaming_chunk_size'}
+        for key in keys:
+            value = config.get(key)
+            if value is None:
+                continue
+            if value == defaults.get(key):
+                continue
+            normalized[key] = value
+        return normalized
+
+    def get_or_create_engine(self, analysis_id: str, resource_config: dict | None = None) -> PolarsComputeEngine:
         """Get existing engine or create a new one for the analysis."""
-        info = self.spawn_engine(analysis_id)
+        info = self.spawn_engine(analysis_id, resource_config=resource_config)
         return info.engine
+
+    def restart_engine_with_config(self, analysis_id: str, resource_config: dict) -> EngineInfo:
+        """Restart engine with new resource configuration.
+
+        This will shutdown any existing engine and spawn a new one with the
+        provided resource configuration. Any in-progress jobs will be terminated.
+
+        Args:
+            analysis_id: Unique identifier for the analysis
+            resource_config: Resource overrides (max_threads, max_memory_mb, streaming_chunk_size)
+
+        Returns:
+            EngineInfo containing the new engine
+        """
+        logger.info(f'Restarting engine for analysis {analysis_id} with new config: {resource_config}')
+        self.shutdown_engine(analysis_id)
+        return self.spawn_engine(analysis_id, resource_config=resource_config)
 
     def get_engine(self, analysis_id: str) -> PolarsComputeEngine | None:
         """Get existing engine by analysis_id."""
@@ -108,8 +172,20 @@ class ProcessManager:
                 info.touch()
             return info
 
+    def _get_defaults(self) -> dict:
+        """Get default resource settings from environment."""
+        from core.config import settings
+
+        return {
+            'max_threads': settings.polars_max_threads,
+            'max_memory_mb': settings.polars_max_memory_mb,
+            'streaming_chunk_size': settings.polars_streaming_chunk_size,
+        }
+
     def get_engine_status(self, analysis_id: str) -> dict:
         """Get status info for an engine - non-blocking."""
+        defaults = self._get_defaults()
+
         with self._engines_lock:
             info = self._engines.get(analysis_id)
             if not info:
@@ -119,6 +195,9 @@ class ProcessManager:
                     'process_id': None,
                     'last_activity': None,
                     'current_job_id': None,
+                    'resource_config': None,
+                    'effective_resources': None,
+                    'defaults': defaults,
                 }
 
             engine = info.engine
@@ -126,12 +205,25 @@ class ProcessManager:
 
             is_alive = engine.is_process_alive()
 
+            # Build resource config dict (only overrides vs defaults)
+            resource_config = None
+            if engine.resource_config:
+                resource_config = self._normalize_config(engine.resource_config) or None
+
+            # Build effective resources dict
+            effective_resources = None
+            if engine.effective_resources:
+                effective_resources = engine.effective_resources
+
             return {
                 'analysis_id': analysis_id,
                 'status': EngineStatus.HEALTHY if is_alive else EngineStatus.TERMINATED,
                 'process_id': engine.process.pid if is_alive and engine.process else None,
                 'last_activity': info.last_activity.isoformat(),
                 'current_job_id': engine.current_job_id,
+                'resource_config': resource_config,
+                'effective_resources': effective_resources,
+                'defaults': defaults,
             }
 
     def shutdown_engine(self, analysis_id: str) -> None:

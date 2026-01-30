@@ -1,4 +1,9 @@
-import type { EngineListResponse, EngineStatusResponse } from '$lib/types/compute';
+import type {
+	EngineDefaults,
+	EngineListResponse,
+	EngineResourceConfig,
+	EngineStatusResponse
+} from '$lib/types/compute';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
@@ -15,7 +20,10 @@ export interface StepPreviewRequest {
 	target_step_id: string;
 	row_limit?: number;
 	page?: number;
+	resource_config?: EngineResourceConfig | null;
 }
+
+export type StepPreviewResourceConfig = StepPreviewRequest['resource_config'];
 
 export interface StepPreviewResponse {
 	step_id: string;
@@ -38,9 +46,24 @@ export function previewStepData(
 
 // Engine lifecycle functions
 
-export function spawnEngine(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
+export function spawnEngine(
+	analysisId: string,
+	resourceConfig?: EngineResourceConfig
+): ResultAsync<EngineStatusResponse, ApiError> {
+	const body = resourceConfig ? JSON.stringify({ resource_config: resourceConfig }) : undefined;
 	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/spawn/${analysisId}`, {
-		method: 'POST'
+		method: 'POST',
+		body
+	});
+}
+
+export function configureEngine(
+	analysisId: string,
+	resourceConfig: EngineResourceConfig
+): ResultAsync<EngineStatusResponse, ApiError> {
+	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/configure/${analysisId}`, {
+		method: 'POST',
+		body: JSON.stringify(resourceConfig)
 	});
 }
 
@@ -62,6 +85,10 @@ export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> 
 
 export function listEngines(): ResultAsync<EngineListResponse, ApiError> {
 	return apiRequest<EngineListResponse>('/v1/compute/engines');
+}
+
+export function getEngineDefaults(): ResultAsync<EngineDefaults, ApiError> {
+	return apiRequest<EngineDefaults>('/v1/compute/defaults');
 }
 
 export interface ExportRequest {

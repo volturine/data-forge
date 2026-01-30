@@ -152,7 +152,7 @@ def _build_fake_dataframe() -> MagicMock:
     return fake_df
 
 
-@patch('modules.compute.engine.PolarsComputeEngine._load_datasource')
+@patch('modules.compute.engine.load_datasource')
 @patch('modules.compute.engine.PolarsComputeEngine._apply_step')
 def test_pipeline_cycle_detection(mock_apply_step: MagicMock, mock_load: MagicMock):
     mock_load.return_value = MagicMock()
@@ -167,7 +167,7 @@ def test_pipeline_cycle_detection(mock_apply_step: MagicMock, mock_load: MagicMo
         PolarsComputeEngine._build_pipeline({}, pipeline_steps, 'job', MagicMock())
 
 
-@patch('modules.compute.engine.PolarsComputeEngine._load_datasource')
+@patch('modules.compute.engine.load_datasource')
 @patch('modules.compute.engine.PolarsComputeEngine._apply_step')
 def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: MagicMock):
     mock_load.return_value = MagicMock()
@@ -183,7 +183,7 @@ def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: M
         PolarsComputeEngine._build_pipeline({}, pipeline_steps, 'job', MagicMock())
 
 
-@patch('modules.compute.engine.PolarsComputeEngine._load_datasource')
+@patch('modules.compute.engine.load_datasource')
 @patch('modules.compute.engine.PolarsComputeEngine._apply_step')
 def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: MagicMock):
     fake_lf = MagicMock()

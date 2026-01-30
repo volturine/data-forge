@@ -10,6 +10,7 @@ export type ColumnInfo = Column;
 export interface Schema {
 	columns: Column[];
 	row_count: number | null;
+	sheet_names?: string[] | null;
 }
 
 export function emptySchema(): Schema {

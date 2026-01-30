@@ -81,11 +81,14 @@ def convert_join_config(config: dict) -> dict:
     join_columns = config.get('join_columns', [])
     right_columns = config.get('right_columns', [])
 
+    how = config.get('how', 'inner')
+    if how == 'outer':
+        how = 'full'
     return {
         'right_source': config.get('right_source') or config.get('rightDataSource'),
         'join_columns': join_columns,
         'right_columns': right_columns,
-        'how': config.get('how', 'inner'),
+        'how': how,
         'suffix': config.get('suffix', '_right'),
     }
 
@@ -96,8 +99,11 @@ def convert_fillnull_config(config: dict) -> dict:
     Frontend: {strategy, value, columns}
     Backend: {strategy, value, columns}
     """
+    strategy = config.get('strategy', 'literal')
+    if strategy == 'value':
+        strategy = 'literal'
     return {
-        'strategy': config.get('strategy', 'value'),
+        'strategy': strategy,
         'value': config.get('value'),
         'value_type': config.get('value_type'),
         'columns': config.get('columns', []),

@@ -12,6 +12,7 @@
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import { analysisStore } from '$lib/stores/analysis.svelte';
 
 	interface Props {
 		analysisId: string;
@@ -60,13 +61,18 @@
 			previewVersion
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
+			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
+				string,
+				unknown
+			> | null;
 			const result = await previewStepData({
 				analysis_id: analysisId,
 				datasource_id: datasourceId,
 				pipeline_steps: pipeline,
 				target_step_id: stepId,
 				row_limit: rowLimit,
-				page: currentPage
+				page: currentPage,
+				resource_config: resourceConfig
 			});
 			if (result.isErr()) {
 				throw new Error(result.error.message);

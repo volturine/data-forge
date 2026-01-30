@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DataSource } from '$lib/types/datasource';
 	import { getDatasourceSchema } from '$lib/api/datasource';
+	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import {
 		FileText,
 		Database,
@@ -13,23 +14,70 @@
 		FileType,
 		Hash,
 		Check,
-		X
+		X,
+		Cpu,
+		ChevronDown
 	} from 'lucide-svelte';
 	import { drag } from '$lib/stores/drag.svelte';
 
 	interface Props {
 		datasource: DataSource | null;
 		tabName?: string;
+		analysisId?: string;
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
 	}
 
-	let { datasource, tabName, onChangeDatasource, onRenameTab }: Props = $props();
+	let { datasource, tabName, analysisId, onChangeDatasource, onRenameTab }: Props = $props();
 
 	let isEditing = $state(false);
 	let draftName = $state('');
 	let rowCount = $state<number | null>(null);
 	let isLoadingRowCount = $state(false);
+
+	// Engine config - simple state bound to store
+	let engineExpanded = $state(false);
+
+	// Use defaults from store (fetched by analysis page on load)
+	let defaults = $derived(analysisStore.engineDefaults);
+
+	// Threads: show effective value (default when not overridden)
+	let threadsOverride = $derived(analysisStore.resourceConfig?.max_threads ?? 0);
+	let effectiveThreads = $derived(threadsOverride || defaults?.max_threads || 0);
+	let isUsingDefaultThreads = $derived(threadsOverride === 0);
+	function setThreads(value: number) {
+		const current = analysisStore.resourceConfig ?? {};
+		// If set to the default value, treat as "use default" (store undefined)
+		const defaultThreads = defaults?.max_threads ?? 0;
+		const storeValue = value === defaultThreads ? undefined : value || undefined;
+		analysisStore.setResourceConfig({ ...current, max_threads: storeValue });
+	}
+
+	// Memory: show effective value (default when not overridden)
+	let memoryGbOverride = $derived(
+		Math.floor((analysisStore.resourceConfig?.max_memory_mb ?? 0) / 1024)
+	);
+	let effectiveMemoryGb = $derived(
+		memoryGbOverride || Math.floor((defaults?.max_memory_mb ?? 0) / 1024)
+	);
+	let isUsingDefaultMemory = $derived(memoryGbOverride === 0);
+	function setMemoryGb(value: number) {
+		const current = analysisStore.resourceConfig ?? {};
+		// If set to the default value, treat as "use default" (store undefined)
+		const defaultMemoryGb = Math.floor((defaults?.max_memory_mb ?? 0) / 1024);
+		const storeValue = value === defaultMemoryGb ? undefined : value ? value * 1024 : undefined;
+		analysisStore.setResourceConfig({ ...current, max_memory_mb: storeValue });
+	}
+
+	const standardMemoryOptions = [1, 2, 4, 8, 16, 32, 64];
+	// Include the default/effective value in options if not already present
+	let memoryOptions = $derived.by(() => {
+		const val = effectiveMemoryGb;
+		if (val && !standardMemoryOptions.includes(val)) {
+			return [...standardMemoryOptions, val].sort((a, b) => a - b);
+		}
+		return standardMemoryOptions;
+	});
 
 	$effect(() => {
 		if (!isEditing) {
@@ -224,6 +272,64 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Engine Resources Section -->
+		{#if analysisId}
+			<div class="engine-section">
+				<button
+					class="engine-header"
+					onclick={() => (engineExpanded = !engineExpanded)}
+					type="button"
+				>
+					<div class="engine-header-left">
+						<Cpu size={12} />
+						<span>Engine</span>
+					</div>
+					<div class="engine-header-right">
+						<span class="engine-summary">
+							{effectiveThreads} threads, {effectiveMemoryGb}GB
+						</span>
+						<span class="chevron" class:expanded={engineExpanded}>
+							<ChevronDown size={12} />
+						</span>
+					</div>
+				</button>
+
+				{#if engineExpanded}
+					<div class="engine-content">
+						<div class="resource-row">
+							<label for="threads-input">Threads</label>
+							<input
+								id="threads-input"
+								type="number"
+								min="1"
+								max="64"
+								value={effectiveThreads}
+								onchange={(e) => setThreads(parseInt(e.currentTarget.value) || 0)}
+							/>
+							{#if isUsingDefaultThreads}
+								<span class="resource-hint default">(default)</span>
+							{/if}
+						</div>
+						<div class="resource-row">
+							<label for="memory-select">Memory</label>
+							<select
+								id="memory-select"
+								value={effectiveMemoryGb}
+								onchange={(e) => setMemoryGb(parseInt(e.currentTarget.value) || 0)}
+							>
+								{#each memoryOptions as gb (gb)}
+									<option value={gb}>{gb} GB</option>
+								{/each}
+							</select>
+							{#if isUsingDefaultMemory}
+								<span class="resource-hint default">(default)</span>
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Action Button -->
 		{#if onChangeDatasource}
@@ -539,5 +645,110 @@
 		border-color: var(--accent-primary);
 		border-style: dashed;
 		opacity: 0.85;
+	}
+
+	/* Engine Resources Section */
+	.engine-section {
+		margin-bottom: var(--space-3);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+	}
+
+	.engine-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: var(--space-2) var(--space-3);
+		background-color: var(--bg-secondary);
+		border: none;
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+	.engine-header:hover {
+		background-color: var(--bg-tertiary);
+	}
+
+	.engine-header-left {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--text-xs);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--fg-muted);
+	}
+
+	.engine-header-right {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.engine-summary {
+		font-size: 10px;
+		color: var(--fg-secondary);
+		font-family: var(--font-mono);
+	}
+
+	.engine-header .chevron {
+		display: flex;
+		align-items: center;
+		color: var(--fg-muted);
+		transition: transform var(--transition);
+	}
+	.engine-header .chevron.expanded {
+		transform: rotate(180deg);
+	}
+
+	.engine-content {
+		padding: var(--space-3);
+		background-color: var(--bg-primary);
+		border-top: 1px solid var(--border-primary);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.resource-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	.resource-row label {
+		font-size: var(--text-xs);
+		color: var(--fg-secondary);
+		min-width: 60px;
+	}
+
+	.resource-row input,
+	.resource-row select {
+		flex: 1;
+		padding: var(--space-1) var(--space-2);
+		background-color: var(--bg-secondary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-xs);
+		font-family: var(--font-mono);
+		color: var(--fg-primary);
+	}
+
+	.resource-row input:focus,
+	.resource-row select:focus {
+		outline: none;
+		border-color: var(--accent-primary);
+	}
+
+	.resource-hint {
+		font-size: 9px;
+		color: var(--fg-muted);
+		min-width: 50px;
+	}
+
+	.resource-hint.default {
+		color: var(--fg-tertiary);
+		font-style: italic;
 	}
 </style>

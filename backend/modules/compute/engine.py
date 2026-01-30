@@ -8,15 +8,19 @@ from queue import Empty
 
 import polars as pl
 
-from modules.compute.polars_functions import get_operation_handlers
+from modules.compute.operations import get_operation_handlers
+from modules.compute.operations.datasource import load_datasource
+from modules.compute.operations.exports import get_export_format
 from modules.compute.step_converter import convert_step_format
 
 logger = logging.getLogger(__name__)
 
 
 class PolarsComputeEngine:
-    def __init__(self, analysis_id: str):
+    def __init__(self, analysis_id: str, resource_config: dict | None = None):
         self.analysis_id = analysis_id
+        self.resource_config = resource_config or {}
+        self.effective_resources: dict = {}  # Populated when engine starts
         self.process: mp.Process | None = None
         self.command_queue: mp.Queue = mp.Queue()
         self.result_queue: mp.Queue = mp.Queue()
@@ -68,22 +72,49 @@ class PolarsComputeEngine:
 
         from core.config import settings
 
-        if settings.polars_max_threads > 0:
-            os.environ['POLARS_MAX_THREADS'] = str(settings.polars_max_threads)
-            logger.debug(f'Set POLARS_MAX_THREADS={settings.polars_max_threads}')
+        # Determine effective resource values (override > settings)
+        # None in resource_config means use settings default
+        max_threads = self.resource_config.get('max_threads')
+        if max_threads is None:
+            max_threads = settings.polars_max_threads
 
-        if settings.polars_streaming_chunk_size > 0:
-            os.environ['POLARS_STREAMING_CHUNK_SIZE'] = str(settings.polars_streaming_chunk_size)
-            logger.debug(f'Set POLARS_STREAMING_CHUNK_SIZE={settings.polars_streaming_chunk_size}')
+        max_memory_mb = self.resource_config.get('max_memory_mb')
+        if max_memory_mb is None:
+            max_memory_mb = settings.polars_max_memory_mb
+
+        streaming_chunk_size = self.resource_config.get('streaming_chunk_size')
+        if streaming_chunk_size is None:
+            streaming_chunk_size = settings.polars_streaming_chunk_size
+
+        # Store effective resources for status reporting
+        self.effective_resources = {
+            'max_threads': max_threads,
+            'max_memory_mb': max_memory_mb,
+            'streaming_chunk_size': streaming_chunk_size,
+        }
+
+        # Set environment variables for subprocess
+        if max_threads > 0:
+            os.environ['POLARS_MAX_THREADS'] = str(max_threads)
+            logger.debug(f'Set POLARS_MAX_THREADS={max_threads}')
+
+        if streaming_chunk_size > 0:
+            os.environ['POLARS_STREAMING_CHUNK_SIZE'] = str(streaming_chunk_size)
+            logger.debug(f'Set POLARS_STREAMING_CHUNK_SIZE={streaming_chunk_size}')
 
         mp.set_start_method('spawn', force=True)
 
         self.process = mp.Process(
             target=self._run_compute,
-            args=(self.command_queue, self.result_queue),
+            args=(self.command_queue, self.result_queue, max_memory_mb),
         )
         self.process.start()
         self.is_running = True
+        logger.info(
+            f'Engine started for analysis {self.analysis_id} '
+            f'(threads: {max_threads or "auto"}, memory: {max_memory_mb or "unlimited"} MB, '
+            f'chunk_size: {streaming_chunk_size or "auto"})'
+        )
 
     def preview(
         self,
@@ -239,22 +270,17 @@ class PolarsComputeEngine:
         self.process = None
 
     @staticmethod
-    def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue) -> None:
+    def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue, max_memory_mb: int = 0) -> None:
         """Main compute loop running in subprocess."""
-        from core.config import settings
-
-        if settings.polars_max_memory_mb > 0:
-            memory_bytes = settings.polars_max_memory_mb * 1024 * 1024
+        if max_memory_mb > 0:
+            memory_bytes = max_memory_mb * 1024 * 1024
             try:
                 resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-                logger.debug(f'Set memory limit to {settings.polars_max_memory_mb} MB')
+                logger.debug(f'Set memory limit to {max_memory_mb} MB')
             except (OSError, ValueError) as e:
                 logger.warning(f'Failed to set memory limit: {e}')
 
-        logger.info(
-            f'Polars engine started (PID: {os.getpid()}, threads: {settings.polars_max_threads or "auto"}, '
-            f'memory: {settings.polars_max_memory_mb or "unlimited"} MB)'
-        )
+        logger.info(f'Polars compute subprocess started (PID: {os.getpid()})')
 
         while True:
             try:
@@ -322,13 +348,13 @@ class PolarsComputeEngine:
         additional_datasources: dict[str, dict] | None = None,
     ) -> pl.LazyFrame:
         """Build the Polars transformation pipeline and return the final LazyFrame."""
-        lf = PolarsComputeEngine._load_datasource(datasource_config)
+        lf = load_datasource(datasource_config)
 
         right_sources: dict[str, pl.LazyFrame] = {}
         if additional_datasources:
             for ds_id, ds_config in additional_datasources.items():
                 try:
-                    right_sources[ds_id] = PolarsComputeEngine._load_datasource(ds_config)
+                    right_sources[ds_id] = load_datasource(ds_config)
                 except Exception as e:
                     logger.error(f'Failed to load additional datasource {ds_id}: {e}')
                     raise ValueError(f'Failed to load datasource {ds_id}: {e}')
@@ -482,16 +508,8 @@ class PolarsComputeEngine:
         df = lf.collect()
         row_count = len(df)
 
-        if export_format == 'csv':
-            df.write_csv(output_path)
-        elif export_format == 'parquet':
-            df.write_parquet(output_path)
-        elif export_format == 'json':
-            df.write_json(output_path)
-        elif export_format == 'ndjson':
-            df.write_ndjson(output_path)
-        else:
-            raise ValueError(f'Unsupported export format: {export_format}')
+        fmt = get_export_format(export_format)
+        fmt.writer(df, output_path)
 
         return {
             'output_path': output_path,
@@ -523,57 +541,6 @@ class PolarsComputeEngine:
         }
 
     @staticmethod
-    def _load_datasource(config: dict) -> pl.LazyFrame:
-        """Load data from datasource configuration using lazy evaluation."""
-        source_type = config.get('source_type', 'file')
-
-        if source_type == 'file':
-            file_path = config['file_path']
-            file_type = config['file_type']
-            csv_options_dict = config.get('csv_options')
-
-            if file_type == 'csv':
-                if csv_options_dict:
-                    return pl.scan_csv(
-                        file_path,
-                        separator=csv_options_dict.get('delimiter', ','),
-                        quote_char=csv_options_dict.get('quote_char', '"'),
-                        has_header=csv_options_dict.get('has_header', True),
-                        skip_rows=csv_options_dict.get('skip_rows', 0),
-                        encoding=csv_options_dict.get('encoding', 'utf8').lower(),
-                    )
-                return pl.scan_csv(file_path)
-            elif file_type == 'parquet':
-                return pl.scan_parquet(file_path)
-            elif file_type == 'json':
-                return pl.read_json(file_path).lazy()
-            elif file_type == 'ndjson':
-                return pl.scan_ndjson(file_path)
-            elif file_type == 'excel':
-                return pl.read_excel(file_path).lazy()
-            else:
-                raise ValueError(f'Unsupported file type: {file_type}')
-
-        elif source_type == 'database':
-            connection_string = config['connection_string']
-            query = config['query']
-            # Database reads need to be collected, then converted to lazy
-            return pl.read_database(query, connection_string).lazy()
-
-        elif source_type == 'duckdb':
-            import duckdb
-
-            db_path = config.get('db_path')
-            query = config['query']
-
-            conn = duckdb.connect(database=db_path, read_only=config.get('read_only', True)) if db_path else duckdb.connect(database=':memory:')
-
-            return conn.execute(query).fetch_df().lazy()
-
-        else:
-            raise ValueError(f'Unsupported source type: {source_type}')
-
-    @staticmethod
     def _apply_step(
         lf: pl.LazyFrame,
         step: dict,
@@ -582,6 +549,8 @@ class PolarsComputeEngine:
     ) -> pl.LazyFrame:
         """Apply a single transformation step to the LazyFrame."""
         operation = step.get('operation')
+        if not isinstance(operation, str) or not operation:
+            raise ValueError('Step operation is required')
         params = step.get('params', {})
 
         handlers = get_operation_handlers()
@@ -590,10 +559,4 @@ class PolarsComputeEngine:
         if not handler:
             raise ValueError(f'Unsupported operation: {operation}')
 
-        if operation == 'join':
-            return handler(lf, params, right_lf)
-
-        if operation == 'union_by_name':
-            return handler(lf, params, right_sources or {})
-
-        return handler(lf, params)
+        return handler(lf, params, right_lf=right_lf, right_sources=right_sources)

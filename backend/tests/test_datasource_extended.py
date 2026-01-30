@@ -159,6 +159,14 @@ class TestDataSourceValidation:
             # Excel support may not be available
             pytest.skip('Excel support not available')
 
+    async def test_preflight_requires_xlsx(self, client: AsyncClient):
+        """Test preflight endpoint rejects non-xlsx files."""
+        files = {'file': ('test.csv', b'a,b\n1,2', 'text/csv')}
+
+        response = await client.post('/api/v1/datasource/preflight', files=files)
+
+        assert response.status_code == 400
+
 
 class TestDataSourceSchema:
     """Test datasource schema extraction."""

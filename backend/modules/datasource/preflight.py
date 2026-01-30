@@ -1,0 +1,45 @@
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+from openpyxl import load_workbook
+
+
+@dataclass
+class ExcelPreflight:
+    temp_path: Path
+    sheets: list[str]
+    tables: dict[str, list[str]]
+    named_ranges: list[str]
+
+
+_PREFLIGHTS: dict[str, ExcelPreflight] = {}
+
+
+def create_preflight(file_path: Path) -> tuple[str, ExcelPreflight]:
+    workbook = load_workbook(file_path, read_only=False, data_only=True)
+    sheets = workbook.sheetnames
+    tables: dict[str, list[str]] = {}
+    for sheet in workbook.worksheets:
+        if not hasattr(sheet, 'tables') or not sheet.tables:
+            continue
+        tables[sheet.title] = list(sheet.tables.keys())
+
+    named_ranges = [name for name in workbook.defined_names]
+
+    preflight_id = str(uuid.uuid4())
+    preflight = ExcelPreflight(temp_path=file_path, sheets=sheets, tables=tables, named_ranges=named_ranges)
+    _PREFLIGHTS[preflight_id] = preflight
+    return preflight_id, preflight
+
+
+def get_preflight(preflight_id: str) -> ExcelPreflight | None:
+    return _PREFLIGHTS.get(preflight_id)
+
+
+def clear_preflight(preflight_id: str, *, delete_file: bool = True) -> None:
+    preflight = _PREFLIGHTS.pop(preflight_id, None)
+    if not preflight:
+        return
+    if delete_file and preflight.temp_path.exists():
+        preflight.temp_path.unlink()

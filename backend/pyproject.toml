@@ -19,6 +19,11 @@ dependencies = [
     "aiosqlite",
     "alembic",
     "python-multipart",
+    "pytest-asyncio>=1.3.0",
+    "fastexcel>=0.19.0",
+    "openpyxl",
+    "mypy>=1.19.1",
+    "types-openpyxl>=3.1.5.20250919",
 ]
 
 [project.optional-dependencies]

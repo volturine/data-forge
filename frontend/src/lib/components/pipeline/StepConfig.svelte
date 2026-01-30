@@ -231,6 +231,10 @@
 				/>
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={step.config as unknown as ViewConfigData} />
+			{:else if step.type === 'datasource'}
+				<div class="not-implemented">
+					<p>Datasource options are set during upload.</p>
+				</div>
 			{:else if step.type === 'sample'}
 				<SampleConfig bind:config={step.config as unknown as SampleConfigData} />
 			{:else if step.type === 'limit'}
