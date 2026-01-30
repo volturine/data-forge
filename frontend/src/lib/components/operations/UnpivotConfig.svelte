@@ -9,8 +9,8 @@
 	let { schema, config = $bindable({}) }: Props = $props();
 
 	// Helper to get config value with default
-	const get = <T>(key: keyof typeof config, defaultValue: T): T =>
-		config[key] as T ?? defaultValue;
+	const get = <T,>(key: keyof typeof config, defaultValue: T): T =>
+		(config[key] as T) ?? defaultValue;
 </script>
 
 <div class="config-panel" role="region" aria-label="Unpivot configuration">
@@ -49,7 +49,7 @@
 			data-testid="unpivot-variable-input"
 			type="text"
 			value={get('variable_name', 'variable')}
-			oninput={(e) => config.variable_name = e.currentTarget.value}
+			oninput={(e) => (config.variable_name = e.currentTarget.value)}
 			placeholder="variable"
 		/>
 	</div>
@@ -61,7 +61,7 @@
 			data-testid="unpivot-value-input"
 			type="text"
 			value={get('value_name', 'value')}
-			oninput={(e) => config.value_name = e.currentTarget.value}
+			oninput={(e) => (config.value_name = e.currentTarget.value)}
 			placeholder="value"
 		/>
 	</div>

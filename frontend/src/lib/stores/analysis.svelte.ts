@@ -144,7 +144,11 @@ export class AnalysisStore {
 					return { ...step, config: normalizedConfig as Record<string, unknown>, depends_on: [] };
 				}
 				const parentId = steps[index - 1]?.id ?? null;
-				return { ...step, config: normalizedConfig as Record<string, unknown>, depends_on: parentId ? [parentId] : [] };
+				return {
+					...step,
+					config: normalizedConfig as Record<string, unknown>,
+					depends_on: parentId ? [parentId] : []
+				};
 			}
 
 			return { ...step, config: normalizedConfig as Record<string, unknown> };

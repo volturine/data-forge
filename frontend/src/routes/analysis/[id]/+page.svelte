@@ -23,7 +23,10 @@
 	const analysisId = $derived($page.params.id);
 
 	let selectedStepId = $state<string | null>(null);
-	let selectedStepState = $state<PipelineStep | null>(null);
+	let selectedStepState = $derived.by(() => {
+		if (!selectedStepId) return null;
+		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
+	});
 	let isSaving = $state(false);
 	let previewVersions = $state(new SvelteMap<string, number>());
 	let lastPreviewPipelines = $state(new SvelteMap<string, string>());
@@ -32,8 +35,10 @@
 	// Track pipeline state at last preview to detect staleness
 	const activeTabId = $derived(analysisStore.activeTab?.id ?? null);
 	const currentPipelineKey = $derived(JSON.stringify(analysisStore.pipeline));
-	const previewVersion = $derived(activeTabId ? previewVersions.get(activeTabId) ?? 0 : 0);
-	const lastPreviewPipeline = $derived(activeTabId ? lastPreviewPipelines.get(activeTabId) ?? '' : '');
+	const previewVersion = $derived(activeTabId ? (previewVersions.get(activeTabId) ?? 0) : 0);
+	const lastPreviewPipeline = $derived(
+		activeTabId ? (lastPreviewPipelines.get(activeTabId) ?? '') : ''
+	);
 	const isPreviewStale = $derived(!!previewVersion && lastPreviewPipeline !== currentPipelineKey);
 	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
@@ -126,13 +131,6 @@
 		window.localStorage.setItem(storageKey, JSON.stringify(payload));
 	});
 
-	$effect(() => {
-		if (!selectedStepId) {
-			selectedStepState = null;
-			return;
-		}
-		selectedStepState = analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
-	});
 	type SaveStates = 'saved' | 'unsaved' | 'saving';
 	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
 	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
@@ -256,7 +254,12 @@
 	}
 
 	function buildStep(type: string): PipelineStep {
-		return { id: makeId(), type, config: getDefaultConfig(type) as Record<string, unknown>, depends_on: [] };
+		return {
+			id: makeId(),
+			type,
+			config: getDefaultConfig(type) as Record<string, unknown>,
+			depends_on: []
+		};
 	}
 
 	function markUnsaved() {
@@ -286,14 +289,12 @@
 
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
-		selectedStepState = analysisStore.pipeline.find((step) => step.id === stepId) || null;
 	}
 
 	function handleDeleteStep(stepId: string) {
 		analysisStore.removeStep(stepId);
 		if (selectedStepId === stepId) {
 			selectedStepId = null;
-			selectedStepState = null;
 		}
 		markUnsaved();
 	}
@@ -308,7 +309,6 @@
 			() => {
 				saveStatus.send('saveComplete');
 				selectedStepId = null;
-				selectedStepState = null;
 				isSaving = false;
 
 				// Reset engine idle timeout on successful save
@@ -328,7 +328,6 @@
 
 	function handleCloseConfig() {
 		selectedStepId = null;
-		selectedStepState = null;
 	}
 
 	function handleSelectTab(tabId: string) {
@@ -404,15 +403,6 @@
 	function handleModalKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') closeDatasourceModal();
 	}
-
-	$effect(() => {
-		if (selectedStepId) {
-			const current = analysisStore.pipeline.find((step) => step.id === selectedStepId);
-			if (current) {
-				selectedStepState = current;
-			}
-		}
-	});
 </script>
 
 {#if analysisQuery.isLoading}
@@ -554,7 +544,7 @@
 
 			<div class="right-pane" class:collapsed={rightPaneCollapsed}>
 				<StepConfig
-					bind:step={selectedStepState}
+					step={selectedStepState}
 					schema={analysisStore.calculatedSchema}
 					{isLoadingSchema}
 					onClose={handleCloseConfig}

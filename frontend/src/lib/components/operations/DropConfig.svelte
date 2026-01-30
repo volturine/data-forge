@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { SvelteSet } from 'svelte/reactivity';
 
 	interface DropConfigData {
 		columns: string[];
@@ -13,40 +12,23 @@
 
 	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	// SvelteSet for UI state - derived from config
-	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let selectedColumns = $state(new SvelteSet<string>(config.columns ?? []));
-
-	// When config changes (different step selected), reset the SvelteSet
-	let lastConfig = $state(config);
-	$effect(() => {
-		if (config !== lastConfig) {
-			selectedColumns = new SvelteSet<string>(config.columns ?? []);
-			lastConfig = config;
-		}
-	});
-
 	function toggleColumn(columnName: string) {
-		if (selectedColumns.has(columnName)) {
-			selectedColumns.delete(columnName);
+		const cols = config.columns;
+		const index = cols.indexOf(columnName);
+		if (index > -1) {
+			config.columns = cols.filter((_, i) => i !== index);
 		} else {
-			selectedColumns.add(columnName);
+			config.columns = [...cols, columnName];
 		}
-		// Update config directly
-		config.columns = Array.from(selectedColumns);
 	}
 
 	function selectAll() {
-		selectedColumns = new SvelteSet(schema.columns.map((c) => c.name));
-		config.columns = Array.from(selectedColumns);
+		config.columns = schema.columns.map((c) => c.name);
 	}
 
 	function deselectAll() {
-		selectedColumns = new SvelteSet();
 		config.columns = [];
 	}
-
-	let selectedColumnNames = $derived(Array.from(selectedColumns));
 </script>
 
 <div class="config-panel" role="region" aria-label="Drop columns configuration">
@@ -82,7 +64,7 @@
 					id={`drop-checkbox-${column.name}`}
 					data-testid={`drop-column-checkbox-${column.name}`}
 					type="checkbox"
-					checked={selectedColumns.has(column.name)}
+					checked={config.columns.includes(column.name)}
 					onchange={() => toggleColumn(column.name)}
 					aria-label={`Drop column ${column.name}`}
 				/>
@@ -92,11 +74,11 @@
 		{/each}
 	</div>
 
-	{#if selectedColumnNames.length > 0}
+	{#if config.columns.length > 0}
 		<div id="drop-selected-summary" class="selected-summary warning" aria-live="polite">
-			<strong>Columns to Drop ({selectedColumnNames.length}):</strong>
+			<strong>Columns to Drop ({config.columns.length}):</strong>
 			<div class="selected-names">
-				{selectedColumnNames.join(', ')}
+				{config.columns.join(', ')}
 			</div>
 		</div>
 	{:else}

@@ -23,6 +23,7 @@
 		ValueCountsConfigData,
 		UnpivotConfigData
 	} from '$lib/types/operation-config';
+	import { untrack } from 'svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
@@ -70,12 +71,10 @@
 		onClose,
 		onConfigChange
 	}: Props = $props();
-	let configSnapshot = $state('');
 	let fetchingPivotSchema = $state(false);
 
-	function refreshSnapshot(nextStep: PipelineStep | null) {
-		configSnapshot = JSON.stringify(nextStep?.config ?? {});
-	}
+	let configSnapshot = $derived(JSON.stringify(step?.config ?? {}));
+	let prevSnapshot = $state('');
 
 	let inputSchema = $derived(
 		step
@@ -123,13 +122,10 @@
 	}
 
 	$effect(() => {
-		refreshSnapshot(step);
-	});
-
-	$effect(() => {
-		const snapshot = JSON.stringify(step?.config ?? {});
-		if (!step || snapshot === configSnapshot) return;
-		configSnapshot = snapshot;
+		const snapshot = configSnapshot;
+		const prev = untrack(() => prevSnapshot);
+		if (!step || snapshot === prev) return;
+		untrack(() => (prevSnapshot = snapshot));
 		onConfigChange?.();
 	});
 

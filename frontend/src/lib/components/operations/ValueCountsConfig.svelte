@@ -9,8 +9,8 @@
 	let { schema, config = $bindable({}) }: Props = $props();
 
 	// Helper to get config value with default
-	const get = <T>(key: keyof typeof config, defaultValue: T): T =>
-		config[key] as T ?? defaultValue;
+	const get = <T,>(key: keyof typeof config, defaultValue: T): T =>
+		(config[key] as T) ?? defaultValue;
 </script>
 
 <div class="config-panel">
@@ -35,7 +35,12 @@
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input id="sort" type="checkbox" checked={get('sort', true)} onchange={(e) => config.sort = e.currentTarget.checked} />
+			<input
+				id="sort"
+				type="checkbox"
+				checked={get('sort', true)}
+				onchange={(e) => (config.sort = e.currentTarget.checked)}
+			/>
 			<span>Sort by count</span>
 		</label>
 	</div>

@@ -288,16 +288,16 @@
 				</div>
 			{/if}
 			{#each steps as step, i (step.id)}
-						<StepNode
-							{step}
-							index={i}
-							{analysisId}
-							datasourceId={previewDatasourceId ?? datasourceId}
-							allSteps={steps}
-							{previewVersion}
-							{isPreviewStale}
-							onEdit={onStepClick}
-							onDelete={onStepDelete}
+				<StepNode
+					{step}
+					index={i}
+					{analysisId}
+					datasourceId={previewDatasourceId ?? datasourceId}
+					allSteps={steps}
+					{previewVersion}
+					{isPreviewStale}
+					onEdit={onStepClick}
+					onDelete={onStepDelete}
 					onTouchMove={onMoveStep}
 				/>
 				<!-- Connection + Drop zone after each step -->
