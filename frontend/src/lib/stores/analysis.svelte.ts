@@ -4,6 +4,7 @@ import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
 import { normalizeDtype } from '$lib/utils/transform';
+import { normalizeConfig } from '$lib/utils/step-config-defaults';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, err, ok } from 'neverthrow';
@@ -132,15 +133,24 @@ export class AnalysisStore {
 	private normalizeSteps(steps: PipelineStep[]): PipelineStep[] {
 		if (!steps.length) return steps;
 		const hasDependencies = steps.some((step) => (step.depends_on ?? []).length > 0);
-		if (hasDependencies) return steps;
 
-		return steps.map((step, index) => {
-			if (index === 0) {
-				return { ...step, depends_on: [] };
+		const normalized = steps.map((step, index) => {
+			// Normalize config to ensure proper shape (handles backward compatibility)
+			const normalizedConfig = normalizeConfig(step.type, step.config as Record<string, unknown>);
+
+			if (!hasDependencies) {
+				// Legacy: add dependencies based on position
+				if (index === 0) {
+					return { ...step, config: normalizedConfig as Record<string, unknown>, depends_on: [] };
+				}
+				const parentId = steps[index - 1]?.id ?? null;
+				return { ...step, config: normalizedConfig as Record<string, unknown>, depends_on: parentId ? [parentId] : [] };
 			}
-			const parentId = steps[index - 1]?.id ?? null;
-			return { ...step, depends_on: parentId ? [parentId] : [] };
+
+			return { ...step, config: normalizedConfig as Record<string, unknown> };
 		});
+
+		return normalized;
 	}
 
 	setActiveTab(id: string): void {

@@ -21,26 +21,6 @@
 		!!(config?.columns && Array.isArray(config?.index) && config.index.length > 0)
 	);
 
-	// Ensure config has proper structure (handles empty {} from step creation)
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { index: [], columns: '', values: '', aggregate_function: 'first' };
-		} else {
-			if (!Array.isArray(config.index)) {
-				config.index = [];
-			}
-			if (typeof config.columns !== 'string') {
-				config.columns = '';
-			}
-			if (typeof config.values !== 'string') {
-				config.values = '';
-			}
-			if (typeof config.aggregate_function !== 'string') {
-				config.aggregate_function = 'first';
-			}
-		}
-	});
-
 	// Safe accessor
 	let safeIndex = $derived(Array.isArray(config?.index) ? config.index : []);
 

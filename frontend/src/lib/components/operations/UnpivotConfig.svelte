@@ -8,19 +8,9 @@
 
 	let { schema, config = $bindable({}) }: Props = $props();
 
-	let index = $state(config.index ?? []);
-	let on = $state(config.on ?? []);
-	let variableName = $state(config.variable_name ?? 'variable');
-	let valueName = $state(config.value_name ?? 'value');
-
-	$effect(() => {
-		config = {
-			...(index.length > 0 ? { index } : {}),
-			...(on.length > 0 ? { on } : {}),
-			...(variableName !== 'variable' ? { variable_name: variableName } : {}),
-			...(valueName !== 'value' ? { value_name: valueName } : {})
-		};
-	});
+	// Helper to get config value with default
+	const get = <T>(key: keyof typeof config, defaultValue: T): T =>
+		config[key] as T ?? defaultValue;
 </script>
 
 <div class="config-panel" role="region" aria-label="Unpivot configuration">
@@ -33,7 +23,7 @@
 			id="unpivot-select-index"
 			data-testid="unpivot-index-select"
 			multiple
-			bind:value={index}
+			bind:value={config.index}
 		>
 			{#each schema.columns as col (col.name)}
 				<option value={col.name}>{col.name}</option>
@@ -44,7 +34,7 @@
 
 	<div class="form-group">
 		<label for="unpivot-select-on">Columns to unpivot</label>
-		<select id="unpivot-select-on" data-testid="unpivot-on-select" multiple bind:value={on}>
+		<select id="unpivot-select-on" data-testid="unpivot-on-select" multiple bind:value={config.on}>
 			{#each schema.columns as col (col.name)}
 				<option value={col.name}>{col.name}</option>
 			{/each}
@@ -58,7 +48,8 @@
 			id="unpivot-input-variable"
 			data-testid="unpivot-variable-input"
 			type="text"
-			bind:value={variableName}
+			value={get('variable_name', 'variable')}
+			oninput={(e) => config.variable_name = e.currentTarget.value}
 			placeholder="variable"
 		/>
 	</div>
@@ -69,7 +60,8 @@
 			id="unpivot-input-value"
 			data-testid="unpivot-value-input"
 			type="text"
-			bind:value={valueName}
+			value={get('value_name', 'value')}
+			oninput={(e) => config.value_name = e.currentTarget.value}
 			placeholder="value"
 		/>
 	</div>

@@ -29,10 +29,12 @@
 
 	const isCrossJoin = $derived(config.how === 'cross');
 
+	// Sync selectedRightSource with config.right_source
 	$effect(() => {
 		config.right_source = selectedRightSource;
 	});
 
+	// Load right schema when right_source changes
 	$effect(() => {
 		const targetSource = config.right_source || selectedRightSource;
 		if (config.right_source && config.right_source !== selectedRightSource) {
@@ -44,6 +46,7 @@
 		}
 	});
 
+	// Sync search with selected source name when picker closes
 	$effect(() => {
 		if (showPicker) return;
 		if (!selectedSource) {

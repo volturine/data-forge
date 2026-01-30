@@ -12,15 +12,6 @@
 
 	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	// Ensure config has proper structure
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { columns: [] };
-		} else if (!Array.isArray(config.columns)) {
-			config.columns = [];
-		}
-	});
-
 	// Safe accessor
 	let safeColumns = $derived(Array.isArray(config?.columns) ? config.columns : []);
 

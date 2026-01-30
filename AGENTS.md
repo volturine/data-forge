@@ -90,6 +90,97 @@ from core.config import settings
 from modules.auth.schemas import UserResponse
 ```
 
+### Config Defaults Pattern
+
+When creating steps with configs, always provide proper defaults at creation time:
+
+```typescript
+// In step-config-defaults.ts - centralize all default configs
+export function getDefaultConfig(stepType: string): StepConfig {
+  const defaults: Record<string, StepConfig> = {
+    select: { columns: [] },
+    filter: { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' },
+    join: { how: 'inner', right_source: '', join_columns: [], right_columns: [], suffix: '_right' },
+    // ... one entry per operation type
+  };
+  return JSON.parse(JSON.stringify(defaults[stepType] ?? {}));
+}
+
+// Use when building steps
+import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+
+function buildStep(type: string): PipelineStep {
+  return { 
+    id: makeId(), 
+    type, 
+    config: getDefaultConfig(type) as Record<string, unknown>, 
+    depends_on: [] 
+  };
+}
+```
+
+### Svelte 5 $effect Patterns
+
+**DO NOT use `$effect` for data validation or initialization** - these are code smells indicating data should be fixed at the source:
+
+```svelte
+<!-- BAD: Defensive $effect in config component -->
+<script>
+  let { config = $bindable({}) }: Props = $props();
+  
+  $effect(() => {
+    if (!config || typeof config !== 'object') {
+      config = { columns: [] };
+    }
+  });
+</script>
+
+<!-- GOOD: Centralize defaults at step creation -->
+<!-- In step-config-defaults.ts -->
+export function getDefaultConfig(stepType: string) {
+  const defaults = {
+    select: { columns: [] },
+    filter: { conditions: [], logic: 'AND' },
+    // ...
+  };
+  return defaults[stepType] ?? {};
+}
+
+<!-- In +page.svelte -->
+function buildStep(type: string) {
+  return { 
+    id: makeId(), 
+    type, 
+    config: getDefaultConfig(type),  // Proper defaults
+    depends_on: [] 
+  };
+}
+```
+
+**Legitimate `$effect` uses:**
+- DOM manipulation (theme changes, focus management)
+- External side effects (API calls, localStorage)
+- Event listener setup/cleanup
+- Syncing internal UI state (SvelteSet) when external config changes
+
+**Prefer `$derived` for computed values:**
+```svelte
+<!-- GOOD -->
+let selectedColumns = $derived(new SvelteSet(config.columns ?? []));
+```
+
+**Config Normalization for Backward Compatibility:**
+When loading saved data that might have malformed configs, normalize once in the store:
+```typescript
+// In analysis.svelte.ts
+private normalizeSteps(steps: PipelineStep[]) {
+  return steps.map(step => ({
+    ...step,
+    config: normalizeConfig(step.type, step.config)
+  }));
+}
+```
+
 ### Runed Utilities
 
 This project uses [Runed](https://runed.dev/docs) for Svelte 5 utilities:

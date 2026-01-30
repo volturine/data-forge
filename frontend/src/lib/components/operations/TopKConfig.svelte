@@ -6,19 +6,16 @@
 		config?: { column?: string; k?: number; descending?: boolean };
 	}
 
-	let { schema, config = $bindable({}) }: Props = $props();
+	let { schema, config = $bindable({ column: '', k: 10, descending: false }) }: Props = $props();
 
-	let column = $state(config.column ?? '');
-	let k = $state(config.k ?? 10);
-	let descending = $state(config.descending ?? false);
+	function setK(value: string) {
+		const num = parseInt(value, 10);
+		config.k = isNaN(num) ? 10 : num;
+	}
 
-	$effect(() => {
-		config = {
-			...(column ? { column } : {}),
-			k,
-			...(descending ? { descending } : {})
-		};
-	});
+	function setDescending(checked: boolean) {
+		config.descending = checked;
+	}
 </script>
 
 <div class="config-panel" role="region" aria-label="Top K configuration">
@@ -26,7 +23,7 @@
 
 	<div class="form-group">
 		<label for="topk-select-column">Column to sort by</label>
-		<select id="topk-select-column" data-testid="topk-column-select" bind:value={column}>
+		<select id="topk-select-column" data-testid="topk-column-select" bind:value={config.column}>
 			<option value="">Select column...</option>
 			{#each schema.columns as col (col.name)}
 				<option value={col.name}>{col.name} ({col.dtype})</option>
@@ -40,7 +37,8 @@
 			id="topk-input-k"
 			data-testid="topk-k-input"
 			type="number"
-			bind:value={k}
+			value={config.k}
+			oninput={(e) => setK(e.currentTarget.value)}
 			min="1"
 			placeholder="e.g., 10"
 		/>
@@ -52,7 +50,8 @@
 				id="topk-checkbox-descending"
 				data-testid="topk-descending-checkbox"
 				type="checkbox"
-				bind:checked={descending}
+				checked={config.descending}
+				onchange={(e) => setDescending(e.currentTarget.checked)}
 				aria-describedby="topk-descending-help"
 			/>
 			<span>Descending (largest first)</span>

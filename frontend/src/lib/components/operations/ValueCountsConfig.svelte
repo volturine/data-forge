@@ -8,17 +8,9 @@
 
 	let { schema, config = $bindable({}) }: Props = $props();
 
-	let column = $state(config.column ?? '');
-	let normalize = $state(config.normalize ?? false);
-	let sort = $state(config.sort ?? true);
-
-	$effect(() => {
-		config = {
-			...(column ? { column } : {}),
-			...(normalize ? { normalize } : {}),
-			...(sort !== true ? { sort } : {})
-		};
-	});
+	// Helper to get config value with default
+	const get = <T>(key: keyof typeof config, defaultValue: T): T =>
+		config[key] as T ?? defaultValue;
 </script>
 
 <div class="config-panel">
@@ -26,7 +18,7 @@
 
 	<div class="form-group">
 		<label for="column">Column to count</label>
-		<select id="column" bind:value={column}>
+		<select id="column" bind:value={config.column}>
 			<option value="">Select column...</option>
 			{#each schema.columns as col (col.name)}
 				<option value={col.name}>{col.name} ({col.dtype})</option>
@@ -36,14 +28,14 @@
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input id="normalize" type="checkbox" bind:checked={normalize} />
+			<input id="normalize" type="checkbox" bind:checked={config.normalize} />
 			<span>Normalize (show proportions instead of counts)</span>
 		</label>
 	</div>
 
 	<div class="form-group">
 		<label class="checkbox-label">
-			<input id="sort" type="checkbox" bind:checked={sort} />
+			<input id="sort" type="checkbox" checked={get('sort', true)} onchange={(e) => config.sort = e.currentTarget.checked} />
 			<span>Sort by count</span>
 		</label>
 	</div>

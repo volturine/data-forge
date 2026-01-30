@@ -41,16 +41,12 @@
 		});
 	});
 
+	// Sync selectedSources with config.sources
 	$effect(() => {
 		config.sources = selectedSources;
 	});
 
-	$effect(() => {
-		if (config.allow_missing === undefined) {
-			config.allow_missing = true;
-		}
-	});
-
+	// Load schemas for selected sources
 	$effect(() => {
 		const selected = new Set(selectedSources);
 		for (const sourceId of selectedSources) {

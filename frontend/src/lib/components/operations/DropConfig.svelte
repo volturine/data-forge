@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { Previous } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface DropConfigData {
@@ -14,41 +13,18 @@
 
 	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	// Ensure config has proper structure
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { columns: [] };
-		} else if (!Array.isArray(config.columns)) {
-			config.columns = [];
-		}
-	});
-
-	// Safe accessor
-	let safeColumns = $derived(Array.isArray(config?.columns) ? config.columns : []);
-
-	// Keep SvelteSet for UI
+	// SvelteSet for UI state - derived from config
 	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let selectedColumns = $state(new SvelteSet<string>());
+	let selectedColumns = $state(new SvelteSet<string>(config.columns ?? []));
 
-	// Track config changes with Previous utility
-	const prevConfig = new Previous(() => config);
-
-	// Sync config → SvelteSet when config changes
+	// When config changes (different step selected), reset the SvelteSet
+	let lastConfig = $state(config);
 	$effect(() => {
-		if (prevConfig.current !== config) {
-			selectedColumns = new SvelteSet(safeColumns);
+		if (config !== lastConfig) {
+			selectedColumns = new SvelteSet<string>(config.columns ?? []);
+			lastConfig = config;
 		}
 	});
-
-	// Initialize on first render
-	$effect(() => {
-		if (selectedColumns.size === 0 && safeColumns.length > 0) {
-			selectedColumns = new SvelteSet(safeColumns);
-		}
-	});
-
-	// Config is now updated directly in toggleColumn/selectAll/deselectAll functions
-	// to avoid infinite loop from bidirectional effect binding
 
 	function toggleColumn(columnName: string) {
 		if (selectedColumns.has(columnName)) {
@@ -56,7 +32,7 @@
 		} else {
 			selectedColumns.add(columnName);
 		}
-		// Update config directly to avoid infinite loop
+		// Update config directly
 		config.columns = Array.from(selectedColumns);
 	}
 

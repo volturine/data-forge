@@ -19,23 +19,9 @@
 
 	let { schema, config = $bindable({ groupBy: [], aggregations: [] }) }: Props = $props();
 
-	// Ensure config has proper structure (handles empty {} from step creation)
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { groupBy: [], aggregations: [] };
-		} else {
-			if (!Array.isArray(config.groupBy)) {
-				config.groupBy = [];
-			}
-			if (!Array.isArray(config.aggregations)) {
-				config.aggregations = [];
-			}
-		}
-	});
-
-	// Safe accessors
-	let safeGroupBy = $derived(Array.isArray(config?.groupBy) ? config.groupBy : []);
-	let safeAggregations = $derived(Array.isArray(config?.aggregations) ? config.aggregations : []);
+	// Config now guaranteed to have proper structure
+	let safeGroupBy = $derived(config.groupBy);
+	let safeAggregations = $derived(config.aggregations);
 
 	let newAggregation = $state<Aggregation>({
 		column: '',
@@ -58,23 +44,21 @@
 	];
 
 	function toggleGroupByColumn(columnName: string) {
-		const base = Array.isArray(config.groupBy) ? config.groupBy : [];
-		const index = base.indexOf(columnName);
+		const index = safeGroupBy.indexOf(columnName);
 		if (index > -1) {
-			config.groupBy = base.filter((_, i) => i !== index);
+			config.groupBy = safeGroupBy.filter((_, i) => i !== index);
 		} else {
-			config.groupBy = [...base, columnName];
+			config.groupBy = [...safeGroupBy, columnName];
 		}
 	}
 
 	function addAggregation() {
 		if (!newAggregation.column) return;
 
-		const base = Array.isArray(config.aggregations) ? config.aggregations : [];
 		const alias = newAggregation.alias || `${newAggregation.column}_${newAggregation.function}`;
 
 		config.aggregations = [
-			...base,
+			...safeAggregations,
 			{
 				column: newAggregation.column,
 				function: newAggregation.function,
@@ -90,9 +74,7 @@
 	}
 
 	function removeAggregation(index: number) {
-		if (Array.isArray(config.aggregations)) {
-			config.aggregations = config.aggregations.filter((_, i) => i !== index);
-		}
+		config.aggregations = safeAggregations.filter((_, i) => i !== index);
 	}
 </script>
 

@@ -22,27 +22,9 @@
 		config = $bindable({ conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' })
 	}: Props = $props();
 
-	// Ensure config has proper structure (handles empty {} from step creation)
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { conditions: [{ column: '', operator: '=', value: '' }], logic: 'AND' };
-		} else {
-			if (!Array.isArray(config.conditions)) {
-				config.conditions = [{ column: '', operator: '=', value: '' }];
-			}
-			if (!config.logic) {
-				config.logic = 'AND';
-			}
-		}
-	});
-
-	// Safe accessors
-	let safeConditions = $derived(
-		Array.isArray(config?.conditions)
-			? config.conditions
-			: [{ column: '', operator: '=', value: '' }]
-	);
-	let safeLogic = $derived(config?.logic ?? 'AND');
+	// Safe accessors - config now guaranteed to have proper structure
+	let safeConditions = $derived(config.conditions);
+	let safeLogic = $derived(config.logic);
 
 	const operators = ['=', '!=', '>', '<', '>=', '<=', 'contains', 'starts_with', 'ends_with'];
 

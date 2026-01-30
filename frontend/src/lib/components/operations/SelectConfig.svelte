@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { Previous } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	interface SelectConfigData {
@@ -14,46 +13,19 @@
 
 	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	// Ensure config has proper structure
-	$effect(() => {
-		if (!config || typeof config !== 'object') {
-			config = { columns: [] };
-		} else if (!Array.isArray(config.columns)) {
-			config.columns = [];
-		}
-	});
-
-	// Safe accessor
-	let safeColumns = $derived(Array.isArray(config?.columns) ? config.columns : []);
-
-	// Keep SvelteSet for UI - initialize from config
+	// SvelteSet for UI state - derived from config
 	// eslint-disable-next-line svelte/no-unnecessary-state-wrap
-	let selectedColumns = $state(new SvelteSet<string>(config?.columns ?? []));
+	let selectedColumns = $state(new SvelteSet<string>(config.columns ?? []));
 
-	// Track if component has been initialized to avoid re-init on deselectAll
-	let initialized = $state(false);
-
-	// Track config changes with Previous utility
-	const prevConfig = new Previous(() => config);
-
-	// Sync config.columns → SvelteSet when config changes (different step selected)
+	// When config changes (different step selected), reset the SvelteSet
+	// This is a legitimate use of $effect for syncing external state changes
+	let lastConfig = $state(config);
 	$effect(() => {
-		if (prevConfig.current !== config) {
-			selectedColumns = new SvelteSet(safeColumns);
-			initialized = true;
+		if (config !== lastConfig) {
+			selectedColumns = new SvelteSet<string>(config.columns ?? []);
+			lastConfig = config;
 		}
 	});
-
-	// Initialize on first render only
-	$effect(() => {
-		if (!initialized && safeColumns.length > 0) {
-			selectedColumns = new SvelteSet(safeColumns);
-			initialized = true;
-		}
-	});
-
-	// Config is now updated directly in toggleColumn/selectAll/deselectAll functions
-	// to avoid infinite loop from bidirectional effect binding
 
 	function toggleColumn(columnName: string) {
 		if (selectedColumns.has(columnName)) {
@@ -61,7 +33,7 @@
 		} else {
 			selectedColumns.add(columnName);
 		}
-		// Update config directly to avoid infinite loop
+		// Update config directly
 		config.columns = Array.from(selectedColumns);
 	}
 

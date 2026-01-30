@@ -6,17 +6,7 @@
 		};
 	}
 
-	let { config = $bindable({}) }: Props = $props();
-
-	let fraction = $state(config.fraction ?? null);
-	let seed = $state(config.seed ?? 42);
-
-	$effect(() => {
-		config = {
-			...(fraction !== null && fraction !== undefined ? { fraction } : {}),
-			...(seed !== null && seed !== undefined ? { seed } : {})
-		};
-	});
+	let { config = $bindable({ fraction: 0.5, seed: 42 }) }: Props = $props();
 </script>
 
 <div class="config-panel" role="region" aria-label="Sample configuration">
@@ -28,7 +18,7 @@
 			id="sample-input-fraction"
 			data-testid="sample-fraction-input"
 			type="number"
-			bind:value={fraction}
+			bind:value={config.fraction}
 			min="0"
 			max="1"
 			step="0.01"
@@ -42,7 +32,7 @@
 			id="sample-input-seed"
 			data-testid="sample-seed-input"
 			type="number"
-			bind:value={seed}
+			bind:value={config.seed}
 			min="0"
 			placeholder="e.g., 42"
 		/>

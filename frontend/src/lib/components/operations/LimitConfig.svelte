@@ -4,12 +4,6 @@
 	}
 
 	let { config = $bindable({ n: 10 }) }: Props = $props();
-
-	let n = $state(config.n ?? 10);
-
-	$effect(() => {
-		config = { n };
-	});
 </script>
 
 <div class="config-panel" role="region" aria-label="Limit configuration">
@@ -21,7 +15,7 @@
 			id="limit-input-n"
 			data-testid="limit-rows-input"
 			type="number"
-			bind:value={n}
+			bind:value={config.n}
 			min="1"
 			placeholder="e.g., 10"
 			aria-describedby="limit-n-help"

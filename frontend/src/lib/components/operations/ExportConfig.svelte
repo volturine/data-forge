@@ -17,16 +17,11 @@
 		})
 	}: Props = $props();
 
-	let format = $state(config.format ?? 'csv');
-	let filename = $state(config.filename ?? 'export');
-	let destination = $state(config.destination ?? 'filesystem');
-	let tableName = $state((config.options?.table_name as string) ?? 'data');
+	let showDuckDBOptions = $derived(config.format === 'duckdb');
 
-	let showDuckDBOptions = $derived(format === 'duckdb');
-
-	$effect(() => {
-		config = { format, filename, destination, options: { table_name: tableName } };
-	});
+	function setTableName(value: string) {
+		config.options = { ...config.options, table_name: value };
+	}
 
 	const formats = [
 		{ value: 'csv', label: 'CSV (.csv)' },
@@ -49,7 +44,7 @@
 			id="export-input-filename"
 			data-testid="export-filename-input"
 			type="text"
-			bind:value={filename}
+			bind:value={config.filename}
 			placeholder="e.g., my_data"
 			aria-describedby="export-filename-hint"
 		/>
@@ -58,7 +53,7 @@
 
 	<div class="form-group">
 		<label for="export-select-format">Format</label>
-		<select id="export-select-format" data-testid="export-format-select" bind:value={format}>
+		<select id="export-select-format" data-testid="export-format-select" bind:value={config.format}>
 			{#each formats as fmt (fmt.value)}
 				<option value={fmt.value}>{fmt.label}</option>
 			{/each}
@@ -72,7 +67,8 @@
 				id="export-input-tablename"
 				data-testid="export-tablename-input"
 				type="text"
-				bind:value={tableName}
+				value={(config.options!.table_name as string) ?? 'data'}
+				oninput={(e) => setTableName(e.currentTarget.value)}
 				placeholder="e.g., my_data"
 				aria-describedby="export-tablename-hint"
 			/>
@@ -85,14 +81,14 @@
 		<select
 			id="export-select-destination"
 			data-testid="export-destination-select"
-			bind:value={destination}
+			bind:value={config.destination}
 		>
 			{#each destinations as dest (dest.value)}
 				<option value={dest.value}>{dest.label}</option>
 			{/each}
 		</select>
 		<span id="export-destination-hint" class="hint" aria-live="polite">
-			{#if destination === 'download'}
+			{#if config.destination === 'download'}
 				File will be downloaded to your browser
 			{:else}
 				File will be saved on the server

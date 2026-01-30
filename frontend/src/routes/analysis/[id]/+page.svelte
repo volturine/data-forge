@@ -11,6 +11,7 @@
 	import { sendKeepalive, spawnEngine } from '$lib/api/compute';
 	import { FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
+	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -255,7 +256,7 @@
 	}
 
 	function buildStep(type: string): PipelineStep {
-		return { id: makeId(), type, config: {}, depends_on: [] };
+		return { id: makeId(), type, config: getDefaultConfig(type) as Record<string, unknown>, depends_on: [] };
 	}
 
 	function markUnsaved() {
