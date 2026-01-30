@@ -3,6 +3,7 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 
 	interface UnionByNameConfigData {
 		sources: string[];
@@ -23,23 +24,12 @@
 
 	let selectedSources = $state<string[]>(config.sources ?? []);
 	let loadedSources = $state<string[]>([]);
-	let search = $state('');
-	let showPicker = $state(false);
 
 	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource_id ?? null);
 	const currentDatasource = $derived(
 		datasourceStore.datasources.find((ds) => ds.id === currentTabDatasource)
 	);
 	const datasourceOptions = $derived.by(() => datasourceStore.datasources);
-	const filteredOptions = $derived.by(() => {
-		const query = search.trim().toLowerCase();
-		if (!query) return datasourceOptions;
-		return datasourceOptions.filter((ds) => {
-			const name = ds.name.toLowerCase();
-			const type = ds.source_type.toLowerCase();
-			return name.includes(query) || type.includes(query);
-		});
-	});
 
 	// Sync selectedSources with config.sources
 	$effect(() => {
@@ -51,7 +41,7 @@
 		const selected = new Set(selectedSources);
 		for (const sourceId of selectedSources) {
 			if (!loadedSources.includes(sourceId)) {
-				loadUnionSchema(sourceId);
+				loadSourceSchema(sourceId);
 			}
 		}
 		const removed = loadedSources.filter((id) => !selected.has(id));
@@ -62,7 +52,7 @@
 		loadedSources = loadedSources.filter((id) => selected.has(id));
 	});
 
-	async function loadUnionSchema(datasourceId: string) {
+	async function loadSourceSchema(datasourceId: string) {
 		const schemaInfo = await datasourceStore.getSchema(datasourceId);
 		const unionSchema: Schema = {
 			columns: schemaInfo.columns.map((c) => ({
@@ -76,31 +66,6 @@
 		if (!loadedSources.includes(datasourceId)) {
 			loadedSources = [...loadedSources, datasourceId];
 		}
-	}
-
-	function toggleSource(sourceId: string) {
-		const exists = selectedSources.includes(sourceId);
-		selectedSources = exists
-			? selectedSources.filter((id) => id !== sourceId)
-			: [...selectedSources, sourceId];
-	}
-
-	function handlePickerFocus() {
-		showPicker = true;
-	}
-
-	function handlePickerBlur() {
-		setTimeout(() => {
-			showPicker = false;
-		}, 100);
-	}
-
-	function selectAll() {
-		selectedSources = filteredOptions.map((ds) => ds.id);
-	}
-
-	function deselectAll() {
-		selectedSources = [];
 	}
 </script>
 
@@ -123,73 +88,20 @@
 	<div class="form-section">
 		<div class="section-header">
 			<h4>Union Sources</h4>
-			<div class="bulk-actions">
-				<button type="button" class="btn-link" onclick={selectAll}>Select All</button>
-				<button type="button" class="btn-link" onclick={deselectAll}>Deselect All</button>
-			</div>
-		</div>
-
-		<div
-			class="search-picker"
-			role="combobox"
-			aria-expanded={showPicker}
-			aria-controls="union-source-options"
-		>
-			<span class="sr-only">Search datasources</span>
-			<input
-				type="text"
-				placeholder="Search datasources..."
-				bind:value={search}
-				onfocus={handlePickerFocus}
-				onblur={handlePickerBlur}
-			/>
-			{#if showPicker}
-				<div
-					class="picker-list"
-					id="union-source-options"
-					role="listbox"
-					aria-label="Union datasource options"
-				>
-					{#if datasourceOptions.length === 0}
-						<div class="picker-empty">Add another datasource to enable unions.</div>
-					{:else if filteredOptions.length === 0}
-						<div class="picker-empty">No matching datasources.</div>
-					{:else}
-						{#each filteredOptions as ds (ds.id)}
-							<button
-								type="button"
-								class="picker-item"
-								data-selected={selectedSources.includes(ds.id)}
-								onmousedown={() => toggleSource(ds.id)}
-							>
-								<span class="source-name">{ds.name}</span>
-								<span class="meta">{ds.source_type}</span>
-							</button>
-						{/each}
-					{/if}
-				</div>
-			{/if}
 		</div>
 
 		{#if datasourceOptions.length === 0}
 			<p class="empty-message">Add another datasource to enable unions.</p>
-		{:else if selectedSources.length === 0}
-			<p class="empty-message">No sources selected yet.</p>
 		{:else}
-			<div class="source-list">
-				{#each datasourceOptions.filter((ds) => selectedSources.includes(ds.id)) as ds (ds.id)}
-					<div class="source-chip">
-						<span>{ds.name}</span>
-						<button
-							type="button"
-							onclick={() => toggleSource(ds.id)}
-							aria-label={`Remove ${ds.name}`}
-						>
-							×
-						</button>
-					</div>
-				{/each}
-			</div>
+			<DatasourcePicker
+				datasources={datasourceOptions}
+				bind:selected={selectedSources}
+				mode="multi"
+				id="union"
+				showChips={true}
+				showBulkActions={true}
+				onSelect={(id, name) => loadSourceSchema(id)}
+			/>
 		{/if}
 
 		{#if selectedSources.length === 0}
@@ -232,47 +144,6 @@
 	.muted {
 		color: var(--fg-muted);
 	}
-	.btn-link {
-		background: none;
-		border: none;
-		color: var(--accent-primary);
-		cursor: pointer;
-		font-size: var(--text-xs);
-		padding: var(--space-1);
-		text-decoration: underline;
-	}
-	.source-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		padding: var(--space-2);
-		background-color: var(--panel-bg);
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--panel-border);
-	}
-	.source-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-		padding: var(--space-1) var(--space-2);
-		border-radius: 999px;
-		background-color: var(--bg-hover);
-		font-size: var(--text-xs);
-	}
-	.source-chip button {
-		border: none;
-		background: none;
-		cursor: pointer;
-		line-height: 1;
-		color: var(--fg-muted);
-		padding: 0;
-	}
-	.source-chip button:hover {
-		color: var(--fg-primary);
-	}
-	.source-name {
-		flex: 1;
-	}
 	.toggle {
 		display: flex;
 		align-items: center;
@@ -293,59 +164,5 @@
 		color: var(--fg-muted);
 		font-style: italic;
 		margin: var(--space-2) 0;
-	}
-	.search-picker {
-		position: relative;
-		margin-bottom: var(--space-3);
-	}
-	.search-picker input {
-		width: 100%;
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--form-control-border);
-		border-radius: var(--radius-sm);
-		background-color: var(--form-control-bg);
-	}
-	.search-picker input::placeholder {
-		color: var(--fg-muted);
-	}
-	.picker-list {
-		position: absolute;
-		z-index: var(--z-dropdown);
-		top: calc(100% + var(--space-1));
-		left: 0;
-		right: 0;
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		max-height: 220px;
-		overflow-y: auto;
-		padding: var(--space-2);
-		background-color: var(--panel-bg);
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--panel-border);
-		box-shadow: var(--shadow-dropdown);
-	}
-	.picker-item {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		cursor: pointer;
-		padding: var(--space-1) var(--space-2);
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		background-color: transparent;
-		text-align: left;
-	}
-	.picker-item[data-selected='true'] {
-		border-color: var(--accent-primary);
-		background-color: var(--bg-hover);
-	}
-	.picker-item:hover {
-		background-color: var(--bg-hover);
-	}
-	.picker-empty {
-		padding: var(--space-2);
-		color: var(--fg-muted);
-		font-style: italic;
 	}
 </style>

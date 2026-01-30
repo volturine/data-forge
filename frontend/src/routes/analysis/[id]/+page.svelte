@@ -3,14 +3,14 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { Debounced, FiniteStateMachine, onClickOutside } from 'runed';
+	import { FiniteStateMachine } from 'runed';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getAnalysis } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { sendKeepalive, spawnEngine } from '$lib/api/compute';
-	import { FileSpreadsheet, FileJson, FileType, Database, Globe } from 'lucide-svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
+	import type { DataSource } from '$lib/types/datasource';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
@@ -18,6 +18,7 @@
 	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
+	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	const analysisId = $derived($page.params.id);
@@ -140,8 +141,6 @@
 	});
 	let isLoadingSchema = $state(false);
 	let showDatasourceModal = $state(false);
-	let searchQuery = $state('');
-	const debouncedSearch = new Debounced(() => searchQuery, 200);
 	let modalMode = $state<'add' | 'change'>('add');
 	let leftPaneCollapsed = $state(false);
 	let rightPaneCollapsed = $state(false);
@@ -180,15 +179,8 @@
 		}
 	});
 
-	// Filtered datasources based on search
-	const filteredDatasources = $derived.by(() => {
-		const data = datasourcesQuery.data;
-		if (!data) return [];
-		const all = data;
-		const query = debouncedSearch.current.toLowerCase().trim();
-		if (!query) return all;
-		return all.filter((ds) => ds.name.toLowerCase().includes(query));
-	});
+	// All available datasources (filtering handled by modal component)
+	const filteredDatasources = $derived(datasourcesQuery.data ?? []);
 
 	// Spawn engine on load to get defaults
 	$effect(() => {
@@ -347,7 +339,6 @@
 		analysisStore.addTab(tab);
 		analysisStore.setActiveTab(tab.id);
 		showDatasourceModal = false;
-		searchQuery = '';
 		markUnsaved();
 	}
 
@@ -356,7 +347,6 @@
 		if (!active) return;
 		analysisStore.updateTab(active.id, { datasource_id: datasourceId, name });
 		showDatasourceModal = false;
-		searchQuery = '';
 		markUnsaved();
 	}
 
@@ -384,24 +374,11 @@
 
 	function openDatasourceModal(mode: 'add' | 'change' = 'add') {
 		modalMode = mode;
-		searchQuery = '';
 		showDatasourceModal = true;
 	}
 
 	function closeDatasourceModal() {
 		showDatasourceModal = false;
-		searchQuery = '';
-	}
-
-	let modalRef = $state<HTMLElement>();
-	onClickOutside(
-		() => modalRef,
-		() => closeDatasourceModal(),
-		{ immediate: true }
-	);
-
-	function handleModalKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') closeDatasourceModal();
 	}
 </script>
 
@@ -555,89 +532,14 @@
 	</div>
 {/if}
 
-{#if showDatasourceModal}
-	<div
-		class="modal-backdrop"
-		onclick={closeDatasourceModal}
-		onkeydown={handleModalKeydown}
-		role="presentation"
-	>
-		<div
-			class="modal"
-			bind:this={modalRef}
-			onclick={(e) => e.stopPropagation()}
-			onkeydown={(e) => e.stopPropagation()}
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="modal-title"
-			tabindex="0"
-		>
-			<div class="modal-header">
-				<h2 id="modal-title">{modalMode === 'change' ? 'Change Datasource' : 'Add Datasource'}</h2>
-				<button class="modal-close" onclick={closeDatasourceModal} type="button" aria-label="Close">
-					&times;
-				</button>
-			</div>
-			<div class="modal-body">
-				<!-- svelte-ignore a11y_autofocus -->
-				<input
-					type="text"
-					class="search-input"
-					placeholder="Search datasources..."
-					bind:value={searchQuery}
-					autofocus
-				/>
-				<div class="datasource-list">
-					{#if datasourcesQuery.isLoading}
-						<div class="list-empty">Loading...</div>
-					{:else if filteredDatasources.length === 0}
-						<div class="list-empty">
-							{searchQuery ? 'No matching datasources' : 'No datasources available'}
-						</div>
-					{:else}
-						{#each filteredDatasources as ds (ds.id)}
-							{@const fileType =
-								ds.source_type === 'file' ? (ds.config?.file_type as string) : null}
-							<button
-								class="datasource-item"
-								onclick={() => handleDatasourceSelect(ds.id, ds.name)}
-								type="button"
-							>
-								<span class="datasource-name">{ds.name}</span>
-								<span class="datasource-type">
-									{#if fileType === 'csv'}
-										<FileSpreadsheet size={12} />
-										CSV
-									{:else if fileType === 'json'}
-										<FileJson size={12} />
-										JSON
-									{:else if fileType === 'parquet'}
-										<FileType size={12} />
-										Parquet
-									{:else if fileType === 'ndjson'}
-										<FileJson size={12} />
-										NDJSON
-									{:else if fileType === 'excel'}
-										<FileSpreadsheet size={12} />
-										Excel
-									{:else if ds.source_type === 'database'}
-										<Database size={12} />
-										Database
-									{:else if ds.source_type === 'api'}
-										<Globe size={12} />
-										API
-									{:else}
-										{ds.source_type}
-									{/if}
-								</span>
-							</button>
-						{/each}
-					{/if}
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
+<DatasourceSelectorModal
+	show={showDatasourceModal}
+	datasources={datasourcesQuery.data ?? []}
+	isLoading={datasourcesQuery.isLoading}
+	mode={modalMode}
+	onSelect={handleDatasourceSelect}
+	onClose={closeDatasourceModal}
+/>
 
 <DragPreview />
 
@@ -893,123 +795,6 @@
 	}
 	.add-tab {
 		font-weight: var(--font-semibold);
-	}
-
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background-color: var(--overlay-bg);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
-
-	.modal {
-		background-color: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-md);
-		box-shadow: var(--shadow-lg);
-		width: 100%;
-		max-width: 480px;
-		max-height: 80vh;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.modal-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-4);
-		border-bottom: 1px solid var(--panel-border);
-		background-color: var(--panel-header-bg);
-	}
-
-	.modal-header h2 {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.modal-close {
-		background: none;
-		border: none;
-		font-size: var(--text-xl);
-		color: var(--fg-muted);
-		cursor: pointer;
-		padding: var(--space-1);
-		line-height: 1;
-	}
-	.modal-close:hover {
-		color: var(--fg-primary);
-	}
-
-	.modal-body {
-		padding: var(--space-4);
-		overflow-y: auto;
-	}
-
-	.search-input {
-		width: 100%;
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-secondary);
-		margin-bottom: var(--space-3);
-	}
-	.search-input:focus {
-		outline: none;
-		border-color: var(--accent-primary);
-	}
-
-	.datasource-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		max-height: 300px;
-		overflow-y: auto;
-	}
-
-	.datasource-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		width: 100%;
-		padding: var(--space-3);
-		background-color: var(--bg-secondary);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		text-align: left;
-		cursor: pointer;
-		transition: all var(--transition);
-	}
-	.datasource-item:hover {
-		background-color: var(--bg-hover);
-		border-color: var(--border-tertiary);
-	}
-
-	.datasource-name {
-		font-size: var(--text-sm);
-		letter-spacing: 0.02em;
-		color: var(--fg-primary);
-	}
-	.datasource-type {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-	}
-
-	.list-empty {
-		padding: var(--space-4);
-		text-align: center;
-		color: var(--fg-muted);
 	}
 
 	.editor-workspace {

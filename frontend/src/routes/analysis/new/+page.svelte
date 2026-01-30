@@ -4,8 +4,8 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
+	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 	import type { AnalysisCreate } from '$lib/types/analysis';
-	import type { DataSource } from '$lib/types/datasource';
 
 	let step = $state(1);
 	let name = $state('');
@@ -13,8 +13,6 @@
 	let selectedDatasourceIds = $state<string[]>([]);
 	let error = $state('');
 	let creating = $state(false);
-	let search = $state('');
-	let showPicker = $state(false);
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -30,43 +28,6 @@
 	const canProceedStep1 = $derived(name.trim().length > 0);
 	const canProceedStep2 = $derived(selectedDatasourceIds.length > 0);
 	const datasourceOptions = $derived.by(() => datasourcesQuery.data ?? []);
-	const filteredDatasources = $derived.by(() => {
-		const query = search.trim().toLowerCase();
-		if (!query) return datasourceOptions;
-		return datasourceOptions.filter((ds) => {
-			const nameValue = ds.name.toLowerCase();
-			const typeValue = ds.source_type.toLowerCase();
-			const fileValue =
-				ds.source_type === 'file' && ds.config?.file_type
-					? String(ds.config.file_type).toLowerCase()
-					: '';
-			return nameValue.includes(query) || typeValue.includes(query) || fileValue.includes(query);
-		});
-	});
-
-	function toggleDatasource(id: string) {
-		if (selectedDatasourceIds.includes(id)) {
-			selectedDatasourceIds = selectedDatasourceIds.filter((dsId) => dsId !== id);
-		} else {
-			selectedDatasourceIds = [...selectedDatasourceIds, id];
-		}
-	}
-
-	function handlePickerFocus() {
-		showPicker = true;
-	}
-
-	function handlePickerBlur() {
-		setTimeout(() => {
-			showPicker = false;
-		}, 100);
-	}
-
-	function getSourceLabel(datasource: DataSource): string {
-		if (datasource.source_type !== 'file') return datasource.source_type;
-		if (!datasource.config?.file_type) return 'file';
-		return String(datasource.config.file_type).toUpperCase();
-	}
 
 	async function handleCreate() {
 		if (!canProceedStep1 || !canProceedStep2) return;
@@ -162,59 +123,14 @@
 						>
 					</div>
 				{:else if datasourcesQuery.data}
-					<div
-						class="datasource-picker"
-						role="combobox"
-						aria-expanded={showPicker}
-						aria-controls="analysis-datasource-options"
-					>
-						<span class="sr-only">Search datasources</span>
-						<input
-							type="text"
-							class="search-input"
-							placeholder="Search datasources..."
-							bind:value={search}
-							onfocus={handlePickerFocus}
-							onblur={handlePickerBlur}
-						/>
-						{#if showPicker}
-							<div class="picker-list" id="analysis-datasource-options" role="listbox">
-								{#if filteredDatasources.length === 0}
-									<div class="picker-empty">No matching datasources.</div>
-								{:else}
-									{#each filteredDatasources as datasource (datasource.id)}
-										<button
-											type="button"
-											class="picker-item"
-											data-selected={selectedDatasourceIds.includes(datasource.id)}
-											onmousedown={() => toggleDatasource(datasource.id)}
-										>
-											<span class="picker-name">{datasource.name}</span>
-											<span class="badge badge-neutral">{getSourceLabel(datasource)}</span>
-										</button>
-									{/each}
-								{/if}
-							</div>
-						{/if}
-					</div>
-					<div class="selected-sources">
-						{#if selectedDatasourceIds.length === 0}
-							<p class="empty-message">No datasources selected.</p>
-						{:else}
-							{#each datasourceOptions.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as datasource (datasource.id)}
-								<div class="source-chip">
-									<span>{datasource.name}</span>
-									<button
-										type="button"
-										onclick={() => toggleDatasource(datasource.id)}
-										aria-label={`Remove ${datasource.name}`}
-									>
-										×
-									</button>
-								</div>
-							{/each}
-						{/if}
-					</div>
+					<DatasourcePicker
+						datasources={datasourceOptions}
+						bind:selected={selectedDatasourceIds}
+						mode="multi"
+						id="new-analysis"
+						showChips={true}
+						searchFields={['name', 'source_type', 'file_type']}
+					/>
 				{/if}
 			</div>
 		{:else if step === 3}
@@ -242,7 +158,7 @@
 					<h3>Data Sources ({selectedDatasourceIds.length})</h3>
 					<ul class="review-sources">
 						{#if datasourcesQuery.data}
-							{#each datasourcesQuery.data.filter( (ds: DataSource) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
+							{#each datasourcesQuery.data.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
 								<li>
 									<span class="source-name">{ds.name}</span>
 									<span class="source-type">{ds.source_type}</span>
@@ -412,99 +328,6 @@
 	.form-group textarea {
 		resize: vertical;
 		min-height: 100px;
-	}
-
-	.datasource-picker {
-		position: relative;
-		margin-bottom: var(--space-4);
-	}
-	.datasource-picker .search-input {
-		width: 100%;
-		padding: var(--space-3);
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-primary);
-	}
-	.datasource-picker .search-input::placeholder {
-		color: var(--fg-muted);
-	}
-
-	.picker-list {
-		position: absolute;
-		z-index: var(--z-dropdown);
-		top: calc(100% + var(--space-2));
-		left: 0;
-		right: 0;
-		background: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		box-shadow: var(--shadow-dropdown);
-		max-height: 240px;
-		overflow-y: auto;
-		padding: var(--space-2);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-
-	.picker-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-2);
-		border-radius: var(--radius-sm);
-		border: 1px solid transparent;
-		background: transparent;
-		cursor: pointer;
-		text-align: left;
-	}
-	.picker-item[data-selected='true'] {
-		border-color: var(--accent-primary);
-		background-color: var(--bg-hover);
-	}
-	.picker-item:hover {
-		background-color: var(--bg-hover);
-	}
-
-	.picker-name {
-		font-weight: var(--font-semibold);
-	}
-	.picker-empty {
-		padding: var(--space-2);
-		color: var(--fg-muted);
-		font-style: italic;
-	}
-
-	.selected-sources {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-secondary);
-	}
-
-	.source-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: 0.25rem 0.5rem;
-		border-radius: var(--radius-full);
-		background-color: var(--bg-tertiary);
-		font-size: var(--text-xs);
-		font-weight: var(--font-semibold);
-	}
-	.source-chip button {
-		border: none;
-		background: none;
-		cursor: pointer;
-		color: var(--fg-muted);
-		line-height: 1;
-		padding: 0;
-	}
-	.source-chip button:hover {
-		color: var(--fg-primary);
 	}
 
 	.review-section {
