@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 
+	const uid = $props.id();
+
 	interface Aggregation {
 		column: string;
 		function: string;
@@ -81,13 +83,13 @@
 <div class="config-panel" role="region" aria-label="Group by configuration">
 	<h3>Group By Configuration</h3>
 
-	<div class="form-section" role="group" aria-labelledby="groupby-columns-heading">
-		<h4 id="groupby-columns-heading">Group By Columns</h4>
+	<div class="form-section" role="group" aria-labelledby="{uid}-columns-heading">
+		<h4 id="{uid}-columns-heading">Group By Columns</h4>
 		<div class="column-list">
 			{#each schema.columns as column (column.name)}
 				<label class="column-item">
 					<input
-						id={`groupby-checkbox-${column.name}`}
+						id="{uid}-col-{column.name}"
 						data-testid={`groupby-checkbox-${column.name}`}
 						type="checkbox"
 						checked={safeGroupBy.includes(column.name)}
@@ -106,13 +108,13 @@
 		{/if}
 	</div>
 
-	<div class="form-section" role="group" aria-labelledby="aggregations-heading">
-		<h4 id="aggregations-heading">Aggregations</h4>
+	<div class="form-section" role="group" aria-labelledby="{uid}-agg-heading">
+		<h4 id="{uid}-agg-heading">Aggregations</h4>
 
 		<div class="add-aggregation" role="group" aria-label="Add aggregation form">
-			<label for="agg-select-column" class="sr-only">Select column</label>
+			<label for="{uid}-agg-column" class="sr-only">Select column</label>
 			<select
-				id="agg-select-column"
+				id="{uid}-agg-column"
 				data-testid="agg-column-select"
 				bind:value={newAggregation.column}
 			>
@@ -122,9 +124,9 @@
 				{/each}
 			</select>
 
-			<label for="agg-select-function" class="sr-only">Aggregation function</label>
+			<label for="{uid}-agg-function" class="sr-only">Aggregation function</label>
 			<select
-				id="agg-select-function"
+				id="{uid}-agg-function"
 				data-testid="agg-function-select"
 				bind:value={newAggregation.function}
 			>
@@ -134,14 +136,14 @@
 			</select>
 
 			<input
-				id="agg-alias"
+				id="{uid}-agg-alias"
 				type="text"
 				bind:value={newAggregation.alias}
 				placeholder="Alias (optional)"
 			/>
 
 			<button
-				id="agg-btn-add"
+				id="{uid}-agg-add"
 				data-testid="agg-add-button"
 				type="button"
 				onclick={addAggregation}

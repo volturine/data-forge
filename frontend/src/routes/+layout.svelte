@@ -6,9 +6,14 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { Sun, Moon } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
+	import { initializeStores } from '$lib/stores/context.svelte';
 	import '$lib/../app.css';
 
 	let { children } = $props();
+
+	// Initialize stores via context API for SSR safety
+	// This creates fresh store instances per request, preventing state leakage
+	initializeStores();
 
 	// Use runed's PersistedState for persisted theme state across tabs/sessions
 	const theme = new PersistedState<'light' | 'dark'>('theme', 'dark');

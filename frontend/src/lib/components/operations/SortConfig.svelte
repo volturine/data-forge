@@ -2,6 +2,8 @@
 	import type { Schema } from '$lib/types/schema';
 	import { X, Plus } from 'lucide-svelte';
 
+	const uid = $props.id();
+
 	interface Props {
 		schema: Schema;
 		config?: { columns: string[]; descending: boolean[] };
@@ -51,8 +53,8 @@
 	<h3>Sort Configuration</h3>
 
 	<div class="add-rule" role="group" aria-label="Add sort rule form">
-		<label for="sort-select-column" class="sr-only">Select column to sort</label>
-		<select id="sort-select-column" data-testid="sort-column-select" bind:value={newColumn}>
+		<label for="{uid}-column" class="sr-only">Select column to sort</label>
+		<select id="{uid}-column" data-testid="sort-column-select" bind:value={newColumn}>
 			<option value="">Select column...</option>
 			{#each availableColumns as column (column.name)}
 				<option value={column.name}>{column.name} ({column.dtype})</option>
@@ -61,7 +63,7 @@
 
 		<div class="direction-select" role="group" aria-label="Sort direction">
 			<button
-				id="sort-btn-ascending"
+				id="{uid}-ascending"
 				data-testid="sort-ascending-button"
 				type="button"
 				class="dir-btn"
@@ -74,7 +76,7 @@
 				<span class="sort-icon" aria-hidden="true">▲</span>
 			</button>
 			<button
-				id="sort-btn-descending"
+				id="{uid}-descending"
 				data-testid="sort-descending-button"
 				type="button"
 				class="dir-btn"
@@ -89,7 +91,7 @@
 		</div>
 
 		<button
-			id="sort-btn-add"
+			id="{uid}-add"
 			data-testid="sort-add-button"
 			type="button"
 			class="add-btn"

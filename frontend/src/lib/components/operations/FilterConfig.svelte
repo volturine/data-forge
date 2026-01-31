@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 
+	const uid = $props.id();
+
 	interface FilterCondition {
 		column: string;
 		operator: string;
@@ -59,9 +61,9 @@
 	<h3>Filter Configuration</h3>
 
 	<div class="logic-selector">
-		<label for="filter-select-logic">
+		<label for="{uid}-logic">
 			Combine conditions with:
-			<select id="filter-select-logic" data-testid="filter-logic-select" bind:value={config.logic}>
+			<select id="{uid}-logic" data-testid="filter-logic-select" bind:value={config.logic}>
 				<option value="AND" selected={safeLogic === 'AND'}>AND</option>
 				<option value="OR" selected={safeLogic === 'OR'}>OR</option>
 			</select>
@@ -71,9 +73,9 @@
 	<div class="conditions" role="group" aria-label="Filter conditions">
 		{#each safeConditions as condition, i (i)}
 			<div class="condition-row" role="group" aria-label={`Condition ${i + 1}`}>
-				<label for={`filter-select-column-${i}`} class="sr-only">Column</label>
+				<label for="{uid}-column-{i}" class="sr-only">Column</label>
 				<select
-					id={`filter-select-column-${i}`}
+					id="{uid}-column-{i}"
 					data-testid={`filter-column-select-${i}`}
 					value={condition.column}
 					onchange={(event) =>
@@ -88,9 +90,9 @@
 					{/each}
 				</select>
 
-				<label for={`filter-select-operator-${i}`} class="sr-only">Operator</label>
+				<label for="{uid}-operator-{i}" class="sr-only">Operator</label>
 				<select
-					id={`filter-select-operator-${i}`}
+					id="{uid}-operator-{i}"
 					data-testid={`filter-operator-select-${i}`}
 					value={condition.operator}
 					onchange={(event) =>
@@ -104,9 +106,9 @@
 					{/each}
 				</select>
 
-				<label for={`filter-input-value-${i}`} class="sr-only">Value</label>
+				<label for="{uid}-value-{i}" class="sr-only">Value</label>
 				<input
-					id={`filter-input-value-${i}`}
+					id="{uid}-value-{i}"
 					data-testid={`filter-value-input-${i}`}
 					type={getInputType(condition.column)}
 					value={condition.value}
@@ -119,7 +121,7 @@
 				/>
 
 				<button
-					id={`filter-btn-remove-${i}`}
+					id="{uid}-remove-{i}"
 					data-testid={`filter-remove-button-${i}`}
 					type="button"
 					onclick={() => removeCondition(i)}

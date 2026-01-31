@@ -2,7 +2,7 @@ import type { EngineStatusResponse } from '$lib/types/compute';
 import { listEngines, shutdownEngine as shutdownEngineApi } from '$lib/api/compute';
 import { configStore } from './config.svelte';
 
-class EnginesStore {
+export class EnginesStore {
 	engines = $state<EngineStatusResponse[]>([]);
 	loading = $state(false);
 	error = $state<string | null>(null);

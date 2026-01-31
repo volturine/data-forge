@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { locks, acquireLock, releaseLock, getLockState } from '$lib/stores/lockManager.svelte';
+	import { acquireLock, releaseLock, getLockState } from '$lib/stores/lockManager.svelte';
 
 	interface Props {
 		resourceId: string;

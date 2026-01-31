@@ -1,6 +1,6 @@
 import { getConfig, type FrontendConfig } from '$lib/api/config';
 
-class ConfigStore {
+export class ConfigStore {
 	config = $state<FrontendConfig | null>(null);
 	loading = $state(false);
 	error = $state<string | null>(null);

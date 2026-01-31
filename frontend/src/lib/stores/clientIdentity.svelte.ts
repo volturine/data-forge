@@ -56,10 +56,10 @@ export function hashFingerprint(fp: Fingerprint): string {
 }
 
 // Client ID - persisted in localStorage
-let clientIdValue = browser ? getOrCreateClientId() : '';
+const clientIdValue = browser ? getOrCreateClientId() : '';
 
 // Fingerprint
-let fingerprintValue: Fingerprint = browser
+const fingerprintValue: Fingerprint = browser
 	? generateFingerprint()
 	: { screen: '', timezone: '', language: '', platform: '' };
 

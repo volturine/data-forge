@@ -1,5 +1,4 @@
 import type { Schema, ColumnInfo } from '$lib/types/schema';
-import type { PipelineStep } from '$lib/types/analysis';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { emptySchema } from '$lib/types/schema';
 import {
@@ -15,21 +14,61 @@ export interface StepSchemas {
 	output: Schema;
 }
 
-class SchemaStore {
+export class SchemaStore {
 	joinSchemas = $state(new SvelteMap<string, Schema>());
 	// Cache for actual output schemas from preview (for dynamic steps like pivot)
 	previewSchemas = $state(new SvelteMap<string, Schema>());
 
-	get primaryDatasourceId(): string | null {
+	// Derived: primary datasource ID from active tab
+	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource_id ?? null);
+
+	// Derived: current pipeline steps
+	steps = $derived(analysisStore.pipeline);
+
+	// Auto-memoized step schemas - only recalculates when dependencies change
+	stepSchemas = $derived.by(() => {
+		const schemas = new SvelteMap<string, StepSchemas>();
+		let currentSchema: Schema | null = null;
+
 		const activeTab = analysisStore.activeTab;
-		return activeTab?.datasource_id ?? null;
-	}
+		const sourceSchema = activeTab?.datasource_id
+			? (analysisStore.sourceSchemas.get(activeTab.datasource_id) ?? null)
+			: null;
 
-	get steps(): PipelineStep[] {
-		return analysisStore.pipeline;
-	}
+		for (const step of this.steps) {
+			const input =
+				currentSchema ??
+				(sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
+			const config = step.config as StepConfig;
+			const transformer = getStepTransform(step);
 
-	async setJoinDatasource(datasourceId: string, schema: Schema): Promise<void> {
+			let output: Schema;
+
+			// Check if we have a cached preview schema for dynamic steps
+			const cachedSchema = this.previewSchemas.get(step.id);
+			if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
+				output = cachedSchema;
+			} else if (step.type === 'join') {
+				const rightSchema = this.joinSchemas.get(step.id) ?? emptySchema();
+				output = joinTransform(input, config, rightSchema);
+			} else if (step.type === 'union_by_name') {
+				const sources = Array.isArray(config.sources) ? config.sources : [];
+				const unionSchemas = sources
+					.map((sourceId) => this.joinSchemas.get(sourceId))
+					.filter((schema): schema is Schema => schema !== undefined);
+				output = unionByNameTransform(input, config, unionSchemas);
+			} else {
+				output = transformer(input, config);
+			}
+
+			schemas.set(step.id, { input, output });
+			currentSchema = output;
+		}
+
+		return schemas;
+	});
+
+	setJoinDatasource(datasourceId: string, schema: Schema): void {
 		this.joinSchemas.set(datasourceId, schema);
 	}
 
@@ -59,56 +98,12 @@ class SchemaStore {
 		this.previewSchemas.delete(stepId);
 	}
 
-	getStepSchemas(): Map<string, StepSchemas> {
-		const schemas = new SvelteMap<string, StepSchemas>();
-		let currentSchema: Schema | null = null;
-
-		const activeTab = analysisStore.activeTab;
-		const sourceSchema = activeTab?.datasource_id
-			? (analysisStore.sourceSchemas.get(activeTab.datasource_id) ?? null)
-			: null;
-
-		for (const step of this.steps) {
-			const input =
-				currentSchema ??
-				(sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
-			const config = step.config as StepConfig;
-			const transformer = getStepTransform(step);
-
-			let output: Schema;
-
-			// Check if we have a cached preview schema for dynamic steps
-			const cachedSchema = this.previewSchemas.get(step.id);
-			if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
-				output = cachedSchema;
-			} else if (step.type === 'join') {
-				const rightSchema = this.joinSchemas.get(step.id) ?? emptySchema();
-				const config = step.config as StepConfig;
-				output = joinTransform(input, config, rightSchema);
-			} else if (step.type === 'union_by_name') {
-				const config = step.config as StepConfig;
-				const sources = Array.isArray(config.sources) ? config.sources : [];
-				const unionSchemas = sources
-					.map((sourceId) => this.joinSchemas.get(sourceId))
-					.filter((schema): schema is Schema => schema !== undefined);
-				output = unionByNameTransform(input, config, unionSchemas);
-			} else {
-				output = transformer(input, config);
-			}
-
-			schemas.set(step.id, { input, output });
-			currentSchema = output;
-		}
-
-		return schemas;
-	}
-
 	getInput(stepId: string): Schema | null {
-		return this.getStepSchemas().get(stepId)?.input ?? null;
+		return this.stepSchemas.get(stepId)?.input ?? null;
 	}
 
 	getOutput(stepId: string): Schema | null {
-		return this.getStepSchemas().get(stepId)?.output ?? null;
+		return this.stepSchemas.get(stepId)?.output ?? null;
 	}
 
 	getAllOutputs(): Schema[] {

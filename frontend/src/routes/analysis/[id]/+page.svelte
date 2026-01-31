@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { FiniteStateMachine } from 'runed';
+	import { MediaQuery } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import {
@@ -46,6 +47,16 @@
 		if (typeof window === 'undefined') return;
 		if (!storageKey || draftLoaded) return;
 		if (!analysisStore.tabs.length) return;
+
+		// Only restore draft if we have an active lock (user was in editing mode)
+		// If no lock, discard draft and load saved state
+		if (!analysisId || !hasLock(analysisId)) {
+			// Clear stale draft
+			window.localStorage.removeItem(storageKey);
+			draftLoaded = true;
+			return;
+		}
+
 		const raw = window.localStorage.getItem(storageKey);
 		if (!raw) {
 			draftLoaded = true;
@@ -115,6 +126,24 @@
 	let showModeDropdown = $state(false);
 	let keepaliveInterval: number | null = null;
 
+	// Responsive: auto-collapse panes on narrow screens
+	const isNarrowScreen = new MediaQuery('max-width: 900px');
+	const isMobileScreen = new MediaQuery('max-width: 600px');
+
+	// Auto-collapse left pane on narrow screens when entering edit mode
+	$effect(() => {
+		if (isEditingMode && isNarrowScreen.current && !leftPaneCollapsed) {
+			leftPaneCollapsed = true;
+		}
+	});
+
+	// Auto-collapse right pane on very narrow screens
+	$effect(() => {
+		if (isEditingMode && isMobileScreen.current && !rightPaneCollapsed) {
+			rightPaneCollapsed = true;
+		}
+	});
+
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
 		queryFn: async () => {
@@ -137,18 +166,11 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
+			// Sync to store in query success instead of effect
+			datasourceStore.datasources = result.value;
 			return result.value;
 		}
 	}));
-
-	$effect(() => {
-		const data = datasourcesQuery.data;
-		if (data) {
-			datasourceStore.datasources = data;
-		}
-	});
-
-	const filteredDatasources = $derived(datasourcesQuery.data ?? []);
 
 	$effect(() => {
 		if (!analysisId || analysisStore.engineDefaults) return;
@@ -292,6 +314,17 @@
 			await releaseLock(analysisId);
 			stopLockCheck();
 			isEditingMode = false;
+
+			// Clear draft - unsaved changes are discarded
+			if (storageKey && typeof window !== 'undefined') {
+				window.localStorage.removeItem(storageKey);
+			}
+
+			// Reset to saved state
+			if (analysisQuery.data) {
+				await analysisStore.loadAnalysis(analysisId);
+				saveStatus.send('saveComplete');
+			}
 		}
 	}
 
@@ -430,19 +463,19 @@
 						<span class="description">{analysisQuery.data.description}</span>
 					{/if}
 				</div>
-				{#if isEditingMode}
-					<button
-						class="collapse-arrow collapse-arrow-left"
-						class:collapsed={leftPaneCollapsed}
-						onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
-						type="button"
-						title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
-					>
-						{leftPaneCollapsed ? '‹' : '›'}
-					</button>
-				{/if}
 			</div>
 			<div class="header-middle">
+				<button
+					class="collapse-arrow collapse-arrow-left"
+					class:collapsed={leftPaneCollapsed}
+					class:hidden={!isEditingMode}
+					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
+					type="button"
+					title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
+					disabled={!isEditingMode}
+				>
+					{leftPaneCollapsed ? '›' : '‹'}
+				</button>
 				<div class="header-tabs">
 					<div class="tabs">
 						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
@@ -476,20 +509,19 @@
 						</button>
 					</div>
 				</div>
+				<button
+					class="collapse-arrow collapse-arrow-right"
+					class:collapsed={rightPaneCollapsed}
+					class:hidden={!isEditingMode}
+					onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
+					type="button"
+					title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
+					disabled={!isEditingMode}
+				>
+					{rightPaneCollapsed ? '‹' : '›'}
+				</button>
 			</div>
 			<div class="header-right">
-				{#if isEditingMode}
-					<button
-						class="collapse-arrow collapse-arrow-right"
-						class:collapsed={rightPaneCollapsed}
-						onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
-						type="button"
-						title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
-					>
-						{rightPaneCollapsed ? '›' : '‹'}
-					</button>
-				{/if}
-
 				<div class="mode-toggle-container">
 					<button
 						class="mode-toggle"
@@ -659,6 +691,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		gap: 0;
+	}
+
+	.header-tabs {
+		flex: 1;
+		overflow: hidden;
+		display: flex;
+		align-items: center;
 		padding: 0 var(--space-4);
 	}
 
@@ -726,20 +766,24 @@
 		flex-shrink: 0;
 	}
 
-	.collapse-arrow:hover {
+	.collapse-arrow:hover:not(:disabled) {
 		color: var(--fg-primary);
+		background-color: var(--bg-hover);
+	}
+	.collapse-arrow.hidden {
+		visibility: hidden;
+		pointer-events: none;
 	}
 	.collapse-arrow-left {
-		border-left: 1px solid var(--panel-border);
+		border-right: 1px solid var(--panel-border);
 	}
 	.collapse-arrow-right {
-		border-right: 1px solid var(--panel-border);
+		border-left: 1px solid var(--panel-border);
 	}
 
 	.save-button {
 		flex: 1;
 		height: 100%;
-		padding: 0 var(--space-4);
 		background: none;
 		border: none;
 		font-size: var(--text-sm);
@@ -760,12 +804,74 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
+	/* Mode toggle styles */
+	.mode-toggle-container {
+		position: relative;
+		align-items: center;
+		/* flex: 1; */
+		padding: 0 var(--space-4);
+	}
 
-	.header-tabs {
-		overflow: hidden;
-		flex: 1;
+	.mode-toggle {
+		padding: var(--space-2) var(--space-3);
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		color: var(--fg-secondary);
+		font-size: var(--text-sm);
+		cursor: pointer;
 		display: flex;
 		align-items: center;
+		gap: var(--space-2);
+		transition: all var(--transition);
+	}
+
+	.mode-toggle:hover {
+		background: var(--bg-hover);
+		border-color: var(--border-secondary);
+	}
+
+	.dropdown-arrow {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
+
+	.mode-dropdown {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-sm);
+		box-shadow: var(--shadow-soft);
+		z-index: 100;
+		min-width: 140px;
+		padding: var(--space-1);
+	}
+
+	.mode-option {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		width: 100%;
+		background: none;
+		border: none;
+		color: var(--fg-secondary);
+		font-size: var(--text-sm);
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+		transition: background-color var(--transition);
+		text-align: left;
+	}
+
+	.mode-option:hover {
+		background: var(--bg-hover);
+	}
+
+	.radio {
+		color: var(--accent-primary);
+		font-weight: var(--font-bold);
 	}
 
 	.tabs {
@@ -881,76 +987,6 @@
 	}
 	.center-pane :global(> *) {
 		width: 100%;
-	}
-
-	/* Mode toggle styles */
-	.mode-toggle-container {
-		position: relative;
-		display: flex;
-		align-items: center;
-		left: 5px;
-	}
-
-	.mode-toggle {
-		padding: var(--space-2) var(--space-3);
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		color: var(--fg-secondary);
-		font-size: var(--text-sm);
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		transition: all var(--transition);
-	}
-
-	.mode-toggle:hover {
-		background: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-
-	.dropdown-arrow {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-
-	.mode-dropdown {
-		position: absolute;
-		top: calc(100% + 4px);
-		left: 0;
-		background: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		box-shadow: var(--shadow-soft);
-		z-index: 100;
-		min-width: 140px;
-		padding: var(--space-1);
-	}
-
-	.mode-option {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		width: 100%;
-		background: none;
-		border: none;
-		color: var(--fg-secondary);
-		font-size: var(--text-sm);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		transition: background-color var(--transition);
-		text-align: left;
-	}
-
-	.mode-option:hover {
-		background: var(--bg-hover);
-	}
-
-	.radio {
-		color: var(--accent-primary);
-		font-weight: var(--font-bold);
 	}
 
 	/* Readonly mode - disable editing but allow scrolling */
