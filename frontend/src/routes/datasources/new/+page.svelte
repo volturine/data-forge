@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { uploadFile, connectDatabase, connectApi, connectDuckDB } from '$lib/api/datasource';
+	import { uploadFile, uploadBulkFiles, connectDatabase, connectApi, connectDuckDB } from '$lib/api/datasource';
 	import { preflightExcel, previewExcel, confirmExcel } from '$lib/api/excel';
 	import type { ExcelPreflightResponse, ExcelPreviewResponse } from '$lib/api/excel';
+	import type { BulkUploadResult } from '$lib/api/datasource';
 	import type { CSVOptions } from '$lib/types/datasource';
 
 	type Tab = 'file' | 'database' | 'api';
@@ -32,13 +33,12 @@
 	let excelHeader = $state(true);
 	let previewLoading = $state(false);
 
-	// CSV options state
+	// CSV options state (using defaults)
 	let delimiter = $state(',');
 	let quoteChar = $state('"');
 	let hasHeader = $state(true);
 	let skipRows = $state(0);
 	let encoding = $state('utf8');
-	let showCsvOptions = $state(false);
 
 	// DuckDB state
 	let duckdbName = $state('');
@@ -56,10 +56,35 @@
 	let apiUrl = $state('');
 	let apiMethod = $state('GET');
 
+	// Bulk upload state
+	let selectedFiles = $state<File[]>([]);
+	let bulkResults = $state<BulkUploadResult[]>([]);
+	let showBulkResults = $state(false);
+	let uploadMode: 'single' | 'bulk' = $state('single');
+
 	function handleFileChange(event: Event) {
 		const target = event.target as HTMLInputElement;
-		if (target.files && target.files.length > 0) {
+		if (!target.files || target.files.length === 0) return;
+
+		if (uploadMode === 'bulk') {
+			selectedFiles = Array.from(target.files);
+			file = null;
+			fileName = '';
+			preflightId = null;
+			sheetNames = [];
+			tableMap = {};
+			namedRanges = [];
+			previewGrid = [];
+			selectedSheet = '';
+			selectedTable = '';
+			selectedRange = '';
+			startRow = 0;
+			startCol = 0;
+			endCol = 0;
+			detectedEndRow = null;
+		} else {
 			file = target.files[0];
+			selectedFiles = [];
 			preflightId = null;
 			sheetNames = [];
 			tableMap = {};
@@ -75,11 +100,58 @@
 			if (!fileName) {
 				fileName = file.name.replace(/\.[^/.]+$/, '');
 			}
-			if (file.name.endsWith('.csv')) {
-				showCsvOptions = true;
-			} else {
-				showCsvOptions = false;
+		}
+	}
+
+	async function handleBulkUpload() {
+		if (selectedFiles.length === 0) {
+			error = 'Please select at least one file';
+			return;
+		}
+
+		loading = true;
+		error = null;
+		showBulkResults = false;
+
+		let csvOptions: CSVOptions | undefined;
+		if (selectedFiles.some((f) => f.name.endsWith('.csv'))) {
+			csvOptions = {
+				delimiter,
+				quote_char: quoteChar,
+				has_header: hasHeader,
+				skip_rows: skipRows,
+				encoding
+			};
+		}
+
+		const result = await uploadBulkFiles(selectedFiles, csvOptions);
+		result.match(
+			(response: import('$lib/api/datasource').BulkUploadResponse) => {
+				bulkResults = response.results;
+				showBulkResults = true;
+				if (response.successful === response.total) {
+					selectedFiles = [];
+				}
+			},
+			(err: { message?: string }) => {
+				error = err.message || 'Bulk upload failed';
 			}
+		);
+
+		loading = false;
+	}
+
+	function clearBulkSelection() {
+		selectedFiles = [];
+		bulkResults = [];
+		showBulkResults = false;
+	}
+
+	function removeBulkFile(index: number) {
+		selectedFiles = selectedFiles.filter((_, i) => i !== index);
+		if (selectedFiles.length === 0) {
+			bulkResults = [];
+			showBulkResults = false;
 		}
 	}
 
@@ -350,83 +422,111 @@
 		{#if activeTab === 'file'}
 			<div class="form">
 				<div class="form-group">
-					<label for="file-name">Name</label>
-					<input
-						id="file-name"
-						type="text"
-						bind:value={fileName}
-						placeholder="My Dataset"
-						disabled={loading}
-					/>
-				</div>
-
-				<div class="form-group">
-					<label for="file-input">File</label>
-					<input id="file-input" type="file" onchange={handleFileChange} disabled={loading} />
-					{#if file}
-						<p class="file-info">Selected: {file.name}</p>
-					{/if}
-				</div>
-
-				{#if showCsvOptions}
-					<div class="csv-options">
-						<h3>CSV Options</h3>
-						<div class="form-row">
-							<div class="form-group">
-								<label for="delimiter">Delimiter</label>
-								<select id="delimiter" bind:value={delimiter} disabled={loading}>
-									<option value=",">Comma (,)</option>
-									<option value=";">Semicolon (;)</option>
-									<option value="\t">Tab (\t)</option>
-									<option value="|">Pipe (|)</option>
-								</select>
-							</div>
-
-							<div class="form-group">
-								<label for="quote-char">Quote Character</label>
-								<input
-									id="quote-char"
-									type="text"
-									bind:value={quoteChar}
-									maxlength="1"
-									disabled={loading}
-								/>
-							</div>
-						</div>
-
-						<div class="form-row">
-							<div class="form-group checkbox-group">
-								<input
-									id="has-header"
-									type="checkbox"
-									bind:checked={hasHeader}
-									disabled={loading}
-								/>
-								<label for="has-header">Has Header Row</label>
-							</div>
-
-							<div class="form-group">
-								<label for="skip-rows">Skip Rows</label>
-								<input
-									id="skip-rows"
-									type="number"
-									bind:value={skipRows}
-									min="0"
-									disabled={loading}
-								/>
-							</div>
-						</div>
-
-						<div class="form-group">
-							<label for="encoding">Encoding</label>
-							<select id="encoding" bind:value={encoding} disabled={loading}>
-								<option value="utf8">UTF8</option>
-								<option value="utf8-lossy">UTF8 (lossy)</option>
-								<option value="latin1">Latin-1 (ISO-8859-1)</option>
-								<option value="cp1252">Windows-1252</option>
-							</select>
-						</div>
+					<span class="form-label">Upload Mode</span>
+					<div class="radio-group">
+						<label class="radio-option">
+							<input
+								type="radio"
+								name="upload-mode"
+								value="single"
+								bind:group={uploadMode}
+								disabled={loading}
+							/>
+							<span class="radio-label">Single File</span>
+							<span class="radio-desc">Upload one file at a time with full configuration</span>
+						</label>
+						<label class="radio-option">
+							<input
+								type="radio"
+								name="upload-mode"
+								value="bulk"
+								bind:group={uploadMode}
+								disabled={loading}
+							/>
+							<span class="radio-label">Bulk Upload</span>
+							<span class="radio-desc">Upload multiple files quickly (CSV, Parquet, JSON only)</span>
+						</label>
 					</div>
+				</div>
+
+				{#if uploadMode === 'single'}
+					<div class="form-group">
+						<label for="file-name">Name</label>
+						<input
+							id="file-name"
+							type="text"
+							bind:value={fileName}
+							placeholder="My Dataset"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="file-input">File</label>
+						<input id="file-input" type="file" onchange={handleFileChange} disabled={loading} />
+						{#if file}
+							<p class="file-info">Selected: {file.name}</p>
+						{/if}
+					</div>
+				{:else}
+					<!-- Bulk upload UI -->
+					<div class="form-group">
+						<label for="bulk-file-input">Files</label>
+						<input
+							id="bulk-file-input"
+							type="file"
+							multiple
+							accept=".csv,.parquet,.json,.ndjson,.jsonl,.xlsx"
+							onchange={handleFileChange}
+							disabled={loading}
+						/>
+						<p class="hint">
+							Select multiple files. Supported: CSV, Parquet, JSON, NDJSON, Excel. Names will be derived from filenames.
+						</p>
+						{#if selectedFiles.length > 0}
+							<div class="file-list">
+								<div class="file-list-header">
+									<span>{selectedFiles.length} file(s) selected</span>
+									<button
+										type="button"
+										class="btn-text"
+										onclick={clearBulkSelection}
+										disabled={loading}
+									>
+										Clear all
+									</button>
+								</div>
+								{#each selectedFiles as selectedFile, index (index)}
+									<div class="file-item">
+										<span class="file-name">{selectedFile.name}</span>
+										<button
+											type="button"
+											class="btn-remove"
+											onclick={() => removeBulkFile(index)}
+											disabled={loading}
+										>
+											×
+										</button>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
+
+					{#if showBulkResults && bulkResults.length > 0}
+						<div class="bulk-results">
+							<h4>Upload Results</h4>
+							{#each bulkResults as result (result.name)}
+								<div class="result-item" class:success={result.success} class:error={!result.success}>
+									<span class="result-icon">{result.success ? '✓' : '✗'}</span>
+									<span class="result-name">{result.name}</span>
+									{#if result.error}
+										<span class="result-error">{result.error}</span>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
 				{/if}
 
 				{#if file?.name.endsWith('.xlsx')}
@@ -538,9 +638,19 @@
 					</div>
 				{/if}
 
-				<button class="btn-primary" onclick={handleFileUpload} disabled={loading || !file}>
-					{loading ? 'Uploading...' : 'Upload'}
-				</button>
+				{#if uploadMode === 'single'}
+					<button class="btn-primary" onclick={handleFileUpload} disabled={loading || !file}>
+						{loading ? 'Uploading...' : 'Upload'}
+					</button>
+				{:else}
+					<button
+						class="btn-primary"
+						onclick={handleBulkUpload}
+						disabled={loading || selectedFiles.length === 0}
+					>
+						{loading ? 'Uploading...' : `Upload ${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}`}
+					</button>
+				{/if}
 			</div>
 		{:else if activeTab === 'database'}
 			<div class="form">
@@ -709,6 +819,9 @@
 		max-width: 800px;
 		margin: 0 auto;
 		padding: var(--space-8);
+		height: 100%;
+		overflow: auto;
+		box-sizing: border-box;
 	}
 	header {
 		display: flex;
@@ -772,7 +885,6 @@
 	}
 	input[type='text'],
 	input[type='url'],
-	input[type='number'],
 	select,
 	textarea {
 		padding: var(--space-2) var(--space-3);
@@ -784,7 +896,6 @@
 	}
 	input[type='text']:focus,
 	input[type='url']:focus,
-	input[type='number']:focus,
 	select:focus,
 	textarea:focus {
 		outline: none;
@@ -793,7 +904,6 @@
 	}
 	input[type='text']:disabled,
 	input[type='url']:disabled,
-	input[type='number']:disabled,
 	select:disabled,
 	textarea:disabled {
 		background: var(--bg-tertiary);
@@ -815,18 +925,6 @@
 	}
 	.file-info {
 		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	.csv-options {
-		background-color: var(--bg-tertiary);
-		padding: var(--space-4);
-		border-radius: var(--radius-md);
-		border: 1px solid var(--border-primary);
-	}
-	.csv-options h3 {
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		margin: 0 0 var(--space-4) 0;
 		color: var(--fg-secondary);
 	}
 	.form-row {
@@ -945,5 +1043,130 @@
 	.radio-desc {
 		font-size: var(--text-xs);
 		color: var(--fg-muted);
+	}
+
+	/* Bulk upload styles */
+	.file-list {
+		background-color: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		padding: var(--space-3);
+		margin-top: var(--space-3);
+	}
+	.file-list-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: var(--space-2);
+		padding-bottom: var(--space-2);
+		border-bottom: 1px solid var(--border-primary);
+		font-size: var(--text-sm);
+		color: var(--fg-secondary);
+	}
+	.btn-text {
+		background: transparent;
+		border: none;
+		color: var(--accent-primary);
+		font-size: var(--text-xs);
+		cursor: pointer;
+		padding: 0;
+	}
+	.btn-text:hover {
+		text-decoration: underline;
+	}
+	.btn-text:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.file-item {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-2);
+		border-bottom: 1px solid var(--border-primary);
+	}
+	.file-item:last-child {
+		border-bottom: none;
+	}
+	.file-name {
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.btn-remove {
+		background: transparent;
+		border: none;
+		color: var(--fg-muted);
+		font-size: var(--text-lg);
+		cursor: pointer;
+		padding: var(--space-1);
+		line-height: 1;
+	}
+	.btn-remove:hover {
+		color: var(--error-fg);
+	}
+	.btn-remove:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	/* Bulk results */
+	.bulk-results {
+		background-color: var(--bg-tertiary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		padding: var(--space-4);
+		margin-top: var(--space-4);
+	}
+	.bulk-results h4 {
+		margin: 0 0 var(--space-3) 0;
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		color: var(--fg-secondary);
+	}
+	.result-item {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2);
+		border-bottom: 1px solid var(--border-primary);
+		font-size: var(--text-sm);
+	}
+	.result-item:last-child {
+		border-bottom: none;
+	}
+	.result-item.success {
+		color: var(--success-fg);
+	}
+	.result-item.error {
+		color: var(--error-fg);
+	}
+	.result-icon {
+		font-weight: var(--font-bold);
+		width: 20px;
+		text-align: center;
+	}
+	.result-name {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.result-error {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		max-width: 200px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* Form label for non-control labels */
+	.form-label {
+		font-weight: var(--font-medium);
+		font-size: var(--text-sm);
+		color: var(--fg-secondary);
 	}
 </style>
