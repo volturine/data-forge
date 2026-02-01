@@ -337,14 +337,20 @@ export function expressionTransform(input: Schema | null, config: StepConfig): S
 	if (!input) return { columns: [], row_count: null };
 
 	const expression = config.expression as string | undefined;
-	const targetColumn = config.target_column as string | undefined;
+	const columnName = (config.column_name as string | undefined) || (config.target_column as string | undefined);
 
-	if (!expression || !targetColumn) {
+	if (!expression || !columnName) {
+		return { columns: input.columns, row_count: null };
+	}
+
+	// Check if column already exists (update) or is new (add)
+	const exists = input.columns.some((c) => c.name === columnName);
+	if (exists) {
 		return { columns: input.columns, row_count: null };
 	}
 
 	return {
-		columns: [...input.columns, { name: targetColumn, dtype: 'Unknown', nullable: true }],
+		columns: [...input.columns, { name: columnName, dtype: 'Unknown', nullable: true }],
 		row_count: null
 	};
 }

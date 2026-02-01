@@ -190,7 +190,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 	datasource: {},
 	sort: {},
 	rename: {},
-	expression: {},
+	expression: { expression: '', column_name: '' },
 	with_columns: {},
 	fill_null: {},
 	deduplicate: {},

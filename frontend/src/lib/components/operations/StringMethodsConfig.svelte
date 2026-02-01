@@ -46,7 +46,8 @@
 		{ value: 'slice', label: 'Substring (Slice)', params: ['start', 'end'] },
 		{ value: 'replace', label: 'Replace Text', params: ['pattern', 'replacement'] },
 		{ value: 'extract', label: 'Extract (Regex)', params: ['pattern', 'group_index'] },
-		{ value: 'split', label: 'Split String', params: ['delimiter', 'index'] }
+		{ value: 'split', label: 'Split to List', params: ['delimiter'] },
+		{ value: 'split_take', label: 'Split & Take', params: ['delimiter', 'index'] }
 	];
 
 	const stringColumns = $derived(
@@ -195,9 +196,29 @@
 		</div>
 	{/if}
 
+	{#if needsParam('delimiter') && !needsParam('index')}
+		<div class="form-section" role="group" aria-labelledby="split-delimiter-heading">
+			<h4 id="split-delimiter-heading">Split Delimiter</h4>
+			<div class="input-group">
+				<label for="str-input-delimiter-only">Delimiter:</label>
+				<input
+					id="str-input-delimiter-only"
+					data-testid="str-delimiter-only-input"
+					type="text"
+					bind:value={config.delimiter}
+					placeholder="e.g., , or |"
+					aria-describedby="str-delimiter-only-help"
+				/>
+				<span id="str-delimiter-only-help" class="sr-only"
+					>Delimiter to split the string into a list</span
+				>
+			</div>
+		</div>
+	{/if}
+
 	{#if needsParam('delimiter') && needsParam('index')}
 		<div class="form-section" role="group" aria-labelledby="split-params-heading">
-			<h4 id="split-params-heading">Split Parameters</h4>
+			<h4 id="split-params-heading">Split & Take Parameters</h4>
 			<div class="input-group">
 				<label for="str-input-delimiter">Delimiter:</label>
 				<input
@@ -205,7 +226,7 @@
 					data-testid="str-delimiter-input"
 					type="text"
 					bind:value={config.delimiter}
-					placeholder="e.g., space, comma"
+					placeholder="e.g., , or |"
 					aria-describedby="str-delimiter-help"
 				/>
 				<span id="str-delimiter-help" class="sr-only"
@@ -223,7 +244,7 @@
 					aria-describedby="str-part-index-help"
 				/>
 				<span id="str-part-index-help" class="sr-only"
-					>Index of the part to keep after splitting (0-based)</span
+					>Index of the part to take after splitting (0-based)</span
 				>
 			</div>
 		</div>

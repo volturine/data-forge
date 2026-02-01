@@ -4,7 +4,7 @@ from modules.compute.operations.deduplicate import DeduplicateHandler
 from modules.compute.operations.drop import DropHandler
 from modules.compute.operations.explode import ExplodeHandler
 from modules.compute.operations.export import ExportHandler
-from modules.compute.operations.expression import WithColumnsHandler
+from modules.compute.operations.expression import ExpressionHandler
 from modules.compute.operations.fill_null import FillNullHandler
 from modules.compute.operations.filter import FilterHandler
 from modules.compute.operations.groupby import GroupByHandler
@@ -23,6 +23,7 @@ from modules.compute.operations.union import UnionByNameHandler
 from modules.compute.operations.unpivot import UnpivotHandler
 from modules.compute.operations.value_counts import ValueCountsHandler
 from modules.compute.operations.view import ViewHandler
+from modules.compute.operations.with_columns import WithColumnsHandler
 
 __all__ = [
     # Base
@@ -53,6 +54,7 @@ __all__ = [
     'ValueCountsHandler',
     'ViewHandler',
     'WithColumnsHandler',
+    'ExpressionHandler',
     # Registry
     'register_operation',
     'get_operation_handlers',
@@ -98,3 +100,4 @@ def _register_defaults() -> None:
     register_operation('value_counts', ValueCountsHandler())
     register_operation('view', ViewHandler())
     register_operation('with_columns', WithColumnsHandler())
+    register_operation('expression', ExpressionHandler())

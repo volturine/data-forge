@@ -282,6 +282,18 @@ def convert_union_by_name_config(config: dict) -> dict:
     }
 
 
+def convert_expression_config(config: dict) -> dict:
+    """Convert expression config from frontend to backend format.
+
+    Frontend: {expression: str, column_name: str}
+    Backend: {expression: str, column_name: str}
+    """
+    return {
+        'expression': config.get('expression', ''),
+        'column_name': config.get('column_name', 'new_column'),
+    }
+
+
 def get_converters() -> dict:
     """Return all converters dictionary."""
     return {
@@ -308,6 +320,7 @@ def get_converters() -> dict:
         'value_counts': convert_value_counts_config,
         'export': convert_export_config,
         'union_by_name': convert_union_by_name_config,
+        'expression': convert_expression_config,
     }
 
 
