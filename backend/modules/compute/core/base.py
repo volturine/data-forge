@@ -1,5 +1,7 @@
 from typing import Protocol, runtime_checkable
 
+from typing import Protocol, runtime_checkable
+
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 

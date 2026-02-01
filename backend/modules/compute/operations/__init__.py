@@ -1,4 +1,4 @@
-from modules.compute.operations.base import OperationHandler, OperationParams
+from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.operations.datasource import DatasourceHandler
 from modules.compute.operations.deduplicate import DeduplicateHandler
 from modules.compute.operations.drop import DropHandler

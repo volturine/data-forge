@@ -4,7 +4,7 @@ import polars as pl
 from openpyxl import load_workbook
 from pydantic import ConfigDict
 
-from modules.compute.operations.base import OperationHandler, OperationParams
+from modules.compute.core.base import OperationHandler, OperationParams
 
 
 class DatasourceParams(OperationParams):

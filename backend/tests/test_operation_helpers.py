@@ -1,7 +1,7 @@
 import polars as pl
 import pytest
 
-from modules.compute.operations.exports import get_export_format
+from modules.compute.core.exports import get_export_format
 from modules.compute.operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from modules.compute.operations.filter import get_operator
 from modules.compute.operations.groupby import get_aggregation

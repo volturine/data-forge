@@ -3,9 +3,9 @@
 from typing import Any
 
 import polars as pl
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from modules.compute.operations.base import OperationHandler, OperationParams
+from modules.compute.core.base import OperationHandler, OperationParams
 
 
 class WithColumnsExpr(BaseModel):
@@ -18,7 +18,7 @@ class WithColumnsExpr(BaseModel):
 
 
 class WithColumnsParams(OperationParams):
-    expressions: list[WithColumnsExpr]
+    expressions: list[WithColumnsExpr] = Field(default_factory=list)
 
 
 class WithColumnsHandler(OperationHandler):

@@ -34,6 +34,7 @@
 	import DropConfig from '$lib/components/operations/DropConfig.svelte';
 	import JoinConfig from '$lib/components/operations/JoinConfig.svelte';
 	import ExpressionConfig from '$lib/components/operations/ExpressionConfig.svelte';
+	import WithColumnsConfig from '$lib/components/operations/WithColumnsConfig.svelte';
 	import DeduplicateConfig from '$lib/components/operations/DeduplicateConfig.svelte';
 	import FillNullConfig from '$lib/components/operations/FillNullConfig.svelte';
 	import ExplodeConfig from '$lib/components/operations/ExplodeConfig.svelte';
@@ -49,6 +50,15 @@
 	import UnpivotConfig from '$lib/components/operations/UnpivotConfig.svelte';
 	import ExportConfig from '$lib/components/operations/ExportConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
+
+	type WithColumnsConfigShape = {
+		expressions: Array<{
+			name: string;
+			type: 'literal' | 'column';
+			value?: string | number | null;
+			column?: string | null;
+		}>;
+	};
 
 	interface Props {
 		step?: PipelineStep | null;
@@ -207,10 +217,15 @@
 				<DropConfig schema={inputSchema} bind:config={draftConfig as unknown as DropConfigData} />
 			{:else if step.type === 'join'}
 				<JoinConfig schema={inputSchema} bind:config={draftConfig as unknown as JoinConfigData} />
-			{:else if step.type === 'expression' || step.type === 'with_columns'}
+			{:else if step.type === 'expression'}
 				<ExpressionConfig
 					schema={inputSchema}
 					bind:config={draftConfig as unknown as ExpressionConfigData}
+				/>
+			{:else if step.type === 'with_columns'}
+				<WithColumnsConfig
+					schema={inputSchema}
+					bind:config={draftConfig as unknown as WithColumnsConfigShape}
 				/>
 			{:else if step.type === 'deduplicate'}
 				<DeduplicateConfig
