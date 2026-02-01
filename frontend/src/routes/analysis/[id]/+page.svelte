@@ -596,7 +596,7 @@
 						schema={analysisStore.calculatedSchema}
 						{isLoadingSchema}
 						onClose={handleCloseConfig}
-						onConfigChange={markUnsaved}
+						onConfigApply={markUnsaved}
 					/>
 				</div>
 			{/if}

@@ -49,7 +49,8 @@ export class SchemaStore {
 			if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
 				output = cachedSchema;
 			} else if (step.type === 'join') {
-				const rightSchema = this.joinSchemas.get(step.id) ?? emptySchema();
+				const rightSource = typeof config.right_source === 'string' ? config.right_source : '';
+				const rightSchema = rightSource ? this.joinSchemas.get(rightSource) ?? emptySchema() : emptySchema();
 				output = joinTransform(input, config, rightSchema);
 			} else if (step.type === 'union_by_name') {
 				const sources = Array.isArray(config.sources) ? config.sources : [];
@@ -78,10 +79,6 @@ export class SchemaStore {
 
 	getJoinSchema(datasourceId: string): Schema | null {
 		return this.joinSchemas.get(datasourceId) ?? null;
-	}
-
-	getJoinSchemaByStepId(stepId: string): Schema | null {
-		return this.joinSchemas.get(stepId) ?? null;
 	}
 
 	// Store actual schema from preview response
