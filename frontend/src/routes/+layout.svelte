@@ -22,6 +22,41 @@
 		document.documentElement.setAttribute('data-theme', theme.current);
 	});
 
+	const findScrollableX = (node: Element | null): HTMLElement | null => {
+		if (!node) return null;
+		if (node instanceof HTMLElement) {
+			const style = getComputedStyle(node);
+			const canScrollX = style.overflowX === 'auto' || style.overflowX === 'scroll';
+			if (canScrollX && node.scrollWidth > node.clientWidth) {
+				return node;
+			}
+		}
+		return findScrollableX(node.parentElement);
+	};
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const handler = (event: WheelEvent) => {
+			if (event.defaultPrevented) return;
+			if (event.deltaX !== 0 && !event.shiftKey) return;
+			if (!event.shiftKey || event.deltaY === 0) return;
+			const target = event.target instanceof Element ? event.target : null;
+			if (target && target.closest('input, textarea, select, button, [contenteditable="true"]')) {
+				return;
+			}
+			const scroller =
+				findScrollableX(target) ??
+				(document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null);
+			if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+			scroller.scrollBy({ left: event.deltaY, behavior: 'auto' });
+			event.preventDefault();
+		};
+		window.addEventListener('wheel', handler, { passive: false, capture: true });
+		return () => {
+			window.removeEventListener('wheel', handler, { capture: true } as AddEventListenerOptions);
+		};
+	});
+
 	function toggleTheme() {
 		theme.current = theme.current === 'light' ? 'dark' : 'light';
 	}
