@@ -62,13 +62,6 @@ def temp_upload_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(scope='function')
-def temp_results_dir(tmp_path: Path) -> Path:
-    results_dir = tmp_path / 'results'
-    results_dir.mkdir(parents=True, exist_ok=True)
-    return results_dir
-
-
-@pytest.fixture(scope='function')
 def sample_csv_file(temp_upload_dir: Path) -> Path:
     csv_path = temp_upload_dir / 'sample.csv'
     df = pl.DataFrame(
@@ -292,23 +285,6 @@ async def sample_analyses(test_db_session: AsyncSession, sample_datasources: lis
         await test_db_session.refresh(analysis)
 
     return analyses
-
-
-@pytest.fixture(scope='function')
-def sample_result_file(temp_results_dir: Path) -> tuple[str, Path]:
-    analysis_id = str(uuid.uuid4())
-    result_path = temp_results_dir / f'{analysis_id}.parquet'
-
-    df = pl.DataFrame(
-        {
-            'id': list(range(1, 101)),
-            'value': [i * 10 for i in range(1, 101)],
-            'category': ['A' if i % 2 == 0 else 'B' for i in range(1, 101)],
-        }
-    )
-    df.write_parquet(result_path)
-
-    return analysis_id, result_path
 
 
 @pytest.fixture(scope='function')

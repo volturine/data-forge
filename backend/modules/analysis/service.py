@@ -82,20 +82,7 @@ async def list_analyses(
     result = await session.execute(select(Analysis))
     analyses = result.scalars().all()
 
-    gallery_items = []
-    for analysis in analyses:
-        item = AnalysisGalleryItemSchema(
-            id=analysis.id,
-            name=analysis.name,
-            thumbnail=analysis.thumbnail,
-            created_at=analysis.created_at,
-            updated_at=analysis.updated_at,
-            row_count=None,
-            column_count=None,
-        )
-        gallery_items.append(item)
-
-    return gallery_items
+    return [AnalysisGalleryItemSchema.model_validate(a) for a in analyses]
 
 
 async def update_analysis(

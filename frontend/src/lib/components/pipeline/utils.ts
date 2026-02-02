@@ -116,11 +116,13 @@ const stepTypes: Record<string, StepTypeConfig> = {
 		icon: '🧮',
 		typeLabel: 'with_columns',
 		summary: (c) => {
-			const expr = c.expression as string;
-			const col = c.column_name as string;
-			if (!expr) return 'no expression';
-			const short = expr.length > 25 ? expr.slice(0, 24) + '…' : expr;
-			return `${col} = ${short}`;
+			const expressions = c.expressions as Array<{ name?: string }>;
+			if (!expressions?.length) return 'no columns';
+			const names = expressions
+				.map((expr) => (typeof expr.name === 'string' ? expr.name : ''))
+				.filter((name) => !!name);
+			if (!names.length) return `${expressions.length} columns`;
+			return names.length === 1 ? names[0] : `${truncate(names, 2)} (${names.length})`;
 		}
 	},
 	pivot: {

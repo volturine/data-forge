@@ -1,32 +1,64 @@
 """Expression-based column operations."""
 
-from typing import Any
-
 import polars as pl
-from pydantic import BaseModel, ConfigDict
 
-from modules.compute.operations.base import OperationHandler, OperationParams
-
-
-class WithColumnsExpr(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    name: str
-    type: str
-    value: Any | None = None
-    column: str | None = None
+from modules.compute.core.base import OperationHandler, OperationParams
 
 
-class WithColumnsParams(OperationParams):
-    expressions: list[WithColumnsExpr]
+class ExpressionParams(OperationParams):
+    """Parameters for expression-based column creation."""
+
+    expression: str
+    column_name: str
 
 
-class WithColumnsHandler(OperationHandler):
-    """Add or modify columns using expressions."""
+def parse_expression(expr_str: str) -> pl.Expr:
+    """Parse a Polars expression string.
+
+    Provides full access to the pl.* namespace.
+    Usage: pl.col("column").cast(pl.Float64)
+    """
+    if not expr_str or not expr_str.strip():
+        raise ValueError('Expression cannot be empty')
+
+    # Basic security: block dangerous patterns
+    dangerous = [
+        'import ',
+        '__import__',
+        'exec(',
+        'eval(',
+        'open(',
+        'compile(',
+        '__builtins__',
+        '__class__',
+        '__subclasses__',
+        'subprocess',
+        'os.system',
+        'os.popen',
+    ]
+    for pattern in dangerous:
+        if pattern in expr_str:
+            raise ValueError(f'Expression contains forbidden pattern: {pattern}')
+
+    try:
+        result = eval(expr_str, {'__builtins__': {}, 'pl': pl})  # noqa: S307
+    except SyntaxError as e:
+        raise ValueError(f'Syntax error in expression: {e}') from e
+    except Exception as e:
+        raise ValueError(f'Failed to parse expression: {e}') from e
+
+    if not isinstance(result, pl.Expr):
+        raise ValueError(f'Expression must return a Polars expression, got {type(result).__name__}')
+
+    return result
+
+
+class ExpressionHandler(OperationHandler):
+    """Create a new column using a Polars expression string."""
 
     @property
     def name(self) -> str:
-        return 'with_columns'
+        return 'expression'
 
     def __call__(
         self,
@@ -36,11 +68,9 @@ class WithColumnsHandler(OperationHandler):
         right_lf: pl.LazyFrame | None = None,
         right_sources: dict[str, pl.LazyFrame] | None = None,
     ) -> pl.LazyFrame:
-        validated = WithColumnsParams.model_validate(params)
-        exprs: list[pl.Expr] = []
-        for expr in validated.expressions:
-            if expr.type == 'literal':
-                exprs.append(pl.lit(expr.value).alias(expr.name))
-            elif expr.type == 'column' and expr.column:
-                exprs.append(pl.col(expr.column).alias(expr.name))
-        return lf.with_columns(exprs)
+        validated = ExpressionParams.model_validate(params)
+
+        expr = parse_expression(validated.expression)
+        aliased = expr.alias(validated.column_name)
+
+        return lf.with_columns(aliased)

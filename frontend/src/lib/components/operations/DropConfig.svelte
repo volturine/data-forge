@@ -12,8 +12,10 @@
 
 	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
+	const safeColumns = $derived(Array.isArray(config.columns) ? config.columns : []);
+
 	function toggleColumn(columnName: string) {
-		const cols = config.columns;
+		const cols = safeColumns;
 		const index = cols.indexOf(columnName);
 		if (index > -1) {
 			config.columns = cols.filter((_, i) => i !== index);
@@ -64,7 +66,7 @@
 					id={`drop-checkbox-${column.name}`}
 					data-testid={`drop-column-checkbox-${column.name}`}
 					type="checkbox"
-					checked={config.columns.includes(column.name)}
+					checked={safeColumns.includes(column.name)}
 					onchange={() => toggleColumn(column.name)}
 					aria-label={`Drop column ${column.name}`}
 				/>
@@ -74,11 +76,11 @@
 		{/each}
 	</div>
 
-	{#if config.columns.length > 0}
+	{#if safeColumns.length > 0}
 		<div id="drop-selected-summary" class="selected-summary warning" aria-live="polite">
-			<strong>Columns to Drop ({config.columns.length}):</strong>
+			<strong>Columns to Drop ({safeColumns.length}):</strong>
 			<div class="selected-names">
-				{config.columns.join(', ')}
+				{safeColumns.join(', ')}
 			</div>
 		</div>
 	{:else}

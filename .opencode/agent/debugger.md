@@ -1,6 +1,7 @@
 ---
 description: Debugging specialist for investigating issues and root cause analysis
 mode: subagent
+model: github-copilot/grok-code-fast-1
 tools:
   write: false
   edit: false

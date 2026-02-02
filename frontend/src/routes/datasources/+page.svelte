@@ -187,13 +187,18 @@
 										</button>
 									</div>
 								{:else}
-									<button
-										onclick={() => handleDelete(datasource.id)}
-										class="btn btn-ghost btn-sm"
-										disabled={deleteMutation.isPending}
-									>
-										Delete
-									</button>
+									<div class="action-buttons">
+										<a href={resolve(`/datasources/${datasource.id}`)} class="btn btn-ghost btn-sm">
+											Edit
+										</a>
+										<button
+											onclick={() => handleDelete(datasource.id)}
+											class="btn btn-ghost btn-sm"
+											disabled={deleteMutation.isPending}
+										>
+											Delete
+										</button>
+									</div>
 								{/if}
 							</span>
 						</div>
@@ -354,5 +359,12 @@
 	.confirm-actions {
 		display: flex;
 		gap: var(--space-2);
+	}
+	.action-buttons {
+		display: flex;
+		gap: var(--space-2);
+	}
+	.action-buttons a {
+		text-decoration: none;
 	}
 </style>

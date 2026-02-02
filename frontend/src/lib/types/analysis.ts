@@ -56,6 +56,4 @@ export interface AnalysisGalleryItem {
 	thumbnail: string | null;
 	created_at: string;
 	updated_at: string;
-	row_count: number | null;
-	column_count: number | null;
 }

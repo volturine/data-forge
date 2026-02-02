@@ -58,6 +58,20 @@ export interface ExpressionConfigData {
 	column_name: string;
 }
 
+export interface WithColumnsExpr {
+	name: string;
+	type: 'literal' | 'column' | 'udf';
+	value?: string | number | null;
+	column?: string | null;
+	args?: string[] | null;
+	code?: string | null;
+	udf_id?: string | null;
+}
+
+export interface WithColumnsConfigData {
+	expressions: WithColumnsExpr[];
+}
+
 export interface DeduplicateConfigData {
 	subset: string[] | null;
 	keep: string;
@@ -153,6 +167,7 @@ export type OperationConfig =
 	| DropConfigData
 	| JoinConfigData
 	| ExpressionConfigData
+	| WithColumnsConfigData
 	| DeduplicateConfigData
 	| FillNullConfigData
 	| ExplodeConfigData

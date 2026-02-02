@@ -1,6 +1,6 @@
 import { getClientIdentity } from './clientIdentity.svelte';
 import { apiRequest } from '$lib/api/client';
-import type { ApiError } from '$lib/api/client';
+import { SvelteMap } from 'svelte/reactivity';
 
 export interface LockState {
 	locked: boolean;
@@ -24,10 +24,10 @@ interface LockStatusResponse {
 }
 
 // Store for lock states - resource_id -> LockState
-const locks = $state(new Map<string, LockState>());
+const locks = new SvelteMap<string, LockState>();
 
-// Track heartbeat intervals
-const heartbeatIntervals = new Map<string, number>();
+// Track heartbeat intervals (not reactive, just for cleanup)
+const heartbeatIntervals = new Map<string, number>(); // eslint-disable-line svelte/prefer-svelte-reactivity
 
 // HEARTBEAT_INTERVAL from architecture: 10 seconds
 const HEARTBEAT_INTERVAL_MS = 10000;

@@ -14,6 +14,7 @@ from api import router
 from core.config import settings
 from core.database import get_db, init_db
 from modules.compute.manager import get_manager
+from modules.udf.seed import ensure_udf_seeds
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +46,9 @@ async def engine_cleanup_loop():
 async def lifespan(app: FastAPI):
     logger.info('Starting application...')
     await init_db()
+    async for session in get_db():
+        await ensure_udf_seeds(session)
+        break
 
     # Start background cleanup task
     cleanup_task = asyncio.create_task(engine_cleanup_loop())
@@ -129,10 +133,9 @@ async def readiness(session: AsyncSession = Depends(get_db)):
     # Check filesystem (data directories)
     try:
         checks['upload_dir'] = 'ok' if settings.upload_dir.exists() else 'missing'
-        checks['results_dir'] = 'ok' if settings.results_dir.exists() else 'missing'
         checks['exports_dir'] = 'ok' if settings.exports_dir.exists() else 'missing'
 
-        if not all(d.exists() for d in [settings.upload_dir, settings.results_dir, settings.exports_dir]):
+        if not all(d.exists() for d in [settings.upload_dir, settings.exports_dir]):
             is_ready = False
     except Exception as e:
         checks['filesystem'] = f'error: {str(e)}'

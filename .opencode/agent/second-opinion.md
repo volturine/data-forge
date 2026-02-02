@@ -1,7 +1,7 @@
 ---
 description: A "second opinion" agent that double-checks opinions or implementations from the primary agent
 mode: subagent
-model: github-copilot/gpt-5.2-codex
+model: github-copilot/grok-code-fast-1
 tools:
   write: false
   edit: false

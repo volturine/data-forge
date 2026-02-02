@@ -11,6 +11,7 @@ from core.config import settings
 class Base(DeclarativeBase):
     type_annotation_map = {
         dict: JSON,
+        list: JSON,
         datetime: DateTime(timezone=True),
     }
 

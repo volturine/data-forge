@@ -4,37 +4,37 @@ This document lists ALL environment variables supported by the application.
 
 ## Quick Reference
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| **Application** ||||
-| `APP_NAME` | string | Polars-FastAPI-Svelte Analysis Platform | Application name |
-| `APP_VERSION` | string | 1.0.0 | Application version |
-| `DEBUG` | boolean | false | Enable debug mode (verbose logging, SQL echo) |
-| `PORT` | integer | 8000 | Port to bind (Docker only) |
-| **Database** ||||
-| `DATABASE_URL` | string | sqlite+aiosqlite:///./database/app.db | Database connection URL |
-| **CORS** ||||
-| `CORS_ORIGINS` | string | localhost:3000,... | Comma-separated allowed origins |
-| **File Storage** ||||
-| `UPLOAD_DIR` | path | /app/data/uploads | Upload directory path |
-| `RESULTS_DIR` | path | /app/data/results | Results directory path |
-| `EXPORTS_DIR` | path | /app/data/exports | Exports directory path |
-| `MAX_UPLOAD_SIZE` | integer | 10737418240 | Max upload size in bytes (10GB) |
-| **Polars Engine** ||||
-| `POLARS_MAX_THREADS` | integer | 0 | Max threads per engine (0=auto) |
-| `POLARS_MAX_MEMORY_MB` | integer | 0 | Memory limit per engine MB (0=unlimited) |
-| `POLARS_STREAMING_CHUNK_SIZE` | integer | 0 | Streaming chunk size (0=auto) |
-| `MAX_CONCURRENT_ENGINES` | integer | 10 | Max simultaneous engines (1-100) |
-| **Workers** ||||
-| `WORKERS` | integer | 1 | Gunicorn/Uvicorn workers (0=auto: 2*cores+1) |
-| `WORKER_CONNECTIONS` | integer | 1000 | Max connections per worker |
-| **Engine Lifecycle** ||||
-| `ENGINE_IDLE_TIMEOUT` | integer | 300 | Idle timeout before cleanup (seconds, reset on save) |
-| `ENGINE_POOLING_INTERVAL` | integer | 5 | Polling interval to check engine states (seconds) |
-| **Job Management** ||||
-| `JOB_TIMEOUT` | integer | 300 | Max job execution time (seconds) |
-| **Logging** ||||
-| `LOG_LEVEL` | string | info | Log level (debug/info/warning/error/critical) |
+| Variable                      | Type    | Default                                 | Description                                          |
+| ----------------------------- | ------- | --------------------------------------- | ---------------------------------------------------- |
+| **Application**               |         |                                         |                                                      |
+| `APP_NAME`                    | string  | Polars-FastAPI-Svelte Analysis Platform | Application name                                     |
+| `APP_VERSION`                 | string  | 1.0.0                                   | Application version                                  |
+| `DEBUG`                       | boolean | false                                   | Enable debug mode (verbose logging, SQL echo)        |
+| `PORT`                        | integer | 8000                                    | Port to bind (Docker only)                           |
+| **Database**                  |         |                                         |                                                      |
+| `DATABASE_URL`                | string  | sqlite+aiosqlite:///./database/app.db   | Database connection URL                              |
+| **CORS**                      |         |                                         |                                                      |
+| `CORS_ORIGINS`                | string  | localhost:3000,...                      | Comma-separated allowed origins                      |
+| **File Storage**              |         |                                         |                                                      |
+| `UPLOAD_DIR`                  | path    | /app/data/uploads                       | Upload directory path                                |
+| `CLEAN_DIR`                   | path    | /app/data/clean                         | Results directory path                               |
+| `EXPORTS_DIR`                 | path    | /app/data/exports                       | Exports directory path                               |
+| `MAX_UPLOAD_SIZE`             | integer | 10737418240                             | Max upload size in bytes (10GB)                      |
+| **Polars Engine**             |         |                                         |                                                      |
+| `POLARS_MAX_THREADS`          | integer | 0                                       | Max threads per engine (0=auto)                      |
+| `POLARS_MAX_MEMORY_MB`        | integer | 0                                       | Memory limit per engine MB (0=unlimited)             |
+| `POLARS_STREAMING_CHUNK_SIZE` | integer | 0                                       | Streaming chunk size (0=auto)                        |
+| `MAX_CONCURRENT_ENGINES`      | integer | 10                                      | Max simultaneous engines (1-100)                     |
+| **Workers**                   |         |                                         |                                                      |
+| `WORKERS`                     | integer | 1                                       | Gunicorn/Uvicorn workers (0=auto: 2\*cores+1)        |
+| `WORKER_CONNECTIONS`          | integer | 1000                                    | Max connections per worker                           |
+| **Engine Lifecycle**          |         |                                         |                                                      |
+| `ENGINE_IDLE_TIMEOUT`         | integer | 300                                     | Idle timeout before cleanup (seconds, reset on save) |
+| `ENGINE_POOLING_INTERVAL`     | integer | 5                                       | Polling interval to check engine states (seconds)    |
+| **Job Management**            |         |                                         |                                                      |
+| `JOB_TIMEOUT`                 | integer | 300                                     | Max job execution time (seconds)                     |
+| **Logging**                   |         |                                         |                                                      |
+| `LOG_LEVEL`                   | string  | info                                    | Log level (debug/info/warning/error/critical)        |
 
 ## Validation Rules
 
@@ -71,7 +71,7 @@ WORKERS=1
 POLARS_MAX_THREADS=4
 MAX_CONCURRENT_ENGINES=3
 UPLOAD_DIR=./data/uploads
-RESULTS_DIR=./data/results
+CLEAN_DIR=./data/results
 EXPORTS_DIR=./data/exports
 ```
 
@@ -84,7 +84,7 @@ WORKERS=1
 POLARS_MAX_THREADS=4
 MAX_CONCURRENT_ENGINES=3
 UPLOAD_DIR=/app/data/uploads
-RESULTS_DIR=/app/data/results
+CLEAN_DIR=/app/data/clean
 EXPORTS_DIR=/app/data/exports
 ```
 
@@ -99,7 +99,7 @@ POLARS_MAX_THREADS=1
 POLARS_MAX_MEMORY_MB=1024
 MAX_CONCURRENT_ENGINES=3
 UPLOAD_DIR=/app/data/uploads
-RESULTS_DIR=/app/data/results
+CLEAN_DIR=/app/data/clean
 EXPORTS_DIR=/app/data/exports
 ```
 
@@ -114,7 +114,7 @@ POLARS_MAX_THREADS=2
 POLARS_MAX_MEMORY_MB=2048
 MAX_CONCURRENT_ENGINES=5
 UPLOAD_DIR=/app/data/uploads
-RESULTS_DIR=/app/data/results
+CLEAN_DIR=/app/data/clean
 EXPORTS_DIR=/app/data/exports
 ```
 
@@ -129,7 +129,7 @@ POLARS_MAX_THREADS=4
 POLARS_MAX_MEMORY_MB=4096
 MAX_CONCURRENT_ENGINES=10
 UPLOAD_DIR=/app/data/uploads
-RESULTS_DIR=/app/data/results
+CLEAN_DIR=/app/data/clean
 EXPORTS_DIR=/app/data/exports
 ```
 
@@ -183,6 +183,7 @@ Total CPU Cores Needed = WORKERS + (MAX_CONCURRENT_ENGINES × POLARS_MAX_THREADS
 ```
 
 **Example**: 8-core server
+
 - WORKERS=4
 - MAX_CONCURRENT_ENGINES=5
 - POLARS_MAX_THREADS=1
@@ -195,6 +196,7 @@ Total Memory = System (2GB) + Workers (500MB × WORKERS) + (MAX_CONCURRENT_ENGIN
 ```
 
 **Example**: 16GB server
+
 - System: 2GB
 - Workers: 4 × 500MB = 2GB
 - Engines: 5 × 2048MB = 10GB
@@ -212,6 +214,7 @@ Total Memory = System (2GB) + Workers (500MB × WORKERS) + (MAX_CONCURRENT_ENGIN
 ### Worker Auto-Configuration
 
 When `WORKERS=0`:
+
 ```python
 workers = (2 * cpu_cores) + 1
 ```
@@ -221,6 +224,7 @@ Example on 4-core machine: `workers = (2 * 4) + 1 = 9`
 ### Polars Auto-Configuration
 
 When `POLARS_MAX_THREADS=0`:
+
 - Uses all available CPU cores
 - May cause contention with workers
 - Recommended to set explicitly in production

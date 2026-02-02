@@ -1,5 +1,4 @@
 import type { Schema, ColumnInfo } from '$lib/types/schema';
-import type { PipelineStep } from '$lib/types/analysis';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { emptySchema } from '$lib/types/schema';
 import {
@@ -15,51 +14,19 @@ export interface StepSchemas {
 	output: Schema;
 }
 
-class SchemaStore {
+export class SchemaStore {
 	joinSchemas = $state(new SvelteMap<string, Schema>());
 	// Cache for actual output schemas from preview (for dynamic steps like pivot)
 	previewSchemas = $state(new SvelteMap<string, Schema>());
 
-	get primaryDatasourceId(): string | null {
-		const activeTab = analysisStore.activeTab;
-		return activeTab?.datasource_id ?? null;
-	}
+	// Derived: primary datasource ID from active tab
+	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource_id ?? null);
 
-	get steps(): PipelineStep[] {
-		return analysisStore.pipeline;
-	}
+	// Derived: current pipeline steps
+	steps = $derived(analysisStore.pipeline);
 
-	async setJoinDatasource(datasourceId: string, schema: Schema): Promise<void> {
-		this.joinSchemas.set(datasourceId, schema);
-	}
-
-	removeJoinDatasource(datasourceId: string): void {
-		this.joinSchemas.delete(datasourceId);
-	}
-
-	getJoinSchema(datasourceId: string): Schema | null {
-		return this.joinSchemas.get(datasourceId) ?? null;
-	}
-
-	getJoinSchemaByStepId(stepId: string): Schema | null {
-		return this.joinSchemas.get(stepId) ?? null;
-	}
-
-	// Store actual schema from preview response
-	setPreviewSchema(stepId: string, columns: string[], columnTypes?: Record<string, string>): void {
-		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
-			name,
-			dtype: columnTypes?.[name] ?? 'Unknown',
-			nullable: true
-		}));
-		this.previewSchemas.set(stepId, { columns: schemaColumns, row_count: null });
-	}
-
-	clearPreviewSchema(stepId: string): void {
-		this.previewSchemas.delete(stepId);
-	}
-
-	getStepSchemas(): Map<string, StepSchemas> {
+	// Auto-memoized step schemas - only recalculates when dependencies change
+	stepSchemas = $derived.by(() => {
 		const schemas = new SvelteMap<string, StepSchemas>();
 		let currentSchema: Schema | null = null;
 
@@ -82,11 +49,12 @@ class SchemaStore {
 			if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
 				output = cachedSchema;
 			} else if (step.type === 'join') {
-				const rightSchema = this.joinSchemas.get(step.id) ?? emptySchema();
-				const config = step.config as StepConfig;
+				const rightSource = typeof config.right_source === 'string' ? config.right_source : '';
+				const rightSchema = rightSource
+					? (this.joinSchemas.get(rightSource) ?? emptySchema())
+					: emptySchema();
 				output = joinTransform(input, config, rightSchema);
 			} else if (step.type === 'union_by_name') {
-				const config = step.config as StepConfig;
 				const sources = Array.isArray(config.sources) ? config.sources : [];
 				const unionSchemas = sources
 					.map((sourceId) => this.joinSchemas.get(sourceId))
@@ -101,14 +69,40 @@ class SchemaStore {
 		}
 
 		return schemas;
+	});
+
+	setJoinDatasource(datasourceId: string, schema: Schema): void {
+		this.joinSchemas.set(datasourceId, schema);
+	}
+
+	removeJoinDatasource(datasourceId: string): void {
+		this.joinSchemas.delete(datasourceId);
+	}
+
+	getJoinSchema(datasourceId: string): Schema | null {
+		return this.joinSchemas.get(datasourceId) ?? null;
+	}
+
+	// Store actual schema from preview response
+	setPreviewSchema(stepId: string, columns: string[], columnTypes?: Record<string, string>): void {
+		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
+			name,
+			dtype: columnTypes?.[name] ?? 'Unknown',
+			nullable: true
+		}));
+		this.previewSchemas.set(stepId, { columns: schemaColumns, row_count: null });
+	}
+
+	clearPreviewSchema(stepId: string): void {
+		this.previewSchemas.delete(stepId);
 	}
 
 	getInput(stepId: string): Schema | null {
-		return this.getStepSchemas().get(stepId)?.input ?? null;
+		return this.stepSchemas.get(stepId)?.input ?? null;
 	}
 
 	getOutput(stepId: string): Schema | null {
-		return this.getStepSchemas().get(stepId)?.output ?? null;
+		return this.stepSchemas.get(stepId)?.output ?? null;
 	}
 
 	getAllOutputs(): Schema[] {

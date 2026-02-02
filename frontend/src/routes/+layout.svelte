@@ -6,15 +6,55 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { Sun, Moon } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
+	import { initializeStores } from '$lib/stores/context.svelte';
 	import '$lib/../app.css';
 
 	let { children } = $props();
+
+	// Initialize stores via context API for SSR safety
+	// This creates fresh store instances per request, preventing state leakage
+	initializeStores();
 
 	// Use runed's PersistedState for persisted theme state across tabs/sessions
 	const theme = new PersistedState<'light' | 'dark'>('theme', 'dark');
 
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme.current);
+	});
+
+	const findScrollableX = (node: Element | null): HTMLElement | null => {
+		if (!node) return null;
+		if (node instanceof HTMLElement) {
+			const style = getComputedStyle(node);
+			const canScrollX = style.overflowX === 'auto' || style.overflowX === 'scroll';
+			if (canScrollX && node.scrollWidth > node.clientWidth) {
+				return node;
+			}
+		}
+		return findScrollableX(node.parentElement);
+	};
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const handler = (event: WheelEvent) => {
+			if (event.defaultPrevented) return;
+			if (event.deltaX !== 0 && !event.shiftKey) return;
+			if (!event.shiftKey || event.deltaY === 0) return;
+			const target = event.target instanceof Element ? event.target : null;
+			if (target && target.closest('input, textarea, select, button, [contenteditable="true"]')) {
+				return;
+			}
+			const scroller =
+				findScrollableX(target) ??
+				(document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null);
+			if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+			scroller.scrollBy({ left: event.deltaY, behavior: 'auto' });
+			event.preventDefault();
+		};
+		window.addEventListener('wheel', handler, { passive: false, capture: true });
+		return () => {
+			window.removeEventListener('wheel', handler, { capture: true } as AddEventListenerOptions);
+		};
 	});
 
 	function toggleTheme() {
@@ -32,7 +72,8 @@
 
 	const navItems = [
 		{ href: '/', label: 'Analyses' },
-		{ href: '/datasources', label: 'Data Sources' }
+		{ href: '/datasources', label: 'Data Sources' },
+		{ href: '/udfs', label: 'UDF Library' }
 	];
 </script>
 
@@ -60,10 +101,11 @@
 				<nav class="nav">
 					{#each navItems as item (item.href)}
 						<a
-							href={resolve(item.href as '/' | '/datasources')}
+							href={resolve(item.href as '/')}
 							class="nav-link"
 							class:active={$page.url.pathname === item.href ||
-								($page.url.pathname.startsWith('/analysis') && item.href === '/')}
+								($page.url.pathname.startsWith('/analysis') && item.href === '/') ||
+								($page.url.pathname.startsWith('/udfs') && item.href === '/udfs')}
 							data-sveltekit-reload
 						>
 							{item.label}

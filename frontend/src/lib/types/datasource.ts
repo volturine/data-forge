@@ -2,6 +2,7 @@ export interface ColumnSchema {
 	name: string;
 	dtype: string;
 	nullable: boolean;
+	sample_value?: string | null;
 }
 
 export interface SchemaInfo {

@@ -4,7 +4,7 @@ from typing import Any
 import polars as pl
 from pydantic import BaseModel, ConfigDict
 
-from modules.compute.operations.base import OperationHandler, OperationParams
+from modules.compute.core.base import OperationHandler, OperationParams
 
 
 class FilterCondition(BaseModel):

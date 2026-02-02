@@ -6,6 +6,8 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 
+	const uid = $props.id();
+
 	const defaultConfig: JoinConfigData = {
 		how: 'inner',
 		right_source: '',
@@ -21,27 +23,19 @@
 
 	let { schema, config = $bindable(defaultConfig) }: Props = $props();
 
-	let selectedRightSource = $state(config.right_source ?? '');
+	// Use config.right_source directly as single source of truth
 	let loadedRightSource = $state('');
 	let rightSchema = $state<Schema | null>(null);
 	let rightColumns = $derived(rightSchema?.columns ?? []);
 
 	const isCrossJoin = $derived(config.how === 'cross');
 
-	// Sync selectedRightSource with config.right_source
+	// Load right schema when config.right_source changes
 	$effect(() => {
-		config.right_source = selectedRightSource;
-	});
-
-	// Load right schema when right_source changes
-	$effect(() => {
-		const targetSource = config.right_source || selectedRightSource;
-		if (config.right_source && config.right_source !== selectedRightSource) {
-			selectedRightSource = config.right_source;
-		}
-		if (targetSource && targetSource !== loadedRightSource) {
-			loadedRightSource = targetSource;
-			loadRightSchema(targetSource);
+		const source = config.right_source;
+		if (source && source !== loadedRightSource) {
+			loadedRightSource = source;
+			loadRightSchema(source);
 		}
 	});
 
@@ -109,12 +103,12 @@
 		<h4 id="right-datasource-heading">Right Datasource</h4>
 		<DatasourcePicker
 			datasources={datasourceOptions}
-			bind:selected={selectedRightSource}
+			selected={config.right_source ?? ''}
 			mode="single"
-			id="join"
+			id={uid}
 			highlightId={currentTabDatasource ?? undefined}
-			excludeIds={currentTabDatasource ? [currentTabDatasource] : []}
 			onSelect={(id) => {
+				config.right_source = id;
 				loadRightSchema(id);
 			}}
 		/>

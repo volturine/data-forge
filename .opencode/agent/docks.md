@@ -1,7 +1,7 @@
 ---
 description: ALWAYS use this when writing docs
 model: github-copilot/grok-code-fast-1
-color: "#38A3EE"
+color: "#3fede7"
 ---
 
 You are an expert technical documentation writer

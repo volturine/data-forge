@@ -112,6 +112,7 @@
 		{ type: 'drop', label: 'Drop', icon: '🗑️', description: 'Remove columns' },
 		{ type: 'join', label: 'Join', icon: '🔗', description: 'Join with another dataset' },
 		{ type: 'expression', label: 'Expression', icon: '🧮', description: 'Create computed columns' },
+		{ type: 'with_columns', label: 'With Columns', icon: '🧮', description: 'Add/Update columns' },
 		{ type: 'pivot', label: 'Pivot', icon: '🔄', description: 'Reshape data wide' },
 		{ type: 'unpivot', label: 'Unpivot', icon: '🔃', description: 'Reshape data long' },
 		{ type: 'fill_null', label: 'Fill Null', icon: '🔧', description: 'Handle missing values' },

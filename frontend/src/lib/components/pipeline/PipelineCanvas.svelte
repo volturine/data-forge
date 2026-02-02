@@ -178,6 +178,41 @@
 		const valid = isValidTarget(target.index);
 		drag.setTarget(target, valid);
 	});
+
+	// Auto-scroll when dragging near edges
+	const scrollThreshold = 60;
+	const scrollSpeed = 15;
+
+	function autoScroll(canvasEl: HTMLElement, pointerY: number) {
+		canvasEl.getBoundingClientRect();
+		const viewportHeight = window.innerHeight;
+
+		// Check if pointer is near the bottom of the viewport
+		if (pointerY > viewportHeight - scrollThreshold) {
+			canvasEl.scrollTop += scrollSpeed;
+		}
+
+		// Check if pointer is near the top of the viewport
+		if (pointerY < scrollThreshold) {
+			canvasEl.scrollTop -= scrollSpeed;
+		}
+	}
+
+	$effect(() => {
+		if (!drag.active) return;
+		if (drag.pointerY === null) return;
+
+		const canvas = document.querySelector('.pipeline-canvas') as HTMLElement | null;
+		if (!canvas) return;
+
+		const handleScroll = () => {
+			if (!drag.active || drag.pointerY === null) return;
+			autoScroll(canvas, drag.pointerY);
+		};
+
+		const intervalId = window.setInterval(handleScroll, 16);
+		return () => window.clearInterval(intervalId);
+	});
 </script>
 
 <div class="pipeline-canvas">

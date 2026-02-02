@@ -100,7 +100,7 @@
 				id="union"
 				showChips={true}
 				showBulkActions={true}
-				onSelect={(id, name) => loadSourceSchema(id)}
+				onSelect={(id) => loadSourceSchema(id)}
 			/>
 		{/if}
 

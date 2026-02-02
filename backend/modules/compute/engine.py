@@ -8,9 +8,9 @@ from queue import Empty
 
 import polars as pl
 
+from modules.compute.core.exports import get_export_format
 from modules.compute.operations import get_operation_handlers
 from modules.compute.operations.datasource import load_datasource
-from modules.compute.operations.exports import get_export_format
 from modules.compute.step_converter import convert_step_format
 
 logger = logging.getLogger(__name__)

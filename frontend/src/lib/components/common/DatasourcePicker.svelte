@@ -97,6 +97,7 @@
 			search = '';
 		} else {
 			const arr = (selected as string[]) ?? [];
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity
 			const set = new Set(arr);
 			if (set.has(id)) {
 				set.delete(id);
@@ -113,6 +114,7 @@
 		if (mode !== 'multi') return;
 		const filtered = filteredOptions();
 		const filteredIds = filtered.map((ds) => ds.id);
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const current = new Set((selected as string[]) ?? []);
 		filteredIds.forEach((id) => current.add(id));
 		selected = Array.from(current);

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { PersistedState } from 'runed';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { listAnalyses, deleteAnalysis } from '$lib/api/analysis';
@@ -8,7 +9,7 @@
 	import EmptyState from '$lib/components/gallery/EmptyState.svelte';
 	import AnalysisFilters from '$lib/components/gallery/AnalysisFilters.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import { Plus } from 'lucide-svelte';
+	import { Plus, Trash2, X } from 'lucide-svelte';
 	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
 
 	const queryClient = useQueryClient();
@@ -26,7 +27,11 @@
 
 	const searchQuery = new PersistedState('analysis-search', '');
 	const sortOption = new PersistedState<SortOption>('analysis-sort', 'newest');
+
+	// Selection state
+	const selectedIds = new SvelteSet<string>();
 	let deleteConfirmId = $state<string | null>(null);
+	let bulkDeleteConfirm = $state(false);
 
 	const filteredAndSortedAnalyses = $derived.by(() => {
 		if (!query.data) return [];
@@ -56,6 +61,7 @@
 		return result;
 	});
 
+	const selectionCount = $derived(selectedIds.size);
 	function createNew() {
 		goto(resolve('/analysis/new'), { invalidateAll: true });
 	}
@@ -68,6 +74,26 @@
 		sortOption.current = option;
 	}
 
+	function toggleSelect(id: string) {
+		if (selectedIds.has(id)) {
+			selectedIds.delete(id);
+			return;
+		}
+		selectedIds.add(id);
+	}
+
+	function selectAll() {
+		const ids = filteredAndSortedAnalyses.map((a) => a.id);
+		selectedIds.clear();
+		for (const id of ids) {
+			selectedIds.add(id);
+		}
+	}
+
+	function clearSelection() {
+		selectedIds.clear();
+	}
+
 	function requestDelete(id: string) {
 		deleteConfirmId = id;
 	}
@@ -78,6 +104,9 @@
 		deleteAnalysis(deleteConfirmId).match(
 			() => {
 				queryClient.invalidateQueries({ queryKey: ['analyses'] });
+				if (deleteConfirmId) {
+					selectedIds.delete(deleteConfirmId);
+				}
 				deleteConfirmId = null;
 			},
 			(error) => {
@@ -90,6 +119,38 @@
 	function cancelDelete() {
 		deleteConfirmId = null;
 	}
+
+	function requestBulkDelete() {
+		bulkDeleteConfirm = true;
+	}
+
+	async function confirmBulkDelete() {
+		const idsToDelete = Array.from(selectedIds);
+		let failed = 0;
+
+		for (const id of idsToDelete) {
+			const result = await deleteAnalysis(id);
+			if (result.isErr()) failed++;
+		}
+
+		queryClient.invalidateQueries({ queryKey: ['analyses'] });
+		selectedIds.clear();
+		bulkDeleteConfirm = false;
+
+		if (failed > 0) {
+			alert(`Failed to delete ${failed} analysis${failed > 1 ? 'es' : ''}.`);
+		}
+	}
+
+	function cancelBulkDelete() {
+		bulkDeleteConfirm = false;
+	}
+
+	const deleteConfirmName = $derived.by(() => {
+		if (!deleteConfirmId || !query.data) return '';
+		const analysis = query.data.find((a) => a.id === deleteConfirmId);
+		return analysis?.name ?? '';
+	});
 </script>
 
 <div class="container">
@@ -131,13 +192,39 @@
 			{#if query.data.length === 0}
 				<EmptyState />
 			{:else}
-				<AnalysisFilters onSearch={handleSearch} onSort={handleSort} />
+				<AnalysisFilters
+					searchQuery={searchQuery.current}
+					sortOption={sortOption.current}
+					onSearch={handleSearch}
+					onSort={handleSort}
+				/>
+				{#if selectionCount > 0}
+					<div class="selection-toolbar">
+						<span class="selection-count">{selectionCount} selected</span>
+						<div class="selection-actions">
+							<button class="btn-text" onclick={selectAll}> Select All </button>
+							<button class="btn-text" onclick={clearSelection}>
+								<X size={14} />
+								Clear
+							</button>
+							<button class="btn-danger" onclick={requestBulkDelete}>
+								<Trash2 size={14} />
+								Delete
+							</button>
+						</div>
+					</div>
+				{/if}
 				{#if filteredAndSortedAnalyses.length === 0}
 					<div class="no-results">
 						<p>No analyses match your search.</p>
 					</div>
 				{:else}
-					<GalleryGrid analyses={filteredAndSortedAnalyses} onDelete={requestDelete} />
+					<GalleryGrid
+						analyses={filteredAndSortedAnalyses}
+						{selectedIds}
+						onDelete={requestDelete}
+						onToggleSelect={toggleSelect}
+					/>
 				{/if}
 			{/if}
 		{/if}
@@ -147,11 +234,23 @@
 <ConfirmDialog
 	show={deleteConfirmId !== null}
 	title="Delete Analysis"
-	message="Are you sure you want to delete this analysis? This action cannot be undone."
+	message={deleteConfirmName
+		? `Are you sure you want to delete "${deleteConfirmName}"? This action cannot be undone.`
+		: 'Are you sure you want to delete this analysis? This action cannot be undone.'}
 	confirmText="Delete"
 	cancelText="Cancel"
 	onConfirm={confirmDelete}
 	onCancel={cancelDelete}
+/>
+
+<ConfirmDialog
+	show={bulkDeleteConfirm}
+	title="Delete Analyses"
+	message={`Are you sure you want to delete ${selectionCount} analysis${selectionCount > 1 ? 'es' : ''}? This action cannot be undone.`}
+	confirmText="Delete"
+	cancelText="Cancel"
+	onConfirm={confirmBulkDelete}
+	onCancel={cancelBulkDelete}
 />
 
 <style>
@@ -281,6 +380,65 @@
 		font-size: var(--text-sm);
 		color: var(--fg-tertiary);
 	}
+
+	/* Selection Toolbar */
+	.selection-toolbar {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: var(--space-3) var(--space-4);
+		background-color: var(--bg-secondary);
+		border: 1px solid var(--border-primary);
+		border-radius: var(--radius-sm);
+		margin-bottom: var(--space-4);
+	}
+	.selection-count {
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
+		color: var(--fg-primary);
+	}
+	.selection-actions {
+		display: flex;
+		gap: var(--space-2);
+		align-items: center;
+	}
+	.btn-text {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-2) var(--space-3);
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		color: var(--fg-secondary);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+	.btn-text:hover {
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
+	}
+	.btn-danger {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-2) var(--space-3);
+		background-color: var(--error-bg);
+		border: 1px solid var(--error-border);
+		border-radius: var(--radius-sm);
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
+		color: var(--error-fg);
+		cursor: pointer;
+		transition: all var(--transition);
+	}
+	.btn-danger:hover {
+		background-color: var(--error-fg);
+		border-color: var(--error-fg);
+		color: var(--bg-primary);
+	}
+
 	@media (max-width: 768px) {
 		.container {
 			padding: var(--space-4);

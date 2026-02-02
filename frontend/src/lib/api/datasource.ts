@@ -40,6 +40,46 @@ export function uploadFile(
 	});
 }
 
+export interface BulkUploadResult {
+	name: string;
+	success: boolean;
+	datasource?: DataSource;
+	error?: string;
+}
+
+export interface BulkUploadResponse {
+	results: BulkUploadResult[];
+	total: number;
+	successful: number;
+	failed: number;
+}
+
+export function uploadBulkFiles(
+	files: File[],
+	csvOptions?: CSVOptions
+): ResultAsync<BulkUploadResponse, ApiError> {
+	const formData = new FormData();
+	files.forEach((file) => formData.append('files', file));
+
+	if (csvOptions) {
+		formData.append('delimiter', csvOptions.delimiter);
+		formData.append('quote_char', csvOptions.quote_char);
+		formData.append('has_header', String(csvOptions.has_header));
+		formData.append('skip_rows', String(csvOptions.skip_rows));
+		formData.append('encoding', csvOptions.encoding);
+	}
+
+	return apiRequest<BulkUploadResponse>('/v1/datasource/upload/bulk', {
+		method: 'POST',
+		body: formData
+	}).mapErr((error) => {
+		if (error.type === 'network') {
+			return createApiError('network', error.message || 'Bulk upload failed');
+		}
+		return error;
+	});
+}
+
 export interface ExcelPreflightResponse {
 	preflight_id: string;
 	sheet_names: string[];
@@ -208,5 +248,20 @@ export function getDatasourceSchema(
 export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
 	return apiRequest<void>(`/v1/datasource/${id}`, {
 		method: 'DELETE'
+	});
+}
+
+export interface DataSourceUpdate {
+	name?: string;
+	config?: Record<string, unknown>;
+}
+
+export function updateDatasource(
+	id: string,
+	update: DataSourceUpdate
+): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>(`/v1/datasource/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(update)
 	});
 }

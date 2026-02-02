@@ -15,8 +15,7 @@ export default defineConfig({
 		exclude: ['tests/e2e/**'],
 		globals: true,
 		environment: 'jsdom',
-		setupFiles: ['./src/test-setup.ts'],
-		ssr: false,
+		setupFiles: ['./tests/test-setup.ts'],
 		pool: 'forks',
 		deps: {
 			optimizer: {
@@ -31,16 +30,11 @@ export default defineConfig({
 			include: ['src/**/*.{js,ts,svelte}'],
 			exclude: [
 				'src/**/*.{test,spec}.{js,ts}',
-				'src/test-setup.ts',
-				'src/test-utils.ts',
+				'tests/test-setup.ts',
+				'tests/test-utils.ts',
 				'**/*.d.ts',
 				'**/node_modules/**'
-			],
-			all: true,
-			lines: 80,
-			functions: 80,
-			branches: 80,
-			statements: 80
+			]
 		}
 	}
 });

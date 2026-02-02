@@ -76,7 +76,7 @@
 			disabled={!canAdd}
 			aria-label="Add rename mapping"
 		>
-			Add Rename
+			Add
 		</button>
 	</div>
 
@@ -87,13 +87,13 @@
 			role="list"
 			aria-label="Configured renames"
 		>
-			<h4>Column Renames</h4>
+			<h4>Renames</h4>
 			{#each mappings as mapping (mapping.oldName)}
 				<div class="mapping-item" role="listitem">
 					<div class="mapping-info">
-						<span class="old-name">{mapping.oldName}</span>
+						<span class="old-name" title={mapping.oldName}>{mapping.oldName}</span>
 						<span class="arrow" aria-hidden="true">→</span>
-						<span class="new-name">{mapping.newName}</span>
+						<span class="new-name" title={mapping.newName}>{mapping.newName}</span>
 					</div>
 					<button
 						id={`rename-btn-remove-${mapping.oldName}`}
@@ -102,109 +102,145 @@
 						onclick={() => removeMapping(mapping.oldName)}
 						aria-label={`Remove rename: ${mapping.oldName} to ${mapping.newName}`}
 					>
-						Remove
+						×
 					</button>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<p id="rename-empty-state" class="empty-state" role="status">
-			No column renames configured. Add a mapping above.
-		</p>
+		<p id="rename-empty-state" class="empty-state" role="status">No renames yet.</p>
 	{/if}
 </div>
 
 <style>
-	h4 {
+	h3 {
+		margin: 0 0 var(--space-4) 0;
+		font-size: var(--text-sm);
 		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--fg-muted);
+	}
+	h4 {
+		margin: 0 0 var(--space-3) 0;
+		font-size: var(--text-xs);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--fg-muted);
 	}
 	.add-mapping {
-		display: flex;
+		display: grid;
+		grid-template-columns: 1fr;
 		gap: var(--space-2);
-		margin-bottom: var(--space-6);
-		flex-wrap: wrap;
+		margin-bottom: var(--space-5);
 	}
 	.add-mapping select,
 	.add-mapping input {
-		flex: 2;
+		width: 100%;
+		min-width: 0;
 	}
 	.add-mapping button {
 		padding: var(--space-2) var(--space-4);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
-		border: none;
+		border: 1px solid var(--accent-primary);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
 		white-space: nowrap;
+		font-weight: 600;
 	}
 	.add-mapping button:disabled {
-		background-color: var(--border-primary);
+		background-color: var(--panel-muted-bg);
+		border-color: var(--panel-border);
 		cursor: not-allowed;
 		color: var(--fg-muted);
 	}
 	.mappings-list {
-		padding: var(--space-4);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-3);
 		background-color: var(--panel-muted-bg);
 		border-radius: var(--radius-md);
 		margin-bottom: var(--space-4);
-		border: 1px solid var(--panel-muted-border);
+		border: 1px solid var(--panel-border);
 	}
 	.mappings-list h4 {
 		margin-top: 0;
-		margin-bottom: var(--space-3);
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
+		margin-bottom: var(--space-2);
 	}
 	.mapping-item {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: var(--space-3);
+		padding: var(--space-2) var(--space-3);
 		background-color: var(--panel-bg);
 		border: 1px solid var(--panel-border);
 		border-radius: var(--radius-sm);
-		margin-bottom: var(--space-2);
-	}
-	.mapping-item:last-child {
-		margin-bottom: 0;
 	}
 	.mapping-info {
 		display: flex;
 		align-items: center;
-		gap: var(--space-3);
+		gap: var(--space-2);
 		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		min-width: 0;
 	}
 	.old-name {
-		font-weight: var(--font-medium);
+		font-weight: 600;
 		color: var(--fg-primary);
+		max-width: 160px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.arrow {
 		color: var(--fg-muted);
-		font-size: var(--text-lg);
 	}
 	.new-name {
-		font-weight: var(--font-medium);
+		font-weight: 600;
 		color: var(--accent-primary);
+		max-width: 160px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.mapping-item button {
-		padding: var(--space-1) var(--space-3);
-		background-color: var(--error-bg);
-		color: var(--error-fg);
-		border: 1px solid var(--error-border);
-		border-radius: var(--radius-sm);
+		width: 28px;
+		height: 28px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		background-color: transparent;
+		color: var(--fg-muted);
+		border: 1px solid transparent;
+		border-radius: 999px;
 		cursor: pointer;
-		font-size: var(--text-sm);
+		font-size: 1.1rem;
+		line-height: 1;
+	}
+	.mapping-item button:hover:not(:disabled) {
+		color: var(--fg-primary);
+		background-color: var(--bg-hover);
+		border-color: var(--panel-border);
 	}
 	.empty-state {
-		padding: var(--space-8);
+		padding: var(--space-6);
 		text-align: center;
 		color: var(--fg-muted);
 		background-color: var(--panel-muted-bg);
 		border-radius: var(--radius-md);
 		margin-bottom: var(--space-4);
-		border: 1px solid var(--panel-muted-border);
+		border: 1px dashed var(--panel-border);
 	}
 	button:hover:not(:disabled) {
 		opacity: 0.9;
+	}
+	@media (max-width: 640px) {
+		.add-mapping {
+			grid-template-columns: 1fr;
+		}
+		.add-mapping button {
+			width: 100%;
+		}
 	}
 </style>

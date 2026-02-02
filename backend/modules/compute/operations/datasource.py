@@ -2,11 +2,14 @@ from collections.abc import Callable
 
 import polars as pl
 from openpyxl import load_workbook
+from pydantic import ConfigDict
 
-from modules.compute.operations.base import OperationHandler, OperationParams
+from modules.compute.core.base import OperationHandler, OperationParams
 
 
 class DatasourceParams(OperationParams):
+    model_config = ConfigDict(extra='allow')
+
     source_type: str = 'file'
     file_path: str | None = None
     file_type: str | None = None
@@ -24,6 +27,7 @@ class DatasourceParams(OperationParams):
     query: str | None = None
     db_path: str | None = None
     read_only: bool = True
+    column_schema: list[dict] | None = None
 
 
 class DatasourceHandler(OperationHandler):

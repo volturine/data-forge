@@ -63,5 +63,3 @@ class AnalysisGalleryItemSchema(BaseModel):
     thumbnail: str | None
     created_at: datetime
     updated_at: datetime
-    row_count: int | None = None
-    column_count: int | None = None

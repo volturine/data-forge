@@ -15,11 +15,13 @@ Review the following code or changes for:
 ## Project-Specific Checks
 
 ### Frontend (Svelte)
+
 - Using Svelte 5 runes (`$state`, `$derived`, `$props`, `$effect`)
 - No legacy syntax (`export let`, `$:`, `onMount`)
 - Proper TypeScript types
 
 ### Backend (Python)
+
 - Async/await for database operations
 - RORO pattern (Pydantic in/out)
 - Type hints everywhere
@@ -29,18 +31,22 @@ Review the following code or changes for:
 Provide specific, actionable feedback:
 
 ### Assessment
+
 Agree / Partially Agree / Disagree with the approach
 
 ### Strengths
+
 What's good about the code
 
 ### Issues Found
+
 - Severity (High/Medium/Low)
 - Location (file:line)
 - Description
 - Suggested fix
 
 ### Recommendations
+
 Improvements or alternatives
 
 ---

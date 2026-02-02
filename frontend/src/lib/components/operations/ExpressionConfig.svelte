@@ -14,8 +14,7 @@
 	let { schema, config = $bindable({ expression: '', column_name: '' }) }: Props = $props();
 
 	function insertColumn(columnName: string) {
-		const _cursorPos = 0;
-		const colRef = `col("${columnName}")`;
+		const colRef = `pl.col("${columnName}")`;
 		config.expression = config.expression ? `${config.expression} ${colRef}` : colRef;
 	}
 </script>
@@ -30,22 +29,22 @@
 			id="expr-textarea-expression"
 			data-testid="expr-expression-textarea"
 			bind:value={config.expression}
-			placeholder="e.g., col(&quot;price&quot;) * 1.2 or col(&quot;first_name&quot;) + &quot; &quot; + col(&quot;last_name&quot;)"
+			placeholder="e.g., pl.col(&quot;price&quot;) * 1.2"
 			rows="4"
 			aria-describedby="expr-expression-help"
 		></textarea>
 		<span id="expr-expression-help" class="sr-only"
-			>Enter a Polars expression using col() function to reference columns</span
+			>Enter a Polars expression using pl.col() to reference columns</span
 		>
 
 		<div id="expr-syntax-help" class="help-text" aria-label="Syntax help">
 			<strong>Polars Expression Syntax:</strong><br />
-			Use <code>col("column_name")</code> to reference columns.<br />
+			Use <code>pl.col("column")</code> to reference columns.<br />
 			Examples:<br />
-			• <code>col("price") * 1.2</code> - Multiply price by 1.2<br />
-			• <code>col("first_name") + " " + col("last_name")</code> - Concatenate names<br />
-			• <code>col("value").abs()</code> - Absolute value<br />
-			• <code>col("date").dt.year()</code> - Extract year from date
+			• <code>pl.col("price") * 1.2</code> - Multiply<br />
+			• <code>pl.col("value").cast(pl.Float64)</code> - Cast type<br />
+			• <code>pl.col("name").str.to_uppercase()</code> - String method<br />
+			• <code>pl.col("date").dt.year()</code> - Date component
 		</div>
 	</div>
 

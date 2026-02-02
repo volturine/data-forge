@@ -1,34 +1,16 @@
 <script lang="ts">
 	import { Search, X } from 'lucide-svelte';
 
-	interface Props {
-		onSearch: (query: string) => void;
-		onSort: (sortOption: SortOption) => void;
-	}
-
 	export type SortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc';
 
-	let { onSearch, onSort }: Props = $props();
-
-	let searchQuery = $state('');
-	let sortOption = $state<SortOption>('newest');
-
-	function handleSearchInput(e: Event) {
-		const target = e.target as HTMLInputElement;
-		searchQuery = target.value;
-		onSearch(searchQuery);
+	interface Props {
+		searchQuery: string;
+		sortOption: SortOption;
+		onSearch: (query: string) => void;
+		onSort: (option: SortOption) => void;
 	}
 
-	function handleSortChange(e: Event) {
-		const target = e.target as HTMLSelectElement;
-		sortOption = target.value as SortOption;
-		onSort(sortOption);
-	}
-
-	function clearSearch() {
-		searchQuery = '';
-		onSearch('');
-	}
+	let { searchQuery, sortOption, onSearch, onSort }: Props = $props();
 </script>
 
 <div class="filters">
@@ -38,11 +20,11 @@
 			type="text"
 			placeholder="Search analyses..."
 			value={searchQuery}
-			oninput={handleSearchInput}
+			oninput={(e) => onSearch((e.target as HTMLInputElement).value)}
 			class="search-input"
 		/>
 		{#if searchQuery}
-			<button class="clear-btn" onclick={clearSearch} aria-label="Clear search">
+			<button class="clear-btn" onclick={() => onSearch('')} aria-label="Clear search">
 				<X size={14} />
 			</button>
 		{/if}
@@ -50,7 +32,12 @@
 
 	<div class="sort-box">
 		<label for="sort-select" class="sort-label">Sort:</label>
-		<select id="sort-select" value={sortOption} onchange={handleSortChange} class="sort-select">
+		<select
+			id="sort-select"
+			value={sortOption}
+			onchange={(e) => onSort((e.target as HTMLSelectElement).value as SortOption)}
+			class="sort-select"
+		>
 			<option value="newest">Newest</option>
 			<option value="oldest">Oldest</option>
 			<option value="name-asc">A-Z</option>

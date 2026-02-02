@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 import polars as pl
 
-from modules.compute.operations.base import OperationHandler, OperationParams
+from modules.compute.core.base import OperationHandler, OperationParams
 
 
 class StringTransformParams(OperationParams):
@@ -68,6 +68,10 @@ class StringTransformHandler(OperationHandler):
             return lf.with_columns(base.str.extract(validated.pattern, group_index).alias(target))
 
         if validated.method == 'split':
+            delimiter = validated.delimiter or ' '
+            return lf.with_columns(base.str.split(delimiter).alias(target))
+
+        if validated.method == 'split_take':
             delimiter = validated.delimiter or ' '
             index = validated.index or 0
             return lf.with_columns(base.str.split(delimiter).list.get(index).alias(target))

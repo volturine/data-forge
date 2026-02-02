@@ -1,5 +1,6 @@
 ---
 description: Extract non-obvious learnings from session to AGENTS.md files to build codebase understanding
+model: github-copilot/grok-code-fast-1
 ---
 
 Analyze this session and extract non-obvious learnings to add to AGENTS.md files.

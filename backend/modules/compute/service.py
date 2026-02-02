@@ -8,10 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, PipelineExecutionError
+from modules.compute.core.exports import get_export_format
 from modules.compute.manager import get_manager
-from modules.compute.operations.exports import get_export_format
 from modules.compute.utils import await_engine_result, build_datasource_config, find_step_index
 from modules.datasource.models import DataSource
+from modules.udf.models import Udf
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,35 @@ async def _get_additional_datasources(session: AsyncSession, pipeline_steps: lis
     return additional
 
 
+async def _hydrate_udfs(session: AsyncSession, pipeline_steps: list[dict]) -> list[dict]:
+    next_steps: list[dict] = []
+    for step in pipeline_steps:
+        if step.get('type') != 'with_columns':
+            next_steps.append(step)
+            continue
+        config = step.get('config', {})
+        expressions = config.get('expressions', [])
+        if not isinstance(expressions, list):
+            next_steps.append(step)
+            continue
+        updated = []
+        for expr in expressions:
+            if not isinstance(expr, dict) or expr.get('type') != 'udf':
+                updated.append(expr)
+                continue
+            udf_id = expr.get('udf_id')
+            if not udf_id or expr.get('code'):
+                updated.append(expr)
+                continue
+            result = await session.execute(select(Udf).where(Udf.id == udf_id))
+            udf = result.scalar_one_or_none()
+            if not udf:
+                raise ValueError(f'UDF {udf_id} not found')
+            updated.append({**expr, 'code': udf.code})
+        next_steps.append({**step, 'config': {**config, 'expressions': updated}})
+    return next_steps
+
+
 async def preview_step(
     session: AsyncSession,
     datasource_id: str,
@@ -85,6 +115,7 @@ async def preview_step(
     else:
         step_index = find_step_index(pipeline_steps, target_step_id)
         preview_steps = pipeline_steps[: step_index + 1]
+        preview_steps = await _hydrate_udfs(session, preview_steps)
 
     manager = get_manager()
     # get_or_create_engine will restart the engine if resource_config changed
@@ -149,6 +180,7 @@ async def get_step_schema(
     # Find the step index by step_id
     step_index = find_step_index(pipeline_steps, target_step_id)
     schema_steps = pipeline_steps[: step_index + 1]
+    schema_steps = await _hydrate_udfs(session, schema_steps)
 
     manager = get_manager()
     engine = manager.get_engine(analysis_id)
@@ -213,6 +245,7 @@ async def export_data(
     # Find steps up to target
     step_index = find_step_index(pipeline_steps, target_step_id)
     export_steps = pipeline_steps[: step_index + 1]
+    export_steps = await _hydrate_udfs(session, export_steps)
 
     manager = get_manager()
 

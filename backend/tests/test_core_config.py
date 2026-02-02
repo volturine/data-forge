@@ -19,7 +19,6 @@ class TestSettings:
                 'DEBUG',
                 'DATABASE_URL',
                 'UPLOAD_DIR',
-                'RESULTS_DIR',
                 'MAX_UPLOAD_SIZE',
                 'ENGINE_IDLE_TIMEOUT',
                 'ENGINE_POOLING_INTERVAL',
@@ -34,7 +33,6 @@ class TestSettings:
         assert settings.debug is False
         assert settings.database_url == 'sqlite+aiosqlite:///./database/app.db'
         assert 'uploads' in str(settings.upload_dir)
-        assert 'results' in str(settings.results_dir)
         assert settings.max_upload_size == 10 * 1024 * 1024 * 1024
         assert settings.job_timeout == 300
         assert settings.engine_idle_timeout == 300
@@ -45,7 +43,6 @@ class TestSettings:
         monkeypatch.setenv('DEBUG', 'true')
         monkeypatch.setenv('DATABASE_URL', 'sqlite+aiosqlite:///./test.db')
         monkeypatch.setenv('UPLOAD_DIR', '/tmp/uploads')
-        monkeypatch.setenv('RESULTS_DIR', '/tmp/results')
         monkeypatch.setenv('MAX_UPLOAD_SIZE', '50000000')
         monkeypatch.setenv('JOB_TIMEOUT', '3600')
 
@@ -54,7 +51,6 @@ class TestSettings:
         assert settings.debug is True
         assert settings.database_url == 'sqlite+aiosqlite:///./test.db'
         assert settings.upload_dir == Path('/tmp/uploads')
-        assert settings.results_dir == Path('/tmp/results')
         assert settings.max_upload_size == 50000000
         assert settings.job_timeout == 3600
 
@@ -116,7 +112,6 @@ class TestSettings:
         settings = Settings()
 
         assert isinstance(settings.upload_dir, Path)
-        assert isinstance(settings.results_dir, Path)
         assert isinstance(settings.exports_dir, Path)
 
     def test_logging_level(self, monkeypatch):

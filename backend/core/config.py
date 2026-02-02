@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # All data directories under root data/ folder
     upload_dir: Path = Field(default=DATA_DIR / 'uploads', alias='UPLOAD_DIR')
-    results_dir: Path = Field(default=DATA_DIR / 'results', alias='RESULTS_DIR')
+    clean_dir: Path = Field(default=DATA_DIR / 'clean', alias='CLEAN_DIR')
     exports_dir: Path = Field(default=DATA_DIR / 'exports', alias='EXPORTS_DIR')
 
     max_upload_size: int = Field(default=10 * 1024 * 1024 * 1024, alias='MAX_UPLOAD_SIZE')
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
         """Parse CORS origins from comma-separated string."""
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
 
-    @field_validator('upload_dir', 'results_dir', 'exports_dir', mode='before')
+    @field_validator('upload_dir', 'clean_dir', 'exports_dir', mode='before')
     @classmethod
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def _validate_directories_writable(self):
         """Ensure all directories are writable."""
-        for dir_name in ['upload_dir', 'results_dir', 'exports_dir']:
+        for dir_name in ['upload_dir', 'clean_dir', 'exports_dir']:
             dir_path = getattr(self, dir_name)
             if not os.access(dir_path, os.W_OK):
                 raise ValueError(f'{dir_name} is not writable: {dir_path}')

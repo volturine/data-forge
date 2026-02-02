@@ -9,6 +9,7 @@ class ColumnSchema(BaseModel):
     name: str
     dtype: str
     nullable: bool
+    sample_value: str | None = None
 
 
 class SchemaInfo(BaseModel):
@@ -107,3 +108,30 @@ class DataSourceResponse(BaseModel):
     config: dict
     schema_cache: dict | None
     created_at: datetime
+
+
+class DataSourceUpdate(BaseModel):
+    """Update a datasource configuration."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = None
+    config: dict | None = None
+
+
+class BulkUploadResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    success: bool
+    datasource: DataSourceResponse | None = None
+    error: str | None = None
+
+
+class BulkUploadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    results: list[BulkUploadResult]
+    total: int
+    successful: int
+    failed: int

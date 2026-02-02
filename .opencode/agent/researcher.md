@@ -1,6 +1,7 @@
 ---
 description: Research agent for web lookups and documentation using Perplexity
 mode: subagent
+model: github-copilot/grok-code-fast-1
 tools:
   write: false
   edit: false

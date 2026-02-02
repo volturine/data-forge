@@ -80,6 +80,83 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f'Failed to create datasource: {str(e)}')
 
 
+@router.post('/upload/bulk', response_model=schemas.BulkUploadResponse)
+async def upload_bulk(
+    files: list[UploadFile],
+    delimiter: str = Form(','),
+    quote_char: str = Form('"'),
+    has_header: bool = Form(True),
+    skip_rows: int = Form(0),
+    encoding: str = Form('utf8'),
+    session: AsyncSession = Depends(get_db),
+):
+    """Upload multiple files and create datasources."""
+    if not files:
+        raise HTTPException(status_code=400, detail='No files provided')
+
+    file_type_mapping = {
+        '.csv': 'csv',
+        '.parquet': 'parquet',
+        '.json': 'json',
+        '.ndjson': 'ndjson',
+        '.jsonl': 'ndjson',
+        '.xlsx': 'excel',
+    }
+
+    csv_options = schemas.CSVOptions(
+        delimiter=delimiter,
+        quote_char=quote_char,
+        has_header=has_header,
+        skip_rows=skip_rows,
+        encoding=encoding,
+    )
+
+    results: list[schemas.BulkUploadResult] = []
+
+    for file in files:
+        if not file.filename:
+            results.append(schemas.BulkUploadResult(name='unknown', success=False, error='No filename provided'))
+            continue
+
+        file_extension = Path(file.filename).suffix.lower()
+
+        if file_extension not in file_type_mapping:
+            results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=f'Unsupported file type: {file_extension}'))
+            continue
+
+        file_type = file_type_mapping[file_extension]
+        unique_filename = f'{uuid.uuid4()}{file_extension}'
+        file_path = settings.upload_dir / unique_filename
+        name = Path(file.filename).stem
+
+        try:
+            contents = await file.read()
+            with open(file_path, 'wb') as f:
+                f.write(contents)
+        except Exception as e:
+            results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=f'Failed to save file: {str(e)}'))
+            continue
+
+        try:
+            datasource = await service.create_file_datasource(
+                session=session,
+                name=name,
+                file_path=str(file_path),
+                file_type=file_type,
+                csv_options=csv_options if file_type == 'csv' else None,
+            )
+            results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
+        except Exception as e:
+            if file_path.exists():
+                file_path.unlink()
+            results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=f'Failed to create datasource: {str(e)}'))
+
+    successful = sum(1 for r in results if r.success)
+    failed = len(results) - successful
+
+    return schemas.BulkUploadResponse(results=results, total=len(results), successful=successful, failed=failed)
+
+
 @router.post('/preflight', response_model=schemas.ExcelPreflightResponse)
 async def preflight_excel(
     file: UploadFile,
@@ -311,6 +388,21 @@ async def get_datasource_schema(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get schema: {str(e)}')
+
+
+@router.put('/{datasource_id}', response_model=schemas.DataSourceResponse)
+async def update_datasource(
+    datasource_id: str,
+    update: schemas.DataSourceUpdate,
+    session: AsyncSession = Depends(get_db),
+):
+    """Update a data source configuration."""
+    try:
+        return await service.update_datasource(session, datasource_id, update)
+    except (ValueError, DataSourceNotFoundError) as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to update datasource: {str(e)}')
 
 
 @router.delete('/{datasource_id}')
