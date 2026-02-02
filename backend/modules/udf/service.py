@@ -69,17 +69,12 @@ async def list_udfs(
     tag: str | None = None,
 ) -> list[UdfResponseSchema]:
     stmt = select(Udf)
-    
+
     # Apply SQL-level text search filtering
     if query:
         q = f'%{query.lower()}%'
-        stmt = stmt.where(
-            or_(
-                Udf.name.ilike(q),
-                Udf.description.ilike(q)
-            )
-        )
-    
+        stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))
+
     result = await session.execute(stmt)
     udfs = result.scalars().all()
 
@@ -89,13 +84,13 @@ async def list_udfs(
         # Signature dtype key filter (requires parsing JSON signature)
         if dtype_key and _signature_key(u.signature) != dtype_key:
             continue
-        
+
         # Tag filter (requires parsing JSON tags array)
         if tag:
             tags = u.tags or []
             if tag not in tags:
                 continue
-        
+
         filtered_udfs.append(u)
 
     return [UdfResponseSchema.model_validate(u) for u in filtered_udfs]
@@ -174,54 +169,48 @@ async def export_udfs(session: AsyncSession) -> list[UdfResponseSchema]:
 async def import_udfs(session: AsyncSession, payload: UdfImportSchema) -> list[UdfResponseSchema]:
     """Import UDFs with atomic transaction - either all succeed or all fail."""
     created: list[UdfResponseSchema] = []
-    udfs_to_create: list[Udf] = []
-    
-    # First pass: validate all UDFs and prepare changes
-    for item in payload.udfs:
-        # Validate code syntax early
-        _validate_code(item.code)
-        
-        existing_result = await session.execute(select(Udf).where(Udf.name == item.name))
-        udf = existing_result.scalar_one_or_none()
-        
-        if udf and not payload.overwrite:
-            continue
-            
-        if udf and payload.overwrite:
-            # Update existing UDF (will be committed at the end)
-            udf.description = item.description
-            udf.signature = item.signature.model_dump()
-            udf.code = item.code
-            udf.tags = item.tags
-            udf.source = item.source or 'user'
-            udf.updated_at = datetime.now(UTC)
-            udfs_to_create.append(udf)
-        else:
-            # Create new UDF
-            now = datetime.now(UTC)
-            new_udf = Udf(
-                id=str(uuid.uuid4()),
-                name=item.name,
-                description=item.description,
-                signature=item.signature.model_dump(),
-                code=item.code,
-                tags=item.tags,
-                source=item.source or 'user',
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(new_udf)
-            udfs_to_create.append(new_udf)
-    
-    # Commit all changes atomically
-    if udfs_to_create:
-        await session.commit()
-        
-        # Refresh all UDFs to get their final state
-        for udf in udfs_to_create:
-            await session.refresh(udf)
-            created.append(UdfResponseSchema.model_validate(udf))
-    
+    udfs_to_refresh: list[Udf] = []
+
+    # Use a single transaction to guarantee atomicity
+    transaction = session.begin_nested() if session.in_transaction() else session.begin()
+    async with transaction:
+        for item in payload.udfs:
+            _validate_code(item.code)
+
+            existing_result = await session.execute(select(Udf).where(Udf.name == item.name))
+            udf = existing_result.scalar_one_or_none()
+
+            if udf and not payload.overwrite:
+                continue
+
+            if udf and payload.overwrite:
+                udf.description = item.description
+                udf.signature = item.signature.model_dump()
+                udf.code = item.code
+                udf.tags = item.tags
+                udf.source = item.source or 'user'
+                udf.updated_at = datetime.now(UTC)
+                udfs_to_refresh.append(udf)
+            else:
+                now = datetime.now(UTC)
+                new_udf = Udf(
+                    id=str(uuid.uuid4()),
+                    name=item.name,
+                    description=item.description,
+                    signature=item.signature.model_dump(),
+                    code=item.code,
+                    tags=item.tags,
+                    source=item.source or 'user',
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(new_udf)
+                udfs_to_refresh.append(new_udf)
+
+    for udf in udfs_to_refresh:
+        await session.refresh(udf)
+        created.append(UdfResponseSchema.model_validate(udf))
+
     return created
 
 
@@ -242,12 +231,7 @@ async def seed_defaults(session: AsyncSession) -> list[UdfResponseSchema]:
                 ],
                 output_dtype='Float64',
             ),
-            code=(
-                'def udf(numerator, denominator):\n'
-                '    if denominator in (0, None):\n'
-                '        return None\n'
-                '    return numerator / denominator\n'
-            ),
+            code=('def udf(numerator, denominator):\n    if denominator in (0, None):\n        return None\n    return numerator / denominator\n'),
             tags=['math', 'ratio'],
             source='seeded',
         ),

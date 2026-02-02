@@ -5,7 +5,14 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.udf.models import Udf
-from modules.udf.schemas import UdfCreateSchema, UdfImportSchema, UdfInputSchema, UdfSignatureSchema, UdfUpdateSchema
+from modules.udf.schemas import (
+    UdfCreateSchema,
+    UdfImportItemSchema,
+    UdfImportSchema,
+    UdfInputSchema,
+    UdfSignatureSchema,
+    UdfUpdateSchema,
+)
 from modules.udf.service import create_udf, delete_udf, get_udf, import_udfs, list_udfs, update_udf
 
 
@@ -269,13 +276,13 @@ class TestUdfImport:
         """Test importing new UDFs."""
         import_data = UdfImportSchema(
             udfs=[
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='import_test_1',
                     description='Import test 1',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
                     code='def udf():\n    return "1"',
                 ),
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='import_test_2',
                     description='Import test 2',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
@@ -295,19 +302,19 @@ class TestUdfImport:
         """Test that import with invalid code rolls back entire transaction."""
         import_data = UdfImportSchema(
             udfs=[
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='valid_1',
                     description='Valid UDF 1',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
                     code='def udf():\n    return "valid1"',
                 ),
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='invalid',
                     description='Invalid UDF',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
                     code='def udf():\n    invalid syntax here',
                 ),
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='valid_2',
                     description='Valid UDF 2',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
@@ -340,7 +347,7 @@ class TestUdfImport:
         # Import with overwrite
         import_data = UdfImportSchema(
             udfs=[
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='overwrite_test',
                     description='Updated description',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
@@ -373,7 +380,7 @@ class TestUdfImport:
         # Import without overwrite
         import_data = UdfImportSchema(
             udfs=[
-                UdfCreateSchema(
+                UdfImportItemSchema(
                     name='skip_test',
                     description='Should be skipped',
                     signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
