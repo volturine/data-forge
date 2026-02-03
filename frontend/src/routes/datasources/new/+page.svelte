@@ -6,7 +6,11 @@
 		uploadBulkFiles,
 		connectDatabase,
 		connectApi,
-		connectDuckDB
+		connectDuckDB,
+		connectIceberg,
+		resolveIcebergMetadata,
+		connectFilePath,
+		validateFilePath
 	} from '$lib/api/datasource';
 	import { preflightExcel, previewExcel, confirmExcel } from '$lib/api/excel';
 	import type { ExcelPreflightResponse, ExcelPreviewResponse } from '$lib/api/excel';
@@ -14,7 +18,7 @@
 	import type { CSVOptions } from '$lib/types/datasource';
 
 	type Tab = 'file' | 'database' | 'api';
-	type DatabaseType = 'duckdb' | 'other';
+	type DatabaseType = 'duckdb' | 'iceberg' | 'other';
 
 	let activeTab = $state<Tab>('file');
 	let databaseType = $state<DatabaseType>('duckdb');
@@ -52,6 +56,14 @@
 	let duckdbQuery = $state('');
 	let duckdbReadOnly = $state(true);
 
+	// Iceberg state
+	let icebergName = $state('');
+	let icebergMetadataPath = $state('');
+	let icebergSnapshotId = $state<number | null>(null);
+	let icebergReader = $state('');
+	let icebergStorageOptions = $state('');
+	let icebergResolvedPath = $state('');
+
 	// Generic database state
 	let dbName = $state('');
 	let connectionString = $state('');
@@ -66,7 +78,7 @@
 	let selectedFiles = $state<File[]>([]);
 	let bulkResults = $state<BulkUploadResult[]>([]);
 	let showBulkResults = $state(false);
-	let uploadMode: 'single' | 'bulk' = $state('single');
+	let uploadMode: 'single' | 'bulk' | 'path' = $state('single');
 
 	function handleFileChange(event: Event) {
 		const target = event.target as HTMLInputElement;
@@ -334,6 +346,77 @@
 		}
 	}
 
+	// Path-based file datasource
+	let pathName = $state('');
+	let pathValue = $state('');
+	let pathType = $state('parquet');
+	let pathOptions = $state('');
+	let pathValidation = $state<{ status: 'idle' | 'ok' | 'error'; message: string }>({
+		status: 'idle',
+		message: ''
+	});
+
+	async function handlePathConnect() {
+		if (!pathName || !pathValue) {
+			error = 'Please fill in name and path';
+			return;
+		}
+		loading = true;
+		error = null;
+
+		let options: Record<string, unknown> | null = null;
+		if (pathOptions.trim()) {
+			try {
+				const parsed = JSON.parse(pathOptions);
+				if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+					throw new Error('Options must be an object');
+				}
+				options = parsed as Record<string, unknown>;
+			} catch {
+				error = 'Options must be valid JSON';
+				loading = false;
+				return;
+			}
+		}
+
+		const csvOptions = pathType === 'csv'
+			? {
+					delimiter,
+					quote_char: quoteChar,
+					has_header: hasHeader,
+					skip_rows: skipRows,
+					encoding
+				}
+			: undefined;
+
+		const result = await connectFilePath(pathName, pathValue.trim(), pathType, options, csvOptions);
+		if (result.isErr()) {
+			error = result.error.message || 'Failed to create datasource';
+			loading = false;
+			return;
+		}
+
+		goto(resolve('/datasources'), { invalidateAll: true });
+	}
+
+	async function handleValidatePath() {
+		if (!pathValue) {
+			pathValidation = { status: 'error', message: 'Enter a path to validate' };
+			return;
+		}
+		const result = await validateFilePath(pathValue.trim(), pathType);
+		if (result.isErr()) {
+			pathValidation = { status: 'error', message: result.error.message || 'Path validation failed' };
+			return;
+		}
+		const value = result.value;
+		const mode = value.is_dir ? 'directory' : 'file';
+		pathValidation = {
+			status: 'ok',
+			message: `Found ${mode}: ${value.file_path}`
+		};
+	}
+
 	async function handleDuckDBConnect() {
 		if (!duckdbName || !duckdbQuery) {
 			error = 'Please fill in name and query';
@@ -357,6 +440,77 @@
 		}
 
 		goto(resolve('/datasources'), { invalidateAll: true });
+	}
+
+	async function handleIcebergConnect() {
+		if (!icebergName || !icebergMetadataPath) {
+			error = 'Please fill in name and metadata path';
+			return;
+		}
+
+		loading = true;
+		error = null;
+
+		const reader = icebergReader.trim();
+		if (reader && reader !== 'native' && reader !== 'pyiceberg') {
+			error = 'Reader must be "native" or "pyiceberg"';
+			loading = false;
+			return;
+		}
+
+		const resolvedMetadataPath = await resolveMetadataPath();
+		if (!resolvedMetadataPath) {
+			loading = false;
+			return;
+		}
+		const normalizedMetadataPath = resolvedMetadataPath.replace(/\/metadata\/[^/]+\.metadata\.json$/, '/metadata');
+
+		const snapshotId = icebergSnapshotId ?? null;
+
+		let storageOptions: Record<string, string> | null = null;
+		if (icebergStorageOptions.trim()) {
+			try {
+				const parsed = JSON.parse(icebergStorageOptions);
+				if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+					throw new Error('Storage options must be an object');
+				}
+				storageOptions = parsed as Record<string, string>;
+			} catch {
+				error = 'Storage options must be valid JSON';
+				loading = false;
+				return;
+			}
+		}
+
+		const result = await connectIceberg(icebergName, {
+			metadata_path: normalizedMetadataPath,
+			snapshot_id: snapshotId,
+			storage_options: storageOptions,
+			reader: reader || null
+		});
+
+		if (result.isErr()) {
+			error = result.error.message || 'Connection failed';
+			loading = false;
+			return;
+		}
+
+		goto(resolve('/datasources'), { invalidateAll: true });
+	}
+
+	async function resolveMetadataPath(): Promise<string | null> {
+		const input = icebergMetadataPath.trim();
+		if (!input) {
+			error = 'Please provide a metadata path';
+			return null;
+		}
+		const resolveResult = await resolveIcebergMetadata(input);
+		if (resolveResult.isErr()) {
+			error = resolveResult.error.message || 'Failed to resolve metadata path';
+			return null;
+		}
+		icebergResolvedPath = resolveResult.value.metadata_path;
+		return icebergResolvedPath;
 	}
 
 	async function handleDatabaseConnect() {
@@ -453,6 +607,17 @@
 							<span class="radio-desc">Upload multiple files quickly (CSV, Parquet, JSON only)</span
 							>
 						</label>
+						<label class="radio-option">
+							<input
+								type="radio"
+								name="upload-mode"
+								value="path"
+								bind:group={uploadMode}
+								disabled={loading}
+							/>
+							<span class="radio-label">Path</span>
+							<span class="radio-desc">Point to a local file or folder path</span>
+						</label>
 					</div>
 				</div>
 
@@ -475,7 +640,7 @@
 							<p class="file-info">Selected: {file.name}</p>
 						{/if}
 					</div>
-				{:else}
+				{:else if uploadMode === 'bulk'}
 					<!-- Bulk upload UI -->
 					<div class="form-group">
 						<label for="bulk-file-input">Files</label>
@@ -539,6 +704,65 @@
 							{/each}
 						</div>
 					{/if}
+				{:else}
+					<div class="form-group">
+						<label for="path-name">Name</label>
+						<input
+							id="path-name"
+							type="text"
+							bind:value={pathName}
+							placeholder="My Dataset"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="path-value">Path</label>
+						<input
+							id="path-value"
+							type="text"
+							bind:value={pathValue}
+							placeholder="/path/to/data"
+							disabled={loading}
+						/>
+						<p class="hint">Supports files or folders for parquet and ndjson.</p>
+						<div class="path-actions">
+							<button class="btn-secondary" type="button" onclick={handleValidatePath} disabled={loading}>
+								Test path
+							</button>
+							{#if pathValidation.status === 'ok'}
+								<span class="path-status ok">{pathValidation.message}</span>
+							{:else if pathValidation.status === 'error'}
+								<span class="path-status error">{pathValidation.message}</span>
+							{/if}
+						</div>
+					</div>
+
+					<div class="form-group">
+						<label for="path-type">Type</label>
+						<select id="path-type" bind:value={pathType} disabled={loading}>
+							<option value="parquet">Parquet</option>
+							<option value="csv">CSV</option>
+							<option value="json">JSON</option>
+							<option value="ndjson">NDJSON</option>
+						</select>
+					</div>
+
+					<div class="form-group">
+						<label for="path-options">Options (optional)</label>
+						<textarea
+							id="path-options"
+							bind:value={pathOptions}
+							placeholder={'{"ignore_errors": true}'}
+							rows="3"
+							disabled={loading}
+						></textarea>
+						<p class="hint">CSV options come from the CSV settings above.</p>
+					</div>
+
+					<button class="btn-primary" onclick={handlePathConnect} disabled={loading}>
+						{loading ? 'Creating...' : 'Create datasource'}
+					</button>
 				{/if}
 
 				{#if file?.name.endsWith('.xlsx')}
@@ -671,32 +895,43 @@
 				<div class="form-group">
 					<label for="db-type">Database Type</label>
 					<div class="radio-group">
-						<label class="radio-option">
-							<input
-								type="radio"
-								name="db-type"
-								value="duckdb"
-								bind:group={databaseType}
-								disabled={loading}
-							/>
-							<span class="radio-label">DuckDB</span>
-							<span class="radio-desc">In-memory or file-based analytics database</span>
-						</label>
-						<label class="radio-option">
-							<input
-								type="radio"
-								name="db-type"
-								value="other"
-								bind:group={databaseType}
-								disabled={loading}
-							/>
-							<span class="radio-label">Other Database</span>
-							<span class="radio-desc">PostgreSQL, MySQL, SQLite via connection string</span>
-						</label>
-					</div>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="db-type"
+							value="duckdb"
+							bind:group={databaseType}
+							disabled={loading}
+						/>
+						<span class="radio-label">DuckDB</span>
+						<span class="radio-desc">In-memory or file-based analytics database</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="db-type"
+							value="iceberg"
+							bind:group={databaseType}
+							disabled={loading}
+						/>
+						<span class="radio-label">Iceberg</span>
+						<span class="radio-desc">Connect to an Iceberg table via metadata JSON</span>
+					</label>
+					<label class="radio-option">
+						<input
+							type="radio"
+							name="db-type"
+							value="other"
+							bind:group={databaseType}
+							disabled={loading}
+						/>
+						<span class="radio-label">Other Database</span>
+						<span class="radio-desc">PostgreSQL, MySQL, SQLite via connection string</span>
+					</label>
 				</div>
+			</div>
 
-				{#if databaseType === 'duckdb'}
+			{#if databaseType === 'duckdb'}
 					<div class="form-group">
 						<label for="duckdb-name">Name</label>
 						<input
@@ -746,6 +981,75 @@
 					</div>
 
 					<button class="btn-primary" onclick={handleDuckDBConnect} disabled={loading}>
+						{loading ? 'Connecting...' : 'Connect'}
+					</button>
+				{:else if databaseType === 'iceberg'}
+					<div class="form-group">
+						<label for="iceberg-name">Name</label>
+						<input
+							id="iceberg-name"
+							type="text"
+							bind:value={icebergName}
+							placeholder="My Iceberg Table"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-metadata">Metadata JSON Path</label>
+						<input
+							id="iceberg-metadata"
+							type="text"
+							bind:value={icebergMetadataPath}
+							placeholder="/path/to/table/metadata or metadata.json"
+							disabled={loading}
+						/>
+						<p class="hint">Point to metadata.json or a folder containing metadata/*.metadata.json</p>
+						<div class="resolve-row">
+							<button class="btn-secondary" type="button" onclick={resolveMetadataPath} disabled={loading}>
+								Resolve Path
+							</button>
+							{#if icebergResolvedPath}
+								<span class="resolve-value">{icebergResolvedPath}</span>
+							{/if}
+						</div>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-snapshot">Snapshot ID (optional)</label>
+						<input
+							id="iceberg-snapshot"
+							type="number"
+							bind:value={icebergSnapshotId}
+							placeholder="7051579356916758811"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-reader">Reader Override (optional)</label>
+						<input
+							id="iceberg-reader"
+							type="text"
+							bind:value={icebergReader}
+							placeholder="native or pyiceberg"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-storage">Storage Options (optional)</label>
+						<textarea
+							id="iceberg-storage"
+							bind:value={icebergStorageOptions}
+							placeholder={'{"s3.region": "us-east-1"}'}
+							rows="3"
+							disabled={loading}
+						></textarea>
+						<p class="hint">JSON map of storage options for S3/GCS/Azure</p>
+					</div>
+
+					<button class="btn-primary" onclick={handleIcebergConnect} disabled={loading}>
 						{loading ? 'Connecting...' : 'Connect'}
 					</button>
 				{:else}
@@ -833,8 +1137,7 @@
 		max-width: 800px;
 		margin: 0 auto;
 		padding: var(--space-8);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 		box-sizing: border-box;
 	}
 	header {
@@ -930,6 +1233,43 @@
 	}
 	textarea {
 		resize: vertical;
+	}
+	.path-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+	.path-status {
+		font-size: var(--text-xs);
+		padding: 2px 6px;
+		border-radius: var(--radius-sm);
+		border: 1px solid;
+	}
+	.path-status.ok {
+		color: #166534;
+		background: #dcfce7;
+		border-color: #86efac;
+	}
+	.path-status.error {
+		color: #991b1b;
+		background: #fee2e2;
+		border-color: #fecaca;
+	}
+	.resolve-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+	.resolve-value {
+		font-size: var(--text-xs);
+		color: var(--fg-secondary);
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-secondary);
+		padding: 2px 6px;
+		border-radius: var(--radius-sm);
+		word-break: break-all;
 	}
 	.hint,
 	.file-info {

@@ -24,6 +24,7 @@ class TestSettings:
                 'ENGINE_POOLING_INTERVAL',
                 'JOB_TIMEOUT',
                 'LOG_LEVEL',
+                'LOG_ICEBERG_PATH',
                 'WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
@@ -127,6 +128,12 @@ class TestSettings:
         settings = Settings()
 
         assert settings.log_level == 'info'
+
+    def test_default_log_iceberg_paths(self):
+        """Test default Iceberg logging path."""
+        settings = Settings()
+
+        assert 'iceberg' in str(settings.log_iceberg_path)
 
     def test_worker_settings(self, monkeypatch):
         """Test worker configuration."""

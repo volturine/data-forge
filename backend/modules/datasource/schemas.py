@@ -86,6 +86,17 @@ class DuckDBDataSourceConfig(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class IcebergDataSourceConfig(BaseModel):
+    """Iceberg-specific datasource configuration."""
+
+    metadata_path: str
+    snapshot_id: int | None = None
+    storage_options: dict | None = None
+    reader: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class APIDataSourceConfig(BaseModel):
     url: str
     method: str = 'GET'
@@ -117,6 +128,19 @@ class DataSourceUpdate(BaseModel):
 
     name: str | None = None
     config: dict | None = None
+
+
+class FilePathValidationRequest(BaseModel):
+    file_path: str
+    file_type: str
+
+
+class FilePathValidationResponse(BaseModel):
+    file_path: str
+    file_type: str
+    exists: bool
+    is_file: bool
+    is_dir: bool
 
 
 class BulkUploadResult(BaseModel):

@@ -9,7 +9,8 @@
 		DataSource,
 		SchemaInfo,
 		ColumnSchema,
-		FileDataSourceConfig
+		FileDataSourceConfig,
+		IcebergDataSourceConfig
 	} from '$lib/types/datasource';
 
 	const queryClient = useQueryClient();
@@ -36,6 +37,7 @@
 		},
 		enabled: !!datasourceId && !!datasourceQuery.data
 	}));
+	let refreshPending = $state(false);
 
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: { name: string; config: Record<string, unknown> }) => {
@@ -161,6 +163,10 @@
 
 	function isFile(datasource: DataSource): boolean {
 		return datasource.source_type === 'file';
+	}
+
+	function isIceberg(datasource: DataSource): boolean {
+		return datasource.source_type === 'iceberg';
 	}
 
 	function handleNameChange(newName: string) {
@@ -353,6 +359,14 @@
 	function handleBack() {
 		goto(resolve('/datasources'), { invalidateAll: true });
 	}
+
+	async function handleRefreshRows() {
+		if (!datasourceId) return;
+		refreshPending = true;
+		await getDatasourceSchema(datasourceId, { refresh: true });
+		await schemaQuery.refetch();
+		refreshPending = false;
+	}
 </script>
 
 <div class="container">
@@ -480,6 +494,13 @@
 									<span class="info-value">{config.file_type}</span>
 								</div>
 							{/if}
+							{#if isIceberg(datasource)}
+								{@const config = datasource.config as unknown as IcebergDataSourceConfig}
+								<div class="info-item">
+									<span class="info-label">Metadata Path</span>
+									<span class="info-value path-value">{config.metadata_path}</span>
+								</div>
+							{/if}
 							<div class="info-item">
 								<span class="info-label">Created</span>
 								<span class="info-value">
@@ -492,6 +513,13 @@
 									<span class="info-value">
 										{schemaQuery.data.row_count?.toLocaleString() ?? 'Unknown'}
 									</span>
+									<button
+										class="btn-secondary btn-inline"
+										onclick={handleRefreshRows}
+										disabled={schemaQuery.isFetching}
+									>
+										{schemaQuery.isFetching ? 'Refreshing...' : 'Refresh'}
+									</button>
 								</div>
 								<div class="info-item">
 									<span class="info-label">Columns</span>
@@ -765,8 +793,7 @@
 		max-width: 900px;
 		margin: 0 auto;
 		padding: var(--space-6);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 	}
 
 	.page-header {
@@ -838,6 +865,12 @@
 	.btn-primary:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.btn-inline {
+		margin-top: var(--space-1);
+		align-self: flex-start;
+		padding: 4px 10px;
+		font-size: var(--text-xs);
 	}
 
 	.tabs {
@@ -981,6 +1014,11 @@
 		font-size: var(--text-sm);
 		font-weight: var(--font-medium);
 		color: var(--fg-primary);
+	}
+	.path-value {
+		word-break: break-all;
+		font-size: var(--text-xs);
+		color: var(--fg-secondary);
 	}
 
 	.schema-section {

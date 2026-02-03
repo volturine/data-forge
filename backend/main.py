@@ -13,14 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import router
 from core.config import settings
 from core.database import get_db, init_db
+from core.logging import RequestLoggingMiddleware, configure_logging
 from modules.compute.manager import get_manager
 from modules.udf.seed import ensure_udf_seeds
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG if settings.debug else logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-)
 logger = logging.getLogger(__name__)
 
 frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
@@ -44,6 +40,7 @@ async def engine_cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     logger.info('Starting application...')
     await init_db()
     async for session in get_db():
@@ -77,6 +74,8 @@ app.add_middleware(
     allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allow_headers=['Content-Type', 'Authorization'],
 )
+
+app.add_middleware(RequestLoggingMiddleware)
 
 # Include API Routers (prefix already defined in api/router.py)
 app.include_router(router, tags=['api'])

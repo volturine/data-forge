@@ -111,7 +111,9 @@
 	});
 
 	const hasChanges = $derived(
-		!!step && JSON.stringify(step.config) !== JSON.stringify(draftConfig)
+		!!step &&
+			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) ||
+				(step as PipelineStep & { is_applied?: boolean }).is_applied === false)
 	);
 
 	function handleRefreshPivotSchema() {
@@ -164,6 +166,12 @@
 	function handleApplyConfig() {
 		if (!step) return;
 		analysisStore.updateStepConfig(step.id, cloneConfig(draftConfig));
+		if ((step as PipelineStep & { is_applied?: boolean }).is_applied === false) {
+			analysisStore.updateStep(
+				step.id,
+				({ is_applied: true } as Partial<PipelineStep> & { is_applied: boolean })
+			);
+		}
 		onConfigApply?.();
 	}
 

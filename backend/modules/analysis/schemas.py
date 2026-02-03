@@ -10,6 +10,7 @@ class PipelineStepSchema(BaseModel):
     type: str
     config: dict
     depends_on: list[str] = []
+    is_applied: bool | None = None
 
 
 class TabSchema(BaseModel):

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onClickOutside, Debounced } from 'runed';
-	import { FileSpreadsheet, FileJson, FileType, Database, Globe, X } from 'lucide-svelte';
+	import { FileSpreadsheet, FileJson, FileType, Database, Globe, Snowflake, X } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
 
 	interface Props {
@@ -56,6 +56,8 @@
 				return Database;
 			case 'api':
 				return Globe;
+			case 'iceberg':
+				return Snowflake;
 			default:
 				return null;
 		}

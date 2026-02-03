@@ -7,6 +7,7 @@
 	import { Sun, Moon } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
+	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import '$lib/../app.css';
 
 	let { children } = $props();
@@ -20,6 +21,41 @@
 
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme.current);
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		installAuditListeners();
+	});
+
+	$effect(() => {
+		setAuditPage($page.url.pathname);
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const onError = (event: ErrorEvent) => {
+			track({
+				event: 'client_error',
+				action: 'error',
+				page: $page.url.pathname,
+				meta: { message: event.message, filename: event.filename, lineno: event.lineno }
+			});
+		};
+		const onReject = (event: PromiseRejectionEvent) => {
+			track({
+				event: 'client_error',
+				action: 'unhandledrejection',
+				page: $page.url.pathname,
+				meta: { reason: String(event.reason) }
+			});
+		};
+		window.addEventListener('error', onError);
+		window.addEventListener('unhandledrejection', onReject);
+		return () => {
+			window.removeEventListener('error', onError);
+			window.removeEventListener('unhandledrejection', onReject);
+		};
 	});
 
 	const findScrollableX = (node: Element | null): HTMLElement | null => {
@@ -146,7 +182,6 @@
 		height: 100vh;
 		display: flex;
 		flex-direction: column;
-		overflow: hidden;
 	}
 	.header {
 		border-bottom: 1px solid var(--border-primary);
@@ -231,6 +266,7 @@
 	.main {
 		flex: 1;
 		background-color: var(--bg-secondary);
-		overflow: hidden;
+		overflow-y: auto;
+		min-height: 0;
 	}
 </style>

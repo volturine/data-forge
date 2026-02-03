@@ -239,8 +239,7 @@
 		max-width: 1100px;
 		margin: 0 auto;
 		padding: var(--space-7) var(--space-6);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 	}
 	.page-header {
 		display: flex;

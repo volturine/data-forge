@@ -5,6 +5,7 @@ export interface PipelineStep {
 	type: string;
 	config: Record<string, unknown>;
 	depends_on?: string[];
+	is_applied?: boolean;
 	inputSchema?: Schema;
 	outputSchema?: Schema;
 }

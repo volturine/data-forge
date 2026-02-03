@@ -51,7 +51,9 @@ export class DatasourceStore {
 		const cached = this.schemas.get(id);
 		if (cached && !sheetName) return cached;
 
-		const result = await getDatasourceSchema(id, sheetName);
+		const result = sheetName
+			? await getDatasourceSchema(id, { sheetName })
+			: await getDatasourceSchema(id);
 		return result.match(
 			(schema) => {
 				if (!sheetName) {

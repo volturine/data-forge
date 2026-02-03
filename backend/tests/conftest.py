@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from core.config import settings
 from core.database import Base, get_db
 from main import app
 from modules.analysis.models import Analysis, AnalysisDataSource
@@ -59,6 +60,11 @@ def temp_upload_dir(tmp_path: Path) -> Path:
     upload_dir = tmp_path / 'uploads'
     upload_dir.mkdir(parents=True, exist_ok=True)
     return upload_dir
+
+
+@pytest.fixture(autouse=True, scope='function')
+def isolate_upload_dir(temp_upload_dir: Path, monkeypatch):
+    monkeypatch.setattr(settings, 'upload_dir', temp_upload_dir, raising=False)
 
 
 @pytest.fixture(scope='function')

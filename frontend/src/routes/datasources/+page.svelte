@@ -156,12 +156,13 @@
 							</span>
 							<span class="col-name">{datasource.name}</span>
 							<span class="col-type">
-								<span
-									class="badge"
-									class:badge-info={datasource.source_type === 'file'}
-									class:badge-success={datasource.source_type === 'database'}
-									class:badge-warning={datasource.source_type === 'api'}
-								>
+							<span
+								class="badge"
+								class:badge-info={datasource.source_type === 'file'}
+								class:badge-success={datasource.source_type === 'database'}
+								class:badge-warning={datasource.source_type === 'api'}
+								class:badge-iceberg={datasource.source_type === 'iceberg'}
+							>
 									{#if datasource.source_type === 'file'}
 										{getFileType(datasource) ?? 'file'}
 									{:else}
@@ -219,8 +220,7 @@
 		max-width: 1000px;
 		margin: 0 auto;
 		padding: var(--space-6);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 	}
 
 	.page-header {
@@ -329,6 +329,12 @@
 	}
 	.col-actions {
 		white-space: nowrap;
+	}
+
+	.badge-iceberg {
+		background-color: #eff6ff;
+		border-color: #bfdbfe;
+		color: #1d4ed8;
 	}
 
 	.expand-btn {

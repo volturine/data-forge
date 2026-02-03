@@ -5,6 +5,7 @@ import type { Schema } from '$lib/types/schema';
 import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
 import { normalizeDtype } from '$lib/utils/transform';
 import { normalizeConfig } from '$lib/utils/step-config-defaults';
+import { track } from '$lib/utils/audit-log';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, err, ok } from 'neverthrow';
@@ -106,13 +107,32 @@ export class AnalysisStore {
 			});
 	}
 
+	private logStep(action: string, step: PipelineStep, meta?: Record<string, unknown>): void {
+		const analysisId = this.current ? this.current.id : null;
+		track({
+			event: 'analysis_step',
+			action,
+			target: step.type,
+			meta: {
+				analysis_id: analysisId,
+				tab_id: this.activeTabId,
+				step_id: step.id,
+				...meta
+			}
+		});
+	}
+
 	addStep(step: PipelineStep): void {
 		if (!this.activeTab) return;
 		const steps = this.activeTab.steps;
 		const parentId = steps.length ? (steps[steps.length - 1]?.id ?? null) : null;
 		step.depends_on = parentId ? [parentId] : [];
-		const newSteps = [...steps, step];
+		const newSteps = [...steps, step].map((item) => ({
+			...item,
+			config: JSON.parse(JSON.stringify(item.config)) as Record<string, unknown>
+		}));
 		this.updateTabSteps(this.activeTab.id, newSteps);
+		this.logStep('add', step, { index: newSteps.length - 1 });
 	}
 
 	setTabs(tabs: AnalysisTab[]): void {
@@ -135,23 +155,34 @@ export class AnalysisStore {
 		const hasDependencies = steps.some((step) => (step.depends_on ?? []).length > 0);
 
 		const normalized = steps.map((step, index) => {
+			const isApplied = step.is_applied !== false;
 			// Normalize config to ensure proper shape (handles backward compatibility)
 			const normalizedConfig = normalizeConfig(step.type, step.config as Record<string, unknown>);
 
 			if (!hasDependencies) {
 				// Legacy: add dependencies based on position
 				if (index === 0) {
-					return { ...step, config: normalizedConfig as Record<string, unknown>, depends_on: [] };
+					return {
+						...step,
+						config: normalizedConfig as Record<string, unknown>,
+						depends_on: [],
+						is_applied: isApplied
+					};
 				}
 				const parentId = steps[index - 1]?.id ?? null;
 				return {
 					...step,
 					config: normalizedConfig as Record<string, unknown>,
-					depends_on: parentId ? [parentId] : []
+					depends_on: parentId ? [parentId] : [],
+					is_applied: isApplied
 				};
 			}
 
-			return { ...step, config: normalizedConfig as Record<string, unknown> };
+			return {
+				...step,
+				config: normalizedConfig as Record<string, unknown>,
+				is_applied: isApplied
+			};
 		});
 
 		return normalized;
@@ -215,31 +246,53 @@ export class AnalysisStore {
 		}
 
 		nextPipeline.splice(index, 0, step);
-		this.updateTabSteps(this.activeTab.id, nextPipeline);
+		const nextSteps = nextPipeline.map((item) => ({
+			...item,
+			config: JSON.parse(JSON.stringify(item.config)) as Record<string, unknown>
+		}));
+		this.updateTabSteps(this.activeTab.id, nextSteps);
+		this.logStep('insert', step, { index });
 		return true;
 	}
 
 	addBranchStep(step: PipelineStep, parentId: string | null): void {
 		if (!this.activeTab) return;
 		step.depends_on = parentId ? [parentId] : [];
-		const newSteps = [...this.activeTab.steps, step];
+		const newSteps = [...this.activeTab.steps, step].map((item) => ({
+			...item,
+			config: JSON.parse(JSON.stringify(item.config)) as Record<string, unknown>
+		}));
 		this.updateTabSteps(this.activeTab.id, newSteps);
+		this.logStep('branch', step, { parent_id: parentId });
 	}
 
 	updateStep(id: string, updates: Partial<PipelineStep>): void {
 		if (!this.activeTab) return;
 		const nextPipeline = this.activeTab.steps.map((step) =>
-			step.id === id ? { ...step, ...updates } : step
+			step.id === id
+				? {
+						...step,
+						...updates,
+						config: JSON.parse(
+							JSON.stringify((updates.config ?? step.config) as Record<string, unknown>)
+						) as Record<string, unknown>
+				  }
+				: step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
 	}
 
 	updateStepConfig(id: string, config: Record<string, unknown>): void {
 		if (!this.activeTab) return;
+		const safeConfig = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
 		const nextPipeline = this.activeTab.steps.map((step) =>
-			step.id === id ? { ...step, config } : step
+			step.id === id ? { ...step, config: safeConfig } : step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
+		const step = nextPipeline.find((item) => item.id === id);
+		if (!step) return;
+		const keys = Object.keys(safeConfig);
+		this.logStep('update', step, { keys, count: keys.length });
 	}
 
 	removeStep(id: string): void {
@@ -277,6 +330,7 @@ export class AnalysisStore {
 		}
 
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
+		this.logStep('remove', removedStep, { parent_id: removedParentId });
 		// No cache invalidation needed - SchemaStore uses $derived
 	}
 
@@ -286,6 +340,7 @@ export class AnalysisStore {
 		const [moved] = steps.splice(fromIndex, 1);
 		steps.splice(toIndex, 0, moved);
 		this.updateTabSteps(this.activeTab.id, steps);
+		this.logStep('reorder', moved, { from: fromIndex, to: toIndex });
 	}
 
 	/**
@@ -346,6 +401,7 @@ export class AnalysisStore {
 		}
 
 		this.updateTabSteps(this.activeTab.id, steps);
+		this.logStep('move', movingStep, { from: fromIndex, to: actualToIndex, parent_id: newParentId });
 		return true;
 	}
 

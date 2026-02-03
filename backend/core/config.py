@@ -15,6 +15,13 @@ def _resolve_dir(value: Path | str) -> Path:
     return path_value
 
 
+def _resolve_file_parent(value: Path | str) -> Path:
+    """Ensure the parent directory for a file path exists and return it."""
+    path_value = Path(value)
+    path_value.parent.mkdir(parents=True, exist_ok=True)
+    return path_value
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file='.env',
@@ -77,6 +84,18 @@ class Settings(BaseSettings):
     # Logging level (debug, info, warning, error)
     log_level: str = Field(default='info', alias='LOG_LEVEL')
 
+    # Iceberg log base path (catalog + warehouse)
+    log_iceberg_path: Path = Field(default=DATA_DIR / 'logs' / 'iceberg', alias='LOG_ICEBERG_PATH')
+
+    # Iceberg log flush interval in seconds
+    log_iceberg_flush_interval_seconds: int = Field(default=300, alias='LOG_ICEBERG_FLUSH_INTERVAL_SECONDS')
+
+    # Max bytes stored for request/response JSON bodies
+    log_body_max_bytes: int = Field(default=20_000_000, alias='LOG_BODY_MAX_BYTES')
+
+    # Max queued log batches before dropping
+    log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
@@ -86,6 +105,16 @@ class Settings(BaseSettings):
     @classmethod
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
+
+    @field_validator('log_iceberg_path', mode='before')
+    @classmethod
+    def _ensure_log_iceberg_path(cls, value: Path | str) -> Path:
+        path_value = Path(value)
+        if path_value.suffix in {'.db', '.json'}:
+            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+        if path_value.exists() and path_value.is_file():
+            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+        return _resolve_dir(path_value)
 
     @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval')
     @classmethod
@@ -139,6 +168,20 @@ class Settings(BaseSettings):
         if value.lower() not in valid_levels:
             raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
         return value.lower()
+
+    @field_validator('log_body_max_bytes')
+    @classmethod
+    def _validate_log_body_size(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError(f'log_body_max_bytes must be positive, got {value}')
+        return value
+
+    @field_validator('log_queue_max_size')
+    @classmethod
+    def _validate_log_queue_size(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError(f'log_queue_max_size must be positive, got {value}')
+        return value
 
     @model_validator(mode='after')
     def _validate_directories_writable(self):

@@ -6,6 +6,7 @@
 		FileText,
 		Database,
 		Globe,
+		Snowflake,
 		PanelLeft,
 		Pencil,
 		RefreshCw,
@@ -160,6 +161,8 @@
 						<Database size={14} />
 					{:else if sourceType === 'api'}
 						<Globe size={14} />
+					{:else if sourceType === 'iceberg'}
+						<Snowflake size={14} />
 					{:else}
 						<FileText size={14} />
 					{/if}

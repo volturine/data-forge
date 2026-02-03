@@ -174,6 +174,7 @@
 		padding: var(--space-12);
 		gap: var(--space-4);
 		color: var(--fg-tertiary);
+		pointer-events: none;
 	}
 	.loading-overlay p {
 		margin: 0;

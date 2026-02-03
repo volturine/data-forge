@@ -12,9 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError, FileError
-from modules.compute.operations.datasource import load_datasource
+from modules.compute.operations.datasource import load_datasource, resolve_iceberg_metadata_path
 from modules.datasource.models import DataSource
-from modules.datasource.schemas import ColumnSchema, CSVOptions, DataSourceResponse, DataSourceUpdate, SchemaInfo
+from modules.datasource.schemas import (
+    ColumnSchema,
+    CSVOptions,
+    DataSourceResponse,
+    DataSourceUpdate,
+    FilePathValidationResponse,
+    SchemaInfo,
+)
 
 # Polars dtype mapping for schema transformations
 DTYPE_MAP = {
@@ -189,20 +196,13 @@ def resolve_excel_selection(
     return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row
 
 
+@dataclass
 class _ExcelBounds:
-    def __init__(
-        self,
-        sheet_name: str,
-        start_row: int,
-        start_col: int,
-        end_col: int,
-        end_row: int | None,
-    ) -> None:
-        self.sheet_name = sheet_name
-        self.start_row = start_row
-        self.start_col = start_col
-        self.end_col = end_col
-        self.end_row = end_row
+    sheet_name: str
+    start_row: int
+    start_col: int
+    end_col: int
+    end_row: int | None
 
 
 def _resolve_excel_bounds(
@@ -375,7 +375,61 @@ async def create_duckdb_datasource(
     return DataSourceResponse.model_validate(datasource)
 
 
-async def get_datasource_schema(session: AsyncSession, datasource_id: str, sheet_name: str | None = None) -> SchemaInfo:
+async def create_iceberg_datasource(
+    session: AsyncSession,
+    name: str,
+    metadata_path: str,
+    snapshot_id: int | None = None,
+    storage_options: dict | None = None,
+    reader: str | None = None,
+) -> DataSourceResponse:
+    """Create an Iceberg datasource."""
+    datasource_id = str(uuid.uuid4())
+
+    normalized_path = _normalize_iceberg_path(metadata_path)
+    try:
+        resolve_iceberg_metadata_path(normalized_path)
+    except ValueError as exc:
+        raise DataSourceValidationError(str(exc), details={'metadata_path': metadata_path}) from exc
+
+    config = {
+        'metadata_path': normalized_path,
+        'snapshot_id': snapshot_id,
+        'storage_options': storage_options,
+        'reader': reader,
+    }
+
+    datasource = DataSource(
+        id=datasource_id,
+        name=name,
+        source_type='iceberg',
+        config=config,
+        created_at=datetime.now(UTC),
+    )
+
+    session.add(datasource)
+    await session.commit()
+    await session.refresh(datasource)
+
+    try:
+        schema_info = await _extract_schema(datasource)
+        datasource.schema_cache = schema_info.model_dump()
+        await session.commit()
+        await session.refresh(datasource)
+        logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
+    except Exception as e:
+        logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
+
+    logger.info(f'Created Iceberg datasource {datasource_id} ({name})')
+    return DataSourceResponse.model_validate(datasource)
+
+
+async def get_datasource_schema(
+    session: AsyncSession,
+    datasource_id: str,
+    sheet_name: str | None = None,
+    refresh: bool = False,
+) -> SchemaInfo:
     """Get or extract schema for a datasource."""
     result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
     datasource = result.scalar_one_or_none()
@@ -383,8 +437,12 @@ async def get_datasource_schema(session: AsyncSession, datasource_id: str, sheet
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
+    if refresh and sheet_name is None:
+        datasource.schema_cache = None
+        await session.commit()
+
     # Check if we have cached schema with row_count and sample_value
-    if datasource.schema_cache and sheet_name is None:
+    if datasource.schema_cache and sheet_name is None and not refresh:
         cached = SchemaInfo.model_validate(datasource.schema_cache)
         # Re-extract if row_count or sample_value is missing
         has_samples = cached.columns and any(c.sample_value is not None for c in cached.columns)
@@ -515,6 +573,28 @@ async def _extract_schema(datasource: DataSource, sheet_name: str | None = None)
 
         return SchemaInfo(columns=columns, row_count=row_count)
 
+    if datasource.source_type == 'iceberg':
+        config = {
+            'source_type': datasource.source_type,
+            **datasource.config,
+        }
+        lazy = load_datasource(config)
+        schema = lazy.collect_schema()
+        row_count = lazy.select(pl.len()).collect().item()
+
+        sample_values = _get_first_non_null_samples(lazy)
+
+        columns = [
+            ColumnSchema(
+                name=name,
+                dtype=str(dtype),
+                nullable=True,
+                sample_value=sample_values.get(name),
+            )
+            for name, dtype in schema.items()
+        ]
+        return SchemaInfo(columns=columns, row_count=row_count)
+
     raise DataSourceValidationError(
         f'Schema extraction not supported for type: {datasource.source_type}',
         details={'source_type': datasource.source_type},
@@ -526,6 +606,11 @@ def _transform_to_parquet(
     column_schema: list[dict],
 ) -> Path:
     """Transform datasource to parquet with new schema and save to clean directory."""
+    if datasource.source_type == 'iceberg':
+        raise DataSourceValidationError(
+            'Schema transformations are not supported for Iceberg datasources',
+            details={'source_type': datasource.source_type},
+        )
     config = {
         'source_type': datasource.source_type,
         **datasource.config,
@@ -568,6 +653,35 @@ def _transform_to_parquet(
     logger.info(f'Transformed datasource {datasource.id} to parquet: {output_path}')
 
     return output_path
+
+
+def validate_file_path(file_path: str, file_type: str) -> FilePathValidationResponse:
+    path = Path(file_path)
+    exists = path.exists()
+    is_file = path.is_file()
+    is_dir = path.is_dir()
+    if not exists:
+        raise ValueError(f'Path does not exist: {file_path}')
+    if file_type in {'csv', 'json', 'ndjson', 'excel'} and not is_file:
+        raise ValueError(f'Path must be a file for type: {file_type}')
+    if file_type == 'parquet' and not (is_file or is_dir):
+        raise ValueError('Parquet path must be a file or directory')
+    return FilePathValidationResponse(
+        file_path=str(path),
+        file_type=file_type,
+        exists=exists,
+        is_file=is_file,
+        is_dir=is_dir,
+    )
+
+
+def _normalize_iceberg_path(metadata_path: str) -> str:
+    path = Path(metadata_path)
+    if path.suffix == '.db':
+        raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not catalog.db')
+    if path.name.endswith('.metadata.json'):
+        return str(path.parent)
+    return str(path)
 
 
 async def get_datasource(session: AsyncSession, datasource_id: str) -> DataSourceResponse:

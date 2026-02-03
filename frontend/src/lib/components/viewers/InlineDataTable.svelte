@@ -10,6 +10,7 @@
 		type Row
 	} from '@tanstack/table-core';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import { applySteps } from '$lib/utils/pipeline';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -33,8 +34,11 @@
 	let currentPage = $state(1);
 	let sorting = $state<SortingState>([]);
 
+	let activePipeline = $derived(applySteps(pipeline));
+	let isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
+
 	// Create a stable key from pipeline to detect changes
-	const pipelineKey = $derived(JSON.stringify(pipeline));
+	const pipelineKey = $derived(JSON.stringify(activePipeline));
 
 	// Reset page when pipeline changes
 	let lastPipelineKey = $state('');
@@ -57,6 +61,9 @@
 				pipelineKey
 			],
 			queryFn: async (): Promise<StepPreviewResponse> => {
+				if (!isActiveStep) {
+					throw new Error('Step is disabled');
+				}
 				const resourceConfig = analysisStore.resourceConfig as unknown as Record<
 					string,
 					unknown
@@ -64,7 +71,7 @@
 				const result = await previewStepData({
 					analysis_id: analysisId,
 					datasource_id: datasourceId,
-					pipeline_steps: pipeline,
+					pipeline_steps: activePipeline,
 					target_step_id: stepId,
 					row_limit: rowLimit,
 					page: currentPage,
@@ -79,12 +86,16 @@
 		};
 	});
 
-	const data = $derived(query.data);
-	const isLoading = $derived(query.isLoading);
-	const error = $derived(query.error);
+	const data = $derived(isActiveStep ? query.data : null);
+	const isLoading = $derived(isActiveStep ? query.isLoading : false);
+	const error = $derived(isActiveStep ? query.error : null);
 
 	// Update schema store with actual columns from preview
 	$effect(() => {
+		if (!isActiveStep) {
+			schemaStore.clearPreviewSchema(stepId);
+			return;
+		}
 		if (data?.columns && data.column_types) {
 			schemaStore.setPreviewSchema(stepId, data.columns, data.column_types);
 		}
@@ -278,6 +289,7 @@
 		padding: 2rem;
 		gap: 0.75rem;
 		color: var(--fg-tertiary);
+		pointer-events: none;
 	}
 	.loading-overlay p {
 		margin: 0;

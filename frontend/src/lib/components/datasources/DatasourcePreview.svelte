@@ -12,17 +12,19 @@
 	let { datasourceId, datasourceName }: Props = $props();
 
 	let viewMode = $state<'data' | 'schema'>('data');
+	let page = $state(1);
+	let rowLimit = $state(100);
 
 	const query = createQuery(() => ({
-		queryKey: ['datasource-preview', datasourceId],
+		queryKey: ['datasource-preview', datasourceId, page, rowLimit],
 		queryFn: async (): Promise<StepPreviewResponse> => {
 			const result = await previewStepData({
 				analysis_id: '',
 				datasource_id: datasourceId,
 				pipeline_steps: [],
 				target_step_id: 'source',
-				row_limit: 100,
-				page: 1
+				row_limit: rowLimit,
+				page
 			});
 			if (result.isErr()) {
 				throw new Error(result.error.message);
@@ -45,6 +47,20 @@
 				}))
 			: []
 	);
+
+	const canPrev = $derived(page > 1);
+	const pageSize = $derived(data?.data?.length ?? 0);
+	const canNext = $derived(pageSize === rowLimit);
+
+	function goPrev() {
+		if (!canPrev) return;
+		page -= 1;
+	}
+
+	function goNext() {
+		if (!canNext) return;
+		page += 1;
+	}
 
 	function getTypeCategory(dtype: string): string {
 		const lower = dtype.toLowerCase();
@@ -119,6 +135,15 @@
 				<p class="error-message">{error.message}</p>
 			</div>
 		{:else}
+			<div class="pagination">
+				<button class="page-btn" onclick={goPrev} disabled={!canPrev || isLoading}>
+					Prev
+				</button>
+				<span class="page-info">Page {page}</span>
+				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}>
+					Next
+				</button>
+			</div>
 			<DataTable columns={data?.columns ?? []} data={data?.data ?? []} loading={isLoading} />
 		{/if}
 	{:else}
@@ -214,10 +239,36 @@
 		padding: 2rem;
 		text-align: center;
 		color: var(--fg-tertiary);
+		pointer-events: none;
 	}
 	.schema-view {
 		max-height: 300px;
 		overflow-y: auto;
+	}
+	.pagination {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.75rem 1rem;
+		border-bottom: 1px solid var(--border-primary);
+		background: var(--bg-secondary);
+	}
+	.page-btn {
+		padding: 0.25rem 0.6rem;
+		border-radius: var(--radius-sm);
+		border: 1px solid var(--border-primary);
+		background: var(--bg-primary);
+		color: var(--fg-primary);
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+	.page-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.page-info {
+		font-size: 0.75rem;
+		color: var(--fg-tertiary);
 	}
 	.schema-header {
 		display: grid;

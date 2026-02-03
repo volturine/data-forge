@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.database import get_db
 from core.exceptions import DataSourceNotFoundError
+from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 
@@ -333,6 +334,23 @@ async def connect_datasource(
                 headers=api_config.headers,
                 auth=api_config.auth,
             )
+        if datasource.source_type == 'file':
+            file_config = schemas.FileDataSourceConfig.model_validate(datasource.config)
+            return await service.create_file_datasource(
+                session=session,
+                name=datasource.name,
+                file_path=file_config.file_path,
+                file_type=file_config.file_type,
+                csv_options=file_config.csv_options,
+                sheet_name=file_config.sheet_name,
+                start_row=file_config.start_row,
+                start_col=file_config.start_col,
+                end_col=file_config.end_col,
+                end_row=file_config.end_row,
+                has_header=file_config.has_header,
+                table_name=file_config.table_name,
+                named_range=file_config.named_range,
+            )
         if datasource.source_type == 'duckdb':
             duckdb_config = schemas.DuckDBDataSourceConfig.model_validate(datasource.config)
             return await service.create_duckdb_datasource(
@@ -342,9 +360,19 @@ async def connect_datasource(
                 query=duckdb_config.query,
                 read_only=duckdb_config.read_only,
             )
+        if datasource.source_type == 'iceberg':
+            iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
+            return await service.create_iceberg_datasource(
+                session=session,
+                name=datasource.name,
+                metadata_path=iceberg_config.metadata_path,
+                snapshot_id=iceberg_config.snapshot_id,
+                storage_options=iceberg_config.storage_options,
+                reader=iceberg_config.reader,
+            )
         raise HTTPException(
             status_code=400,
-            detail=f'Unsupported source type: {datasource.source_type}. Use "database", "api", or "duckdb"',
+            detail=f'Unsupported source type: {datasource.source_type}. Use "file", "database", "api", "duckdb", or "iceberg"',
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -379,15 +407,35 @@ async def get_datasource(
 async def get_datasource_schema(
     datasource_id: str,
     sheet_name: str | None = None,
+    refresh: bool = False,
     session: AsyncSession = Depends(get_db),
 ):
     """Get schema information for a data source."""
     try:
-        return await service.get_datasource_schema(session, datasource_id, sheet_name=sheet_name)
+        return await service.get_datasource_schema(session, datasource_id, sheet_name=sheet_name, refresh=refresh)
     except (ValueError, DataSourceNotFoundError) as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get schema: {str(e)}')
+
+
+@router.get('/iceberg/resolve')
+async def resolve_iceberg(metadata_path: str):
+    """Resolve an Iceberg metadata path or directory to a metadata.json file."""
+    try:
+        resolved = resolve_iceberg_metadata_path(metadata_path)
+        return {'metadata_path': resolved}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post('/file/validate', response_model=schemas.FilePathValidationResponse)
+async def validate_file_path(request: schemas.FilePathValidationRequest):
+    """Validate a file path for file datasources."""
+    try:
+        return service.validate_file_path(request.file_path, request.file_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put('/{datasource_id}', response_model=schemas.DataSourceResponse)

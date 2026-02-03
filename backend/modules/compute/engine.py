@@ -472,12 +472,7 @@ class PolarsComputeEngine:
         schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
 
         # Collect only the rows we need for preview
-        # Use head() for efficiency - don't collect entire dataset
-        preview_df = lf.head(offset + row_limit).collect()
-
-        # Apply offset (slice from offset to end)
-        if offset > 0:
-            preview_df = preview_df.slice(offset, row_limit)
+        preview_df = lf.slice(offset, row_limit).collect(streaming=True)
 
         return {
             'schema': schema,

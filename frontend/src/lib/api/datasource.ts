@@ -1,4 +1,4 @@
-import type { CSVOptions, DataSource, SchemaInfo } from '$lib/types/datasource';
+import type { CSVOptions, DataSource, IcebergDataSourceConfig, SchemaInfo } from '$lib/types/datasource';
 import { apiRequest } from './client';
 import { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
@@ -78,6 +78,44 @@ export function uploadBulkFiles(
 		}
 		return error;
 	});
+}
+
+export function connectFilePath(
+	name: string,
+	filePath: string,
+	fileType: string,
+	options?: Record<string, unknown> | null,
+	csvOptions?: CSVOptions
+): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
+		method: 'POST',
+		body: JSON.stringify({
+			name,
+			source_type: 'file',
+			config: {
+				file_path: filePath,
+				file_type: fileType,
+				options: options ?? undefined,
+				csv_options: csvOptions
+			}
+		})
+	});
+}
+
+export function validateFilePath(
+	filePath: string,
+	fileType: string
+): ResultAsync<{ file_path: string; file_type: string; exists: boolean; is_file: boolean; is_dir: boolean }, ApiError> {
+	return apiRequest<{ file_path: string; file_type: string; exists: boolean; is_file: boolean; is_dir: boolean }>(
+		'/v1/datasource/file/validate',
+		{
+			method: 'POST',
+			body: JSON.stringify({
+				file_path: filePath,
+				file_type: fileType
+			})
+		}
+	);
 }
 
 export interface ExcelPreflightResponse {
@@ -229,6 +267,27 @@ export function connectDuckDB(
 	});
 }
 
+export function connectIceberg(
+	name: string,
+	config: IcebergDataSourceConfig
+): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
+		method: 'POST',
+		body: JSON.stringify({
+			name,
+			source_type: 'iceberg',
+			config
+		})
+	});
+}
+
+export function resolveIcebergMetadata(metadataPath: string): ResultAsync<{ metadata_path: string }, ApiError> {
+	const params = new URLSearchParams({ metadata_path: metadataPath });
+	return apiRequest<{ metadata_path: string }>(`/v1/datasource/iceberg/resolve?${params.toString()}`, {
+		method: 'GET'
+	});
+}
+
 export function listDatasources(): ResultAsync<DataSource[], ApiError> {
 	return apiRequest<DataSource[]>('/v1/datasource');
 }
@@ -237,12 +296,24 @@ export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
 	return apiRequest<DataSource>(`/v1/datasource/${id}`);
 }
 
+export function getDatasourceSchema(id: string): ResultAsync<SchemaInfo, ApiError>;
 export function getDatasourceSchema(
 	id: string,
-	sheetName?: string
+	options: { sheetName?: string; refresh?: boolean }
+): ResultAsync<SchemaInfo, ApiError>;
+export function getDatasourceSchema(
+	id: string,
+	options?: { sheetName?: string; refresh?: boolean }
 ): ResultAsync<SchemaInfo, ApiError> {
-	const params = sheetName ? `?sheet_name=${encodeURIComponent(sheetName)}` : '';
-	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema${params}`);
+	const params = new URLSearchParams();
+	if (options?.sheetName) {
+		params.set('sheet_name', options.sheetName);
+	}
+	if (options?.refresh) {
+		params.set('refresh', 'true');
+	}
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema${suffix}`);
 }
 
 export function deleteDatasource(id: string): ResultAsync<void, ApiError> {

@@ -221,12 +221,13 @@
 	}
 
 	function buildStep(type: string): PipelineStep {
-		return {
+		const base: PipelineStep = {
 			id: makeId(),
 			type,
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
+		return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
 	}
 
 	function markUnsaved() {
@@ -269,6 +270,18 @@
 		if (selectedStepId === stepId) {
 			selectedStepId = null;
 		}
+		markUnsaved();
+	}
+
+	function handleToggleStep(stepId: string) {
+		if (!isEditingMode) return;
+		const step = analysisStore.pipeline.find((item) => item.id === stepId);
+		if (!step) return;
+		const next = (step as PipelineStep & { is_applied?: boolean }).is_applied === false;
+		analysisStore.updateStep(
+			stepId,
+			({ is_applied: next } as Partial<PipelineStep> & { is_applied: boolean })
+		);
 		markUnsaved();
 	}
 
@@ -574,19 +587,20 @@
 			{/if}
 
 			<div class="center-pane" class:readonly={!isEditingMode} class:expanded={!isEditingMode}>
-				<PipelineCanvas
-					steps={analysisStore.pipeline}
-					{analysisId}
-					{datasourceId}
-					datasource={currentDatasource}
-					tabName={analysisStore.activeTab?.name}
-					onStepClick={handleSelectStep}
-					onStepDelete={handleDeleteStep}
-					onInsertStep={handleInsertStep}
-					onMoveStep={handleMoveStep}
-					onChangeDatasource={() => openDatasourceModal('change')}
-					onRenameTab={handleRenameSourceTab}
-				/>
+			<PipelineCanvas
+				steps={analysisStore.pipeline}
+				{analysisId}
+				{datasourceId}
+				datasource={currentDatasource}
+				tabName={analysisStore.activeTab?.name}
+				onStepClick={handleSelectStep}
+				onStepDelete={handleDeleteStep}
+				onStepToggle={handleToggleStep}
+				onInsertStep={handleInsertStep}
+				onMoveStep={handleMoveStep}
+				onChangeDatasource={() => openDatasourceModal('change')}
+				onRenameTab={handleRenameSourceTab}
+			/>
 			</div>
 
 			{#if isEditingMode}
@@ -673,6 +687,9 @@
 		border-bottom: 1px solid var(--panel-border);
 		background-color: var(--panel-bg);
 		height: 48px;
+		position: sticky;
+		top: 0;
+		z-index: var(--z-header);
 	}
 
 	.header-left {
@@ -981,7 +998,6 @@
 	.center-pane {
 		flex: 1;
 		min-width: 200px;
-		overflow: hidden;
 		display: flex;
 		background-color: var(--bg-secondary);
 	}
