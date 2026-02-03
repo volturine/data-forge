@@ -3,7 +3,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from modules.udf.models import Udf
 from modules.udf.schemas import (
@@ -34,7 +34,7 @@ def _signature_key(signature: dict) -> str:
     return ','.join(dtypes)
 
 
-async def create_udf(session: AsyncSession, data: UdfCreateSchema) -> UdfResponseSchema:
+def create_udf(session: Session, data: UdfCreateSchema) -> UdfResponseSchema:
     _validate_code(data.code)
     now = datetime.now(UTC)
     udf = Udf(
@@ -49,21 +49,21 @@ async def create_udf(session: AsyncSession, data: UdfCreateSchema) -> UdfRespons
         updated_at=now,
     )
     session.add(udf)
-    await session.commit()
-    await session.refresh(udf)
+    session.commit()
+    session.refresh(udf)
     return UdfResponseSchema.model_validate(udf)
 
 
-async def get_udf(session: AsyncSession, udf_id: str) -> UdfResponseSchema:
-    result = await session.execute(select(Udf).where(Udf.id == udf_id))
+def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
+    result = session.execute(select(Udf).where(Udf.id == udf_id))
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
     return UdfResponseSchema.model_validate(udf)
 
 
-async def list_udfs(
-    session: AsyncSession,
+def list_udfs(
+    session: Session,
     query: str | None = None,
     dtype_key: str | None = None,
     tag: str | None = None,
@@ -75,7 +75,7 @@ async def list_udfs(
         q = f'%{query.lower()}%'
         stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))
 
-    result = await session.execute(stmt)
+    result = session.execute(stmt)
     udfs = result.scalars().all()
 
     # Apply Python-side filters for complex JSON fields
@@ -96,8 +96,8 @@ async def list_udfs(
     return [UdfResponseSchema.model_validate(u) for u in filtered_udfs]
 
 
-async def update_udf(session: AsyncSession, udf_id: str, data: UdfUpdateSchema) -> UdfResponseSchema:
-    result = await session.execute(select(Udf).where(Udf.id == udf_id))
+def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfResponseSchema:
+    result = session.execute(select(Udf).where(Udf.id == udf_id))
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
@@ -117,22 +117,22 @@ async def update_udf(session: AsyncSession, udf_id: str, data: UdfUpdateSchema) 
         udf.source = data.source
 
     udf.updated_at = datetime.now(UTC)
-    await session.commit()
-    await session.refresh(udf)
+    session.commit()
+    session.refresh(udf)
     return UdfResponseSchema.model_validate(udf)
 
 
-async def delete_udf(session: AsyncSession, udf_id: str) -> None:
-    result = await session.execute(select(Udf).where(Udf.id == udf_id))
+def delete_udf(session: Session, udf_id: str) -> None:
+    result = session.execute(select(Udf).where(Udf.id == udf_id))
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
-    await session.delete(udf)
-    await session.commit()
+    session.delete(udf)
+    session.commit()
 
 
-async def clone_udf(session: AsyncSession, udf_id: str, data: UdfCloneSchema) -> UdfResponseSchema:
-    result = await session.execute(select(Udf).where(Udf.id == udf_id))
+def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfResponseSchema:
+    result = session.execute(select(Udf).where(Udf.id == udf_id))
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
@@ -150,34 +150,34 @@ async def clone_udf(session: AsyncSession, udf_id: str, data: UdfCloneSchema) ->
         updated_at=now,
     )
     session.add(cloned)
-    await session.commit()
-    await session.refresh(cloned)
+    session.commit()
+    session.refresh(cloned)
     return UdfResponseSchema.model_validate(cloned)
 
 
-async def match_udfs(session: AsyncSession, dtypes: list[str]) -> list[UdfResponseSchema]:
+def match_udfs(session: Session, dtypes: list[str]) -> list[UdfResponseSchema]:
     dtype_key = ','.join(dtypes)
-    return await list_udfs(session, dtype_key=dtype_key)
+    return list_udfs(session, dtype_key=dtype_key)
 
 
-async def export_udfs(session: AsyncSession) -> list[UdfResponseSchema]:
-    result = await session.execute(select(Udf))
+def export_udfs(session: Session) -> list[UdfResponseSchema]:
+    result = session.execute(select(Udf))
     udfs = result.scalars().all()
     return [UdfResponseSchema.model_validate(u) for u in udfs]
 
 
-async def import_udfs(session: AsyncSession, payload: UdfImportSchema) -> list[UdfResponseSchema]:
+def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseSchema]:
     """Import UDFs with atomic transaction - either all succeed or all fail."""
     created: list[UdfResponseSchema] = []
     udfs_to_refresh: list[Udf] = []
 
     # Use a single transaction to guarantee atomicity
     transaction = session.begin_nested() if session.in_transaction() else session.begin()
-    async with transaction:
+    with transaction:
         for item in payload.udfs:
             _validate_code(item.code)
 
-            existing_result = await session.execute(select(Udf).where(Udf.name == item.name))
+            existing_result = session.execute(select(Udf).where(Udf.name == item.name))
             udf = existing_result.scalar_one_or_none()
 
             if udf and not payload.overwrite:
@@ -208,14 +208,14 @@ async def import_udfs(session: AsyncSession, payload: UdfImportSchema) -> list[U
                 udfs_to_refresh.append(new_udf)
 
     for udf in udfs_to_refresh:
-        await session.refresh(udf)
+        session.refresh(udf)
         created.append(UdfResponseSchema.model_validate(udf))
 
     return created
 
 
-async def seed_defaults(session: AsyncSession) -> list[UdfResponseSchema]:
-    result = await session.execute(select(Udf))
+def seed_defaults(session: Session) -> list[UdfResponseSchema]:
+    result = session.execute(select(Udf))
     existing = result.scalars().first()
     if existing:
         return []
@@ -231,7 +231,9 @@ async def seed_defaults(session: AsyncSession) -> list[UdfResponseSchema]:
                 ],
                 output_dtype='Float64',
             ),
-            code=('def udf(numerator, denominator):\n    if denominator in (0, None):\n        return None\n    return numerator / denominator\n'),
+            code=(
+                'def udf(numerator, denominator):\n    if denominator in (0, None):\n        return None\n    return numerator / denominator\n'
+            ),
             tags=['math', 'ratio'],
             source='seeded',
         ),
@@ -273,5 +275,5 @@ async def seed_defaults(session: AsyncSession) -> list[UdfResponseSchema]:
 
     created: list[UdfResponseSchema] = []
     for item in defaults:
-        created.append(await create_udf(session, item))
+        created.append(create_udf(session, item))
     return created

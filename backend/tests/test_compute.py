@@ -1,15 +1,12 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from httpx import AsyncClient
-
 from modules.compute.engine import PolarsComputeEngine
 from modules.datasource.models import DataSource
 
 
-@pytest.mark.asyncio
 class TestComputePreview:
-    async def test_preview_step_success(self, client: AsyncClient, sample_datasource: DataSource):
+    def test_preview_step_success(self, client, sample_datasource: DataSource):
         payload = {
             'datasource_id': sample_datasource.id,
             'pipeline_steps': [
@@ -48,7 +45,7 @@ class TestComputePreview:
             mock_manager.get_or_create_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.post('/api/v1/compute/preview', json=payload)
+            response = client.post('/api/v1/compute/preview', json=payload)
 
             assert response.status_code == 200
             result = response.json()
@@ -57,7 +54,7 @@ class TestComputePreview:
             assert 'data' in result
             assert result['total_rows'] == 2
 
-    async def test_preview_step_failure(self, client: AsyncClient, sample_datasource: DataSource):
+    def test_preview_step_failure(self, client, sample_datasource: DataSource):
         payload = {
             'datasource_id': sample_datasource.id,
             'pipeline_steps': [
@@ -87,19 +84,19 @@ class TestComputePreview:
             mock_manager.get_or_create_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.post('/api/v1/compute/preview', json=payload)
+            response = client.post('/api/v1/compute/preview', json=payload)
 
             # Failed pipeline execution returns 500
             assert response.status_code in [404, 500]
 
-    async def test_preview_step_datasource_not_found(self, client: AsyncClient):
+    def test_preview_step_datasource_not_found(self, client):
         payload = {
             'datasource_id': 'non-existent-id',
             'pipeline_steps': [],
             'target_step_id': 'step1',
         }
 
-        response = await client.post('/api/v1/compute/preview', json=payload)
+        response = client.post('/api/v1/compute/preview', json=payload)
 
         assert response.status_code == 404
         result = response.json()
@@ -109,7 +106,7 @@ class TestComputePreview:
         else:
             assert 'not found' in str(detail)
 
-    async def test_preview_step_specific_target(self, client: AsyncClient, sample_datasource: DataSource):
+    def test_preview_step_specific_target(self, client, sample_datasource: DataSource):
         payload = {
             'datasource_id': sample_datasource.id,
             'pipeline_steps': [
@@ -137,7 +134,7 @@ class TestComputePreview:
             mock_manager.get_or_create_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.post('/api/v1/compute/preview', json=payload)
+            response = client.post('/api/v1/compute/preview', json=payload)
 
             assert response.status_code == 200
 
@@ -203,9 +200,8 @@ def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: Magic
     assert result == fake_lf
 
 
-@pytest.mark.asyncio
 class TestEngineLifecycle:
-    async def test_spawn_engine(self, client: AsyncClient):
+    def test_spawn_engine(self, client):
         analysis_id = 'test-analysis-123'
 
         with patch('modules.compute.routes.get_manager') as mock_get_manager:
@@ -220,14 +216,14 @@ class TestEngineLifecycle:
             }
             mock_get_manager.return_value = mock_manager
 
-            response = await client.post(f'/api/v1/compute/engine/spawn/{analysis_id}')
+            response = client.post(f'/api/v1/compute/engine/spawn/{analysis_id}')
 
             assert response.status_code == 200
             result = response.json()
             assert result['analysis_id'] == analysis_id
             assert result['status'] == 'healthy'
 
-    async def test_keepalive_engine(self, client: AsyncClient):
+    def test_keepalive_engine(self, client):
         analysis_id = 'test-analysis-123'
 
         with patch('modules.compute.routes.get_manager') as mock_get_manager:
@@ -242,13 +238,13 @@ class TestEngineLifecycle:
             }
             mock_get_manager.return_value = mock_manager
 
-            response = await client.post(f'/api/v1/compute/engine/keepalive/{analysis_id}')
+            response = client.post(f'/api/v1/compute/engine/keepalive/{analysis_id}')
 
             assert response.status_code == 200
             result = response.json()
             assert result['analysis_id'] == analysis_id
 
-    async def test_get_engine_status(self, client: AsyncClient):
+    def test_get_engine_status(self, client):
         analysis_id = 'test-analysis-123'
 
         with patch('modules.compute.routes.get_manager') as mock_get_manager:
@@ -262,14 +258,14 @@ class TestEngineLifecycle:
             }
             mock_get_manager.return_value = mock_manager
 
-            response = await client.get(f'/api/v1/compute/engine/status/{analysis_id}')
+            response = client.get(f'/api/v1/compute/engine/status/{analysis_id}')
 
             assert response.status_code == 200
             result = response.json()
             assert result['analysis_id'] == analysis_id
             assert result['status'] == 'healthy'
 
-    async def test_shutdown_engine(self, client: AsyncClient):
+    def test_shutdown_engine(self, client):
         analysis_id = 'test-analysis-123'
 
         with patch('modules.compute.routes.get_manager') as mock_get_manager:
@@ -278,13 +274,13 @@ class TestEngineLifecycle:
             mock_manager.get_engine.return_value = mock_engine
             mock_get_manager.return_value = mock_manager
 
-            response = await client.delete(f'/api/v1/compute/engine/{analysis_id}')
+            response = client.delete(f'/api/v1/compute/engine/{analysis_id}')
 
             assert response.status_code == 200
             assert 'shutdown successfully' in response.json()['message']
             mock_manager.shutdown_engine.assert_called_once_with(analysis_id)
 
-    async def test_shutdown_engine_not_found(self, client: AsyncClient):
+    def test_shutdown_engine_not_found(self, client):
         analysis_id = 'non-existent-analysis'
 
         with patch('modules.compute.routes.get_manager') as mock_get_manager:
@@ -292,11 +288,11 @@ class TestEngineLifecycle:
             mock_manager.get_engine.return_value = None
             mock_get_manager.return_value = mock_manager
 
-            response = await client.delete(f'/api/v1/compute/engine/{analysis_id}')
+            response = client.delete(f'/api/v1/compute/engine/{analysis_id}')
 
             assert response.status_code == 404
 
-    async def test_list_engines(self, client: AsyncClient):
+    def test_list_engines(self, client):
         with patch('modules.compute.routes.get_manager') as mock_get_manager:
             mock_manager = MagicMock()
             mock_manager.list_all_engine_statuses.return_value = [
@@ -317,7 +313,7 @@ class TestEngineLifecycle:
             ]
             mock_get_manager.return_value = mock_manager
 
-            response = await client.get('/api/v1/compute/engines')
+            response = client.get('/api/v1/compute/engines')
 
             assert response.status_code == 200
             result = response.json()

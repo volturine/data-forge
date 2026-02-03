@@ -1,8 +1,8 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, delete, select
+from sqlmodel import Session
 
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.analysis.schemas import (
@@ -15,14 +15,14 @@ from modules.analysis.schemas import (
 from modules.datasource.models import DataSource
 
 
-async def create_analysis(
-    session: AsyncSession,
+def create_analysis(
+    session: Session,  # type: ignore[type-arg]
     data: AnalysisCreateSchema,
 ) -> AnalysisResponseSchema:
     analysis_id = str(uuid.uuid4())
 
     for datasource_id in data.datasource_ids:
-        result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+        result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
         datasource = result.scalar_one_or_none()
         if not datasource:
             raise ValueError(f'DataSource {datasource_id} not found')
@@ -53,19 +53,19 @@ async def create_analysis(
         )
         session.add(link)
 
-    await session.commit()
-    await session.refresh(analysis)
+    session.commit()
+    session.refresh(analysis)
 
     response = AnalysisResponseSchema.model_validate(analysis)
     response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
     return response
 
 
-async def get_analysis(
-    session: AsyncSession,
+def get_analysis(
+    session: Session,  # type: ignore[type-arg]
     analysis_id: str,
 ) -> AnalysisResponseSchema:
-    result = await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    result = session.execute(select(Analysis).where(Analysis.id == analysis_id))  # type: ignore[arg-type]
     analysis = result.scalar_one_or_none()
 
     if not analysis:
@@ -76,21 +76,21 @@ async def get_analysis(
     return response
 
 
-async def list_analyses(
-    session: AsyncSession,
+def list_analyses(
+    session: Session,  # type: ignore[type-arg]
 ) -> list[AnalysisGalleryItemSchema]:
-    result = await session.execute(select(Analysis))
+    result = session.execute(select(Analysis))
     analyses = result.scalars().all()
 
     return [AnalysisGalleryItemSchema.model_validate(a) for a in analyses]
 
 
-async def update_analysis(
-    session: AsyncSession,
+def update_analysis(
+    session: Session,  # type: ignore[type-arg]
     analysis_id: str,
     data: AnalysisUpdateSchema,
 ) -> AnalysisResponseSchema:
-    result = await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    result = session.execute(select(Analysis).where(Analysis.id == analysis_id))  # type: ignore[arg-type]
     analysis = result.scalar_one_or_none()
 
     if not analysis:
@@ -119,51 +119,53 @@ async def update_analysis(
 
     analysis.updated_at = datetime.now(UTC)
 
-    await session.commit()
-    await session.refresh(analysis)
+    session.commit()
+    session.refresh(analysis)
 
     response = AnalysisResponseSchema.model_validate(analysis)
     response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
     return response
 
 
-async def delete_analysis(
-    session: AsyncSession,
+def delete_analysis(
+    session: Session,  # type: ignore[type-arg]
     analysis_id: str,
 ) -> None:
-    result = await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    result = session.execute(select(Analysis).where(Analysis.id == analysis_id))  # type: ignore[arg-type]
     analysis = result.scalar_one_or_none()
 
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
 
-    await session.execute(delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))
+    session.execute(delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
 
-    await session.delete(analysis)
-    await session.commit()
+    session.delete(analysis)
+    session.commit()
 
 
-async def link_datasource(
-    session: AsyncSession,
+def link_datasource(
+    session: Session,  # type: ignore[type-arg]
     analysis_id: str,
     datasource_id: str,
 ) -> None:
-    result = await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    result = session.execute(select(Analysis).where(Analysis.id == analysis_id))  # type: ignore[arg-type]
     analysis = result.scalar_one_or_none()
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
 
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
     if not datasource:
         raise ValueError(f'DataSource {datasource_id} not found')
 
-    result = await session.execute(
+    result = session.execute(
         select(AnalysisDataSource).where(
-            AnalysisDataSource.analysis_id == analysis_id,
-            AnalysisDataSource.datasource_id == datasource_id,
+            and_(
+                AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
+                AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
+            )
         )
-    )
+    )  # type: ignore[arg-type]
     existing = result.scalar_one_or_none()
     if existing:
         return
@@ -193,30 +195,32 @@ async def link_datasource(
         analysis.pipeline_definition['tabs'] = tabs
         analysis.updated_at = datetime.now(UTC)
 
-    await session.commit()
+    session.commit()
 
 
-async def unlink_datasource(
-    session: AsyncSession,
+def unlink_datasource(
+    session: Session,  # type: ignore[type-arg]
     analysis_id: str,
     datasource_id: str,
 ) -> None:
-    result = await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+    result = session.execute(select(Analysis).where(Analysis.id == analysis_id))  # type: ignore[arg-type]
     analysis = result.scalar_one_or_none()
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
 
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
     if not datasource:
         raise ValueError(f'DataSource {datasource_id} not found')
 
-    await session.execute(
+    session.execute(
         delete(AnalysisDataSource).where(
-            AnalysisDataSource.analysis_id == analysis_id,
-            AnalysisDataSource.datasource_id == datasource_id,
+            and_(
+                AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
+                AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
+            )
         )
-    )
+    )  # type: ignore[arg-type]
 
     datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
     if datasource_id in datasource_ids:
@@ -230,4 +234,4 @@ async def unlink_datasource(
         analysis.pipeline_definition['tabs'] = next_tabs
         analysis.updated_at = datetime.now(UTC)
 
-    await session.commit()
+    session.commit()

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from core.database import get_db
 from modules.locks import schemas, service
@@ -8,14 +8,14 @@ router = APIRouter(prefix='/locks', tags=['locks'])
 
 
 @router.post('/{resource_id}/acquire', response_model=schemas.LockResponse)
-async def acquire_lock(
+def acquire_lock(
     resource_id: str,
     request: schemas.LockAcquireRequest,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Acquire a lock on a resource."""
     try:
-        return await service.acquire_lock(
+        return service.acquire_lock(
             session,
             resource_id,
             request.client_id,
@@ -28,14 +28,14 @@ async def acquire_lock(
 
 
 @router.post('/{resource_id}/heartbeat', response_model=schemas.LockResponse)
-async def heartbeat(
+def heartbeat(
     resource_id: str,
     request: schemas.LockHeartbeatRequest,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Extend lock lease via heartbeat."""
     try:
-        return await service.heartbeat(
+        return service.heartbeat(
             session,
             resource_id,
             request.client_id,
@@ -48,14 +48,14 @@ async def heartbeat(
 
 
 @router.post('/{resource_id}/release')
-async def release_lock(
+def release_lock(
     resource_id: str,
     request: schemas.LockReleaseRequest,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Release a lock."""
     try:
-        await service.release_lock(
+        service.release_lock(
             session,
             resource_id,
             request.client_id,
@@ -69,13 +69,13 @@ async def release_lock(
 
 
 @router.get('/{resource_id}', response_model=schemas.LockStatusResponse)
-async def get_lock_status(
+def get_lock_status(
     resource_id: str,
     client_id: str | None = None,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Get current lock status for a resource."""
     try:
-        return await service.get_lock_status(session, resource_id, client_id)
+        return service.get_lock_status(session, resource_id, client_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to get lock status: {str(e)}')

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from core.database import get_db
 from core.error_handlers import handle_errors
@@ -13,16 +13,16 @@ router = APIRouter(prefix='/compute', tags=['compute'])
 
 @router.post('/preview', response_model=schemas.StepPreviewResponse)
 @handle_errors(operation='preview step')
-async def preview_step(
+def preview_step(
     request: schemas.StepPreviewRequest,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Preview the result of a pipeline step with pagination."""
     resource_config = None
     if request.resource_config:
         resource_config = request.resource_config.model_dump()
 
-    return await service.preview_step(
+    return service.preview_step(
         session=session,
         datasource_id=request.datasource_id,
         pipeline_steps=request.pipeline_steps,
@@ -36,12 +36,12 @@ async def preview_step(
 
 @router.post('/schema', response_model=schemas.StepSchemaResponse)
 @handle_errors(operation='get step schema')
-async def get_step_schema(
+def get_step_schema(
     request: schemas.StepSchemaRequest,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Get the output schema of a pipeline step (for pivot/unpivot dynamic columns)."""
-    return await service.get_step_schema(
+    return service.get_step_schema(
         session=session,
         datasource_id=request.datasource_id,
         pipeline_steps=request.pipeline_steps,
@@ -137,12 +137,12 @@ def get_engine_defaults():
 
 @router.post('/export')
 @handle_errors(operation='export data')
-async def export_data(
+def export_data(
     request: schemas.ExportRequest,
-    session: AsyncSession = Depends(get_db),
+    session: Session = Depends(get_db),
 ):
     """Export pipeline result to file (download or save to filesystem)."""
-    file_bytes, filename, content_type = await service.export_data(
+    file_bytes, filename, content_type = service.export_data(
         session=session,
         datasource_id=request.datasource_id,
         pipeline_steps=request.pipeline_steps,

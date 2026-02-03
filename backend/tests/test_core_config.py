@@ -32,7 +32,7 @@ class TestSettings:
         settings = Settings()
 
         assert settings.debug is False
-        assert settings.database_url == 'sqlite+aiosqlite:///./database/app.db'
+        assert settings.database_url == 'sqlite+libsql:///./database/app.db'
         assert 'uploads' in str(settings.upload_dir)
         assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.job_timeout == 300
@@ -42,7 +42,7 @@ class TestSettings:
     def test_custom_settings_from_env(self, monkeypatch):
         """Test configuration from environment variables."""
         monkeypatch.setenv('DEBUG', 'true')
-        monkeypatch.setenv('DATABASE_URL', 'sqlite+aiosqlite:///./test.db')
+        monkeypatch.setenv('DATABASE_URL', 'sqlite+libsql:///./test.db')
         monkeypatch.setenv('UPLOAD_DIR', '/tmp/uploads')
         monkeypatch.setenv('UPLOAD_CHUNK_SIZE', '2000000')
         monkeypatch.setenv('JOB_TIMEOUT', '3600')
@@ -50,7 +50,7 @@ class TestSettings:
         settings = Settings()
 
         assert settings.debug is True
-        assert settings.database_url == 'sqlite+aiosqlite:///./test.db'
+        assert settings.database_url == 'sqlite+libsql:///./test.db'
         assert settings.upload_dir == Path('/tmp/uploads')
         assert settings.upload_chunk_size == 2000000
         assert settings.job_timeout == 3600

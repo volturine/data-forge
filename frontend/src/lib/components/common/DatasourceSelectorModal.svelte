@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { onClickOutside, Debounced } from 'runed';
-	import { FileSpreadsheet, FileJson, FileType, Database, Globe, Snowflake, X } from 'lucide-svelte';
+	import {
+		FileSpreadsheet,
+		FileBracesCorner,
+		FileType,
+		Database,
+		Globe,
+		Snowflake,
+		X
+	} from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
 
 	interface Props {
@@ -38,11 +46,11 @@
 			case 'csv':
 				return FileSpreadsheet;
 			case 'json':
-				return FileJson;
+				return FileBracesCorner;
 			case 'parquet':
 				return FileType;
 			case 'ndjson':
-				return FileJson;
+				return FileBracesCorner;
 			case 'excel':
 				return FileSpreadsheet;
 			default:

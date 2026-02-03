@@ -11,7 +11,7 @@
 		Pencil,
 		RefreshCw,
 		FileSpreadsheet,
-		FileJson,
+		FileBracesCorner,
 		FileType,
 		Hash,
 		Check,
@@ -230,11 +230,11 @@
 									{#if fileType === 'csv'}
 										<FileSpreadsheet size={10} />
 									{:else if fileType === 'json'}
-										<FileJson size={10} />
+										<FileBracesCorner size={10} />
 									{:else if fileType === 'parquet'}
 										<FileType size={10} />
 									{:else if fileType === 'ndjson'}
-										<FileJson size={10} />
+										<FileBracesCorner size={10} />
 									{:else}
 										<FileText size={10} />
 									{/if}

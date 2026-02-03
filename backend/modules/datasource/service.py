@@ -9,7 +9,7 @@ import polars as pl
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError, FileError
@@ -63,8 +63,8 @@ DTYPE_MAP = {
 logger = logging.getLogger(__name__)
 
 
-async def create_file_datasource(
-    session: AsyncSession,
+def create_file_datasource(
+    session: Session,
     name: str,
     file_path: str,
     file_type: str,
@@ -117,15 +117,15 @@ async def create_file_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     # Extract and cache schema immediately
     try:
-        schema_info = await _extract_schema(datasource, sheet_name=sheet_name)
+        schema_info = _extract_schema(datasource, sheet_name=sheet_name)
         datasource.schema_cache = schema_info.model_dump()
-        await session.commit()
-        await session.refresh(datasource)
+        session.commit()
+        session.refresh(datasource)
         logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
     except Exception as e:
         logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
@@ -296,8 +296,8 @@ def _collect_preview_rows(
     return rows
 
 
-async def create_database_datasource(
-    session: AsyncSession,
+def create_database_datasource(
+    session: Session,
     name: str,
     connection_string: str,
     query: str,
@@ -318,14 +318,14 @@ async def create_database_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     return DataSourceResponse.model_validate(datasource)
 
 
-async def create_api_datasource(
-    session: AsyncSession,
+def create_api_datasource(
+    session: Session,
     name: str,
     url: str,
     method: str = 'GET',
@@ -350,14 +350,14 @@ async def create_api_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     return DataSourceResponse.model_validate(datasource)
 
 
-async def create_duckdb_datasource(
-    session: AsyncSession,
+def create_duckdb_datasource(
+    session: Session,
     name: str,
     db_path: str | None,
     query: str,
@@ -381,15 +381,15 @@ async def create_duckdb_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     logger.info(f'Created DuckDB datasource {datasource_id} ({name})')
     return DataSourceResponse.model_validate(datasource)
 
 
-async def create_iceberg_datasource(
-    session: AsyncSession,
+def create_iceberg_datasource(
+    session: Session,
     name: str,
     metadata_path: str,
     snapshot_id: int | None = None,
@@ -421,14 +421,14 @@ async def create_iceberg_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     try:
-        schema_info = await _extract_schema(datasource)
+        schema_info = _extract_schema(datasource)
         datasource.schema_cache = schema_info.model_dump()
-        await session.commit()
-        await session.refresh(datasource)
+        session.commit()
+        session.refresh(datasource)
         logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
     except Exception as e:
         logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
@@ -437,14 +437,14 @@ async def create_iceberg_datasource(
     return DataSourceResponse.model_validate(datasource)
 
 
-async def get_datasource_schema(
-    session: AsyncSession,
+def get_datasource_schema(
+    session: Session,
     datasource_id: str,
     sheet_name: str | None = None,
     refresh: bool = False,
 ) -> SchemaInfo:
     """Get or extract schema for a datasource."""
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -452,7 +452,7 @@ async def get_datasource_schema(
 
     if refresh and sheet_name is None:
         datasource.schema_cache = None
-        await session.commit()
+        session.commit()
 
     # Check if we have cached schema with row_count and sample_value
     if datasource.schema_cache and sheet_name is None and not refresh:
@@ -464,11 +464,11 @@ async def get_datasource_schema(
             return cached
 
     logger.info(f'Extracting schema for datasource {datasource_id}')
-    schema_info = await _extract_schema(datasource, sheet_name=sheet_name)
+    schema_info = _extract_schema(datasource, sheet_name=sheet_name)
 
     if sheet_name is None:
         datasource.schema_cache = schema_info.model_dump()
-        await session.commit()
+        session.commit()
 
     logger.info(f'Schema extracted and cached for datasource {datasource_id}: {len(schema_info.columns)} columns')
     return schema_info
@@ -511,7 +511,7 @@ def _get_first_non_null_samples_eager(frame: pl.DataFrame, max_rows: int = 1000)
     return sample_values
 
 
-async def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
+def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
     if datasource.source_type == 'file':
         config = {
             'source_type': datasource.source_type,
@@ -699,8 +699,8 @@ def _normalize_iceberg_path(metadata_path: str) -> str:
     return str(path)
 
 
-async def get_datasource(session: AsyncSession, datasource_id: str) -> DataSourceResponse:
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -709,31 +709,31 @@ async def get_datasource(session: AsyncSession, datasource_id: str) -> DataSourc
     return DataSourceResponse.model_validate(datasource)
 
 
-async def list_datasources(session: AsyncSession) -> list[DataSourceResponse]:
-    result = await session.execute(select(DataSource))
+def list_datasources(session: Session) -> list[DataSourceResponse]:
+    result = session.execute(select(DataSource))
     datasources = result.scalars().all()
 
     # Populate schema_cache for datasources that don't have it
     for ds in datasources:
         if ds.schema_cache is None:
             try:
-                schema_info = await _extract_schema(ds)
+                schema_info = _extract_schema(ds)
                 ds.schema_cache = schema_info.model_dump()
                 logger.info(f'Populated schema cache for datasource {ds.id}')
             except Exception as e:
                 logger.warning(f'Failed to extract schema for datasource {ds.id}: {e}')
 
-    await session.commit()
+    session.commit()
     return [DataSourceResponse.model_validate(ds) for ds in datasources]
 
 
-async def update_datasource(
-    session: AsyncSession,
+def update_datasource(
+    session: Session,
     datasource_id: str,
     update: DataSourceUpdate,
 ) -> DataSourceResponse:
     """Update a datasource configuration."""
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -778,16 +778,16 @@ async def update_datasource(
             if schema_modified or parsing_changed:
                 datasource.schema_cache = None
 
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     # Re-extract schema if it was modified
     if update.config and 'column_schema' in update.config:
         try:
-            schema_info = await _extract_schema(datasource)
+            schema_info = _extract_schema(datasource)
             datasource.schema_cache = schema_info.model_dump()
-            await session.commit()
-            await session.refresh(datasource)
+            session.commit()
+            session.refresh(datasource)
         except Exception as e:
             logger.warning(f'Failed to extract schema after update: {e}')
 
@@ -795,9 +795,9 @@ async def update_datasource(
     return DataSourceResponse.model_validate(datasource)
 
 
-async def delete_datasource(session: AsyncSession, datasource_id: str) -> None:
+def delete_datasource(session: Session, datasource_id: str) -> None:
     """Delete a datasource and its associated file if it exists."""
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -829,6 +829,6 @@ async def delete_datasource(session: AsyncSession, datasource_id: str) -> None:
                     details={'file_path': str(file_path), 'error': str(e)},
                 )
 
-    await session.delete(datasource)
-    await session.commit()
+    session.delete(datasource)
+    session.commit()
     logger.info(f'Deleted datasource {datasource_id}')

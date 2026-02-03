@@ -167,10 +167,9 @@
 		if (!step) return;
 		analysisStore.updateStepConfig(step.id, cloneConfig(draftConfig));
 		if ((step as PipelineStep & { is_applied?: boolean }).is_applied === false) {
-			analysisStore.updateStep(
-				step.id,
-				({ is_applied: true } as Partial<PipelineStep> & { is_applied: boolean })
-			);
+			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep> & {
+				is_applied: boolean;
+			});
 		}
 		onConfigApply?.();
 	}

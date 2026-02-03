@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from modules.locks.models import Lock
 from modules.locks.schemas import LockResponse, LockStatusResponse
@@ -12,12 +12,12 @@ LOCK_TTL_SECONDS = 30  # Lock expires after 30 seconds
 HEARTBEAT_INTERVAL_SECONDS = 10  # Heartbeat every 10 seconds
 
 
-async def cleanup_expired_locks(session: AsyncSession) -> None:
+def cleanup_expired_locks(session: Session) -> None:
     """Remove all expired locks."""
     now = datetime.now(UTC)
     # SQLite stores naive datetimes, so we need to compare carefully
     # Fetch all locks and filter in Python to avoid timezone issues
-    result = await session.execute(select(Lock))
+    result = session.execute(select(Lock))
     locks = result.scalars().all()
 
     for lock in locks:
@@ -25,13 +25,13 @@ async def cleanup_expired_locks(session: AsyncSession) -> None:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
         if expires_at < now:
-            await session.delete(lock)
+            session.delete(lock)
 
-    await session.commit()
+    session.commit()
 
 
-async def acquire_lock(
-    session: AsyncSession,
+def acquire_lock(
+    session: Session,
     resource_id: str,
     client_id: str,
     client_signature: str,
@@ -42,12 +42,12 @@ async def acquire_lock(
         ValueError: If resource is already locked by another client.
     """
     # Clean up expired locks first
-    await cleanup_expired_locks(session)
+    cleanup_expired_locks(session)
 
     now = datetime.now(UTC)
 
     # Check if resource is already locked
-    result = await session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -73,8 +73,8 @@ async def acquire_lock(
         session.add(lock)
         existing = lock
 
-    await session.commit()
-    await session.refresh(existing)
+    session.commit()
+    session.refresh(existing)
 
     return LockResponse(
         resource_id=existing.resource_id,
@@ -84,8 +84,8 @@ async def acquire_lock(
     )
 
 
-async def heartbeat(
-    session: AsyncSession,
+def heartbeat(
+    session: Session,
     resource_id: str,
     client_id: str,
     lock_token: str,
@@ -97,7 +97,7 @@ async def heartbeat(
     """
     now = datetime.now(UTC)
 
-    result = await session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
     lock = result.scalar_one_or_none()
 
     if not lock:
@@ -116,16 +116,16 @@ async def heartbeat(
 
     if expires_at < now:
         # Lock expired - remove it
-        await session.delete(lock)
-        await session.commit()
+        session.delete(lock)
+        session.commit()
         raise ValueError('Lock expired')
 
     # Extend lease
     lock.expires_at = now + timedelta(seconds=LOCK_TTL_SECONDS)
     lock.last_heartbeat = now
 
-    await session.commit()
-    await session.refresh(lock)
+    session.commit()
+    session.refresh(lock)
 
     return LockResponse(
         resource_id=lock.resource_id,
@@ -135,8 +135,8 @@ async def heartbeat(
     )
 
 
-async def release_lock(
-    session: AsyncSession,
+def release_lock(
+    session: Session,
     resource_id: str,
     client_id: str,
     lock_token: str,
@@ -146,7 +146,7 @@ async def release_lock(
     Raises:
         ValueError: If lock doesn't exist or client/token mismatch.
     """
-    result = await session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
     lock = result.scalar_one_or_none()
 
     if not lock:
@@ -156,20 +156,20 @@ async def release_lock(
     if lock.client_id != client_id or lock.lock_token != lock_token:
         raise ValueError('Cannot release lock held by another client')
 
-    await session.delete(lock)
-    await session.commit()
+    session.delete(lock)
+    session.commit()
 
 
-async def get_lock_status(
-    session: AsyncSession,
+def get_lock_status(
+    session: Session,
     resource_id: str,
     client_id: str | None = None,
 ) -> LockStatusResponse:
     """Get current lock status for a resource."""
     # Clean up expired locks first
-    await cleanup_expired_locks(session)
+    cleanup_expired_locks(session)
 
-    result = await session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
     lock = result.scalar_one_or_none()
 
     if not lock:

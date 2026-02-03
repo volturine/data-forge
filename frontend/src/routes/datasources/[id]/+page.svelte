@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
-	import { ArrowLeft, Save, Loader2, AlertCircle } from 'lucide-svelte';
+	import { ArrowLeft, Save, Loader, CircleAlert } from 'lucide-svelte';
 	import type {
 		DataSource,
 		SchemaInfo,
@@ -37,7 +37,6 @@
 		},
 		enabled: !!datasourceId && !!datasourceQuery.data
 	}));
-	let refreshPending = $state(false);
 
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: { name: string; config: Record<string, unknown> }) => {
@@ -362,10 +361,8 @@
 
 	async function handleRefreshRows() {
 		if (!datasourceId) return;
-		refreshPending = true;
 		await getDatasourceSchema(datasourceId, { refresh: true });
 		await schemaQuery.refetch();
-		refreshPending = false;
 	}
 </script>
 
@@ -388,7 +385,7 @@
 			disabled={!hasChanges || updateMutation.isPending}
 		>
 			{#if updateMutation.isPending}
-				<Loader2 size={16} class="spin" />
+				<Loader size={16} class="spin" />
 				Saving...
 			{:else}
 				<Save size={16} />
@@ -399,12 +396,12 @@
 
 	{#if datasourceQuery.isLoading}
 		<div class="loading-state">
-			<Loader2 size={32} class="spin" />
+			<Loader size={32} class="spin" />
 			<p>Loading data source...</p>
 		</div>
 	{:else if datasourceQuery.isError}
 		<div class="error-box">
-			<AlertCircle size={20} />
+			<CircleAlert size={20} />
 			<div>
 				<p class="error-title">Error loading data source</p>
 				<p class="error-message">
@@ -450,7 +447,7 @@
 
 		{#if updateMutation.isError}
 			<div class="error-box">
-				<AlertCircle size={20} />
+				<CircleAlert size={20} />
 				<div>
 					<p class="error-title">Error saving changes</p>
 					<p class="error-message">
@@ -540,17 +537,17 @@
 
 					{#if isSavingParsing}
 						<div class="loading-state">
-							<Loader2 size={24} class="spin" />
+							<Loader size={24} class="spin" />
 							<p>Refreshing schema...</p>
 						</div>
 					{:else if schemaQuery.isLoading}
 						<div class="loading-state">
-							<Loader2 size={24} class="spin" />
+							<Loader size={24} class="spin" />
 							<p>Loading schema...</p>
 						</div>
 					{:else if schemaQuery.isError}
 						<div class="error-box">
-							<AlertCircle size={20} />
+							<CircleAlert size={20} />
 							<p>Error loading schema</p>
 						</div>
 					{:else if columns.length > 0}

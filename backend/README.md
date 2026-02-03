@@ -94,14 +94,13 @@ backend/
 
 1. Create model in appropriate module (e.g., `modules/mymodule/models.py`):
    ```python
-   from sqlalchemy import String
-   from sqlalchemy.orm import Mapped, mapped_column
-   from core.database import Base
-   
-   class MyModel(Base):
-       __tablename__ = 'my_table'
-       id: Mapped[str] = mapped_column(String, primary_key=True)
-       name: Mapped[str] = mapped_column(String, nullable=False)
+    from sqlalchemy import Column, String
+    from sqlmodel import Field, SQLModel
+    
+    class MyModel(SQLModel, table=True):
+        __tablename__ = 'my_table'
+        id: str = Field(primary_key=True, sa_column=Column(String, primary_key=True))
+        name: str = Field(sa_column=Column(String, nullable=False))
    ```
 
 2. Import model in `database/alembic/env.py`:
@@ -147,7 +146,7 @@ Once the server is running, visit:
 Configuration is managed through `core/config.py` using Pydantic settings.
 
 Key settings:
-- `DATABASE_URL` - Database connection string (default: `sqlite+aiosqlite:///./database/app.db`)
+- `DATABASE_URL` - Database connection string (default: `sqlite+libsql:///./database/app.db`)
 - `UPLOAD_DIR` - File upload directory (default: `./data/uploads`)
 - `RESULTS_DIR` - Results storage directory (default: `./data/results`)
 - `UPLOAD_CHUNK_SIZE` - Upload chunk size in bytes (default: 5MB)
@@ -159,7 +158,7 @@ Override in `.env` file or environment variables.
 
 1. Set environment variables:
    ```bash
-   export DATABASE_URL="sqlite+aiosqlite:///./database/app.db"
+   export DATABASE_URL="sqlite+libsql:///./database/app.db"
    # ... other settings
    ```
 

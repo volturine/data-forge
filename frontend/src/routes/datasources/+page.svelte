@@ -156,13 +156,13 @@
 							</span>
 							<span class="col-name">{datasource.name}</span>
 							<span class="col-type">
-							<span
-								class="badge"
-								class:badge-info={datasource.source_type === 'file'}
-								class:badge-success={datasource.source_type === 'database'}
-								class:badge-warning={datasource.source_type === 'api'}
-								class:badge-iceberg={datasource.source_type === 'iceberg'}
-							>
+								<span
+									class="badge"
+									class:badge-info={datasource.source_type === 'file'}
+									class:badge-success={datasource.source_type === 'database'}
+									class:badge-warning={datasource.source_type === 'api'}
+									class:badge-iceberg={datasource.source_type === 'iceberg'}
+								>
 									{#if datasource.source_type === 'file'}
 										{getFileType(datasource) ?? 'file'}
 									{:else}

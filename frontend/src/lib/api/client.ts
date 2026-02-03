@@ -68,19 +68,16 @@ export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAs
 				)
 			);
 		}
-		return ResultAsync.fromPromise(
-			response.json() as Promise<T>,
-			(): ApiError => {
-				track({
-					event: 'api_error',
-					action: options?.method ?? 'GET',
-					page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-					target: endpoint,
-					meta: { type: 'parse' }
-				});
-				return createApiError('parse', 'Failed to parse response JSON');
-			}
-		);
+		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
+			track({
+				event: 'api_error',
+				action: options?.method ?? 'GET',
+				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
+				target: endpoint,
+				meta: { type: 'parse' }
+			});
+			return createApiError('parse', 'Failed to parse response JSON');
+		});
 	});
 }
 
@@ -127,18 +124,15 @@ export function apiBlobRequest(
 				)
 			);
 		}
-		return ResultAsync.fromPromise(
-			response.blob(),
-			(): ApiError => {
-				track({
-					event: 'api_error',
-					action: options?.method ?? 'GET',
-					page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-					target: endpoint,
-					meta: { type: 'parse' }
-				});
-				return createApiError('parse', 'Failed to read response');
-			}
-		);
+		return ResultAsync.fromPromise(response.blob(), (): ApiError => {
+			track({
+				event: 'api_error',
+				action: options?.method ?? 'GET',
+				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
+				target: endpoint,
+				meta: { type: 'parse' }
+			});
+			return createApiError('parse', 'Failed to read response');
+		});
 	});
 }

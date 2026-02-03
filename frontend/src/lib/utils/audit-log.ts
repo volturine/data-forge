@@ -60,7 +60,8 @@ function redactValue(
 	el?: Element | null
 ): { value: string; redacted: boolean } {
 	if (el && el.closest('[data-audit="redact"]')) return { value: '[redacted]', redacted: true };
-	if (el instanceof HTMLInputElement && el.type === 'password') return { value: '[redacted]', redacted: true };
+	if (el instanceof HTMLInputElement && el.type === 'password')
+		return { value: '[redacted]', redacted: true };
 	if (mask.test(name)) return { value: '[redacted]', redacted: true };
 	if (jwt.test(value)) return { value: '[redacted]', redacted: true };
 	if (value.length > limit) return { value: value.slice(0, limit), redacted: true };
@@ -84,11 +85,21 @@ function extractFields(form: HTMLFormElement): AuditField[] {
 	const fields: AuditField[] = [];
 	const elements = Array.from(form.elements);
 	for (const element of elements) {
-		if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement)) {
+		if (
+			!(
+				element instanceof HTMLInputElement ||
+				element instanceof HTMLSelectElement ||
+				element instanceof HTMLTextAreaElement
+			)
+		) {
 			continue;
 		}
 		if (element.closest('[data-audit="off"]')) continue;
-		const name = element.name || element.id || element.getAttribute('data-audit-label') || element.tagName.toLowerCase();
+		const name =
+			element.name ||
+			element.id ||
+			element.getAttribute('data-audit-label') ||
+			element.tagName.toLowerCase();
 		const raw = element.value ?? '';
 		const { value, redacted } = redactValue(name, raw, element);
 		fields.push({ name, value, redacted });
@@ -160,7 +171,13 @@ export function installAuditListeners() {
 		const target = event.target instanceof Element ? event.target : null;
 		if (shouldSkipTarget(target)) return;
 		const label = getTargetLabel(target);
-		pushLog({ event: 'click', action: 'click', target: label, page: state.page, session_id: state.session });
+		pushLog({
+			event: 'click',
+			action: 'click',
+			target: label,
+			page: state.page,
+			session_id: state.session
+		});
 	};
 
 	const onSubmit = (event: Event) => {

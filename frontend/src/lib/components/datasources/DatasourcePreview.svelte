@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { Table, FileJson } from 'lucide-svelte';
+	import { Table, FileBracesCorner } from 'lucide-svelte';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
 
@@ -122,7 +122,7 @@
 				class:active={viewMode === 'schema'}
 				onclick={() => (viewMode = 'schema')}
 			>
-				<FileJson size={14} />
+				<FileBracesCorner size={14} />
 				Schema
 			</button>
 		</div>
@@ -136,13 +136,9 @@
 			</div>
 		{:else}
 			<div class="pagination">
-				<button class="page-btn" onclick={goPrev} disabled={!canPrev || isLoading}>
-					Prev
-				</button>
+				<button class="page-btn" onclick={goPrev} disabled={!canPrev || isLoading}> Prev </button>
 				<span class="page-info">Page {page}</span>
-				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}>
-					Next
-				</button>
+				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}> Next </button>
 			</div>
 			<DataTable columns={data?.columns ?? []} data={data?.data ?? []} loading={isLoading} />
 		{/if}

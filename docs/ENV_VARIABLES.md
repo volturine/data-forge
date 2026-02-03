@@ -12,7 +12,7 @@ This document lists ALL environment variables supported by the application.
 | `DEBUG`                       | boolean | false                                   | Enable debug mode (verbose logging, SQL echo)        |
 | `PORT`                        | integer | 8000                                    | Port to bind (Docker only)                           |
 | **Database**                  |         |                                         |                                                      |
-| `DATABASE_URL`                | string  | sqlite+aiosqlite:///./database/app.db   | Database connection URL                              |
+| `DATABASE_URL`                | string  | sqlite+libsql:///./database/app.db      | Database connection URL                              |
 | **CORS**                      |         |                                         |                                                      |
 | `CORS_ORIGINS`                | string  | localhost:3000,...                      | Comma-separated allowed origins                      |
 | **File Storage**              |         |                                         |                                                      |
@@ -138,7 +138,7 @@ EXPORTS_DIR=/app/data/exports
 ### SQLite (Default)
 
 ```bash
-DATABASE_URL="sqlite+aiosqlite:///./database/app.db"
+DATABASE_URL="sqlite+libsql:///./database/app.db"
 ```
 
 ### PostgreSQL

@@ -1,4 +1,9 @@
-import type { CSVOptions, DataSource, IcebergDataSourceConfig, SchemaInfo } from '$lib/types/datasource';
+import type {
+	CSVOptions,
+	DataSource,
+	IcebergDataSourceConfig,
+	SchemaInfo
+} from '$lib/types/datasource';
 import { apiRequest } from './client';
 import { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
@@ -287,11 +292,16 @@ export function connectIceberg(
 	});
 }
 
-export function resolveIcebergMetadata(metadataPath: string): ResultAsync<{ metadata_path: string }, ApiError> {
+export function resolveIcebergMetadata(
+	metadataPath: string
+): ResultAsync<{ metadata_path: string }, ApiError> {
 	const params = new URLSearchParams({ metadata_path: metadataPath });
-	return apiRequest<{ metadata_path: string }>(`/v1/datasource/iceberg/resolve?${params.toString()}`, {
-		method: 'GET'
-	});
+	return apiRequest<{ metadata_path: string }>(
+		`/v1/datasource/iceberg/resolve?${params.toString()}`,
+		{
+			method: 'GET'
+		}
+	);
 }
 
 export function listDatasources(): ResultAsync<DataSource[], ApiError> {

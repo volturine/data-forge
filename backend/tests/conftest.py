@@ -1,57 +1,46 @@
 import uuid
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
 import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 from core.config import settings
-from core.database import Base, get_db
+from core.database import get_db
 from main import app
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.datasource.models import DataSource
 
 
 @pytest.fixture(scope='function')
-async def test_engine():
-    engine = create_async_engine(
-        'sqlite+aiosqlite:///:memory:',
+def test_engine():
+    engine = create_engine(
+        'sqlite:///:memory:',
         echo=False,
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
     )
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
+    SQLModel.metadata.create_all(engine)
     yield engine
-
-    await engine.dispose()
 
 
 @pytest.fixture(scope='function')
-async def test_db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    AsyncTestingSessionLocal = async_sessionmaker(
-        test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    async with AsyncTestingSessionLocal() as session:
+def test_db_session(test_engine):
+    with Session(test_engine) as session:
         yield session
 
 
 @pytest.fixture(scope='function')
-async def client(test_db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    async def override_get_db():
+def client(test_db_session):
+    def override_get_db():
         yield test_db_session
 
     app.dependency_overrides[get_db] = override_get_db
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as ac:
+    with TestClient(app) as ac:
         yield ac
-
     app.dependency_overrides.clear()
 
 
@@ -126,7 +115,7 @@ def sample_json_file(temp_upload_dir: Path) -> Path:
 
 
 @pytest.fixture(scope='function')
-async def sample_datasource(test_db_session: AsyncSession, sample_csv_file: Path) -> DataSource:
+def sample_datasource(test_db_session: Session, sample_csv_file: Path) -> DataSource:
     datasource_id = str(uuid.uuid4())
 
     config = {
@@ -144,14 +133,14 @@ async def sample_datasource(test_db_session: AsyncSession, sample_csv_file: Path
     )
 
     test_db_session.add(datasource)
-    await test_db_session.commit()
-    await test_db_session.refresh(datasource)
+    test_db_session.commit()
+    test_db_session.refresh(datasource)
 
     return datasource
 
 
 @pytest.fixture(scope='function')
-async def sample_datasources(test_db_session: AsyncSession, sample_csv_file: Path, sample_parquet_file: Path) -> list[DataSource]:
+def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_parquet_file: Path) -> list[DataSource]:
     datasources = []
 
     for _idx, (file_path, file_type, name) in enumerate(
@@ -178,16 +167,16 @@ async def sample_datasources(test_db_session: AsyncSession, sample_csv_file: Pat
         test_db_session.add(datasource)
         datasources.append(datasource)
 
-    await test_db_session.commit()
+    test_db_session.commit()
 
     for datasource in datasources:
-        await test_db_session.refresh(datasource)
+        test_db_session.refresh(datasource)
 
     return datasources
 
 
 @pytest.fixture(scope='function')
-async def sample_analysis(test_db_session: AsyncSession, sample_datasource: DataSource) -> Analysis:
+def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     analysis_id = str(uuid.uuid4())
 
     pipeline_definition = {
@@ -230,14 +219,14 @@ async def sample_analysis(test_db_session: AsyncSession, sample_datasource: Data
     )
     test_db_session.add(link)
 
-    await test_db_session.commit()
-    await test_db_session.refresh(analysis)
+    test_db_session.commit()
+    test_db_session.refresh(analysis)
 
     return analysis
 
 
 @pytest.fixture(scope='function')
-async def sample_analyses(test_db_session: AsyncSession, sample_datasources: list[DataSource]) -> list[Analysis]:
+def sample_analyses(test_db_session: Session, sample_datasources: list[DataSource]) -> list[Analysis]:
     analyses = []
 
     for idx in range(3):
@@ -285,10 +274,10 @@ async def sample_analyses(test_db_session: AsyncSession, sample_datasources: lis
 
         analyses.append(analysis)
 
-    await test_db_session.commit()
+    test_db_session.commit()
 
     for analysis in analyses:
-        await test_db_session.refresh(analysis)
+        test_db_session.refresh(analysis)
 
     return analyses
 

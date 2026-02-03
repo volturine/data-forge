@@ -7,7 +7,7 @@ This directory contains Alembic migrations for the FastAPI backend database.
 The project uses:
 - **Alembic** for database migrations
 - **SQLAlchemy 2.0** with async support
-- **aiosqlite** for async SQLite operations
+- **sqlalchemy-libsql** for libSQL support
 - **SQLite** database (configured in `core/config.py`)
 
 ## Directory Structure
@@ -85,13 +85,13 @@ uv run alembic -c database/alembic.ini heads
 The database URL is configured in `core/config.py`:
 
 ```python
-database_url: str = 'sqlite+aiosqlite:///./database/app.db'
+database_url: str = 'sqlite+libsql:///./database/app.db'
 ```
 
 You can override this in `.env`:
 
 ```env
-DATABASE_URL=sqlite+aiosqlite:///./database/app.db
+DATABASE_URL=sqlite+libsql:///./database/app.db
 ```
 
 ### Adding New Models
@@ -122,14 +122,14 @@ Now that Alembic is set up, you should **run migrations instead of using `init_d
 **Before (in `main.py`):**
 ```python
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    await init_db()  # Creates tables directly - DON'T USE with Alembic
+def lifespan(app: FastAPI):
+    init_db()  # Creates tables directly - DON'T USE with Alembic
     yield
 ```
 
 **After (recommended approach):**
 
-1. Remove the `await init_db()` call from `main.py` (or keep it for backward compatibility)
+1. Remove the `init_db()` call from `main.py` (or keep it for backward compatibility)
 2. Run migrations before starting the application:
    ```bash
    # Apply migrations first
@@ -151,12 +151,11 @@ async def lifespan(app: FastAPI):
 
 ## Important Notes
 
-### Async Support
+### Sync Support
 
-The Alembic configuration is set up for async SQLAlchemy:
-- Uses `async_engine_from_config` in `env.py`
-- Runs migrations with `asyncio.run()`
-- Compatible with `aiosqlite` driver
+The Alembic configuration is set up for sync SQLAlchemy:
+- Uses `create_engine` in `env.py`
+- Compatible with `sqlalchemy-libsql` dialect
 
 ### SQLite Batch Mode
 
