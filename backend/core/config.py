@@ -43,11 +43,12 @@ class Settings(BaseSettings):
     database_url: str = 'sqlite+aiosqlite:///./database/app.db'
 
     # All data directories under root data/ folder
+    data_dir: Path = Field(default=DATA_DIR, alias='DATA_DIR')
     upload_dir: Path = Field(default=DATA_DIR / 'uploads', alias='UPLOAD_DIR')
     clean_dir: Path = Field(default=DATA_DIR / 'clean', alias='CLEAN_DIR')
     exports_dir: Path = Field(default=DATA_DIR / 'exports', alias='EXPORTS_DIR')
 
-    max_upload_size: int = Field(default=10 * 1024 * 1024 * 1024, alias='MAX_UPLOAD_SIZE')
+    upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
 
     # Engine idle timeout in seconds (default 5 minutes)
     # Engines will be terminated after this duration of inactivity (reset on save)
@@ -101,7 +102,7 @@ class Settings(BaseSettings):
         """Parse CORS origins from comma-separated string."""
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
 
-    @field_validator('upload_dir', 'clean_dir', 'exports_dir', mode='before')
+    @field_validator('data_dir', 'upload_dir', 'clean_dir', 'exports_dir', mode='before')
     @classmethod
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
@@ -124,12 +125,14 @@ class Settings(BaseSettings):
             raise ValueError(f'{info.field_name} must be positive, got {value}')
         return value
 
-    @field_validator('max_upload_size')
+    @field_validator('upload_chunk_size')
     @classmethod
-    def _validate_upload_size(cls, value: int) -> int:
-        """Ensure upload size is reasonable."""
+    def _validate_upload_chunk_size(cls, value: int) -> int:
+        """Ensure upload chunk size is reasonable."""
         if value < 1024:  # At least 1KB
-            raise ValueError(f'max_upload_size must be at least 1024 bytes, got {value}')
+            raise ValueError(f'upload_chunk_size must be at least 1024 bytes, got {value}')
+        if value > 100 * 1024 * 1024:
+            raise ValueError(f'upload_chunk_size must be at most 100MB, got {value}')
         return value
 
     @field_validator('polars_max_threads', 'polars_max_memory_mb', 'polars_streaming_chunk_size')
@@ -186,7 +189,7 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def _validate_directories_writable(self):
         """Ensure all directories are writable."""
-        for dir_name in ['upload_dir', 'clean_dir', 'exports_dir']:
+        for dir_name in ['data_dir', 'upload_dir', 'clean_dir', 'exports_dir']:
             dir_path = getattr(self, dir_name)
             if not os.access(dir_path, os.W_OK):
                 raise ValueError(f'{dir_name} is not writable: {dir_path}')

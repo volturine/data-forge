@@ -10,11 +10,11 @@
 		connectIceberg,
 		resolveIcebergMetadata,
 		connectFilePath,
-		validateFilePath
+		listDataFiles
 	} from '$lib/api/datasource';
 	import { preflightExcel, previewExcel, confirmExcel } from '$lib/api/excel';
 	import type { ExcelPreflightResponse, ExcelPreviewResponse } from '$lib/api/excel';
-	import type { BulkUploadResult } from '$lib/api/datasource';
+	import type { BulkUploadResult, FileListItem, FileListResponse } from '$lib/api/datasource';
 	import type { CSVOptions } from '$lib/types/datasource';
 
 	type Tab = 'file' | 'database' | 'api';
@@ -351,10 +351,11 @@
 	let pathValue = $state('');
 	let pathType = $state('parquet');
 	let pathOptions = $state('');
-	let pathValidation = $state<{ status: 'idle' | 'ok' | 'error'; message: string }>({
-		status: 'idle',
-		message: ''
-	});
+	let pickerOpen = $state(false);
+	let pickerPath = $state('');
+	let pickerLoading = $state(false);
+	let pickerError = $state<string | null>(null);
+	let pickerEntries = $state<FileListItem[]>([]);
 
 	async function handlePathConnect() {
 		if (!pathName || !pathValue) {
@@ -399,22 +400,36 @@
 		goto(resolve('/datasources'), { invalidateAll: true });
 	}
 
-	async function handleValidatePath() {
-		if (!pathValue) {
-			pathValidation = { status: 'error', message: 'Enter a path to validate' };
-			return;
-		}
-		const result = await validateFilePath(pathValue.trim(), pathType);
-		if (result.isErr()) {
-			pathValidation = { status: 'error', message: result.error.message || 'Path validation failed' };
-			return;
-		}
-		const value = result.value;
-		const mode = value.is_dir ? 'directory' : 'file';
-		pathValidation = {
-			status: 'ok',
-			message: `Found ${mode}: ${value.file_path}`
-		};
+	async function loadPicker(path?: string) {
+		pickerLoading = true;
+		pickerError = null;
+		const result = await listDataFiles(path);
+		result.match(
+			(response: FileListResponse) => {
+				pickerEntries = response.entries;
+				pickerPath = response.base_path;
+				pickerLoading = false;
+			},
+			(err: { message?: string }) => {
+				pickerError = err.message || 'Failed to load files';
+				pickerLoading = false;
+			}
+		);
+	}
+
+	async function openPicker() {
+		pickerOpen = true;
+		await loadPicker(pickerPath || undefined);
+	}
+
+	function closePicker() {
+		pickerOpen = false;
+		pickerError = null;
+	}
+
+	function selectPath(path: string) {
+		pathValue = path;
+		closePicker();
 	}
 
 	async function handleDuckDBConnect() {
@@ -727,16 +742,11 @@
 						/>
 						<p class="hint">Supports files or folders for parquet and ndjson.</p>
 						<div class="path-actions">
-							<button class="btn-secondary" type="button" onclick={handleValidatePath} disabled={loading}>
-								Test path
-							</button>
-							{#if pathValidation.status === 'ok'}
-								<span class="path-status ok">{pathValidation.message}</span>
-							{:else if pathValidation.status === 'error'}
-								<span class="path-status error">{pathValidation.message}</span>
-							{/if}
-						</div>
+						<button class="btn-secondary" type="button" onclick={openPicker} disabled={loading}>
+							Browse server
+						</button>
 					</div>
+				</div>
 
 					<div class="form-group">
 						<label for="path-type">Type</label>
@@ -760,12 +770,52 @@
 						<p class="hint">CSV options come from the CSV settings above.</p>
 					</div>
 
-					<button class="btn-primary" onclick={handlePathConnect} disabled={loading}>
-						{loading ? 'Creating...' : 'Create datasource'}
-					</button>
-				{/if}
+				<button class="btn-primary" onclick={handlePathConnect} disabled={loading}>
+					{loading ? 'Creating...' : 'Create datasource'}
+				</button>
+			{/if}
 
-				{#if file?.name.endsWith('.xlsx')}
+			{#if pickerOpen}
+				<div class="picker-backdrop" onclick={closePicker}>
+					<div class="picker" onclick={(e) => e.stopPropagation()}>
+						<div class="picker-header">
+							<h4>Data directory</h4>
+							<span class="picker-path">{pickerPath}</span>
+							<button class="btn-text" onclick={closePicker}>Close</button>
+						</div>
+						<div class="picker-body">
+							{#if pickerLoading}
+								<div class="picker-empty">Loading...</div>
+							{:else if pickerError}
+								<div class="picker-empty">{pickerError}</div>
+							{:else if pickerEntries.length === 0}
+								<div class="picker-empty">No files found</div>
+							{:else}
+								<div class="picker-list">
+									{#each pickerEntries as entry (entry.path)}
+										<button
+											class="picker-item"
+											onclick={() =>
+												entry.is_dir ? loadPicker(entry.path) : selectPath(entry.path)
+											}
+										>
+											<span class="picker-name">{entry.name}</span>
+											<span class="picker-type">{entry.is_dir ? 'folder' : 'file'}</span>
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+						<div class="picker-footer">
+							<button class="btn-secondary" onclick={() => loadPicker(pickerPath)} disabled={pickerLoading}>
+								Refresh
+							</button>
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			{#if file?.name.endsWith('.xlsx')}
 					<div class="excel-preflight">
 						<h3>Excel Table Selection</h3>
 						<div class="form-row">
@@ -1240,21 +1290,88 @@
 		gap: var(--space-2);
 		flex-wrap: wrap;
 	}
-	.path-status {
+	.picker-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.4);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+		padding: var(--space-4);
+	}
+	.picker {
+		background: var(--panel-bg);
+		border: 1px solid var(--panel-border);
+		border-radius: var(--radius-md);
+		box-shadow: var(--shadow-lg);
+		max-width: 720px;
+		width: 100%;
+		max-height: 70vh;
+		display: flex;
+		flex-direction: column;
+	}
+	.picker-header {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: var(--space-2);
+		padding: var(--space-4);
+		border-bottom: 1px solid var(--panel-border);
+	}
+	.picker-header h4 {
+		margin: 0;
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		color: var(--fg-primary);
+	}
+	.picker-path {
+		grid-column: 1 / -1;
 		font-size: var(--text-xs);
-		padding: 2px 6px;
+		color: var(--fg-muted);
+		word-break: break-all;
+	}
+	.picker-body {
+		padding: var(--space-3);
+		overflow: auto;
+		flex: 1;
+	}
+	.picker-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+	.picker-item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: var(--space-2) var(--space-3);
+		border: 1px solid var(--border-primary);
 		border-radius: var(--radius-sm);
-		border: 1px solid;
+		background: var(--bg-primary);
+		cursor: pointer;
 	}
-	.path-status.ok {
-		color: #166534;
-		background: #dcfce7;
-		border-color: #86efac;
+	.picker-item:hover {
+		background: var(--bg-hover);
 	}
-	.path-status.error {
-		color: #991b1b;
-		background: #fee2e2;
-		border-color: #fecaca;
+	.picker-name {
+		font-size: var(--text-sm);
+		color: var(--fg-primary);
+	}
+	.picker-type {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+	}
+	.picker-empty {
+		padding: var(--space-6);
+		text-align: center;
+		color: var(--fg-muted);
+		font-size: var(--text-sm);
+	}
+	.picker-footer {
+		padding: var(--space-3);
+		border-top: 1px solid var(--panel-border);
+		display: flex;
+		justify-content: flex-end;
 	}
 	.resolve-row {
 		display: flex;

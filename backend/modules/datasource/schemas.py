@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ColumnSchema(BaseModel):
@@ -59,7 +59,7 @@ class CSVOptions(BaseModel):
 class FileDataSourceConfig(BaseModel):
     file_path: str
     file_type: str
-    options: dict = {}
+    options: dict = Field(default_factory=dict)
     csv_options: CSVOptions | None = None
     sheet_name: str | None = None
     start_row: int | None = None
@@ -130,17 +130,15 @@ class DataSourceUpdate(BaseModel):
     config: dict | None = None
 
 
-class FilePathValidationRequest(BaseModel):
-    file_path: str
-    file_type: str
-
-
-class FilePathValidationResponse(BaseModel):
-    file_path: str
-    file_type: str
-    exists: bool
-    is_file: bool
+class FileListItem(BaseModel):
+    name: str
+    path: str
     is_dir: bool
+
+
+class FileListResponse(BaseModel):
+    base_path: str
+    entries: list[FileListItem]
 
 
 class BulkUploadResult(BaseModel):

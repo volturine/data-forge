@@ -19,7 +19,7 @@ This document lists ALL environment variables supported by the application.
 | `UPLOAD_DIR`                  | path    | /app/data/uploads                       | Upload directory path                                |
 | `CLEAN_DIR`                   | path    | /app/data/clean                         | Results directory path                               |
 | `EXPORTS_DIR`                 | path    | /app/data/exports                       | Exports directory path                               |
-| `MAX_UPLOAD_SIZE`             | integer | 10737418240                             | Max upload size in bytes (10GB)                      |
+| `UPLOAD_CHUNK_SIZE`           | integer | 5242880                                 | Upload chunk size in bytes (5MB)                     |
 | **Polars Engine**             |         |                                         |                                                      |
 | `POLARS_MAX_THREADS`          | integer | 0                                       | Max threads per engine (0=auto)                      |
 | `POLARS_MAX_MEMORY_MB`        | integer | 0                                       | Memory limit per engine MB (0=unlimited)             |
@@ -42,7 +42,7 @@ This document lists ALL environment variables supported by the application.
 
 - `MAX_CONCURRENT_ENGINES`: 1-100
 - `WORKERS`: 0-32
-- `MAX_UPLOAD_SIZE`: ≥1024 bytes
+- `UPLOAD_CHUNK_SIZE`: 1024 to 104857600
 
 ### Positive Values Required
 

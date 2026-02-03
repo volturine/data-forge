@@ -19,7 +19,8 @@ from modules.datasource.schemas import (
     CSVOptions,
     DataSourceResponse,
     DataSourceUpdate,
-    FilePathValidationResponse,
+    FileListItem,
+    FileListResponse,
     SchemaInfo,
 )
 
@@ -79,9 +80,20 @@ async def create_file_datasource(
 ) -> DataSourceResponse:
     """Create a file-based datasource."""
     datasource_id = str(uuid.uuid4())
+    resolved_path = Path(file_path).resolve()
+    data_root = settings.data_dir.resolve()
+    upload_root = settings.upload_dir.resolve()
+    within_data_root = data_root in resolved_path.parents or data_root == resolved_path
+    within_upload_root = upload_root in resolved_path.parents or upload_root == resolved_path
+    if not (within_data_root or within_upload_root):
+        raise ValueError(f'Path must be inside data directory: {data_root}')
+    if file_type in {'csv', 'json', 'ndjson', 'excel'} and not resolved_path.is_file():
+        raise ValueError(f'Path must be a file for type: {file_type}')
+    if file_type == 'parquet' and not (resolved_path.is_file() or resolved_path.is_dir()):
+        raise ValueError('Parquet path must be a file or directory')
 
     config = {
-        'file_path': file_path,
+        'file_path': str(resolved_path),
         'file_type': file_type,
         'options': options or {},
         'csv_options': csv_options.model_dump() if csv_options else None,
@@ -655,24 +667,26 @@ def _transform_to_parquet(
     return output_path
 
 
-def validate_file_path(file_path: str, file_type: str) -> FilePathValidationResponse:
-    path = Path(file_path)
-    exists = path.exists()
-    is_file = path.is_file()
-    is_dir = path.is_dir()
-    if not exists:
-        raise ValueError(f'Path does not exist: {file_path}')
-    if file_type in {'csv', 'json', 'ndjson', 'excel'} and not is_file:
-        raise ValueError(f'Path must be a file for type: {file_type}')
-    if file_type == 'parquet' and not (is_file or is_dir):
-        raise ValueError('Parquet path must be a file or directory')
-    return FilePathValidationResponse(
-        file_path=str(path),
-        file_type=file_type,
-        exists=exists,
-        is_file=is_file,
-        is_dir=is_dir,
-    )
+def list_data_files(path: str | None) -> FileListResponse:
+    base_dir = settings.data_dir.resolve()
+    target = Path(path) if path else base_dir
+    resolved = target.resolve()
+    if base_dir not in resolved.parents and base_dir != resolved:
+        raise ValueError(f'Path must be inside data directory: {base_dir}')
+    if not resolved.exists():
+        raise ValueError(f'Path does not exist: {resolved}')
+    if not resolved.is_dir():
+        raise ValueError(f'Path must be a directory: {resolved}')
+
+    entries = [
+        FileListItem(
+            name=item.name,
+            path=str(item),
+            is_dir=item.is_dir(),
+        )
+        for item in sorted(resolved.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.lower()))
+    ]
+    return FileListResponse(base_path=str(resolved), entries=entries)
 
 
 def _normalize_iceberg_path(metadata_path: str) -> str:
@@ -680,7 +694,7 @@ def _normalize_iceberg_path(metadata_path: str) -> str:
     if path.suffix == '.db':
         raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not catalog.db')
     if path.name.endswith('.metadata.json'):
-        return str(path.parent)
+        raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not metadata.json')
     return str(path)
 
 

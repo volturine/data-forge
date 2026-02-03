@@ -51,9 +51,12 @@ async def upload_file(
     file_path = settings.upload_dir / unique_filename
 
     try:
-        contents = await file.read()
         with open(file_path, 'wb') as f:
-            f.write(contents)
+            while True:
+                chunk = await file.read(settings.upload_chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}')
 
@@ -131,9 +134,12 @@ async def upload_bulk(
         name = Path(file.filename).stem
 
         try:
-            contents = await file.read()
             with open(file_path, 'wb') as f:
-                f.write(contents)
+                while True:
+                    chunk = await file.read(settings.upload_chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
         except Exception as e:
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=f'Failed to save file: {str(e)}'))
             continue
@@ -178,9 +184,12 @@ async def preflight_excel(
     unique_filename = f'{uuid.uuid4()}{file_extension}'
     file_path = settings.upload_dir / unique_filename
     try:
-        contents = await file.read()
         with open(file_path, 'wb') as f:
-            f.write(contents)
+            while True:
+                chunk = await file.read(settings.upload_chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}')
 
@@ -429,11 +438,11 @@ async def resolve_iceberg(metadata_path: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post('/file/validate', response_model=schemas.FilePathValidationResponse)
-async def validate_file_path(request: schemas.FilePathValidationRequest):
-    """Validate a file path for file datasources."""
+@router.get('/file/list', response_model=schemas.FileListResponse)
+async def list_files(path: str | None = None):
+    """List files under data directory for picker."""
     try:
-        return service.validate_file_path(request.file_path, request.file_type)
+        return service.list_data_files(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

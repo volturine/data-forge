@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "uvicorn",
     "fastapi",
-    "pydantic>=2.0",
+    "pydantic>=2.12",
     "pydantic-settings",
     "pytest",
     "httpx",
@@ -15,7 +15,7 @@ dependencies = [
     "ruff>=0.14.7",
     "polars",
     "duckdb",
-    "pyiceberg[sql-sqlite,pyarrow]",
+    "pyiceberg[sql-sqlite,pyarrow]>=0.7.0",
     "fsspec",
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite",

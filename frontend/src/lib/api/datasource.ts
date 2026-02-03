@@ -102,20 +102,26 @@ export function connectFilePath(
 	});
 }
 
-export function validateFilePath(
-	filePath: string,
-	fileType: string
-): ResultAsync<{ file_path: string; file_type: string; exists: boolean; is_file: boolean; is_dir: boolean }, ApiError> {
-	return apiRequest<{ file_path: string; file_type: string; exists: boolean; is_file: boolean; is_dir: boolean }>(
-		'/v1/datasource/file/validate',
-		{
-			method: 'POST',
-			body: JSON.stringify({
-				file_path: filePath,
-				file_type: fileType
-			})
-		}
-	);
+export interface FileListItem {
+	name: string;
+	path: string;
+	is_dir: boolean;
+}
+
+export interface FileListResponse {
+	base_path: string;
+	entries: FileListItem[];
+}
+
+export function listDataFiles(path?: string): ResultAsync<FileListResponse, ApiError> {
+	const params = new URLSearchParams();
+	if (path) {
+		params.set('path', path);
+	}
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<FileListResponse>(`/v1/datasource/file/list${suffix}`, {
+		method: 'GET'
+	});
 }
 
 export interface ExcelPreflightResponse {

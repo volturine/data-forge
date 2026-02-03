@@ -135,13 +135,13 @@ def resolve_iceberg_metadata_path(metadata_path: str) -> str:
         if path.suffix == '.db':
             raise ValueError('Iceberg metadata_path must point to metadata.json, not catalog.db')
         if path.name.endswith('.metadata.json'):
-            return _latest_metadata_file(path.parent)
+            raise ValueError('Iceberg metadata_path must be a table directory, not metadata.json')
         return str(path)
     if path.suffix == '.db':
         raise ValueError('Iceberg metadata_path must point to metadata.json, not catalog.db')
     if not path.exists():
-        if metadata_path.endswith('.metadata.json') and path.parent.is_dir():
-            return _latest_metadata_file(path.parent)
+        if metadata_path.endswith('.metadata.json'):
+            raise ValueError('Iceberg metadata_path must be a table directory, not metadata.json')
         raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
     if not path.is_dir():
         raise ValueError(f'Iceberg metadata_path must be a file or directory: {metadata_path}')

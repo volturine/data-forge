@@ -150,7 +150,7 @@ Key settings:
 - `DATABASE_URL` - Database connection string (default: `sqlite+aiosqlite:///./database/app.db`)
 - `UPLOAD_DIR` - File upload directory (default: `./data/uploads`)
 - `RESULTS_DIR` - Results storage directory (default: `./data/results`)
-- `MAX_UPLOAD_SIZE` - Maximum upload size in bytes (default: 10GB)
+- `UPLOAD_CHUNK_SIZE` - Upload chunk size in bytes (default: 5MB)
 - `COMPUTE_TIMEOUT` - Computation timeout in seconds (default: 300)
 
 Override in `.env` file or environment variables.

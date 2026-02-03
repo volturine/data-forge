@@ -19,7 +19,7 @@ class TestSettings:
                 'DEBUG',
                 'DATABASE_URL',
                 'UPLOAD_DIR',
-                'MAX_UPLOAD_SIZE',
+                'UPLOAD_CHUNK_SIZE',
                 'ENGINE_IDLE_TIMEOUT',
                 'ENGINE_POOLING_INTERVAL',
                 'JOB_TIMEOUT',
@@ -34,7 +34,7 @@ class TestSettings:
         assert settings.debug is False
         assert settings.database_url == 'sqlite+aiosqlite:///./database/app.db'
         assert 'uploads' in str(settings.upload_dir)
-        assert settings.max_upload_size == 10 * 1024 * 1024 * 1024
+        assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.job_timeout == 300
         assert settings.engine_idle_timeout == 300
         assert settings.engine_pooling_interval == 5
@@ -44,7 +44,7 @@ class TestSettings:
         monkeypatch.setenv('DEBUG', 'true')
         monkeypatch.setenv('DATABASE_URL', 'sqlite+aiosqlite:///./test.db')
         monkeypatch.setenv('UPLOAD_DIR', '/tmp/uploads')
-        monkeypatch.setenv('MAX_UPLOAD_SIZE', '50000000')
+        monkeypatch.setenv('UPLOAD_CHUNK_SIZE', '2000000')
         monkeypatch.setenv('JOB_TIMEOUT', '3600')
 
         settings = Settings()
@@ -52,7 +52,7 @@ class TestSettings:
         assert settings.debug is True
         assert settings.database_url == 'sqlite+aiosqlite:///./test.db'
         assert settings.upload_dir == Path('/tmp/uploads')
-        assert settings.max_upload_size == 50000000
+        assert settings.upload_chunk_size == 2000000
         assert settings.job_timeout == 3600
 
     def test_polars_settings(self, monkeypatch):

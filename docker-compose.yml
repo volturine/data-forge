@@ -27,7 +27,7 @@ services:
       - UPLOAD_DIR=${UPLOAD_DIR:-/app/data/uploads}
       - RESULTS_DIR=${RESULTS_DIR:-/app/data/results}
       - EXPORTS_DIR=${EXPORTS_DIR:-/app/data/exports}
-      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-10737418240}
+      - UPLOAD_CHUNK_SIZE=${UPLOAD_CHUNK_SIZE:-5242880}
 
       # Polars Engine Resource Configuration
       - POLARS_MAX_THREADS=${POLARS_MAX_THREADS:-0}
