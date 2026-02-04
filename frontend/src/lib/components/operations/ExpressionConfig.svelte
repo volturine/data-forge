@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	interface ExpressionConfigData {
 		expression: string;
@@ -13,10 +14,20 @@
 
 	let { schema, config = $bindable({ expression: '', column_name: '' }) }: Props = $props();
 
+	let selectedColumnToInsert = $state('');
+
 	function insertColumn(columnName: string) {
 		const colRef = `pl.col("${columnName}")`;
 		config.expression = config.expression ? `${config.expression} ${colRef}` : colRef;
+		selectedColumnToInsert = ''; // Reset selection after insert
 	}
+
+	// Watch for changes to selectedColumnToInsert and insert when changed
+	$effect(() => {
+		if (selectedColumnToInsert) {
+			insertColumn(selectedColumnToInsert);
+		}
+	});
 </script>
 
 <div class="config-panel" role="region" aria-label="Expression configuration">
@@ -61,28 +72,19 @@
 	</div>
 
 	<div class="form-section" role="group" aria-labelledby="expr-columns-heading">
-		<h4 id="expr-columns-heading">Available Columns</h4>
-		<div id="expr-columns-grid" class="columns-grid" role="listbox" aria-label="Available columns">
-			{#each schema.columns as column (column.name)}
-				<button
-					id={`expr-btn-column-${column.name}`}
-					data-testid={`expr-column-button-${column.name}`}
-					type="button"
-					class="column-chip"
-					onclick={() => insertColumn(column.name)}
-					title="Click to insert into expression"
-					aria-label={`Insert ${column.name} into expression`}
-				>
-					<span class="column-name">{column.name}</span>
-					<span class="column-type">{column.dtype}</span>
-				</button>
-			{/each}
-		</div>
-		<p class="help-text">Click a column to insert it into the expression above.</p>
+		<h4 id="expr-columns-heading">Insert Column</h4>
+		<ColumnDropdown
+			{schema}
+			value={selectedColumnToInsert}
+			onChange={(val) => (selectedColumnToInsert = val)}
+			placeholder="Select column to insert..."
+		/>
+		<p class="help-text">Select a column to insert it into the expression above.</p>
 	</div>
 </div>
 
 <style>
+	/* Component-specific styles - dropdown pattern defined in app.css */
 	textarea {
 		width: 100%;
 		resize: vertical;
@@ -105,42 +107,5 @@
 		font-family: var(--font-mono);
 		font-size: 0.85em;
 		color: var(--accent-primary);
-	}
-	.columns-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-		gap: var(--space-2);
-		margin-bottom: var(--space-2);
-		max-height: 200px;
-		overflow-y: auto;
-		padding: var(--space-2);
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-	}
-	.column-chip {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: var(--space-1);
-		padding: var(--space-2) var(--space-3);
-		background-color: var(--info-bg);
-		border: 1px solid var(--info-border);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		transition: all 0.2s;
-		color: var(--info-fg);
-	}
-	.column-chip:hover {
-		background-color: var(--bg-hover);
-		border-color: var(--border-focus);
-		transform: translateY(-1px);
-	}
-	.column-chip .column-name {
-		font-weight: var(--font-medium);
-		font-size: var(--text-sm);
-	}
-	.column-chip .column-type {
-		font-size: var(--text-xs);
 	}
 </style>

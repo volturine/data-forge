@@ -7,6 +7,8 @@
 	import { listUdfs, createUdf } from '$lib/api/udf';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import UdfPickerModal from '$lib/components/udfs/UdfPickerModal.svelte';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	interface WithColumnsExpr {
 		name: string;
@@ -40,9 +42,6 @@
 	let showEditor = $state(false);
 	let codeEdited = $state(false);
 	let modalRef = $state<HTMLElement>();
-	let columnRef = $state<HTMLElement>();
-	let columnOpen = $state(false);
-	let columnOrder = $derived(schema.columns.map((col) => col.name));
 	let editIndex = $state<number | null>(null);
 	let isEditing = $derived(editIndex !== null);
 	let pickerOpen = $state(false);
@@ -119,33 +118,6 @@
 		if (!params) return 'def udf():\n    return None\n';
 		const first = params.split(', ')[0] ?? 'value';
 		return `def udf(${params}):\n    # TODO: return a value\n    return ${first}\n`;
-	}
-
-	function sortArgs(args: string[]): string[] {
-		return columnOrder.filter((name) => args.includes(name));
-	}
-
-	function toggleArg(name: string) {
-		const exists = exprArgs.includes(name);
-		const next = exists ? exprArgs.filter((item) => item !== name) : [...exprArgs, name];
-		exprArgs = sortArgs(next);
-	}
-
-	function selectColumn(name: string) {
-		exprColumn = name;
-		columnOpen = false;
-	}
-
-	function dtypeClass(dtype: string): string {
-		const value = dtype.toLowerCase();
-		if (value.includes('string') || value.includes('utf') || value.includes('cat'))
-			return 'dtype-string';
-		if (value.includes('int') || value.includes('float') || value.includes('num'))
-			return 'dtype-number';
-		if (value.includes('date') || value.includes('time') || value.includes('duration'))
-			return 'dtype-time';
-		if (value.includes('bool')) return 'dtype-bool';
-		return 'dtype-other';
 	}
 
 	$effect(() => {
@@ -242,14 +214,6 @@
 			if (showEditor) showEditor = false;
 		}
 	);
-
-	onClickOutside(
-		() => columnRef,
-		() => {
-			if (!columnOpen) return;
-			columnOpen = false;
-		}
-	);
 </script>
 
 <div class="config-panel" role="region" aria-label="With columns configuration">
@@ -265,44 +229,12 @@
 		<input type="text" bind:value={exprName} placeholder="New column name" />
 
 		{#if exprType === 'column'}
-			<div class="column-select" bind:this={columnRef}>
-				<button
-					type="button"
-					class="column-trigger"
-					onclick={() => (columnOpen = !columnOpen)}
-					aria-expanded={columnOpen}
-				>
-					{#if exprColumn}
-						{@const currentColumn = schema.columns.find((col) => col.name === exprColumn)}
-						<span class={`column-type ${dtypeClass(currentColumn?.dtype ?? 'Unknown')}`}>
-							{currentColumn?.dtype ?? 'Unknown'}
-						</span>
-						<span class="column-label">{exprColumn}</span>
-					{:else}
-						<span class="column-placeholder">Select source column...</span>
-					{/if}
-					<span class="chevron">▾</span>
-				</button>
-				{#if columnOpen}
-					<div class="column-menu" role="listbox">
-						<div class="column-options">
-							{#each schema.columns as column (column.name)}
-								<button
-									type="button"
-									class="column-option"
-									class:selected={exprColumn === column.name}
-									onclick={() => selectColumn(column.name)}
-									role="option"
-									aria-selected={exprColumn === column.name}
-								>
-									<span>{column.name}</span>
-									<span class={`column-type ${dtypeClass(column.dtype)}`}>{column.dtype}</span>
-								</button>
-							{/each}
-						</div>
-					</div>
-				{/if}
-			</div>
+			<ColumnDropdown
+				{schema}
+				value={exprColumn}
+				onChange={(val) => (exprColumn = val)}
+				placeholder="Select source column..."
+			/>
 		{:else if exprType === 'literal'}
 			<input type="text" bind:value={exprValue} placeholder="Literal value" />
 		{:else}
@@ -331,34 +263,20 @@
 						{/if}
 					</div>
 					<span class="section-label">Input columns</span>
-					<div class="column-grid">
-						{#each schema.columns as column (column.name)}
-							<label class="column-option">
-								<input
-									type="checkbox"
-									checked={exprArgs.includes(column.name)}
-									onchange={() => toggleArg(column.name)}
-								/>
-								<span>{column.name}</span>
-								<span class={`column-type ${dtypeClass(column.dtype)}`}>{column.dtype}</span>
-							</label>
-						{/each}
-					</div>
+					<MultiSelectColumnDropdown
+						{schema}
+						value={exprArgs}
+						onChange={(val) => (exprArgs = val)}
+						placeholder="Select input columns..."
+					/>
 				{:else}
 					<span class="section-label">Input columns</span>
-					<div class="column-grid">
-						{#each schema.columns as column (column.name)}
-							<label class="column-option">
-								<input
-									type="checkbox"
-									checked={exprArgs.includes(column.name)}
-									onchange={() => toggleArg(column.name)}
-								/>
-								<span>{column.name}</span>
-								<span class={`column-type ${dtypeClass(column.dtype)}`}>{column.dtype}</span>
-							</label>
-						{/each}
-					</div>
+					<MultiSelectColumnDropdown
+						{schema}
+						value={exprArgs}
+						onChange={(val) => (exprArgs = val)}
+						placeholder="Select input columns..."
+					/>
 
 					<div class="code-header">
 						<span class="section-label">Function</span>
@@ -520,176 +438,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		color: var(--fg-muted);
-	}
-	.column-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		gap: var(--space-2);
-		padding: var(--space-3);
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		max-height: 160px;
-		overflow-y: auto;
-	}
-	.column-legend {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		margin-bottom: var(--space-2);
-	}
-	.badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 2px 6px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border-primary);
-		font-size: var(--text-xs);
-		color: var(--fg-secondary);
-		background-color: var(--bg-primary);
-	}
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		display: inline-block;
-	}
-	.dot-string {
-		background-color: #7dd3fc;
-	}
-	.dot-number {
-		background-color: #fbbf24;
-	}
-	.dot-time {
-		background-color: #34d399;
-	}
-	.dot-bool {
-		background-color: #f472b6;
-	}
-	.dot-other {
-		background-color: #a3a3a3;
-	}
-	.column-option {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--text-sm);
-		color: var(--fg-primary);
-		cursor: pointer;
-	}
-	.column-option.selected {
-		background-color: var(--bg-hover);
-		border-radius: var(--radius-sm);
-		padding: 2px 4px;
-	}
-	.column-type {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		margin-left: auto;
-		border-radius: 999px;
-		padding: 2px 6px;
-		background-color: var(--bg-secondary);
-	}
-	.column-type.dtype-string {
-		color: #7dd3fc;
-		border: 1px solid color-mix(in srgb, #7dd3fc 40%, transparent);
-	}
-	.column-type.dtype-number {
-		color: #fbbf24;
-		border: 1px solid color-mix(in srgb, #fbbf24 40%, transparent);
-	}
-	.column-type.dtype-time {
-		color: #34d399;
-		border: 1px solid color-mix(in srgb, #34d399 40%, transparent);
-	}
-	.column-type.dtype-bool {
-		color: #f472b6;
-		border: 1px solid color-mix(in srgb, #f472b6 40%, transparent);
-	}
-	.column-type.dtype-other {
-		color: #a3a3a3;
-		border: 1px solid color-mix(in srgb, #a3a3a3 40%, transparent);
-	}
-	.column-option input {
-		width: auto;
-	}
-	.column-select {
-		position: relative;
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	.column-trigger {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border-secondary);
-		background-color: var(--bg-secondary);
-		color: var(--fg-primary);
-		cursor: pointer;
-		justify-content: space-between;
-		font-size: var(--text-sm);
-	}
-	.column-trigger:focus-visible {
-		outline: 2px solid var(--accent-primary);
-		outline-offset: 2px;
-	}
-	.column-placeholder {
-		color: var(--fg-muted);
-	}
-	.column-label {
-		flex: 1;
-		text-align: left;
-	}
-	.column-trigger .column-type {
-		margin-left: 0;
-	}
-	.chevron {
-		font-size: 0.75rem;
-		color: var(--fg-muted);
-	}
-	.column-menu {
-		position: absolute;
-		z-index: 10;
-		top: calc(100% + 6px);
-		left: 0;
-		right: 0;
-		background-color: var(--panel-bg);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		box-shadow: var(--dialog-shadow);
-		padding: var(--space-2);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	.column-options {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		max-height: 220px;
-		overflow-y: auto;
-		padding-right: var(--space-1);
-	}
-	.column-options .column-option {
-		width: 100%;
-		padding: var(--space-2);
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		background: transparent;
-		justify-content: space-between;
-		text-align: left;
-	}
-	.column-options .column-option:hover {
-		background-color: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-	.column-options .column-option.selected {
-		background-color: var(--bg-hover);
-		border-color: var(--border-secondary);
 	}
 	.code-header {
 		display: flex;

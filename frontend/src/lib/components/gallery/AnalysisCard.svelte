@@ -2,7 +2,7 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { BarChart3, Trash2 } from 'lucide-svelte';
+	import { ChartBar, Trash2 } from 'lucide-svelte';
 
 	interface Props {
 		analysis: AnalysisGalleryItem;
@@ -61,7 +61,7 @@
 			<img src={analysis.thumbnail} alt={analysis.name} />
 		{:else}
 			<div class="placeholder">
-				<BarChart3 size={32} strokeWidth={1.5} />
+				<ChartBar size={32} strokeWidth={1.5} />
 			</div>
 		{/if}
 	</div>

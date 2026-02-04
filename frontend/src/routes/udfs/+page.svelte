@@ -3,8 +3,9 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { listUdfs, deleteUdf, exportUdfs, importUdfs, cloneUdf } from '$lib/api/udf';
-	import type { Udf, UdfExport } from '$lib/types/udf';
+	import type { UdfExport } from '$lib/types/udf';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil } from 'lucide-svelte';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 
 	const queryClient = useQueryClient();
 
@@ -112,11 +113,6 @@
 	function editUdf(id: string) {
 		goto(resolve(`/udfs/${id}`), { invalidateAll: true });
 	}
-
-	function signatureLabel(signature: Udf['signature']): string {
-		if (!signature?.inputs?.length) return 'No inputs';
-		return signature.inputs.map((input) => input.dtype).join(', ');
-	}
 </script>
 
 <div class="container">
@@ -164,7 +160,18 @@
 						<div class="row-main">
 							<div class="row-title">
 								<h3>{udf.name}</h3>
-								<span class="row-signature">{signatureLabel(udf.signature)}</span>
+								<div class="row-signature">
+									{#if udf.signature?.inputs?.length}
+										{#each udf.signature.inputs as input, i (i)}
+											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
+											{#if i < udf.signature.inputs.length - 1}
+												<span class="signature-separator">,</span>
+											{/if}
+										{/each}
+									{:else}
+										<span class="no-inputs">No inputs</span>
+									{/if}
+								</div>
 							</div>
 							{#if udf.description}
 								<p class="row-description">{udf.description}</p>
@@ -301,6 +308,17 @@
 		font-size: var(--text-base);
 	}
 	.row-signature {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-wrap: wrap;
+	}
+	.signature-separator {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		margin: 0 0.125rem;
+	}
+	.no-inputs {
 		font-size: var(--text-xs);
 		color: var(--fg-muted);
 		text-transform: uppercase;

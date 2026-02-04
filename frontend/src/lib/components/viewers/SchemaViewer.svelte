@@ -1,32 +1,12 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 
 	interface Props {
 		schema: Schema;
 	}
 
 	let { schema }: Props = $props();
-
-	function getDtypeIcon(dtype: string): string {
-		const lowercased = dtype.toLowerCase();
-		if (lowercased.includes('int') || lowercased.includes('uint')) return '🔢';
-		if (lowercased.includes('float') || lowercased.includes('decimal')) return '🔣';
-		if (lowercased.includes('str') || lowercased.includes('utf8')) return '📝';
-		if (lowercased.includes('bool')) return '✓';
-		if (lowercased.includes('date') || lowercased.includes('time')) return '📅';
-		if (lowercased.includes('list') || lowercased.includes('array')) return '📋';
-		return '📊';
-	}
-
-	function getDtypeBadgeClass(dtype: string): string {
-		const lowercased = dtype.toLowerCase();
-		if (lowercased.includes('int') || lowercased.includes('uint')) return 'badge-numeric';
-		if (lowercased.includes('float') || lowercased.includes('decimal')) return 'badge-float';
-		if (lowercased.includes('str') || lowercased.includes('utf8')) return 'badge-string';
-		if (lowercased.includes('bool')) return 'badge-boolean';
-		if (lowercased.includes('date') || lowercased.includes('time')) return 'badge-datetime';
-		return 'badge-other';
-	}
 </script>
 
 <div class="schema-viewer">
@@ -47,13 +27,10 @@
 		{#each schema.columns as column (column.name)}
 			<div class="column-row">
 				<div class="column-name">
-					<span class="dtype-icon">{getDtypeIcon(column.dtype)}</span>
 					<span class="name-text">{column.name}</span>
 				</div>
 				<div class="column-type">
-					<span class="dtype-badge {getDtypeBadgeClass(column.dtype)}">
-						{column.dtype}
-					</span>
+					<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
 				</div>
 				<div class="column-nullable">
 					{#if column.nullable}
@@ -130,9 +107,6 @@
 		font-weight: 500;
 		color: var(--fg-primary);
 	}
-	.dtype-icon {
-		font-size: 1rem;
-	}
 	.name-text {
 		font-family: var(--font-mono);
 		font-size: 0.875rem;
@@ -140,35 +114,6 @@
 	.column-type {
 		display: flex;
 		align-items: center;
-	}
-	.dtype-badge {
-		display: inline-block;
-		padding: var(--space-1) var(--space-2);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xs);
-		font-weight: var(--font-semibold);
-		font-family: var(--font-mono);
-	}
-	.badge-numeric,
-	.badge-float {
-		background: var(--info-bg);
-		color: var(--info-fg);
-	}
-	.badge-string {
-		background: var(--success-bg);
-		color: var(--success-fg);
-	}
-	.badge-boolean {
-		background: var(--warning-bg);
-		color: var(--warning-fg);
-	}
-	.badge-datetime {
-		background: var(--error-bg);
-		color: var(--error-fg);
-	}
-	.badge-other {
-		background: var(--bg-tertiary);
-		color: var(--fg-tertiary);
 	}
 	.column-nullable {
 		display: flex;

@@ -6,6 +6,7 @@
 	import { createUdf, getUdf, updateUdf } from '$lib/api/udf';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import UdfSignatureBuilder from '$lib/components/udfs/UdfSignatureBuilder.svelte';
+	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import type { Udf, UdfInput, UdfSignature } from '$lib/types/udf';
 	import { ArrowLeft, Save } from 'lucide-svelte';
 
@@ -173,28 +174,11 @@
 				<UdfSignatureBuilder {inputs} onChange={updateInputs} />
 				<div class="output">
 					<label for="udf-output">Output dtype</label>
-					<select id="udf-output" bind:value={outputDtype}>
-						<option value="">Optional</option>
-						<option value="String">String</option>
-						<option value="Categorical">Categorical</option>
-						<option value="Int8">Int8</option>
-						<option value="Int16">Int16</option>
-						<option value="Int32">Int32</option>
-						<option value="Int64">Int64</option>
-						<option value="UInt8">UInt8</option>
-						<option value="UInt16">UInt16</option>
-						<option value="UInt32">UInt32</option>
-						<option value="UInt64">UInt64</option>
-						<option value="Float32">Float32</option>
-						<option value="Float64">Float64</option>
-						<option value="Boolean">Boolean</option>
-						<option value="Date">Date</option>
-						<option value="Datetime">Datetime</option>
-						<option value="Time">Time</option>
-						<option value="Duration">Duration</option>
-						<option value="Binary">Binary</option>
-						<option value="Null">Null</option>
-					</select>
+					<ColumnTypeDropdown
+						value={outputDtype}
+						onChange={(val) => (outputDtype = val)}
+						placeholder="Optional"
+					/>
 				</div>
 			</div>
 

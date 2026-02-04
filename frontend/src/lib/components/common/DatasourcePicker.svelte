@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 
 	interface Props {
 		datasources: DataSource[];
@@ -188,8 +189,18 @@
 						<span class="option-name">{ds.name}</span>
 						{#if ds.id === highlightId}
 							<span class="option-badge current">current</span>
+						{:else if ds.source_type === 'file'}
+							<FileTypeBadge
+								path={(ds.config?.file_path as string) ?? ''}
+								size="sm"
+								showIcon={false}
+							/>
 						{:else}
-							<span class="option-badge">{ds.source_type}</span>
+							<FileTypeBadge
+								sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+								size="sm"
+								showIcon={false}
+							/>
 						{/if}
 					</button>
 				{/each}

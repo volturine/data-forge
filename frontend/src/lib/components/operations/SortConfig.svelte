@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import { X, Plus } from 'lucide-svelte';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	const uid = $props.id();
 
@@ -53,13 +54,16 @@
 	<h3>Sort Configuration</h3>
 
 	<div class="add-rule" role="group" aria-label="Add sort rule form">
-		<label for="{uid}-column" class="sr-only">Select column to sort</label>
-		<select id="{uid}-column" data-testid="sort-column-select" bind:value={newColumn}>
-			<option value="">Select column...</option>
-			{#each availableColumns as column (column.name)}
-				<option value={column.name}>{column.name} ({column.dtype})</option>
-			{/each}
-		</select>
+		<div class="column-dropdown-wrapper">
+			<span class="sr-only">Select column to sort</span>
+			<ColumnDropdown
+				{schema}
+				value={newColumn}
+				onChange={(val) => (newColumn = val)}
+				placeholder="Select column..."
+				filter={(col) => availableColumns.some((c) => c.name === col.name)}
+			/>
+		</div>
 
 		<div class="direction-select" role="group" aria-label="Sort direction">
 			<button
@@ -172,7 +176,7 @@
 		margin-bottom: var(--space-6);
 		flex-wrap: wrap;
 	}
-	.add-rule select {
+	.column-dropdown-wrapper {
 		flex: 2;
 		min-width: 200px;
 	}

@@ -1,4 +1,3 @@
-import asyncio
 import time
 
 from core.exceptions import EngineTimeoutError, StepNotFoundError
@@ -11,7 +10,7 @@ def find_step_index(pipeline_steps: list[dict], target_step_id: str) -> int:
     raise StepNotFoundError(target_step_id)
 
 
-async def await_engine_result(engine, timeout: int) -> dict:
+def await_engine_result(engine, timeout: int) -> dict:
     start_time = time.time()
     while True:
         if time.time() - start_time > timeout:
@@ -21,7 +20,7 @@ async def await_engine_result(engine, timeout: int) -> dict:
         if result_data:
             return result_data
 
-        await asyncio.sleep(0.1)
+        time.sleep(0.1)
 
 
 def build_datasource_config(datasource) -> dict:

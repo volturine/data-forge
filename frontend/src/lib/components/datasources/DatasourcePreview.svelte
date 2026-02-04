@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { Table, FileJson } from 'lucide-svelte';
+	import { Table, FileBracesCorner } from 'lucide-svelte';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 
 	interface Props {
 		datasourceId: string;
@@ -61,48 +62,6 @@
 		if (!canNext) return;
 		page += 1;
 	}
-
-	function getTypeCategory(dtype: string): string {
-		const lower = dtype.toLowerCase();
-		if (
-			lower.includes('int') ||
-			lower.includes('float') ||
-			lower.includes('decimal') ||
-			lower === 'f32' ||
-			lower === 'f64' ||
-			lower === 'i8' ||
-			lower === 'i16' ||
-			lower === 'i32' ||
-			lower === 'i64' ||
-			lower === 'u8' ||
-			lower === 'u16' ||
-			lower === 'u32' ||
-			lower === 'u64'
-		) {
-			return 'numeric';
-		}
-		if (
-			lower.includes('str') ||
-			lower.includes('utf8') ||
-			lower.includes('string') ||
-			lower.includes('categorical')
-		) {
-			return 'string';
-		}
-		if (lower.includes('bool')) {
-			return 'boolean';
-		}
-		if (lower.includes('date') || lower.includes('time') || lower.includes('duration')) {
-			return 'temporal';
-		}
-		if (lower.includes('list') || lower.includes('array')) {
-			return 'list';
-		}
-		if (lower.includes('struct') || lower.includes('object')) {
-			return 'struct';
-		}
-		return 'other';
-	}
 </script>
 
 <div class="preview-panel">
@@ -122,7 +81,7 @@
 				class:active={viewMode === 'schema'}
 				onclick={() => (viewMode = 'schema')}
 			>
-				<FileJson size={14} />
+				<FileBracesCorner size={14} />
 				Schema
 			</button>
 		</div>
@@ -136,13 +95,9 @@
 			</div>
 		{:else}
 			<div class="pagination">
-				<button class="page-btn" onclick={goPrev} disabled={!canPrev || isLoading}>
-					Prev
-				</button>
+				<button class="page-btn" onclick={goPrev} disabled={!canPrev || isLoading}> Prev </button>
 				<span class="page-info">Page {page}</span>
-				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}>
-					Next
-				</button>
+				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}> Next </button>
 			</div>
 			<DataTable columns={data?.columns ?? []} data={data?.data ?? []} loading={isLoading} />
 		{/if}
@@ -163,7 +118,7 @@
 				{#each schema as column (column.name)}
 					<div class="schema-row">
 						<span class="col-name">{column.name}</span>
-						<span class="type-badge {getTypeCategory(column.dtype)}">{column.dtype}</span>
+						<ColumnTypeBadge columnType={column.dtype} size="xs" showIcon={true} />
 					</div>
 				{/each}
 			{/if}
@@ -298,37 +253,5 @@
 		font-family: var(--font-mono);
 		font-size: 0.8125rem;
 		color: var(--fg-primary);
-	}
-	.type-badge {
-		display: inline-block;
-		padding: var(--space-1) var(--space-2);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xs);
-		font-weight: var(--font-medium);
-		font-family: var(--font-mono);
-		border: 1px solid;
-	}
-	.type-badge.numeric {
-		background: var(--info-bg);
-		color: var(--info-fg);
-		border-color: var(--info-border);
-	}
-	.type-badge.string {
-		background: var(--success-bg);
-		color: var(--success-fg);
-		border-color: var(--success-border);
-	}
-	.type-badge.boolean {
-		background: var(--warning-bg);
-		color: var(--warning-fg);
-		border-color: var(--warning-border);
-	}
-	.type-badge.temporal,
-	.type-badge.list,
-	.type-badge.struct,
-	.type-badge.other {
-		background: var(--bg-tertiary);
-		color: var(--fg-tertiary);
-		border-color: var(--border-primary);
 	}
 </style>

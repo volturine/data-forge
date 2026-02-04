@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	interface Props {
 		schema: Schema;
@@ -22,13 +23,13 @@
 	<h3>Top K Configuration</h3>
 
 	<div class="form-group">
-		<label for="topk-select-column">Column to sort by</label>
-		<select id="topk-select-column" data-testid="topk-column-select" bind:value={config.column}>
-			<option value="">Select column...</option>
-			{#each schema.columns as col (col.name)}
-				<option value={col.name}>{col.name} ({col.dtype})</option>
-			{/each}
-		</select>
+		<div class="form-label">Column to sort by</div>
+		<ColumnDropdown
+			{schema}
+			value={config.column ?? ''}
+			onChange={(val) => (config.column = val)}
+			placeholder="Select column..."
+		/>
 	</div>
 
 	<div class="form-group">

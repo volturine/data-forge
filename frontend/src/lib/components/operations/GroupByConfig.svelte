@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	const uid = $props.id();
 
@@ -97,7 +99,7 @@
 						aria-label={`Group by ${column.name}`}
 					/>
 					<span class="column-name">{column.name}</span>
-					<span class="column-type">{column.dtype}</span>
+					<ColumnTypeBadge columnType={column.dtype} size="xs" />
 				</label>
 			{/each}
 		</div>
@@ -112,17 +114,14 @@
 		<h4 id="{uid}-agg-heading">Aggregations</h4>
 
 		<div class="add-aggregation" role="group" aria-label="Add aggregation form">
-			<label for="{uid}-agg-column" class="sr-only">Select column</label>
-			<select
-				id="{uid}-agg-column"
-				data-testid="agg-column-select"
-				bind:value={newAggregation.column}
-			>
-				<option value="">Select column...</option>
-				{#each schema.columns as column (column.name)}
-					<option value={column.name}>{column.name} ({column.dtype})</option>
-				{/each}
-			</select>
+			<div class="agg-column-dropdown">
+				<ColumnDropdown
+					{schema}
+					value={newAggregation.column}
+					onChange={(val) => (newAggregation.column = val)}
+					placeholder="Select column..."
+				/>
+			</div>
 
 			<label for="{uid}-agg-function" class="sr-only">Aggregation function</label>
 			<select
@@ -189,11 +188,11 @@
 		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
 	}
-	.add-aggregation select:first-child {
+	.agg-column-dropdown {
 		flex: 2;
 		min-width: 160px;
 	}
-	.add-aggregation select:nth-child(2) {
+	.add-aggregation select {
 		flex: 1;
 		min-width: 120px;
 	}

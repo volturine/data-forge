@@ -5,6 +5,7 @@
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { AnalysisCreate } from '$lib/types/analysis';
 
 	let step = $state(1);
@@ -161,7 +162,21 @@
 							{#each datasourcesQuery.data.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
 								<li>
 									<span class="source-name">{ds.name}</span>
-									<span class="source-type">{ds.source_type}</span>
+									<span class="source-type">
+										{#if ds.source_type === 'file'}
+											<FileTypeBadge
+												path={(ds.config?.file_path as string) ?? ''}
+												size="sm"
+												showIcon={true}
+											/>
+										{:else}
+											<FileTypeBadge
+												sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+												size="sm"
+												showIcon={true}
+											/>
+										{/if}
+									</span>
 								</li>
 							{/each}
 						{/if}

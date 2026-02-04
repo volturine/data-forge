@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { UdfInput } from '$lib/types/udf';
+	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 
 	interface Props {
 		inputs: UdfInput[];
@@ -7,28 +8,6 @@
 	}
 
 	let { inputs, onChange }: Props = $props();
-
-	const dtypeOptions = [
-		'String',
-		'Categorical',
-		'Int8',
-		'Int16',
-		'Int32',
-		'Int64',
-		'UInt8',
-		'UInt16',
-		'UInt32',
-		'UInt64',
-		'Float32',
-		'Float64',
-		'Boolean',
-		'Date',
-		'Datetime',
-		'Time',
-		'Duration',
-		'Binary',
-		'Null'
-	];
 
 	function addInput() {
 		const next = [
@@ -69,14 +48,13 @@
 						value={input.label ?? ''}
 						oninput={(e) => updateInput(index, { label: e.currentTarget.value })}
 					/>
-					<select
-						value={input.dtype}
-						onchange={(e) => updateInput(index, { dtype: e.currentTarget.value })}
-					>
-						{#each dtypeOptions as option (option)}
-							<option value={option}>{option}</option>
-						{/each}
-					</select>
+					<div class="type-dropdown-wrapper">
+						<ColumnTypeDropdown
+							value={input.dtype}
+							onChange={(val) => updateInput(index, { dtype: val })}
+							placeholder="Select type..."
+						/>
+					</div>
 					<button class="btn-ghost btn-sm" type="button" onclick={() => removeInput(index)}>
 						Remove
 					</button>
@@ -114,7 +92,7 @@
 	}
 	.input-row {
 		display: grid;
-		grid-template-columns: 32px 1fr 160px auto;
+		grid-template-columns: 32px 1fr 200px auto;
 		gap: var(--space-2);
 		align-items: center;
 	}

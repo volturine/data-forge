@@ -2,21 +2,18 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from modules.datasource.models import DataSource
 
 
-@pytest.mark.asyncio
 class TestDataSourceUpload:
-    async def test_upload_csv_file_success(self, client: AsyncClient, temp_upload_dir: Path, mock_file_upload: dict):
+    def test_upload_csv_file_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
         with patch.object(settings, 'upload_dir', temp_upload_dir):
             files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
             data = {'name': 'Test CSV Upload'}
 
-            response = await client.post('/api/v1/datasource/upload', files=files, data=data)
+            response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
             assert response.status_code == 200
             result = response.json()
@@ -31,13 +28,13 @@ class TestDataSourceUpload:
             assert uploaded_file.exists()
             uploaded_file.unlink()
 
-    async def test_upload_parquet_file_success(self, client: AsyncClient, temp_upload_dir: Path, sample_parquet_file: Path):
+    def test_upload_parquet_file_success(self, client, temp_upload_dir: Path, sample_parquet_file: Path):
         with patch.object(settings, 'upload_dir', temp_upload_dir):
             with open(sample_parquet_file, 'rb') as f:
                 files = {'file': ('test.parquet', f, 'application/octet-stream')}
                 data = {'name': 'Test Parquet Upload'}
 
-                response = await client.post('/api/v1/datasource/upload', files=files, data=data)
+                response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
             assert response.status_code == 200
             result = response.json()
@@ -49,13 +46,13 @@ class TestDataSourceUpload:
             assert uploaded_file.exists()
             uploaded_file.unlink()
 
-    async def test_upload_json_file_success(self, client: AsyncClient, temp_upload_dir: Path, sample_json_file: Path):
+    def test_upload_json_file_success(self, client, temp_upload_dir: Path, sample_json_file: Path):
         with patch.object(settings, 'upload_dir', temp_upload_dir):
             with open(sample_json_file, 'rb') as f:
                 files = {'file': ('test.json', f, 'application/json')}
                 data = {'name': 'Test JSON Upload'}
 
-                response = await client.post('/api/v1/datasource/upload', files=files, data=data)
+                response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
             assert response.status_code == 200
             result = response.json()
@@ -67,13 +64,13 @@ class TestDataSourceUpload:
             assert uploaded_file.exists()
             uploaded_file.unlink()
 
-    async def test_upload_ndjson_file_success(self, client: AsyncClient, temp_upload_dir: Path, sample_ndjson_file: Path):
+    def test_upload_ndjson_file_success(self, client, temp_upload_dir: Path, sample_ndjson_file: Path):
         with patch.object(settings, 'upload_dir', temp_upload_dir):
             with open(sample_ndjson_file, 'rb') as f:
                 files = {'file': ('test.ndjson', f, 'application/json')}
                 data = {'name': 'Test NDJSON Upload'}
 
-                response = await client.post('/api/v1/datasource/upload', files=files, data=data)
+                response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
             assert response.status_code == 200
             result = response.json()
@@ -85,29 +82,28 @@ class TestDataSourceUpload:
             assert uploaded_file.exists()
             uploaded_file.unlink()
 
-    async def test_upload_without_filename(self, client: AsyncClient, temp_upload_dir: Path):
+    def test_upload_without_filename(self, client, temp_upload_dir: Path):
         with patch.object(settings, 'upload_dir', temp_upload_dir):
             files = {'file': ('', b'content', 'text/csv')}
             data = {'name': 'Test Upload'}
 
-            response = await client.post('/api/v1/datasource/upload', files=files, data=data)
+            response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
             assert response.status_code == 422
 
-    async def test_upload_unsupported_file_type(self, client: AsyncClient, temp_upload_dir: Path):
+    def test_upload_unsupported_file_type(self, client, temp_upload_dir: Path):
         with patch.object(settings, 'upload_dir', temp_upload_dir):
             files = {'file': ('test.txt', b'content', 'text/plain')}
             data = {'name': 'Test Upload'}
 
-            response = await client.post('/api/v1/datasource/upload', files=files, data=data)
+            response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
             assert response.status_code == 400
             assert 'Unsupported file type' in response.json()['detail']
 
 
-@pytest.mark.asyncio
 class TestDataSourceConnect:
-    async def test_connect_database_datasource(self, client: AsyncClient):
+    def test_connect_database_datasource(self, client):
         payload = {
             'name': 'Test Database Connection',
             'source_type': 'database',
@@ -117,7 +113,7 @@ class TestDataSourceConnect:
             },
         }
 
-        response = await client.post('/api/v1/datasource/connect', json=payload)
+        response = client.post('/api/v1/datasource/connect', json=payload)
 
         assert response.status_code == 200
         result = response.json()
@@ -127,7 +123,7 @@ class TestDataSourceConnect:
         assert result['config']['connection_string'] == 'postgresql://user:pass@localhost/db'
         assert result['config']['query'] == 'SELECT * FROM users'
 
-    async def test_connect_api_datasource(self, client: AsyncClient):
+    def test_connect_api_datasource(self, client):
         payload = {
             'name': 'Test API Connection',
             'source_type': 'api',
@@ -139,7 +135,7 @@ class TestDataSourceConnect:
             },
         }
 
-        response = await client.post('/api/v1/datasource/connect', json=payload)
+        response = client.post('/api/v1/datasource/connect', json=payload)
 
         assert response.status_code == 200
         result = response.json()
@@ -149,22 +145,21 @@ class TestDataSourceConnect:
         assert result['config']['url'] == 'https://api.example.com/data'
         assert result['config']['method'] == 'GET'
 
-    async def test_connect_unsupported_source_type(self, client: AsyncClient):
+    def test_connect_unsupported_source_type(self, client):
         payload = {
             'name': 'Test Unknown',
             'source_type': 'unknown',
             'config': {},
         }
 
-        response = await client.post('/api/v1/datasource/connect', json=payload)
+        response = client.post('/api/v1/datasource/connect', json=payload)
 
         assert response.status_code == 500
 
 
-@pytest.mark.asyncio
 class TestDataSourceList:
-    async def test_list_empty_datasources(self, client: AsyncClient):
-        response = await client.get('/api/v1/datasource')
+    def test_list_empty_datasources(self, client):
+        response = client.get('/api/v1/datasource')
 
         assert response.status_code == 200
         result = response.json()
@@ -172,8 +167,8 @@ class TestDataSourceList:
         assert isinstance(result, list)
         assert len(result) == 0
 
-    async def test_list_datasources_with_data(self, client: AsyncClient, sample_datasources: list[DataSource]):
-        response = await client.get('/api/v1/datasource')
+    def test_list_datasources_with_data(self, client, sample_datasources: list[DataSource]):
+        response = client.get('/api/v1/datasource')
 
         assert response.status_code == 200
         result = response.json()
@@ -185,10 +180,9 @@ class TestDataSourceList:
         assert result[1]['name'] == 'Parquet DataSource'
 
 
-@pytest.mark.asyncio
 class TestDataSourceGet:
-    async def test_get_datasource_success(self, client: AsyncClient, sample_datasource: DataSource):
-        response = await client.get(f'/api/v1/datasource/{sample_datasource.id}')
+    def test_get_datasource_success(self, client, sample_datasource: DataSource):
+        response = client.get(f'/api/v1/datasource/{sample_datasource.id}')
 
         assert response.status_code == 200
         result = response.json()
@@ -197,17 +191,16 @@ class TestDataSourceGet:
         assert result['name'] == sample_datasource.name
         assert result['source_type'] == sample_datasource.source_type
 
-    async def test_get_datasource_not_found(self, client: AsyncClient):
-        response = await client.get('/api/v1/datasource/non-existent-id')
+    def test_get_datasource_not_found(self, client):
+        response = client.get('/api/v1/datasource/non-existent-id')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
 
-@pytest.mark.asyncio
 class TestDataSourceSchema:
-    async def test_get_schema_csv_file(self, client: AsyncClient, sample_datasource: DataSource):
-        response = await client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
+    def test_get_schema_csv_file(self, client, sample_datasource: DataSource):
+        response = client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
 
         assert response.status_code == 200
         result = response.json()
@@ -225,49 +218,48 @@ class TestDataSourceSchema:
             assert 'dtype' in col
             assert 'nullable' in col
 
-    async def test_get_schema_caching(self, client: AsyncClient, sample_datasource: DataSource, test_db_session: AsyncSession):
-        response1 = await client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
+    def test_get_schema_caching(self, client, sample_datasource: DataSource, test_db_session):
+        response1 = client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
         assert response1.status_code == 200
 
-        await test_db_session.refresh(sample_datasource)
+        test_db_session.refresh(sample_datasource)
         assert sample_datasource.schema_cache is not None
 
-        response2 = await client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
+        response2 = client.get(f'/api/v1/datasource/{sample_datasource.id}/schema')
         assert response2.status_code == 200
         assert response1.json() == response2.json()
 
-    async def test_get_schema_not_found(self, client: AsyncClient):
-        response = await client.get('/api/v1/datasource/non-existent-id/schema')
+    def test_get_schema_not_found(self, client):
+        response = client.get('/api/v1/datasource/non-existent-id/schema')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
 
-@pytest.mark.asyncio
 class TestDataSourceDelete:
-    async def test_delete_datasource_success(self, client: AsyncClient, sample_datasource: DataSource, test_db_session: AsyncSession):
+    def test_delete_datasource_success(self, client, sample_datasource: DataSource, test_db_session):
         datasource_id = sample_datasource.id
         file_path = Path(sample_datasource.config['file_path'])
 
         assert file_path.exists()
 
-        response = await client.delete(f'/api/v1/datasource/{datasource_id}')
+        response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
         assert response.status_code == 200
         assert 'deleted successfully' in response.json()['message']
 
         assert not file_path.exists()
 
-        get_response = await client.get(f'/api/v1/datasource/{datasource_id}')
+        get_response = client.get(f'/api/v1/datasource/{datasource_id}')
         assert get_response.status_code == 404
 
-    async def test_delete_datasource_not_found(self, client: AsyncClient):
-        response = await client.delete('/api/v1/datasource/non-existent-id')
+    def test_delete_datasource_not_found(self, client):
+        response = client.delete('/api/v1/datasource/non-existent-id')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
-    async def test_delete_datasource_without_file(self, client: AsyncClient, test_db_session: AsyncSession):
+    def test_delete_datasource_without_file(self, client, test_db_session):
         import uuid
         from datetime import UTC, datetime
 
@@ -286,9 +278,9 @@ class TestDataSourceDelete:
         )
 
         test_db_session.add(datasource)
-        await test_db_session.commit()
+        test_db_session.commit()
 
-        response = await client.delete(f'/api/v1/datasource/{datasource_id}')
+        response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
         assert response.status_code == 200
         assert 'deleted successfully' in response.json()['message']

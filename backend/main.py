@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session, text
 
 from api import router
 from core.config import settings
@@ -42,9 +42,9 @@ async def engine_cleanup_loop():
 async def lifespan(app: FastAPI):
     configure_logging()
     logger.info('Starting application...')
-    await init_db()
-    async for session in get_db():
-        await ensure_udf_seeds(session)
+    init_db()
+    for session in get_db():
+        ensure_udf_seeds(session)
         break
 
     # Start background cleanup task
@@ -100,20 +100,19 @@ async def health():
 
 
 @app.get('/health/ready')
-async def readiness(session: AsyncSession = Depends(get_db)):
+def readiness(session: Session = Depends(get_db)):
     """
     Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
     """
     from fastapi.responses import JSONResponse
-    from sqlalchemy import text
 
     checks = {}
     is_ready = True
 
     # Check database
     try:
-        await session.execute(text('SELECT 1'))
+        session.execute(text('SELECT 1'))
         checks['database'] = 'ok'
     except Exception as e:
         checks['database'] = f'error: {str(e)}'

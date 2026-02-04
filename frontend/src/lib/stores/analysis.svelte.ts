@@ -276,7 +276,7 @@ export class AnalysisStore {
 						config: JSON.parse(
 							JSON.stringify((updates.config ?? step.config) as Record<string, unknown>)
 						) as Record<string, unknown>
-				  }
+					}
 				: step
 		);
 		this.updateTabSteps(this.activeTab.id, nextPipeline);
@@ -401,7 +401,11 @@ export class AnalysisStore {
 		}
 
 		this.updateTabSteps(this.activeTab.id, steps);
-		this.logStep('move', movingStep, { from: fromIndex, to: actualToIndex, parent_id: newParentId });
+		this.logStep('move', movingStep, {
+			from: fromIndex,
+			to: actualToIndex,
+			parent_id: newParentId
+		});
 		return true;
 	}
 

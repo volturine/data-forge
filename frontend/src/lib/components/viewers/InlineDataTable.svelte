@@ -14,6 +14,7 @@
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 
 	interface Props {
 		analysisId: string;
@@ -233,9 +234,13 @@
 										{/if}
 									</button>
 									{#if getColumnType(header.id)}
-										<span class="column-type" class:is-list={isListType(getColumnType(header.id))}>
-											{getColumnType(header.id)}
-										</span>
+										<div class="column-type-wrapper">
+											<ColumnTypeBadge
+												columnType={getColumnType(header.id)}
+												size="xs"
+												showIcon={false}
+											/>
+										</div>
 									{/if}
 								</th>
 							{/each}
@@ -374,21 +379,10 @@
 		color: var(--accent-primary);
 		font-size: 0.75rem;
 	}
-	.column-type {
+	.column-type-wrapper {
 		display: inline-block;
 		margin-left: 0.5rem;
-		padding: 0.125rem 0.375rem;
-		font-size: 0.625rem;
-		font-weight: 500;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		border-radius: var(--radius-sm);
-		background: var(--bg-tertiary);
-		color: var(--fg-muted);
-	}
-	.column-type.is-list {
-		background: var(--accent-bg);
-		color: var(--accent-fg);
+		vertical-align: middle;
 	}
 	td.is-list-cell {
 		font-size: 0.75rem;

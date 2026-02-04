@@ -1,7 +1,7 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from modules.udf import service
 
 
-async def ensure_udf_seeds(session: AsyncSession) -> None:
-    await service.seed_defaults(session)
+def ensure_udf_seeds(session: Session) -> None:
+    service.seed_defaults(session)

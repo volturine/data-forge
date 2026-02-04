@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	const uid = $props.id();
 
@@ -73,22 +74,15 @@
 	<div class="conditions" role="group" aria-label="Filter conditions">
 		{#each safeConditions as condition, i (i)}
 			<div class="condition-row" role="group" aria-label={`Condition ${i + 1}`}>
-				<label for="{uid}-column-{i}" class="sr-only">Column</label>
-				<select
-					id="{uid}-column-{i}"
-					data-testid={`filter-column-select-${i}`}
-					value={condition.column}
-					onchange={(event) =>
-						updateCondition(i, {
-							column: (event.currentTarget as HTMLSelectElement).value
-						})}
-					aria-label="Select column"
-				>
-					<option value="">Select column...</option>
-					{#each schema.columns as column (column.name)}
-						<option value={column.name}>{column.name} ({column.dtype})</option>
-					{/each}
-				</select>
+				<div class="column-dropdown-wrapper">
+					<label for="{uid}-column-{i}" class="sr-only">Column</label>
+					<ColumnDropdown
+						{schema}
+						value={condition.column}
+						onChange={(val) => updateCondition(i, { column: val })}
+						placeholder="Select column..."
+					/>
+				</div>
 
 				<label for="{uid}-operator-{i}" class="sr-only">Operator</label>
 				<select
@@ -167,11 +161,11 @@
 		align-items: center;
 		flex-wrap: wrap;
 	}
-	.condition-row select:first-child {
+	.column-dropdown-wrapper {
 		flex: 2;
 		min-width: 160px;
 	}
-	.condition-row select:nth-child(2) {
+	.condition-row select {
 		flex: 1;
 		min-width: 120px;
 	}

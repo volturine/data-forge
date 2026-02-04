@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
-	import { ArrowLeft, Save, Loader2, AlertCircle } from 'lucide-svelte';
+	import { ArrowLeft, Save, Loader, CircleAlert } from 'lucide-svelte';
 	import type {
 		DataSource,
 		SchemaInfo,
@@ -12,6 +12,8 @@
 		FileDataSourceConfig,
 		IcebergDataSourceConfig
 	} from '$lib/types/datasource';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import ColumnTypeSelect from '$lib/components/common/ColumnTypeSelect.svelte';
 
 	const queryClient = useQueryClient();
 	const datasourceId = $derived(page.params.id);
@@ -37,7 +39,6 @@
 		},
 		enabled: !!datasourceId && !!datasourceQuery.data
 	}));
-	let refreshPending = $state(false);
 
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: { name: string; config: Record<string, unknown> }) => {
@@ -362,10 +363,8 @@
 
 	async function handleRefreshRows() {
 		if (!datasourceId) return;
-		refreshPending = true;
 		await getDatasourceSchema(datasourceId, { refresh: true });
 		await schemaQuery.refetch();
-		refreshPending = false;
 	}
 </script>
 
@@ -388,7 +387,7 @@
 			disabled={!hasChanges || updateMutation.isPending}
 		>
 			{#if updateMutation.isPending}
-				<Loader2 size={16} class="spin" />
+				<Loader size={16} class="spin" />
 				Saving...
 			{:else}
 				<Save size={16} />
@@ -399,12 +398,12 @@
 
 	{#if datasourceQuery.isLoading}
 		<div class="loading-state">
-			<Loader2 size={32} class="spin" />
+			<Loader size={32} class="spin" />
 			<p>Loading data source...</p>
 		</div>
 	{:else if datasourceQuery.isError}
 		<div class="error-box">
-			<AlertCircle size={20} />
+			<CircleAlert size={20} />
 			<div>
 				<p class="error-title">Error loading data source</p>
 				<p class="error-message">
@@ -450,7 +449,7 @@
 
 		{#if updateMutation.isError}
 			<div class="error-box">
-				<AlertCircle size={20} />
+				<CircleAlert size={20} />
 				<div>
 					<p class="error-title">Error saving changes</p>
 					<p class="error-message">
@@ -491,7 +490,7 @@
 								{@const config = datasource.config as unknown as FileDataSourceConfig}
 								<div class="info-item">
 									<span class="info-label">File Type</span>
-									<span class="info-value">{config.file_type}</span>
+									<FileTypeBadge path={config.file_path} size="sm" />
 								</div>
 							{/if}
 							{#if isIceberg(datasource)}
@@ -540,17 +539,17 @@
 
 					{#if isSavingParsing}
 						<div class="loading-state">
-							<Loader2 size={24} class="spin" />
+							<Loader size={24} class="spin" />
 							<p>Refreshing schema...</p>
 						</div>
 					{:else if schemaQuery.isLoading}
 						<div class="loading-state">
-							<Loader2 size={24} class="spin" />
+							<Loader size={24} class="spin" />
 							<p>Loading schema...</p>
 						</div>
 					{:else if schemaQuery.isError}
 						<div class="error-box">
-							<AlertCircle size={20} />
+							<CircleAlert size={20} />
 							<p>Error loading schema</p>
 						</div>
 					{:else if columns.length > 0}
@@ -570,41 +569,12 @@
 										value={column.name}
 										oninput={(e) => handleColumnNameChange(index, e.currentTarget.value)}
 									/>
-									<select
-										class="col-type-select"
+									<ColumnTypeSelect
 										value={column.dtype}
-										onchange={(e) => handleColumnTypeChange(index, e.currentTarget.value)}
-									>
-										<optgroup label="String">
-											<option value="String">String</option>
-											<option value="Categorical">Categorical</option>
-										</optgroup>
-										<optgroup label="Integer">
-											<option value="Int8">Int8</option>
-											<option value="Int16">Int16</option>
-											<option value="Int32">Int32</option>
-											<option value="Int64">Int64</option>
-											<option value="UInt8">UInt8</option>
-											<option value="UInt16">UInt16</option>
-											<option value="UInt32">UInt32</option>
-											<option value="UInt64">UInt64</option>
-										</optgroup>
-										<optgroup label="Float">
-											<option value="Float32">Float32</option>
-											<option value="Float64">Float64</option>
-										</optgroup>
-										<optgroup label="Temporal">
-											<option value="Date">Date</option>
-											<option value="Datetime">Datetime</option>
-											<option value="Time">Time</option>
-											<option value="Duration">Duration</option>
-										</optgroup>
-										<optgroup label="Other">
-											<option value="Boolean">Boolean</option>
-											<option value="Binary">Binary</option>
-											<option value="Null">Null</option>
-										</optgroup>
-									</select>
+										onchange={(val) => handleColumnTypeChange(index, val)}
+										size="sm"
+										showBadge={true}
+									/>
 									<span class="col-sample" title={column.sample_value ?? ''}>
 										{column.sample_value ?? '—'}
 									</span>
@@ -1071,10 +1041,6 @@
 	}
 
 	.col-name-input {
-		width: 100%;
-	}
-
-	.col-type-select {
 		width: 100%;
 	}
 

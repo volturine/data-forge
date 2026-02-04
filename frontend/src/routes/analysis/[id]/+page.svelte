@@ -278,10 +278,9 @@
 		const step = analysisStore.pipeline.find((item) => item.id === stepId);
 		if (!step) return;
 		const next = (step as PipelineStep & { is_applied?: boolean }).is_applied === false;
-		analysisStore.updateStep(
-			stepId,
-			({ is_applied: next } as Partial<PipelineStep> & { is_applied: boolean })
-		);
+		analysisStore.updateStep(stepId, { is_applied: next } as Partial<PipelineStep> & {
+			is_applied: boolean;
+		});
 		markUnsaved();
 	}
 
@@ -587,20 +586,20 @@
 			{/if}
 
 			<div class="center-pane" class:readonly={!isEditingMode} class:expanded={!isEditingMode}>
-			<PipelineCanvas
-				steps={analysisStore.pipeline}
-				{analysisId}
-				{datasourceId}
-				datasource={currentDatasource}
-				tabName={analysisStore.activeTab?.name}
-				onStepClick={handleSelectStep}
-				onStepDelete={handleDeleteStep}
-				onStepToggle={handleToggleStep}
-				onInsertStep={handleInsertStep}
-				onMoveStep={handleMoveStep}
-				onChangeDatasource={() => openDatasourceModal('change')}
-				onRenameTab={handleRenameSourceTab}
-			/>
+				<PipelineCanvas
+					steps={analysisStore.pipeline}
+					{analysisId}
+					{datasourceId}
+					datasource={currentDatasource}
+					tabName={analysisStore.activeTab?.name}
+					onStepClick={handleSelectStep}
+					onStepDelete={handleDeleteStep}
+					onStepToggle={handleToggleStep}
+					onInsertStep={handleInsertStep}
+					onMoveStep={handleMoveStep}
+					onChangeDatasource={() => openDatasourceModal('change')}
+					onRenameTab={handleRenameSourceTab}
+				/>
 			</div>
 
 			{#if isEditingMode}

@@ -40,7 +40,11 @@ class Settings(BaseSettings):
         'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,http://192.168.1.140:3000,http://100.68.183.19:3000'
     )
 
-    database_url: str = 'sqlite+aiosqlite:///./database/app.db'
+    database_url: str = 'sqlite+libsql:///./database/app.db'
+
+    turso_database_url: str = Field(default='', alias='TURSO_DATABASE_URL')
+    turso_auth_token: str = Field(default='', alias='TURSO_AUTH_TOKEN')
+    turso_sync_interval: int = Field(default=60, alias='TURSO_SYNC_INTERVAL')
 
     # All data directories under root data/ folder
     data_dir: Path = Field(default=DATA_DIR, alias='DATA_DIR')
@@ -123,6 +127,13 @@ class Settings(BaseSettings):
         """Ensure timeout values are positive."""
         if value <= 0:
             raise ValueError(f'{info.field_name} must be positive, got {value}')
+        return value
+
+    @field_validator('turso_sync_interval')
+    @classmethod
+    def _validate_turso_sync_interval(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(f'turso_sync_interval must be non-negative, got {value}')
         return value
 
     @field_validator('upload_chunk_size')

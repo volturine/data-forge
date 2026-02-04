@@ -5,6 +5,7 @@
 	import { Plus, ChevronDown, ChevronUp } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 
 	const queryClient = useQueryClient();
 
@@ -88,13 +89,6 @@
 		const date = new Date(dateString);
 		return date.toLocaleDateString();
 	}
-
-	function getFileType(datasource: DataSource): string | null {
-		if (datasource.source_type !== 'file') return null;
-		if (!datasource.config || typeof datasource.config !== 'object') return null;
-		const config = datasource.config as { file_type?: string };
-		return config.file_type ?? null;
-	}
 </script>
 
 <div class="container">
@@ -156,19 +150,14 @@
 							</span>
 							<span class="col-name">{datasource.name}</span>
 							<span class="col-type">
-							<span
-								class="badge"
-								class:badge-info={datasource.source_type === 'file'}
-								class:badge-success={datasource.source_type === 'database'}
-								class:badge-warning={datasource.source_type === 'api'}
-								class:badge-iceberg={datasource.source_type === 'iceberg'}
-							>
-									{#if datasource.source_type === 'file'}
-										{getFileType(datasource) ?? 'file'}
-									{:else}
-										{datasource.source_type}
-									{/if}
-								</span>
+								{#if datasource.source_type === 'file'}
+									<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
+								{:else}
+									<FileTypeBadge
+										sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+										size="sm"
+									/>
+								{/if}
 							</span>
 							<span class="col-rows">{formatRowCount(getRowCount(datasource))}</span>
 							<span class="col-columns">{getColumnCount(datasource)}</span>
@@ -329,12 +318,6 @@
 	}
 	.col-actions {
 		white-space: nowrap;
-	}
-
-	.badge-iceberg {
-		background-color: #eff6ff;
-		border-color: #bfdbfe;
-		color: #1d4ed8;
 	}
 
 	.expand-btn {

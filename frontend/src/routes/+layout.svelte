@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { PersistedState } from 'runed';
 	import favicon from '$lib/assets/favicon.svg';
@@ -18,6 +18,7 @@
 
 	// Use runed's PersistedState for persisted theme state across tabs/sessions
 	const theme = new PersistedState<'light' | 'dark'>('theme', 'dark');
+	let currentPath = $derived(page.url.pathname);
 
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme.current);
@@ -29,7 +30,7 @@
 	});
 
 	$effect(() => {
-		setAuditPage($page.url.pathname);
+		setAuditPage(currentPath);
 	});
 
 	$effect(() => {
@@ -38,7 +39,7 @@
 			track({
 				event: 'client_error',
 				action: 'error',
-				page: $page.url.pathname,
+				page: currentPath,
 				meta: { message: event.message, filename: event.filename, lineno: event.lineno }
 			});
 		};
@@ -46,7 +47,7 @@
 			track({
 				event: 'client_error',
 				action: 'unhandledrejection',
-				page: $page.url.pathname,
+				page: currentPath,
 				meta: { reason: String(event.reason) }
 			});
 		};
@@ -139,9 +140,9 @@
 						<a
 							href={resolve(item.href as '/')}
 							class="nav-link"
-							class:active={$page.url.pathname === item.href ||
-								($page.url.pathname.startsWith('/analysis') && item.href === '/') ||
-								($page.url.pathname.startsWith('/udfs') && item.href === '/udfs')}
+							class:active={currentPath === item.href ||
+								(currentPath.startsWith('/analysis') && item.href === '/') ||
+								(currentPath.startsWith('/udfs') && item.href === '/udfs')}
 							data-sveltekit-reload
 						>
 							{item.label}

@@ -55,6 +55,10 @@ class TimeseriesHandler(OperationHandler):
             method = self._get_extractor(validated.component or '')
             return lf.with_columns(getattr(pl.col(validated.column).dt, method)().alias(validated.new_column))
 
+        if validated.operation_type == 'timestamp':
+            unit = validated.unit or 'us'  # Default to microseconds
+            return lf.with_columns(pl.col(validated.column).dt.timestamp(unit).alias(validated.new_column))
+
         if validated.operation_type in {'add', 'subtract', 'offset'}:
             if validated.value is None:
                 raise ValueError('timeseries operation requires numeric value parameter')

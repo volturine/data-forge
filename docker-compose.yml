@@ -18,7 +18,7 @@ services:
       - DEBUG=${DEBUG:-false}
 
       # Database
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./database/app.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+libsql:///./database/app.db}
 
       # CORS
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
