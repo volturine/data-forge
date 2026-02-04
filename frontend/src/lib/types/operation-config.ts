@@ -1,9 +1,13 @@
 // Type definitions for operation configuration objects
 
+export type FilterValueType = 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
+
 export interface FilterCondition {
 	column: string;
 	operator: string;
-	value: string;
+	value: string | number | boolean | null;
+	value_type: FilterValueType;
+	compare_column?: string;
 }
 
 export interface FilterConfigData {

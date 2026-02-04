@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from zoneinfo import available_timezones
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -88,6 +89,12 @@ class Settings(BaseSettings):
 
     # Logging level (debug, info, warning, error)
     log_level: str = Field(default='info', alias='LOG_LEVEL')
+
+    # Timezone handling
+    timezone: str = Field(default='UTC', alias='TIMEZONE')
+
+    # Normalize datetime values to TIMEZONE
+    normalize_tz: bool = Field(default=False, alias='NORMALIZE_TZ')
 
     # Iceberg log base path (catalog + warehouse)
     log_iceberg_path: Path = Field(default=DATA_DIR / 'logs' / 'iceberg', alias='LOG_ICEBERG_PATH')
@@ -185,6 +192,14 @@ class Settings(BaseSettings):
         if value.lower() not in valid_levels:
             raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
         return value.lower()
+
+    @field_validator('timezone')
+    @classmethod
+    def _validate_timezone(cls, value: str) -> str:
+        zones = available_timezones()
+        if value not in zones:
+            raise ValueError(f'timezone must be a valid IANA timezone, got {value}')
+        return value
 
     @field_validator('log_queue_max_size')
     @classmethod

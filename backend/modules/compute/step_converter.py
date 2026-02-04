@@ -41,16 +41,29 @@ def convert_step_format(frontend_step: dict) -> dict:
 def convert_filter_config(config: dict) -> dict:
     """Convert filter config from frontend format to backend format.
 
-    Frontend: {conditions: [{column, operator, value}], logic: "AND"}
-    Backend: {conditions: [{column, operator, value}], logic: "AND"}
+    Frontend: {conditions: [{column, operator, value, value_type?, compare_column?}], logic: "AND"}
+    Backend: {conditions: [{column, operator, value, value_type, compare_column?}], logic: "AND"}
 
     Supports multiple conditions with AND/OR logic.
+    Supports typed values (string, number, date, datetime, column) and NULL checks.
     """
     conditions = config.get('conditions', [])
     if not conditions:
         raise ValueError('Filter requires at least one condition')
 
-    return {'conditions': conditions, 'logic': config.get('logic', 'AND')}
+    converted = []
+    for cond in conditions:
+        item = {
+            'column': cond.get('column', ''),
+            'operator': cond.get('operator', '='),
+            'value': cond.get('value'),
+            'value_type': cond.get('value_type', 'string'),
+        }
+        if cond.get('compare_column'):
+            item['compare_column'] = cond['compare_column']
+        converted.append(item)
+
+    return {'conditions': converted, 'logic': config.get('logic', 'AND')}
 
 
 def convert_groupby_config(config: dict) -> dict:

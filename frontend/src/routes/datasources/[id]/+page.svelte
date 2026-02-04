@@ -14,6 +14,7 @@
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
+	import { formatDateDisplay } from '$lib/utils/datetime';
 
 	const queryClient = useQueryClient();
 	const datasourceId = $derived(page.params.id);
@@ -62,6 +63,9 @@
 	let initialized = $state(false);
 	let parsingOptionsTimer: ReturnType<typeof setTimeout> | null = null;
 	let isSavingParsing = $state(false);
+	function formatDate(dateString: string): string {
+		return formatDateDisplay(dateString);
+	}
 
 	$effect(() => {
 		if (!datasourceId) return;
@@ -502,9 +506,7 @@
 							{/if}
 							<div class="info-item">
 								<span class="info-label">Created</span>
-								<span class="info-value">
-									{new Date(datasource.created_at).toLocaleDateString()}
-								</span>
+								<span class="info-value">{formatDate(datasource.created_at)}</span>
 							</div>
 							{#if schemaQuery.data}
 								<div class="info-item">

@@ -13,6 +13,7 @@
 	import { applySteps } from '$lib/utils/pipeline';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
@@ -107,8 +108,20 @@
 	const startRow = $derived((currentPage - 1) * rowLimit + 1);
 	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0);
 
-	function formatValue(value: TableCellValue): string {
+	function getTemporalType(dtype: string | undefined): 'date' | 'datetime' | null {
+		if (!dtype) return null;
+		const lower = dtype.toLowerCase();
+		if (lower.includes('datetime')) return 'datetime';
+		if (lower.includes('date')) return 'date';
+		if (lower.includes('time')) return 'datetime';
+		return null;
+	}
+
+	function formatValue(value: TableCellValue, columnId: string): string {
 		if (value === null || value === undefined) return '—';
+		const temporal = getTemporalType(data?.column_types?.[columnId]);
+		if (temporal === 'date') return formatDateDisplay(value as string);
+		if (temporal === 'datetime') return formatDateTimeDisplay(value as string);
 		if (typeof value === 'number') return value.toLocaleString();
 		if (typeof value === 'boolean') return value ? 'true' : 'false';
 		if (Array.isArray(value)) {
@@ -253,7 +266,7 @@
 						<tr>
 							{#each row.getVisibleCells() as cell (cell.id)}
 								<td class:is-list-cell={isListType(getColumnType(cell.column.id))}>
-									{formatValue(cell.getValue() as TableCellValue)}
+									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
 							{/each}
 						</tr>

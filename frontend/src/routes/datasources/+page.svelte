@@ -6,6 +6,7 @@
 	import type { DataSource } from '$lib/types/datasource';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import { formatDateDisplay } from '$lib/utils/datetime';
 
 	const queryClient = useQueryClient();
 
@@ -74,6 +75,7 @@
 		return null;
 	}
 
+
 	function formatRowCount(count: number | null): string {
 		if (count === null) return '-';
 		if (count >= 1_000_000) {
@@ -86,8 +88,7 @@
 	}
 
 	function formatDate(dateString: string): string {
-		const date = new Date(dateString);
-		return date.toLocaleDateString();
+		return formatDateDisplay(dateString);
 	}
 </script>
 

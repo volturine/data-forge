@@ -100,7 +100,12 @@
 				<span class="page-info">Page {page}</span>
 				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}> Next </button>
 			</div>
-			<DataTable columns={data?.columns ?? []} data={data?.data ?? []} loading={isLoading} />
+			<DataTable
+				columns={data?.columns ?? []}
+				data={data?.data ?? []}
+				columnTypes={data?.column_types ?? {}}
+				loading={isLoading}
+			/>
 		{/if}
 	{:else}
 		<div class="schema-view">

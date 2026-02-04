@@ -37,6 +37,14 @@ export class ConfigStore {
 	get jobTimeout(): number {
 		return this.config?.job_timeout ?? 300; // 5min default
 	}
+
+	get timezone(): string {
+		return this.config?.timezone ?? 'UTC';
+	}
+
+	get normalizeTz(): boolean {
+		return this.config?.normalize_tz ?? false;
+	}
 }
 
 export const configStore = new ConfigStore();

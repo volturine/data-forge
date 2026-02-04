@@ -30,9 +30,39 @@ def test_filter_handler():
     handler = FilterHandler()
     lf = handler(
         _frame(),
-        {'conditions': [{'column': 'age', 'operator': '>', 'value': 30}], 'logic': 'AND'},
+        {'conditions': [{'column': 'age', 'operator': '>', 'value': 30, 'value_type': 'number'}], 'logic': 'AND'},
     )
     assert lf.collect().height == 1
+
+
+def test_filter_handler_string():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {'conditions': [{'column': 'name', 'operator': 'contains', 'value': 'Ali', 'value_type': 'string'}], 'logic': 'AND'},
+    )
+    assert lf.collect().height == 1
+
+
+def test_filter_handler_null():
+    handler = FilterHandler()
+    lf = handler(
+        pl.DataFrame({'a': [1, None, 3]}).lazy(),
+        {'conditions': [{'column': 'a', 'operator': 'is_not_null', 'value': None, 'value_type': 'string'}], 'logic': 'AND'},
+    )
+    assert lf.collect().height == 2
+
+
+def test_filter_handler_column_comparison():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [{'column': 'date', 'operator': '<', 'value': None, 'value_type': 'column', 'compare_column': 'date2'}],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect().height == 3
 
 
 def test_groupby_handler():
