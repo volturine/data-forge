@@ -15,6 +15,7 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { resolveColumnType } from '$lib/utils/columnTypes';
 
 	interface Props {
 		analysisId: string;
@@ -127,7 +128,7 @@
 	}
 
 	function getColumnType(col: string): string {
-		return data?.column_types?.[col] || '';
+		return resolveColumnType(data?.column_types?.[col]);
 	}
 
 	function isListType(columnType: string): boolean {

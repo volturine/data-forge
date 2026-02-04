@@ -8,6 +8,7 @@ import {
 	unionByNameTransform,
 	type StepConfig
 } from '$lib/utils/transform';
+import { resolveColumnType } from '$lib/utils/columnTypes';
 import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {
@@ -91,7 +92,7 @@ export class SchemaStore {
 	setPreviewSchema(stepId: string, columns: string[], columnTypes?: Record<string, string>): void {
 		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
 			name,
-			dtype: columnTypes?.[name] ?? 'Unknown',
+			dtype: resolveColumnType(columnTypes?.[name]),
 			nullable: true
 		}));
 		this.previewSchemas.set(stepId, { columns: schemaColumns, row_count: null });

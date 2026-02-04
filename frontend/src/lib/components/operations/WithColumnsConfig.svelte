@@ -72,7 +72,7 @@
 			const signature = {
 				inputs: exprArgs.map((name, index) => {
 					const column = schema.columns.find((col) => col.name === name);
-					return { position: index, dtype: column?.dtype ?? 'Unknown', label: name };
+				return { position: index, dtype: column?.dtype ?? 'Any', label: name };
 				}),
 				output_dtype: null
 			};

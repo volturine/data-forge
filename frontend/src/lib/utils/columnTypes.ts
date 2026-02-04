@@ -67,7 +67,7 @@ export type ColumnType =
 	| 'Binary'
 	| 'Object'
 	| 'Null'
-	| 'Unknown';
+	| 'Any';
 
 /**
  * Column type categories for grouping and color-coding
@@ -134,7 +134,9 @@ const CANONICAL_NAMES: Record<string, string> = {
 	int: 'Int64',
 	float: 'Float64',
 	bool: 'Boolean',
-	Timestamp: 'Datetime'
+	Timestamp: 'Datetime',
+	Unknown: 'Any',
+	unknown: 'Any'
 };
 
 /**
@@ -481,15 +483,15 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 		description: 'Null type',
 		aliases: []
 	},
-	Unknown: {
-		type: 'Unknown',
-		label: 'Unknown',
-		canonicalName: 'Unknown',
+	Any: {
+		type: 'Any',
+		label: 'Any',
+		canonicalName: 'Any',
 		category: 'other',
 		colors: CATEGORY_REGISTRY.other.colors,
 		icon: File,
-		description: 'Unknown type',
-		aliases: []
+		description: 'Any type',
+		aliases: ['Unknown', 'unknown']
 	}
 };
 
@@ -591,8 +593,16 @@ export function getColumnTypeConfig(type: string): ColumnTypeConfig {
 		return COLUMN_TYPE_REGISTRY.List;
 	}
 
-	// Fallback to Unknown
-	return COLUMN_TYPE_REGISTRY.Unknown;
+	// Fallback to Any
+	return COLUMN_TYPE_REGISTRY.Any;
+}
+
+/**
+ * Resolves a column type string to a canonical type with safe fallback.
+ */
+export function resolveColumnType(type?: string | null): string {
+	if (!type) return COLUMN_TYPE_REGISTRY.Any.canonicalName;
+	return getColumnTypeConfig(type).canonicalName;
 }
 
 /**

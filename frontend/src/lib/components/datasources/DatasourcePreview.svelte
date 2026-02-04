@@ -4,6 +4,7 @@
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { resolveColumnType } from '$lib/utils/columnTypes';
 
 	interface Props {
 		datasourceId: string;
@@ -44,7 +45,7 @@
 		data
 			? data.columns.map((name) => ({
 					name,
-					dtype: data.column_types?.[name] ?? 'unknown'
+					dtype: resolveColumnType(data.column_types?.[name])
 				}))
 			: []
 	);

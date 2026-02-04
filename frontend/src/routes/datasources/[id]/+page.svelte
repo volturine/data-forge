@@ -13,7 +13,7 @@
 		IcebergDataSourceConfig
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import ColumnTypeSelect from '$lib/components/common/ColumnTypeSelect.svelte';
+	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 
 	const queryClient = useQueryClient();
 	const datasourceId = $derived(page.params.id);
@@ -569,12 +569,11 @@
 										value={column.name}
 										oninput={(e) => handleColumnNameChange(index, e.currentTarget.value)}
 									/>
-									<ColumnTypeSelect
-										value={column.dtype}
-										onchange={(val) => handleColumnTypeChange(index, val)}
-										size="sm"
-										showBadge={true}
-									/>
+								<ColumnTypeDropdown
+									value={column.dtype}
+									onChange={(val) => handleColumnTypeChange(index, val)}
+									placeholder="Select type..."
+								/>
 									<span class="col-sample" title={column.sample_value ?? ''}>
 										{column.sample_value ?? '—'}
 									</span>
