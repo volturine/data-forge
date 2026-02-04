@@ -95,9 +95,6 @@ class Settings(BaseSettings):
     # Iceberg log flush interval in seconds
     log_iceberg_flush_interval_seconds: int = Field(default=300, alias='LOG_ICEBERG_FLUSH_INTERVAL_SECONDS')
 
-    # Max bytes stored for request/response JSON bodies
-    log_body_max_bytes: int = Field(default=20_000_000, alias='LOG_BODY_MAX_BYTES')
-
     # Max queued log batches before dropping
     log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
 
@@ -182,13 +179,6 @@ class Settings(BaseSettings):
         if value.lower() not in valid_levels:
             raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
         return value.lower()
-
-    @field_validator('log_body_max_bytes')
-    @classmethod
-    def _validate_log_body_size(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError(f'log_body_max_bytes must be positive, got {value}')
-        return value
 
     @field_validator('log_queue_max_size')
     @classmethod

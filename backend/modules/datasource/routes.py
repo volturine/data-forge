@@ -4,9 +4,10 @@ from shutil import copy2
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlmodel import Session
+from starlette.concurrency import run_in_threadpool
 
 from core.config import settings
-from core.database import get_db
+from core.database import get_db, run_db
 from core.exceptions import DataSourceNotFoundError
 from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
@@ -24,7 +25,6 @@ async def upload_file(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
-    session: Session = Depends(get_db),
 ):
     """Upload a file and create a data source."""
     if not file.filename:
@@ -71,8 +71,9 @@ async def upload_file(
         )
 
     try:
-        return service.create_file_datasource(
-            session=session,
+        return await run_in_threadpool(
+            run_db,
+            service.create_file_datasource,
             name=name,
             file_path=str(file_path),
             file_type=file_type,
@@ -92,7 +93,6 @@ async def upload_bulk(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
-    session: Session = Depends(get_db),
 ):
     """Upload multiple files and create datasources."""
     if not files:
@@ -144,13 +144,15 @@ async def upload_bulk(
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=f'Failed to save file: {str(e)}'))
             continue
 
+        file_csv_options = csv_options if file_type == 'csv' else None
         try:
-            datasource = service.create_file_datasource(
-                session=session,
+            datasource = await run_in_threadpool(
+                run_db,
+                service.create_file_datasource,
                 name=name,
                 file_path=str(file_path),
                 file_type=file_type,
-                csv_options=csv_options if file_type == 'csv' else None,
+                csv_options=file_csv_options,
             )
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
         except Exception as e:
@@ -268,7 +270,6 @@ async def confirm_excel(
     has_header: bool = Form(True),
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
-    session: Session = Depends(get_db),
 ):
     preflight = get_preflight(preflight_id)
     if not preflight:
@@ -294,8 +295,9 @@ async def confirm_excel(
             table_name,
             named_range,
         )
-        datasource = service.create_file_datasource(
-            session=session,
+        datasource = await run_in_threadpool(
+            run_db,
+            service.create_file_datasource,
             name=name,
             file_path=str(target_path),
             file_type='excel',

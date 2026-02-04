@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Concatenate, ParamSpec, TypeVar
+
 from sqlmodel import Session, SQLModel, create_engine
 
 from core.config import settings
@@ -23,10 +26,18 @@ engine = create_engine(
     connect_args=_build_connect_args(),
 )
 
+P = ParamSpec('P')
+T = TypeVar('T')
+
 
 def get_db():
     with Session(engine) as session:
         yield session
+
+
+def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+    with Session(engine) as session:
+        return func(session, *args, **kwargs)
 
 
 def init_db() -> None:

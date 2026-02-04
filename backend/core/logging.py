@@ -99,6 +99,7 @@ class IcebergLogWriter:
             'error': payload.get('error'),
             'request_json': payload.get('request_json'),
             'response_json': payload.get('response_json'),
+            'chunk_index': payload.get('chunk_index'),
         }
         self._enqueue_rows('request_logs', [row])
 
@@ -265,23 +266,42 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         request_id: str,
         body: bytes,
     ) -> Response:
-        response_body: bytes = b''
         stream = response.body_iterator if isinstance(response, StreamingResponse) else getattr(response, 'body_iterator', None)
         if stream is not None:
-            async for chunk in stream:
-                part = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
-                response_body += part
-            new_response = Response(
-                content=response_body,
+
+            async def stream_wrapper():
+                index = 0
+                logged = False
+                async for chunk in stream:
+                    logged = True
+                    part = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
+                    request_body = body if index == 0 else None
+                    self._log_request(
+                        request,
+                        response,
+                        duration_ms,
+                        request_id,
+                        request_body,
+                        part,
+                        chunk_index=index,
+                    )
+                    index += 1
+                    yield chunk
+                if not logged:
+                    self._log_request(request, response, duration_ms, request_id, body, None, chunk_index=0)
+
+            headers = dict(response.headers)
+            headers.pop('content-length', None)
+            return StreamingResponse(
+                stream_wrapper(),
                 status_code=response.status_code,
-                headers=dict(response.headers),
+                headers=headers,
                 media_type=response.media_type,
+                background=response.background,
             )
-            self._log_request(request, response, duration_ms, request_id, body, response_body)
-            return new_response
         response_data = getattr(response, 'body', None)
         if response_data is None:
-            self._log_request(request, response, duration_ms, request_id, body, None)
+            self._log_request(request, response, duration_ms, request_id, body, None, chunk_index=0)
             return response
         if isinstance(response_data, str):
             response_body = response_data.encode('utf-8')
@@ -289,7 +309,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             response_body = bytes(response_data)
         else:
             response_body = response_data
-        self._log_request(request, response, duration_ms, request_id, body, response_body)
+        self._log_request(request, response, duration_ms, request_id, body, response_body, chunk_index=0)
         return response
 
     def _log_request(
@@ -298,9 +318,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response: Response | None,
         duration_ms: float,
         request_id: str,
-        request_body: bytes,
+        request_body: bytes | None,
         response_body: bytes | None,
         error: str | None = None,
+        chunk_index: int = 0,
     ) -> None:
         if not self.writer:
             self.writer = get_log_writer()
@@ -328,6 +349,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             'error': error,
             'request_json': self._coerce_body(request.headers.get('content-type'), request_body),
             'response_json': self._coerce_body(response.headers.get('content-type') if response else None, response_body),
+            'chunk_index': chunk_index,
         }
         if not self.writer:
             return
@@ -412,6 +434,7 @@ def _request_schema() -> Schema:
         _field(11, 'error', StringType()),
         _field(12, 'request_json', StringType()),
         _field(13, 'response_json', StringType()),
+        _field(14, 'chunk_index', IntegerType()),
     )
 
 
@@ -465,6 +488,7 @@ def _request_arrow_schema() -> pa.Schema:
             ('error', pa.string()),
             ('request_json', pa.string()),
             ('response_json', pa.string()),
+            ('chunk_index', pa.int32()),
         ]
     )
 
