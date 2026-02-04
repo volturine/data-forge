@@ -697,6 +697,7 @@
 		width: var(--operations-panel-width, 280px);
 		height: 100%;
 		border-right: 1px solid var(--panel-border);
+		box-sizing: border-box;
 		transition: width var(--transition);
 	}
 
@@ -725,6 +726,7 @@
 		width: var(--operations-panel-width, 280px);
 		height: 100%;
 		border-left: 1px solid var(--panel-border);
+		box-sizing: border-box;
 		transition: width var(--transition);
 	}
 
@@ -964,6 +966,7 @@
 		display: flex;
 		width: var(--operations-panel-width, 280px);
 		background-color: var(--panel-bg);
+		box-sizing: border-box;
 		transition:
 			width var(--transition),
 			visibility var(--transition);

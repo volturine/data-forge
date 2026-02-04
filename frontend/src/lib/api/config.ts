@@ -6,6 +6,8 @@ export interface FrontendConfig {
 	engine_pooling_interval: number; // milliseconds
 	engine_idle_timeout: number; // seconds
 	job_timeout: number; // seconds
+	timezone: string;
+	normalize_tz: boolean;
 }
 
 export function getConfig(): ResultAsync<FrontendConfig, ApiError> {

@@ -10,16 +10,19 @@
 	} from '@tanstack/table-core';
 	import type { TableCellValue } from '$lib/types/api-responses';
 
+	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
+
 	interface Props {
 		columns: string[];
 		data: Record<string, unknown>[];
+		columnTypes?: Record<string, string>;
 		loading?: boolean;
 		onSort?: (column: string, direction: 'asc' | 'desc') => void;
 	}
 
 	type RowData = Record<string, unknown>;
 
-	let { columns, data, loading = false, onSort }: Props = $props();
+	let { columns, data, columnTypes = {}, loading = false, onSort }: Props = $props();
 
 	let sorting = $state<SortingState>([]);
 	let headerGroups = $state<HeaderGroup<RowData>[]>([]);
@@ -67,8 +70,20 @@
 		rows = table.getRowModel().rows;
 	});
 
-	function formatValue(value: TableCellValue): string {
+	function getTemporalType(dtype: string | undefined): 'date' | 'datetime' | null {
+		if (!dtype) return null;
+		const lower = dtype.toLowerCase();
+		if (lower.includes('datetime')) return 'datetime';
+		if (lower.includes('date')) return 'date';
+		if (lower.includes('time')) return 'datetime';
+		return null;
+	}
+
+	function formatValue(value: TableCellValue, columnId: string): string {
 		if (value === null || value === undefined) return '—';
+		const temporal = getTemporalType(columnTypes[columnId]);
+		if (temporal === 'date') return formatDateDisplay(value as string);
+		if (temporal === 'datetime') return formatDateTimeDisplay(value as string);
 		if (typeof value === 'number') return value.toLocaleString();
 		if (typeof value === 'boolean') return value ? 'true' : 'false';
 		return String(value);
@@ -138,7 +153,7 @@
 						<tr>
 							{#each row.getVisibleCells() as cell (cell.id)}
 								<td>
-									{formatValue(cell.getValue() as TableCellValue)}
+									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
 							{/each}
 						</tr>

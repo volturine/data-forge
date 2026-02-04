@@ -7,6 +7,7 @@
 	import { Sun, Moon } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
+	import { configStore } from '$lib/stores/config.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import '$lib/../app.css';
 
@@ -22,6 +23,11 @@
 
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme.current);
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		configStore.fetch();
 	});
 
 	$effect(() => {

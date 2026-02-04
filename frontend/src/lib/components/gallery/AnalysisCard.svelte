@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ChartBar, Trash2 } from 'lucide-svelte';
+	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
 
 	interface Props {
 		analysis: AnalysisGalleryItem;
@@ -27,12 +28,16 @@
 		}
 	}
 
+
 	function formatDate(date: string): string {
-		const d = new Date(date);
 		const now = new Date();
+		const year = getYearDisplay(date);
+		const currentYear = getYearDisplay(now);
 		const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-		if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
-		return d.toLocaleDateString('en-US', opts);
+		if (year !== null && currentYear !== null && year !== currentYear) {
+			opts.year = 'numeric';
+		}
+		return formatDateDisplay(date, opts);
 	}
 </script>
 

@@ -23,9 +23,8 @@
 
 	let { schema, config = $bindable({ groupBy: [], aggregations: [] }) }: Props = $props();
 
-	// Config now guaranteed to have proper structure
-	let safeGroupBy = $derived(config.groupBy);
-	let safeAggregations = $derived(config.aggregations);
+	const safeGroupBy = $derived(config.groupBy ?? []);
+	const safeAggregations = $derived(config.aggregations ?? []);
 
 	let newAggregation = $state<Aggregation>({
 		column: '',

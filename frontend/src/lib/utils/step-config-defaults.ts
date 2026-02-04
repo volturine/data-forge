@@ -3,7 +3,7 @@
  * Centralizes config shape definitions to eliminate defensive $effect blocks in components.
  */
 
-import type { FilterCondition, JoinColumn } from '$lib/types/operation-config';
+import type { FilterCondition, FilterValueType, JoinColumn } from '$lib/types/operation-config';
 
 export interface SelectConfigData {
 	columns: string[];
@@ -114,7 +114,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 	drop: { columns: [] } satisfies DropConfigData,
 
 	filter: {
-		conditions: [{ column: '', operator: '=', value: '' }],
+		conditions: [{ column: '', operator: '=', value: '', value_type: 'string' }],
 		logic: 'AND'
 	} satisfies FilterConfigData,
 
@@ -219,5 +219,18 @@ export function getDefaultConfig(stepType: string): StepConfig {
  */
 export function normalizeConfig(stepType: string, config: Record<string, unknown>): StepConfig {
 	const defaults = getDefaultConfig(stepType);
+
+	// Handle filter-specific normalization for backward compatibility
+	if (stepType === 'filter' && Array.isArray(config.conditions)) {
+		const conditions = config.conditions as Array<Record<string, unknown>>;
+		config.conditions = conditions.map((cond) => ({
+			column: cond.column ?? '',
+			operator: cond.operator ?? '=',
+			value: cond.value ?? '',
+			value_type: cond.value_type ?? 'string',
+			...(cond.compare_column ? { compare_column: cond.compare_column } : {})
+		}));
+	}
+
 	return { ...defaults, ...config };
 }

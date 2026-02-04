@@ -11,6 +11,7 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { Plus, Trash2, X } from 'lucide-svelte';
 	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
+	import { toEpochDisplay } from '$lib/utils/datetime';
 
 	const queryClient = useQueryClient();
 
@@ -44,11 +45,13 @@
 		}
 
 		result.sort((a, b) => {
+			const left = toEpochDisplay(a.updated_at);
+			const right = toEpochDisplay(b.updated_at);
 			switch (sortOption.current) {
 				case 'newest':
-					return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+					return right - left;
 				case 'oldest':
-					return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+					return left - right;
 				case 'name-asc':
 					return a.name.localeCompare(b.name);
 				case 'name-desc':

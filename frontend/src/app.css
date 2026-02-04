@@ -148,7 +148,7 @@
 	--panel-shadow: var(--shadow-soft);
 
 	/* Panel widths */
-	--operations-panel-width: 340px;
+	--operations-panel-width: 400px;
 
 	/* Pipeline component spacing */
 	--pipeline-connection-height: 18px;
@@ -315,6 +315,20 @@ html {
 	-moz-osx-font-smoothing: grayscale;
 }
 
+@media (prefers-color-scheme: dark) {
+	html:not([data-theme='light']) {
+		color-scheme: dark;
+	}
+}
+
+[data-theme='dark'] {
+	color-scheme: dark;
+}
+
+[data-theme='light'] {
+	color-scheme: light;
+}
+
 body {
 	font-family: var(--font-mono);
 	font-size: var(--text-sm);
@@ -444,6 +458,48 @@ input[type='radio'] {
 	width: auto;
 	cursor: pointer;
 }
+
+/* Date/Time inputs styling */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'] {
+	cursor: pointer;
+	min-height: 36px;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='time']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator {
+	cursor: pointer;
+	padding: var(--space-1);
+	margin-left: var(--space-1);
+	border-radius: var(--radius-sm);
+	opacity: 0.7;
+	filter: invert(0.5);
+	transition: all var(--transition);
+}
+
+input[type='date']::-webkit-calendar-picker-indicator:hover,
+input[type='time']::-webkit-calendar-picker-indicator:hover,
+input[type='datetime-local']::-webkit-calendar-picker-indicator:hover {
+	opacity: 1;
+	background-color: var(--bg-hover);
+}
+
+@media (prefers-color-scheme: dark) {
+	input[type='date']::-webkit-calendar-picker-indicator,
+	input[type='time']::-webkit-calendar-picker-indicator,
+	input[type='datetime-local']::-webkit-calendar-picker-indicator {
+		filter: invert(0.8);
+	}
+}
+
+[data-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='time']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator {
+	filter: invert(0.8);
+}
+
 label {
 	display: block;
 	font-size: var(--text-sm);
@@ -585,19 +641,19 @@ tr:hover {
    ============================================ */
 
 .config-panel {
-	padding: var(--space-4);
+	padding: var(--space-3);
 	border: 1px solid var(--panel-border);
 	border-radius: var(--radius-md);
 	background-color: var(--panel-bg);
 }
 .config-panel h3 {
 	margin-top: 0;
-	margin-bottom: var(--space-4);
+	margin-bottom: var(--space-3);
 	color: var(--panel-header-fg);
 }
 .config-panel .description {
 	margin-top: 0;
-	margin-bottom: var(--space-4);
+	margin-bottom: var(--space-3);
 	color: var(--fg-tertiary);
 	font-size: var(--text-sm);
 }
@@ -609,7 +665,7 @@ tr:hover {
 }
 .form-section {
 	margin-bottom: var(--space-6);
-	padding: var(--space-4);
+	padding: var(--space-3);
 	background-color: var(--form-section-bg);
 	border-radius: var(--radius-md);
 	border: 1px solid var(--form-section-border);
