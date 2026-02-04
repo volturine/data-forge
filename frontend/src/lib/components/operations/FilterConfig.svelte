@@ -2,7 +2,6 @@
 	import type { Schema } from '$lib/types/schema';
 	import { X, Plus } from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import DateTimeInput from '$lib/components/common/DateTimeInput.svelte';
 	
 
@@ -75,9 +74,6 @@
 		return 'string';
 	}
 
-	function getColumnDtype(name: string): string {
-		return schema.columns.find((c) => c.name === name)?.dtype ?? 'Utf8';
-	}
 
 	function getOperatorsForType(type: string, isColumnMode: boolean): string[] {
 		if (isColumnMode) return COMPARISON_OPS;
@@ -154,6 +150,8 @@
 		// If ISO format with Z or offset, parse and format without TZ conversion
 		const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(str);
 		if (match) return `${match[1]}T${match[2]}`;
+		// If date-only format (YYYY-MM-DD), return as-is (no time component)
+		if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
 		return '';
 	}
 
@@ -172,39 +170,34 @@
 <div class="config-panel" role="region" aria-label="Filter configuration">
 	<h3>Filter Configuration</h3>
 
-	<div class="form-section" role="group" aria-labelledby="{uid}-logic-heading">
-		<div class="section-header">
-			<h4 id="{uid}-logic-heading">Logic</h4>
-			<div class="logic-toggle" role="radiogroup" aria-label="Condition logic">
-				<button
-					type="button"
-					class="logic-btn"
-					class:active={config.logic === 'AND'}
-					onclick={() => (config.logic = 'AND')}
-					aria-pressed={config.logic === 'AND'}
-				>
-					AND
-				</button>
-				<button
-					type="button"
-					class="logic-btn"
-					class:active={config.logic === 'OR'}
-					onclick={() => (config.logic = 'OR')}
-					aria-pressed={config.logic === 'OR'}
-				>
-					OR
-				</button>
-			</div>
-		</div>
-	</div>
-
 	<div class="form-section" role="group" aria-labelledby="{uid}-conditions-heading">
 		<div class="section-header">
 			<h4 id="{uid}-conditions-heading">Conditions</h4>
-			<button type="button" class="btn-add" onclick={addCondition} aria-label="Add filter condition">
-				<Plus size={16} aria-hidden="true" />
-				Add
-			</button>
+			<div class="header-actions">
+				<div class="logic-toggle" role="radiogroup" aria-label="Condition logic">
+					<button
+						type="button"
+						class="logic-btn"
+						class:active={config.logic === 'AND'}
+						onclick={() => (config.logic = 'AND')}
+						aria-pressed={config.logic === 'AND'}
+					>
+						AND
+					</button>
+					<button
+						type="button"
+						class="logic-btn"
+						class:active={config.logic === 'OR'}
+						onclick={() => (config.logic = 'OR')}
+						aria-pressed={config.logic === 'OR'}
+					>
+						OR
+					</button>
+				</div>
+				<button type="button" class="btn-add" onclick={addCondition} aria-label="Add filter condition">
+					<Plus size={16} aria-hidden="true" />
+				</button>
+			</div>
 		</div>
 
 		{#if conditions.length === 0}
@@ -221,7 +214,7 @@
 						<div class="condition-header">
 							<span class="condition-number">#{i + 1}</span>
 							{#if cond.column}
-								<ColumnTypeBadge columnType={getColumnDtype(cond.column)} size="xs" />
+								<span class="condition-column">{cond.column}</span>
 							{/if}
 							<button
 								type="button"
@@ -368,64 +361,95 @@
 		margin-bottom: 0;
 	}
 
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
 	.logic-toggle,
 	.mode-toggle {
 		display: flex;
 	}
 
-	.logic-btn,
+	.logic-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-1) var(--space-2);
+		background-color: transparent;
+		color: var(--fg-muted);
+		border: 1px solid var(--border-primary);
+		cursor: pointer;
+		transition: all var(--transition);
+		font-size: var(--text-xs);
+	}
+	.logic-btn:first-child {
+		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+		border-right: none;
+	}
+	.logic-btn:last-child {
+		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	}
+	.logic-btn:hover:not(.active) {
+		background-color: var(--bg-hover);
+		color: var(--fg-secondary);
+	}
+	.logic-btn.active {
+		background-color: var(--accent-primary);
+		color: var(--bg-primary);
+		border-color: var(--accent-primary);
+	}
+
+	.mode-toggle {
+		display: flex;
+	}
+
 	.mode-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: var(--space-1) var(--space-3);
-		background-color: var(--bg-tertiary);
-		color: var(--fg-secondary);
+		padding: var(--space-1) var(--space-2);
+		background-color: transparent;
+		color: var(--fg-muted);
 		border: 1px solid var(--border-primary);
 		cursor: pointer;
 		transition: all var(--transition);
-		font-size: var(--text-sm);
+		font-size: var(--text-xs);
 	}
-	.logic-btn:first-child,
 	.mode-btn:first-child {
 		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 		border-right: none;
 	}
-	.logic-btn:last-child,
 	.mode-btn:last-child {
 		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 	}
-	.logic-btn:hover:not(.active),
 	.mode-btn:hover:not(.active) {
-		background-color: var(--bg-secondary);
-		color: var(--fg-primary);
+		background-color: var(--bg-hover);
+		color: var(--fg-secondary);
 	}
-	.logic-btn.active,
 	.mode-btn.active {
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border-color: var(--accent-primary);
 	}
 
-	.mode-btn {
-		padding: var(--space-1) var(--space-2);
-		font-size: var(--text-xs);
-	}
-
 	.btn-add {
 		display: flex;
 		align-items: center;
-		gap: var(--space-1);
-		padding: var(--space-1) var(--space-3);
-		background-color: var(--primary-bg);
-		color: var(--primary-fg);
-		border: none;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		background-color: var(--bg-tertiary);
+		color: var(--fg-secondary);
+		border: 1px solid var(--border-primary);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
-		font-size: var(--text-sm);
 	}
 	.btn-add:hover {
-		background-color: var(--primary-hover);
+		background-color: var(--bg-hover);
+		color: var(--fg-primary);
 	}
 
 	.empty-message {
@@ -461,6 +485,12 @@
 		font-size: var(--text-xs);
 		font-weight: var(--font-semibold);
 		color: var(--fg-muted);
+	}
+
+	.condition-column {
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
+		color: var(--fg-primary);
 	}
 
 	.btn-remove {

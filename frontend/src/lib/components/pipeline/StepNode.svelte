@@ -269,12 +269,10 @@
 
 <style>
 	.step-node {
-		position: relative;
-		width: min(55%, 640px);
+		width: min(65%);
 	}
 	.step-node.view-node {
-		max-width: 75%;
-		width: 75%;
+		width: 85%;
 		min-width: 320px;
 	}
 	.step-node.greyed-out {

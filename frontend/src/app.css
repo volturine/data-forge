@@ -641,19 +641,19 @@ tr:hover {
    ============================================ */
 
 .config-panel {
-	padding: var(--space-4);
+	padding: var(--space-3);
 	border: 1px solid var(--panel-border);
 	border-radius: var(--radius-md);
 	background-color: var(--panel-bg);
 }
 .config-panel h3 {
 	margin-top: 0;
-	margin-bottom: var(--space-4);
+	margin-bottom: var(--space-3);
 	color: var(--panel-header-fg);
 }
 .config-panel .description {
 	margin-top: 0;
-	margin-bottom: var(--space-4);
+	margin-bottom: var(--space-3);
 	color: var(--fg-tertiary);
 	font-size: var(--text-sm);
 }
@@ -665,7 +665,7 @@ tr:hover {
 }
 .form-section {
 	margin-bottom: var(--space-6);
-	padding: var(--space-4);
+	padding: var(--space-3);
 	background-color: var(--form-section-bg);
 	border-radius: var(--radius-md);
 	border: 1px solid var(--form-section-border);

@@ -146,8 +146,9 @@ class FilterHandler(OperationHandler):
         """Build a filter expression from a condition."""
         left = pl.col(cond.column)
         schema = self._schema
-        if schema and cond.column in schema:
-            left = self._normalize_datetime_col(left, schema[cond.column])
+        col_dtype = schema.get(cond.column) if schema else None
+        if col_dtype:
+            left = self._normalize_datetime_col(left, col_dtype)
 
         if cond.operator in ('is_null', 'is_not_null'):
             op = self.OPERATORS.get(cond.operator)
@@ -166,11 +167,30 @@ class FilterHandler(OperationHandler):
                 right = self._normalize_datetime_col(right, schema[cond.compare_column])
             return op(left, right)
 
+        # Check if this is a date-only value against a datetime column
+        is_date_only = self._is_date_only_value(cond.value)
+        is_datetime_col = isinstance(col_dtype, pl.Datetime)
+
+        # For date-only comparisons against datetime columns, compare by date
+        if is_date_only and is_datetime_col and cond.value_type == 'datetime':
+            date_val = coerce_value(cond.value, 'date')
+            left_date = pl.col(cond.column).dt.date()
+            op = self.OPERATORS.get(cond.operator)
+            if not op:
+                raise ValueError(f'Unsupported filter operator: {cond.operator}')
+            return op(left_date, date_val)
+
         coerced = coerce_value(cond.value, cond.value_type)
         op = self.OPERATORS.get(cond.operator)
         if not op:
             raise ValueError(f'Unsupported filter operator: {cond.operator}')
         return op(left, coerced)
+
+    def _is_date_only_value(self, value: Any) -> bool:
+        """Check if value is a date-only string (YYYY-MM-DD without time)."""
+        if not isinstance(value, str):
+            return False
+        return len(value) == 10 and '-' in value and 'T' not in value
 
     def _get_operator(self, name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
         op = self.OPERATORS.get(name)

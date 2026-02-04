@@ -334,7 +334,7 @@
 <style>
 	.datasource-node {
 		position: relative;
-		width: min(55%, 640px);
+		width: min(65%);
 	}
 
 	.node-content {
