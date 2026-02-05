@@ -188,46 +188,62 @@
 	}
 </script>
 
-<div class="inline-data-table">
+<div
+	class="w-full my-2 overflow-hidden rounded-md border select-text"
+	style="background: var(--panel-bg); border-color: var(--panel-border); box-shadow: var(--panel-shadow);"
+>
 	{#if isLoading}
-		<div class="loading-overlay">
+		<div
+			class="flex flex-col items-center justify-center gap-3 p-8 pointer-events-none"
+			style="color: var(--fg-tertiary);"
+		>
 			<div class="spinner-md"></div>
-			<p class="text-tertiary">Loading preview...</p>
+			<p class="m-0" style="color: var(--fg-tertiary);">Loading preview...</p>
 		</div>
 	{:else if error}
-		<div class="error-state">
-			<p class="error-title">Failed to load preview</p>
-			<p class="error-message">{error.message}</p>
+		<div class="p-8 text-center">
+			<p class="m-0 mb-2 font-semibold" style="color: var(--error-fg);">Failed to load preview</p>
+			<p class="m-0" style="color: var(--fg-tertiary);">{error.message}</p>
 		</div>
 	{:else if headerGroups.length > 0 && data}
-		<div class="table-info">
+		<div
+			class="flex justify-between items-center px-4 py-3 text-xs border-b"
+			style="color: var(--fg-tertiary); background: var(--panel-header-bg); border-color: var(--panel-border);"
+		>
 			<span>
 				Showing {startRow.toLocaleString()}-{endRow.toLocaleString()} of {data.total_rows.toLocaleString()}
 				rows
 			</span>
 		</div>
 
-		<div class="table-wrapper">
-			<table>
-				<thead>
+		<div class="overflow-x-auto overflow-y-auto max-h-[400px]">
+			<table class="w-full border-collapse">
+				<thead class="sticky top-0 z-10" style="background: var(--table-header-bg);">
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-								<th>
-									<button class="column-header" onclick={() => toggleSort(header.id)}>
-										<span class="column-name">
+								<th
+									class="p-0 text-left font-semibold text-[0.8125rem] uppercase tracking-wide border-b-2"
+									style="border-color: var(--table-border);"
+								>
+									<button
+										class="column-header flex items-center gap-1 px-4 py-3 bg-transparent border-none cursor-pointer transition-colors"
+										style="font-size: inherit; font-weight: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;"
+										onclick={() => toggleSort(header.id)}
+									>
+										<span class="text-sm">
 											{typeof header.column.columnDef.header === 'string'
 												? header.column.columnDef.header
 												: header.id}
 										</span>
 										{#if getSortDirection(header.id)}
-											<span class="sort-indicator">
+											<span class="text-xs" style="color: var(--accent-primary);">
 												{getSortDirection(header.id) === 'asc' ? '↑' : '↓'}
 											</span>
 										{/if}
 									</button>
 									{#if getColumnType(header.id)}
-										<div class="column-type-wrapper">
+										<div class="inline-block ml-2 align-middle">
 											<ColumnTypeBadge
 												columnType={getColumnType(header.id)}
 												size="xs"
@@ -242,9 +258,13 @@
 				</thead>
 				<tbody>
 					{#each rows as row (row.id)}
-						<tr>
+						<tr class="table-row border-b transition-colors last:border-b-0" style="border-color: var(--table-border);">
 							{#each row.getVisibleCells() as cell (cell.id)}
-								<td class:is-list-cell={isListType(getColumnType(cell.column.id))}>
+								<td
+									class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[250px] text-[0.8125rem] select-text"
+									class:text-xs={isListType(getColumnType(cell.column.id))}
+									style="color: var(--fg-secondary);"
+								>
 									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
 							{/each}
@@ -255,180 +275,56 @@
 		</div>
 
 		{#if totalPages > 1}
-			<div class="pagination">
-				<button onclick={prevPage} disabled={currentPage === 1}>Previous</button>
-				<span class="page-info">Page {currentPage} of {totalPages}</span>
-				<button onclick={nextPage} disabled={currentPage >= totalPages}>Next</button>
+			<div
+				class="flex justify-between items-center px-4 py-3 border-t"
+				style="background: var(--panel-header-bg); border-color: var(--panel-border);"
+			>
+				<button
+					class="pagination-btn px-4 py-2 border rounded-sm cursor-pointer transition-all"
+					style="border-color: var(--border-primary); background: var(--panel-bg);"
+					onclick={prevPage}
+					disabled={currentPage === 1}
+				>
+					Previous
+				</button>
+				<span class="text-xs" style="color: var(--fg-tertiary);">Page {currentPage} of {totalPages}</span>
+				<button
+					class="pagination-btn px-4 py-2 border rounded-sm cursor-pointer transition-all"
+					style="border-color: var(--border-primary); background: var(--panel-bg);"
+					onclick={nextPage}
+					disabled={currentPage >= totalPages}
+				>
+					Next
+				</button>
 			</div>
 		{/if}
 	{:else}
-		<div class="empty-state">
-			<p>No data available</p>
+		<div class="p-8 text-center" style="color: var(--fg-muted);">
+			<p class="m-0">No data available</p>
 		</div>
 	{/if}
 </div>
 
 <style>
-	.inline-data-table {
-		width: 100%;
-		background: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-md);
-		overflow: hidden;
-		margin: var(--space-2) 0;
-		box-shadow: var(--panel-shadow);
-		user-select: text;
-	}
-	.loading-overlay {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: 2rem;
-		gap: 0.75rem;
-		color: var(--fg-tertiary);
-		pointer-events: none;
-	}
-	.loading-overlay p {
-		margin: 0;
-	}
-	.error-state {
-		padding: var(--space-8);
-		text-align: center;
-	}
-	.error-title {
-		margin: 0 0 var(--space-2) 0;
-		color: var(--error-fg);
-		font-weight: var(--font-semibold);
-	}
-	.error-message {
-		margin: 0;
-		color: var(--fg-tertiary);
-	}
-	.empty-state {
-		padding: var(--space-8);
-		text-align: center;
-		color: var(--fg-muted);
-	}
-	.empty-state p {
-		margin: 0;
-	}
-	.table-info {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.75rem 1rem;
-		font-size: 0.75rem;
-		color: var(--fg-tertiary);
-		background: var(--panel-header-bg);
-		border-bottom: 1px solid var(--panel-border);
-	}
-	.table-wrapper {
-		overflow-x: auto;
-		max-height: 400px;
-		overflow-y: auto;
-	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	thead {
-		position: sticky;
-		top: 0;
-		background: var(--table-header-bg);
-		z-index: 10;
-	}
-	th {
-		padding: 0;
-		text-align: left;
-		border-bottom: 2px solid var(--table-border);
-		font-weight: 600;
-		font-size: 0.8125rem;
-		text-transform: uppercase;
-		letter-spacing: 0.02em;
-	}
-	.column-header {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		padding: 0.75rem 1rem;
-		background: none;
-		border: none;
-		cursor: pointer;
-		font-size: inherit;
-		font-weight: inherit;
-		color: inherit;
-		text-transform: inherit;
-		letter-spacing: inherit;
-		transition: background-color 0.15s ease;
-	}
 	.column-header:hover {
 		background: var(--bg-hover);
 	}
-	.column-name {
-		font-size: 0.875rem;
-	}
-	.sort-indicator {
-		color: var(--accent-primary);
-		font-size: 0.75rem;
-	}
-	.column-type-wrapper {
-		display: inline-block;
-		margin-left: 0.5rem;
-		vertical-align: middle;
-	}
-	td.is-list-cell {
-		font-size: 0.75rem;
-	}
-	tbody tr {
-		border-bottom: 1px solid var(--table-border);
-		transition: background-color 0.15s ease;
-	}
-	tbody tr:nth-child(even) {
+
+	.table-row:nth-child(even) {
 		background: var(--table-row-alt);
 	}
-	tbody tr:hover {
+
+	.table-row:hover {
 		background: var(--table-row-hover);
 	}
-	tbody tr:last-child {
-		border-bottom: none;
-	}
-	td {
-		padding: 0.75rem 1rem;
-		color: var(--fg-secondary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		max-width: 250px;
-		font-size: 0.8125rem;
-		user-select: text;
-	}
-	.pagination {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.75rem 1rem;
-		background: var(--panel-header-bg);
-		border-top: 1px solid var(--panel-border);
-	}
-	.pagination button {
-		padding: 0.5rem 1rem;
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		background: var(--panel-bg);
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-	.pagination button:hover:not(:disabled) {
+
+	.pagination-btn:hover:not(:disabled) {
 		background: var(--bg-hover);
 		border-color: var(--border-secondary);
 	}
-	.pagination button:disabled {
+
+	.pagination-btn:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
-	}
-	.page-info {
-		font-size: 0.75rem;
-		color: var(--fg-tertiary);
 	}
 </style>
