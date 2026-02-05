@@ -12,6 +12,7 @@
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import type { TableCellValue } from '$lib/types/api-responses';
+	import { Previous } from 'runed';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -40,17 +41,7 @@
 	let activePipeline = $derived(applySteps(pipeline));
 	let isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
 
-	// Create a stable key from pipeline to detect changes
 	const pipelineKey = $derived(JSON.stringify(activePipeline));
-
-	// Reset page when pipeline changes
-	let lastPipelineKey = $state('');
-	$effect(() => {
-		if (pipelineKey !== lastPipelineKey) {
-			currentPage = 1;
-			lastPipelineKey = pipelineKey;
-		}
-	});
 
 	const query = createQuery(() => {
 		return {
@@ -92,18 +83,6 @@
 	const data = $derived(isActiveStep ? query.data : null);
 	const isLoading = $derived(isActiveStep ? query.isLoading : false);
 	const error = $derived(isActiveStep ? query.error : null);
-
-	// Update schema store with actual columns from preview
-	$effect(() => {
-		if (!isActiveStep) {
-			schemaStore.clearPreviewSchema(stepId);
-			return;
-		}
-		if (data?.columns && data.column_types) {
-			schemaStore.setPreviewSchema(stepId, data.columns, data.column_types);
-		}
-	});
-
 	const totalPages = $derived(data ? Math.ceil(data.total_rows / rowLimit) : 0);
 	const startRow = $derived((currentPage - 1) * rowLimit + 1);
 	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0);

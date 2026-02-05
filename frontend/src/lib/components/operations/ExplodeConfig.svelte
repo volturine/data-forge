@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	interface ExplodeConfigData {
 		columns: string[];
@@ -13,11 +13,8 @@
 
 	let { schema, config = $bindable({ columns: [] }) }: Props = $props();
 
-	// Safe accessor
-	let safeColumns = $derived(Array.isArray(config?.columns) ? config.columns : []);
-
-	const listColumns = $derived(
-		schema.columns.filter(
+	const hasListColumns = $derived(
+		schema.columns.some(
 			(col) =>
 				col.dtype.toLowerCase().includes('list') ||
 				col.dtype.toLowerCase().includes('array') ||
@@ -25,14 +22,9 @@
 		)
 	);
 
-	function toggleColumn(columnName: string) {
-		const cols = safeColumns;
-		const index = cols.indexOf(columnName);
-		if (index > -1) {
-			config.columns = cols.filter((_, i) => i !== index);
-		} else {
-			config.columns = [...cols, columnName];
-		}
+	function isListColumn(col: { name: string; dtype: string }): boolean {
+		const d = col.dtype.toLowerCase();
+		return d.includes('list') || d.includes('array');
 	}
 </script>
 
@@ -48,7 +40,7 @@
 		<h4>Columns to Explode</h4>
 		<p class="help-text">Select one or more list/array columns to explode</p>
 
-		{#if listColumns.length === 0}
+		{#if !hasListColumns}
 			<div class="warning-box">
 				<strong>No list/array columns detected</strong>
 				<p>
@@ -57,24 +49,19 @@
 				</p>
 			</div>
 		{:else}
-			<div class="column-list">
-				{#each listColumns as column (column.name)}
-					<label class="column-item">
-						<input
-							type="checkbox"
-							checked={safeColumns.includes(column.name)}
-							onchange={() => toggleColumn(column.name)}
-						/>
-						<span class="column-name">{column.name}</span>
-						<ColumnTypeBadge columnType={column.dtype} size="xs" />
-					</label>
-				{/each}
-			</div>
+			<MultiSelectColumnDropdown
+				{schema}
+				value={config.columns ?? []}
+				onChange={(val) => (config.columns = val)}
+				filter={isListColumn}
+				showSelectAll={false}
+				placeholder="Select list columns..."
+			/>
 
-			{#if safeColumns.length > 0}
+			{#if (config.columns ?? []).length > 0}
 				<div class="info-box">
-					Selected {safeColumns.length} column{safeColumns.length !== 1 ? 's' : ''}:
-					{safeColumns.join(', ')}
+					Selected {(config.columns ?? []).length} column{(config.columns ?? []).length !== 1 ? 's' : ''}:
+					{(config.columns ?? []).join(', ')}
 				</div>
 			{/if}
 		{/if}

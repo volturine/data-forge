@@ -14,20 +14,11 @@
 
 	let { schema, config = $bindable({ expression: '', column_name: '' }) }: Props = $props();
 
-	let selectedColumnToInsert = $state('');
-
 	function insertColumn(columnName: string) {
+		if (!columnName) return;
 		const colRef = `pl.col("${columnName}")`;
 		config.expression = config.expression ? `${config.expression} ${colRef}` : colRef;
-		selectedColumnToInsert = ''; // Reset selection after insert
 	}
-
-	// Watch for changes to selectedColumnToInsert and insert when changed
-	$effect(() => {
-		if (selectedColumnToInsert) {
-			insertColumn(selectedColumnToInsert);
-		}
-	});
 </script>
 
 <div class="config-panel" role="region" aria-label="Expression configuration">
@@ -75,8 +66,8 @@
 		<h4 id="expr-columns-heading">Insert Column</h4>
 		<ColumnDropdown
 			{schema}
-			value={selectedColumnToInsert}
-			onChange={(val) => (selectedColumnToInsert = val)}
+			value={''}
+			onChange={(val) => insertColumn(val)}
 			placeholder="Select column to insert..."
 		/>
 		<p class="help-text">Select a column to insert it into the expression above.</p>

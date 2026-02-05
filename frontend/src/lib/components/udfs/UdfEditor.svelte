@@ -107,10 +107,6 @@
 		goto(resolve('/udfs'), { invalidateAll: true });
 	}
 
-	function updateInputs(next: UdfInput[]) {
-		inputs = next;
-	}
-
 	function updateSignature(source: string, signature: string): string {
 		const lines = source.split('\n');
 		if (lines.length === 0) return `def udf(${signature}):\n    return None\n`;
@@ -121,15 +117,15 @@
 		return lines.join('\n');
 	}
 
-	$effect(() => {
-		const params = inputs.map((item, index) => item.label?.trim() || `arg${index + 1}`);
-		const signature = params.join(', ');
-		if (!signature && !code.trim().startsWith('def udf')) return;
-		if (signature === lastArgs) return;
-		lastArgs = signature;
-		const updated = updateSignature(code, signature);
-		code = updated;
-	});
+	function updateInputs(next: UdfInput[]) {
+		inputs = next;
+		const params = next.map((item, index) => item.label?.trim() || `arg${index + 1}`);
+		const sig = params.join(', ');
+		if (!sig && !code.trim().startsWith('def udf')) return;
+		if (sig === lastArgs) return;
+		lastArgs = sig;
+		code = updateSignature(code, sig);
+	}
 
 	const canSave = $derived(name.trim().length > 0 && code.trim().length > 0);
 </script>

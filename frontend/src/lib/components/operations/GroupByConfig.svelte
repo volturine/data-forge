@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	const uid = $props.id();
 
@@ -46,15 +46,6 @@
 		'collect_set'
 	];
 
-	function toggleGroupByColumn(columnName: string) {
-		const index = safeGroupBy.indexOf(columnName);
-		if (index > -1) {
-			config.groupBy = safeGroupBy.filter((_, i) => i !== index);
-		} else {
-			config.groupBy = [...safeGroupBy, columnName];
-		}
-	}
-
 	function addAggregation() {
 		if (!newAggregation.column) return;
 
@@ -86,27 +77,13 @@
 
 	<div class="form-section" role="group" aria-labelledby="{uid}-columns-heading">
 		<h4 id="{uid}-columns-heading">Group By Columns</h4>
-		<div class="column-list">
-			{#each schema.columns as column (column.name)}
-				<label class="column-item">
-					<input
-						id="{uid}-col-{column.name}"
-						data-testid={`groupby-checkbox-${column.name}`}
-						type="checkbox"
-						checked={safeGroupBy.includes(column.name)}
-						onchange={() => toggleGroupByColumn(column.name)}
-						aria-label={`Group by ${column.name}`}
-					/>
-					<span class="column-name">{column.name}</span>
-					<ColumnTypeBadge columnType={column.dtype} size="xs" />
-				</label>
-			{/each}
-		</div>
-		{#if safeGroupBy.length > 0}
-			<div id="groupby-selected-info" class="info-box" aria-live="polite">
-				Selected: {safeGroupBy.join(', ')}
-			</div>
-		{/if}
+		<MultiSelectColumnDropdown
+			{schema}
+			value={config.groupBy ?? []}
+			onChange={(val) => (config.groupBy = val)}
+			showSelectAll={false}
+			placeholder="Select group by columns..."
+		/>
 	</div>
 
 	<div class="form-section" role="group" aria-labelledby="{uid}-agg-heading">

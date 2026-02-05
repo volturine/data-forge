@@ -64,50 +64,7 @@
 {/if}
 
 <style>
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: var(--overlay-bg);
-		z-index: var(--z-modal);
-	}
-	.modal {
-		position: fixed;
-		left: 50%;
-		top: 50%;
-		transform: translate(-50%, -50%);
-		width: min(700px, 92vw);
-		background-color: var(--dialog-bg);
-		border: 1px solid var(--dialog-border);
-		border-radius: var(--radius-lg);
-		box-shadow: var(--dialog-shadow);
-		z-index: calc(var(--z-modal) + 1);
-		display: flex;
-		flex-direction: column;
-	}
-	.modal-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-3) var(--space-4);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.modal-header h2 {
-		margin: 0;
-		font-size: var(--text-base);
-	}
-	.modal-close {
-		background: transparent;
-		border: none;
-		color: var(--fg-muted);
-		font-size: 1.25rem;
-		cursor: pointer;
-	}
-	.modal-body {
-		padding: var(--space-4);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
+	/* modal-backdrop, modal, modal-header, modal-close, modal-body, modal-footer — global in app.css */
 	.list {
 		display: flex;
 		flex-direction: column;
@@ -159,10 +116,5 @@
 		margin: 0;
 		color: var(--fg-muted);
 	}
-	.modal-footer {
-		padding: var(--space-3) var(--space-4);
-		border-top: 1px solid var(--border-primary);
-		display: flex;
-		justify-content: flex-end;
-	}
+
 </style>

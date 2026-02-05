@@ -569,61 +569,7 @@
 		border-radius: var(--radius-sm);
 	}
 
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: var(--overlay-bg);
-		z-index: var(--z-modal);
-	}
-	.modal {
-		position: fixed;
-		left: 50%;
-		top: 50%;
-		transform: translate(-50%, -50%);
-		width: min(720px, 90vw);
-		background-color: var(--dialog-bg);
-		border: 1px solid var(--dialog-border);
-		border-radius: var(--radius-lg);
-		box-shadow: var(--dialog-shadow);
-		z-index: calc(var(--z-modal) + 1);
-		display: flex;
-		flex-direction: column;
-	}
-	.modal-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-3) var(--space-4);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.modal-header h2 {
-		margin: 0;
-		font-size: var(--text-base);
-		color: var(--fg-primary);
-	}
-	.modal-close {
-		background: transparent;
-		border: none;
-		color: var(--fg-muted);
-		cursor: pointer;
-		font-size: 1.25rem;
-		padding: 0;
-	}
-	.modal-close:hover {
-		color: var(--fg-primary);
-	}
-	.modal-body {
-		padding: var(--space-4);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-	.modal-footer {
-		padding: var(--space-3) var(--space-4);
-		border-top: 1px solid var(--border-primary);
-		display: flex;
-		justify-content: flex-end;
-	}
+	/* modal-backdrop, modal, modal-header, modal-close, modal-body, modal-footer — global in app.css */
 	.help-text {
 		font-size: var(--text-sm);
 		color: var(--fg-muted);

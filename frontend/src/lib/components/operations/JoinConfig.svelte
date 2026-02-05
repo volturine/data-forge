@@ -5,8 +5,8 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	const uid = $props.id();
 
@@ -67,23 +67,6 @@
 	function removeJoinColumn(id: string) {
 		const columns = config.join_columns ?? [];
 		config.join_columns = columns.filter((col) => col.id !== id);
-	}
-
-	function toggleRightColumn(columnName: string) {
-		const rightCols = config.right_columns ?? [];
-		if (rightCols.includes(columnName)) {
-			config.right_columns = rightCols.filter((c) => c !== columnName);
-		} else {
-			config.right_columns = [...rightCols, columnName];
-		}
-	}
-
-	function selectAllRightColumns() {
-		config.right_columns = rightColumns.map((c) => c.name);
-	}
-
-	function deselectAllRightColumns() {
-		config.right_columns = [];
 	}
 
 	const joinTypes: Array<{ value: JoinConfigData['how']; label: string }> = [
@@ -204,56 +187,18 @@
 	{/if}
 
 	<div class="form-section" role="group" aria-labelledby="right-columns-heading">
-		<div class="section-header">
-			<h4 id="right-columns-heading">Columns from Right Dataset</h4>
-			<div class="bulk-actions">
-				<button
-					id="join-btn-select-all-right"
-					data-testid="join-select-all-right-button"
-					type="button"
-					class="btn-link"
-					onclick={selectAllRightColumns}
-					aria-label="Select all right columns"
-				>
-					Select All
-				</button>
-				<button
-					id="join-btn-deselect-all-right"
-					data-testid="join-deselect-all-right-button"
-					type="button"
-					class="btn-link"
-					onclick={deselectAllRightColumns}
-					aria-label="Deselect all right columns"
-				>
-					Deselect All
-				</button>
-			</div>
-		</div>
+		<h4 id="right-columns-heading">Columns from Right Dataset</h4>
 
 		{#if rightColumns.length === 0}
-			<p id="join-right-columns-empty" class="empty-message">Select a right datasource first</p>
+			<p class="empty-message">Select a right datasource first</p>
 		{:else}
-			<div
-				id="join-right-columns-list"
-				class="column-list"
-				role="group"
-				aria-label="Right dataset columns"
-			>
-				{#each rightColumns as col (col.name)}
-					<label class="column-checkbox">
-						<input
-							id={`join-checkbox-${col.name}`}
-							data-testid={`join-right-column-checkbox-${col.name}`}
-							type="checkbox"
-							checked={(config.right_columns ?? []).includes(col.name)}
-							onchange={() => toggleRightColumn(col.name)}
-							aria-label={`Include column ${col.name} from right dataset`}
-						/>
-						<span>{col.name}</span>
-						<ColumnTypeBadge columnType={col.dtype} size="xs" />
-					</label>
-				{/each}
-			</div>
+			<MultiSelectColumnDropdown
+				schema={{ columns: rightColumns, row_count: rightSchema?.row_count ?? 0 }}
+				value={config.right_columns ?? []}
+				onChange={(val) => (config.right_columns = val)}
+				showSelectAll={true}
+				placeholder="Select columns from right dataset..."
+			/>
 		{/if}
 
 		{#if rightColumns.length > 0 && (config.right_columns ?? []).length === 0}
@@ -262,7 +207,6 @@
 			</div>
 		{/if}
 	</div>
-
 	<div class="form-section" role="group" aria-labelledby="suffix-heading">
 		<h4 id="suffix-heading">Column Suffix</h4>
 		<label for="join-input-suffix" class="sr-only">Suffix for right dataset columns</label>
@@ -342,33 +286,6 @@
 		background-color: var(--error-bg);
 	}
 
-	.btn-link {
-		background: none;
-		border: none;
-		color: var(--accent-primary);
-		cursor: pointer;
-		font-size: var(--text-xs);
-		padding: var(--space-1);
-		text-decoration: underline;
-	}
-
-	.column-list {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-		gap: var(--space-2);
-	}
-	.column-checkbox {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--text-sm);
-		cursor: pointer;
-	}
-	.column-checkbox input {
-		margin: 0;
-		width: auto;
-	}
-
 	.schema-preview {
 		margin-top: var(--space-2);
 		padding: var(--space-2);
@@ -388,9 +305,5 @@
 		border: 1px solid var(--form-help-border);
 	}
 
-	.empty-message {
-		color: var(--fg-muted);
-		font-style: italic;
-		margin: var(--space-2) 0;
-	}
+	/* .empty-message — global in app.css */
 </style>

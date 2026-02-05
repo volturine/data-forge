@@ -25,33 +25,21 @@
 	let { columns, data, columnTypes = {}, loading = false, onSort }: Props = $props();
 
 	let sorting = $state<SortingState>([]);
-	let headerGroups = $state<HeaderGroup<RowData>[]>([]);
-	let rows = $state<Row<RowData>[]>([]);
 
-	// Single effect that handles table creation and updates
-	$effect(() => {
-		// Dependencies: data, columns, sorting
-		const currentData = data;
-		const currentColumns = columns;
-		const currentSorting = sorting;
+	const table = $derived.by(() => {
+		if (data.length === 0 || columns.length === 0) return null;
 
-		if (currentData.length === 0 || currentColumns.length === 0) {
-			headerGroups = [];
-			rows = [];
-			return;
-		}
-
-		const columnDefs: ColumnDef<RowData>[] = currentColumns.map((col) => ({
+		const columnDefs: ColumnDef<RowData>[] = columns.map((col) => ({
 			id: col,
 			accessorKey: col,
 			header: col
 		}));
 
-		const table = createTable({
-			data: currentData,
+		return createTable({
+			data,
 			columns: columnDefs,
 			state: {
-				sorting: currentSorting,
+				sorting,
 				columnPinning: { left: [], right: [] },
 				columnVisibility: {},
 				expanded: {},
@@ -65,10 +53,10 @@
 			onStateChange: () => {},
 			renderFallbackValue: null
 		});
-
-		headerGroups = table.getHeaderGroups();
-		rows = table.getRowModel().rows;
 	});
+
+	const headerGroups = $derived<HeaderGroup<RowData>[]>(table ? table.getHeaderGroups() : []);
+	const rows = $derived<Row<RowData>[]>(table ? table.getRowModel().rows : []);
 
 	function getTemporalType(dtype: string | undefined): 'date' | 'datetime' | null {
 		if (!dtype) return null;

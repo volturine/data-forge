@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	interface FillNullConfigData {
 		strategy: string;
@@ -30,24 +30,6 @@
 	];
 
 	const currentStrategy = $derived(strategies.find((s) => s.value === config.strategy));
-
-	function toggleColumn(columnName: string) {
-		const base = config.columns ?? [];
-		const index = base.indexOf(columnName);
-		if (index > -1) {
-			config.columns = base.filter((_, i) => i !== index);
-		} else {
-			config.columns = [...base, columnName];
-		}
-	}
-
-	function selectAllColumns() {
-		config.columns = schema.columns.map((c) => c.name);
-	}
-
-	function deselectAllColumns() {
-		config.columns = [];
-	}
 </script>
 
 <div class="config-panel" role="region" aria-label="Fill null configuration">
@@ -87,50 +69,15 @@
 
 	<div class="form-section" role="group" aria-labelledby="target-columns-heading">
 		<h4 id="target-columns-heading">Target Columns</h4>
-		<div class="bulk-actions">
-			<button
-				id="fill-btn-select-all"
-				data-testid="fill-select-all-button"
-				type="button"
-				onclick={selectAllColumns}
-				aria-label="Select all columns"
-			>
-				Select All
-			</button>
-			<button
-				id="fill-btn-deselect-all"
-				data-testid="fill-deselect-all-button"
-				type="button"
-				onclick={deselectAllColumns}
-				aria-label="Deselect all columns"
-			>
-				Deselect All
-			</button>
-		</div>
+		<MultiSelectColumnDropdown
+			{schema}
+			value={config.columns ?? []}
+			onChange={(val) => (config.columns = val)}
+			showSelectAll={true}
+			placeholder="Select target columns..."
+		/>
 
-		<div id="fill-column-list" class="column-list" role="group" aria-label="Available columns">
-			{#each schema.columns as column (column.name)}
-				<label class="column-item">
-					<input
-						id={`fill-checkbox-${column.name}`}
-						data-testid={`fill-column-checkbox-${column.name}`}
-						type="checkbox"
-						checked={config.columns?.includes(column.name) || false}
-						onchange={() => toggleColumn(column.name)}
-						aria-label={`Fill nulls in ${column.name}`}
-					/>
-					<span class="column-name">{column.name}</span>
-					<ColumnTypeBadge columnType={column.dtype} size="xs" />
-				</label>
-			{/each}
-		</div>
-
-		{#if config.columns && config.columns.length > 0}
-			<div id="fill-selected-info" class="info-box" aria-live="polite">
-				Selected {config.columns.length} column{config.columns.length !== 1 ? 's' : ''}:
-				{config.columns.join(', ')}
-			</div>
-		{:else}
+		{#if !config.columns || config.columns.length === 0}
 			<div id="fill-no-columns-info" class="info-box">
 				No columns selected - will apply to all columns
 			</div>

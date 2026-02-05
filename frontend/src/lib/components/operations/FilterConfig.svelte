@@ -455,12 +455,7 @@
 		color: var(--fg-primary);
 	}
 
-	.empty-message {
-		color: var(--fg-muted);
-		font-style: italic;
-		text-align: center;
-		padding: var(--space-6);
-	}
+	/* .empty-message — global in app.css */
 
 	.conditions-list {
 		display: flex;
