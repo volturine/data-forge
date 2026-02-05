@@ -96,7 +96,8 @@
 </script>
 
 <div
-	class="picker-backdrop"
+	class="fixed inset-0 z-[1000] flex items-center justify-center p-4"
+	style="background: rgba(0, 0, 0, 0.4);"
 	role="button"
 	tabindex="0"
 	aria-label="Close file picker"
@@ -104,52 +105,70 @@
 	onkeydown={handleBackdropKeydown}
 >
 	<div
-		class="picker"
+		class="flex w-full max-w-[720px] max-h-[70vh] flex-col rounded-md border"
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
 		onclick={stopPickerEvent}
 		onkeydown={stopPickerEvent}
+		style="background: var(--panel-bg); border-color: var(--panel-border); box-shadow: var(--dialog-shadow);"
 	>
-		<div class="picker-header">
-			<div class="picker-title">
-				<h4>Data directory</h4>
-				<div class="picker-crumbs" role="navigation" aria-label="Path breadcrumb">
+		<div
+			class="grid grid-cols-[1fr_auto] gap-2 border-b p-4"
+			style="border-color: var(--panel-border);"
+		>
+			<div class="flex flex-col gap-1">
+				<h4 class="m-0 text-sm font-semibold" style="color: var(--fg-primary);">Data directory</h4>
+				<div class="flex flex-wrap items-center gap-1" role="navigation" aria-label="Path breadcrumb">
 					{#each crumbs as crumb, index (crumb.path)}
-						<button type="button" class="crumb" onclick={() => load(crumb.path)} disabled={loading}>
+						<button
+							type="button"
+							class="crumb cursor-pointer border-none bg-transparent p-0 text-xs"
+							onclick={() => load(crumb.path)}
+							disabled={loading}
+							style="color: var(--fg-secondary);"
+						>
 							{crumb.label}
 						</button>
 						{#if index < crumbs.length - 1}
-							<span class="crumb-sep">/</span>
+							<span class="text-xs" style="color: var(--fg-muted);">/</span>
 						{/if}
 					{/each}
 				</div>
-				<span class="picker-path">{path}</span>
-				<span class="picker-hint">Select files or choose a folder for parquet datasets.</span>
+				<span class="break-all text-xs" style="color: var(--fg-muted);">{path}</span>
+				<span class="text-xs" style="color: var(--fg-muted);">Select files or choose a folder for parquet datasets.</span>
 			</div>
-			<div class="picker-header-actions">
-				<button class="btn-text" onclick={oncancel}>Close</button>
+			<div class="flex items-center justify-end gap-2">
+				<button
+					class="cursor-pointer border-none bg-transparent p-0 text-xs"
+					onclick={oncancel}
+					style="color: var(--accent-primary);"
+				>
+					Close
+				</button>
 			</div>
 		</div>
-		<div class="picker-body">
+
+		<div class="flex-1 overflow-auto p-3">
 			{#if loading}
-				<div class="picker-empty">Loading...</div>
+				<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">Loading...</div>
 			{:else if error}
-				<div class="picker-empty">{error}</div>
+				<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">{error}</div>
 			{:else if entries.length === 0}
-				<div class="picker-empty">No files found</div>
+				<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">No files found</div>
 			{:else}
-				<div class="picker-list">
+				<div class="flex flex-col gap-2">
 					{#each entries as entry (entry.path)}
 						<button
 							type="button"
-							class="picker-item"
+							class="picker-item flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm border p-2 px-3 text-left"
 							onclick={() => (entry.is_dir ? load(entry.path) : onselect(entry.path, false))}
 							disabled={loading}
+							style="background: var(--bg-primary); border-color: var(--border-primary);"
 						>
-							<div class="picker-info">
-								<span class="picker-name">{entry.name}</span>
-								<span class="picker-type">{entryType(entry)}</span>
+							<div class="flex flex-col gap-0.5">
+								<span class="text-sm" style="color: var(--fg-primary);">{entry.name}</span>
+								<span class="text-xs" style="color: var(--fg-muted);">{entryType(entry)}</span>
 							</div>
 							<FileTypeBadge path={entry.name} isFolder={entry.is_dir} size="sm" />
 						</button>
@@ -157,210 +176,61 @@
 				</div>
 			{/if}
 		</div>
-		<div class="picker-footer">
-			<div class="picker-footer-left">
-				<button class="btn-icon" onclick={up} disabled={!canUp} aria-label="Go up">←</button>
+
+		<div class="flex justify-between gap-2 border-t p-3" style="border-color: var(--panel-border);">
+			<div class="flex items-center gap-2">
 				<button
-					class="btn-secondary"
+					class="btn-icon inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-sm border disabled:cursor-not-allowed disabled:opacity-50"
+					onclick={up}
+					disabled={!canUp}
+					aria-label="Go up"
+					style="background: var(--bg-primary); border-color: var(--border-primary); color: var(--fg-secondary);"
+				>
+					←
+				</button>
+				<button
+					class="btn-secondary cursor-pointer rounded-sm border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
 					onclick={() => onselect(path, true)}
 					disabled={loading || !path}
+					style="background: var(--bg-secondary); color: var(--fg-primary); border-color: var(--border-primary);"
 				>
 					Use folder
 				</button>
 			</div>
-			<button class="btn-secondary" onclick={() => load(path)} disabled={loading}> Refresh </button>
+			<button
+				class="btn-secondary cursor-pointer rounded-sm border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
+				onclick={() => load(path)}
+				disabled={loading}
+				style="background: var(--bg-secondary); color: var(--fg-primary); border-color: var(--border-primary);"
+			>
+				Refresh
+			</button>
 		</div>
 	</div>
 </div>
 
 <style>
-	.picker-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.4);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-		padding: var(--space-4);
-	}
-	.picker {
-		background: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-md);
-		box-shadow: var(--shadow-lg);
-		max-width: 720px;
-		width: 100%;
-		max-height: 70vh;
-		display: flex;
-		flex-direction: column;
-	}
-	.picker-header {
-		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: var(--space-2);
-		padding: var(--space-4);
-		border-bottom: 1px solid var(--panel-border);
-	}
-	.picker-title {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-	.picker-header h4 {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		color: var(--fg-primary);
-	}
-	.picker-path {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		word-break: break-all;
-	}
-	.picker-hint {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-	.picker-header-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		justify-content: flex-end;
-	}
-	.picker-crumbs {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 4px;
-	}
-	.crumb {
-		border: none;
-		background: transparent;
-		color: var(--fg-secondary);
-		font-size: var(--text-xs);
-		padding: 0;
-		cursor: pointer;
-	}
-	.crumb:hover {
+	.crumb:hover:not(:disabled) {
 		color: var(--fg-primary);
 		text-decoration: underline;
 	}
+
 	.crumb:disabled {
 		color: var(--fg-muted);
 		cursor: default;
-		text-decoration: none;
 	}
-	.crumb-sep {
-		color: var(--fg-muted);
-		font-size: var(--text-xs);
-	}
-	.picker-body {
-		padding: var(--space-3);
-		overflow: auto;
-		flex: 1;
-	}
-	.picker-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	.picker-item {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		background: var(--bg-primary);
-		gap: var(--space-2);
-		width: 100%;
-		text-align: left;
-		cursor: pointer;
-	}
+
 	.picker-item:hover {
 		background: var(--bg-hover);
 	}
-	.picker-info {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
-	.picker-name {
-		font-size: var(--text-sm);
-		color: var(--fg-primary);
-	}
-	.picker-type {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-	.picker-empty {
-		padding: var(--space-6);
-		text-align: center;
-		color: var(--fg-muted);
-		font-size: var(--text-sm);
-	}
-	.picker-footer {
-		padding: var(--space-3);
-		border-top: 1px solid var(--panel-border);
-		display: flex;
-		justify-content: space-between;
-		gap: var(--space-2);
-	}
-	.picker-footer-left {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.btn-icon {
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		background: var(--bg-primary);
-		color: var(--fg-secondary);
-		width: 32px;
-		height: 32px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-	}
-	.btn-icon:hover {
+
+	.btn-icon:hover:not(:disabled) {
 		background: var(--bg-hover);
 		color: var(--fg-primary);
 	}
-	.btn-icon:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.btn-secondary {
-		text-decoration: none;
-		padding: var(--space-2) var(--space-4);
-		background: var(--bg-secondary);
-		color: var(--fg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		transition: all var(--transition);
-	}
+
 	.btn-secondary:hover:not(:disabled) {
 		background: var(--bg-hover);
 		border-color: var(--border-secondary);
-	}
-	.btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.btn-text {
-		background: transparent;
-		border: none;
-		color: var(--accent-primary);
-		font-size: var(--text-xs);
-		cursor: pointer;
-		padding: 0;
-	}
-	.btn-text:hover {
-		text-decoration: underline;
 	}
 </style>
