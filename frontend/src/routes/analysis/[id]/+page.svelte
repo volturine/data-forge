@@ -221,12 +221,13 @@
 	}
 
 	function buildStep(type: string): PipelineStep {
-		return {
+		const base: PipelineStep = {
 			id: makeId(),
 			type,
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
+		return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
 	}
 
 	function markUnsaved() {
@@ -269,6 +270,17 @@
 		if (selectedStepId === stepId) {
 			selectedStepId = null;
 		}
+		markUnsaved();
+	}
+
+	function handleToggleStep(stepId: string) {
+		if (!isEditingMode) return;
+		const step = analysisStore.pipeline.find((item) => item.id === stepId);
+		if (!step) return;
+		const next = (step as PipelineStep & { is_applied?: boolean }).is_applied === false;
+		analysisStore.updateStep(stepId, { is_applied: next } as Partial<PipelineStep> & {
+			is_applied: boolean;
+		});
 		markUnsaved();
 	}
 
@@ -582,6 +594,7 @@
 					tabName={analysisStore.activeTab?.name}
 					onStepClick={handleSelectStep}
 					onStepDelete={handleDeleteStep}
+					onStepToggle={handleToggleStep}
 					onInsertStep={handleInsertStep}
 					onMoveStep={handleMoveStep}
 					onChangeDatasource={() => openDatasourceModal('change')}
@@ -673,6 +686,9 @@
 		border-bottom: 1px solid var(--panel-border);
 		background-color: var(--panel-bg);
 		height: 48px;
+		position: sticky;
+		top: 0;
+		z-index: var(--z-header);
 	}
 
 	.header-left {
@@ -681,6 +697,7 @@
 		width: var(--operations-panel-width, 280px);
 		height: 100%;
 		border-right: 1px solid var(--panel-border);
+		box-sizing: border-box;
 		transition: width var(--transition);
 	}
 
@@ -709,6 +726,7 @@
 		width: var(--operations-panel-width, 280px);
 		height: 100%;
 		border-left: 1px solid var(--panel-border);
+		box-sizing: border-box;
 		transition: width var(--transition);
 	}
 
@@ -948,6 +966,7 @@
 		display: flex;
 		width: var(--operations-panel-width, 280px);
 		background-color: var(--panel-bg);
+		box-sizing: border-box;
 		transition:
 			width var(--transition),
 			visibility var(--transition);
@@ -981,7 +1000,6 @@
 	.center-pane {
 		flex: 1;
 		min-width: 200px;
-		overflow: hidden;
 		display: flex;
 		background-color: var(--bg-secondary);
 	}

@@ -1,20 +1,18 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, String
-from sqlalchemy.orm import Mapped, mapped_column
-
-from core.database import Base
+from sqlalchemy import Column, DateTime, JSON, String
+from sqlmodel import Field, SQLModel
 
 
-class Udf(Base):
+class Udf(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = 'udfs'
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    description: Mapped[str | None] = mapped_column(String, nullable=True)
-    signature: Mapped[dict] = mapped_column(nullable=False)
-    code: Mapped[str] = mapped_column(String, nullable=False)
-    tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
-    source: Mapped[str] = mapped_column(String, nullable=False, default='user')
-    created_at: Mapped[datetime] = mapped_column(nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(nullable=False)
+    id: str = Field(sa_column=Column(String, primary_key=True))
+    name: str = Field(sa_column=Column(String, nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    signature: dict = Field(sa_column=Column(JSON, nullable=False))
+    code: str = Field(sa_column=Column(String, nullable=False))
+    tags: list[str] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    source: str = Field(default='user', sa_column=Column(String, nullable=False))
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

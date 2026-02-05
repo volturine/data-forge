@@ -12,14 +12,14 @@ This document lists ALL environment variables supported by the application.
 | `DEBUG`                       | boolean | false                                   | Enable debug mode (verbose logging, SQL echo)        |
 | `PORT`                        | integer | 8000                                    | Port to bind (Docker only)                           |
 | **Database**                  |         |                                         |                                                      |
-| `DATABASE_URL`                | string  | sqlite+aiosqlite:///./database/app.db   | Database connection URL                              |
+| `DATABASE_URL`                | string  | sqlite+libsql:///./database/app.db      | Database connection URL                              |
 | **CORS**                      |         |                                         |                                                      |
 | `CORS_ORIGINS`                | string  | localhost:3000,...                      | Comma-separated allowed origins                      |
 | **File Storage**              |         |                                         |                                                      |
 | `UPLOAD_DIR`                  | path    | /app/data/uploads                       | Upload directory path                                |
 | `CLEAN_DIR`                   | path    | /app/data/clean                         | Results directory path                               |
 | `EXPORTS_DIR`                 | path    | /app/data/exports                       | Exports directory path                               |
-| `MAX_UPLOAD_SIZE`             | integer | 10737418240                             | Max upload size in bytes (10GB)                      |
+| `UPLOAD_CHUNK_SIZE`           | integer | 5242880                                 | Upload chunk size in bytes (5MB)                     |
 | **Polars Engine**             |         |                                         |                                                      |
 | `POLARS_MAX_THREADS`          | integer | 0                                       | Max threads per engine (0=auto)                      |
 | `POLARS_MAX_MEMORY_MB`        | integer | 0                                       | Memory limit per engine MB (0=unlimited)             |
@@ -35,6 +35,11 @@ This document lists ALL environment variables supported by the application.
 | `JOB_TIMEOUT`                 | integer | 300                                     | Max job execution time (seconds)                     |
 | **Logging**                   |         |                                         |                                                      |
 | `LOG_LEVEL`                   | string  | info                                    | Log level (debug/info/warning/error/critical)        |
+| `LOG_ICEBERG_PATH`            | path    | /app/data/logs/iceberg                  | Iceberg log storage path                             |
+| `LOG_ICEBERG_FLUSH_INTERVAL`  | integer | 300                                     | Log flush interval (seconds)                         |
+| `LOG_QUEUE_MAX_SIZE`          | integer | 2000                                    | Max queued log batches                               |
+| `LOG_QUEUE_OVERFLOW`          | string  | block                                   | Queue overflow behavior (block/drop)                 |
+| `LOG_MAX_BODY_SIZE`           | integer | 1048576                                 | Max body size to log in bytes (0=unlimited)          |
 
 ## Validation Rules
 
@@ -42,7 +47,7 @@ This document lists ALL environment variables supported by the application.
 
 - `MAX_CONCURRENT_ENGINES`: 1-100
 - `WORKERS`: 0-32
-- `MAX_UPLOAD_SIZE`: ≥1024 bytes
+- `UPLOAD_CHUNK_SIZE`: 1024 to 104857600
 
 ### Positive Values Required
 
@@ -59,6 +64,7 @@ This document lists ALL environment variables supported by the application.
 ### String Enums
 
 - `LOG_LEVEL`: Must be one of: debug, info, warning, error, critical
+- `LOG_QUEUE_OVERFLOW`: Must be one of: block, drop
 
 ## Configuration by Environment
 
@@ -138,7 +144,7 @@ EXPORTS_DIR=/app/data/exports
 ### SQLite (Default)
 
 ```bash
-DATABASE_URL="sqlite+aiosqlite:///./database/app.db"
+DATABASE_URL="sqlite+libsql:///./database/app.db"
 ```
 
 ### PostgreSQL

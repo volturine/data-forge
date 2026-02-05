@@ -1,4 +1,5 @@
 import type { Schema, ColumnInfo } from '$lib/types/schema';
+import type { PipelineStep } from '$lib/types/analysis';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { emptySchema } from '$lib/types/schema';
 import {
@@ -7,6 +8,7 @@ import {
 	unionByNameTransform,
 	type StepConfig
 } from '$lib/utils/transform';
+import { resolveColumnType } from '$lib/utils/columnTypes';
 import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {
@@ -41,12 +43,15 @@ export class SchemaStore {
 				(sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
 			const config = step.config as StepConfig;
 			const transformer = getStepTransform(step);
+			const isApplied = (step as PipelineStep & { is_applied?: boolean }).is_applied !== false;
 
 			let output: Schema;
 
 			// Check if we have a cached preview schema for dynamic steps
 			const cachedSchema = this.previewSchemas.get(step.id);
-			if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
+			if (!isApplied) {
+				output = input;
+			} else if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
 				output = cachedSchema;
 			} else if (step.type === 'join') {
 				const rightSource = typeof config.right_source === 'string' ? config.right_source : '';
@@ -87,7 +92,7 @@ export class SchemaStore {
 	setPreviewSchema(stepId: string, columns: string[], columnTypes?: Record<string, string>): void {
 		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
 			name,
-			dtype: columnTypes?.[name] ?? 'Unknown',
+			dtype: resolveColumnType(columnTypes?.[name]),
 			nullable: true
 		}));
 		this.previewSchemas.set(stepId, { columns: schemaColumns, row_count: null });

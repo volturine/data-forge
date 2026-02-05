@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	interface TimeSeriesConfigData {
 		column: string;
@@ -31,6 +32,7 @@
 
 	const operations = [
 		{ value: 'extract', label: 'Extract Component' },
+		{ value: 'timestamp', label: 'Convert to Timestamp' },
 		{ value: 'add', label: 'Add Time Period' },
 		{ value: 'subtract', label: 'Subtract Time Period' },
 		{ value: 'diff', label: 'Date Difference' }
@@ -50,6 +52,8 @@
 
 	const timeUnits = ['seconds', 'minutes', 'hours', 'days', 'weeks'];
 
+	const timestampUnits = ['ns', 'us', 'ms'];
+
 	const dateColumns = $derived(
 		schema.columns.filter(
 			(col) =>
@@ -66,13 +70,17 @@
 
 	<div class="form-section" role="group" aria-labelledby="ts-source-column-heading">
 		<h4 id="ts-source-column-heading">Source Column</h4>
-		<label for="ts-select-column" class="sr-only">Select date/time column</label>
-		<select id="ts-select-column" data-testid="ts-column-select" bind:value={config.column}>
-			<option value="">Select date/time column...</option>
-			{#each dateColumns as column (column.name)}
-				<option value={column.name}>{column.name} ({column.dtype})</option>
-			{/each}
-		</select>
+		<ColumnDropdown
+			{schema}
+			value={config.column ?? ''}
+			onChange={(val) => (config.column = val)}
+			placeholder="Select date/time column..."
+			filter={(col) =>
+				col.dtype.toLowerCase().includes('date') ||
+				col.dtype.toLowerCase().includes('time') ||
+				col.dtype.toLowerCase() === 'date' ||
+				col.dtype.toLowerCase() === 'datetime'}
+		/>
 		{#if dateColumns.length === 0}
 			<p id="ts-no-columns-warning" class="warning-box" role="alert">
 				No date/time columns detected in schema
@@ -108,6 +116,27 @@
 				{/each}
 			</select>
 		</div>
+	{:else if config.operation_type === 'timestamp'}
+		<div class="form-section" role="group" aria-labelledby="ts-timestamp-unit-heading">
+			<h4 id="ts-timestamp-unit-heading">Timestamp Unit</h4>
+			<label for="ts-select-timestamp-unit" class="sr-only">Select timestamp time unit</label>
+			<select
+				id="ts-select-timestamp-unit"
+				data-testid="ts-timestamp-unit-select"
+				bind:value={config.unit}
+			>
+				{#each timestampUnits as unit (unit)}
+					<option value={unit}
+						>{unit} ({unit === 'ns'
+							? 'nanoseconds'
+							: unit === 'us'
+								? 'microseconds'
+								: 'milliseconds'})</option
+					>
+				{/each}
+			</select>
+			<p class="help-text">Convert datetime to integer timestamp in the specified time unit.</p>
+		</div>
 	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
 		<div class="form-section" role="group" aria-labelledby="ts-period-heading">
 			<h4 id="ts-period-heading">Time Period</h4>
@@ -136,13 +165,17 @@
 	{:else if config.operation_type === 'diff'}
 		<div class="form-section" role="group" aria-labelledby="ts-column2-heading">
 			<h4 id="ts-column2-heading">Second Date Column</h4>
-			<label for="ts-select-column2" class="sr-only">Select second date column</label>
-			<select id="ts-select-column2" data-testid="ts-column2-select" bind:value={config.column2}>
-				<option value="">Select column...</option>
-				{#each dateColumns as column (column.name)}
-					<option value={column.name}>{column.name} ({column.dtype})</option>
-				{/each}
-			</select>
+			<ColumnDropdown
+				{schema}
+				value={config.column2 ?? ''}
+				onChange={(val) => (config.column2 = val)}
+				placeholder="Select column..."
+				filter={(col) =>
+					col.dtype.toLowerCase().includes('date') ||
+					col.dtype.toLowerCase().includes('time') ||
+					col.dtype.toLowerCase() === 'date' ||
+					col.dtype.toLowerCase() === 'datetime'}
+			/>
 		</div>
 	{/if}
 
@@ -162,6 +195,12 @@
 	.warning-box {
 		font-size: var(--text-sm);
 		color: var(--error-fg);
+		margin-top: var(--space-2);
+		margin-bottom: 0;
+	}
+	.help-text {
+		font-size: var(--text-sm);
+		color: var(--fg-muted);
 		margin-top: var(--space-2);
 		margin-bottom: 0;
 	}

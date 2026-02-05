@@ -1,39 +1,65 @@
-from collections.abc import AsyncGenerator
-from datetime import datetime
+from collections.abc import Callable
+from typing import Concatenate, ParamSpec, TypeVar
 
-from sqlalchemy import JSON, DateTime
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlmodel import Session, SQLModel, create_engine
 
 from core.config import settings
 
 
-class Base(DeclarativeBase):
-    type_annotation_map = {
-        dict: JSON,
-        list: JSON,
-        datetime: DateTime(timezone=True),
+def _build_connect_args() -> dict:
+    if 'libsql' not in settings.database_url:
+        return {}
+    if not settings.turso_database_url:
+        return {}
+    args: dict[str, object] = {
+        'sync_url': settings.turso_database_url,
+        'auth_token': settings.turso_auth_token,
     }
+    if settings.turso_sync_interval:
+        args['sync_interval'] = settings.turso_sync_interval
+    return args
 
 
-engine = create_async_engine(
+engine = create_engine(
     settings.database_url,
     echo=settings.debug,  # Only log SQL queries in debug mode
-    connect_args={'check_same_thread': False} if 'sqlite' in settings.database_url else {},
+    connect_args=_build_connect_args(),
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+# Engine override for testing - allows tests to swap the engine used by run_db
+_engine_override = None
+
+P = ParamSpec('P')
+T = TypeVar('T')
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with AsyncSessionLocal() as session:
+def set_engine_override(test_engine):
+    """Set an engine override for testing purposes.
+
+    This allows tests to inject a test engine that will be used by run_db
+    instead of the production engine.
+    """
+    global _engine_override
+    _engine_override = test_engine
+
+
+def clear_engine_override():
+    """Clear the engine override after testing."""
+    global _engine_override
+    _engine_override = None
+
+
+def get_db():
+    engine_to_use = _engine_override or engine
+    with Session(engine_to_use) as session:
         yield session
 
 
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
+    engine_to_use = _engine_override or engine
+    with Session(engine_to_use) as session:
+        return func(session, *args, **kwargs)
+
+
+def init_db() -> None:
+    SQLModel.metadata.create_all(engine)

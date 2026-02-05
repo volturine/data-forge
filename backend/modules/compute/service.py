@@ -4,7 +4,7 @@ import tempfile
 
 import duckdb
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, PipelineExecutionError
@@ -17,7 +17,7 @@ from modules.udf.models import Udf
 logger = logging.getLogger(__name__)
 
 
-async def _get_additional_datasources(session: AsyncSession, pipeline_steps: list[dict]) -> dict[str, dict]:
+def _get_additional_datasources(session: Session, pipeline_steps: list[dict]) -> dict[str, dict]:
     """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins)."""
     additional: dict[str, dict] = {}
 
@@ -30,7 +30,7 @@ async def _get_additional_datasources(session: AsyncSession, pipeline_steps: lis
             union_sources = [union_sources]
 
         if right_source_id and right_source_id not in additional:
-            result = await session.execute(select(DataSource).where(DataSource.id == right_source_id))
+            result = session.execute(select(DataSource).where(DataSource.id == right_source_id))  # type: ignore[arg-type]
             datasource = result.scalar_one_or_none()
             if datasource:
                 additional[right_source_id] = {
@@ -41,7 +41,7 @@ async def _get_additional_datasources(session: AsyncSession, pipeline_steps: lis
         for source_id in union_sources:
             if source_id in additional:
                 continue
-            result = await session.execute(select(DataSource).where(DataSource.id == source_id))
+            result = session.execute(select(DataSource).where(DataSource.id == source_id))  # type: ignore[arg-type]
             datasource = result.scalar_one_or_none()
             if datasource:
                 additional[source_id] = {
@@ -52,7 +52,7 @@ async def _get_additional_datasources(session: AsyncSession, pipeline_steps: lis
     return additional
 
 
-async def _hydrate_udfs(session: AsyncSession, pipeline_steps: list[dict]) -> list[dict]:
+def _hydrate_udfs(session: Session, pipeline_steps: list[dict]) -> list[dict]:
     next_steps: list[dict] = []
     for step in pipeline_steps:
         if step.get('type') != 'with_columns':
@@ -72,7 +72,7 @@ async def _hydrate_udfs(session: AsyncSession, pipeline_steps: list[dict]) -> li
             if not udf_id or expr.get('code'):
                 updated.append(expr)
                 continue
-            result = await session.execute(select(Udf).where(Udf.id == udf_id))
+            result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type]
             udf = result.scalar_one_or_none()
             if not udf:
                 raise ValueError(f'UDF {udf_id} not found')
@@ -81,8 +81,8 @@ async def _hydrate_udfs(session: AsyncSession, pipeline_steps: list[dict]) -> li
     return next_steps
 
 
-async def preview_step(
-    session: AsyncSession,
+def preview_step(
+    session: Session,
     datasource_id: str,
     pipeline_steps: list[dict],
     target_step_id: str,
@@ -102,7 +102,7 @@ async def preview_step(
         # Create a temporary analysis_id for datasource preview
         analysis_id = f'__preview__{datasource_id}'
 
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -115,7 +115,7 @@ async def preview_step(
     else:
         step_index = find_step_index(pipeline_steps, target_step_id)
         preview_steps = pipeline_steps[: step_index + 1]
-        preview_steps = await _hydrate_udfs(session, preview_steps)
+        preview_steps = _hydrate_udfs(session, preview_steps)
 
     manager = get_manager()
     # get_or_create_engine will restart the engine if resource_config changed
@@ -123,7 +123,7 @@ async def preview_step(
 
     datasource_config = build_datasource_config(datasource)
 
-    additional_datasources = await _get_additional_datasources(session, preview_steps)
+    additional_datasources = _get_additional_datasources(session, preview_steps)
 
     # Calculate offset for pagination
     offset = (page - 1) * row_limit
@@ -137,7 +137,7 @@ async def preview_step(
         additional_datasources=additional_datasources,
     )
 
-    result_data = await await_engine_result(engine, timeout)
+    result_data = await_engine_result(engine, timeout)
     error = result_data.get('error')
     if error:
         raise PipelineExecutionError(
@@ -157,8 +157,8 @@ async def preview_step(
     )
 
 
-async def get_step_schema(
-    session: AsyncSession,
+def get_step_schema(
+    session: Session,
     datasource_id: str,
     pipeline_steps: list[dict],
     target_step_id: str,
@@ -171,7 +171,7 @@ async def get_step_schema(
     if timeout is None:
         timeout = settings.job_timeout
 
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -180,7 +180,7 @@ async def get_step_schema(
     # Find the step index by step_id
     step_index = find_step_index(pipeline_steps, target_step_id)
     schema_steps = pipeline_steps[: step_index + 1]
-    schema_steps = await _hydrate_udfs(session, schema_steps)
+    schema_steps = _hydrate_udfs(session, schema_steps)
 
     manager = get_manager()
     engine = manager.get_engine(analysis_id)
@@ -189,7 +189,7 @@ async def get_step_schema(
 
     datasource_config = build_datasource_config(datasource)
 
-    additional_datasources = await _get_additional_datasources(session, schema_steps)
+    additional_datasources = _get_additional_datasources(session, schema_steps)
 
     # Use the new schema command that doesn't collect full data
     engine.get_schema(
@@ -198,7 +198,7 @@ async def get_step_schema(
         additional_datasources=additional_datasources,
     )
 
-    result_data = await await_engine_result(engine, timeout)
+    result_data = await_engine_result(engine, timeout)
     error = result_data.get('error')
     if error:
         raise PipelineExecutionError(
@@ -215,8 +215,8 @@ async def get_step_schema(
     )
 
 
-async def export_data(
-    session: AsyncSession,
+def export_data(
+    session: Session,
     datasource_id: str,
     pipeline_steps: list[dict],
     target_step_id: str,
@@ -236,7 +236,7 @@ async def export_data(
     if timeout is None:
         timeout = settings.job_timeout
 
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -245,7 +245,7 @@ async def export_data(
     # Find steps up to target
     step_index = find_step_index(pipeline_steps, target_step_id)
     export_steps = pipeline_steps[: step_index + 1]
-    export_steps = await _hydrate_udfs(session, export_steps)
+    export_steps = _hydrate_udfs(session, export_steps)
 
     manager = get_manager()
 
@@ -262,7 +262,7 @@ async def export_data(
 
     datasource_config = build_datasource_config(datasource)
 
-    additional_datasources = await _get_additional_datasources(session, export_steps)
+    additional_datasources = _get_additional_datasources(session, export_steps)
 
     # Determine file extension and content type
     format_config = {
@@ -292,7 +292,7 @@ async def export_data(
             additional_datasources=additional_datasources,
         )
 
-        result_data = await await_engine_result(engine, timeout)
+        result_data = await_engine_result(engine, timeout)
         error = result_data.get('error')
         if error:
             if temp_engine:

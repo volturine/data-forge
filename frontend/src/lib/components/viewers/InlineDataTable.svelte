@@ -10,9 +10,13 @@
 		type Row
 	} from '@tanstack/table-core';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import { applySteps } from '$lib/utils/pipeline';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { resolveColumnType } from '$lib/utils/columnTypes';
 
 	interface Props {
 		analysisId: string;
@@ -33,8 +37,11 @@
 	let currentPage = $state(1);
 	let sorting = $state<SortingState>([]);
 
+	let activePipeline = $derived(applySteps(pipeline));
+	let isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
+
 	// Create a stable key from pipeline to detect changes
-	const pipelineKey = $derived(JSON.stringify(pipeline));
+	const pipelineKey = $derived(JSON.stringify(activePipeline));
 
 	// Reset page when pipeline changes
 	let lastPipelineKey = $state('');
@@ -57,6 +64,9 @@
 				pipelineKey
 			],
 			queryFn: async (): Promise<StepPreviewResponse> => {
+				if (!isActiveStep) {
+					throw new Error('Step is disabled');
+				}
 				const resourceConfig = analysisStore.resourceConfig as unknown as Record<
 					string,
 					unknown
@@ -64,7 +74,7 @@
 				const result = await previewStepData({
 					analysis_id: analysisId,
 					datasource_id: datasourceId,
-					pipeline_steps: pipeline,
+					pipeline_steps: activePipeline,
 					target_step_id: stepId,
 					row_limit: rowLimit,
 					page: currentPage,
@@ -79,12 +89,16 @@
 		};
 	});
 
-	const data = $derived(query.data);
-	const isLoading = $derived(query.isLoading);
-	const error = $derived(query.error);
+	const data = $derived(isActiveStep ? query.data : null);
+	const isLoading = $derived(isActiveStep ? query.isLoading : false);
+	const error = $derived(isActiveStep ? query.error : null);
 
 	// Update schema store with actual columns from preview
 	$effect(() => {
+		if (!isActiveStep) {
+			schemaStore.clearPreviewSchema(stepId);
+			return;
+		}
 		if (data?.columns && data.column_types) {
 			schemaStore.setPreviewSchema(stepId, data.columns, data.column_types);
 		}
@@ -94,8 +108,20 @@
 	const startRow = $derived((currentPage - 1) * rowLimit + 1);
 	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0);
 
-	function formatValue(value: TableCellValue): string {
+	function getTemporalType(dtype: string | undefined): 'date' | 'datetime' | null {
+		if (!dtype) return null;
+		const lower = dtype.toLowerCase();
+		if (lower.includes('datetime')) return 'datetime';
+		if (lower.includes('date')) return 'date';
+		if (lower.includes('time')) return 'datetime';
+		return null;
+	}
+
+	function formatValue(value: TableCellValue, columnId: string): string {
 		if (value === null || value === undefined) return '—';
+		const temporal = getTemporalType(data?.column_types?.[columnId]);
+		if (temporal === 'date') return formatDateDisplay(value as string);
+		if (temporal === 'datetime') return formatDateTimeDisplay(value as string);
 		if (typeof value === 'number') return value.toLocaleString();
 		if (typeof value === 'boolean') return value ? 'true' : 'false';
 		if (Array.isArray(value)) {
@@ -115,7 +141,7 @@
 	}
 
 	function getColumnType(col: string): string {
-		return data?.column_types?.[col] || '';
+		return resolveColumnType(data?.column_types?.[col]);
 	}
 
 	function isListType(columnType: string): boolean {
@@ -222,9 +248,13 @@
 										{/if}
 									</button>
 									{#if getColumnType(header.id)}
-										<span class="column-type" class:is-list={isListType(getColumnType(header.id))}>
-											{getColumnType(header.id)}
-										</span>
+										<div class="column-type-wrapper">
+											<ColumnTypeBadge
+												columnType={getColumnType(header.id)}
+												size="xs"
+												showIcon={false}
+											/>
+										</div>
 									{/if}
 								</th>
 							{/each}
@@ -236,7 +266,7 @@
 						<tr>
 							{#each row.getVisibleCells() as cell (cell.id)}
 								<td class:is-list-cell={isListType(getColumnType(cell.column.id))}>
-									{formatValue(cell.getValue() as TableCellValue)}
+									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
 							{/each}
 						</tr>
@@ -278,6 +308,7 @@
 		padding: 2rem;
 		gap: 0.75rem;
 		color: var(--fg-tertiary);
+		pointer-events: none;
 	}
 	.loading-overlay p {
 		margin: 0;
@@ -362,21 +393,10 @@
 		color: var(--accent-primary);
 		font-size: 0.75rem;
 	}
-	.column-type {
+	.column-type-wrapper {
 		display: inline-block;
 		margin-left: 0.5rem;
-		padding: 0.125rem 0.375rem;
-		font-size: 0.625rem;
-		font-weight: 500;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		border-radius: var(--radius-sm);
-		background: var(--bg-tertiary);
-		color: var(--fg-muted);
-	}
-	.column-type.is-list {
-		background: var(--accent-bg);
-		color: var(--accent-fg);
+		vertical-align: middle;
 	}
 	td.is-list-cell {
 		font-size: 0.75rem;

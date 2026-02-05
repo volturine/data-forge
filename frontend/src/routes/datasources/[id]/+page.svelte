@@ -4,13 +4,18 @@
 	import { page } from '$app/state';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
-	import { ArrowLeft, Save, Loader2, AlertCircle } from 'lucide-svelte';
+	import { ArrowLeft, Save, Loader, CircleAlert } from 'lucide-svelte';
 	import type {
 		DataSource,
 		SchemaInfo,
 		ColumnSchema,
-		FileDataSourceConfig
+		FileDataSourceConfig,
+		IcebergDataSourceConfig
 	} from '$lib/types/datasource';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
+	import { formatDateDisplay } from '$lib/utils/datetime';
+	import { resolveColumnType } from '$lib/utils/columnTypes';
 
 	const queryClient = useQueryClient();
 	const datasourceId = $derived(page.params.id);
@@ -59,6 +64,9 @@
 	let initialized = $state(false);
 	let parsingOptionsTimer: ReturnType<typeof setTimeout> | null = null;
 	let isSavingParsing = $state(false);
+	function formatDate(dateString: string): string {
+		return formatDateDisplay(dateString);
+	}
 
 	$effect(() => {
 		if (!datasourceId) return;
@@ -144,7 +152,11 @@
 			columns = [];
 			return;
 		}
-		columns = value.columns.map((col) => ({ ...col }));
+		// Normalize dtypes to handle parameterized types like "Datetime(time_unit='us', time_zone=None)"
+		columns = value.columns.map((col) => ({
+			...col,
+			dtype: resolveColumnType(col.dtype)
+		}));
 	}
 
 	function isCsv(datasource: DataSource): boolean {
@@ -161,6 +173,10 @@
 
 	function isFile(datasource: DataSource): boolean {
 		return datasource.source_type === 'file';
+	}
+
+	function isIceberg(datasource: DataSource): boolean {
+		return datasource.source_type === 'iceberg';
 	}
 
 	function handleNameChange(newName: string) {
@@ -353,6 +369,12 @@
 	function handleBack() {
 		goto(resolve('/datasources'), { invalidateAll: true });
 	}
+
+	async function handleRefreshRows() {
+		if (!datasourceId) return;
+		await getDatasourceSchema(datasourceId, { refresh: true });
+		await schemaQuery.refetch();
+	}
 </script>
 
 <div class="container">
@@ -374,7 +396,7 @@
 			disabled={!hasChanges || updateMutation.isPending}
 		>
 			{#if updateMutation.isPending}
-				<Loader2 size={16} class="spin" />
+				<Loader size={16} class="spin" />
 				Saving...
 			{:else}
 				<Save size={16} />
@@ -385,12 +407,12 @@
 
 	{#if datasourceQuery.isLoading}
 		<div class="loading-state">
-			<Loader2 size={32} class="spin" />
+			<Loader size={32} class="spin" />
 			<p>Loading data source...</p>
 		</div>
 	{:else if datasourceQuery.isError}
 		<div class="error-box">
-			<AlertCircle size={20} />
+			<CircleAlert size={20} />
 			<div>
 				<p class="error-title">Error loading data source</p>
 				<p class="error-message">
@@ -436,7 +458,7 @@
 
 		{#if updateMutation.isError}
 			<div class="error-box">
-				<AlertCircle size={20} />
+				<CircleAlert size={20} />
 				<div>
 					<p class="error-title">Error saving changes</p>
 					<p class="error-message">
@@ -477,14 +499,19 @@
 								{@const config = datasource.config as unknown as FileDataSourceConfig}
 								<div class="info-item">
 									<span class="info-label">File Type</span>
-									<span class="info-value">{config.file_type}</span>
+									<FileTypeBadge path={config.file_path} size="sm" />
+								</div>
+							{/if}
+							{#if isIceberg(datasource)}
+								{@const config = datasource.config as unknown as IcebergDataSourceConfig}
+								<div class="info-item">
+									<span class="info-label">Metadata Path</span>
+									<span class="info-value path-value">{config.metadata_path}</span>
 								</div>
 							{/if}
 							<div class="info-item">
 								<span class="info-label">Created</span>
-								<span class="info-value">
-									{new Date(datasource.created_at).toLocaleDateString()}
-								</span>
+								<span class="info-value">{formatDate(datasource.created_at)}</span>
 							</div>
 							{#if schemaQuery.data}
 								<div class="info-item">
@@ -492,6 +519,13 @@
 									<span class="info-value">
 										{schemaQuery.data.row_count?.toLocaleString() ?? 'Unknown'}
 									</span>
+									<button
+										class="btn-secondary btn-inline"
+										onclick={handleRefreshRows}
+										disabled={schemaQuery.isFetching}
+									>
+										{schemaQuery.isFetching ? 'Refreshing...' : 'Refresh'}
+									</button>
 								</div>
 								<div class="info-item">
 									<span class="info-label">Columns</span>
@@ -512,17 +546,17 @@
 
 					{#if isSavingParsing}
 						<div class="loading-state">
-							<Loader2 size={24} class="spin" />
+							<Loader size={24} class="spin" />
 							<p>Refreshing schema...</p>
 						</div>
 					{:else if schemaQuery.isLoading}
 						<div class="loading-state">
-							<Loader2 size={24} class="spin" />
+							<Loader size={24} class="spin" />
 							<p>Loading schema...</p>
 						</div>
 					{:else if schemaQuery.isError}
 						<div class="error-box">
-							<AlertCircle size={20} />
+							<CircleAlert size={20} />
 							<p>Error loading schema</p>
 						</div>
 					{:else if columns.length > 0}
@@ -542,41 +576,11 @@
 										value={column.name}
 										oninput={(e) => handleColumnNameChange(index, e.currentTarget.value)}
 									/>
-									<select
-										class="col-type-select"
-										value={column.dtype}
-										onchange={(e) => handleColumnTypeChange(index, e.currentTarget.value)}
-									>
-										<optgroup label="String">
-											<option value="String">String</option>
-											<option value="Categorical">Categorical</option>
-										</optgroup>
-										<optgroup label="Integer">
-											<option value="Int8">Int8</option>
-											<option value="Int16">Int16</option>
-											<option value="Int32">Int32</option>
-											<option value="Int64">Int64</option>
-											<option value="UInt8">UInt8</option>
-											<option value="UInt16">UInt16</option>
-											<option value="UInt32">UInt32</option>
-											<option value="UInt64">UInt64</option>
-										</optgroup>
-										<optgroup label="Float">
-											<option value="Float32">Float32</option>
-											<option value="Float64">Float64</option>
-										</optgroup>
-										<optgroup label="Temporal">
-											<option value="Date">Date</option>
-											<option value="Datetime">Datetime</option>
-											<option value="Time">Time</option>
-											<option value="Duration">Duration</option>
-										</optgroup>
-										<optgroup label="Other">
-											<option value="Boolean">Boolean</option>
-											<option value="Binary">Binary</option>
-											<option value="Null">Null</option>
-										</optgroup>
-									</select>
+								<ColumnTypeDropdown
+									value={column.dtype}
+									onChange={(val) => handleColumnTypeChange(index, val)}
+									placeholder="Select type..."
+								/>
 									<span class="col-sample" title={column.sample_value ?? ''}>
 										{column.sample_value ?? '—'}
 									</span>
@@ -765,8 +769,7 @@
 		max-width: 900px;
 		margin: 0 auto;
 		padding: var(--space-6);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 	}
 
 	.page-header {
@@ -838,6 +841,12 @@
 	.btn-primary:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.btn-inline {
+		margin-top: var(--space-1);
+		align-self: flex-start;
+		padding: 4px 10px;
+		font-size: var(--text-xs);
 	}
 
 	.tabs {
@@ -982,6 +991,11 @@
 		font-weight: var(--font-medium);
 		color: var(--fg-primary);
 	}
+	.path-value {
+		word-break: break-all;
+		font-size: var(--text-xs);
+		color: var(--fg-secondary);
+	}
 
 	.schema-section {
 		display: flex;
@@ -1033,10 +1047,6 @@
 	}
 
 	.col-name-input {
-		width: 100%;
-	}
-
-	.col-type-select {
 		width: 100%;
 	}
 

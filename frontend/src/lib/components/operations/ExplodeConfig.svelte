@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 
 	interface ExplodeConfigData {
 		columns: string[];
@@ -65,7 +66,7 @@
 							onchange={() => toggleColumn(column.name)}
 						/>
 						<span class="column-name">{column.name}</span>
-						<span class="column-type">{column.dtype}</span>
+						<ColumnTypeBadge columnType={column.dtype} size="xs" />
 					</label>
 				{/each}
 			</div>

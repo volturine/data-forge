@@ -1,17 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import String
-from sqlalchemy.orm import Mapped, mapped_column
-
-from core.database import Base
+from sqlalchemy import Column, DateTime, JSON, String
+from sqlmodel import Field, SQLModel
 
 
-class DataSource(Base):
+class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
     __tablename__ = 'datasources'
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    source_type: Mapped[str] = mapped_column(String, nullable=False)
-    config: Mapped[dict] = mapped_column(nullable=False)
-    schema_cache: Mapped[dict | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    id: str = Field(sa_column=Column(String, primary_key=True))
+    name: str = Field(sa_column=Column(String, nullable=False))
+    source_type: str = Field(sa_column=Column(String, nullable=False))
+    config: dict = Field(sa_column=Column(JSON, nullable=False))
+    schema_cache: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

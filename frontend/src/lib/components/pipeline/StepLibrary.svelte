@@ -224,7 +224,7 @@
 
 <style>
 	.step-library {
-		width: var(--operations-panel-width, 280px);
+		width: 100%;
 		padding: var(--space-4) var(--space-3);
 		background-color: var(--panel-bg);
 		display: flex;

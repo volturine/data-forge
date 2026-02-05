@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Udf } from '$lib/types/udf';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 
 	interface Props {
 		show: boolean;
@@ -16,12 +17,6 @@
 		const q = search.trim().toLowerCase();
 		return udfs.filter((udf) => udf.name.toLowerCase().includes(q));
 	});
-
-	function signatureLabel(udf: Udf): string {
-		const inputs = udf.signature?.inputs ?? [];
-		if (!inputs.length) return 'No inputs';
-		return inputs.map((input) => input.dtype).join(', ');
-	}
 </script>
 
 {#if show}
@@ -33,13 +28,6 @@
 		</div>
 		<div class="modal-body">
 			<input type="text" placeholder="Search UDFs..." bind:value={search} />
-			<div class="legend">
-				<span class="badge"><span class="dot dot-string"></span>String</span>
-				<span class="badge"><span class="dot dot-number"></span>Number</span>
-				<span class="badge"><span class="dot dot-time"></span>Temporal</span>
-				<span class="badge"><span class="dot dot-bool"></span>Boolean</span>
-				<span class="badge"><span class="dot dot-other"></span>Other</span>
-			</div>
 			<div class="list">
 				{#if filtered.length === 0}
 					<p class="empty">No matching UDFs.</p>
@@ -48,7 +36,18 @@
 						<button class="row" type="button" onclick={() => onSelect(udf)}>
 							<div class="title">
 								<span>{udf.name}</span>
-								<span class="signature">{signatureLabel(udf)}</span>
+								<div class="signature">
+									{#if udf.signature?.inputs?.length}
+										{#each udf.signature.inputs as input, i (i)}
+											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
+											{#if i < udf.signature.inputs.length - 1}
+												<span class="signature-separator">,</span>
+											{/if}
+										{/each}
+									{:else}
+										<span class="no-inputs">No inputs</span>
+									{/if}
+								</div>
 							</div>
 							{#if udf.description}
 								<p class="desc">{udf.description}</p>
@@ -116,11 +115,6 @@
 		max-height: 360px;
 		overflow: auto;
 	}
-	.legend {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-	}
 	.row {
 		text-align: left;
 		padding: var(--space-3);
@@ -140,42 +134,21 @@
 		font-weight: var(--font-medium);
 	}
 	.signature {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-wrap: wrap;
+	}
+	.signature-separator {
+		font-size: var(--text-xs);
+		color: var(--fg-muted);
+		margin: 0 0.125rem;
+	}
+	.no-inputs {
 		font-size: var(--text-xs);
 		color: var(--fg-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-	}
-	.badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 2px 6px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border-primary);
-		font-size: var(--text-xs);
-		color: var(--fg-secondary);
-		background-color: var(--bg-primary);
-	}
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		display: inline-block;
-	}
-	.dot-string {
-		background-color: #7dd3fc;
-	}
-	.dot-number {
-		background-color: #fbbf24;
-	}
-	.dot-time {
-		background-color: #34d399;
-	}
-	.dot-bool {
-		background-color: #f472b6;
-	}
-	.dot-other {
-		background-color: #a3a3a3;
 	}
 	.desc {
 		margin: var(--space-2) 0 0 0;

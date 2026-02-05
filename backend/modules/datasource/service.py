@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -8,13 +9,21 @@ import polars as pl
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError, FileError
-from modules.compute.operations.datasource import load_datasource
+from modules.compute.operations.datasource import load_datasource, resolve_iceberg_metadata_path
 from modules.datasource.models import DataSource
-from modules.datasource.schemas import ColumnSchema, CSVOptions, DataSourceResponse, DataSourceUpdate, SchemaInfo
+from modules.datasource.schemas import (
+    ColumnSchema,
+    CSVOptions,
+    DataSourceResponse,
+    DataSourceUpdate,
+    FileListItem,
+    FileListResponse,
+    SchemaInfo,
+)
 
 # Polars dtype mapping for schema transformations
 DTYPE_MAP = {
@@ -54,8 +63,8 @@ DTYPE_MAP = {
 logger = logging.getLogger(__name__)
 
 
-async def create_file_datasource(
-    session: AsyncSession,
+def create_file_datasource(
+    session: Session,
     name: str,
     file_path: str,
     file_type: str,
@@ -72,9 +81,20 @@ async def create_file_datasource(
 ) -> DataSourceResponse:
     """Create a file-based datasource."""
     datasource_id = str(uuid.uuid4())
+    resolved_path = Path(os.path.realpath(Path(file_path).resolve()))
+    data_root = Path(os.path.realpath(settings.data_dir.resolve()))
+    upload_root = Path(os.path.realpath(settings.upload_dir.resolve()))
+    within_data_root = data_root in resolved_path.parents or data_root == resolved_path
+    within_upload_root = upload_root in resolved_path.parents or upload_root == resolved_path
+    if not (within_data_root or within_upload_root):
+        raise ValueError(f'Path must be inside data directory: {data_root}')
+    if file_type in {'csv', 'json', 'ndjson', 'excel'} and not resolved_path.is_file():
+        raise ValueError(f'Path must be a file for type: {file_type}')
+    if file_type == 'parquet' and not (resolved_path.is_file() or resolved_path.is_dir()):
+        raise ValueError('Parquet path must be a file or directory')
 
     config = {
-        'file_path': file_path,
+        'file_path': str(resolved_path),
         'file_type': file_type,
         'options': options or {},
         'csv_options': csv_options.model_dump() if csv_options else None,
@@ -97,15 +117,15 @@ async def create_file_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     # Extract and cache schema immediately
     try:
-        schema_info = await _extract_schema(datasource, sheet_name=sheet_name)
+        schema_info = _extract_schema(datasource, sheet_name=sheet_name)
         datasource.schema_cache = schema_info.model_dump()
-        await session.commit()
-        await session.refresh(datasource)
+        session.commit()
+        session.refresh(datasource)
         logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
     except Exception as e:
         logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
@@ -189,20 +209,13 @@ def resolve_excel_selection(
     return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row
 
 
+@dataclass
 class _ExcelBounds:
-    def __init__(
-        self,
-        sheet_name: str,
-        start_row: int,
-        start_col: int,
-        end_col: int,
-        end_row: int | None,
-    ) -> None:
-        self.sheet_name = sheet_name
-        self.start_row = start_row
-        self.start_col = start_col
-        self.end_col = end_col
-        self.end_row = end_row
+    sheet_name: str
+    start_row: int
+    start_col: int
+    end_col: int
+    end_row: int | None
 
 
 def _resolve_excel_bounds(
@@ -283,8 +296,8 @@ def _collect_preview_rows(
     return rows
 
 
-async def create_database_datasource(
-    session: AsyncSession,
+def create_database_datasource(
+    session: Session,
     name: str,
     connection_string: str,
     query: str,
@@ -305,14 +318,14 @@ async def create_database_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     return DataSourceResponse.model_validate(datasource)
 
 
-async def create_api_datasource(
-    session: AsyncSession,
+def create_api_datasource(
+    session: Session,
     name: str,
     url: str,
     method: str = 'GET',
@@ -337,14 +350,14 @@ async def create_api_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     return DataSourceResponse.model_validate(datasource)
 
 
-async def create_duckdb_datasource(
-    session: AsyncSession,
+def create_duckdb_datasource(
+    session: Session,
     name: str,
     db_path: str | None,
     query: str,
@@ -368,23 +381,81 @@ async def create_duckdb_datasource(
     )
 
     session.add(datasource)
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     logger.info(f'Created DuckDB datasource {datasource_id} ({name})')
     return DataSourceResponse.model_validate(datasource)
 
 
-async def get_datasource_schema(session: AsyncSession, datasource_id: str, sheet_name: str | None = None) -> SchemaInfo:
+def create_iceberg_datasource(
+    session: Session,
+    name: str,
+    metadata_path: str,
+    snapshot_id: int | None = None,
+    storage_options: dict | None = None,
+    reader: str | None = None,
+) -> DataSourceResponse:
+    """Create an Iceberg datasource."""
+    datasource_id = str(uuid.uuid4())
+
+    normalized_path = _normalize_iceberg_path(metadata_path)
+    try:
+        resolve_iceberg_metadata_path(normalized_path)
+    except ValueError as exc:
+        raise DataSourceValidationError(str(exc), details={'metadata_path': metadata_path}) from exc
+
+    config = {
+        'metadata_path': normalized_path,
+        'snapshot_id': snapshot_id,
+        'storage_options': storage_options,
+        'reader': reader,
+    }
+
+    datasource = DataSource(
+        id=datasource_id,
+        name=name,
+        source_type='iceberg',
+        config=config,
+        created_at=datetime.now(UTC),
+    )
+
+    session.add(datasource)
+    session.commit()
+    session.refresh(datasource)
+
+    try:
+        schema_info = _extract_schema(datasource)
+        datasource.schema_cache = schema_info.model_dump()
+        session.commit()
+        session.refresh(datasource)
+        logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
+    except Exception as e:
+        logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
+
+    logger.info(f'Created Iceberg datasource {datasource_id} ({name})')
+    return DataSourceResponse.model_validate(datasource)
+
+
+def get_datasource_schema(
+    session: Session,
+    datasource_id: str,
+    sheet_name: str | None = None,
+    refresh: bool = False,
+) -> SchemaInfo:
     """Get or extract schema for a datasource."""
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
+    if refresh and sheet_name is None:
+        datasource.schema_cache = None
+        session.commit()
+
     # Check if we have cached schema with row_count and sample_value
-    if datasource.schema_cache and sheet_name is None:
+    if datasource.schema_cache and sheet_name is None and not refresh:
         cached = SchemaInfo.model_validate(datasource.schema_cache)
         # Re-extract if row_count or sample_value is missing
         has_samples = cached.columns and any(c.sample_value is not None for c in cached.columns)
@@ -393,11 +464,11 @@ async def get_datasource_schema(session: AsyncSession, datasource_id: str, sheet
             return cached
 
     logger.info(f'Extracting schema for datasource {datasource_id}')
-    schema_info = await _extract_schema(datasource, sheet_name=sheet_name)
+    schema_info = _extract_schema(datasource, sheet_name=sheet_name)
 
     if sheet_name is None:
         datasource.schema_cache = schema_info.model_dump()
-        await session.commit()
+        session.commit()
 
     logger.info(f'Schema extracted and cached for datasource {datasource_id}: {len(schema_info.columns)} columns')
     return schema_info
@@ -440,7 +511,7 @@ def _get_first_non_null_samples_eager(frame: pl.DataFrame, max_rows: int = 1000)
     return sample_values
 
 
-async def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
+def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
     if datasource.source_type == 'file':
         config = {
             'source_type': datasource.source_type,
@@ -515,6 +586,28 @@ async def _extract_schema(datasource: DataSource, sheet_name: str | None = None)
 
         return SchemaInfo(columns=columns, row_count=row_count)
 
+    if datasource.source_type == 'iceberg':
+        config = {
+            'source_type': datasource.source_type,
+            **datasource.config,
+        }
+        lazy = load_datasource(config)
+        schema = lazy.collect_schema()
+        row_count = lazy.select(pl.len()).collect().item()
+
+        sample_values = _get_first_non_null_samples(lazy)
+
+        columns = [
+            ColumnSchema(
+                name=name,
+                dtype=str(dtype),
+                nullable=True,
+                sample_value=sample_values.get(name),
+            )
+            for name, dtype in schema.items()
+        ]
+        return SchemaInfo(columns=columns, row_count=row_count)
+
     raise DataSourceValidationError(
         f'Schema extraction not supported for type: {datasource.source_type}',
         details={'source_type': datasource.source_type},
@@ -526,6 +619,11 @@ def _transform_to_parquet(
     column_schema: list[dict],
 ) -> Path:
     """Transform datasource to parquet with new schema and save to clean directory."""
+    if datasource.source_type == 'iceberg':
+        raise DataSourceValidationError(
+            'Schema transformations are not supported for Iceberg datasources',
+            details={'source_type': datasource.source_type},
+        )
     config = {
         'source_type': datasource.source_type,
         **datasource.config,
@@ -570,8 +668,39 @@ def _transform_to_parquet(
     return output_path
 
 
-async def get_datasource(session: AsyncSession, datasource_id: str) -> DataSourceResponse:
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+def list_data_files(path: str | None) -> FileListResponse:
+    base_dir = settings.data_dir.resolve()
+    target = Path(path) if path else base_dir
+    resolved = target.resolve()
+    if base_dir not in resolved.parents and base_dir != resolved:
+        raise ValueError(f'Path must be inside data directory: {base_dir}')
+    if not resolved.exists():
+        raise ValueError(f'Path does not exist: {resolved}')
+    if not resolved.is_dir():
+        raise ValueError(f'Path must be a directory: {resolved}')
+
+    entries = [
+        FileListItem(
+            name=item.name,
+            path=str(item),
+            is_dir=item.is_dir(),
+        )
+        for item in sorted(resolved.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.lower()))
+    ]
+    return FileListResponse(base_path=str(resolved), entries=entries)
+
+
+def _normalize_iceberg_path(metadata_path: str) -> str:
+    path = Path(metadata_path)
+    if path.suffix == '.db':
+        raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not catalog.db')
+    if path.name.endswith('.metadata.json'):
+        raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not metadata.json')
+    return str(path)
+
+
+def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -580,31 +709,31 @@ async def get_datasource(session: AsyncSession, datasource_id: str) -> DataSourc
     return DataSourceResponse.model_validate(datasource)
 
 
-async def list_datasources(session: AsyncSession) -> list[DataSourceResponse]:
-    result = await session.execute(select(DataSource))
+def list_datasources(session: Session) -> list[DataSourceResponse]:
+    result = session.execute(select(DataSource))
     datasources = result.scalars().all()
 
     # Populate schema_cache for datasources that don't have it
     for ds in datasources:
         if ds.schema_cache is None:
             try:
-                schema_info = await _extract_schema(ds)
+                schema_info = _extract_schema(ds)
                 ds.schema_cache = schema_info.model_dump()
                 logger.info(f'Populated schema cache for datasource {ds.id}')
             except Exception as e:
                 logger.warning(f'Failed to extract schema for datasource {ds.id}: {e}')
 
-    await session.commit()
+    session.commit()
     return [DataSourceResponse.model_validate(ds) for ds in datasources]
 
 
-async def update_datasource(
-    session: AsyncSession,
+def update_datasource(
+    session: Session,
     datasource_id: str,
     update: DataSourceUpdate,
 ) -> DataSourceResponse:
     """Update a datasource configuration."""
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -649,16 +778,16 @@ async def update_datasource(
             if schema_modified or parsing_changed:
                 datasource.schema_cache = None
 
-    await session.commit()
-    await session.refresh(datasource)
+    session.commit()
+    session.refresh(datasource)
 
     # Re-extract schema if it was modified
     if update.config and 'column_schema' in update.config:
         try:
-            schema_info = await _extract_schema(datasource)
+            schema_info = _extract_schema(datasource)
             datasource.schema_cache = schema_info.model_dump()
-            await session.commit()
-            await session.refresh(datasource)
+            session.commit()
+            session.refresh(datasource)
         except Exception as e:
             logger.warning(f'Failed to extract schema after update: {e}')
 
@@ -666,9 +795,9 @@ async def update_datasource(
     return DataSourceResponse.model_validate(datasource)
 
 
-async def delete_datasource(session: AsyncSession, datasource_id: str) -> None:
+def delete_datasource(session: Session, datasource_id: str) -> None:
     """Delete a datasource and its associated file if it exists."""
-    result = await session.execute(select(DataSource).where(DataSource.id == datasource_id))
+    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
 
     if not datasource:
@@ -700,6 +829,6 @@ async def delete_datasource(session: AsyncSession, datasource_id: str) -> None:
                     details={'file_path': str(file_path), 'error': str(e)},
                 )
 
-    await session.delete(datasource)
-    await session.commit()
+    session.delete(datasource)
+    session.commit()
     logger.info(f'Deleted datasource {datasource_id}')

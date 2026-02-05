@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import type { PivotConfigData } from '$lib/types/operation-config';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	interface Props {
 		schema: Schema;
@@ -44,12 +45,12 @@
 		<label for="pivot-column"
 			>Pivot Column <span class="hint">(values become new columns)</span></label
 		>
-		<select id="pivot-column" bind:value={config.columns}>
-			<option value="">Select column...</option>
-			{#each schema.columns as column (column.name)}
-				<option value={column.name}>{column.name} ({column.dtype})</option>
-			{/each}
-		</select>
+		<ColumnDropdown
+			{schema}
+			value={config.columns ?? ''}
+			onChange={(val) => (config.columns = val)}
+			placeholder="Select column..."
+		/>
 		<span id="pivot-column-help" class="hint"
 			>Select the column whose unique values will become new columns</span
 		>
@@ -84,12 +85,12 @@
 
 	<div class="field-group">
 		<label for="pivot-select-values">Values Column</label>
-		<select id="pivot-select-values" data-testid="pivot-values-select" bind:value={config.values}>
-			<option value="">All remaining columns</option>
-			{#each schema.columns as column (column.name)}
-				<option value={column.name}>{column.name} ({column.dtype})</option>
-			{/each}
-		</select>
+		<ColumnDropdown
+			{schema}
+			value={config.values ?? ''}
+			onChange={(val) => (config.values = val)}
+			placeholder="All remaining columns"
+		/>
 	</div>
 
 	<div class="field-group">

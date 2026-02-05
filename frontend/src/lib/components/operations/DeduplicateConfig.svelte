@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	interface DeduplicateConfigData {
 		subset: string[] | null;
@@ -18,24 +19,6 @@
 		{ value: 'last', label: 'Keep Last' },
 		{ value: 'none', label: 'Keep None' }
 	];
-
-	function toggleColumn(columnName: string) {
-		const base = config.subset ?? [];
-		const index = base.indexOf(columnName);
-		if (index > -1) {
-			config.subset = base.filter((_, i) => i !== index);
-		} else {
-			config.subset = [...base, columnName];
-		}
-	}
-
-	function selectAllColumns() {
-		config.subset = schema.columns.map((c) => c.name);
-	}
-
-	function deselectAllColumns() {
-		config.subset = [];
-	}
 </script>
 
 <div class="config-panel" role="region" aria-label="Deduplicate configuration">
@@ -60,63 +43,25 @@
 
 	<div class="form-section" role="group" aria-labelledby="column-subset-heading">
 		<h4 id="column-subset-heading">Column Subset</h4>
-
-		<div class="bulk-actions">
-			<button
-				id="dedup-btn-select-all"
-				data-testid="dedup-select-all-button"
-				type="button"
-				onclick={selectAllColumns}
-				aria-label="Select all columns"
-			>
-				Select All
-			</button>
-			<button
-				id="dedup-btn-deselect-all"
-				data-testid="dedup-deselect-all-button"
-				type="button"
-				onclick={deselectAllColumns}
-				aria-label="Deselect all columns"
-			>
-				Deselect All
-			</button>
-		</div>
-
-		<div id="dedup-column-list" class="column-list" role="group" aria-label="Available columns">
-			{#each schema.columns as column (column.name)}
-				<label class="column-item">
-					<input
-						id={`dedup-checkbox-${column.name}`}
-						data-testid={`dedup-column-checkbox-${column.name}`}
-						type="checkbox"
-						checked={config.subset?.includes(column.name) || false}
-						onchange={() => toggleColumn(column.name)}
-						aria-label={`Check ${column.name} for duplicate detection`}
-					/>
-					<span class="column-name">{column.name}</span>
-					<span class="column-type">({column.dtype})</span>
-				</label>
-			{/each}
-		</div>
+		<div class="form-label">Columns to check for duplicates</div>
+		<MultiSelectColumnDropdown
+			{schema}
+			value={config.subset ?? []}
+			onChange={(val) => (config.subset = val.length > 0 ? val : null)}
+			placeholder="Select columns..."
+		/>
 
 		{#if config.subset && config.subset.length > 0}
-			<div id="dedup-selected-info" class="info-box" aria-live="polite">
-				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''}:
-				{config.subset.join(', ')}
+			<div class="info-box" aria-live="polite">
+				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''} for duplicates
 			</div>
 		{:else}
-			<div id="dedup-no-columns-info" class="info-box">
-				No columns selected - will check all columns for duplicates
-			</div>
+			<div class="info-box">No columns selected - will check all columns for duplicates</div>
 		{/if}
 	</div>
 </div>
 
 <style>
-	.column-list {
-		max-height: 200px;
-		margin-bottom: var(--space-2);
-	}
 	.info-box {
 		margin-top: var(--space-2);
 	}

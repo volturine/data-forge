@@ -1,4 +1,7 @@
 <script lang="ts">
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import type { FileType } from '$lib/utils/fileTypes';
+
 	interface Props {
 		config?: {
 			format?: string;
@@ -18,6 +21,17 @@
 	}: Props = $props();
 
 	let showDuckDBOptions = $derived(config.format === 'duckdb');
+
+	// Map format string to FileType for badge display
+	let selectedFileType = $derived.by((): FileType | 'duckdb' => {
+		const format = config.format ?? 'csv';
+		// Map formats to file types - duckdb is a source type, not a file type
+		if (format === 'csv') return 'csv';
+		if (format === 'parquet') return 'parquet';
+		if (format === 'json') return 'json';
+		if (format === 'ndjson') return 'ndjson';
+		return 'duckdb' as const;
+	});
 
 	function setTableName(value: string) {
 		config.options = { ...config.options, table_name: value };
@@ -52,7 +66,14 @@
 	</div>
 
 	<div class="form-group">
-		<label for="export-select-format">Format</label>
+		<label for="export-select-format">
+			Format
+			{#if selectedFileType === 'duckdb'}
+				<FileTypeBadge sourceType="duckdb" size="sm" />
+			{:else}
+				<FileTypeBadge fileType={selectedFileType} size="sm" />
+			{/if}
+		</label>
 		<select id="export-select-format" data-testid="export-format-select" bind:value={config.format}>
 			{#each formats as fmt (fmt.value)}
 				<option value={fmt.value}>{fmt.label}</option>
@@ -104,6 +125,12 @@
 
 	.form-group:last-child {
 		margin-bottom: 0;
+	}
+
+	.form-group label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
 	}
 
 	.hint {

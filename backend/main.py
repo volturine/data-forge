@@ -8,19 +8,15 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Session, text
 
 from api import router
 from core.config import settings
 from core.database import get_db, init_db
+from core.logging import RequestLoggingMiddleware, configure_logging
 from modules.compute.manager import get_manager
 from modules.udf.seed import ensure_udf_seeds
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG if settings.debug else logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-)
 logger = logging.getLogger(__name__)
 
 frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
@@ -44,10 +40,11 @@ async def engine_cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     logger.info('Starting application...')
-    await init_db()
-    async for session in get_db():
-        await ensure_udf_seeds(session)
+    init_db()
+    for session in get_db():
+        ensure_udf_seeds(session)
         break
 
     # Start background cleanup task
@@ -78,6 +75,8 @@ app.add_middleware(
     allow_headers=['Content-Type', 'Authorization'],
 )
 
+app.add_middleware(RequestLoggingMiddleware)
+
 # Include API Routers (prefix already defined in api/router.py)
 app.include_router(router, tags=['api'])
 
@@ -101,20 +100,19 @@ async def health():
 
 
 @app.get('/health/ready')
-async def readiness(session: AsyncSession = Depends(get_db)):
+def readiness(session: Session = Depends(get_db)):
     """
     Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
     """
     from fastapi.responses import JSONResponse
-    from sqlalchemy import text
 
     checks = {}
     is_ready = True
 
     # Check database
     try:
-        await session.execute(text('SELECT 1'))
+        session.execute(text('SELECT 1'))
         checks['database'] = 'ok'
     except Exception as e:
         checks['database'] = f'error: {str(e)}'

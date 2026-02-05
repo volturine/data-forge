@@ -1,6 +1,6 @@
 .DS_Store
 
-# Data directory (uploads, results, exports)
+# Data directory (uploads, results, exports, logs)
 /data/
 .opencode/opencode.jsonc
 .vscode/mcp.json

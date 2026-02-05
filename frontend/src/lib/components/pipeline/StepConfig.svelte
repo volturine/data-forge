@@ -111,7 +111,9 @@
 	});
 
 	const hasChanges = $derived(
-		!!step && JSON.stringify(step.config) !== JSON.stringify(draftConfig)
+		!!step &&
+			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) ||
+				(step as PipelineStep & { is_applied?: boolean }).is_applied === false)
 	);
 
 	function handleRefreshPivotSchema() {
@@ -164,6 +166,11 @@
 	function handleApplyConfig() {
 		if (!step) return;
 		analysisStore.updateStepConfig(step.id, cloneConfig(draftConfig));
+		if ((step as PipelineStep & { is_applied?: boolean }).is_applied === false) {
+			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep> & {
+				is_applied: boolean;
+			});
+		}
 		onConfigApply?.();
 	}
 
@@ -333,7 +340,7 @@
 
 <style>
 	.step-config {
-		width: var(--operations-panel-width, 280px);
+		width: 100%;
 		background-color: var(--panel-bg);
 		display: flex;
 		flex-direction: column;
@@ -417,13 +424,13 @@
 	.config-body {
 		flex: 1;
 		overflow-y: auto;
-		padding: var(--space-4);
+		padding: var(--space-3);
 		background-color: var(--panel-bg);
 	}
 	.config-actions {
 		display: flex;
 		gap: var(--space-2);
-		padding: var(--space-4);
+		padding: var(--space-3);
 		border-top: 1px solid var(--panel-border);
 		background-color: var(--panel-bg);
 	}
@@ -460,7 +467,7 @@
 		background-color: var(--panel-bg);
 	}
 	.not-implemented p {
-		margin: 0 0 var(--space-4) 0;
+		margin: 0 0 var(--space-3) 0;
 		color: var(--fg-tertiary);
 	}
 	.not-implemented button {

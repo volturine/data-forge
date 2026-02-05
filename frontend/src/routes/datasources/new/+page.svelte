@@ -6,15 +6,20 @@
 		uploadBulkFiles,
 		connectDatabase,
 		connectApi,
-		connectDuckDB
+		connectDuckDB,
+		connectIceberg,
+		resolveIcebergMetadata,
+		connectFilePath
 	} from '$lib/api/datasource';
 	import { preflightExcel, previewExcel, confirmExcel } from '$lib/api/excel';
 	import type { ExcelPreflightResponse, ExcelPreviewResponse } from '$lib/api/excel';
 	import type { BulkUploadResult } from '$lib/api/datasource';
-	import type { CSVOptions } from '$lib/types/datasource';
+	import FileBrowser from '$lib/components/common/FileBrowser.svelte';
+	import { detectFileType } from '$lib/utils/fileTypes';
+	import { MessageCircleQuestionMark } from 'lucide-svelte';
 
 	type Tab = 'file' | 'database' | 'api';
-	type DatabaseType = 'duckdb' | 'other';
+	type DatabaseType = 'duckdb' | 'iceberg' | 'other';
 
 	let activeTab = $state<Tab>('file');
 	let databaseType = $state<DatabaseType>('duckdb');
@@ -39,18 +44,19 @@
 	let excelHeader = $state(true);
 	let previewLoading = $state(false);
 
-	// CSV options state (using defaults)
-	let delimiter = $state(',');
-	let quoteChar = $state('"');
-	let hasHeader = $state(true);
-	let skipRows = $state(0);
-	let encoding = $state('utf8');
-
 	// DuckDB state
 	let duckdbName = $state('');
 	let duckdbPath = $state('');
 	let duckdbQuery = $state('');
 	let duckdbReadOnly = $state(true);
+
+	// Iceberg state
+	let icebergName = $state('');
+	let icebergMetadataPath = $state('');
+	let icebergSnapshotId = $state<number | null>(null);
+	let icebergReader = $state('');
+	let icebergStorageOptions = $state('');
+	let icebergResolvedPath = $state('');
 
 	// Generic database state
 	let dbName = $state('');
@@ -62,51 +68,53 @@
 	let apiUrl = $state('');
 	let apiMethod = $state('GET');
 
-	// Bulk upload state
+	// Upload state
 	let selectedFiles = $state<File[]>([]);
 	let bulkResults = $state<BulkUploadResult[]>([]);
 	let showBulkResults = $state(false);
-	let uploadMode: 'single' | 'bulk' = $state('single');
+	let fileMode = $state<'upload' | 'path'>('upload');
+
+	$effect(() => {
+		if (fileMode !== 'path') return;
+		selectedFiles = [];
+		file = null;
+		fileName = '';
+		resetExcelState();
+	});
+
+	function resetExcelState() {
+		preflightId = null;
+		sheetNames = [];
+		tableMap = {};
+		namedRanges = [];
+		previewGrid = [];
+		selectedSheet = '';
+		selectedTable = '';
+		selectedRange = '';
+		startRow = 0;
+		startCol = 0;
+		endCol = 0;
+		detectedEndRow = null;
+	}
+
+	function applySelection(files: File[]) {
+		selectedFiles = files;
+		showBulkResults = false;
+		bulkResults = [];
+		resetExcelState();
+		if (files.length !== 1) {
+			file = null;
+			fileName = '';
+			return;
+		}
+		file = files[0];
+		fileName = file.name.replace(/\.[^/.]+$/, '');
+	}
 
 	function handleFileChange(event: Event) {
 		const target = event.target as HTMLInputElement;
 		if (!target.files || target.files.length === 0) return;
-
-		if (uploadMode === 'bulk') {
-			selectedFiles = Array.from(target.files);
-			file = null;
-			fileName = '';
-			preflightId = null;
-			sheetNames = [];
-			tableMap = {};
-			namedRanges = [];
-			previewGrid = [];
-			selectedSheet = '';
-			selectedTable = '';
-			selectedRange = '';
-			startRow = 0;
-			startCol = 0;
-			endCol = 0;
-			detectedEndRow = null;
-		} else {
-			file = target.files[0];
-			selectedFiles = [];
-			preflightId = null;
-			sheetNames = [];
-			tableMap = {};
-			namedRanges = [];
-			previewGrid = [];
-			selectedSheet = '';
-			selectedTable = '';
-			selectedRange = '';
-			startRow = 0;
-			startCol = 0;
-			endCol = 0;
-			detectedEndRow = null;
-			if (!fileName) {
-				fileName = file.name.replace(/\.[^/.]+$/, '');
-			}
-		}
+		applySelection(Array.from(target.files));
 	}
 
 	async function handleBulkUpload() {
@@ -119,24 +127,14 @@
 		error = null;
 		showBulkResults = false;
 
-		let csvOptions: CSVOptions | undefined;
-		if (selectedFiles.some((f) => f.name.endsWith('.csv'))) {
-			csvOptions = {
-				delimiter,
-				quote_char: quoteChar,
-				has_header: hasHeader,
-				skip_rows: skipRows,
-				encoding
-			};
-		}
-
-		const result = await uploadBulkFiles(selectedFiles, csvOptions);
+		const result = await uploadBulkFiles(selectedFiles);
 		result.match(
 			(response: import('$lib/api/datasource').BulkUploadResponse) => {
 				bulkResults = response.results;
 				showBulkResults = true;
 				if (response.successful === response.total) {
 					selectedFiles = [];
+					goto(resolve('/datasources'), { invalidateAll: true });
 				}
 			},
 			(err: { message?: string }) => {
@@ -151,13 +149,22 @@
 		selectedFiles = [];
 		bulkResults = [];
 		showBulkResults = false;
+		file = null;
+		fileName = '';
+		resetExcelState();
 	}
 
 	function removeBulkFile(index: number) {
 		selectedFiles = selectedFiles.filter((_, i) => i !== index);
+		if (selectedFiles.length === 1) {
+			applySelection(selectedFiles);
+		}
 		if (selectedFiles.length === 0) {
 			bulkResults = [];
 			showBulkResults = false;
+			file = null;
+			fileName = '';
+			resetExcelState();
 		}
 	}
 
@@ -290,17 +297,6 @@
 		loading = true;
 		error = null;
 
-		let csvOptions: CSVOptions | undefined;
-		if (file.name.endsWith('.csv')) {
-			csvOptions = {
-				delimiter,
-				quote_char: quoteChar,
-				has_header: hasHeader,
-				skip_rows: skipRows,
-				encoding
-			};
-		}
-
 		try {
 			if (file.name.endsWith('.xlsx')) {
 				if (!preflightId) {
@@ -324,7 +320,7 @@
 				}
 				goto(resolve('/datasources'), { invalidateAll: true });
 			} else {
-				await uploadFile(file, fileName, csvOptions);
+				await uploadFile(file, fileName);
 				goto(resolve('/datasources'), { invalidateAll: true });
 			}
 		} catch (err) {
@@ -332,6 +328,83 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	// Path-based file datasource
+	let pathName = $state('');
+	let pathValue = $state('');
+	let pathOptions = $state('');
+	let pickerOpen = $state(false);
+	let pathIsFolder = $state(false);
+
+	async function handlePathConnect() {
+		if (!pathName || !pathValue) {
+			error = 'Please fill in name and path';
+			return;
+		}
+		const trimmedPath = pathValue.trim();
+		const normalizedPath = trimmedPath.replace(/\/+$/, '');
+		const isFolder = pathIsFolder;
+		const detectedType = detectFileType(normalizedPath, isFolder);
+		if (detectedType === 'unknown') {
+			error = 'Unknown file type. Add an extension or use a folder for parquet.';
+			return;
+		}
+		loading = true;
+		error = null;
+
+		let options: Record<string, unknown> | null = null;
+		if (pathOptions.trim()) {
+			try {
+				const parsed = JSON.parse(pathOptions);
+				if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+					throw new Error('Options must be an object');
+				}
+				options = parsed as Record<string, unknown>;
+			} catch {
+				error = 'Options must be valid JSON';
+				loading = false;
+				return;
+			}
+		}
+
+		const result = await connectFilePath(pathName, normalizedPath, detectedType, options);
+		if (result.isErr()) {
+			error = result.error.message || 'Failed to create datasource';
+			loading = false;
+			return;
+		}
+
+		goto(resolve('/datasources'), { invalidateAll: true });
+	}
+
+	function openPicker() {
+		pickerOpen = true;
+	}
+
+	function closePicker() {
+		pickerOpen = false;
+	}
+
+	function handlePathSelect(next: string, isFolder: boolean) {
+		pathValue = next;
+		pathIsFolder = isFolder;
+		pickerOpen = false;
+	}
+
+	function handlePathInput(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		pathIsFolder = target.value.trim().endsWith('/');
+	}
+
+	function browserStart() {
+		const value = pathValue.trim();
+		if (!value) return '';
+		if (pathIsFolder) return value;
+		const normalized = value.replace(/\/+$/, '');
+		const index = normalized.lastIndexOf('/');
+		if (index <= 0) return '';
+		return normalized.slice(0, index);
 	}
 
 	async function handleDuckDBConnect() {
@@ -357,6 +430,80 @@
 		}
 
 		goto(resolve('/datasources'), { invalidateAll: true });
+	}
+
+	async function handleIcebergConnect() {
+		if (!icebergName || !icebergMetadataPath) {
+			error = 'Please fill in name and metadata path';
+			return;
+		}
+
+		loading = true;
+		error = null;
+
+		const reader = icebergReader.trim();
+		if (reader && reader !== 'native' && reader !== 'pyiceberg') {
+			error = 'Reader must be "native" or "pyiceberg"';
+			loading = false;
+			return;
+		}
+
+		const resolvedMetadataPath = await resolveMetadataPath();
+		if (!resolvedMetadataPath) {
+			loading = false;
+			return;
+		}
+		const normalizedMetadataPath = resolvedMetadataPath.replace(
+			/\/metadata\/[^/]+\.metadata\.json$/,
+			'/metadata'
+		);
+
+		const snapshotId = icebergSnapshotId ?? null;
+
+		let storageOptions: Record<string, string> | null = null;
+		if (icebergStorageOptions.trim()) {
+			try {
+				const parsed = JSON.parse(icebergStorageOptions);
+				if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+					throw new Error('Storage options must be an object');
+				}
+				storageOptions = parsed as Record<string, string>;
+			} catch {
+				error = 'Storage options must be valid JSON';
+				loading = false;
+				return;
+			}
+		}
+
+		const result = await connectIceberg(icebergName, {
+			metadata_path: normalizedMetadataPath,
+			snapshot_id: snapshotId,
+			storage_options: storageOptions,
+			reader: reader || null
+		});
+
+		if (result.isErr()) {
+			error = result.error.message || 'Connection failed';
+			loading = false;
+			return;
+		}
+
+		goto(resolve('/datasources'), { invalidateAll: true });
+	}
+
+	async function resolveMetadataPath(): Promise<string | null> {
+		const input = icebergMetadataPath.trim();
+		if (!input) {
+			error = 'Please provide a metadata path';
+			return null;
+		}
+		const resolveResult = await resolveIcebergMetadata(input);
+		if (resolveResult.isErr()) {
+			error = resolveResult.error.message || 'Failed to resolve metadata path';
+			return null;
+		}
+		icebergResolvedPath = resolveResult.value.metadata_path;
+		return icebergResolvedPath;
 	}
 
 	async function handleDatabaseConnect() {
@@ -428,69 +575,45 @@
 		{#if activeTab === 'file'}
 			<div class="form">
 				<div class="form-group">
-					<span class="form-label">Upload Mode</span>
+					<span class="form-label">Source</span>
 					<div class="radio-group">
 						<label class="radio-option">
 							<input
 								type="radio"
-								name="upload-mode"
-								value="single"
-								bind:group={uploadMode}
+								name="file-mode"
+								value="upload"
+								bind:group={fileMode}
 								disabled={loading}
 							/>
-							<span class="radio-label">Single File</span>
-							<span class="radio-desc">Upload one file at a time with full configuration</span>
+							<span class="radio-label">Upload</span>
+							<span class="radio-desc">Upload one or many files in one step</span>
 						</label>
 						<label class="radio-option">
 							<input
 								type="radio"
-								name="upload-mode"
-								value="bulk"
-								bind:group={uploadMode}
+								name="file-mode"
+								value="path"
+								bind:group={fileMode}
 								disabled={loading}
 							/>
-							<span class="radio-label">Bulk Upload</span>
-							<span class="radio-desc">Upload multiple files quickly (CSV, Parquet, JSON only)</span
-							>
+							<span class="radio-label">Path</span>
+							<span class="radio-desc">Point to a local file or folder path</span>
 						</label>
 					</div>
 				</div>
 
-				{#if uploadMode === 'single'}
+				{#if fileMode === 'upload'}
 					<div class="form-group">
-						<label for="file-name">Name</label>
+						<label for="file-input">Files</label>
 						<input
-							id="file-name"
-							type="text"
-							bind:value={fileName}
-							placeholder="My Dataset"
-							disabled={loading}
-						/>
-					</div>
-
-					<div class="form-group">
-						<label for="file-input">File</label>
-						<input id="file-input" type="file" onchange={handleFileChange} disabled={loading} />
-						{#if file}
-							<p class="file-info">Selected: {file.name}</p>
-						{/if}
-					</div>
-				{:else}
-					<!-- Bulk upload UI -->
-					<div class="form-group">
-						<label for="bulk-file-input">Files</label>
-						<input
-							id="bulk-file-input"
+							id="file-input"
 							type="file"
 							multiple
 							accept=".csv,.parquet,.json,.ndjson,.jsonl,.xlsx"
 							onchange={handleFileChange}
 							disabled={loading}
 						/>
-						<p class="hint">
-							Select multiple files. Supported: CSV, Parquet, JSON, NDJSON, Excel. Names will be
-							derived from filenames.
-						</p>
+						<p class="hint">Select one or more files. Names are derived from filenames.</p>
 						{#if selectedFiles.length > 0}
 							<div class="file-list">
 								<div class="file-list-header">
@@ -521,6 +644,22 @@
 						{/if}
 					</div>
 
+					{#if selectedFiles.length === 1}
+						<div class="form-group">
+							<label for="file-name">Name</label>
+							<input
+								id="file-name"
+								type="text"
+								bind:value={fileName}
+								placeholder="My Dataset"
+								disabled={loading}
+							/>
+							{#if file}
+								<p class="file-info">Selected: {file.name}</p>
+							{/if}
+						</div>
+					{/if}
+
 					{#if showBulkResults && bulkResults.length > 0}
 						<div class="bulk-results">
 							<h4>Upload Results</h4>
@@ -539,9 +678,77 @@
 							{/each}
 						</div>
 					{/if}
+				{:else}
+					<div class="form-group">
+						<label for="path-name">Name</label>
+						<input
+							id="path-name"
+							type="text"
+							bind:value={pathName}
+							placeholder="My Dataset"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="path-value">Path</label>
+						<input
+							id="path-value"
+							type="text"
+							bind:value={pathValue}
+							placeholder="/path/to/data"
+							oninput={handlePathInput}
+							disabled={loading}
+						/>
+						<div class="path-actions">
+							<button class="btn-secondary" type="button" onclick={openPicker} disabled={loading}>
+								Browse server
+							</button>
+						</div>
+					</div>
+
+					<div class="form-group">
+						<label for="path-options" class="label-with-help">
+							<span>Options (optional)</span>
+							<span class="help-icon" title="Click to view Polars documentation">
+								<a
+									href="https://docs.pola.rs/api/python/stable/reference/io.html"
+									target="_blank"
+									rel="noopener noreferrer"
+									class="help-link"
+								>
+									<MessageCircleQuestionMark size={16} />
+								</a>
+							</span>
+						</label>
+						<textarea
+							id="path-options"
+							bind:value={pathOptions}
+							placeholder={'{"ignore_errors": true, "rechunk": false}'}
+							rows="3"
+							disabled={loading}
+						></textarea>
+						<p class="hint">
+							Advanced Polars scan options in JSON format. Common options: <code>ignore_errors</code
+							>,
+							<code>rechunk</code>, <code>low_memory</code>, <code>n_rows</code>.
+						</p>
+					</div>
+
+					<button class="btn-primary" onclick={handlePathConnect} disabled={loading}>
+						{loading ? 'Creating...' : 'Create datasource'}
+					</button>
 				{/if}
 
-				{#if file?.name.endsWith('.xlsx')}
+				{#if pickerOpen}
+					<FileBrowser
+						initialPath={browserStart()}
+						onselect={handlePathSelect}
+						oncancel={closePicker}
+					/>
+				{/if}
+
+				{#if fileMode === 'upload' && file?.name.endsWith('.xlsx')}
 					<div class="excel-preflight">
 						<h3>Excel Table Selection</h3>
 						<div class="form-row">
@@ -650,19 +857,19 @@
 					</div>
 				{/if}
 
-				{#if uploadMode === 'single'}
-					<button class="btn-primary" onclick={handleFileUpload} disabled={loading || !file}>
-						{loading ? 'Uploading...' : 'Upload'}
-					</button>
-				{:else}
+				{#if fileMode === 'upload'}
 					<button
 						class="btn-primary"
-						onclick={handleBulkUpload}
-						disabled={loading || selectedFiles.length === 0}
+						onclick={selectedFiles.length === 1 ? handleFileUpload : handleBulkUpload}
+						disabled={loading ||
+							selectedFiles.length === 0 ||
+							(selectedFiles.length === 1 && !fileName)}
 					>
 						{loading
 							? 'Uploading...'
-							: `Upload ${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}`}
+							: selectedFiles.length === 1
+								? 'Upload'
+								: `Upload ${selectedFiles.length} Files`}
 					</button>
 				{/if}
 			</div>
@@ -681,6 +888,17 @@
 							/>
 							<span class="radio-label">DuckDB</span>
 							<span class="radio-desc">In-memory or file-based analytics database</span>
+						</label>
+						<label class="radio-option">
+							<input
+								type="radio"
+								name="db-type"
+								value="iceberg"
+								bind:group={databaseType}
+								disabled={loading}
+							/>
+							<span class="radio-label">Iceberg</span>
+							<span class="radio-desc">Connect to an Iceberg table via metadata JSON</span>
 						</label>
 						<label class="radio-option">
 							<input
@@ -746,6 +964,82 @@
 					</div>
 
 					<button class="btn-primary" onclick={handleDuckDBConnect} disabled={loading}>
+						{loading ? 'Connecting...' : 'Connect'}
+					</button>
+				{:else if databaseType === 'iceberg'}
+					<div class="form-group">
+						<label for="iceberg-name">Name</label>
+						<input
+							id="iceberg-name"
+							type="text"
+							bind:value={icebergName}
+							placeholder="My Iceberg Table"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-metadata">Metadata JSON Path</label>
+						<input
+							id="iceberg-metadata"
+							type="text"
+							bind:value={icebergMetadataPath}
+							placeholder="/path/to/table/metadata or metadata.json"
+							disabled={loading}
+						/>
+						<p class="hint">
+							Point to metadata.json or a folder containing metadata/*.metadata.json
+						</p>
+						<div class="resolve-row">
+							<button
+								class="btn-secondary"
+								type="button"
+								onclick={resolveMetadataPath}
+								disabled={loading}
+							>
+								Resolve Path
+							</button>
+							{#if icebergResolvedPath}
+								<span class="resolve-value">{icebergResolvedPath}</span>
+							{/if}
+						</div>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-snapshot">Snapshot ID (optional)</label>
+						<input
+							id="iceberg-snapshot"
+							type="number"
+							bind:value={icebergSnapshotId}
+							placeholder="7051579356916758811"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-reader">Reader Override (optional)</label>
+						<input
+							id="iceberg-reader"
+							type="text"
+							bind:value={icebergReader}
+							placeholder="native or pyiceberg"
+							disabled={loading}
+						/>
+					</div>
+
+					<div class="form-group">
+						<label for="iceberg-storage">Storage Options (optional)</label>
+						<textarea
+							id="iceberg-storage"
+							bind:value={icebergStorageOptions}
+							placeholder={'{"s3.region": "us-east-1"}'}
+							rows="3"
+							disabled={loading}
+						></textarea>
+						<p class="hint">JSON map of storage options for S3/GCS/Azure</p>
+					</div>
+
+					<button class="btn-primary" onclick={handleIcebergConnect} disabled={loading}>
 						{loading ? 'Connecting...' : 'Connect'}
 					</button>
 				{:else}
@@ -833,8 +1127,7 @@
 		max-width: 800px;
 		margin: 0 auto;
 		padding: var(--space-8);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 		box-sizing: border-box;
 	}
 	header {
@@ -931,15 +1224,65 @@
 	textarea {
 		resize: vertical;
 	}
+	.path-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+	.resolve-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		flex-wrap: wrap;
+	}
+	.resolve-value {
+		font-size: var(--text-xs);
+		color: var(--fg-secondary);
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-secondary);
+		padding: 2px 6px;
+		border-radius: var(--radius-sm);
+		word-break: break-all;
+	}
 	.hint,
 	.file-info {
 		font-size: var(--text-xs);
 		color: var(--fg-muted);
 		margin: 0;
+		line-height: 1.5;
+	}
+	.hint code {
+		font-family: var(--font-mono);
+		background: var(--bg-tertiary);
+		padding: 1px 4px;
+		border-radius: 3px;
+		font-size: 0.9em;
+		color: var(--fg-secondary);
 	}
 	.file-info {
 		font-size: var(--text-sm);
 		color: var(--fg-secondary);
+	}
+	.label-with-help {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+	.help-icon {
+		display: inline-flex;
+		align-items: center;
+		flex-shrink: 0;
+	}
+	.help-link {
+		display: inline-flex;
+		align-items: center;
+		color: var(--fg-muted);
+		transition: color var(--transition);
+		text-decoration: none;
+	}
+	.help-link:hover {
+		color: var(--accent-primary);
 	}
 	.form-row {
 		display: grid;

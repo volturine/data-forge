@@ -5,6 +5,8 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	const uid = $props.id();
 
@@ -160,33 +162,23 @@
 
 			{#each config.join_columns ?? [] as joinCol, _index (joinCol.id)}
 				<div class="join-column-row" role="group" aria-label={`Join column pair ${_index + 1}`}>
-					<div class="column-select">
+					<div class="column-dropdown-wrapper">
 						<label for={`join-left-${joinCol.id}`}>Left Column</label>
-						<select
-							id={`join-left-${joinCol.id}`}
-							data-testid={`join-left-select-${_index}`}
-							bind:value={joinCol.left_column}
-							aria-label="Left column for join"
-						>
-							<option value="">Select...</option>
-							{#each schema.columns as col (col.name)}
-								<option value={col.name}>{col.name}</option>
-							{/each}
-						</select>
+						<ColumnDropdown
+							{schema}
+							value={joinCol.left_column ?? ''}
+							onChange={(val) => (joinCol.left_column = val)}
+							placeholder="Select..."
+						/>
 					</div>
-					<div class="column-select">
+					<div class="column-dropdown-wrapper">
 						<label for={`join-right-${joinCol.id}`}>Right Column</label>
-						<select
-							id={`join-right-${joinCol.id}`}
-							data-testid={`join-right-select-${_index}`}
-							bind:value={joinCol.right_column}
-							aria-label="Right column for join"
-						>
-							<option value="">Select...</option>
-							{#each rightColumns as col (col.name)}
-								<option value={col.name}>{col.name}</option>
-							{/each}
-						</select>
+						<ColumnDropdown
+							schema={{ columns: rightColumns, row_count: rightSchema?.row_count ?? 0 }}
+							value={joinCol.right_column ?? ''}
+							onChange={(val) => (joinCol.right_column = val)}
+							placeholder="Select..."
+						/>
 					</div>
 					<button
 						id={`join-btn-remove-${_index}`}
@@ -258,7 +250,7 @@
 							aria-label={`Include column ${col.name} from right dataset`}
 						/>
 						<span>{col.name}</span>
-						<span class="dtype">{col.dtype}</span>
+						<ColumnTypeBadge columnType={col.dtype} size="xs" />
 					</label>
 				{/each}
 			</div>
@@ -315,17 +307,14 @@
 		border-radius: var(--radius-sm);
 	}
 
-	.column-select {
+	.column-dropdown-wrapper {
 		flex: 1;
 	}
-	.column-select label {
+	.column-dropdown-wrapper label {
 		display: block;
 		font-size: var(--text-xs);
 		margin-bottom: var(--space-1);
 		color: var(--fg-muted);
-	}
-	.column-select select {
-		margin-bottom: 0;
 	}
 
 	.btn-add {
@@ -378,11 +367,6 @@
 	.column-checkbox input {
 		margin: 0;
 		width: auto;
-	}
-	.dtype {
-		color: var(--fg-muted);
-		font-size: var(--text-xs);
-		margin-left: auto;
 	}
 
 	.schema-preview {

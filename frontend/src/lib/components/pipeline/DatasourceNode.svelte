@@ -6,12 +6,10 @@
 		FileText,
 		Database,
 		Globe,
+		Snowflake,
 		PanelLeft,
 		Pencil,
 		RefreshCw,
-		FileSpreadsheet,
-		FileJson,
-		FileType,
 		Hash,
 		Check,
 		X,
@@ -19,6 +17,7 @@
 		ChevronDown
 	} from 'lucide-svelte';
 	import { drag } from '$lib/stores/drag.svelte';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 
 	interface Props {
 		datasource: DataSource | null;
@@ -135,15 +134,6 @@
 		);
 	}
 
-	function getFileType(): string | null {
-		if (datasource?.source_type === 'file' && datasource.config) {
-			const fileType = datasource.config.file_type as string | undefined;
-			return fileType ?? null;
-		}
-		return null;
-	}
-
-	let fileType = $derived(getFileType());
 	let sourceType = $derived(datasource?.source_type ?? 'file');
 	let isDragActive = $derived(drag.active);
 </script>
@@ -160,6 +150,8 @@
 						<Database size={14} />
 					{:else if sourceType === 'api'}
 						<Globe size={14} />
+					{:else if sourceType === 'iceberg'}
+						<Snowflake size={14} />
 					{:else}
 						<FileText size={14} />
 					{/if}
@@ -221,22 +213,18 @@
 					<div class="dataset-info">
 						<div class="dataset-name">{datasource.name}</div>
 						<div class="dataset-meta">
-							<span class="meta-badge">{fileType ?? datasource.source_type}</span>
-							{#if fileType}
-								<span class="meta-badge file-type">
-									{#if fileType === 'csv'}
-										<FileSpreadsheet size={10} />
-									{:else if fileType === 'json'}
-										<FileJson size={10} />
-									{:else if fileType === 'parquet'}
-										<FileType size={10} />
-									{:else if fileType === 'ndjson'}
-										<FileJson size={10} />
-									{:else}
-										<FileText size={10} />
-									{/if}
-									{fileType}
-								</span>
+							{#if datasource.source_type === 'file'}
+								<FileTypeBadge
+									path={(datasource.config?.file_path as string) ?? ''}
+									size="sm"
+									showIcon={true}
+								/>
+							{:else}
+								<FileTypeBadge
+									sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+									size="sm"
+									showIcon={true}
+								/>
 							{/if}
 						</div>
 					</div>
@@ -346,7 +334,7 @@
 <style>
 	.datasource-node {
 		position: relative;
-		width: min(55%, 640px);
+		width: min(65%);
 	}
 
 	.node-content {
@@ -504,22 +492,6 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
-	}
-
-	.meta-badge {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		font-size: 10px;
-		color: var(--fg-secondary);
-		background-color: var(--bg-secondary);
-		padding: 2px 8px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border-secondary);
-	}
-	.meta-badge.file-type {
-		color: var(--fg-tertiary);
-		text-transform: uppercase;
 	}
 
 	.row-count-section {

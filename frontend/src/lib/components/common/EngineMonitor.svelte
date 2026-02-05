@@ -2,6 +2,7 @@
 	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
 	import { onClickOutside } from 'runed';
 	import { enginesStore } from '$lib/stores/engines.svelte';
+	import { toEpochDisplay } from '$lib/utils/datetime';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
@@ -22,9 +23,9 @@
 
 	function formatTime(isoString: string | null): string {
 		if (!isoString) return 'N/A';
-		const date = new Date(isoString);
-		const now = new Date();
-		const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+		const dateMs = toEpochDisplay(isoString);
+		const nowMs = Date.now();
+		const diff = Math.floor((nowMs - dateMs) / 1000);
 
 		if (diff < 60) return `${diff}s ago`;
 		if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;

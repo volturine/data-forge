@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ColumnSchema(BaseModel):
@@ -59,7 +59,7 @@ class CSVOptions(BaseModel):
 class FileDataSourceConfig(BaseModel):
     file_path: str
     file_type: str
-    options: dict = {}
+    options: dict = Field(default_factory=dict)
     csv_options: CSVOptions | None = None
     sheet_name: str | None = None
     start_row: int | None = None
@@ -82,6 +82,17 @@ class DuckDBDataSourceConfig(BaseModel):
     db_path: str | None = None
     query: str
     read_only: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IcebergDataSourceConfig(BaseModel):
+    """Iceberg-specific datasource configuration."""
+
+    metadata_path: str
+    snapshot_id: int | None = None
+    storage_options: dict | None = None
+    reader: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -117,6 +128,17 @@ class DataSourceUpdate(BaseModel):
 
     name: str | None = None
     config: dict | None = None
+
+
+class FileListItem(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+
+
+class FileListResponse(BaseModel):
+    base_path: str
+    entries: list[FileListItem]
 
 
 class BulkUploadResult(BaseModel):

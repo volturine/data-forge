@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	interface StringMethodsConfigData {
 		column: string;
@@ -71,13 +72,16 @@
 
 	<div class="form-section" role="group" aria-labelledby="str-column-heading">
 		<h4 id="str-column-heading">Source Column</h4>
-		<label for="str-select-column" class="sr-only">Select string column</label>
-		<select id="str-select-column" data-testid="str-column-select" bind:value={config.column}>
-			<option value="">Select string column...</option>
-			{#each stringColumns as column (column.name)}
-				<option value={column.name}>{column.name} ({column.dtype})</option>
-			{/each}
-		</select>
+		<ColumnDropdown
+			{schema}
+			value={config.column ?? ''}
+			onChange={(val) => (config.column = val)}
+			placeholder="Select string column..."
+			filter={(col) =>
+				col.dtype.toLowerCase().includes('str') ||
+				col.dtype.toLowerCase().includes('string') ||
+				col.dtype.toLowerCase() === 'utf8'}
+		/>
 		{#if stringColumns.length === 0}
 			<p id="str-no-columns-warning" class="warning-box" role="alert">
 				No string columns detected in schema

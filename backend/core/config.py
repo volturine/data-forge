@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from zoneinfo import available_timezones
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,6 +13,13 @@ def _resolve_dir(value: Path | str) -> Path:
     """Ensure a directory path exists and return it."""
     path_value = Path(value)
     path_value.mkdir(parents=True, exist_ok=True)
+    return path_value
+
+
+def _resolve_file_parent(value: Path | str) -> Path:
+    """Ensure the parent directory for a file path exists and return it."""
+    path_value = Path(value)
+    path_value.parent.mkdir(parents=True, exist_ok=True)
     return path_value
 
 
@@ -33,14 +41,19 @@ class Settings(BaseSettings):
         'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,http://192.168.1.140:3000,http://100.68.183.19:3000'
     )
 
-    database_url: str = 'sqlite+aiosqlite:///./database/app.db'
+    database_url: str = 'sqlite+libsql:///./database/app.db'
+
+    turso_database_url: str = Field(default='', alias='TURSO_DATABASE_URL')
+    turso_auth_token: str = Field(default='', alias='TURSO_AUTH_TOKEN')
+    turso_sync_interval: int = Field(default=60, alias='TURSO_SYNC_INTERVAL')
 
     # All data directories under root data/ folder
+    data_dir: Path = Field(default=DATA_DIR, alias='DATA_DIR')
     upload_dir: Path = Field(default=DATA_DIR / 'uploads', alias='UPLOAD_DIR')
     clean_dir: Path = Field(default=DATA_DIR / 'clean', alias='CLEAN_DIR')
     exports_dir: Path = Field(default=DATA_DIR / 'exports', alias='EXPORTS_DIR')
 
-    max_upload_size: int = Field(default=10 * 1024 * 1024 * 1024, alias='MAX_UPLOAD_SIZE')
+    upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
 
     # Engine idle timeout in seconds (default 5 minutes)
     # Engines will be terminated after this duration of inactivity (reset on save)
@@ -77,15 +90,46 @@ class Settings(BaseSettings):
     # Logging level (debug, info, warning, error)
     log_level: str = Field(default='info', alias='LOG_LEVEL')
 
+    # Timezone handling
+    timezone: str = Field(default='UTC', alias='TIMEZONE')
+
+    # Normalize datetime values to TIMEZONE
+    normalize_tz: bool = Field(default=False, alias='NORMALIZE_TZ')
+
+    # Iceberg log base path (catalog + warehouse)
+    log_iceberg_path: Path = Field(default=DATA_DIR / 'logs' / 'iceberg', alias='LOG_ICEBERG_PATH')
+
+    # Iceberg log flush interval in seconds
+    log_iceberg_flush_interval_seconds: int = Field(default=300, alias='LOG_ICEBERG_FLUSH_INTERVAL_SECONDS')
+
+    # Max queued log batches before dropping
+    log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
+
+    # Queue overflow behavior: 'block' (default) or 'drop'
+    log_queue_overflow: str = Field(default='block', alias='LOG_QUEUE_OVERFLOW')
+
+    # Max body size to log in bytes (default 1MB, 0 = unlimited)
+    log_max_body_size: int = Field(default=1 * 1024 * 1024, alias='LOG_MAX_BODY_SIZE')
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
 
-    @field_validator('upload_dir', 'clean_dir', 'exports_dir', mode='before')
+    @field_validator('data_dir', 'upload_dir', 'clean_dir', 'exports_dir', mode='before')
     @classmethod
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
+
+    @field_validator('log_iceberg_path', mode='before')
+    @classmethod
+    def _ensure_log_iceberg_path(cls, value: Path | str) -> Path:
+        path_value = Path(value)
+        if path_value.suffix in {'.db', '.json'}:
+            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+        if path_value.exists() and path_value.is_file():
+            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+        return _resolve_dir(path_value)
 
     @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval')
     @classmethod
@@ -95,12 +139,21 @@ class Settings(BaseSettings):
             raise ValueError(f'{info.field_name} must be positive, got {value}')
         return value
 
-    @field_validator('max_upload_size')
+    @field_validator('turso_sync_interval')
     @classmethod
-    def _validate_upload_size(cls, value: int) -> int:
-        """Ensure upload size is reasonable."""
+    def _validate_turso_sync_interval(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(f'turso_sync_interval must be non-negative, got {value}')
+        return value
+
+    @field_validator('upload_chunk_size')
+    @classmethod
+    def _validate_upload_chunk_size(cls, value: int) -> int:
+        """Ensure upload chunk size is reasonable."""
         if value < 1024:  # At least 1KB
-            raise ValueError(f'max_upload_size must be at least 1024 bytes, got {value}')
+            raise ValueError(f'upload_chunk_size must be at least 1024 bytes, got {value}')
+        if value > 100 * 1024 * 1024:
+            raise ValueError(f'upload_chunk_size must be at most 100MB, got {value}')
         return value
 
     @field_validator('polars_max_threads', 'polars_max_memory_mb', 'polars_streaming_chunk_size')
@@ -140,10 +193,40 @@ class Settings(BaseSettings):
             raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
         return value.lower()
 
+    @field_validator('timezone')
+    @classmethod
+    def _validate_timezone(cls, value: str) -> str:
+        zones = available_timezones()
+        if value not in zones:
+            raise ValueError(f'timezone must be a valid IANA timezone, got {value}')
+        return value
+
+    @field_validator('log_queue_max_size')
+    @classmethod
+    def _validate_log_queue_size(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError(f'log_queue_max_size must be positive, got {value}')
+        return value
+
+    @field_validator('log_queue_overflow')
+    @classmethod
+    def _validate_log_queue_overflow(cls, value: str) -> str:
+        valid = ['block', 'drop']
+        if value.lower() not in valid:
+            raise ValueError(f'log_queue_overflow must be one of {valid}, got {value}')
+        return value.lower()
+
+    @field_validator('log_max_body_size')
+    @classmethod
+    def _validate_log_max_body_size(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(f'log_max_body_size must be non-negative (0 = unlimited), got {value}')
+        return value
+
     @model_validator(mode='after')
     def _validate_directories_writable(self):
         """Ensure all directories are writable."""
-        for dir_name in ['upload_dir', 'clean_dir', 'exports_dir']:
+        for dir_name in ['data_dir', 'upload_dir', 'clean_dir', 'exports_dir']:
             dir_path = getattr(self, dir_name)
             if not os.access(dir_path, os.W_OK):
                 raise ValueError(f'{dir_name} is not writable: {dir_path}')

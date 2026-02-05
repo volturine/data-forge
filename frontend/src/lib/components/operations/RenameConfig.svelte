@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	interface RenameConfigData {
 		column_mapping: { [oldName: string]: string };
@@ -24,8 +25,6 @@
 		}))
 	);
 
-	let availableColumns = $derived(schema.columns.filter((col) => !safeMapping[col.name]));
-
 	let canAdd = $derived(!!formOldName && !!formNewName);
 
 	function addMapping() {
@@ -49,23 +48,30 @@
 <div class="config-panel" role="region" aria-label="Rename configuration">
 	<h3>Rename Configuration</h3>
 
-	<div class="add-mapping" role="group" aria-label="Add rename mapping form">
-		<label for="rename-select-old" class="sr-only">Select column to rename</label>
-		<select id="rename-select-old" data-testid="rename-old-column-select" bind:value={formOldName}>
-			<option value="">Select column to rename...</option>
-			{#each availableColumns as column (column.name)}
-				<option value={column.name}>{column.name} ({column.dtype})</option>
-			{/each}
-		</select>
+	<div class="form-section" role="group" aria-labelledby="rename-columns-heading">
+		<h4 id="rename-columns-heading">Select Column to Rename</h4>
+		<ColumnDropdown
+			{schema}
+			value={formOldName}
+			onChange={(val) => (formOldName = val)}
+			placeholder="Select column to rename..."
+			filter={(col) => !safeMapping[col.name]}
+		/>
+		{#if schema.columns.filter((col) => !safeMapping[col.name]).length === 0}
+			<p class="empty-state">All columns have been renamed.</p>
+		{/if}
+	</div>
 
+	<div class="add-mapping" role="group" aria-label="Add rename mapping form">
 		<label for="rename-input-new" class="sr-only">New column name</label>
 		<input
 			id="rename-input-new"
 			data-testid="rename-new-name-input"
 			type="text"
 			bind:value={formNewName}
-			placeholder="New column name"
+			placeholder={formOldName ? `New name for ${formOldName}` : 'Select a column first'}
 			aria-label="Enter new column name"
+			disabled={!formOldName}
 		/>
 
 		<button
@@ -76,7 +82,7 @@
 			disabled={!canAdd}
 			aria-label="Add rename mapping"
 		>
-			Add
+			Add Rename
 		</button>
 	</div>
 
@@ -113,6 +119,7 @@
 </div>
 
 <style>
+	/* Component-specific styles - dropdown pattern defined in app.css */
 	h3 {
 		margin: 0 0 var(--space-4) 0;
 		font-size: var(--text-sm);
@@ -127,16 +134,23 @@
 		letter-spacing: 0.08em;
 		color: var(--fg-muted);
 	}
+	.form-section {
+		margin-bottom: var(--space-5);
+	}
 	.add-mapping {
 		display: grid;
 		grid-template-columns: 1fr;
 		gap: var(--space-2);
 		margin-bottom: var(--space-5);
 	}
-	.add-mapping select,
 	.add-mapping input {
 		width: 100%;
 		min-width: 0;
+	}
+	.add-mapping input:disabled {
+		background-color: var(--bg-muted);
+		cursor: not-allowed;
+		color: var(--fg-muted);
 	}
 	.add-mapping button {
 		padding: var(--space-2) var(--space-4);

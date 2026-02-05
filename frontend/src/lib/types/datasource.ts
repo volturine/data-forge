@@ -52,6 +52,13 @@ export interface DuckDBDataSourceConfig {
 	read_only?: boolean;
 }
 
+export interface IcebergDataSourceConfig {
+	metadata_path: string;
+	snapshot_id?: number | null;
+	storage_options?: Record<string, string> | null;
+	reader?: string | null;
+}
+
 export interface DataSourceCreate {
 	name: string;
 	source_type: string;

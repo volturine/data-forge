@@ -15,6 +15,7 @@
 		tabName?: string;
 		onStepClick: (id: string) => void;
 		onStepDelete: (id: string) => void;
+		onStepToggle: (id: string) => void;
 		onInsertStep: (type: string, target: DropTarget) => void;
 		onMoveStep: (stepId: string, target: DropTarget) => void;
 		onChangeDatasource?: () => void;
@@ -29,6 +30,7 @@
 		tabName: _tabName,
 		onStepClick,
 		onStepDelete,
+		onStepToggle,
 		onInsertStep,
 		onMoveStep,
 		onChangeDatasource: _onChangeDatasource,
@@ -325,6 +327,7 @@
 					allSteps={steps}
 					onEdit={onStepClick}
 					onDelete={onStepDelete}
+					onToggleApply={onStepToggle}
 					onTouchMove={onMoveStep}
 				/>
 				<!-- Connection + Drop zone after each step -->

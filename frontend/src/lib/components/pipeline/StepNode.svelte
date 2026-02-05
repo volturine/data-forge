@@ -14,6 +14,7 @@
 		allSteps?: PipelineStep[];
 		onEdit: (id: string) => void;
 		onDelete: (id: string) => void;
+		onToggleApply: (id: string) => void;
 		onTouchMove: (stepId: string, target: DropTarget) => void;
 	}
 
@@ -25,6 +26,7 @@
 		allSteps = [],
 		onEdit,
 		onDelete,
+		onToggleApply,
 		onTouchMove
 	}: Props = $props();
 
@@ -45,6 +47,7 @@
 	let currentStepInfo = $derived({ label: stepConfig.label, icon: stepConfig.icon });
 	let label = $derived(stepConfig.typeLabel);
 	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
+	let isApplied = $derived((step as PipelineStep & { is_applied?: boolean }).is_applied !== false);
 
 	// Is this node being dragged?
 	let isDragging = $state(false);
@@ -210,9 +213,18 @@
 			<span class="step-number">#{index + 1}</span>
 		</div>
 
-		<div class="step-summary">{summary}</div>
+		<div class="step-summary" class:inactive={!isApplied}>{summary}</div>
 
 		<div class="step-actions">
+			<button
+				class="action-btn apply-toggle"
+				class:inactive={!isApplied}
+				onclick={() => onToggleApply(step.id)}
+				type="button"
+				title={isApplied ? 'Disable step' : 'Enable step'}
+			>
+				{isApplied ? 'disable' : 'enable'}
+			</button>
 			<button class="action-btn" onclick={() => onEdit(step.id)} type="button"> edit </button>
 			<button class="action-btn danger" onclick={() => onDelete(step.id)} type="button">
 				delete
@@ -257,12 +269,10 @@
 
 <style>
 	.step-node {
-		position: relative;
-		width: min(55%, 640px);
+		width: min(65%);
 	}
 	.step-node.view-node {
-		max-width: 75%;
-		width: 75%;
+		width: 85%;
 		min-width: 320px;
 	}
 	.step-node.greyed-out {
@@ -370,6 +380,11 @@
 		color: var(--fg-tertiary);
 		margin-bottom: var(--space-3);
 	}
+	.step-summary.inactive {
+		background-color: var(--bg-secondary);
+		color: var(--fg-muted);
+		border: 1px dashed var(--border-primary);
+	}
 
 	.step-actions {
 		display: flex;
@@ -397,6 +412,19 @@
 	.action-btn:hover {
 		background-color: var(--bg-hover);
 		color: var(--fg-primary);
+	}
+	.action-btn.apply-toggle {
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		font-size: 0.625rem;
+	}
+	.action-btn.apply-toggle.inactive {
+		border-style: dashed;
+		color: var(--fg-muted);
+	}
+	.action-btn.apply-toggle.inactive:hover {
+		background-color: var(--bg-tertiary);
+		color: var(--fg-secondary);
 	}
 	.action-btn.danger:hover {
 		background-color: var(--error-bg);

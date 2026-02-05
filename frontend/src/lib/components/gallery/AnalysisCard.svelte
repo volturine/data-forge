@@ -2,7 +2,8 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { BarChart3, Trash2 } from 'lucide-svelte';
+	import { ChartBar, Trash2 } from 'lucide-svelte';
+	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
 
 	interface Props {
 		analysis: AnalysisGalleryItem;
@@ -27,12 +28,16 @@
 		}
 	}
 
+
 	function formatDate(date: string): string {
-		const d = new Date(date);
 		const now = new Date();
+		const year = getYearDisplay(date);
+		const currentYear = getYearDisplay(now);
 		const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-		if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
-		return d.toLocaleDateString('en-US', opts);
+		if (year !== null && currentYear !== null && year !== currentYear) {
+			opts.year = 'numeric';
+		}
+		return formatDateDisplay(date, opts);
 	}
 </script>
 
@@ -61,7 +66,7 @@
 			<img src={analysis.thumbnail} alt={analysis.name} />
 		{:else}
 			<div class="placeholder">
-				<BarChart3 size={32} strokeWidth={1.5} />
+				<ChartBar size={32} strokeWidth={1.5} />
 			</div>
 		{/if}
 	</div>

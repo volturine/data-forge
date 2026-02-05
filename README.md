@@ -71,7 +71,7 @@ cp .env.example .env
 | `ENGINE_IDLE_TIMEOUT` | `300` | Seconds before idle engines are cleaned up (reset on save) |
 | `ENGINE_POOLING_INTERVAL` | `5` | Seconds between engine state checks |
 | `JOB_TIMEOUT` | `300` | Maximum job execution time in seconds |
-| `MAX_UPLOAD_SIZE` | `10737418240` | Maximum file upload size (10GB) |
+| `UPLOAD_CHUNK_SIZE` | `5242880` | Upload chunk size in bytes (5MB) |
 
 See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for complete reference of all environment variables.
 

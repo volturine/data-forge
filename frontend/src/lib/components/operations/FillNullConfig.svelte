@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 
 	interface FillNullConfigData {
 		strategy: string;
@@ -75,15 +77,11 @@
 				bind:value={config.value}
 				placeholder="Enter value (e.g., 0, N/A)"
 			/>
-			<select id="fill-value-type" bind:value={config.value_type}>
-				<option value="Utf8">String</option>
-				<option value="Int64">Integer</option>
-				<option value="Float64">Float</option>
-				<option value="Boolean">Boolean</option>
-				<option value="Date">Date</option>
-				<option value="Datetime">Datetime</option>
-				<option value="Unknown">Unknown</option>
-			</select>
+			<ColumnTypeDropdown
+				value={config.value_type ?? 'Utf8'}
+				onChange={(val) => (config.value_type = val)}
+				placeholder="Select type..."
+			/>
 		</div>
 	{/if}
 
@@ -122,7 +120,7 @@
 						aria-label={`Fill nulls in ${column.name}`}
 					/>
 					<span class="column-name">{column.name}</span>
-					<span class="column-type">{column.dtype}</span>
+					<ColumnTypeBadge columnType={column.dtype} size="xs" />
 				</label>
 			{/each}
 		</div>

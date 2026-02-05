@@ -1,8 +1,6 @@
 """Unit tests for UDF module."""
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.udf.schemas import (
     UdfCreateSchema,
@@ -15,11 +13,10 @@ from modules.udf.schemas import (
 from modules.udf.service import create_udf, delete_udf, get_udf, import_udfs, list_udfs, update_udf
 
 
-@pytest.mark.asyncio
 class TestUdfValidation:
     """Test UDF code validation."""
 
-    async def test_create_udf_with_valid_code(self, test_db_session: AsyncSession):
+    def test_create_udf_with_valid_code(self, test_db_session):
         """Test creating a UDF with valid Python code."""
         udf_data = UdfCreateSchema(
             name='test_add',
@@ -35,7 +32,7 @@ class TestUdfValidation:
             tags=['math', 'test'],
         )
 
-        result = await create_udf(test_db_session, udf_data)
+        result = create_udf(test_db_session, udf_data)
 
         assert result.name == 'test_add'
         assert result.description == 'Add two numbers'
@@ -43,7 +40,7 @@ class TestUdfValidation:
         assert result.tags == ['math', 'test']
         assert result.source == 'user'
 
-    async def test_create_udf_with_empty_code(self, test_db_session: AsyncSession):
+    def test_create_udf_with_empty_code(self, test_db_session):
         """Test creating a UDF with empty code raises error."""
         udf_data = UdfCreateSchema(
             name='test_empty',
@@ -53,9 +50,9 @@ class TestUdfValidation:
         )
 
         with pytest.raises(ValueError, match='UDF code cannot be empty'):
-            await create_udf(test_db_session, udf_data)
+            create_udf(test_db_session, udf_data)
 
-    async def test_create_udf_with_whitespace_only_code(self, test_db_session: AsyncSession):
+    def test_create_udf_with_whitespace_only_code(self, test_db_session):
         """Test creating a UDF with whitespace-only code raises error."""
         udf_data = UdfCreateSchema(
             name='test_whitespace',
@@ -65,9 +62,9 @@ class TestUdfValidation:
         )
 
         with pytest.raises(ValueError, match='UDF code cannot be empty'):
-            await create_udf(test_db_session, udf_data)
+            create_udf(test_db_session, udf_data)
 
-    async def test_create_udf_with_invalid_syntax(self, test_db_session: AsyncSession):
+    def test_create_udf_with_invalid_syntax(self, test_db_session):
         """Test creating a UDF with invalid Python syntax raises error."""
         udf_data = UdfCreateSchema(
             name='test_syntax',
@@ -77,9 +74,9 @@ class TestUdfValidation:
         )
 
         with pytest.raises(ValueError, match='Invalid Python syntax'):
-            await create_udf(test_db_session, udf_data)
+            create_udf(test_db_session, udf_data)
 
-    async def test_update_udf_with_invalid_code(self, test_db_session: AsyncSession):
+    def test_update_udf_with_invalid_code(self, test_db_session):
         """Test updating a UDF with invalid code raises error."""
         # First create a valid UDF
         udf_data = UdfCreateSchema(
@@ -88,20 +85,19 @@ class TestUdfValidation:
             signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
             code='def udf():\n    return "valid"',
         )
-        created = await create_udf(test_db_session, udf_data)
+        created = create_udf(test_db_session, udf_data)
 
         # Try to update with invalid code
         update_data = UdfUpdateSchema(code='def udf():\n    invalid syntax')
 
         with pytest.raises(ValueError, match='Invalid Python syntax'):
-            await update_udf(test_db_session, created.id, update_data)
+            update_udf(test_db_session, created.id, update_data)
 
 
-@pytest.mark.asyncio
 class TestUdfCRUD:
     """Test UDF CRUD operations."""
 
-    async def test_get_udf(self, test_db_session: AsyncSession):
+    def test_get_udf(self, test_db_session):
         """Test getting a UDF by ID."""
         udf_data = UdfCreateSchema(
             name='test_get',
@@ -109,19 +105,19 @@ class TestUdfCRUD:
             signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
             code='def udf():\n    return "test"',
         )
-        created = await create_udf(test_db_session, udf_data)
+        created = create_udf(test_db_session, udf_data)
 
-        result = await get_udf(test_db_session, created.id)
+        result = get_udf(test_db_session, created.id)
 
         assert result.id == created.id
         assert result.name == 'test_get'
 
-    async def test_get_nonexistent_udf(self, test_db_session: AsyncSession):
+    def test_get_nonexistent_udf(self, test_db_session):
         """Test getting a non-existent UDF raises error."""
         with pytest.raises(ValueError, match='UDF .* not found'):
-            await get_udf(test_db_session, 'nonexistent-id')
+            get_udf(test_db_session, 'nonexistent-id')
 
-    async def test_update_udf(self, test_db_session: AsyncSession):
+    def test_update_udf(self, test_db_session):
         """Test updating a UDF."""
         udf_data = UdfCreateSchema(
             name='test_update',
@@ -130,7 +126,7 @@ class TestUdfCRUD:
             code='def udf():\n    return "original"',
             tags=['original'],
         )
-        created = await create_udf(test_db_session, udf_data)
+        created = create_udf(test_db_session, udf_data)
 
         update_data = UdfUpdateSchema(
             name='test_updated',
@@ -138,7 +134,7 @@ class TestUdfCRUD:
             code='def udf():\n    return "updated"',
             tags=['updated'],
         )
-        updated = await update_udf(test_db_session, created.id, update_data)
+        updated = update_udf(test_db_session, created.id, update_data)
 
         assert updated.id == created.id
         assert updated.name == 'test_updated'
@@ -147,7 +143,7 @@ class TestUdfCRUD:
         assert updated.tags == ['updated']
         assert updated.updated_at > created.created_at
 
-    async def test_delete_udf(self, test_db_session: AsyncSession):
+    def test_delete_udf(self, test_db_session):
         """Test deleting a UDF."""
         udf_data = UdfCreateSchema(
             name='test_delete',
@@ -155,25 +151,24 @@ class TestUdfCRUD:
             signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
             code='def udf():\n    return "delete"',
         )
-        created = await create_udf(test_db_session, udf_data)
+        created = create_udf(test_db_session, udf_data)
 
-        await delete_udf(test_db_session, created.id)
+        delete_udf(test_db_session, created.id)
 
         # Verify it's deleted
         with pytest.raises(ValueError, match='UDF .* not found'):
-            await get_udf(test_db_session, created.id)
+            get_udf(test_db_session, created.id)
 
-    async def test_delete_nonexistent_udf(self, test_db_session: AsyncSession):
+    def test_delete_nonexistent_udf(self, test_db_session):
         """Test deleting a non-existent UDF raises error."""
         with pytest.raises(ValueError, match='UDF .* not found'):
-            await delete_udf(test_db_session, 'nonexistent-id')
+            delete_udf(test_db_session, 'nonexistent-id')
 
 
-@pytest.mark.asyncio
 class TestUdfListing:
     """Test UDF listing and filtering."""
 
-    async def test_list_all_udfs(self, test_db_session: AsyncSession):
+    def test_list_all_udfs(self, test_db_session):
         """Test listing all UDFs."""
         # Create multiple UDFs
         for i in range(3):
@@ -183,15 +178,15 @@ class TestUdfListing:
                 signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
                 code=f'def udf():\n    return "test_{i}"',
             )
-            await create_udf(test_db_session, udf_data)
+            create_udf(test_db_session, udf_data)
 
-        result = await list_udfs(test_db_session)
+        result = list_udfs(test_db_session)
 
         assert len(result) == 3
         names = {udf.name for udf in result}
         assert names == {'test_udf_0', 'test_udf_1', 'test_udf_2'}
 
-    async def test_list_udfs_with_text_search(self, test_db_session: AsyncSession):
+    def test_list_udfs_with_text_search(self, test_db_session):
         """Test listing UDFs with text search filter."""
         udf1 = UdfCreateSchema(
             name='calculate_sum',
@@ -212,22 +207,22 @@ class TestUdfListing:
             code='def udf():\n    return ""',
         )
 
-        await create_udf(test_db_session, udf1)
-        await create_udf(test_db_session, udf2)
-        await create_udf(test_db_session, udf3)
+        create_udf(test_db_session, udf1)
+        create_udf(test_db_session, udf2)
+        create_udf(test_db_session, udf3)
 
         # Search for "calculate"
-        result = await list_udfs(test_db_session, query='calculate')
+        result = list_udfs(test_db_session, query='calculate')
         assert len(result) == 2
         names = {udf.name for udf in result}
         assert names == {'calculate_sum', 'calculate_product'}
 
         # Search for "sum"
-        result = await list_udfs(test_db_session, query='sum')
+        result = list_udfs(test_db_session, query='sum')
         assert len(result) == 1
         assert result[0].name == 'calculate_sum'
 
-    async def test_list_udfs_with_tag_filter(self, test_db_session: AsyncSession):
+    def test_list_udfs_with_tag_filter(self, test_db_session):
         """Test listing UDFs with tag filter."""
         udf1 = UdfCreateSchema(
             name='math_func',
@@ -251,27 +246,26 @@ class TestUdfListing:
             tags=['math'],
         )
 
-        await create_udf(test_db_session, udf1)
-        await create_udf(test_db_session, udf2)
-        await create_udf(test_db_session, udf3)
+        create_udf(test_db_session, udf1)
+        create_udf(test_db_session, udf2)
+        create_udf(test_db_session, udf3)
 
         # Filter by 'math' tag
-        result = await list_udfs(test_db_session, tag='math')
+        result = list_udfs(test_db_session, tag='math')
         assert len(result) == 2
         names = {udf.name for udf in result}
         assert names == {'math_func', 'another_math'}
 
         # Filter by 'string' tag
-        result = await list_udfs(test_db_session, tag='string')
+        result = list_udfs(test_db_session, tag='string')
         assert len(result) == 1
         assert result[0].name == 'string_func'
 
 
-@pytest.mark.asyncio
 class TestUdfImport:
     """Test UDF import with transaction safety."""
 
-    async def test_import_new_udfs(self, test_db_session: AsyncSession):
+    def test_import_new_udfs(self, test_db_session):
         """Test importing new UDFs."""
         import_data = UdfImportSchema(
             udfs=[
@@ -291,13 +285,13 @@ class TestUdfImport:
             overwrite=False,
         )
 
-        result = await import_udfs(test_db_session, import_data)
+        result = import_udfs(test_db_session, import_data)
 
         assert len(result) == 2
         names = {udf.name for udf in result}
         assert names == {'import_test_1', 'import_test_2'}
 
-    async def test_import_with_invalid_code_rolls_back(self, test_db_session: AsyncSession):
+    def test_import_with_invalid_code_rolls_back(self, test_db_session):
         """Test that import with invalid code rolls back entire transaction."""
         import_data = UdfImportSchema(
             udfs=[
@@ -325,13 +319,13 @@ class TestUdfImport:
 
         # Import should fail due to invalid code
         with pytest.raises(ValueError, match='Invalid Python syntax'):
-            await import_udfs(test_db_session, import_data)
+            import_udfs(test_db_session, import_data)
 
         # Verify no UDFs were created (transaction rolled back)
-        all_udfs = await list_udfs(test_db_session)
+        all_udfs = list_udfs(test_db_session)
         assert len(all_udfs) == 0
 
-    async def test_import_with_overwrite(self, test_db_session: AsyncSession):
+    def test_import_with_overwrite(self, test_db_session):
         """Test importing UDFs with overwrite enabled."""
         # Create initial UDF
         initial = UdfCreateSchema(
@@ -341,7 +335,7 @@ class TestUdfImport:
             code='def udf():\n    return "original"',
             tags=['original'],
         )
-        created = await create_udf(test_db_session, initial)
+        created = create_udf(test_db_session, initial)
 
         # Import with overwrite
         import_data = UdfImportSchema(
@@ -357,7 +351,7 @@ class TestUdfImport:
             overwrite=True,
         )
 
-        result = await import_udfs(test_db_session, import_data)
+        result = import_udfs(test_db_session, import_data)
 
         assert len(result) == 1
         assert result[0].id == created.id  # Same ID
@@ -365,7 +359,7 @@ class TestUdfImport:
         assert result[0].code == 'def udf():\n    return "updated"'
         assert result[0].tags == ['updated']
 
-    async def test_import_without_overwrite_skips_existing(self, test_db_session: AsyncSession):
+    def test_import_without_overwrite_skips_existing(self, test_db_session):
         """Test importing UDFs without overwrite skips existing."""
         # Create initial UDF
         initial = UdfCreateSchema(
@@ -374,7 +368,7 @@ class TestUdfImport:
             signature=UdfSignatureSchema(inputs=[], output_dtype='String'),
             code='def udf():\n    return "original"',
         )
-        await create_udf(test_db_session, initial)
+        create_udf(test_db_session, initial)
 
         # Import without overwrite
         import_data = UdfImportSchema(
@@ -389,22 +383,21 @@ class TestUdfImport:
             overwrite=False,
         )
 
-        result = await import_udfs(test_db_session, import_data)
+        result = import_udfs(test_db_session, import_data)
 
         # No UDFs returned because existing was skipped
         assert len(result) == 0
 
         # Verify original UDF unchanged
-        existing = await list_udfs(test_db_session)
+        existing = list_udfs(test_db_session)
         assert len(existing) == 1
         assert existing[0].description == 'Original'
 
 
-@pytest.mark.asyncio
 class TestUdfAPI:
     """Test UDF API endpoints."""
 
-    async def test_create_udf_endpoint(self, client: AsyncClient):
+    def test_create_udf_endpoint(self, client):
         """Test creating a UDF via API."""
         udf_data = {
             'name': 'api_test',
@@ -414,14 +407,14 @@ class TestUdfAPI:
             'tags': ['api', 'test'],
         }
 
-        response = await client.post('/api/v1/udf', json=udf_data)
+        response = client.post('/api/v1/udf', json=udf_data)
 
         assert response.status_code == 200
         result = response.json()
         assert result['name'] == 'api_test'
         assert result['description'] == 'API test UDF'
 
-    async def test_create_udf_with_invalid_code_returns_400(self, client: AsyncClient):
+    def test_create_udf_with_invalid_code_returns_400(self, client):
         """Test creating a UDF with invalid code returns 400."""
         udf_data = {
             'name': 'invalid_api_test',
@@ -430,13 +423,17 @@ class TestUdfAPI:
             'code': 'invalid python syntax',
         }
 
-        response = await client.post('/api/v1/udf', json=udf_data)
+        response = client.post('/api/v1/udf', json=udf_data)
 
         assert response.status_code == 400
         assert 'Invalid Python syntax' in response.json()['detail']
 
-    async def test_list_udfs_endpoint(self, client: AsyncClient):
+    def test_list_udfs_endpoint(self, client):
         """Test listing UDFs via API."""
+        # Get initial count (may include seeded UDFs)
+        initial_response = client.get('/api/v1/udf')
+        initial_count = len(initial_response.json())
+
         # Create some UDFs
         for i in range(3):
             udf_data = {
@@ -445,17 +442,17 @@ class TestUdfAPI:
                 'signature': {'inputs': [], 'output_dtype': 'String'},
                 'code': f'def udf():\n    return "{i}"',
             }
-            await client.post('/api/v1/udf', json=udf_data)
+            client.post('/api/v1/udf', json=udf_data)
 
-        response = await client.get('/api/v1/udf')
+        response = client.get('/api/v1/udf')
 
         assert response.status_code == 200
         result = response.json()
-        assert len(result) == 3
+        assert len(result) == initial_count + 3
 
-    async def test_list_udfs_with_query_filter(self, client: AsyncClient):
+    def test_list_udfs_with_query_filter(self, client):
         """Test listing UDFs with query filter via API."""
-        await client.post(
+        client.post(
             '/api/v1/udf',
             json={
                 'name': 'math_add',
@@ -464,7 +461,7 @@ class TestUdfAPI:
                 'code': 'def udf():\n    return 0',
             },
         )
-        await client.post(
+        client.post(
             '/api/v1/udf',
             json={
                 'name': 'string_concat',
@@ -474,7 +471,7 @@ class TestUdfAPI:
             },
         )
 
-        response = await client.get('/api/v1/udf?q=math')
+        response = client.get('/api/v1/udf?q=math')
 
         assert response.status_code == 200
         result = response.json()

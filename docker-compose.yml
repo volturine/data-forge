@@ -18,7 +18,7 @@ services:
       - DEBUG=${DEBUG:-false}
 
       # Database
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./database/app.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+libsql:///./database/app.db}
 
       # CORS
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
@@ -27,7 +27,7 @@ services:
       - UPLOAD_DIR=${UPLOAD_DIR:-/app/data/uploads}
       - RESULTS_DIR=${RESULTS_DIR:-/app/data/results}
       - EXPORTS_DIR=${EXPORTS_DIR:-/app/data/exports}
-      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-10737418240}
+      - UPLOAD_CHUNK_SIZE=${UPLOAD_CHUNK_SIZE:-5242880}
 
       # Polars Engine Resource Configuration
       - POLARS_MAX_THREADS=${POLARS_MAX_THREADS:-0}

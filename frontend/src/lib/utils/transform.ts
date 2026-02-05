@@ -127,7 +127,7 @@ export function groupbyTransform(input: Schema | null, config: StepConfig): Sche
 		result.push({
 			name: col,
 			dtype:
-				normalizeDtype(input.columns.find((column) => column.name === col)?.dtype) ?? 'Unknown',
+				normalizeDtype(input.columns.find((column) => column.name === col)?.dtype) ?? 'Any',
 			nullable: false
 		});
 	}
@@ -221,7 +221,7 @@ export function withColumnsTransform(input: Schema | null, config: StepConfig): 
 					return { ...source, name };
 				}
 			}
-			return { name, dtype: 'Unknown', nullable: true };
+			return { name, dtype: 'Any', nullable: true };
 		})
 		.filter((col): col is ColumnInfo => col !== null);
 
@@ -267,7 +267,7 @@ export function unpivotTransform(input: Schema | null, _config: StepConfig): Sch
 	return {
 		columns: [
 			{ name: 'variable', dtype: 'Utf8', nullable: false },
-			{ name: 'value', dtype: 'Unknown', nullable: true }
+			{ name: 'value', dtype: 'Any', nullable: true }
 		],
 		row_count: null
 	};
@@ -306,7 +306,7 @@ export function stringTransform(input: Schema | null, config: StepConfig): Schem
 	}
 
 	return {
-		columns: [...input.columns, { name: newColumn, dtype: 'Unknown', nullable: true }],
+		columns: [...input.columns, { name: newColumn, dtype: 'Any', nullable: true }],
 		row_count: null
 	};
 }
@@ -347,7 +347,7 @@ export function valueCountsTransform(input: Schema | null, _config: StepConfig):
 
 	return {
 		columns: [
-			{ name: 'value', dtype: 'Unknown', nullable: false },
+			{ name: 'value', dtype: 'Any', nullable: false },
 			{ name: 'count', dtype: 'UInt32', nullable: false }
 		],
 		row_count: null
@@ -380,7 +380,7 @@ export function expressionTransform(input: Schema | null, config: StepConfig): S
 	}
 
 	return {
-		columns: [...input.columns, { name: columnName, dtype: 'Unknown', nullable: true }],
+		columns: [...input.columns, { name: columnName, dtype: 'Any', nullable: true }],
 		row_count: null
 	};
 }
@@ -446,7 +446,7 @@ export function normalizeDtype(dtype: string | undefined): string | undefined {
 		str: 'Utf8',
 		date: 'Date',
 		datetime: 'Datetime',
-		unknown: 'Unknown'
+		unknown: 'Any'
 	};
 	return map[dtype] ?? dtype;
 }

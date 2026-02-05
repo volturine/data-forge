@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { PersistedState } from 'runed';
 	import favicon from '$lib/assets/favicon.svg';
 	import { Sun, Moon } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
+	import { configStore } from '$lib/stores/config.svelte';
+	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import '$lib/../app.css';
 
 	let { children } = $props();
@@ -17,9 +19,50 @@
 
 	// Use runed's PersistedState for persisted theme state across tabs/sessions
 	const theme = new PersistedState<'light' | 'dark'>('theme', 'dark');
+	let currentPath = $derived(page.url.pathname);
 
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme.current);
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		configStore.fetch();
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		installAuditListeners();
+	});
+
+	$effect(() => {
+		setAuditPage(currentPath);
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const onError = (event: ErrorEvent) => {
+			track({
+				event: 'client_error',
+				action: 'error',
+				page: currentPath,
+				meta: { message: event.message, filename: event.filename, lineno: event.lineno }
+			});
+		};
+		const onReject = (event: PromiseRejectionEvent) => {
+			track({
+				event: 'client_error',
+				action: 'unhandledrejection',
+				page: currentPath,
+				meta: { reason: String(event.reason) }
+			});
+		};
+		window.addEventListener('error', onError);
+		window.addEventListener('unhandledrejection', onReject);
+		return () => {
+			window.removeEventListener('error', onError);
+			window.removeEventListener('unhandledrejection', onReject);
+		};
 	});
 
 	const findScrollableX = (node: Element | null): HTMLElement | null => {
@@ -103,9 +146,9 @@
 						<a
 							href={resolve(item.href as '/')}
 							class="nav-link"
-							class:active={$page.url.pathname === item.href ||
-								($page.url.pathname.startsWith('/analysis') && item.href === '/') ||
-								($page.url.pathname.startsWith('/udfs') && item.href === '/udfs')}
+							class:active={currentPath === item.href ||
+								(currentPath.startsWith('/analysis') && item.href === '/') ||
+								(currentPath.startsWith('/udfs') && item.href === '/udfs')}
 							data-sveltekit-reload
 						>
 							{item.label}
@@ -146,7 +189,6 @@
 		height: 100vh;
 		display: flex;
 		flex-direction: column;
-		overflow: hidden;
 	}
 	.header {
 		border-bottom: 1px solid var(--border-primary);
@@ -231,6 +273,7 @@
 	.main {
 		flex: 1;
 		background-color: var(--bg-secondary);
-		overflow: hidden;
+		overflow-y: auto;
+		min-height: 0;
 	}
 </style>

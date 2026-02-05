@@ -5,6 +5,9 @@
 	import { Plus, ChevronDown, ChevronUp } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
+	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import { formatDateDisplay } from '$lib/utils/datetime';
+	import { goto } from '$app/navigation';
 
 	const queryClient = useQueryClient();
 
@@ -85,15 +88,7 @@
 	}
 
 	function formatDate(dateString: string): string {
-		const date = new Date(dateString);
-		return date.toLocaleDateString();
-	}
-
-	function getFileType(datasource: DataSource): string | null {
-		if (datasource.source_type !== 'file') return null;
-		if (!datasource.config || typeof datasource.config !== 'object') return null;
-		const config = datasource.config as { file_type?: string };
-		return config.file_type ?? null;
+		return formatDateDisplay(dateString);
 	}
 </script>
 
@@ -156,18 +151,14 @@
 							</span>
 							<span class="col-name">{datasource.name}</span>
 							<span class="col-type">
-								<span
-									class="badge"
-									class:badge-info={datasource.source_type === 'file'}
-									class:badge-success={datasource.source_type === 'database'}
-									class:badge-warning={datasource.source_type === 'api'}
-								>
-									{#if datasource.source_type === 'file'}
-										{getFileType(datasource) ?? 'file'}
-									{:else}
-										{datasource.source_type}
-									{/if}
-								</span>
+								{#if datasource.source_type === 'file'}
+									<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
+								{:else}
+									<FileTypeBadge
+										sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+										size="sm"
+									/>
+								{/if}
 							</span>
 							<span class="col-rows">{formatRowCount(getRowCount(datasource))}</span>
 							<span class="col-columns">{getColumnCount(datasource)}</span>
@@ -175,25 +166,27 @@
 							<span class="col-actions">
 								{#if confirmingDelete === datasource.id}
 									<div class="confirm-actions">
+										<span class="confirm-label">Delete?</span>
 										<button
 											onclick={() => confirmDelete(datasource.id)}
 											class="btn btn-danger btn-sm"
 											disabled={deleteMutation.isPending}
 										>
-											Confirm
+											Yes
 										</button>
-										<button onclick={cancelDelete} class="btn btn-secondary btn-sm">
-											Cancel
-										</button>
+										<button onclick={cancelDelete} class="btn btn-secondary btn-sm"> No </button>
 									</div>
 								{:else}
 									<div class="action-buttons">
-										<a href={resolve(`/datasources/${datasource.id}`)} class="btn btn-ghost btn-sm">
+										<button
+											onclick={() => goto(resolve(`/datasources/${datasource.id}`))}
+											class="btn btn-ghost btn-sm"
+										>
 											Edit
-										</a>
+										</button>
 										<button
 											onclick={() => handleDelete(datasource.id)}
-											class="btn btn-ghost btn-sm"
+											class="btn btn-ghost btn-sm btn-delete"
 											disabled={deleteMutation.isPending}
 										>
 											Delete
@@ -219,8 +212,7 @@
 		max-width: 1000px;
 		margin: 0 auto;
 		padding: var(--space-6);
-		height: 100%;
-		overflow: auto;
+		min-height: 100%;
 	}
 
 	.page-header {
@@ -329,6 +321,8 @@
 	}
 	.col-actions {
 		white-space: nowrap;
+		display: flex;
+		align-items: center;
 	}
 
 	.expand-btn {
@@ -358,13 +352,21 @@
 	}
 	.confirm-actions {
 		display: flex;
+		align-items: center;
 		gap: var(--space-2);
+	}
+	.confirm-label {
+		font-size: var(--text-xs);
+		color: var(--error-fg);
+		font-weight: var(--font-medium);
 	}
 	.action-buttons {
 		display: flex;
+		align-items: center;
 		gap: var(--space-2);
 	}
-	.action-buttons a {
-		text-decoration: none;
+
+	.btn-delete:hover:not(:disabled) {
+		color: var(--error-fg);
 	}
 </style>
