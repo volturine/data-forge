@@ -48,19 +48,16 @@
 
 <div class="relative">
 	<button
-		class="trigger flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-2 text-xs transition-all"
-		class:active={expanded}
-		class:has-engines={enginesStore.count > 0}
+		class="flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-2 text-xs transition-all bg-primary border-primary text-fg-tertiary shadow-card"
+		class:bg-hover={expanded}
+		class:text-fg-primary={expanded}
+		class:text-fg-secondary={enginesStore.count > 0}
 		onclick={toggleExpanded}
 		title="Engine Monitor"
-		style="background-color: var(--bg-primary); border-color: var(--border-primary); color: var(--fg-tertiary); box-shadow: var(--card-shadow);"
 	>
 		<Cpu size={16} />
 		{#if enginesStore.count > 0}
-			<span
-				class="min-w-[18px] rounded-full px-2 text-center text-xs font-semibold"
-				style="background-color: var(--accent-primary); color: var(--bg-primary);"
-			>
+			<span class="min-w-[18px] rounded-full px-2 text-center text-xs font-semibold bg-accent text-bg-primary">
 				{enginesStore.count}
 			</span>
 		{/if}
@@ -71,19 +68,15 @@
 
 	{#if expanded}
 		<div
-			class="absolute right-0 top-[calc(100%+0.5rem)] z-[100] w-[280px] overflow-hidden rounded-sm border"
+			class="absolute right-0 top-[calc(100%+0.5rem)] z-[100] w-[280px] overflow-hidden rounded-sm border bg-primary border-primary"
 			bind:this={dropdownRef}
-			style="background-color: var(--bg-primary); border-color: var(--border-primary); box-shadow: var(--dialog-shadow);"
+			style="box-shadow: var(--dialog-shadow);"
 		>
-			<div
-				class="flex items-center justify-between border-b p-3"
-				style="background-color: var(--bg-secondary); border-color: var(--border-primary);"
-			>
-				<span class="text-sm font-semibold" style="color: var(--fg-primary);">Active Engines</span>
+			<div class="flex items-center justify-between border-b p-3 bg-secondary border-primary">
+				<span class="text-sm font-semibold text-fg-primary">Active Engines</span>
 				<button
-					class="close-btn flex cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-1 transition-all"
+					class="flex cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-1 transition-all text-fg-muted hover:bg-hover hover:text-fg-primary"
 					onclick={() => (expanded = false)}
-					style="color: var(--fg-muted);"
 				>
 					<X size={14} />
 				</button>
@@ -92,60 +85,48 @@
 			<div class="max-h-[300px] overflow-y-auto">
 				{#if enginesStore.count === 0}
 					{#if enginesStore.loading}
-						<div
-							class="flex items-center justify-center gap-2 p-6 text-center text-sm"
-							style="color: var(--fg-muted);"
-						>
+						<div class="flex items-center justify-center gap-2 p-6 text-center text-sm text-fg-muted">
 							<LoaderCircle size={16} class="animate-spin" />
 							<span>Loading...</span>
 						</div>
 					{:else}
-						<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">
+						<div class="p-6 text-center text-sm text-fg-muted">
 							<span>No active engines</span>
 						</div>
 					{/if}
 				{:else}
 					<ul class="m-0 list-none p-0">
 						{#each enginesStore.engines as engine (engine.analysis_id)}
-							<li
-								class="engine-item flex items-center gap-3 border-b p-3 last:border-b-0"
-								style="border-color: var(--border-primary);"
-							>
+							<li class="flex items-center gap-3 border-b p-3 last:border-b-0 border-primary">
 								<div class="min-w-0 flex-1">
 									<div class="flex items-center gap-2">
-										<span
-											class="font-mono text-xs"
-											style="color: var(--fg-primary);"
-											title={engine.analysis_id}
-										>
+										<span class="font-mono text-xs text-fg-primary" title={engine.analysis_id}>
 											{engine.analysis_id.slice(0, 8)}...
 										</span>
 										<span
-											class="rounded-full px-2 py-px text-xs font-medium uppercase"
-											class:healthy={engine.status === 'healthy'}
-											class:terminated={engine.status === 'terminated'}
-											style="background-color: var(--bg-tertiary); color: var(--fg-muted);"
+											class="rounded-full px-2 py-px text-xs font-medium uppercase bg-tertiary text-fg-muted"
+											class:!bg-success={engine.status === 'healthy'}
+											class:!text-success={engine.status === 'healthy'}
 										>
 											{engine.status}
 										</span>
 									</div>
 									<div class="mt-1 flex items-center gap-2">
 										{#if engine.current_job_id}
-											<span class="font-mono text-xs" style="color: var(--accent-primary);">
+											<span class="font-mono text-xs text-accent">
 												Job: {engine.current_job_id.slice(0, 6)}
 											</span>
 										{/if}
-										<span class="text-xs" style="color: var(--fg-muted);">
+										<span class="text-xs text-fg-muted">
 											{formatTime(engine.last_activity)}
 										</span>
 									</div>
 								</div>
 								<button
-									class="kill-btn flex cursor-pointer items-center justify-center rounded-sm border p-1 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+									class="flex cursor-pointer items-center justify-center rounded-sm border p-1 transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-transparent border-primary text-fg-muted hover:bg-error hover:border-error hover:text-error-fg"
 									onclick={() => handleKill(engine.analysis_id)}
 									disabled={killing === engine.analysis_id}
 									title="Shutdown engine"
-									style="background-color: transparent; border-color: var(--border-primary); color: var(--fg-muted);"
 								>
 									{#if killing === engine.analysis_id}
 										<LoaderCircle size={12} class="animate-spin" />
@@ -160,10 +141,7 @@
 			</div>
 
 			{#if enginesStore.error}
-				<div
-					class="border-t p-2 text-xs"
-					style="background-color: var(--error-bg); color: var(--error-fg); border-color: var(--error-border);"
-				>
+				<div class="border-t p-2 text-xs bg-error text-error-fg border-error">
 					{enginesStore.error}
 				</div>
 			{/if}
@@ -174,36 +152,3 @@
 		></button>
 	{/if}
 </div>
-
-<style>
-	.trigger:hover,
-	.trigger.active {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.trigger.has-engines {
-		color: var(--fg-secondary);
-	}
-
-	.close-btn:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.healthy {
-		background-color: var(--success-bg) !important;
-		color: var(--success-fg) !important;
-	}
-
-	.terminated {
-		background-color: var(--bg-tertiary) !important;
-		color: var(--fg-muted) !important;
-	}
-
-	.kill-btn:hover:not(:disabled) {
-		background-color: var(--error-bg);
-		border-color: var(--error-border);
-		color: var(--error-fg);
-	}
-</style>

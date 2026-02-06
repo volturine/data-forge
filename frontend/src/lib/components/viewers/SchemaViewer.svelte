@@ -9,26 +9,18 @@
 	let { schema }: Props = $props();
 </script>
 
-<div
-	class="overflow-hidden rounded-md border"
-	style="background: var(--panel-bg); border-color: var(--panel-border);"
->
-	<div
-		class="flex justify-between items-center px-5 py-4 border-b"
-		style="border-color: var(--border-primary); background: var(--panel-header-bg);"
-	>
-		<h3 class="m-0 text-lg font-semibold" style="color: var(--fg-primary);">Schema</h3>
+<div class="overflow-hidden rounded-md border bg-panel border-panel">
+	<div class="flex justify-between items-center px-5 py-4 border-b border-primary" style="background: var(--panel-header-bg);">
+		<h3 class="m-0 text-lg font-semibold text-fg-primary">Schema</h3>
 		{#if schema.row_count !== null}
-			<span class="text-sm" style="color: var(--fg-muted);"
-				>{schema.row_count.toLocaleString()} rows</span
-			>
+			<span class="text-sm text-fg-muted">{schema.row_count.toLocaleString()} rows</span>
 		{/if}
 	</div>
 
 	<div class="max-h-[500px] overflow-y-auto">
 		<div
-			class="grid gap-4 px-5 py-3 border-b text-xs font-semibold uppercase tracking-wider"
-			style="grid-template-columns: 2fr 1.5fr 1fr; background: var(--table-header-bg); border-color: var(--border-primary); color: var(--fg-muted);"
+			class="grid gap-4 px-5 py-3 border-b text-xs font-semibold uppercase tracking-wider border-primary text-fg-muted"
+			style="grid-template-columns: 2fr 1.5fr 1fr; background: var(--table-header-bg);"
 		>
 			<div>Column</div>
 			<div>Type</div>
@@ -37,10 +29,10 @@
 
 		{#each schema.columns as column (column.name)}
 			<div
-				class="column-row grid gap-4 px-5 py-3.5 border-b transition-colors last:border-b-0"
-				style="grid-template-columns: 2fr 1.5fr 1fr; border-color: var(--border-primary);"
+				class="grid gap-4 px-5 py-3.5 border-b transition-colors last:border-b-0 border-primary hover:bg-hover"
+				style="grid-template-columns: 2fr 1.5fr 1fr;"
 			>
-				<div class="flex items-center gap-2 font-medium" style="color: var(--fg-primary);">
+				<div class="flex items-center gap-2 font-medium text-fg-primary">
 					<span class="font-mono text-sm">{column.name}</span>
 				</div>
 				<div class="flex items-center">
@@ -48,18 +40,12 @@
 				</div>
 				<div class="flex items-center text-sm">
 					{#if column.nullable}
-						<span style="color: var(--fg-muted);">Yes</span>
+						<span class="text-fg-muted">Yes</span>
 					{:else}
-						<span class="font-medium" style="color: var(--fg-secondary);">No</span>
+						<span class="font-medium text-fg-secondary">No</span>
 					{/if}
 				</div>
 			</div>
 		{/each}
 	</div>
 </div>
-
-<style>
-	.column-row:hover {
-		background: var(--table-row-hover);
-	}
-</style>

@@ -105,51 +105,37 @@
 	onkeydown={handleBackdropKeydown}
 >
 	<div
-		class="flex w-full max-w-[720px] max-h-[70vh] flex-col rounded-md border"
+		class="flex w-full max-w-[720px] max-h-[70vh] flex-col rounded-md border bg-panel border-panel"
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
 		onclick={stopPickerEvent}
 		onkeydown={stopPickerEvent}
-		style="background: var(--panel-bg); border-color: var(--panel-border); box-shadow: var(--dialog-shadow);"
+		style="box-shadow: var(--dialog-shadow);"
 	>
-		<div
-			class="grid grid-cols-[1fr_auto] gap-2 border-b p-4"
-			style="border-color: var(--panel-border);"
-		>
+		<div class="grid grid-cols-[1fr_auto] gap-2 border-b p-4 border-panel">
 			<div class="flex flex-col gap-1">
-				<h4 class="m-0 text-sm font-semibold" style="color: var(--fg-primary);">Data directory</h4>
-				<div
-					class="flex flex-wrap items-center gap-1"
-					role="navigation"
-					aria-label="Path breadcrumb"
-				>
+				<h4 class="m-0 text-sm font-semibold text-fg-primary">Data directory</h4>
+				<div class="flex flex-wrap items-center gap-1" role="navigation" aria-label="Path breadcrumb">
 					{#each crumbs as crumb, index (crumb.path)}
 						<button
 							type="button"
-							class="crumb cursor-pointer border-none bg-transparent p-0 text-xs"
+							class="cursor-pointer border-none bg-transparent p-0 text-xs text-fg-secondary hover:text-fg-primary hover:underline disabled:text-fg-muted disabled:cursor-default disabled:no-underline"
 							onclick={() => load(crumb.path)}
 							disabled={loading}
-							style="color: var(--fg-secondary);"
 						>
 							{crumb.label}
 						</button>
 						{#if index < crumbs.length - 1}
-							<span class="text-xs" style="color: var(--fg-muted);">/</span>
+							<span class="text-xs text-fg-muted">/</span>
 						{/if}
 					{/each}
 				</div>
-				<span class="break-all text-xs" style="color: var(--fg-muted);">{path}</span>
-				<span class="text-xs" style="color: var(--fg-muted);"
-					>Select files or choose a folder for parquet datasets.</span
-				>
+				<span class="break-all text-xs text-fg-muted">{path}</span>
+				<span class="text-xs text-fg-muted">Select files or choose a folder for parquet datasets.</span>
 			</div>
 			<div class="flex items-center justify-end gap-2">
-				<button
-					class="cursor-pointer border-none bg-transparent p-0 text-xs"
-					onclick={oncancel}
-					style="color: var(--accent-primary);"
-				>
+				<button class="cursor-pointer border-none bg-transparent p-0 text-xs text-accent" onclick={oncancel}>
 					Close
 				</button>
 			</div>
@@ -157,24 +143,23 @@
 
 		<div class="flex-1 overflow-auto p-3">
 			{#if loading}
-				<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">Loading...</div>
+				<div class="p-6 text-center text-sm text-fg-muted">Loading...</div>
 			{:else if error}
-				<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">{error}</div>
+				<div class="p-6 text-center text-sm text-fg-muted">{error}</div>
 			{:else if entries.length === 0}
-				<div class="p-6 text-center text-sm" style="color: var(--fg-muted);">No files found</div>
+				<div class="p-6 text-center text-sm text-fg-muted">No files found</div>
 			{:else}
 				<div class="flex flex-col gap-2">
 					{#each entries as entry (entry.path)}
 						<button
 							type="button"
-							class="picker-item flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm border p-2 px-3 text-left"
+							class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm border p-2 px-3 text-left bg-primary border-primary hover:bg-hover"
 							onclick={() => (entry.is_dir ? load(entry.path) : onselect(entry.path, false))}
 							disabled={loading}
-							style="background: var(--bg-primary); border-color: var(--border-primary);"
 						>
 							<div class="flex flex-col gap-0.5">
-								<span class="text-sm" style="color: var(--fg-primary);">{entry.name}</span>
-								<span class="text-xs" style="color: var(--fg-muted);">{entryType(entry)}</span>
+								<span class="text-sm text-fg-primary">{entry.name}</span>
+								<span class="text-xs text-fg-muted">{entryType(entry)}</span>
 							</div>
 							<FileTypeBadge path={entry.name} isFolder={entry.is_dir} size="sm" />
 						</button>
@@ -183,60 +168,31 @@
 			{/if}
 		</div>
 
-		<div class="flex justify-between gap-2 border-t p-3" style="border-color: var(--panel-border);">
+		<div class="flex justify-between gap-2 border-t p-3 border-panel">
 			<div class="flex items-center gap-2">
 				<button
-					class="btn-icon inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-sm border disabled:cursor-not-allowed disabled:opacity-50"
+					class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-sm border disabled:cursor-not-allowed disabled:opacity-50 bg-primary border-primary text-fg-secondary hover:bg-hover hover:text-fg-primary"
 					onclick={up}
 					disabled={!canUp}
 					aria-label="Go up"
-					style="background: var(--bg-primary); border-color: var(--border-primary); color: var(--fg-secondary);"
 				>
 					←
 				</button>
 				<button
-					class="btn-secondary cursor-pointer rounded-sm border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
+					class="cursor-pointer rounded-sm border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-secondary"
 					onclick={() => onselect(path, true)}
 					disabled={loading || !path}
-					style="background: var(--bg-secondary); color: var(--fg-primary); border-color: var(--border-primary);"
 				>
 					Use folder
 				</button>
 			</div>
 			<button
-				class="btn-secondary cursor-pointer rounded-sm border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50"
+				class="cursor-pointer rounded-sm border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-secondary"
 				onclick={() => load(path)}
 				disabled={loading}
-				style="background: var(--bg-secondary); color: var(--fg-primary); border-color: var(--border-primary);"
 			>
 				Refresh
 			</button>
 		</div>
 	</div>
 </div>
-
-<style>
-	.crumb:hover:not(:disabled) {
-		color: var(--fg-primary);
-		text-decoration: underline;
-	}
-
-	.crumb:disabled {
-		color: var(--fg-muted);
-		cursor: default;
-	}
-
-	.picker-item:hover {
-		background: var(--bg-hover);
-	}
-
-	.btn-icon:hover:not(:disabled) {
-		background: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-</style>
