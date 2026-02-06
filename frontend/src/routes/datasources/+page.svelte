@@ -92,20 +92,20 @@
 	}
 </script>
 
-<div class="container">
-	<header class="page-header">
-		<div class="header-text">
-			<h1>Data Sources</h1>
-			<p class="subtitle">Manage your data connections and files</p>
+<div class="mx-auto min-h-full max-w-[1000px] p-6">
+	<header class="mb-8 flex items-start justify-between gap-6 border-b pb-6" style="border-color: var(--border-primary);">
+		<div>
+			<h1 class="m-0 mb-2 text-2xl font-semibold">Data Sources</h1>
+			<p class="m-0" style="color: var(--fg-tertiary);">Manage your data connections and files</p>
 		</div>
-		<a href={resolve('/datasources/new')} class="btn-primary btn-new" data-sveltekit-reload>
+		<a href={resolve('/datasources/new')} class="btn-primary no-underline" style="box-shadow: var(--card-shadow);" data-sveltekit-reload>
 			<Plus size={16} />
 			Add Data Source
 		</a>
 	</header>
 
 	{#if query.isLoading}
-		<div class="info-box loading-state">Loading data sources...</div>
+		<div class="info-box text-center">Loading data sources...</div>
 	{:else if query.isError}
 		<div class="error-box">
 			Error loading data sources: {query.error instanceof Error
@@ -114,30 +114,31 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="empty-state">
-				<div class="empty-icon">+</div>
-				<p>No data sources yet.</p>
+			<div class="rounded-sm border border-dashed p-12 text-center" style="background-color: var(--bg-primary); border-color: var(--border-secondary);">
+				<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-sm border text-xl" style="border-color: var(--border-primary); color: var(--fg-muted);">+</div>
+				<p class="m-0 mb-6" style="color: var(--fg-tertiary);">No data sources yet.</p>
 				<a href={resolve('/datasources/new')} class="btn btn-primary" data-sveltekit-reload
 					>Create your first data source</a
 				>
 			</div>
 		{:else}
-			<div class="list-container">
-				<div class="list-header">
-					<span class="col-expand"></span>
-					<span class="col-name">Name</span>
-					<span class="col-type">Type</span>
-					<span class="col-rows">Rows</span>
-					<span class="col-columns">Columns</span>
-					<span class="col-created">Created</span>
-					<span class="col-actions">Actions</span>
+			<div class="overflow-hidden rounded-sm border" style="background-color: var(--bg-primary); border-color: var(--border-primary);">
+				<div class="grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 border-b px-5 py-4 text-xs font-semibold uppercase tracking-wide" style="background-color: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-tertiary);">
+					<span></span>
+					<span>Name</span>
+					<span>Type</span>
+					<span>Rows</span>
+					<span>Columns</span>
+					<span>Created</span>
+					<span>Actions</span>
 				</div>
 				{#each query.data as datasource (datasource.id)}
-					<div class="list-item" class:expanded={isExpanded(datasource.id)}>
-						<div class="list-row">
-							<span class="col-expand">
+					<div class="list-item border-b" style="border-color: var(--border-primary);" class:expanded={isExpanded(datasource.id)}>
+						<div class="list-row grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 px-5 py-4" style="color: var(--fg-secondary);">
+							<span>
 								<button
-									class="expand-btn"
+									class="expand-btn flex h-7 w-7 items-center justify-center rounded-sm border border-transparent bg-transparent transition-all"
+									style="color: var(--fg-tertiary);"
 									onclick={() => togglePreview(datasource.id)}
 									aria-expanded={isExpanded(datasource.id)}
 									aria-label={isExpanded(datasource.id) ? 'Collapse preview' : 'Expand preview'}
@@ -149,8 +150,8 @@
 									{/if}
 								</button>
 							</span>
-							<span class="col-name">{datasource.name}</span>
-							<span class="col-type">
+							<span class="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{datasource.name}</span>
+							<span>
 								{#if datasource.source_type === 'file'}
 									<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
 								{:else}
@@ -160,13 +161,13 @@
 									/>
 								{/if}
 							</span>
-							<span class="col-rows">{formatRowCount(getRowCount(datasource))}</span>
-							<span class="col-columns">{getColumnCount(datasource)}</span>
-							<span class="col-created">{formatDate(datasource.created_at)}</span>
-							<span class="col-actions">
+							<span class="tabular-nums">{formatRowCount(getRowCount(datasource))}</span>
+							<span class="tabular-nums">{getColumnCount(datasource)}</span>
+							<span style="color: var(--fg-muted);">{formatDate(datasource.created_at)}</span>
+							<span class="flex items-center whitespace-nowrap">
 								{#if confirmingDelete === datasource.id}
-									<div class="confirm-actions">
-										<span class="confirm-label">Delete?</span>
+									<div class="flex items-center gap-2">
+										<span class="text-xs font-medium" style="color: var(--error-fg);">Delete?</span>
 										<button
 											onclick={() => confirmDelete(datasource.id)}
 											class="btn btn-danger btn-sm"
@@ -177,7 +178,7 @@
 										<button onclick={cancelDelete} class="btn btn-secondary btn-sm"> No </button>
 									</div>
 								{:else}
-									<div class="action-buttons">
+									<div class="flex items-center gap-2">
 										<button
 											onclick={() => goto(resolve(`/datasources/${datasource.id}`))}
 											class="btn btn-ghost btn-sm"
@@ -196,7 +197,7 @@
 							</span>
 						</div>
 						{#if isExpanded(datasource.id)}
-							<div class="preview-panel">
+							<div class="border-t p-4" style="background: var(--bg-secondary); border-color: var(--border-primary);">
 								<DatasourcePreview datasourceId={datasource.id} datasourceName={datasource.name} />
 							</div>
 						{/if}
@@ -208,162 +209,18 @@
 </div>
 
 <style>
-	.container {
-		max-width: 1000px;
-		margin: 0 auto;
-		padding: var(--space-6);
-		min-height: 100%;
-	}
-
-	.page-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: var(--space-6);
-		margin-bottom: var(--space-8);
-		padding-bottom: var(--space-6);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.header-text h1 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-2xl);
-		font-weight: var(--font-semibold);
-	}
-	.subtitle {
-		margin: 0;
-		color: var(--fg-tertiary);
-	}
-	.btn-new {
-		text-decoration: none;
-		box-shadow: var(--card-shadow);
-	}
-
-	.loading-state {
-		text-align: center;
-	}
-
-	.empty-state {
-		text-align: center;
-		padding: var(--space-12);
-		background-color: var(--bg-primary);
-		border: 1px dashed var(--border-secondary);
-		border-radius: var(--radius-sm);
-	}
-	.empty-icon {
-		width: 48px;
-		height: 48px;
-		margin: 0 auto var(--space-4);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xl);
-		color: var(--fg-muted);
-	}
-	.empty-state p {
-		margin: 0 0 var(--space-6) 0;
-		color: var(--fg-tertiary);
-	}
-
-	.list-container {
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		overflow: hidden;
-	}
-
-	.list-header,
-	.list-row {
-		display: grid;
-		grid-template-columns: 48px 1fr 100px 90px 90px 110px 140px;
-		align-items: center;
-		gap: var(--space-4);
-	}
-	.list-header {
-		padding: var(--space-4) var(--space-5);
-		font-size: var(--text-xs);
-		font-weight: var(--font-semibold);
-		color: var(--fg-tertiary);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		background-color: var(--bg-tertiary);
-		border-bottom: 1px solid var(--border-primary);
-	}
-
-	.list-item {
-		border-bottom: 1px solid var(--border-primary);
-	}
 	.list-item:last-child {
 		border-bottom: none;
 	}
 
-	.list-row {
-		padding: var(--space-4) var(--space-5);
-		color: var(--fg-secondary);
-	}
 	.list-row:hover {
 		background-color: var(--bg-hover);
 	}
 
-	.col-name {
-		font-weight: var(--font-medium);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.col-rows,
-	.col-columns {
-		font-variant-numeric: tabular-nums;
-	}
-	.col-created {
-		color: var(--fg-muted);
-	}
-	.col-actions {
-		white-space: nowrap;
-		display: flex;
-		align-items: center;
-	}
-
-	.expand-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		padding: 0;
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		color: var(--fg-tertiary);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
 	.expand-btn:hover {
 		background: var(--bg-hover);
 		color: var(--fg-primary);
 		border-color: var(--border-secondary);
-	}
-
-	.preview-panel {
-		padding: var(--space-4);
-		background: var(--bg-secondary);
-		border-top: 1px solid var(--border-primary);
-	}
-	.confirm-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.confirm-label {
-		font-size: var(--text-xs);
-		color: var(--error-fg);
-		font-weight: var(--font-medium);
-	}
-	.action-buttons {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
 	}
 
 	.btn-delete:hover:not(:disabled) {

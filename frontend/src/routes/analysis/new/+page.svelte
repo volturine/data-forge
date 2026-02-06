@@ -64,51 +64,77 @@
 	}
 </script>
 
-<div class="wizard-container">
-	<div class="wizard-header">
-		<h1>New Analysis</h1>
-		<div class="steps-indicator">
-			<div class="step" class:active={step === 1} class:completed={step > 1}>
-				<span class="step-number">{step > 1 ? '✓' : '1'}</span>
-				<span class="step-label">Details</span>
+<div class="mx-auto flex min-h-[calc(100vh-60px)] max-w-[720px] flex-col gap-6 px-6 py-7">
+	<div class="mb-8">
+		<h1 class="m-0 mb-6 text-2xl font-semibold">New Analysis</h1>
+		<div class="flex items-center gap-2">
+			<div class="step flex items-center gap-2" class:active={step === 1} class:completed={step > 1}>
+				<span
+					class="step-number flex h-7 w-7 items-center justify-center rounded-sm border text-xs font-semibold"
+					style="border-color: var(--border-secondary); color: var(--fg-muted); background-color: var(--bg-primary);"
+				>
+					{step > 1 ? '✓' : '1'}
+				</span>
+				<span class="text-sm" style="color: var(--fg-muted);">Details</span>
 			</div>
-			<div class="step-line" class:completed={step > 1}></div>
-			<div class="step" class:active={step === 2} class:completed={step > 2}>
-				<span class="step-number">{step > 2 ? '✓' : '2'}</span>
-				<span class="step-label">Data Source</span>
+			<div class="step-line min-w-[40px] flex-1 h-px" style="background-color: var(--border-primary);" class:completed={step > 1}></div>
+			<div class="step flex items-center gap-2" class:active={step === 2} class:completed={step > 2}>
+				<span
+					class="step-number flex h-7 w-7 items-center justify-center rounded-sm border text-xs font-semibold"
+					style="border-color: var(--border-secondary); color: var(--fg-muted); background-color: var(--bg-primary);"
+				>
+					{step > 2 ? '✓' : '2'}
+				</span>
+				<span class="text-sm" style="color: var(--fg-muted);">Data Source</span>
 			</div>
-			<div class="step-line" class:completed={step > 2}></div>
-			<div class="step" class:active={step === 3}>
-				<span class="step-number">3</span>
-				<span class="step-label">Review</span>
+			<div class="step-line min-w-[40px] flex-1 h-px" style="background-color: var(--border-primary);" class:completed={step > 2}></div>
+			<div class="step flex items-center gap-2" class:active={step === 3}>
+				<span
+					class="step-number flex h-7 w-7 items-center justify-center rounded-sm border text-xs font-semibold"
+					style="border-color: var(--border-secondary); color: var(--fg-muted); background-color: var(--bg-primary);"
+				>
+					3
+				</span>
+				<span class="text-sm" style="color: var(--fg-muted);">Review</span>
 			</div>
 		</div>
 	</div>
 
-	<div class="wizard-content">
+	<div class="mb-6 flex-1">
 		{#if step === 1}
-			<div class="step-content">
-				<h2>Analysis Details</h2>
-				<p class="step-description">Give your analysis a name and optional description.</p>
+			<div class="rounded-sm border p-6" style="background-color: var(--bg-primary); border-color: var(--border-primary); box-shadow: var(--card-shadow);">
+				<h2 class="m-0 mb-2 text-lg font-semibold">Analysis Details</h2>
+				<p class="mb-6" style="color: var(--fg-tertiary);">Give your analysis a name and optional description.</p>
 
-				<div class="form-group">
-					<label for="name">Name <span class="required">*</span></label>
-					<input id="name" type="text" bind:value={name} placeholder="My Data Analysis" />
+				<div class="mb-5 flex flex-col gap-2">
+					<label for="name" class="block text-sm font-medium" style="color: var(--fg-secondary);">
+						Name <span style="color: var(--error-fg);">*</span>
+					</label>
+					<input
+						id="name"
+						type="text"
+						bind:value={name}
+						placeholder="My Data Analysis"
+						class="w-full rounded-sm border p-3 text-sm"
+						style="border-color: var(--border-secondary); background-color: var(--bg-primary);"
+					/>
 				</div>
-				<div class="form-group">
-					<label for="description">Description</label>
+				<div class="mb-5 flex flex-col gap-2">
+					<label for="description" class="block text-sm font-medium" style="color: var(--fg-secondary);">Description</label>
 					<textarea
 						id="description"
 						bind:value={description}
 						placeholder="Describe what this analysis does..."
 						rows="4"
+						class="min-h-[100px] w-full resize-y rounded-sm border p-3 text-sm"
+						style="border-color: var(--border-secondary); background-color: var(--bg-primary);"
 					></textarea>
 				</div>
 			</div>
 		{:else if step === 2}
-			<div class="step-content">
-				<h2>Select Data Sources</h2>
-				<p class="step-description">Choose one or more data sources for this analysis.</p>
+			<div class="rounded-sm border p-6" style="background-color: var(--bg-primary); border-color: var(--border-primary); box-shadow: var(--card-shadow);">
+				<h2 class="m-0 mb-2 text-lg font-semibold">Select Data Sources</h2>
+				<p class="mb-6" style="color: var(--fg-tertiary);">Choose one or more data sources for this analysis.</p>
 
 				{#if datasourcesQuery.isLoading}
 					<div class="info-box">Loading data sources...</div>
@@ -117,7 +143,7 @@
 						Error loading data sources: {datasourcesQuery.error.message}
 					</div>
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
-					<div class="empty-state">
+					<div class="rounded-sm border border-dashed p-8 text-center" style="border-color: var(--border-primary); color: var(--fg-tertiary);">
 						<p>No data sources available.</p>
 						<a href={resolve('/datasources/new')} class="btn btn-secondary" data-sveltekit-reload
 							>Create Data Source</a
@@ -135,34 +161,34 @@
 				{/if}
 			</div>
 		{:else if step === 3}
-			<div class="step-content">
-				<h2>Review & Create</h2>
-				<p class="step-description">Review your analysis configuration before creating.</p>
+			<div class="rounded-sm border p-6" style="background-color: var(--bg-primary); border-color: var(--border-primary); box-shadow: var(--card-shadow);">
+				<h2 class="m-0 mb-2 text-lg font-semibold">Review & Create</h2>
+				<p class="mb-6" style="color: var(--fg-tertiary);">Review your analysis configuration before creating.</p>
 
-				<div class="review-section">
-					<h3>Details</h3>
-					<dl class="review-list">
-						<div class="review-item">
-							<dt>Name</dt>
-							<dd>{name}</dd>
+				<div class="mb-6 border-b pb-6" style="border-color: var(--border-primary);">
+					<h3 class="m-0 mb-4 text-sm font-semibold uppercase tracking-wide" style="color: var(--fg-tertiary);">Details</h3>
+					<dl class="m-0">
+						<div class="mb-2 flex gap-4">
+							<dt class="w-[100px] shrink-0" style="color: var(--fg-muted);">Name</dt>
+							<dd class="m-0">{name}</dd>
 						</div>
 						{#if description}
-							<div class="review-item">
-								<dt>Description</dt>
-								<dd>{description}</dd>
+							<div class="mb-2 flex gap-4">
+								<dt class="w-[100px] shrink-0" style="color: var(--fg-muted);">Description</dt>
+								<dd class="m-0">{description}</dd>
 							</div>
 						{/if}
 					</dl>
 				</div>
 
-				<div class="review-section">
-					<h3>Data Sources ({selectedDatasourceIds.length})</h3>
-					<ul class="review-sources">
+				<div>
+					<h3 class="m-0 mb-4 text-sm font-semibold uppercase tracking-wide" style="color: var(--fg-tertiary);">Data Sources ({selectedDatasourceIds.length})</h3>
+					<ul class="m-0 list-none p-0">
 						{#if datasourcesQuery.data}
 							{#each datasourcesQuery.data.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
-								<li>
-									<span class="source-name">{ds.name}</span>
-									<span class="source-type">
+								<li class="flex items-center gap-3 border-b py-2" style="border-color: var(--border-primary);">
+									<span style="color: var(--fg-primary);">{ds.name}</span>
+									<span class="text-xs" style="color: var(--fg-muted);">
 										{#if ds.source_type === 'file'}
 											<FileTypeBadge
 												path={(ds.config?.file_path as string) ?? ''}
@@ -190,7 +216,7 @@
 		{/if}
 	</div>
 
-	<div class="wizard-footer">
+	<div class="flex gap-3 border-t pt-6" style="border-color: var(--border-primary);">
 		{#if step > 1}
 			<button class="btn btn-secondary" onclick={() => (step -= 1)} disabled={creating}>
 				Back
@@ -199,7 +225,7 @@
 			<a href={resolve('/')} class="btn btn-secondary" data-sveltekit-reload>Cancel</a>
 		{/if}
 
-		<div class="spacer"></div>
+		<div class="flex-1"></div>
 
 		{#if step < 3}
 			<button
@@ -218,207 +244,34 @@
 </div>
 
 <style>
-	.wizard-container {
-		max-width: 720px;
-		margin: 0 auto;
-		padding: var(--space-7) var(--space-6);
-		display: flex;
-		flex-direction: column;
-		min-height: calc(100vh - 60px);
-		gap: var(--space-6);
-	}
-
-	.wizard-header {
-		margin-bottom: var(--space-8);
-	}
-	.wizard-header h1 {
-		margin: 0 0 var(--space-6) 0;
-		font-size: var(--text-2xl);
-		font-weight: var(--font-semibold);
-	}
-
-	.steps-indicator {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.step {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
-	.step-number {
-		width: 28px;
-		height: 28px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xs);
-		font-weight: var(--font-semibold);
-		color: var(--fg-muted);
-		background-color: var(--bg-primary);
-	}
 	.step.active .step-number {
 		border-color: var(--accent-primary);
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 	}
+
+	.step.active span:not(.step-number) {
+		color: var(--fg-primary);
+		font-weight: var(--font-medium);
+	}
+
 	.step.completed .step-number {
 		border-color: var(--success-border);
 		background-color: var(--success-bg);
 		color: var(--success-fg);
 	}
 
-	.step-label {
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-	}
-	.step.active .step-label {
-		color: var(--fg-primary);
-		font-weight: var(--font-medium);
-	}
-
-	.step-line {
-		flex: 1;
-		height: 1px;
-		background-color: var(--border-primary);
-		min-width: 40px;
-	}
 	.step-line.completed {
 		background-color: var(--success-border);
 	}
 
-	.wizard-content {
-		flex: 1;
-		margin-bottom: var(--space-6);
-	}
-
-	.step-content {
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		padding: var(--space-6);
-		box-shadow: var(--card-shadow);
-	}
-	.step-content h2 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-lg);
-		font-weight: var(--font-semibold);
-	}
-	.step-description {
-		color: var(--fg-tertiary);
-		margin-bottom: var(--space-6);
-	}
-
-	.form-group {
-		margin-bottom: var(--space-5);
-	}
-	.form-group label {
-		display: block;
-		margin-bottom: var(--space-2);
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		color: var(--fg-secondary);
-	}
-	.required {
-		color: var(--error-fg);
-	}
-
-	.form-group input,
-	.form-group textarea {
-		width: 100%;
-		padding: var(--space-3);
-		border: 1px solid var(--border-secondary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-primary);
-	}
-	.form-group input:focus,
-	.form-group textarea:focus {
+	input:focus,
+	textarea:focus {
 		outline: none;
 		border-color: var(--border-focus);
 	}
-	.form-group textarea {
-		resize: vertical;
-		min-height: 100px;
-	}
 
-	.review-section {
-		margin-bottom: var(--space-6);
-		padding-bottom: var(--space-6);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.review-section:last-of-type {
-		border-bottom: none;
-		margin-bottom: 0;
-		padding-bottom: 0;
-	}
-	.review-section h3 {
-		margin: 0 0 var(--space-4) 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		color: var(--fg-tertiary);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.review-list {
-		margin: 0;
-	}
-	.review-item {
-		display: flex;
-		gap: var(--space-4);
-		margin-bottom: var(--space-2);
-	}
-	.review-item dt {
-		width: 100px;
-		flex-shrink: 0;
-		color: var(--fg-muted);
-	}
-	.review-item dd {
-		margin: 0;
-	}
-
-	.review-sources {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-	.review-sources li {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		padding: var(--space-2) 0;
-		border-bottom: 1px solid var(--border-primary);
-	}
 	.review-sources li:last-child {
 		border-bottom: none;
-	}
-	.source-name {
-		color: var(--fg-primary);
-	}
-	.source-type {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-
-	.empty-state {
-		text-align: center;
-		padding: var(--space-8);
-		color: var(--fg-tertiary);
-		border: 1px dashed var(--border-primary);
-		border-radius: var(--radius-sm);
-	}
-
-	.wizard-footer {
-		display: flex;
-		gap: var(--space-3);
-		padding-top: var(--space-6);
-		border-top: 1px solid var(--border-primary);
-	}
-	.spacer {
-		flex: 1;
 	}
 </style>
