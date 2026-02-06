@@ -148,7 +148,7 @@
 					{#each navItems as item (item.href)}
 						<a
 							href={resolve(item.href as '/')}
-							class="rounded-sm border border-transparent px-3 py-2 text-sm no-underline transition-all"
+							class="nav-link rounded-sm border border-transparent px-3 py-2 text-sm no-underline transition-all"
 							class:active={currentPath === item.href ||
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs')}
@@ -163,7 +163,7 @@
 				<div class="ml-auto flex items-center gap-2">
 					<EngineMonitor />
 					<button
-						class="flex items-center justify-center rounded-sm border p-2 transition-all"
+						class="theme-toggle flex items-center justify-center rounded-sm border p-2 transition-all"
 						style="background-color: var(--bg-primary); border-color: var(--border-primary); color: var(--fg-secondary); box-shadow: var(--card-shadow);"
 						onclick={toggleTheme}
 						title="Toggle theme"
@@ -191,19 +191,19 @@
 		overflow: hidden;
 	}
 
-	nav a:hover {
+	.nav-link:hover {
 		color: var(--fg-primary);
 		background-color: var(--bg-hover);
 		border-color: var(--border-primary);
 	}
 
-	nav a.active {
+	.nav-link.active {
 		color: var(--fg-primary);
 		background-color: var(--bg-tertiary);
 		border-color: var(--border-primary);
 	}
 
-	header button:hover {
+	.theme-toggle:hover {
 		background-color: var(--bg-hover);
 		color: var(--fg-primary);
 	}

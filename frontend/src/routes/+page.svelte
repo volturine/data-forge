@@ -160,7 +160,7 @@
 	<header class="mb-8 flex flex-col items-stretch justify-between gap-6 border-b pb-6 md:flex-row md:items-start" style="border-color: var(--border-primary);">
 		<div>
 			<h1 class="m-0 mb-2 text-2xl font-semibold">Analyses</h1>
-			<p class="subtitle m-0 text-sm" style="color: var(--fg-tertiary);">Browse and manage your data analyses</p>
+			<p class="m-0 text-sm" style="color: var(--fg-tertiary);">Browse and manage your data analyses</p>
 		</div>
 		<button class="btn-primary w-full justify-center md:w-auto" onclick={createNew}>
 			<Plus size={16} />
