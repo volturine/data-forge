@@ -458,7 +458,7 @@
 				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-4">
 					<h1
 						contenteditable="true"
-						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none cursor-text text-fg-primary tracking-wide"
+						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none cursor-text text-fg-primary tracking-[0.02em]"
 						onblur={(e) => {
 							const newName = e.currentTarget.textContent?.trim();
 							if (newName && newName !== analysisQuery.data.name) {
@@ -472,7 +472,7 @@
 						{analysisQuery.data.name}
 					</h1>
 					{#if analysisQuery.data.description}
-						<span class="text-xs whitespace-nowrap overflow-hidden text-ellipsis text-fg-muted tracking-wide">{analysisQuery.data.description}</span>
+						<span class="text-xs whitespace-nowrap overflow-hidden text-ellipsis text-fg-muted tracking-[0.02em]">{analysisQuery.data.description}</span>
 					{/if}
 				</div>
 			</div>
@@ -492,7 +492,7 @@
 					<div class="tabs flex items-center overflow-x-auto w-full gap-1">
 						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
 							<button
-								class="tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-medium uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-widest rounded-sm hover:text-fg-secondary hover:bg-hover"
+								class="tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-medium uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-[0.06em] rounded-sm hover:text-fg-secondary hover:bg-hover"
 								class:active={analysisStore.activeTab?.id === tab.id}
 								onclick={() => handleSelectTab(tab.id)}
 								type="button"
@@ -516,7 +516,7 @@
 								{/if}
 							</button>
 						{/each}
-						<button class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-semibold uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-widest rounded-sm hover:text-fg-secondary hover:bg-hover" onclick={() => openDatasourceModal('add')} type="button">
+						<button class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-semibold uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-[0.06em] rounded-sm hover:text-fg-secondary hover:bg-hover" onclick={() => openDatasourceModal('add')} type="button">
 							+
 						</button>
 					</div>
