@@ -41,7 +41,11 @@
 	</div>
 
 	<div class="flex items-center gap-2 max-sm:justify-between">
-		<label for="sort-select" class="whitespace-nowrap text-xs font-medium" style="color: var(--fg-muted);">
+		<label
+			for="sort-select"
+			class="whitespace-nowrap text-xs font-medium"
+			style="color: var(--fg-muted);"
+		>
 			Sort:
 		</label>
 		<select

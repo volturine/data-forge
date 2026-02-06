@@ -211,14 +211,12 @@ if (typeof window !== 'undefined') {
 		locks.forEach((state, resourceId) => {
 			if (state.byMe && state.lockToken) {
 				const { clientId: cid } = getClientIdentity();
-				// Use sendBeacon for reliable delivery during unload
-				navigator.sendBeacon(
-					`/api/v1/locks/${encodeURIComponent(resourceId)}/release`,
-					JSON.stringify({
-						client_id: cid,
-						lock_token: state.lockToken
-					})
-				);
+				const payload = JSON.stringify({
+					client_id: cid,
+					lock_token: state.lockToken
+				});
+				const blob = new Blob([payload], { type: 'application/json' });
+				navigator.sendBeacon(`/api/v1/locks/${encodeURIComponent(resourceId)}/release`, blob);
 			}
 		});
 	});

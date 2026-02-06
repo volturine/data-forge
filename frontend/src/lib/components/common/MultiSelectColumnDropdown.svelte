@@ -88,7 +88,10 @@
 				/>
 			</div>
 			{#if showSelectAll}
-				<div class="flex gap-2 border-b p-2" style="border-color: var(--border-secondary); background-color: var(--bg-secondary);">
+				<div
+					class="flex gap-2 border-b p-2"
+					style="border-color: var(--border-secondary); background-color: var(--bg-secondary);"
+				>
 					<button
 						type="button"
 						class="select-action-btn flex-1 cursor-pointer rounded-sm border bg-transparent px-2 py-1 text-xs transition-all"
@@ -115,7 +118,10 @@
 			{/if}
 			<div class="column-options">
 				{#each filteredColumns as column (column.name)}
-					<label class="multi-select-option flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 transition-colors" style="color: var(--fg-primary);">
+					<label
+						class="multi-select-option flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 transition-colors"
+						style="color: var(--fg-primary);"
+					>
 						<input
 							type="checkbox"
 							checked={selectedSet.has(column.name)}
@@ -138,7 +144,10 @@
 </div>
 
 {#if selectedCount > 0}
-	<div class="mt-2 max-h-[60px] overflow-y-auto rounded-sm border p-2 text-xs" style="background-color: var(--bg-secondary); border-color: var(--border-secondary); color: var(--fg-secondary);">
+	<div
+		class="mt-2 max-h-[60px] overflow-y-auto rounded-sm border p-2 text-xs"
+		style="background-color: var(--bg-secondary); border-color: var(--border-secondary); color: var(--fg-secondary);"
+	>
 		{value.join(', ')}
 	</div>
 {/if}

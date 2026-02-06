@@ -27,9 +27,7 @@ function parseIsoParts(value: string): {
 	millisecond: number;
 } | null {
 	const match =
-		/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/.exec(
-			value
-		);
+		/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/.exec(value);
 	if (!match) return null;
 	const year = Number(match[1]);
 	const month = Number(match[2]);
@@ -63,10 +61,7 @@ export function getTimezoneSettings(): { timezone: string; normalize: boolean } 
 	return { timezone: configStore.timezone, normalize: configStore.normalizeTz };
 }
 
-export function formatDateDisplay(
-	value: DateInput,
-	options?: Intl.DateTimeFormatOptions
-): string {
+export function formatDateDisplay(value: DateInput, options?: Intl.DateTimeFormatOptions): string {
 	const { timezone, normalize } = getTimezoneSettings();
 	return formatDateValue(value, timezone, normalize, options);
 }
@@ -209,7 +204,11 @@ export function formatDateForInput(value: DateInput, timezone: string, normalize
 	return `${map.year}-${map.month}-${map.day}`;
 }
 
-export function formatDateTimeForInput(value: DateInput, timezone: string, normalize: boolean): string {
+export function formatDateTimeForInput(
+	value: DateInput,
+	timezone: string,
+	normalize: boolean
+): string {
 	const date = toDate(value);
 	if (!date) return '';
 	if (!normalize) return date.toISOString().slice(0, 16);
@@ -244,7 +243,11 @@ export function parseDateTimeInputToIso(
 	return utc.toISOString();
 }
 
-export function getYearInZone(value: DateInput, timezone: string, normalize: boolean): number | null {
+export function getYearInZone(
+	value: DateInput,
+	timezone: string,
+	normalize: boolean
+): number | null {
 	const date = toDate(value);
 	if (!date) return null;
 	if (!normalize) return date.getFullYear();

@@ -72,7 +72,10 @@
 </script>
 
 <span
-	class="inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border font-medium uppercase tracking-wide transition-all {variant === 'minimal' ? 'border-none p-0' : ''}"
+	class="inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-sm border font-medium uppercase tracking-wide transition-all {variant ===
+	'minimal'
+		? 'border-none p-0'
+		: ''}"
 	style:font-size={styles.fontSize}
 	style:padding={variant === 'minimal' ? '0' : styles.padding}
 	style:color={styles.color}

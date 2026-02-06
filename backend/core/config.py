@@ -37,9 +37,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # CORS origins - comma-separated list of allowed origins
-    cors_origins: str = (
-        'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,http://192.168.1.140:3000,http://100.68.183.19:3000'
-    )
+    cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,http://192.168.1.140:3000,http://100.68.183.19:3000'
 
     database_url: str = 'sqlite+libsql:///./database/app.db'
 
@@ -61,7 +59,7 @@ class Settings(BaseSettings):
 
     # Engine pooling interval in seconds (default 5 seconds)
     # How often to check engine states and cleanup idle engines
-    engine_pooling_interval: int = Field(default=5, alias='ENGINE_POOLING_INTERVAL')
+    engine_pooling_interval: int = Field(default=30, alias='ENGINE_POOLING_INTERVAL')
 
     # Job execution timeout in seconds (default 5 minutes)
     # Jobs that exceed this duration will be terminated

@@ -227,8 +227,12 @@
 			style="color: var(--fg-muted);"
 		>
 			<LayoutGrid size={32} strokeWidth={1.5} class="mb-4" style="color: var(--fg-faint);" />
-			<h3 class="m-0 mb-2 text-base font-semibold" style="color: var(--fg-secondary);">No pipeline steps</h3>
-			<p class="m-0 text-sm" style="color: var(--fg-muted);">Drag operations from the library and drop here</p>
+			<h3 class="m-0 mb-2 text-base font-semibold" style="color: var(--fg-secondary);">
+				No pipeline steps
+			</h3>
+			<p class="m-0 text-sm" style="color: var(--fg-muted);">
+				Drag operations from the library and drop here
+			</p>
 			<div
 				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2 transition-all"
 				class:ready={canDrop}
@@ -253,13 +257,16 @@
 
 				{#if canDrop}
 					<div
-						class="drop-slot my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all"
-						class:active={hoverIndex === 0}
-						class:invalid={hoverIndex === 0 && !drag.valid}
-						style="border-color: var(--fg-faint); background-color: transparent;"
+						class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--fg-faint)] bg-transparent hover:border-[var(--fg-muted)] hover:bg-[var(--bg-hover)]"
+						class:!border-[var(--fg-primary)]={hoverIndex === 0}
+						class:!bg-[var(--bg-tertiary)]={hoverIndex === 0}
+						class:!border-[var(--error-border)]={hoverIndex === 0 && !drag.valid}
+						class:!bg-[var(--error-bg)]={hoverIndex === 0 && !drag.valid}
 					>
 						{#if hoverIndex === 0}
-							<span class="font-mono text-sm font-medium lowercase" style="color: var(--fg-primary);">{drag.type ?? 'step'}</span>
+							<span class="font-mono text-sm font-medium lowercase text-[var(--fg-primary)]"
+								>{drag.type ?? 'step'}</span
+							>
 						{/if}
 					</div>
 					<ConnectionLine
@@ -302,13 +309,16 @@
 					/>
 					{#if canDrop}
 						<div
-							class="drop-slot my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all"
-							class:active={hoverIndex === 0}
-							class:invalid={hoverIndex === 0 && !drag.valid}
-							style="border-color: var(--fg-faint); background-color: transparent;"
+							class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--fg-faint)] bg-transparent hover:border-[var(--fg-muted)] hover:bg-[var(--bg-hover)]"
+							class:!border-[var(--fg-primary)]={hoverIndex === 0}
+							class:!bg-[var(--bg-tertiary)]={hoverIndex === 0}
+							class:!border-[var(--error-border)]={hoverIndex === 0 && !drag.valid}
+							class:!bg-[var(--error-bg)]={hoverIndex === 0 && !drag.valid}
 						>
 							{#if hoverIndex === 0}
-								<span class="font-mono text-sm font-medium lowercase" style="color: var(--fg-primary);">{drag.type ?? 'step'}</span>
+								<span class="font-mono text-sm font-medium lowercase text-[var(--fg-primary)]"
+									>{drag.type ?? 'step'}</span
+								>
 							{/if}
 						</div>
 						{#if steps.length > 0}
@@ -364,13 +374,16 @@
 							{/if}
 							{#if canDrop}
 								<div
-									class="drop-slot my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all"
-									class:active={hoverIndex === i + 1}
-									class:invalid={hoverIndex === i + 1 && !drag.valid}
-									style="border-color: var(--fg-faint); background-color: transparent;"
+									class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--fg-faint)] bg-transparent hover:border-[var(--fg-muted)] hover:bg-[var(--bg-hover)]"
+									class:!border-[var(--fg-primary)]={hoverIndex === i + 1}
+									class:!bg-[var(--bg-tertiary)]={hoverIndex === i + 1}
+									class:!border-[var(--error-border)]={hoverIndex === i + 1 && !drag.valid}
+									class:!bg-[var(--error-bg)]={hoverIndex === i + 1 && !drag.valid}
 								>
 									{#if hoverIndex === i + 1}
-										<span class="font-mono text-sm font-medium lowercase" style="color: var(--fg-primary);">{drag.type ?? 'step'}</span>
+										<span class="font-mono text-sm font-medium lowercase text-[var(--fg-primary)]"
+											>{drag.type ?? 'step'}</span
+										>
 									{/if}
 								</div>
 								{#if i < steps.length - 1}
@@ -395,7 +408,6 @@
 </div>
 
 <style>
-	/* When touch-dragging class is on body, prevent any scrolling on the canvas */
 	:global(body.touch-dragging) .pipeline-canvas {
 		overflow: hidden;
 		touch-action: none;
@@ -407,24 +419,5 @@
 
 	.insert-zone.ready:hover :global(.connection-line) {
 		color: var(--accent-primary);
-	}
-
-	.drop-slot:hover {
-		border-color: var(--fg-muted);
-		background-color: var(--bg-hover);
-	}
-
-	.drop-slot.active {
-		border-color: var(--fg-primary);
-		background-color: var(--bg-tertiary);
-	}
-
-	.drop-slot.invalid {
-		border-color: var(--error-border);
-		background-color: var(--error-bg);
-	}
-
-	.drop-slot.invalid .slot-label {
-		color: var(--error-fg);
 	}
 </style>

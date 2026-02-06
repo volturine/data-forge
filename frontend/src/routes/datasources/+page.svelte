@@ -93,12 +93,18 @@
 </script>
 
 <div class="mx-auto min-h-full max-w-[1000px] p-6">
-	<header class="mb-8 flex items-start justify-between gap-6 border-b pb-6" style="border-color: var(--border-primary);">
+	<header
+		class="mb-8 flex items-start justify-between gap-6 border-b border-border-primary pb-6"
+	>
 		<div>
 			<h1 class="m-0 mb-2 text-2xl font-semibold">Data Sources</h1>
-			<p class="m-0" style="color: var(--fg-tertiary);">Manage your data connections and files</p>
+			<p class="m-0 text-fg-tertiary">Manage your data connections and files</p>
 		</div>
-		<a href={resolve('/datasources/new')} class="btn-primary no-underline" style="box-shadow: var(--card-shadow);" data-sveltekit-reload>
+		<a
+			href={resolve('/datasources/new')}
+			class="btn-primary no-underline shadow-[var(--card-shadow)]"
+			data-sveltekit-reload
+		>
 			<Plus size={16} />
 			Add Data Source
 		</a>
@@ -114,16 +120,26 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="rounded-sm border border-dashed p-12 text-center" style="background-color: var(--bg-primary); border-color: var(--border-secondary);">
-				<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-sm border text-xl" style="border-color: var(--border-primary); color: var(--fg-muted);">+</div>
-				<p class="m-0 mb-6" style="color: var(--fg-tertiary);">No data sources yet.</p>
+			<div
+				class="rounded-sm border border-dashed border-border-secondary bg-bg-primary p-12 text-center"
+			>
+				<div
+					class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-sm border border-border-primary text-xl text-fg-muted"
+				>
+					+
+				</div>
+				<p class="m-0 mb-6 text-fg-tertiary">No data sources yet.</p>
 				<a href={resolve('/datasources/new')} class="btn btn-primary" data-sveltekit-reload
 					>Create your first data source</a
 				>
 			</div>
 		{:else}
-			<div class="overflow-hidden rounded-sm border" style="background-color: var(--bg-primary); border-color: var(--border-primary);">
-				<div class="grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 border-b px-5 py-4 text-xs font-semibold uppercase tracking-wide" style="background-color: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-tertiary);">
+			<div
+				class="overflow-hidden rounded-sm border border-border-primary bg-bg-primary"
+			>
+				<div
+					class="grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 border-b border-border-primary bg-bg-tertiary px-5 py-4 text-xs font-semibold uppercase tracking-wide text-fg-tertiary"
+				>
 					<span></span>
 					<span>Name</span>
 					<span>Type</span>
@@ -133,12 +149,16 @@
 					<span>Actions</span>
 				</div>
 				{#each query.data as datasource (datasource.id)}
-					<div class="list-item border-b" style="border-color: var(--border-primary);" class:expanded={isExpanded(datasource.id)}>
-						<div class="list-row grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 px-5 py-4" style="color: var(--fg-secondary);">
+					<div
+						class="list-item border-b border-border-primary"
+						class:expanded={isExpanded(datasource.id)}
+					>
+						<div
+							class="list-row grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 px-5 py-4 text-fg-secondary hover:bg-bg-hover"
+						>
 							<span>
 								<button
-									class="expand-btn flex h-7 w-7 items-center justify-center rounded-sm border border-transparent bg-transparent transition-all"
-									style="color: var(--fg-tertiary);"
+									class="expand-btn flex h-7 w-7 items-center justify-center rounded-sm border border-transparent bg-transparent text-fg-tertiary transition-all hover:border-border-secondary hover:bg-bg-hover hover:text-fg-primary"
 									onclick={() => togglePreview(datasource.id)}
 									aria-expanded={isExpanded(datasource.id)}
 									aria-label={isExpanded(datasource.id) ? 'Collapse preview' : 'Expand preview'}
@@ -150,7 +170,9 @@
 									{/if}
 								</button>
 							</span>
-							<span class="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{datasource.name}</span>
+							<span class="overflow-hidden text-ellipsis whitespace-nowrap font-medium"
+								>{datasource.name}</span
+							>
 							<span>
 								{#if datasource.source_type === 'file'}
 									<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
@@ -163,11 +185,11 @@
 							</span>
 							<span class="tabular-nums">{formatRowCount(getRowCount(datasource))}</span>
 							<span class="tabular-nums">{getColumnCount(datasource)}</span>
-							<span style="color: var(--fg-muted);">{formatDate(datasource.created_at)}</span>
+							<span class="text-fg-muted">{formatDate(datasource.created_at)}</span>
 							<span class="flex items-center whitespace-nowrap">
 								{#if confirmingDelete === datasource.id}
 									<div class="flex items-center gap-2">
-										<span class="text-xs font-medium" style="color: var(--error-fg);">Delete?</span>
+										<span class="text-xs font-medium text-error-fg">Delete?</span>
 										<button
 											onclick={() => confirmDelete(datasource.id)}
 											class="btn btn-danger btn-sm"
@@ -187,7 +209,7 @@
 										</button>
 										<button
 											onclick={() => handleDelete(datasource.id)}
-											class="btn btn-ghost btn-sm btn-delete"
+											class="btn btn-ghost btn-sm btn-delete hover:text-error-fg"
 											disabled={deleteMutation.isPending}
 										>
 											Delete
@@ -197,7 +219,9 @@
 							</span>
 						</div>
 						{#if isExpanded(datasource.id)}
-							<div class="border-t p-4" style="background: var(--bg-secondary); border-color: var(--border-primary);">
+							<div
+								class="border-t border-border-primary bg-bg-secondary p-4"
+							>
 								<DatasourcePreview datasourceId={datasource.id} datasourceName={datasource.name} />
 							</div>
 						{/if}
@@ -211,19 +235,5 @@
 <style>
 	.list-item:last-child {
 		border-bottom: none;
-	}
-
-	.list-row:hover {
-		background-color: var(--bg-hover);
-	}
-
-	.expand-btn:hover {
-		background: var(--bg-hover);
-		color: var(--fg-primary);
-		border-color: var(--border-secondary);
-	}
-
-	.btn-delete:hover:not(:disabled) {
-		color: var(--error-fg);
 	}
 </style>

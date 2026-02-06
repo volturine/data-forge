@@ -42,7 +42,13 @@
 </script>
 
 <div class="flex gap-2">
-	<input type="date" id={id ? `${id}-date` : undefined} value={dateValue} onchange={handleDateChange} class="min-w-0 flex-1" />
+	<input
+		type="date"
+		id={id ? `${id}-date` : undefined}
+		value={dateValue}
+		onchange={handleDateChange}
+		class="min-w-0 flex-1"
+	/>
 	<div class="relative min-w-0 flex-1">
 		<input
 			type="time"

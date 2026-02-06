@@ -45,12 +45,16 @@
 											{/if}
 										{/each}
 									{:else}
-										<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">No inputs</span>
+										<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);"
+											>No inputs</span
+										>
 									{/if}
 								</div>
 							</div>
 							{#if udf.description}
-								<p class="mt-2 mb-0 text-sm" style="color: var(--fg-secondary);">{udf.description}</p>
+								<p class="mt-2 mb-0 text-sm" style="color: var(--fg-secondary);">
+									{udf.description}
+								</p>
 							{/if}
 						</button>
 					{/each}

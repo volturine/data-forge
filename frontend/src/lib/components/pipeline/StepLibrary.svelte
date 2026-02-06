@@ -155,22 +155,23 @@
 </script>
 
 <div
-	class="step-library flex w-full flex-col gap-3 overflow-hidden px-3 py-4"
-	style="background-color: var(--panel-bg);"
+	class="step-library flex w-full flex-col gap-3 overflow-hidden bg-panel-bg px-3 py-4"
 >
 	<img
 		class="drag-preview pointer-events-none fixed -left-[9999px] -top-[9999px] h-px w-px opacity-0"
 		alt=""
 		bind:this={dragImageEl}
 	/>
-	<h3
-		class="m-0 mb-3 shrink-0 text-sm uppercase tracking-widest"
-		style="color: var(--fg-primary);"
-	>Operations</h3>
-	<div class="step-list flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden" role="list">
+	<h3 class="m-0 mb-3 shrink-0 text-sm uppercase tracking-widest text-fg-primary">
+		Operations
+	</h3>
+	<div
+		class="step-list flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden"
+		role="list"
+	>
 		{#each stepTypes as stepType (stepType.type)}
 			<button
-				class="step-button relative flex cursor-grab items-center justify-start gap-3 rounded-md border border-transparent bg-transparent p-3 text-left transition-colors"
+				class="step-button relative flex cursor-grab items-center justify-start gap-3 rounded-md border border-transparent bg-transparent p-3 text-left transition-colors hover:border-border-secondary hover:bg-bg-hover"
 				class:dragging
 				onclick={() => handleClick(stepType.type)}
 				onpointerdown={(event) => startDrag(event, stepType.type)}
@@ -183,24 +184,22 @@
 			>
 				<span class="shrink-0 text-xl" data-drag-handle="true">{stepType.icon}</span>
 				<div class="flex min-w-0 flex-col items-start gap-0.5">
-					<span class="text-sm font-semibold" style="color: var(--fg-primary);">{stepType.label}</span>
-					<span class="truncate text-xs" style="color: var(--fg-muted);">{stepType.description}</span>
+					<span class="text-sm font-semibold text-fg-primary">{stepType.label}</span>
+					<span class="truncate text-xs text-fg-muted">{stepType.description}</span>
 				</div>
 			</button>
 		{/each}
 	</div>
 
-	<div class="mt-4 shrink-0 border-t pt-3" style="border-color: var(--panel-border);">
-		<h4
-			class="m-0 mb-2 text-xs uppercase tracking-wide"
-			style="color: var(--fg-muted);"
-		>Quick Insert</h4>
+	<div class="mt-4 shrink-0 border-t border-panel-border pt-3">
+		<h4 class="m-0 mb-2 text-xs uppercase tracking-wide text-fg-muted">
+			Quick Insert
+		</h4>
 		<div class="flex flex-col gap-2">
 			<select
-				class="rounded-sm border p-2"
+				class="rounded-sm border border-panel-border bg-bg-secondary p-2 text-fg-primary"
 				value={selectedType ?? ''}
 				onchange={(event) => (selectedType = event.currentTarget.value || null)}
-				style="border-color: var(--panel-border); background-color: var(--bg-secondary); color: var(--fg-primary);"
 			>
 				<option value="">Select operation...</option>
 				{#each stepTypes as stepType (stepType.type)}
@@ -209,7 +208,7 @@
 			</select>
 			<div class="grid grid-cols-2 gap-2">
 				<button
-					class="fallback-btn cursor-pointer rounded-sm border bg-transparent p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+					class="fallback-btn cursor-pointer rounded-sm border border-panel-border bg-transparent p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {
@@ -218,12 +217,11 @@
 							selectedType = null;
 						}
 					}}
-					style="border-color: var(--panel-border); color: var(--fg-primary);"
 				>
 					Add to end
 				</button>
 				<button
-					class="fallback-btn cursor-pointer rounded-sm border bg-transparent p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+					class="fallback-btn cursor-pointer rounded-sm border border-panel-border bg-transparent p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {
@@ -232,7 +230,6 @@
 							selectedType = null;
 						}
 					}}
-					style="border-color: var(--panel-border); color: var(--fg-primary);"
 				>
 					Insert at start
 				</button>
@@ -242,11 +239,6 @@
 </div>
 
 <style>
-	.step-button:hover {
-		border-color: var(--border-secondary);
-		background-color: var(--bg-hover);
-	}
-
 	.step-button:active {
 		cursor: grabbing;
 	}
@@ -262,9 +254,5 @@
 		user-select: none;
 		-webkit-user-select: none;
 		-webkit-touch-callout: none;
-	}
-
-	.fallback-btn:hover:not(:disabled) {
-		background-color: var(--bg-hover);
 	}
 </style>

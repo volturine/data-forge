@@ -178,23 +178,23 @@
 <div
 	class="step-node relative w-[65%]"
 	class:view-node={step.type === 'view'}
-	class:greyed-out={isDragging}
+	class:opacity-40={isDragging}
+	class:grayscale-50={isDragging}
 	class:drag-target={isOtherDragging}
 >
 	<div
-		class="absolute left-1/2 -top-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full"
-		style="background-color: var(--fg-muted); border: 2px solid var(--bg-primary);"
+		class="absolute left-1/2 -top-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2"
+		style="background-color: var(--fg-muted); border-color: var(--bg-primary);"
 	></div>
 
 	<div
-		class="step-content rounded-sm border p-4 transition-all"
+		class="step-content card-base rounded-sm border p-4 transition-all hover:border-tertiary hover:-translate-y-px"
 		role="listitem"
-		style="background-color: var(--bg-primary); border-color: var(--border-primary); box-shadow: var(--card-shadow);"
 	>
 		<div class="mb-3 flex items-center gap-2">
 			<!-- Drag handle (6-dot grip) -->
 			<button
-				class="drag-handle flex shrink-0 cursor-grab items-center justify-center rounded-sm border-none bg-transparent p-1 opacity-40 transition-all select-none"
+				class="drag-handle flex shrink-0 cursor-grab items-center justify-center rounded-sm border-none bg-transparent p-1 opacity-40 transition-all select-none text-fg-muted hover:opacity-100 hover:bg-hover active:cursor-grabbing"
 				class:dragging
 				title="Drag to reorder"
 				type="button"
@@ -204,7 +204,6 @@
 				onpointercancel={finishDrag}
 				onclick={handleClick}
 				data-drag-handle="true"
-				style="color: var(--fg-muted);"
 			>
 				<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
 					<circle cx="2" cy="2" r="1.5" />
@@ -218,62 +217,54 @@
 
 			<span class="shrink-0 text-base">{currentStepInfo.icon}</span>
 			<span class="flex-1 text-sm font-semibold">{label}</span>
-			<span class="shrink-0 text-xs" style="color: var(--fg-muted);">#{index + 1}</span>
+			<span class="shrink-0 text-xs text-fg-muted">#{index + 1}</span>
 		</div>
 
 		<div
-			class="step-summary mb-3 rounded-sm px-3 py-2 text-xs"
+			class="step-summary mb-3 rounded-sm px-3 py-2 text-xs bg-tertiary text-fg-tertiary"
 			class:inactive={!isApplied}
-			style="background-color: var(--bg-tertiary); color: var(--fg-tertiary);"
 		>
 			{summary}
 		</div>
 
 		<div class="flex gap-2">
 			<button
-				class="action-btn flex-1 cursor-pointer rounded-sm border bg-transparent p-2 text-xs font-medium uppercase tracking-widest transition-all"
+				class="action-btn flex-1 cursor-pointer rounded-sm border border-primary bg-transparent p-2 font-medium uppercase tracking-widest text-[0.625rem] text-fg-secondary hover:bg-hover hover:text-fg-primary transition-all"
 				class:inactive={!isApplied}
 				onclick={() => onToggleApply(step.id)}
 				type="button"
 				title={isApplied ? 'Disable step' : 'Enable step'}
-				style="border-color: var(--border-primary); color: var(--fg-secondary); font-size: 0.625rem;"
 			>
 				{isApplied ? 'disable' : 'enable'}
 			</button>
 			<button
-				class="action-btn flex-1 cursor-pointer rounded-sm border bg-transparent p-2 text-xs font-medium transition-all"
+				class="action-btn flex-1 cursor-pointer rounded-sm border border-primary bg-transparent p-2 text-xs font-medium transition-all text-fg-secondary hover:bg-hover hover:text-fg-primary"
 				onclick={() => onEdit(step.id)}
 				type="button"
-				style="border-color: var(--border-primary); color: var(--fg-secondary);"
 			>
 				edit
 			</button>
 			<button
-				class="action-btn danger flex-1 cursor-pointer rounded-sm border bg-transparent p-2 text-xs font-medium transition-all"
+				class="action-btn danger flex-1 cursor-pointer rounded-sm border border-primary bg-transparent p-2 text-xs font-medium transition-all text-fg-secondary hover:bg-error hover:border-error hover:text-error"
 				onclick={() => onDelete(step.id)}
 				type="button"
-				style="border-color: var(--border-primary); color: var(--fg-secondary);"
 			>
 				delete
 			</button>
 		</div>
 
 		{#if step.type === 'export' && datasourceId}
-			<div class="mt-3 border-t pt-3" style="border-color: var(--border-primary);">
+			<div class="mt-3 border-t border-primary pt-3">
 				{#if exportError}
-					<div
-						class="mb-2 rounded-sm border p-2 text-xs"
-						style="background-color: var(--error-bg); color: var(--error-fg); border-color: var(--error-border);"
-					>
+					<div class="mb-2 rounded-sm border border-error bg-error p-2 text-xs text-error">
 						{exportError}
 					</div>
 				{/if}
 				<button
-					class="export-btn flex w-full cursor-pointer items-center justify-center gap-2 rounded-sm border-none px-3 py-2 text-xs font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+					class="export-btn flex w-full cursor-pointer items-center justify-center gap-2 rounded-sm border-none px-3 py-2 text-xs font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-bg-primary hover:opacity-90 hover:enabled:opacity-90"
 					onclick={handleExport}
 					disabled={isExporting}
 					type="button"
-					style="background-color: var(--accent-primary); color: var(--bg-primary);"
 				>
 					{#if isExporting}
 						<span class="spinner spinner-sm"></span>
@@ -290,7 +281,7 @@
 		{/if}
 
 		{#if step.type === 'view' && datasourceId && analysisId}
-			<div class="mt-3 border-t pt-3" style="border-color: var(--border-secondary);">
+			<div class="mt-3 border-t border-secondary pt-3">
 				<InlineDataTable
 					{analysisId}
 					{datasourceId}
@@ -303,8 +294,8 @@
 	</div>
 
 	<div
-		class="absolute left-1/2 -bottom-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full"
-		style="background-color: var(--fg-muted); border: 2px solid var(--bg-primary);"
+		class="absolute left-1/2 -bottom-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2"
+		style="background-color: var(--fg-muted); border-color: var(--bg-primary);"
 	></div>
 </div>
 
@@ -312,25 +303,6 @@
 	.step-node.view-node {
 		width: 85%;
 		min-width: 320px;
-	}
-
-	.step-node.greyed-out {
-		opacity: 0.4;
-		filter: grayscale(50%);
-	}
-
-	.step-content:hover {
-		border-color: var(--border-tertiary);
-		transform: translateY(-1px);
-	}
-
-	.drag-handle:hover {
-		opacity: 1;
-		background-color: var(--bg-hover);
-	}
-
-	.drag-handle:active {
-		cursor: grabbing;
 	}
 
 	.drag-handle.dragging {
@@ -352,11 +324,6 @@
 		border: 1px dashed var(--border-primary);
 	}
 
-	.action-btn:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
 	.action-btn.inactive {
 		border-style: dashed;
 		color: var(--fg-muted);
@@ -365,16 +332,6 @@
 	.action-btn.inactive:hover {
 		background-color: var(--bg-tertiary);
 		color: var(--fg-secondary);
-	}
-
-	.action-btn.danger:hover {
-		background-color: var(--error-bg);
-		border-color: var(--error-border);
-		color: var(--error-fg);
-	}
-
-	.export-btn:hover:not(:disabled) {
-		opacity: 0.9;
 	}
 
 	.step-node.drag-target .step-content {

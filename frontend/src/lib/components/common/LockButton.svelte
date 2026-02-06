@@ -45,11 +45,15 @@
 	</button>
 {:else}
 	<button
-		class="lock-btn acquire flex items-center gap-2 rounded-sm border border-transparent px-3 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed {isLocked ? 'cursor-not-allowed' : 'cursor-pointer hover:opacity-90'}"
+		class="lock-btn acquire flex items-center gap-2 rounded-sm border border-transparent px-3 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed {isLocked
+			? 'cursor-not-allowed'
+			: 'cursor-pointer hover:opacity-90'}"
 		onclick={handleAcquire}
 		disabled={isLocked}
 		type="button"
-		style="background: {isLocked ? 'var(--bg-tertiary)' : 'var(--accent-primary)'}; color: {isLocked ? 'var(--fg-muted)' : 'white'};"
+		style="background: {isLocked ? 'var(--bg-tertiary)' : 'var(--accent-primary)'}; color: {isLocked
+			? 'var(--fg-muted)'
+			: 'white'};"
 	>
 		<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
 			{#if isLocked}

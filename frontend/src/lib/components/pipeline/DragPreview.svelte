@@ -46,12 +46,20 @@
 	<div
 		class="pointer-events-none fixed z-[9999] flex items-center gap-2 whitespace-nowrap rounded-md border-2 px-3 py-2 text-sm"
 		class:reorder={isReorder}
-		style="left: {position.x + 12}px; top: {position.y + 12}px; background: var(--bg-primary); border-color: {isReorder ? 'var(--warning-border, #f59e0b)' : 'var(--accent-primary)'}; box-shadow: var(--shadow-drag); {isReorder ? 'background: var(--warning-bg, #fef3c7);' : ''}"
+		style="left: {position.x + 12}px; top: {position.y +
+			12}px; background: var(--bg-primary); border-color: {isReorder
+			? 'var(--warning-border, #f59e0b)'
+			: 'var(--accent-primary)'}; box-shadow: var(--shadow-drag); {isReorder
+			? 'background: var(--warning-bg, #fef3c7);'
+			: ''}"
 	>
 		<span class="text-base">{info.icon}</span>
 		<span class="font-semibold" style="color: var(--fg-primary);">{info.label}</span>
 		{#if isReorder}
-			<span class="rounded-sm px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-white" style="background: var(--warning-fg);">Move</span>
+			<span
+				class="rounded-sm px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-white"
+				style="background: var(--warning-fg);">Move</span
+			>
 		{/if}
 	</div>
 {/if}

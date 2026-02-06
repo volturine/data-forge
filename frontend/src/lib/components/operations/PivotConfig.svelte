@@ -43,7 +43,9 @@
 
 	<div class="mb-4">
 		<label for="pivot-column"
-			>Pivot Column <span class="text-xs" style="color: var(--fg-muted);">(values become new columns)</span></label
+			>Pivot Column <span class="text-xs" style="color: var(--fg-muted);"
+				>(values become new columns)</span
+			></label
 		>
 		<ColumnDropdown
 			{schema}
@@ -60,9 +62,14 @@
 		<span id="index-columns-label" class="group-label"
 			>Index Columns <span class="text-xs" style="color: var(--fg-muted);">(rows)</span></span
 		>
-		<div class="grid gap-2 p-2 rounded-sm max-h-[150px] overflow-y-auto" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); border: 1px solid var(--border-primary); background-color: var(--bg-secondary);">
+		<div
+			class="grid gap-2 p-2 rounded-sm max-h-[150px] overflow-y-auto"
+			style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); border: 1px solid var(--border-primary); background-color: var(--bg-secondary);"
+		>
 			{#each schema.columns as column (column.name)}
-				<label class="checkbox-label flex items-center gap-2 px-2 py-1 rounded-sm cursor-pointer text-sm hover:bg-[var(--bg-hover)]">
+				<label
+					class="checkbox-label flex items-center gap-2 px-2 py-1 rounded-sm cursor-pointer text-sm hover:bg-[var(--bg-hover)]"
+				>
 					<input
 						id={`pivot-checkbox-index-${column.name}`}
 						data-testid={`pivot-index-checkbox-${column.name}`}
@@ -78,7 +85,12 @@
 			{/each}
 		</div>
 		{#if safeIndex.length > 0}
-			<div id="pivot-index-summary" class="mt-2 text-xs" style="color: var(--fg-muted);" aria-live="polite">
+			<div
+				id="pivot-index-summary"
+				class="mt-2 text-xs"
+				style="color: var(--fg-muted);"
+				aria-live="polite"
+			>
 				{safeIndex.length} selected
 			</div>
 		{/if}
@@ -126,7 +138,9 @@
 					Refresh Output Columns
 				{/if}
 			</button>
-			<p class="text-xs mt-1" style="color: var(--fg-muted);">Click to compute the resulting columns after pivot</p>
+			<p class="text-xs mt-1" style="color: var(--fg-muted);">
+				Click to compute the resulting columns after pivot
+			</p>
 		</div>
 	{/if}
 </div>

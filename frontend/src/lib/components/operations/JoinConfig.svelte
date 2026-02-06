@@ -98,7 +98,12 @@
 			}}
 		/>
 		{#if rightSchema}
-			<div id="join-schema-preview" class="mt-2 p-2 rounded-sm" style="background-color: var(--panel-bg);" aria-live="polite">
+			<div
+				id="join-schema-preview"
+				class="mt-2 p-2 rounded-sm"
+				style="background-color: var(--panel-bg);"
+				aria-live="polite"
+			>
 				<strong>{rightSchema.columns.length} columns</strong>
 			</div>
 		{/if}
@@ -112,7 +117,12 @@
 				<option value={joinType.value}>{joinType.label}</option>
 			{/each}
 		</select>
-		<div id="join-type-help" class="text-sm leading-relaxed p-3 rounded-sm mt-2" style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);" aria-describedby="join-type-help">
+		<div
+			id="join-type-help"
+			class="text-sm leading-relaxed p-3 rounded-sm mt-2"
+			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);"
+			aria-describedby="join-type-help"
+		>
 			<strong>Inner:</strong> Only matching rows from both.<br />
 			<strong>Left:</strong> All left rows, matching right rows.<br />
 			<strong>Right:</strong> All right rows, matching left rows.<br />
@@ -145,9 +155,18 @@
 			{/if}
 
 			{#each config.join_columns ?? [] as joinCol, _index (joinCol.id)}
-				<div class="flex gap-2 items-end mb-3 p-3 rounded-sm" style="background-color: var(--panel-bg);" role="group" aria-label={`Join column pair ${_index + 1}`}>
+				<div
+					class="flex gap-2 items-end mb-3 p-3 rounded-sm"
+					style="background-color: var(--panel-bg);"
+					role="group"
+					aria-label={`Join column pair ${_index + 1}`}
+				>
 					<div class="flex-1">
-						<label for={`join-left-${joinCol.id}`} class="block text-xs mb-1" style="color: var(--fg-muted);">Left Column</label>
+						<label
+							for={`join-left-${joinCol.id}`}
+							class="block text-xs mb-1"
+							style="color: var(--fg-muted);">Left Column</label
+						>
 						<ColumnDropdown
 							{schema}
 							value={joinCol.left_column ?? ''}
@@ -156,7 +175,11 @@
 						/>
 					</div>
 					<div class="flex-1">
-						<label for={`join-right-${joinCol.id}`} class="block text-xs mb-1" style="color: var(--fg-muted);">Right Column</label>
+						<label
+							for={`join-right-${joinCol.id}`}
+							class="block text-xs mb-1"
+							style="color: var(--fg-muted);">Right Column</label
+						>
 						<ColumnDropdown
 							schema={{ columns: rightColumns, row_count: rightSchema?.row_count ?? 0 }}
 							value={joinCol.right_column ?? ''}
@@ -220,7 +243,11 @@
 			placeholder="_right"
 			aria-describedby="join-suffix-hint"
 		/>
-		<div id="join-suffix-hint" class="text-sm leading-relaxed p-3 rounded-sm mt-2" style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);">
+		<div
+			id="join-suffix-hint"
+			class="text-sm leading-relaxed p-3 rounded-sm mt-2"
+			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);"
+		>
 			Suffix for columns from the right dataset (when names collide)
 		</div>
 	</div>

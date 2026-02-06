@@ -61,13 +61,20 @@
 	}
 </script>
 
-<div class="inline-flex flex-wrap items-center gap-2 max-[480px]:flex-col max-[480px]:items-stretch">
+<div
+	class="inline-flex flex-wrap items-center gap-2 max-[480px]:flex-col max-[480px]:items-stretch"
+>
 	<select
 		{id}
 		{value}
 		onchange={handleChange}
 		{disabled}
-		class="cursor-pointer rounded-sm border transition-all disabled:cursor-not-allowed disabled:opacity-60 hover:not-disabled:border-[var(--border-primary)] hover:not-disabled:bg-[var(--bg-primary)] focus:outline-2 focus:outline-offset-2 focus:outline-[var(--accent-primary)] focus:border-[var(--accent-primary)] max-[480px]:w-full {size === 'sm' ? 'px-2 py-1 text-xs' : size === 'lg' ? 'px-3 py-2 text-[0.9375rem]' : 'px-2.5 py-1.5 text-sm'}"
+		class="cursor-pointer rounded-sm border transition-all disabled:cursor-not-allowed disabled:opacity-60 hover:not-disabled:border-[var(--border-primary)] hover:not-disabled:bg-[var(--bg-primary)] focus:outline-2 focus:outline-offset-2 focus:outline-[var(--accent-primary)] focus:border-[var(--accent-primary)] max-[480px]:w-full {size ===
+		'sm'
+			? 'px-2 py-1 text-xs'
+			: size === 'lg'
+				? 'px-3 py-2 text-[0.9375rem]'
+				: 'px-2.5 py-1.5 text-sm'}"
 		style="min-width: {selectWidth}; background-color: var(--bg-secondary); border-color: var(--border-secondary); color: var(--fg-primary); font-family: var(--font-mono, monospace);"
 	>
 		{#if placeholder}

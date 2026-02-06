@@ -378,11 +378,10 @@
 </script>
 
 <div class="mx-auto min-h-full max-w-[900px] p-6">
-	<header class="mb-6 flex items-center justify-between gap-4 border-b pb-6" style="border-color: var(--border-primary);">
+	<header class="mb-6 flex items-center justify-between gap-4 border-b border-primary pb-6">
 		<div class="flex items-center gap-4">
 			<button
-				class="btn-back flex h-9 w-9 items-center justify-center rounded-sm border p-0 transition-all"
-				style="background: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-secondary);"
+				class="btn-back flex h-9 w-9 items-center justify-center rounded-sm border border-primary bg-tertiary p-0 text-fg-secondary transition-all hover:bg-hover hover:text-fg-primary"
 				onclick={handleBack}
 			>
 				<ArrowLeft size={20} />
@@ -390,7 +389,7 @@
 			<div>
 				<h1 class="m-0 mb-1 text-2xl font-semibold">Edit Data Source</h1>
 				{#if datasourceQuery.data}
-					<p class="m-0 text-sm" style="color: var(--fg-tertiary);">{datasourceQuery.data.name}</p>
+					<p class="m-0 text-sm text-fg-tertiary">{datasourceQuery.data.name}</p>
 				{/if}
 			</div>
 		</div>
@@ -410,7 +409,7 @@
 	</header>
 
 	{#if datasourceQuery.isLoading}
-		<div class="flex flex-col items-center justify-center gap-4 p-12" style="color: var(--fg-muted);">
+		<div class="flex flex-col items-center justify-center gap-4 p-12 text-fg-muted">
 			<Loader size={32} class="spin" />
 			<p>Loading data source...</p>
 		</div>
@@ -429,39 +428,35 @@
 		{@const csv = isCsv(datasource)}
 		{@const excel = isExcel(datasource)}
 
-		<div class="mb-6 flex gap-2 border-b-2" style="border-color: var(--border-primary);">
+		<div class="mb-6 flex gap-2 border-b-2 border-primary">
 			<button
-				class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium transition-all"
+				class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 				class:active={activeTab === 'general'}
 				onclick={() => (activeTab = 'general')}
-				style="color: var(--fg-muted);"
 			>
 				General
 			</button>
 			<button
-				class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium transition-all"
+				class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 				class:active={activeTab === 'schema'}
 				onclick={() => (activeTab = 'schema')}
-				style="color: var(--fg-muted);"
 			>
 				Schema
 			</button>
 			{#if csv}
 				<button
-					class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium transition-all"
+					class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 					class:active={activeTab === 'csv'}
 					onclick={() => (activeTab = 'csv')}
-					style="color: var(--fg-muted);"
 				>
 					CSV Options
 				</button>
 			{/if}
 			{#if excel}
 				<button
-					class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium transition-all"
+					class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 					class:active={activeTab === 'excel'}
 					onclick={() => (activeTab = 'excel')}
-					style="color: var(--fg-muted);"
 				>
 					Excel Options
 				</button>
@@ -481,56 +476,57 @@
 		{/if}
 
 		{#if updateMutation.isSuccess}
-			<div class="success-box mb-4 flex items-center gap-2 rounded-sm border p-3 text-sm" style="background-color: var(--success-bg); border-color: var(--success-border); color: var(--success-fg);">
+			<div class="success-box mb-4 flex items-center gap-2 rounded-sm border p-3 text-sm">
 				<p class="m-0">Changes saved successfully!</p>
 			</div>
 		{/if}
 
-		<div class="rounded-md border p-6" style="background-color: var(--bg-primary); border-color: var(--border-primary);">
+		<div class="rounded-md border border-primary bg-primary p-6">
 			{#if activeTab === 'general'}
 				<div class="flex flex-col gap-5">
 					<div class="flex flex-col gap-2">
-						<label for="datasource-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
+						<label for="datasource-name" class="text-sm font-medium text-fg-secondary">Name</label>
 						<input
 							id="datasource-name"
 							type="text"
 							value={name}
 							oninput={(e) => handleNameChange(e.currentTarget.value)}
 							placeholder="Data source name"
-							class="rounded-sm border px-3 py-2 text-sm transition-colors"
-							style="border-color: var(--input-border); background-color: var(--input-bg);"
+							class="input-base rounded-sm border px-3 py-2 text-sm transition-colors"
 						/>
 					</div>
 
-					<div class="mt-4 border-t pt-4" style="border-color: var(--border-primary);">
-						<h3 class="m-0 mb-4 text-sm font-semibold" style="color: var(--fg-secondary);">Source Information</h3>
+					<div class="mt-4 border-t border-primary pt-4">
+						<h3 class="m-0 mb-4 text-sm font-semibold text-fg-secondary">Source Information</h3>
 						<div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
 							<div class="flex flex-col gap-1">
-								<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">Type</span>
-								<span class="text-sm font-medium" style="color: var(--fg-primary);">{datasource.source_type}</span>
+								<span class="text-xs uppercase tracking-wide text-fg-muted">Type</span>
+								<span class="text-sm font-medium text-fg-primary">{datasource.source_type}</span>
 							</div>
 							{#if isFile(datasource)}
 								{@const config = datasource.config as unknown as FileDataSourceConfig}
 								<div class="flex flex-col gap-1">
-									<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">File Type</span>
+									<span class="text-xs uppercase tracking-wide text-fg-muted">File Type</span>
 									<FileTypeBadge path={config.file_path} size="sm" />
 								</div>
 							{/if}
 							{#if isIceberg(datasource)}
 								{@const config = datasource.config as unknown as IcebergDataSourceConfig}
 								<div class="flex flex-col gap-1">
-									<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">Metadata Path</span>
-									<span class="break-all text-xs" style="color: var(--fg-secondary);">{config.metadata_path}</span>
+									<span class="text-xs uppercase tracking-wide text-fg-muted">Metadata Path</span>
+									<span class="break-all text-xs text-fg-secondary">{config.metadata_path}</span>
 								</div>
 							{/if}
 							<div class="flex flex-col gap-1">
-								<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">Created</span>
-								<span class="text-sm font-medium" style="color: var(--fg-primary);">{formatDate(datasource.created_at)}</span>
+								<span class="text-xs uppercase tracking-wide text-fg-muted">Created</span>
+								<span class="text-sm font-medium text-fg-primary"
+									>{formatDate(datasource.created_at)}</span
+								>
 							</div>
 							{#if schemaQuery.data}
 								<div class="flex flex-col gap-1">
-									<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">Rows</span>
-									<span class="text-sm font-medium" style="color: var(--fg-primary);">
+									<span class="text-xs uppercase tracking-wide text-fg-muted">Rows</span>
+									<span class="text-sm font-medium text-fg-primary">
 										{schemaQuery.data.row_count?.toLocaleString() ?? 'Unknown'}
 									</span>
 									<button
@@ -542,8 +538,10 @@
 									</button>
 								</div>
 								<div class="flex flex-col gap-1">
-									<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">Columns</span>
-									<span class="text-sm font-medium" style="color: var(--fg-primary);">{schemaQuery.data.columns.length}</span>
+									<span class="text-xs uppercase tracking-wide text-fg-muted">Columns</span>
+									<span class="text-sm font-medium text-fg-primary"
+										>{schemaQuery.data.columns.length}</span
+									>
 								</div>
 							{/if}
 						</div>
@@ -553,18 +551,18 @@
 				<div class="flex flex-col gap-4">
 					<div>
 						<h3 class="m-0 mb-2 text-base font-semibold">Column Schema</h3>
-						<p class="m-0 text-xs" style="color: var(--fg-muted);">
+						<p class="m-0 text-xs text-fg-muted">
 							Adjust column names and types. Changes will trigger re-processing of the file.
 						</p>
 					</div>
 
 					{#if isSavingParsing}
-						<div class="flex flex-col items-center justify-center gap-4 p-12" style="color: var(--fg-muted);">
+						<div class="flex flex-col items-center justify-center gap-4 p-12 text-fg-muted">
 							<Loader size={24} class="spin" />
 							<p>Refreshing schema...</p>
 						</div>
 					{:else if schemaQuery.isLoading}
-						<div class="flex flex-col items-center justify-center gap-4 p-12" style="color: var(--fg-muted);">
+						<div class="flex flex-col items-center justify-center gap-4 p-12 text-fg-muted">
 							<Loader size={24} class="spin" />
 							<p>Loading schema...</p>
 						</div>
@@ -574,20 +572,23 @@
 							<p>Error loading schema</p>
 						</div>
 					{:else if columns.length > 0}
-						<div class="overflow-hidden rounded-sm border" style="border-color: var(--border-primary);">
-							<div class="grid grid-cols-[50px_2fr_140px_1fr] items-center gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-wide" style="background-color: var(--bg-tertiary); color: var(--fg-tertiary);">
+						<div class="overflow-hidden rounded-sm border border-primary">
+							<div
+								class="grid grid-cols-[50px_2fr_140px_1fr] items-center gap-3 bg-tertiary px-4 py-3 text-xs font-semibold uppercase tracking-wide text-fg-tertiary"
+							>
 								<span>#</span>
 								<span>Column Name</span>
 								<span>Type</span>
 								<span>Sample Value</span>
 							</div>
 							{#each columns as column, index (index)}
-								<div class="table-row grid grid-cols-[50px_2fr_140px_1fr] items-center gap-3 border-t px-4 py-3" style="border-color: var(--border-primary);">
-									<span class="text-xs" style="color: var(--fg-muted);">{index + 1}</span>
+								<div
+									class="table-row grid grid-cols-[50px_2fr_140px_1fr] items-center gap-3 border-t border-primary px-4 py-3 hover:bg-hover"
+								>
+									<span class="text-xs text-fg-muted">{index + 1}</span>
 									<input
 										type="text"
-										class="w-full rounded-sm border px-3 py-2 text-sm"
-										style="border-color: var(--input-border); background-color: var(--input-bg);"
+										class="input-base w-full rounded-sm border px-3 py-2 text-sm"
 										value={column.name}
 										oninput={(e) => handleColumnNameChange(index, e.currentTarget.value)}
 									/>
@@ -596,14 +597,17 @@
 										onChange={(val) => handleColumnTypeChange(index, val)}
 										placeholder="Select type..."
 									/>
-									<span class="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap text-sm" style="color: var(--fg-muted);" title={column.sample_value ?? ''}>
+									<span
+										class="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap text-sm text-fg-muted"
+										title={column.sample_value ?? ''}
+									>
 										{column.sample_value ?? '-'}
 									</span>
 								</div>
 							{/each}
 						</div>
 					{:else}
-						<div class="p-8 text-center" style="color: var(--fg-muted);">
+						<div class="p-8 text-center text-fg-muted">
 							<p class="m-0">No schema information available.</p>
 						</div>
 					{/if}
@@ -614,13 +618,14 @@
 
 					<div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
 						<div class="flex flex-col gap-2">
-							<label for="csv-delimiter" class="text-sm font-medium" style="color: var(--fg-secondary);">Delimiter</label>
+							<label for="csv-delimiter" class="text-sm font-medium text-fg-secondary"
+								>Delimiter</label
+							>
 							<select
 								id="csv-delimiter"
 								value={csvConfig.delimiter}
 								onchange={(e) => handleCsvConfigChange('delimiter', e.currentTarget.value)}
-								class="rounded-sm border px-3 py-2 text-sm"
-								style="border-color: var(--input-border); background-color: var(--input-bg);"
+								class="input-base rounded-sm border px-3 py-2 text-sm"
 							>
 								<option value=",">Comma (,)</option>
 								<option value=";">Semicolon (;)</option>
@@ -631,13 +636,14 @@
 						</div>
 
 						<div class="flex flex-col gap-2">
-							<label for="csv-quote" class="text-sm font-medium" style="color: var(--fg-secondary);">Quote Character</label>
+							<label for="csv-quote" class="text-sm font-medium text-fg-secondary"
+								>Quote Character</label
+							>
 							<select
 								id="csv-quote"
 								value={csvConfig.quote_char}
 								onchange={(e) => handleCsvConfigChange('quote_char', e.currentTarget.value)}
-								class="rounded-sm border px-3 py-2 text-sm"
-								style="border-color: var(--input-border); background-color: var(--input-bg);"
+								class="input-base rounded-sm border px-3 py-2 text-sm"
 							>
 								<option value="&quot;">Double Quote (")</option>
 								<option value="'">Single Quote (')</option>
@@ -648,13 +654,14 @@
 
 					<div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
 						<div class="flex flex-col gap-2">
-							<label for="csv-encoding" class="text-sm font-medium" style="color: var(--fg-secondary);">Encoding</label>
+							<label for="csv-encoding" class="text-sm font-medium text-fg-secondary"
+								>Encoding</label
+							>
 							<select
 								id="csv-encoding"
 								value={csvConfig.encoding}
 								onchange={(e) => handleCsvConfigChange('encoding', e.currentTarget.value)}
-								class="rounded-sm border px-3 py-2 text-sm"
-								style="border-color: var(--input-border); background-color: var(--input-bg);"
+								class="input-base rounded-sm border px-3 py-2 text-sm"
 							>
 								<option value="utf8">UTF-8</option>
 								<option value="utf8-lossy">UTF-8 (lossy)</option>
@@ -664,7 +671,9 @@
 						</div>
 
 						<div class="flex flex-col gap-2">
-							<label for="csv-skip-rows" class="text-sm font-medium" style="color: var(--fg-secondary);">Skip Rows</label>
+							<label for="csv-skip-rows" class="text-sm font-medium text-fg-secondary"
+								>Skip Rows</label
+							>
 							<input
 								id="csv-skip-rows"
 								type="number"
@@ -672,10 +681,9 @@
 								value={csvConfig.skip_rows}
 								oninput={(e) =>
 									handleCsvConfigChange('skip_rows', parseInt(e.currentTarget.value) || 0)}
-								class="rounded-sm border px-3 py-2 text-sm"
-								style="border-color: var(--input-border); background-color: var(--input-bg);"
+								class="input-base rounded-sm border px-3 py-2 text-sm"
 							/>
-							<span class="m-0 text-xs" style="color: var(--fg-muted);">Number of rows to skip at the start</span>
+							<span class="m-0 text-xs text-fg-muted">Number of rows to skip at the start</span>
 						</div>
 					</div>
 
@@ -687,7 +695,9 @@
 							onchange={(e) => handleCsvConfigChange('has_header', e.currentTarget.checked)}
 							class="h-4 w-4 cursor-pointer"
 						/>
-						<label for="csv-header" class="m-0 text-sm font-medium" style="color: var(--fg-secondary);">First row is header</label>
+						<label for="csv-header" class="m-0 text-sm font-medium text-fg-secondary"
+							>First row is header</label
+						>
 					</div>
 				</div>
 			{:else if activeTab === 'excel' && excel}
@@ -696,50 +706,55 @@
 
 					<div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
 						<div class="flex flex-col gap-2">
-							<label for="excel-sheet" class="text-sm font-medium" style="color: var(--fg-secondary);">Sheet Name</label>
+							<label for="excel-sheet" class="text-sm font-medium text-fg-secondary"
+								>Sheet Name</label
+							>
 							<input
 								id="excel-sheet"
 								type="text"
 								value={excelConfig.sheet_name}
 								oninput={(e) => handleExcelConfigChange('sheet_name', e.currentTarget.value)}
 								placeholder="Sheet1"
-								class="rounded-sm border px-3 py-2 text-sm"
-								style="border-color: var(--input-border); background-color: var(--input-bg);"
+								class="input-base rounded-sm border px-3 py-2 text-sm"
 							/>
 						</div>
 
 						<div class="flex flex-col gap-2">
-							<label for="excel-table" class="text-sm font-medium" style="color: var(--fg-secondary);">Table Name</label>
+							<label for="excel-table" class="text-sm font-medium text-fg-secondary"
+								>Table Name</label
+							>
 							<input
 								id="excel-table"
 								type="text"
 								value={excelConfig.table_name}
 								oninput={(e) => handleExcelConfigChange('table_name', e.currentTarget.value)}
 								placeholder="Optional"
-								class="rounded-sm border px-3 py-2 text-sm"
-								style="border-color: var(--input-border); background-color: var(--input-bg);"
+								class="input-base rounded-sm border px-3 py-2 text-sm"
 							/>
 						</div>
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="excel-range" class="text-sm font-medium" style="color: var(--fg-secondary);">Named Range</label>
+						<label for="excel-range" class="text-sm font-medium text-fg-secondary"
+							>Named Range</label
+						>
 						<input
 							id="excel-range"
 							type="text"
 							value={excelConfig.named_range}
 							oninput={(e) => handleExcelConfigChange('named_range', e.currentTarget.value)}
 							placeholder="Optional"
-							class="rounded-sm border px-3 py-2 text-sm"
-							style="border-color: var(--input-border); background-color: var(--input-bg);"
+							class="input-base rounded-sm border px-3 py-2 text-sm"
 						/>
 					</div>
 
-					<div class="rounded-sm border p-4" style="background-color: var(--bg-tertiary); border-color: var(--border-primary);">
-						<h4 class="m-0 mb-4 text-sm font-semibold" style="color: var(--fg-secondary);">Table Bounds</h4>
+					<div class="rounded-sm border border-primary bg-tertiary p-4">
+						<h4 class="m-0 mb-4 text-sm font-semibold text-fg-secondary">Table Bounds</h4>
 						<div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-4">
 							<div class="flex flex-col gap-2">
-								<label for="start-row" class="text-sm font-medium" style="color: var(--fg-secondary);">Start Row (0-based)</label>
+								<label for="start-row" class="text-sm font-medium text-fg-secondary"
+									>Start Row (0-based)</label
+								>
 								<input
 									id="start-row"
 									type="number"
@@ -747,14 +762,16 @@
 									value={excelConfig.start_row}
 									oninput={(e) =>
 										handleExcelConfigChange('start_row', parseInt(e.currentTarget.value) || 0)}
-									class="rounded-sm border px-3 py-2 text-sm"
-									style="border-color: var(--input-border); background-color: var(--input-bg);"
+									class="input-base rounded-sm border px-3 py-2 text-sm"
 								/>
-								<span class="m-0 text-xs" style="color: var(--fg-muted);">Excel row: {excelConfig.start_row + 1}</span>
+								<span class="m-0 text-xs text-fg-muted">Excel row: {excelConfig.start_row + 1}</span
+								>
 							</div>
 
 							<div class="flex flex-col gap-2">
-								<label for="start-col" class="text-sm font-medium" style="color: var(--fg-secondary);">Start Column</label>
+								<label for="start-col" class="text-sm font-medium text-fg-secondary"
+									>Start Column</label
+								>
 								<input
 									id="start-col"
 									type="number"
@@ -762,14 +779,16 @@
 									value={excelConfig.start_col}
 									oninput={(e) =>
 										handleExcelConfigChange('start_col', parseInt(e.currentTarget.value) || 0)}
-									class="rounded-sm border px-3 py-2 text-sm"
-									style="border-color: var(--input-border); background-color: var(--input-bg);"
+									class="input-base rounded-sm border px-3 py-2 text-sm"
 								/>
-								<span class="m-0 text-xs" style="color: var(--fg-muted);">Excel column: {cellLabel(excelConfig.start_col)}</span>
+								<span class="m-0 text-xs text-fg-muted"
+									>Excel column: {cellLabel(excelConfig.start_col)}</span
+								>
 							</div>
 
 							<div class="flex flex-col gap-2">
-								<label for="end-col" class="text-sm font-medium" style="color: var(--fg-secondary);">End Column</label>
+								<label for="end-col" class="text-sm font-medium text-fg-secondary">End Column</label
+								>
 								<input
 									id="end-col"
 									type="number"
@@ -777,10 +796,11 @@
 									value={excelConfig.end_col}
 									oninput={(e) =>
 										handleExcelConfigChange('end_col', parseInt(e.currentTarget.value) || 0)}
-									class="rounded-sm border px-3 py-2 text-sm"
-									style="border-color: var(--input-border); background-color: var(--input-bg);"
+									class="input-base rounded-sm border px-3 py-2 text-sm"
 								/>
-								<span class="m-0 text-xs" style="color: var(--fg-muted);">Excel column: {cellLabel(excelConfig.end_col)}</span>
+								<span class="m-0 text-xs text-fg-muted"
+									>Excel column: {cellLabel(excelConfig.end_col)}</span
+								>
 							</div>
 						</div>
 					</div>
@@ -793,7 +813,9 @@
 							onchange={(e) => handleExcelConfigChange('has_header', e.currentTarget.checked)}
 							class="h-4 w-4 cursor-pointer"
 						/>
-						<label for="excel-header" class="m-0 text-sm font-medium" style="color: var(--fg-secondary);">First row is header</label>
+						<label for="excel-header" class="m-0 text-sm font-medium text-fg-secondary"
+							>First row is header</label
+						>
 					</div>
 				</div>
 			{/if}
@@ -802,22 +824,9 @@
 </div>
 
 <style>
-	.btn-back:hover {
-		background: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.tab:hover {
-		color: var(--fg-secondary);
-	}
-
 	.tab.active {
 		color: var(--accent-primary);
 		border-bottom-color: var(--accent-primary);
-	}
-
-	.table-row:hover {
-		background-color: var(--bg-hover);
 	}
 
 	input:focus,

@@ -141,7 +141,11 @@
 				aria-label="Configured aggregations"
 			>
 				{#each safeAggregations as agg, i (i)}
-					<div class="flex justify-between items-center p-3 rounded-sm" style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);" role="listitem">
+					<div
+						class="flex justify-between items-center p-3 rounded-sm"
+						style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);"
+						role="listitem"
+					>
 						<span class="text-sm" style="font-family: var(--font-mono); color: var(--fg-primary);">
 							{agg.function}({agg.column}) as {agg.alias}
 						</span>

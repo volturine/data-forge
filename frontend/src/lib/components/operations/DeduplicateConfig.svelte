@@ -28,7 +28,10 @@
 		<h4 id="keep-strategy-heading">Keep Strategy</h4>
 		<div class="flex flex-col gap-3">
 			{#each keepStrategies as strategy (strategy.value)}
-				<label class="strategy-option flex cursor-pointer items-start gap-3 rounded-sm border p-3 transition-all" style="background-color: var(--bg-primary); border-color: var(--border-primary);">
+				<label
+					class="strategy-option flex cursor-pointer items-start gap-3 rounded-sm border p-3 transition-all"
+					style="background-color: var(--bg-primary); border-color: var(--border-primary);"
+				>
 					<input
 						type="radio"
 						name="keep-strategy"

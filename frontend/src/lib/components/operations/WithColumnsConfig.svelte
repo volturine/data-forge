@@ -72,7 +72,7 @@
 			const signature = {
 				inputs: exprArgs.map((name, index) => {
 					const column = schema.columns.find((col) => col.name === name);
-				return { position: index, dtype: column?.dtype ?? 'Any', label: name };
+					return { position: index, dtype: column?.dtype ?? 'Any', label: name };
 				}),
 				output_dtype: null
 			};
@@ -217,7 +217,9 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="With columns configuration">
-	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider" style="color: var(--fg-muted);">With Columns</h3>
+	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider" style="color: var(--fg-muted);">
+		With Columns
+	</h3>
 
 	<div class="flex flex-col gap-3 mb-5">
 		<select bind:value={exprType}>
@@ -257,12 +259,16 @@
 						</button>
 						{#if exprUdfId}
 							{@const selectedUdf = (udfQuery.data ?? []).find((item) => item.id === exprUdfId)}
-							<span class="text-xs" style="color: var(--fg-muted);">Selected: {selectedUdf?.name ?? exprUdfId}</span>
+							<span class="text-xs" style="color: var(--fg-muted);"
+								>Selected: {selectedUdf?.name ?? exprUdfId}</span
+							>
 						{:else}
 							<span class="text-xs" style="color: var(--fg-muted);">No UDF selected</span>
 						{/if}
 					</div>
-					<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Input columns</span>
+					<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);"
+						>Input columns</span
+					>
 					<MultiSelectColumnDropdown
 						{schema}
 						value={exprArgs}
@@ -270,7 +276,9 @@
 						placeholder="Select input columns..."
 					/>
 				{:else}
-					<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Input columns</span>
+					<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);"
+						>Input columns</span
+					>
 					<MultiSelectColumnDropdown
 						{schema}
 						value={exprArgs}
@@ -279,7 +287,9 @@
 					/>
 
 					<div class="flex items-center justify-between">
-						<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Function</span>
+						<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);"
+							>Function</span
+						>
 						<button type="button" class="btn-ghost btn-sm" onclick={openEditor}>Expand</button>
 					</div>
 					<textarea
@@ -290,12 +300,18 @@
 						bind:value={exprCode}
 						oninput={() => (codeEdited = true)}
 					></textarea>
-					<label class="inline-flex items-center gap-2 text-sm mt-2" style="color: var(--fg-secondary);">
+					<label
+						class="inline-flex items-center gap-2 text-sm mt-2"
+						style="color: var(--fg-secondary);"
+					>
 						<input type="checkbox" bind:checked={saveToLibrary} />
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
-						<div class="flex flex-col gap-2 p-3 rounded-sm" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);">
+						<div
+							class="flex flex-col gap-2 p-3 rounded-sm"
+							style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);"
+						>
 							<input type="text" placeholder="UDF name" bind:value={saveName} />
 							<input type="text" placeholder="Description" bind:value={saveDescription} />
 							<input type="text" placeholder="Tags (comma-separated)" bind:value={saveTags} />
@@ -328,12 +344,27 @@
 	</div>
 
 	{#if (config.expressions ?? []).length > 0}
-		<div class="flex flex-col gap-2 p-3 rounded-md" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);" role="list">
-			<h4 class="m-0 mb-3 text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Columns</h4>
+		<div
+			class="flex flex-col gap-2 p-3 rounded-md"
+			style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);"
+			role="list"
+		>
+			<h4 class="m-0 mb-3 text-xs uppercase tracking-wider" style="color: var(--fg-muted);">
+				Columns
+			</h4>
 			{#each config.expressions ?? [] as expr, index (index)}
-				<div class="item flex justify-between items-center py-2 px-3 rounded-sm" style="background-color: var(--bg-primary); border: 1px solid var(--border-primary);" class:editing={editIndex === index} role="listitem">
+				<div
+					class="item flex justify-between items-center py-2 px-3 rounded-sm"
+					style="background-color: var(--bg-primary); border: 1px solid var(--border-primary);"
+					class:editing={editIndex === index}
+					role="listitem"
+				>
 					<div class="flex items-center gap-3 min-w-0">
-						<span class="font-semibold max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap" style="color: var(--fg-primary);" title={expr.name}>{expr.name}</span>
+						<span
+							class="font-semibold max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap"
+							style="color: var(--fg-primary);"
+							title={expr.name}>{expr.name}</span
+						>
 						<span class="text-xs" style="color: var(--fg-muted);">
 							{expr.type === 'column'
 								? `← ${expr.column ?? ''}`
@@ -374,7 +405,12 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="p-6 text-center rounded-md" style="color: var(--fg-muted); background-color: var(--bg-tertiary); border: 1px dashed var(--border-primary);">No columns configured yet.</p>
+		<p
+			class="p-6 text-center rounded-md"
+			style="color: var(--fg-muted); background-color: var(--bg-tertiary); border: 1px dashed var(--border-primary);"
+		>
+			No columns configured yet.
+		</p>
 	{/if}
 </div>
 

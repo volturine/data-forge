@@ -173,31 +173,28 @@
 				<div class="flex" role="radiogroup" aria-label="Condition logic">
 					<button
 						type="button"
-						class="logic-btn flex cursor-pointer items-center justify-center border px-2 py-1 text-xs transition-all"
+						class="logic-btn flex cursor-pointer items-center justify-center border border-primary bg-transparent px-2 py-1 text-xs text-fg-muted transition-all hover:bg-hover hover:text-fg-secondary"
 						class:active={config.logic === 'AND'}
 						onclick={() => (config.logic = 'AND')}
 						aria-pressed={config.logic === 'AND'}
-						style="background-color: transparent; color: var(--fg-muted); border-color: var(--border-primary);"
 					>
 						AND
 					</button>
 					<button
 						type="button"
-						class="logic-btn flex cursor-pointer items-center justify-center border px-2 py-1 text-xs transition-all"
+						class="logic-btn flex cursor-pointer items-center justify-center border border-primary bg-transparent px-2 py-1 text-xs text-fg-muted transition-all hover:bg-hover hover:text-fg-secondary"
 						class:active={config.logic === 'OR'}
 						onclick={() => (config.logic = 'OR')}
 						aria-pressed={config.logic === 'OR'}
-						style="background-color: transparent; color: var(--fg-muted); border-color: var(--border-primary);"
 					>
 						OR
 					</button>
 				</div>
 				<button
 					type="button"
-					class="btn-add flex h-7 w-7 cursor-pointer items-center justify-center rounded-sm border p-0"
+					class="btn-add flex h-7 w-7 cursor-pointer items-center justify-center rounded-sm border border-primary bg-tertiary p-0 text-fg-secondary hover:bg-hover hover:text-fg-primary"
 					onclick={addCondition}
 					aria-label="Add filter condition"
-					style="background-color: var(--bg-tertiary); color: var(--fg-secondary); border-color: var(--border-primary);"
 				>
 					<Plus size={16} aria-hidden="true" />
 				</button>
@@ -209,26 +206,33 @@
 				No conditions configured. Click "+ Add" to create one.
 			</p>
 		{:else}
-			<div class="flex flex-col gap-3" role="list" aria-label="Filter conditions" aria-live="polite">
+			<div
+				class="flex flex-col gap-3"
+				role="list"
+				aria-label="Filter conditions"
+				aria-live="polite"
+			>
 				{#each conditions as cond, i (i)}
 					{@const colType = getColumnType(cond.column)}
 					{@const isColumn = cond.value_type === 'column'}
 					{@const isNull = isNullOperator(cond.operator)}
 					{@const ops = getOperatorsForType(colType, isColumn)}
 
-					<div class="condition-card rounded-sm border p-3" role="listitem" style="background-color: var(--panel-bg); border-color: var(--panel-border);">
-						<div class="mb-3 flex items-center gap-2 border-b pb-2" style="border-color: var(--border-primary);">
-							<span class="text-xs font-semibold" style="color: var(--fg-muted);">#{i + 1}</span>
+					<div
+						class="condition-card rounded-sm border border-secondary bg-panel p-3"
+						role="listitem"
+					>
+						<div class="mb-3 flex items-center gap-2 border-b border-primary pb-2">
+							<span class="text-xs font-semibold text-fg-muted">#{i + 1}</span>
 							{#if cond.column}
-								<span class="text-sm font-medium" style="color: var(--fg-primary);">{cond.column}</span>
+								<span class="text-sm font-medium text-fg-primary">{cond.column}</span>
 							{/if}
 							<button
 								type="button"
-								class="btn-remove ml-auto flex h-6 w-6 cursor-pointer items-center justify-center rounded-sm border border-transparent bg-transparent p-0 transition-all disabled:cursor-not-allowed disabled:opacity-30"
+								class="btn-remove ml-auto flex h-6 w-6 cursor-pointer items-center justify-center rounded-sm border border-transparent bg-transparent p-0 text-fg-muted transition-all hover:border-error hover:bg-error hover:text-error disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-fg-muted"
 								onclick={() => removeCondition(i)}
 								disabled={conditions.length === 1}
 								aria-label={`Remove condition ${i + 1}`}
-								style="color: var(--fg-muted);"
 							>
 								<X size={14} aria-hidden="true" />
 							</button>
@@ -236,7 +240,9 @@
 
 						<div class="relative flex flex-wrap items-start gap-3">
 							<div class="flex min-w-[120px] flex-1 flex-col gap-1">
-								<label class="mb-0 text-xs font-normal" style="color: var(--fg-muted);" for="{uid}-column-{i}">Column</label>
+								<label class="mb-0 text-xs font-normal text-fg-muted" for="{uid}-column-{i}"
+									>Column</label
+								>
 								<ColumnDropdown
 									{schema}
 									value={cond.column}
@@ -246,7 +252,9 @@
 							</div>
 
 							<div class="flex flex-col gap-1 min-w-[100px] flex-1">
-								<label class="text-xs font-normal mb-0" style="color: var(--fg-muted);" for="{uid}-operator-{i}">Operator</label>
+								<label class="text-xs font-normal mb-0 text-fg-muted" for="{uid}-operator-{i}"
+									>Operator</label
+								>
 								<select
 									id="{uid}-operator-{i}"
 									data-testid={`filter-operator-select-${i}`}
@@ -262,12 +270,11 @@
 							{#if !isNull}
 								<div class="flex flex-col gap-1 min-w-[140px] flex-[2]">
 									<div class="flex items-center justify-between gap-2">
-										<span class="text-xs font-normal" style="color: var(--fg-muted);">Compare to</span>
+										<span class="text-xs font-normal text-fg-muted">Compare to</span>
 										<div class="flex" role="radiogroup" aria-label="Value mode">
 											<button
 												type="button"
-												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border"
-												style="background-color: transparent; color: var(--fg-muted); border-color: var(--border-primary);"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
 												class:active={!isColumn}
 												onclick={() => handleModeChange(i, 'value')}
 												aria-pressed={!isColumn}
@@ -276,8 +283,7 @@
 											</button>
 											<button
 												type="button"
-												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border"
-												style="background-color: transparent; color: var(--fg-muted); border-color: var(--border-primary);"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
 												class:active={isColumn}
 												onclick={() => handleModeChange(i, 'column')}
 												aria-pressed={isColumn}
@@ -345,8 +351,10 @@
 								</div>
 							{:else}
 								<div class="flex flex-col gap-1 min-w-[140px] flex-[2]">
-									<span class="text-xs font-normal" style="color: var(--fg-muted);">Value</span>
-									<div class="flex items-center h-9 px-3 rounded-sm text-sm italic" style="background-color: var(--bg-tertiary); color: var(--fg-muted);">
+									<span class="text-xs font-normal text-fg-muted">Value</span>
+									<div
+										class="flex items-center h-9 px-3 rounded-sm text-sm italic bg-tertiary text-fg-muted"
+									>
 										<span>No value needed</span>
 									</div>
 								</div>
@@ -369,27 +377,11 @@
 	.mode-btn:last-child {
 		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 	}
-	.logic-btn:hover:not(.active),
-	.mode-btn:hover:not(.active) {
-		background-color: var(--bg-hover);
-		color: var(--fg-secondary);
-	}
 	.logic-btn.active,
 	.mode-btn.active {
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 		border-color: var(--accent-primary);
-	}
-
-	.btn-add:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.btn-remove:hover:not(:disabled) {
-		background-color: var(--error-bg);
-		color: var(--error-fg);
-		border-color: var(--error-border);
 	}
 
 	.condition-card :global(.column-select) {

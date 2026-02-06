@@ -40,7 +40,12 @@
 			>Enter a Polars expression using pl.col() to reference columns</span
 		>
 
-		<div id="expr-syntax-help" class="help-text text-sm leading-relaxed p-3 rounded-sm" style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);" aria-label="Syntax help">
+		<div
+			id="expr-syntax-help"
+			class="help-text text-sm leading-relaxed p-3 rounded-sm"
+			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);"
+			aria-label="Syntax help"
+		>
 			<strong>Polars Expression Syntax:</strong><br />
 			Use <code>pl.col("column")</code> to reference columns.<br />
 			Examples:<br />
@@ -71,7 +76,9 @@
 			onChange={(val) => insertColumn(val)}
 			placeholder="Select column to insert..."
 		/>
-		<p class="text-sm mt-2" style="color: var(--fg-tertiary);">Select a column to insert it into the expression above.</p>
+		<p class="text-sm mt-2" style="color: var(--fg-tertiary);">
+			Select a column to insert it into the expression above.
+		</p>
 	</div>
 </div>
 

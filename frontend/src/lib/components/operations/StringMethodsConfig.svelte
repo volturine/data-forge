@@ -104,7 +104,11 @@
 			<h4 id="slice-params-heading">Slice Parameters</h4>
 			<div class="flex gap-4">
 				<div class="flex-1">
-					<label for="str-input-start" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Start Index:</label>
+					<label
+						for="str-input-start"
+						class="block text-sm font-medium mb-1"
+						style="color: var(--fg-secondary);">Start Index:</label
+					>
 					<input
 						id="str-input-start"
 						data-testid="str-start-input"
@@ -115,7 +119,11 @@
 					<span id="str-start-help" class="sr-only">Starting index for substring</span>
 				</div>
 				<div class="flex-1">
-					<label for="str-input-end" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">End Index (optional):</label>
+					<label
+						for="str-input-end"
+						class="block text-sm font-medium mb-1"
+						style="color: var(--fg-secondary);">End Index (optional):</label
+					>
 					<input
 						id="str-input-end"
 						data-testid="str-end-input"
@@ -136,7 +144,11 @@
 		<div class="form-section" role="group" aria-labelledby="replace-params-heading">
 			<h4 id="replace-params-heading">Replace Parameters</h4>
 			<div>
-				<label for="str-input-pattern" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Pattern to find:</label>
+				<label
+					for="str-input-pattern"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Pattern to find:</label
+				>
 				<input
 					id="str-input-pattern"
 					data-testid="str-pattern-input"
@@ -150,7 +162,11 @@
 				>
 			</div>
 			<div>
-				<label for="str-input-replacement" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Replacement:</label>
+				<label
+					for="str-input-replacement"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Replacement:</label
+				>
 				<input
 					id="str-input-replacement"
 					data-testid="str-replacement-input"
@@ -170,7 +186,11 @@
 		<div class="form-section" role="group" aria-labelledby="extract-params-heading">
 			<h4 id="extract-params-heading">Extract Parameters</h4>
 			<div>
-				<label for="str-input-extract-pattern" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Regex Pattern:</label>
+				<label
+					for="str-input-extract-pattern"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Regex Pattern:</label
+				>
 				<input
 					id="str-input-extract-pattern"
 					data-testid="str-extract-pattern-input"
@@ -184,7 +204,11 @@
 				>
 			</div>
 			<div>
-				<label for="str-input-group-index" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Group Index:</label>
+				<label
+					for="str-input-group-index"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Group Index:</label
+				>
 				<input
 					id="str-input-group-index"
 					data-testid="str-group-index-input"
@@ -204,7 +228,11 @@
 		<div class="form-section" role="group" aria-labelledby="split-delimiter-heading">
 			<h4 id="split-delimiter-heading">Split Delimiter</h4>
 			<div>
-				<label for="str-input-delimiter-only" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Delimiter:</label>
+				<label
+					for="str-input-delimiter-only"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Delimiter:</label
+				>
 				<input
 					id="str-input-delimiter-only"
 					data-testid="str-delimiter-only-input"
@@ -224,7 +252,11 @@
 		<div class="form-section" role="group" aria-labelledby="split-params-heading">
 			<h4 id="split-params-heading">Split & Take Parameters</h4>
 			<div>
-				<label for="str-input-delimiter" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Delimiter:</label>
+				<label
+					for="str-input-delimiter"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Delimiter:</label
+				>
 				<input
 					id="str-input-delimiter"
 					data-testid="str-delimiter-input"
@@ -238,7 +270,11 @@
 				>
 			</div>
 			<div>
-				<label for="str-input-part-index" class="block text-sm font-medium mb-1" style="color: var(--fg-secondary);">Part Index:</label>
+				<label
+					for="str-input-part-index"
+					class="block text-sm font-medium mb-1"
+					style="color: var(--fg-secondary);">Part Index:</label
+				>
 				<input
 					id="str-input-part-index"
 					data-testid="str-part-index-input"
@@ -270,4 +306,3 @@
 		>
 	</div>
 </div>
-

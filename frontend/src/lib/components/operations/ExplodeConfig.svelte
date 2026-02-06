@@ -31,14 +31,19 @@
 <div class="config-panel">
 	<h3>Explode Configuration</h3>
 
-	<div class="mb-4 rounded-sm border-l-[3px] p-3 text-sm" style="background-color: var(--info-bg); border-color: var(--info-border); color: var(--info-fg);">
+	<div
+		class="mb-4 rounded-sm border-l-[3px] p-3 text-sm"
+		style="background-color: var(--info-bg); border-color: var(--info-border); color: var(--info-fg);"
+	>
 		Transform list/array columns into multiple rows. Each list element becomes a separate row,
 		duplicating all other column values.
 	</div>
 
 	<div class="form-section">
 		<h4>Columns to Explode</h4>
-		<p class="mb-3 text-sm" style="color: var(--fg-tertiary);">Select one or more list/array columns to explode</p>
+		<p class="mb-3 text-sm" style="color: var(--fg-tertiary);">
+			Select one or more list/array columns to explode
+		</p>
 
 		{#if !hasListColumns}
 			<div class="warning-box">
@@ -60,7 +65,9 @@
 
 			{#if (config.columns ?? []).length > 0}
 				<div class="info-box">
-					Selected {(config.columns ?? []).length} column{(config.columns ?? []).length !== 1 ? 's' : ''}:
+					Selected {(config.columns ?? []).length} column{(config.columns ?? []).length !== 1
+						? 's'
+						: ''}:
 					{(config.columns ?? []).join(', ')}
 				</div>
 			{/if}
@@ -77,7 +84,10 @@
 		</ul>
 	</div>
 
-	<div class="mb-4 rounded-sm border-l-[3px] p-3 text-sm" style="background-color: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-fg);">
+	<div
+		class="mb-4 rounded-sm border-l-[3px] p-3 text-sm"
+		style="background-color: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-fg);"
+	>
 		<strong>Example:</strong> A row with tags=['python', 'data', 'ai'] becomes 3 rows, each with one tag
 		value.
 	</div>

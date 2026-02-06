@@ -134,25 +134,27 @@
 <QueryClientProvider client={queryClient}>
 	<div class="flex h-screen flex-col">
 		<header
-			class="sticky top-0 z-header border-b backdrop-blur-sm"
-			style="border-color: var(--border-primary); background-color: var(--bg-primary);"
+			class="sticky top-0 z-header border-b border-border-primary bg-bg-primary backdrop-blur-sm"
 		>
 			<div class="mx-auto flex max-w-[1200px] items-center gap-6 px-6 py-3">
-				<a href={resolve('/')} class="flex items-center gap-1 text-base font-semibold no-underline" data-sveltekit-reload>
-					<span style="color: var(--fg-primary);">polars</span>
-					<span style="color: var(--fg-muted);">/</span>
-					<span style="color: var(--fg-tertiary);">analysis</span>
+				<a
+					href={resolve('/')}
+					class="flex items-center gap-1 text-base font-semibold no-underline"
+					data-sveltekit-reload
+				>
+					<span class="text-fg-primary">polars</span>
+					<span class="text-fg-muted">/</span>
+					<span class="text-fg-tertiary">analysis</span>
 				</a>
 
 				<nav class="flex items-center gap-1">
 					{#each navItems as item (item.href)}
 						<a
 							href={resolve(item.href as '/')}
-							class="nav-link rounded-sm border border-transparent px-3 py-2 text-sm no-underline transition-all"
+							class="nav-link rounded-sm border border-transparent px-3 py-2 text-sm text-fg-tertiary no-underline transition-all hover:border-border-primary hover:bg-bg-hover hover:text-fg-primary"
 							class:active={currentPath === item.href ||
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs')}
-							style="color: var(--fg-tertiary);"
 							data-sveltekit-reload
 						>
 							{item.label}
@@ -163,8 +165,7 @@
 				<div class="ml-auto flex items-center gap-2">
 					<EngineMonitor />
 					<button
-						class="theme-toggle flex items-center justify-center rounded-sm border p-2 transition-all"
-						style="background-color: var(--bg-primary); border-color: var(--border-primary); color: var(--fg-secondary); box-shadow: var(--card-shadow);"
+						class="theme-toggle flex items-center justify-center rounded-sm border border-border-primary bg-bg-primary p-2 text-fg-secondary shadow-[var(--card-shadow)] transition-all hover:bg-bg-hover hover:text-fg-primary"
 						onclick={toggleTheme}
 						title="Toggle theme"
 						aria-label="Toggle theme"
@@ -179,7 +180,7 @@
 			</div>
 		</header>
 
-		<main class="min-h-0 flex-1 overflow-y-auto" style="background-color: var(--bg-secondary);">
+		<main class="min-h-0 flex-1 overflow-y-auto bg-bg-secondary">
 			{@render children()}
 		</main>
 	</div>
@@ -191,20 +192,9 @@
 		overflow: hidden;
 	}
 
-	.nav-link:hover {
-		color: var(--fg-primary);
-		background-color: var(--bg-hover);
-		border-color: var(--border-primary);
-	}
-
 	.nav-link.active {
 		color: var(--fg-primary);
 		background-color: var(--bg-tertiary);
 		border-color: var(--border-primary);
-	}
-
-	.theme-toggle:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
 	}
 </style>

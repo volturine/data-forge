@@ -188,28 +188,19 @@
 	}
 </script>
 
-<div
-	class="w-full my-2 overflow-hidden rounded-md border select-text"
-	style="background: var(--panel-bg); border-color: var(--panel-border); box-shadow: var(--panel-shadow);"
->
+<div class="w-full my-2 overflow-hidden rounded-md border select-text bg-panel border-panel" style="box-shadow: var(--panel-shadow);">
 	{#if isLoading}
-		<div
-			class="flex flex-col items-center justify-center gap-3 p-8 pointer-events-none"
-			style="color: var(--fg-tertiary);"
-		>
+		<div class="flex flex-col items-center justify-center gap-3 p-8 pointer-events-none text-fg-tertiary">
 			<div class="spinner-md"></div>
-			<p class="m-0" style="color: var(--fg-tertiary);">Loading preview...</p>
+			<p class="m-0 text-fg-tertiary">Loading preview...</p>
 		</div>
 	{:else if error}
 		<div class="p-8 text-center">
-			<p class="m-0 mb-2 font-semibold" style="color: var(--error-fg);">Failed to load preview</p>
-			<p class="m-0" style="color: var(--fg-tertiary);">{error.message}</p>
+			<p class="m-0 mb-2 font-semibold text-error-fg">Failed to load preview</p>
+			<p class="m-0 text-fg-tertiary">{error.message}</p>
 		</div>
 	{:else if headerGroups.length > 0 && data}
-		<div
-			class="flex justify-between items-center px-4 py-3 text-xs border-b"
-			style="color: var(--fg-tertiary); background: var(--panel-header-bg); border-color: var(--panel-border);"
-		>
+		<div class="flex justify-between items-center px-4 py-3 text-xs border-b text-fg-tertiary border-panel" style="background: var(--panel-header-bg);">
 			<span>
 				Showing {startRow.toLocaleString()}-{endRow.toLocaleString()} of {data.total_rows.toLocaleString()}
 				rows
@@ -222,12 +213,9 @@
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-								<th
-									class="p-0 text-left font-semibold text-[0.8125rem] uppercase tracking-wide border-b-2"
-									style="border-color: var(--table-border);"
-								>
+								<th class="p-0 text-left font-semibold text-[0.8125rem] uppercase tracking-wide border-b-2 border-table">
 									<button
-										class="column-header flex items-center gap-1 px-4 py-3 bg-transparent border-none cursor-pointer transition-colors"
+										class="flex items-center gap-1 px-4 py-3 bg-transparent border-none cursor-pointer transition-colors hover:bg-hover"
 										style="font-size: inherit; font-weight: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;"
 										onclick={() => toggleSort(header.id)}
 									>
@@ -237,7 +225,7 @@
 												: header.id}
 										</span>
 										{#if getSortDirection(header.id)}
-											<span class="text-xs" style="color: var(--accent-primary);">
+											<span class="text-xs text-accent">
 												{getSortDirection(header.id) === 'asc' ? '↑' : '↓'}
 											</span>
 										{/if}
@@ -258,12 +246,11 @@
 				</thead>
 				<tbody>
 					{#each rows as row (row.id)}
-						<tr class="table-row border-b transition-colors last:border-b-0" style="border-color: var(--table-border);">
+						<tr class="border-b transition-colors last:border-b-0 border-table even:bg-secondary hover:!bg-hover">
 							{#each row.getVisibleCells() as cell (cell.id)}
 								<td
-									class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[250px] text-[0.8125rem] select-text"
+									class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[250px] text-[0.8125rem] select-text text-fg-secondary"
 									class:text-xs={isListType(getColumnType(cell.column.id))}
-									style="color: var(--fg-secondary);"
 								>
 									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
@@ -275,22 +262,17 @@
 		</div>
 
 		{#if totalPages > 1}
-			<div
-				class="flex justify-between items-center px-4 py-3 border-t"
-				style="background: var(--panel-header-bg); border-color: var(--panel-border);"
-			>
+			<div class="flex justify-between items-center px-4 py-3 border-t border-panel" style="background: var(--panel-header-bg);">
 				<button
-					class="pagination-btn px-4 py-2 border rounded-sm cursor-pointer transition-all"
-					style="border-color: var(--border-primary); background: var(--panel-bg);"
+					class="px-4 py-2 border rounded-sm cursor-pointer transition-all border-primary bg-panel hover:bg-hover hover:border-secondary disabled:opacity-40 disabled:cursor-not-allowed"
 					onclick={prevPage}
 					disabled={currentPage === 1}
 				>
 					Previous
 				</button>
-				<span class="text-xs" style="color: var(--fg-tertiary);">Page {currentPage} of {totalPages}</span>
+				<span class="text-xs text-fg-tertiary">Page {currentPage} of {totalPages}</span>
 				<button
-					class="pagination-btn px-4 py-2 border rounded-sm cursor-pointer transition-all"
-					style="border-color: var(--border-primary); background: var(--panel-bg);"
+					class="px-4 py-2 border rounded-sm cursor-pointer transition-all border-primary bg-panel hover:bg-hover hover:border-secondary disabled:opacity-40 disabled:cursor-not-allowed"
 					onclick={nextPage}
 					disabled={currentPage >= totalPages}
 				>
@@ -299,32 +281,8 @@
 			</div>
 		{/if}
 	{:else}
-		<div class="p-8 text-center" style="color: var(--fg-muted);">
+		<div class="p-8 text-center text-fg-muted">
 			<p class="m-0">No data available</p>
 		</div>
 	{/if}
 </div>
-
-<style>
-	.column-header:hover {
-		background: var(--bg-hover);
-	}
-
-	.table-row:nth-child(even) {
-		background: var(--table-row-alt);
-	}
-
-	.table-row:hover {
-		background: var(--table-row-hover);
-	}
-
-	.pagination-btn:hover:not(:disabled) {
-		background: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-
-	.pagination-btn:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-</style>

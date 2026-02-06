@@ -28,6 +28,8 @@
 				step="10"
 			/>
 		</label>
-		<p class="mt-2 mb-0 text-sm font-normal" style="color: var(--fg-tertiary);">Number of rows to display (10-1000)</p>
+		<p class="mt-2 mb-0 text-sm font-normal" style="color: var(--fg-tertiary);">
+			Number of rows to display (10-1000)
+		</p>
 	</div>
 </div>

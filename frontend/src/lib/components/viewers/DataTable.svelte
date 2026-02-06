@@ -99,35 +99,28 @@
 	}
 </script>
 
-<div
-	class="data-table-container relative overflow-hidden rounded-md border"
-	style="background: var(--panel-bg); border-color: var(--panel-border); box-shadow: var(--panel-shadow);"
->
+<div class="relative overflow-hidden rounded-md border bg-panel border-panel" style="box-shadow: var(--panel-shadow);">
 	{#if loading}
-		<div
-			class="loading-overlay flex flex-col items-center justify-center gap-4 p-12 pointer-events-none"
-			style="color: var(--fg-tertiary);"
-		>
+		<div class="flex flex-col items-center justify-center gap-4 p-12 pointer-events-none text-fg-tertiary">
 			<div class="spinner"></div>
-			<p class="text-sm m-0" style="color: var(--fg-tertiary);">Loading data...</p>
+			<p class="text-sm m-0 text-fg-tertiary">Loading data...</p>
 		</div>
 	{/if}
 
 	{#if !loading && data.length === 0}
-		<div class="p-12 text-center m-0" style="color: var(--fg-muted);">
+		<div class="p-12 text-center m-0 text-fg-muted">
 			<p class="m-0">No data available</p>
 		</div>
 	{:else if headerGroups.length > 0}
-		<div class="table-wrapper overflow-x-auto overflow-y-auto max-h-[600px]" style="background: var(--panel-bg);">
+		<div class="overflow-x-auto overflow-y-auto max-h-[600px] bg-panel">
 			<table class="w-full border-collapse text-sm">
 				<thead class="sticky top-0 z-50" style="background: var(--table-header-bg);">
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-								<th class="p-0 text-left font-semibold border-b-2" style="border-color: var(--table-border);">
+								<th class="p-0 text-left font-semibold border-b-2 border-table">
 									<button
-										class="column-header flex items-center justify-between w-full px-4 py-3 bg-transparent border-none cursor-pointer text-sm font-semibold transition-colors"
-										style="color: var(--fg-primary);"
+										class="flex items-center justify-between w-full px-4 py-3 bg-transparent border-none cursor-pointer text-sm font-semibold transition-colors text-fg-primary hover:bg-hover"
 										onclick={() => toggleSort(header.id)}
 									>
 										<span class="font-mono">
@@ -136,7 +129,7 @@
 												: header.id}
 										</span>
 										{#if getSortDirection(header.id)}
-											<span class="ml-2 text-base" style="color: var(--accent-primary);">
+											<span class="ml-2 text-base text-accent">
 												{getSortDirection(header.id) === 'asc' ? '↑' : '↓'}
 											</span>
 										{/if}
@@ -148,12 +141,9 @@
 				</thead>
 				<tbody>
 					{#each rows as row (row.id)}
-						<tr class="table-row border-b transition-colors last:border-b-0" style="border-color: var(--table-border);">
+						<tr class="border-b transition-colors last:border-b-0 border-table even:bg-secondary hover:!bg-hover">
 							{#each row.getVisibleCells() as cell (cell.id)}
-								<td
-									class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px] text-sm"
-									style="color: var(--fg-secondary);"
-								>
+								<td class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px] text-sm text-fg-secondary">
 									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
 							{/each}
@@ -165,27 +155,10 @@
 	{/if}
 
 	{#if !loading && data.length > 0}
-		<div
-			class="px-4 py-3 border-t"
-			style="border-color: var(--panel-border); background: var(--panel-header-bg);"
-		>
-			<span class="text-xs" style="color: var(--fg-tertiary);">
+		<div class="px-4 py-3 border-t border-panel" style="background: var(--panel-header-bg);">
+			<span class="text-xs text-fg-tertiary">
 				Showing {data.length.toLocaleString()} row{data.length !== 1 ? 's' : ''}
 			</span>
 		</div>
 	{/if}
 </div>
-
-<style>
-	.column-header:hover {
-		background: var(--bg-hover);
-	}
-
-	.table-row:nth-child(even) {
-		background: var(--table-row-alt);
-	}
-
-	.table-row:hover {
-		background: var(--table-row-hover);
-	}
-</style>

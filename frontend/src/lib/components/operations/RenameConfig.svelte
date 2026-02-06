@@ -46,10 +46,18 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Rename configuration">
-	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider" style="color: var(--fg-muted);">Rename Configuration</h3>
+	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider" style="color: var(--fg-muted);">
+		Rename Configuration
+	</h3>
 
 	<div class="mb-5" role="group" aria-labelledby="rename-columns-heading">
-		<h4 id="rename-columns-heading" class="m-0 mb-3 text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Select Column to Rename</h4>
+		<h4
+			id="rename-columns-heading"
+			class="m-0 mb-3 text-xs uppercase tracking-wider"
+			style="color: var(--fg-muted);"
+		>
+			Select Column to Rename
+		</h4>
 		<ColumnDropdown
 			{schema}
 			value={formOldName}
@@ -58,7 +66,12 @@
 			filter={(col) => !safeMapping[col.name]}
 		/>
 		{#if schema.columns.filter((col) => !safeMapping[col.name]).length === 0}
-			<p class="p-6 text-center rounded-md mb-4" style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--panel-border);">All columns have been renamed.</p>
+			<p
+				class="p-6 text-center rounded-md mb-4"
+				style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--panel-border);"
+			>
+				All columns have been renamed.
+			</p>
 		{/if}
 	</div>
 
@@ -99,13 +112,30 @@
 			role="list"
 			aria-label="Configured renames"
 		>
-			<h4 class="mt-0 mb-2 text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Renames</h4>
+			<h4 class="mt-0 mb-2 text-xs uppercase tracking-wider" style="color: var(--fg-muted);">
+				Renames
+			</h4>
 			{#each mappings as mapping (mapping.oldName)}
-				<div class="flex justify-between items-center py-2 px-3 rounded-sm" style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);" role="listitem">
-					<div class="flex items-center gap-2 min-w-0 text-sm" style="font-family: var(--font-mono);">
-						<span class="font-semibold max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap" style="color: var(--fg-primary);" title={mapping.oldName}>{mapping.oldName}</span>
+				<div
+					class="flex justify-between items-center py-2 px-3 rounded-sm"
+					style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);"
+					role="listitem"
+				>
+					<div
+						class="flex items-center gap-2 min-w-0 text-sm"
+						style="font-family: var(--font-mono);"
+					>
+						<span
+							class="font-semibold max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap"
+							style="color: var(--fg-primary);"
+							title={mapping.oldName}>{mapping.oldName}</span
+						>
 						<span style="color: var(--fg-muted);" aria-hidden="true">→</span>
-						<span class="font-semibold max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap" style="color: var(--accent-primary);" title={mapping.newName}>{mapping.newName}</span>
+						<span
+							class="font-semibold max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap"
+							style="color: var(--accent-primary);"
+							title={mapping.newName}>{mapping.newName}</span
+						>
 					</div>
 					<button
 						id={`rename-btn-remove-${mapping.oldName}`}
@@ -122,7 +152,14 @@
 			{/each}
 		</div>
 	{:else}
-		<p id="rename-empty-state" class="p-6 text-center rounded-md mb-4" style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--panel-border);" role="status">No renames yet.</p>
+		<p
+			id="rename-empty-state"
+			class="p-6 text-center rounded-md mb-4"
+			style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--panel-border);"
+			role="status"
+		>
+			No renames yet.
+		</p>
 	{/if}
 </div>
 

@@ -82,7 +82,12 @@
 				col.dtype.toLowerCase() === 'datetime'}
 		/>
 		{#if dateColumns.length === 0}
-			<p id="ts-no-columns-warning" class="text-sm mt-2 mb-0" style="color: var(--error-fg);" role="alert">
+			<p
+				id="ts-no-columns-warning"
+				class="text-sm mt-2 mb-0"
+				style="color: var(--error-fg);"
+				role="alert"
+			>
 				No date/time columns detected in schema
 			</p>
 		{/if}
@@ -135,14 +140,18 @@
 					>
 				{/each}
 			</select>
-			<p class="text-sm mt-2 mb-0" style="color: var(--fg-muted);">Convert datetime to integer timestamp in the specified time unit.</p>
+			<p class="text-sm mt-2 mb-0" style="color: var(--fg-muted);">
+				Convert datetime to integer timestamp in the specified time unit.
+			</p>
 		</div>
 	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
 		<div class="form-section" role="group" aria-labelledby="ts-period-heading">
 			<h4 id="ts-period-heading">Time Period</h4>
 			<div class="flex gap-2">
 				<div class="flex-1">
-					<label for="ts-input-value" class="block text-sm mb-1" style="color: var(--fg-secondary);">Value:</label>
+					<label for="ts-input-value" class="block text-sm mb-1" style="color: var(--fg-secondary);"
+						>Value:</label
+					>
 					<input
 						id="ts-input-value"
 						data-testid="ts-value-input"
@@ -154,8 +163,15 @@
 					/>
 				</div>
 				<div class="flex-1">
-					<label for="ts-select-unit" class="block text-sm mb-1" style="color: var(--fg-secondary);">Unit:</label>
-					<select id="ts-select-unit" data-testid="ts-unit-select" class="flex-1" bind:value={config.unit}>
+					<label for="ts-select-unit" class="block text-sm mb-1" style="color: var(--fg-secondary);"
+						>Unit:</label
+					>
+					<select
+						id="ts-select-unit"
+						data-testid="ts-unit-select"
+						class="flex-1"
+						bind:value={config.unit}
+					>
 						{#each timeUnits as unit (unit)}
 							<option value={unit}>{unit}</option>
 						{/each}
@@ -191,4 +207,3 @@
 		/>
 	</div>
 </div>
-

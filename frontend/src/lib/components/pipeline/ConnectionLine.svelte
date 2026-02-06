@@ -37,7 +37,11 @@
 	class="connection-line flex w-full shrink-0 items-center justify-center transition-colors"
 	class:drag-active={isDragActive}
 	class:highlighted
-	style="color: {isDragActive ? (highlighted ? 'var(--fg-primary)' : 'var(--fg-faint)') : 'var(--fg-muted)'}; height: var(--pipeline-connection-height);"
+	style="color: {isDragActive
+		? highlighted
+			? 'var(--fg-primary)'
+			: 'var(--fg-faint)'
+		: 'var(--fg-muted)'}; height: var(--pipeline-connection-height);"
 >
 	<svg class="overflow-visible" {width} {height} xmlns="http://www.w3.org/2000/svg">
 		<!-- Dotted vertical line -->

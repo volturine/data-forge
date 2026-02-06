@@ -116,10 +116,14 @@
 </script>
 
 <div class="mx-auto min-h-full max-w-[1100px] px-6 py-7">
-	<header class="mb-6 flex flex-col items-stretch justify-between gap-6 border-b pb-5 md:flex-row md:items-start" style="border-color: var(--border-primary);">
+	<header
+		class="mb-6 flex flex-col items-stretch justify-between gap-6 border-b border-border-primary pb-5 md:flex-row md:items-start"
+	>
 		<div>
 			<h1 class="m-0 mb-2 text-2xl">UDF Library</h1>
-			<p class="m-0" style="color: var(--fg-tertiary);">Reusable Python transforms stored globally</p>
+			<p class="m-0 text-fg-tertiary">
+				Reusable Python transforms stored globally
+			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
 			<button class="btn-secondary" onclick={() => (importOpen = true)}>
@@ -149,14 +153,18 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="rounded-sm border border-dashed p-8 text-center" style="border-color: var(--border-primary);">
+			<div
+				class="rounded-sm border border-dashed border-border-primary p-8 text-center"
+			>
 				<p>No UDFs yet.</p>
 				<button class="btn-primary" onclick={openNew}>Create your first UDF</button>
 			</div>
 		{:else}
 			<div class="flex flex-col gap-3">
 				{#each query.data as udf (udf.id)}
-					<div class="row flex flex-col justify-between gap-4 rounded-sm border p-4 md:flex-row" style="border-color: var(--border-primary); background-color: var(--bg-primary);">
+					<div
+						class="row flex flex-col justify-between gap-4 rounded-sm border border-border-primary bg-bg-primary p-4 md:flex-row"
+					>
 						<div class="flex flex-col gap-2">
 							<div class="flex items-center gap-3">
 								<h3 class="m-0 text-base">{udf.name}</h3>
@@ -165,21 +173,24 @@
 										{#each udf.signature.inputs as input, i (i)}
 											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
 											{#if i < udf.signature.inputs.length - 1}
-												<span class="mx-0.5 text-xs" style="color: var(--fg-muted);">,</span>
+												<span class="mx-0.5 text-xs text-fg-muted">,</span>
 											{/if}
 										{/each}
 									{:else}
-										<span class="text-xs uppercase tracking-wide" style="color: var(--fg-muted);">No inputs</span>
+										<span class="text-xs uppercase tracking-wide text-fg-muted">No inputs</span>
 									{/if}
 								</div>
 							</div>
 							{#if udf.description}
-								<p class="m-0" style="color: var(--fg-tertiary);">{udf.description}</p>
+								<p class="m-0 text-fg-tertiary">{udf.description}</p>
 							{/if}
 							{#if udf.tags?.length}
 								<div class="flex flex-wrap gap-2">
 									{#each udf.tags as tag (tag)}
-										<span class="rounded-sm px-1.5 py-0.5 text-xs" style="background-color: var(--bg-tertiary); color: var(--fg-muted);">{tag}</span>
+										<span
+											class="rounded-sm bg-bg-tertiary px-1.5 py-0.5 text-xs text-fg-muted"
+											>{tag}</span
+										>
 									{/each}
 								</div>
 							{/if}
@@ -223,7 +234,12 @@
 				<button class="modal-close" onclick={() => (importOpen = false)}>x</button>
 			</div>
 			<div class="modal-body">
-				<textarea rows="10" placeholder="Paste exported JSON here..." bind:value={importText} class="font-mono"></textarea>
+				<textarea
+					rows="10"
+					placeholder="Paste exported JSON here..."
+					bind:value={importText}
+					class="font-mono"
+				></textarea>
 				<label class="flex items-center gap-2" style="color: var(--fg-secondary);">
 					<input type="checkbox" bind:checked={overwriteImport} />
 					Overwrite existing by name

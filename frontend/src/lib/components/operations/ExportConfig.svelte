@@ -62,7 +62,9 @@
 			placeholder="e.g., my_data"
 			aria-describedby="export-filename-hint"
 		/>
-		<span id="export-filename-hint" class="hint mt-1 block text-xs" style="color: var(--fg-muted);">Extension will be added automatically</span>
+		<span id="export-filename-hint" class="hint mt-1 block text-xs" style="color: var(--fg-muted);"
+			>Extension will be added automatically</span
+		>
 	</div>
 
 	<div class="form-group mb-4">
@@ -93,7 +95,11 @@
 				placeholder="e.g., my_data"
 				aria-describedby="export-tablename-hint"
 			/>
-			<span id="export-tablename-hint" class="hint mt-1 block text-xs" style="color: var(--fg-muted);">Name of the table in the DuckDB database</span>
+			<span
+				id="export-tablename-hint"
+				class="hint mt-1 block text-xs"
+				style="color: var(--fg-muted);">Name of the table in the DuckDB database</span
+			>
 		</div>
 	{/if}
 
@@ -108,7 +114,12 @@
 				<option value={dest.value}>{dest.label}</option>
 			{/each}
 		</select>
-		<span id="export-destination-hint" class="hint mt-1 block text-xs" style="color: var(--fg-muted);" aria-live="polite">
+		<span
+			id="export-destination-hint"
+			class="hint mt-1 block text-xs"
+			style="color: var(--fg-muted);"
+			aria-live="polite"
+		>
 			{#if config.destination === 'download'}
 				File will be downloaded to your browser
 			{:else}
@@ -117,4 +128,3 @@
 		</span>
 	</div>
 </div>
-

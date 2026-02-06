@@ -131,14 +131,19 @@
 </script>
 
 <div class="max-w-[960px] mx-auto p-6 h-full overflow-auto">
-	<header class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 pb-5 border-b" style="border-color: var(--border-primary);">
+	<header
+		class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 pb-5 border-b"
+		style="border-color: var(--border-primary);"
+	>
 		<div class="flex items-center gap-3">
 			<button class="btn-back" onclick={handleBack}>
 				<ArrowLeft size={18} />
 			</button>
 			<div>
 				<h1>{mode === 'create' ? 'New UDF' : 'Edit UDF'}</h1>
-				<p class="m-0" style="color: var(--fg-tertiary);">Reusable Python transforms for your pipelines</p>
+				<p class="m-0" style="color: var(--fg-tertiary);">
+					Reusable Python transforms for your pipelines
+				</p>
 			</div>
 		</div>
 		<button class="btn-primary" onclick={() => saveMutation.mutate()} disabled={!canSave || saving}>
@@ -157,16 +162,23 @@
 					<input id="udf-name" type="text" bind:value={name} placeholder="UDF name" />
 				</div>
 				<div class="flex flex-col gap-2">
-					<label for="udf-description" class="text-sm" style="color: var(--fg-secondary);">Description</label>
+					<label for="udf-description" class="text-sm" style="color: var(--fg-secondary);"
+						>Description</label
+					>
 					<textarea id="udf-description" rows="3" bind:value={description}></textarea>
 				</div>
 				<div class="flex flex-col gap-2">
-					<label for="udf-tags" class="text-sm" style="color: var(--fg-secondary);">Tags (comma-separated)</label>
+					<label for="udf-tags" class="text-sm" style="color: var(--fg-secondary);"
+						>Tags (comma-separated)</label
+					>
 					<input id="udf-tags" type="text" bind:value={tags} placeholder="math, text, date" />
 				</div>
 			</div>
 
-			<div class="flex flex-col gap-3 p-4 rounded-sm border" style="background-color: var(--bg-primary); border-color: var(--border-primary);">
+			<div
+				class="flex flex-col gap-3 p-4 rounded-sm border"
+				style="background-color: var(--bg-primary); border-color: var(--border-primary);"
+			>
 				<UdfSignatureBuilder {inputs} onChange={updateInputs} />
 				<div class="flex flex-col gap-2">
 					<label for="udf-output">Output dtype</label>
@@ -178,10 +190,15 @@
 				</div>
 			</div>
 
-			<div class="flex flex-col gap-3 p-4 rounded-sm border" style="background-color: var(--bg-primary); border-color: var(--border-primary);">
+			<div
+				class="flex flex-col gap-3 p-4 rounded-sm border"
+				style="background-color: var(--bg-primary); border-color: var(--border-primary);"
+			>
 				<div class="flex justify-between items-center">
 					<h4 class="m-0 text-sm" style="color: var(--fg-secondary);">Code</h4>
-					<span class="text-xs" style="color: var(--fg-muted);">Define a function named <code>udf</code></span>
+					<span class="text-xs" style="color: var(--fg-muted);"
+						>Define a function named <code>udf</code></span
+					>
 				</div>
 				<CodeEditor bind:value={code} height="360px" />
 			</div>
