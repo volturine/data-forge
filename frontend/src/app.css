@@ -1238,6 +1238,14 @@ tr:hover {
 	box-shadow: var(--card-shadow);
 }
 
+.text-accent-primary {
+	color: var(--accent-primary);
+}
+
+.text-error-fg {
+	color: var(--error-fg);
+}
+
 /* Shadow utilities */
 .shadow-soft {
 	box-shadow: var(--shadow-soft);

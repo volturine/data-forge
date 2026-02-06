@@ -551,14 +551,14 @@
 		<a href={resolve('/datasources')} class="btn-secondary no-underline" data-sveltekit-reload>Cancel</a>
 	</header>
 
-	<div class="mb-8 flex gap-2 border-b-2" style="border-color: var(--border-primary);">
-		<button class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium transition-all" class:active={activeTab === 'file'} onclick={() => (activeTab = 'file')} style="color: var(--fg-muted);">
+	<div class="mb-8 flex gap-2 border-b-2 border-primary">
+		<button class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary" class:active={activeTab === 'file'} onclick={() => (activeTab = 'file')}>
 			File Upload
 		</button>
-		<button class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium transition-all" class:active={activeTab === 'database'} onclick={() => (activeTab = 'database')} style="color: var(--fg-muted);">
+		<button class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary" class:active={activeTab === 'database'} onclick={() => (activeTab = 'database')}>
 			Database
 		</button>
-		<button class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium transition-all" class:active={activeTab === 'api'} onclick={() => (activeTab = 'api')} style="color: var(--fg-muted);">
+		<button class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary" class:active={activeTab === 'api'} onclick={() => (activeTab = 'api')}>
 			API
 		</button>
 	</div>
@@ -567,40 +567,40 @@
 		<div class="error-box">{error}</div>
 	{/if}
 
-	<div class="rounded-md p-8" style="background-color: var(--card-bg); box-shadow: var(--card-shadow);">
+	<div class="card-base rounded-md p-8">
 		{#if activeTab === 'file'}
 			<div class="flex flex-col gap-6">
 				<div class="flex flex-col gap-2">
-					<span class="text-sm font-medium" style="color: var(--fg-secondary);">Source</span>
+					<span class="text-sm font-medium text-fg-secondary">Source</span>
 					<div class="flex flex-col gap-3">
-						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all" style="border-color: var(--border-primary);">
+						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border border-primary p-3 transition-all hover:border-secondary hover:bg-hover">
 							<input type="radio" name="file-mode" value="upload" bind:group={fileMode} disabled={loading} class="row-span-2 h-4 w-4 cursor-pointer self-center" />
 							<span class="text-sm font-medium">Upload</span>
-							<span class="text-xs" style="color: var(--fg-muted);">Upload one or many files in one step</span>
+							<span class="text-xs text-fg-muted">Upload one or many files in one step</span>
 						</label>
-						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all" style="border-color: var(--border-primary);">
+						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border border-primary p-3 transition-all hover:border-secondary hover:bg-hover">
 							<input type="radio" name="file-mode" value="path" bind:group={fileMode} disabled={loading} class="row-span-2 h-4 w-4 cursor-pointer self-center" />
 							<span class="text-sm font-medium">Path</span>
-							<span class="text-xs" style="color: var(--fg-muted);">Point to a local file or folder path</span>
+							<span class="text-xs text-fg-muted">Point to a local file or folder path</span>
 						</label>
 					</div>
 				</div>
 
 				{#if fileMode === 'upload'}
 					<div class="flex flex-col gap-2">
-						<label for="file-input" class="text-sm font-medium" style="color: var(--fg-secondary);">Files</label>
-						<input id="file-input" type="file" multiple accept=".csv,.parquet,.json,.ndjson,.jsonl,.xlsx" onchange={handleFileChange} disabled={loading} class="rounded-sm border p-2" style="border-color: var(--input-border);" />
-						<p class="m-0 text-xs leading-relaxed" style="color: var(--fg-muted);">Select one or more files. Names are derived from filenames.</p>
+						<label for="file-input" class="text-sm font-medium text-fg-secondary">Files</label>
+						<input id="file-input" type="file" multiple accept=".csv,.parquet,.json,.ndjson,.jsonl,.xlsx" onchange={handleFileChange} disabled={loading} class="rounded-sm border border-input p-2" />
+						<p class="m-0 text-xs leading-relaxed text-fg-muted">Select one or more files. Names are derived from filenames.</p>
 						{#if selectedFiles.length > 0}
-							<div class="mt-3 rounded-sm border p-3" style="background-color: var(--bg-tertiary); border-color: var(--border-primary);">
-								<div class="mb-2 flex items-center justify-between border-b pb-2 text-sm" style="border-color: var(--border-primary); color: var(--fg-secondary);">
+							<div class="mt-3 rounded-sm border border-primary bg-tertiary p-3">
+								<div class="mb-2 flex items-center justify-between border-b border-primary pb-2 text-sm text-fg-secondary">
 									<span>{selectedFiles.length} file(s) selected</span>
-									<button type="button" class="btn-text border-none bg-transparent p-0 text-xs" style="color: var(--accent-primary);" onclick={clearBulkSelection} disabled={loading}>Clear all</button>
+									<button type="button" class="btn-text border-none bg-transparent p-0 text-xs text-accent-primary hover:underline" onclick={clearBulkSelection} disabled={loading}>Clear all</button>
 								</div>
 								{#each selectedFiles as selectedFile, index (index)}
-									<div class="flex items-center justify-between border-b p-2" style="border-color: var(--border-primary);">
-										<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm" style="color: var(--fg-primary);">{selectedFile.name}</span>
-										<button type="button" class="btn-remove border-none bg-transparent p-1 text-lg leading-none" style="color: var(--fg-muted);" onclick={() => removeBulkFile(index)} disabled={loading}>x</button>
+									<div class="flex items-center justify-between border-b border-primary p-2">
+										<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-fg-primary">{selectedFile.name}</span>
+										<button type="button" class="btn-remove border-none bg-transparent p-1 text-lg leading-none text-fg-muted hover:text-error-fg" onclick={() => removeBulkFile(index)} disabled={loading}>x</button>
 									</div>
 								{/each}
 							</div>
@@ -609,23 +609,23 @@
 
 					{#if selectedFiles.length === 1}
 						<div class="flex flex-col gap-2">
-							<label for="file-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
-							<input id="file-name" type="text" bind:value={fileName} placeholder="My Dataset" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+							<label for="file-name" class="text-sm font-medium text-fg-secondary">Name</label>
+							<input id="file-name" type="text" bind:value={fileName} placeholder="My Dataset" disabled={loading} class="input-base rounded-sm border px-3 py-2 text-sm" />
 							{#if file}
-								<p class="m-0 text-sm" style="color: var(--fg-secondary);">Selected: {file.name}</p>
+								<p class="m-0 text-sm text-fg-secondary">Selected: {file.name}</p>
 							{/if}
 						</div>
 					{/if}
 
 					{#if showBulkResults && bulkResults.length > 0}
-						<div class="mt-4 rounded-sm border p-4" style="background-color: var(--bg-tertiary); border-color: var(--border-primary);">
-							<h4 class="m-0 mb-3 text-sm font-semibold" style="color: var(--fg-secondary);">Upload Results</h4>
+						<div class="mt-4 rounded-sm border border-primary bg-tertiary p-4">
+							<h4 class="m-0 mb-3 text-sm font-semibold text-fg-secondary">Upload Results</h4>
 							{#each bulkResults as result (result.name)}
-								<div class="flex items-center gap-2 border-b p-2 text-sm" style="border-color: var(--border-primary);" class:text-success={result.success} class:text-error={!result.success}>
+								<div class="flex items-center gap-2 border-b border-primary p-2 text-sm" class:text-success={result.success} class:text-error={!result.success}>
 									<span class="w-5 text-center font-bold">{result.success ? '✓' : '✗'}</span>
 									<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{result.name}</span>
 									{#if result.error}
-										<span class="max-w-[200px] overflow-hidden text-ellipsis text-xs" style="color: var(--fg-muted);">{result.error}</span>
+										<span class="max-w-[200px] overflow-hidden text-ellipsis text-xs text-fg-muted">{result.error}</span>
 									{/if}
 								</div>
 							{/each}
@@ -633,27 +633,27 @@
 					{/if}
 				{:else}
 					<div class="flex flex-col gap-2">
-						<label for="path-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
-						<input id="path-name" type="text" bind:value={pathName} placeholder="My Dataset" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="path-name" class="text-sm font-medium text-fg-secondary">Name</label>
+						<input id="path-name" type="text" bind:value={pathName} placeholder="My Dataset" disabled={loading} class="input-base rounded-sm border px-3 py-2 text-sm" />
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="path-value" class="text-sm font-medium" style="color: var(--fg-secondary);">Path</label>
-						<input id="path-value" type="text" bind:value={pathValue} placeholder="/path/to/data" oninput={handlePathInput} disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="path-value" class="text-sm font-medium text-fg-secondary">Path</label>
+						<input id="path-value" type="text" bind:value={pathValue} placeholder="/path/to/data" oninput={handlePathInput} disabled={loading} class="input-base rounded-sm border px-3 py-2 text-sm" />
 						<div class="flex flex-wrap items-center gap-2">
 							<button class="btn-secondary" type="button" onclick={openPicker} disabled={loading}>Browse server</button>
 						</div>
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="path-options" class="flex items-center gap-2 text-sm font-medium" style="color: var(--fg-secondary);">
+						<label for="path-options" class="flex items-center gap-2 text-sm font-medium text-fg-secondary">
 							<span>Options (optional)</span>
-							<a href="https://docs.pola.rs/api/python/stable/reference/io.html" target="_blank" rel="noopener noreferrer" class="inline-flex items-center no-underline transition-colors" style="color: var(--fg-muted);">
+							<a href="https://docs.pola.rs/api/python/stable/reference/io.html" target="_blank" rel="noopener noreferrer" class="inline-flex items-center no-underline transition-colors text-fg-muted">
 								<MessageCircleQuestionMark size={16} />
 							</a>
 						</label>
-						<textarea id="path-options" bind:value={pathOptions} placeholder={'{"ignore_errors": true, "rechunk": false}'} rows="3" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);"></textarea>
-						<p class="m-0 text-xs leading-relaxed" style="color: var(--fg-muted);">Advanced Polars scan options in JSON format. Common options: <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">ignore_errors</code>, <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">rechunk</code>, <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">low_memory</code>, <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">n_rows</code>.</p>
+						<textarea id="path-options" bind:value={pathOptions} placeholder={'{"ignore_errors": true, "rechunk": false}'} rows="3" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm input-base"></textarea>
+						<p class="m-0 text-xs leading-relaxed text-fg-muted">Advanced Polars scan options in JSON format. Common options: <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">ignore_errors</code>, <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">rechunk</code>, <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">low_memory</code>, <code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">n_rows</code>.</p>
 					</div>
 
 					<button class="btn-primary" onclick={handlePathConnect} disabled={loading}>
@@ -666,12 +666,12 @@
 				{/if}
 
 				{#if fileMode === 'upload' && file?.name.endsWith('.xlsx')}
-					<div class="flex flex-col gap-4 rounded-md border p-4" style="background-color: var(--bg-tertiary); border-color: var(--border-primary);">
-						<h3 class="m-0 text-sm font-semibold" style="color: var(--fg-secondary);">Excel Table Selection</h3>
+					<div class="flex flex-col gap-4 rounded-md border p-4 bg-tertiary border-primary">
+						<h3 class="m-0 text-sm font-semibold text-fg-secondary">Excel Table Selection</h3>
 						<div class="grid grid-cols-2 gap-4">
 							<div class="flex flex-col gap-2">
-								<label for="excel-sheet" class="text-sm font-medium" style="color: var(--fg-secondary);">Sheet</label>
-								<select id="excel-sheet" value={selectedSheet} onchange={(event) => applySheet(event.currentTarget.value)} disabled={loading || previewLoading || !sheetNames.length} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);">
+								<label for="excel-sheet" class="text-sm font-medium text-fg-secondary">Sheet</label>
+								<select id="excel-sheet" value={selectedSheet} onchange={(event) => applySheet(event.currentTarget.value)} disabled={loading || previewLoading || !sheetNames.length} class="rounded-sm border px-3 py-2 text-sm input-base">
 									<option value="">Select sheet</option>
 									{#each sheetNames as sheet (sheet)}
 										<option value={sheet}>{sheet}</option>
@@ -679,8 +679,8 @@
 								</select>
 							</div>
 							<div class="flex flex-col gap-2">
-								<label for="excel-table" class="text-sm font-medium" style="color: var(--fg-secondary);">Excel Table</label>
-								<select id="excel-table" value={selectedTable} onchange={(event) => applyTable(event.currentTarget.value)} disabled={loading || previewLoading || !selectedSheet} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);">
+								<label for="excel-table" class="text-sm font-medium text-fg-secondary">Excel Table</label>
+								<select id="excel-table" value={selectedTable} onchange={(event) => applyTable(event.currentTarget.value)} disabled={loading || previewLoading || !selectedSheet} class="rounded-sm border px-3 py-2 text-sm input-base">
 									<option value="">Manual selection</option>
 									{#each tableMap[selectedSheet] ?? [] as table (table)}
 										<option value={table}>{table}</option>
@@ -688,8 +688,8 @@
 								</select>
 							</div>
 							<div class="flex flex-col gap-2">
-								<label for="excel-range" class="text-sm font-medium" style="color: var(--fg-secondary);">Named Range</label>
-								<select id="excel-range" value={selectedRange} onchange={(event) => applyNamedRange(event.currentTarget.value)} disabled={loading || previewLoading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);">
+								<label for="excel-range" class="text-sm font-medium text-fg-secondary">Named Range</label>
+								<select id="excel-range" value={selectedRange} onchange={(event) => applyNamedRange(event.currentTarget.value)} disabled={loading || previewLoading} class="rounded-sm border px-3 py-2 text-sm input-base">
 									<option value="">None</option>
 									{#each namedRanges as range (range)}
 										<option value={range}>{range}</option>
@@ -701,7 +701,7 @@
 						<div class="flex items-center gap-4">
 							<div class="flex items-center gap-2">
 								<input id="excel-header" type="checkbox" bind:checked={excelHeader} onchange={() => refreshPreview()} disabled={loading || previewLoading} class="h-4 w-4 cursor-pointer" />
-								<label for="excel-header" class="m-0 text-sm font-medium" style="color: var(--fg-secondary);">First row is header</label>
+								<label for="excel-header" class="m-0 text-sm font-medium text-fg-secondary">First row is header</label>
 							</div>
 							<button type="button" class="btn-secondary" onclick={runPreflight} disabled={loading || previewLoading}>
 								{previewLoading ? 'Loading preview...' : 'Run preflight'}
@@ -709,8 +709,8 @@
 						</div>
 
 						{#if preflightId}
-							<div class="overflow-hidden rounded-sm border" style="border-color: var(--border-primary); background: var(--bg-primary);">
-								<div class="flex flex-wrap gap-3 px-3 py-2 text-xs" style="background: var(--bg-tertiary); color: var(--fg-muted);">
+							<div class="overflow-hidden rounded-sm border border-primary bg-primary">
+								<div class="flex flex-wrap gap-3 px-3 py-2 text-xs bg-tertiary text-fg-muted">
 									<span>Start row: {startRow + 1}</span>
 									<span>Start col: {cellLabel(startCol)}</span>
 									<span>End col: {cellLabel(endCol)}</span>
@@ -719,21 +719,21 @@
 									{/if}
 								</div>
 								<div class="max-h-80 overflow-auto">
-									<div class="preview-row grid" style="grid-auto-flow: column; grid-auto-columns: minmax(120px, 1fr);">
-										<div class="cell border-b border-r p-2 text-left text-xs font-semibold" style="background: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-primary);"></div>
+									<div class="preview-row grid grid-flow-col auto-cols-[minmax(120px,1fr)]">
+										<div class="cell border-b border-r border-primary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary"></div>
 										{#each previewGrid[0] ?? [] as _cell, index (index)}
-											<button class="cell cursor-pointer border-b border-r bg-transparent p-2 text-left text-xs font-semibold" style="background: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-primary);" onclick={() => handleEndCol(startCol + index)}>
+											<button class="cell cursor-pointer border-b border-r border-primary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary" onclick={() => handleEndCol(startCol + index)}>
 												{cellLabel(startCol + index)}
 											</button>
 										{/each}
 									</div>
 									{#each previewGrid as row, rowIndex (rowIndex)}
-										<div class="preview-row grid" style="grid-auto-flow: column; grid-auto-columns: minmax(120px, 1fr);">
-											<button class="cell cursor-pointer border-b border-r bg-transparent p-2 text-left text-xs font-semibold" style="background: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-primary);" onclick={() => handleStartRow(startRow + rowIndex)}>
+										<div class="preview-row grid grid-flow-col auto-cols-[minmax(120px,1fr)]">
+											<button class="cell cursor-pointer border-b border-r border-primary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary" onclick={() => handleStartRow(startRow + rowIndex)}>
 												{startRow + rowIndex + 1}
 											</button>
 											{#each row as cell, colIndex (colIndex)}
-												<button class="cell cursor-pointer border-b border-r bg-transparent p-2 text-left text-xs" style="border-color: var(--border-primary); color: var(--fg-secondary);" onclick={() => handleStartCol(startCol + colIndex)}>
+												<button class="cell cursor-pointer border-b border-r border-primary bg-transparent p-2 text-left text-xs text-fg-secondary" onclick={() => handleStartCol(startCol + colIndex)}>
 													{cell ?? ''}
 												</button>
 											{/each}
@@ -754,47 +754,47 @@
 		{:else if activeTab === 'database'}
 			<div class="flex flex-col gap-6">
 				<div class="flex flex-col gap-2">
-					<label for="db-type" class="text-sm font-medium" style="color: var(--fg-secondary);">Database Type</label>
+					<label for="db-type" class="text-sm font-medium text-fg-secondary">Database Type</label>
 					<div class="flex flex-col gap-3">
-						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all" style="border-color: var(--border-primary);">
+						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all border-primary">
 							<input type="radio" name="db-type" value="duckdb" bind:group={databaseType} disabled={loading} class="row-span-2 h-4 w-4 cursor-pointer self-center" />
 							<span class="text-sm font-medium">DuckDB</span>
-							<span class="text-xs" style="color: var(--fg-muted);">In-memory or file-based analytics database</span>
+							<span class="text-xs text-fg-muted">In-memory or file-based analytics database</span>
 						</label>
-						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all" style="border-color: var(--border-primary);">
+						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all border-primary">
 							<input type="radio" name="db-type" value="iceberg" bind:group={databaseType} disabled={loading} class="row-span-2 h-4 w-4 cursor-pointer self-center" />
 							<span class="text-sm font-medium">Iceberg</span>
-							<span class="text-xs" style="color: var(--fg-muted);">Connect to an Iceberg table via metadata JSON</span>
+							<span class="text-xs text-fg-muted">Connect to an Iceberg table via metadata JSON</span>
 						</label>
-						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all" style="border-color: var(--border-primary);">
+						<label class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-sm border p-3 transition-all border-primary">
 							<input type="radio" name="db-type" value="other" bind:group={databaseType} disabled={loading} class="row-span-2 h-4 w-4 cursor-pointer self-center" />
 							<span class="text-sm font-medium">Other Database</span>
-							<span class="text-xs" style="color: var(--fg-muted);">PostgreSQL, MySQL, SQLite via connection string</span>
+							<span class="text-xs text-fg-muted">PostgreSQL, MySQL, SQLite via connection string</span>
 						</label>
 					</div>
 				</div>
 
 				{#if databaseType === 'duckdb'}
 					<div class="flex flex-col gap-2">
-						<label for="duckdb-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
-						<input id="duckdb-name" type="text" bind:value={duckdbName} placeholder="My DuckDB Data" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="duckdb-name" class="text-sm font-medium text-fg-secondary">Name</label>
+						<input id="duckdb-name" type="text" bind:value={duckdbName} placeholder="My DuckDB Data" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="duckdb-path" class="text-sm font-medium" style="color: var(--fg-secondary);">Database Path (optional)</label>
-						<input id="duckdb-path" type="text" bind:value={duckdbPath} placeholder="/path/to/database.duckdb" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
-						<p class="m-0 text-xs" style="color: var(--fg-muted);">Leave empty for in-memory database</p>
+						<label for="duckdb-path" class="text-sm font-medium text-fg-secondary">Database Path (optional)</label>
+						<input id="duckdb-path" type="text" bind:value={duckdbPath} placeholder="/path/to/database.duckdb" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
+						<p class="m-0 text-xs text-fg-muted">Leave empty for in-memory database</p>
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="duckdb-query" class="text-sm font-medium" style="color: var(--fg-secondary);">Query</label>
-						<textarea id="duckdb-query" bind:value={duckdbQuery} placeholder="SELECT * FROM read_csv_auto('data.csv')" rows="5" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);"></textarea>
-						<p class="m-0 text-xs" style="color: var(--fg-muted);">DuckDB can read CSV, Parquet, JSON directly: read_csv_auto(), read_parquet(), read_json_auto()</p>
+						<label for="duckdb-query" class="text-sm font-medium text-fg-secondary">Query</label>
+						<textarea id="duckdb-query" bind:value={duckdbQuery} placeholder="SELECT * FROM read_csv_auto('data.csv')" rows="5" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm input-base"></textarea>
+						<p class="m-0 text-xs text-fg-muted">DuckDB can read CSV, Parquet, JSON directly: read_csv_auto(), read_parquet(), read_json_auto()</p>
 					</div>
 
 					<div class="flex items-center gap-2">
 						<input id="duckdb-readonly" type="checkbox" bind:checked={duckdbReadOnly} disabled={loading} class="h-4 w-4 cursor-pointer" />
-						<label for="duckdb-readonly" class="m-0 text-sm font-medium" style="color: var(--fg-secondary);">Read-only mode</label>
+						<label for="duckdb-readonly" class="m-0 text-sm font-medium text-fg-secondary">Read-only mode</label>
 					</div>
 
 					<button class="btn-primary" onclick={handleDuckDBConnect} disabled={loading}>
@@ -802,36 +802,36 @@
 					</button>
 				{:else if databaseType === 'iceberg'}
 					<div class="flex flex-col gap-2">
-						<label for="iceberg-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
-						<input id="iceberg-name" type="text" bind:value={icebergName} placeholder="My Iceberg Table" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="iceberg-name" class="text-sm font-medium text-fg-secondary">Name</label>
+						<input id="iceberg-name" type="text" bind:value={icebergName} placeholder="My Iceberg Table" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="iceberg-metadata" class="text-sm font-medium" style="color: var(--fg-secondary);">Metadata JSON Path</label>
-						<input id="iceberg-metadata" type="text" bind:value={icebergMetadataPath} placeholder="/path/to/table/metadata or metadata.json" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
-						<p class="m-0 text-xs" style="color: var(--fg-muted);">Point to metadata.json or a folder containing metadata/*.metadata.json</p>
+						<label for="iceberg-metadata" class="text-sm font-medium text-fg-secondary">Metadata JSON Path</label>
+						<input id="iceberg-metadata" type="text" bind:value={icebergMetadataPath} placeholder="/path/to/table/metadata or metadata.json" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
+						<p class="m-0 text-xs text-fg-muted">Point to metadata.json or a folder containing metadata/*.metadata.json</p>
 						<div class="flex flex-wrap items-center gap-2">
 							<button class="btn-secondary" type="button" onclick={resolveMetadataPath} disabled={loading}>Resolve Path</button>
 							{#if icebergResolvedPath}
-								<span class="break-all rounded-sm border px-1.5 py-0.5 text-xs" style="color: var(--fg-secondary); background: var(--bg-secondary); border-color: var(--border-secondary);">{icebergResolvedPath}</span>
+								<span class="break-all rounded-sm border px-1.5 py-0.5 text-xs text-fg-secondary bg-secondary border-secondary">{icebergResolvedPath}</span>
 							{/if}
 						</div>
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="iceberg-snapshot" class="text-sm font-medium" style="color: var(--fg-secondary);">Snapshot ID (optional)</label>
-						<input id="iceberg-snapshot" type="number" bind:value={icebergSnapshotId} placeholder="7051579356916758811" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="iceberg-snapshot" class="text-sm font-medium text-fg-secondary">Snapshot ID (optional)</label>
+						<input id="iceberg-snapshot" type="number" bind:value={icebergSnapshotId} placeholder="7051579356916758811" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="iceberg-reader" class="text-sm font-medium" style="color: var(--fg-secondary);">Reader Override (optional)</label>
-						<input id="iceberg-reader" type="text" bind:value={icebergReader} placeholder="native or pyiceberg" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="iceberg-reader" class="text-sm font-medium text-fg-secondary">Reader Override (optional)</label>
+						<input id="iceberg-reader" type="text" bind:value={icebergReader} placeholder="native or pyiceberg" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="iceberg-storage" class="text-sm font-medium" style="color: var(--fg-secondary);">Storage Options (optional)</label>
-						<textarea id="iceberg-storage" bind:value={icebergStorageOptions} placeholder={'{"s3.region": "us-east-1"}'} rows="3" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);"></textarea>
-						<p class="m-0 text-xs" style="color: var(--fg-muted);">JSON map of storage options for S3/GCS/Azure</p>
+						<label for="iceberg-storage" class="text-sm font-medium text-fg-secondary">Storage Options (optional)</label>
+						<textarea id="iceberg-storage" bind:value={icebergStorageOptions} placeholder={'{"s3.region": "us-east-1"}'} rows="3" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm input-base"></textarea>
+						<p class="m-0 text-xs text-fg-muted">JSON map of storage options for S3/GCS/Azure</p>
 					</div>
 
 					<button class="btn-primary" onclick={handleIcebergConnect} disabled={loading}>
@@ -839,19 +839,19 @@
 					</button>
 				{:else}
 					<div class="flex flex-col gap-2">
-						<label for="db-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
-						<input id="db-name" type="text" bind:value={dbName} placeholder="My Database" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+						<label for="db-name" class="text-sm font-medium text-fg-secondary">Name</label>
+						<input id="db-name" type="text" bind:value={dbName} placeholder="My Database" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="connection-string" class="text-sm font-medium" style="color: var(--fg-secondary);">Connection String</label>
-						<input id="connection-string" type="text" bind:value={connectionString} placeholder="postgresql://user:pass@localhost/db" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
-						<p class="m-0 text-xs" style="color: var(--fg-muted);">Example: postgresql://user:pass@localhost/dbname</p>
+						<label for="connection-string" class="text-sm font-medium text-fg-secondary">Connection String</label>
+						<input id="connection-string" type="text" bind:value={connectionString} placeholder="postgresql://user:pass@localhost/db" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
+						<p class="m-0 text-xs text-fg-muted">Example: postgresql://user:pass@localhost/dbname</p>
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<label for="query" class="text-sm font-medium" style="color: var(--fg-secondary);">Query</label>
-						<textarea id="query" bind:value={query} placeholder="SELECT * FROM table" rows="5" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);"></textarea>
+						<label for="query" class="text-sm font-medium text-fg-secondary">Query</label>
+						<textarea id="query" bind:value={query} placeholder="SELECT * FROM table" rows="5" disabled={loading} class="resize-y rounded-sm border px-3 py-2 text-sm input-base"></textarea>
 					</div>
 
 					<button class="btn-primary" onclick={handleDatabaseConnect} disabled={loading}>
@@ -862,18 +862,18 @@
 		{:else if activeTab === 'api'}
 			<div class="flex flex-col gap-6">
 				<div class="flex flex-col gap-2">
-					<label for="api-name" class="text-sm font-medium" style="color: var(--fg-secondary);">Name</label>
-					<input id="api-name" type="text" bind:value={apiName} placeholder="My API" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+					<label for="api-name" class="text-sm font-medium text-fg-secondary">Name</label>
+					<input id="api-name" type="text" bind:value={apiName} placeholder="My API" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 				</div>
 
 				<div class="flex flex-col gap-2">
-					<label for="api-url" class="text-sm font-medium" style="color: var(--fg-secondary);">URL</label>
-					<input id="api-url" type="url" bind:value={apiUrl} placeholder="https://api.example.com/data" disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);" />
+					<label for="api-url" class="text-sm font-medium text-fg-secondary">URL</label>
+					<input id="api-url" type="url" bind:value={apiUrl} placeholder="https://api.example.com/data" disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base" />
 				</div>
 
 				<div class="flex flex-col gap-2">
-					<label for="api-method" class="text-sm font-medium" style="color: var(--fg-secondary);">Method</label>
-					<select id="api-method" bind:value={apiMethod} disabled={loading} class="rounded-sm border px-3 py-2 text-sm" style="border-color: var(--input-border); background-color: var(--input-bg);">
+					<label for="api-method" class="text-sm font-medium text-fg-secondary">Method</label>
+					<select id="api-method" bind:value={apiMethod} disabled={loading} class="rounded-sm border px-3 py-2 text-sm input-base">
 						<option value="GET">GET</option>
 						<option value="POST">POST</option>
 					</select>
@@ -888,49 +888,14 @@
 </div>
 
 <style>
-	.tab:hover {
-		color: var(--fg-secondary);
-	}
-
 	.tab.active {
 		color: var(--accent-primary);
 		border-bottom-color: var(--accent-primary);
 	}
 
-	.radio-option:hover {
-		background: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-
 	.radio-option:has(input:checked) {
 		background: var(--accent-bg);
 		border-color: var(--accent-border);
-	}
-
-	.btn-text:hover {
-		text-decoration: underline;
-	}
-
-	.btn-text:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.btn-remove:hover {
-		color: var(--error-fg);
-	}
-
-	.btn-remove:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.text-success {
-		color: var(--success-fg);
-	}
-
-	.text-error {
-		color: var(--error-fg);
 	}
 
 	input:focus,
