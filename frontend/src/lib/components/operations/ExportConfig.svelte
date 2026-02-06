@@ -66,7 +66,7 @@
 	</div>
 
 	<div class="form-group mb-4">
-		<label for="export-select-format">
+		<label for="export-select-format" class="flex items-center gap-2">
 			Format
 			{#if selectedFileType === 'duckdb'}
 				<FileTypeBadge sourceType="duckdb" size="sm" />
@@ -118,10 +118,3 @@
 	</div>
 </div>
 
-<style>
-	label {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-</style>

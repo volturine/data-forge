@@ -141,8 +141,8 @@
 		<div class="form-section" role="group" aria-labelledby="ts-period-heading">
 			<h4 id="ts-period-heading">Time Period</h4>
 			<div class="flex gap-2">
-				<div class="input-group flex-1">
-					<label for="ts-input-value">Value:</label>
+				<div class="flex-1">
+					<label for="ts-input-value" class="block text-sm mb-1" style="color: var(--fg-secondary);">Value:</label>
 					<input
 						id="ts-input-value"
 						data-testid="ts-value-input"
@@ -153,8 +153,8 @@
 						aria-label="Time period value"
 					/>
 				</div>
-				<div class="input-group flex-1">
-					<label for="ts-select-unit">Unit:</label>
+				<div class="flex-1">
+					<label for="ts-select-unit" class="block text-sm mb-1" style="color: var(--fg-secondary);">Unit:</label>
 					<select id="ts-select-unit" data-testid="ts-unit-select" class="flex-1" bind:value={config.unit}>
 						{#each timeUnits as unit (unit)}
 							<option value={unit}>{unit}</option>
@@ -192,11 +192,3 @@
 	</div>
 </div>
 
-<style>
-	.input-group label {
-		display: block;
-		font-size: var(--text-sm);
-		margin-bottom: var(--space-1);
-		color: var(--fg-secondary);
-	}
-</style>

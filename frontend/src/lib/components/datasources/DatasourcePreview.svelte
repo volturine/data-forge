@@ -65,10 +65,10 @@
 	}
 </script>
 
-<div class="preview-panel">
-	<div class="preview-header">
-		<h3>{datasourceName}</h3>
-		<div class="view-toggle">
+<div class="rounded-md overflow-hidden" style="background: var(--bg-primary);">
+	<div class="flex justify-between items-center px-4 py-3 border-b" style="background: var(--bg-tertiary); border-color: var(--border-primary);">
+		<h3 class="m-0 text-sm font-semibold truncate" style="color: var(--fg-primary);">{datasourceName}</h3>
+		<div class="flex gap-1 shrink-0">
 			<button
 				class="toggle-btn"
 				class:active={viewMode === 'data'}
@@ -90,14 +90,14 @@
 
 	{#if viewMode === 'data'}
 		{#if error}
-			<div class="error-state">
-				<p class="error-title">Failed to load preview</p>
-				<p class="error-message">{error.message}</p>
+			<div class="p-8 text-center">
+				<p class="m-0 mb-2 font-semibold" style="color: var(--error-fg);">Failed to load preview</p>
+				<p class="m-0 text-xs" style="color: var(--fg-tertiary);">{error.message}</p>
 			</div>
 		{:else}
-			<div class="pagination">
+			<div class="flex items-center gap-3 px-4 py-3 border-b" style="background: var(--bg-secondary); border-color: var(--border-primary);">
 				<button class="page-btn" onclick={goPrev} disabled={!canPrev || isLoading}> Prev </button>
-				<span class="page-info">Page {page}</span>
+				<span class="text-xs" style="color: var(--fg-tertiary);">Page {page}</span>
 				<button class="page-btn" onclick={goNext} disabled={!canNext || isLoading}> Next </button>
 			</div>
 			<DataTable
@@ -108,22 +108,22 @@
 			/>
 		{/if}
 	{:else}
-		<div class="schema-view">
+		<div class="max-h-[300px] overflow-y-auto">
 			{#if isLoading}
-				<div class="loading-state">Loading schema...</div>
+				<div class="p-8 text-center pointer-events-none" style="color: var(--fg-tertiary);">Loading schema...</div>
 			{:else if error}
-				<div class="error-state">
-					<p class="error-title">Failed to load schema</p>
-					<p class="error-message">{error.message}</p>
+				<div class="p-8 text-center">
+					<p class="m-0 mb-2 font-semibold" style="color: var(--error-fg);">Failed to load schema</p>
+					<p class="m-0 text-xs" style="color: var(--fg-tertiary);">{error.message}</p>
 				</div>
 			{:else}
-				<div class="schema-header">
+				<div class="grid grid-cols-2 px-4 py-2 text-xs font-semibold sticky top-0 border-b" style="background: var(--bg-tertiary); border-color: var(--border-primary); color: var(--fg-muted);">
 					<span>Column</span>
 					<span>Type</span>
 				</div>
 				{#each schema as column (column.name)}
 					<div class="schema-row">
-						<span class="col-name">{column.name}</span>
+						<span class="font-mono text-[0.8125rem]" style="color: var(--fg-primary);">{column.name}</span>
 						<ColumnTypeBadge columnType={column.dtype} size="xs" showIcon={true} />
 					</div>
 				{/each}
@@ -133,33 +133,6 @@
 </div>
 
 <style>
-	.preview-panel {
-		background: var(--bg-primary);
-		border-radius: var(--radius-md);
-		overflow: hidden;
-	}
-	.preview-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.75rem 1rem;
-		background: var(--bg-tertiary);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.preview-header h3 {
-		margin: 0;
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: var(--fg-primary);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.view-toggle {
-		display: flex;
-		gap: 0.25rem;
-		flex-shrink: 0;
-	}
 	.toggle-btn {
 		display: flex;
 		align-items: center;
@@ -182,38 +155,6 @@
 		color: var(--accent-fg);
 		border-color: var(--accent-border);
 	}
-	.error-state {
-		padding: var(--space-8);
-		text-align: center;
-	}
-	.error-state .error-title {
-		margin: 0 0 var(--space-2);
-		color: var(--error-fg);
-		font-weight: var(--font-semibold);
-	}
-	.error-state .error-message {
-		margin: 0;
-		font-size: var(--text-xs);
-		color: var(--fg-tertiary);
-	}
-	.loading-state {
-		padding: 2rem;
-		text-align: center;
-		color: var(--fg-tertiary);
-		pointer-events: none;
-	}
-	.schema-view {
-		max-height: 300px;
-		overflow-y: auto;
-	}
-	.pagination {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid var(--border-primary);
-		background: var(--bg-secondary);
-	}
 	.page-btn {
 		padding: 0.25rem 0.6rem;
 		border-radius: var(--radius-sm);
@@ -227,22 +168,6 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
-	.page-info {
-		font-size: 0.75rem;
-		color: var(--fg-tertiary);
-	}
-	.schema-header {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		padding: 0.5rem 1rem;
-		background: var(--bg-tertiary);
-		border-bottom: 1px solid var(--border-primary);
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: var(--fg-muted);
-		position: sticky;
-		top: 0;
-	}
 	.schema-row {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -254,10 +179,5 @@
 	}
 	.schema-row:last-child {
 		border-bottom: none;
-	}
-	.col-name {
-		font-family: var(--font-mono);
-		font-size: 0.8125rem;
-		color: var(--fg-primary);
 	}
 </style>
