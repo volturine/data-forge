@@ -1101,3 +1101,137 @@ tr:hover {
 	height: 24px;
 	border-width: 3px;
 }
+
+/* ============================================
+   UTILITY CLASSES FOR CSS VARIABLES
+   ============================================ */
+
+/* Text colors */
+.text-fg-primary {
+	color: var(--fg-primary);
+}
+
+.text-fg-secondary {
+	color: var(--fg-secondary);
+}
+
+.text-fg-tertiary {
+	color: var(--fg-tertiary);
+}
+
+.text-fg-muted {
+	color: var(--fg-muted);
+}
+
+.text-fg-faint {
+	color: var(--fg-faint);
+}
+
+.text-accent {
+	color: var(--accent-primary);
+}
+
+.text-error {
+	color: var(--error-fg);
+}
+
+.text-success {
+	color: var(--success-fg);
+}
+
+.text-warning {
+	color: var(--warning-fg);
+}
+
+/* Background colors */
+.bg-primary {
+	background-color: var(--bg-primary);
+}
+
+.bg-secondary {
+	background-color: var(--bg-secondary);
+}
+
+.bg-tertiary {
+	background-color: var(--bg-tertiary);
+}
+
+.bg-hover {
+	background-color: var(--bg-hover);
+}
+
+.bg-panel {
+	background-color: var(--panel-bg);
+}
+
+.bg-accent {
+	background-color: var(--accent-primary);
+}
+
+.bg-error {
+	background-color: var(--error-bg);
+}
+
+.bg-success {
+	background-color: var(--success-bg);
+}
+
+.bg-warning {
+	background-color: var(--warning-bg);
+}
+
+/* Border colors */
+.border-primary {
+	border-color: var(--border-primary);
+}
+
+.border-secondary {
+	border-color: var(--border-secondary);
+}
+
+.border-tertiary {
+	border-color: var(--border-tertiary);
+}
+
+.border-panel {
+	border-color: var(--panel-border);
+}
+
+.border-input {
+	border-color: var(--input-border);
+}
+
+.border-error {
+	border-color: var(--error-border);
+}
+
+.border-success {
+	border-color: var(--success-border);
+}
+
+.border-warning {
+	border-color: var(--warning-border);
+}
+
+.border-table {
+	border-color: var(--table-border);
+}
+
+/* Combined input styles */
+.input-base {
+	border-color: var(--input-border);
+	background-color: var(--input-bg);
+}
+
+/* Card styles */
+.card-base {
+	background-color: var(--bg-primary);
+	border-color: var(--border-primary);
+	box-shadow: var(--card-shadow);
+}
+
+/* Panel styles */
+.panel-base {
+	background-color: var(--panel-bg);
+	border: 1px solid var(--panel-border);
+}

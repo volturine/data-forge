@@ -157,10 +157,10 @@
 </script>
 
 <div class="mx-auto box-border min-h-full max-w-[1200px] px-6 py-7 md:px-4 md:py-4">
-	<header class="mb-8 flex flex-col items-stretch justify-between gap-6 border-b pb-6 md:flex-row md:items-start" style="border-color: var(--border-primary);">
+	<header class="mb-8 flex flex-col items-stretch justify-between gap-6 border-b border-primary pb-6 md:flex-row md:items-start">
 		<div>
 			<h1 class="m-0 mb-2 text-2xl font-semibold">Analyses</h1>
-			<p class="m-0 text-sm" style="color: var(--fg-tertiary);">Browse and manage your data analyses</p>
+			<p class="m-0 text-sm text-fg-tertiary">Browse and manage your data analyses</p>
 		</div>
 		<button class="btn-primary w-full justify-center md:w-auto" onclick={createNew}>
 			<Plus size={16} />
@@ -173,12 +173,12 @@
 			<div class="py-4">
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
 					{#each Array(6) as _, i (i)}
-						<div class="overflow-hidden rounded-sm border" style="border-color: var(--border-primary); background: var(--bg-primary);">
-							<div class="aspect-video w-full animate-shimmer" style="background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%); background-size: 200% 100%;"></div>
+						<div class="bg-primary overflow-hidden rounded-sm border border-primary">
+							<div class="aspect-video w-full animate-shimmer shimmer-bg"></div>
 							<div class="p-4">
-								<div class="mb-3 h-4 w-[70%] animate-shimmer rounded-sm" style="background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%); background-size: 200% 100%;"></div>
-								<div class="mb-3 h-3.5 animate-shimmer rounded-sm" style="background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%); background-size: 200% 100%;"></div>
-								<div class="h-3.5 w-1/2 animate-shimmer rounded-sm" style="background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%); background-size: 200% 100%;"></div>
+								<div class="mb-3 h-4 w-[70%] animate-shimmer shimmer-bg rounded-sm"></div>
+								<div class="mb-3 h-3.5 animate-shimmer shimmer-bg rounded-sm"></div>
+								<div class="h-3.5 w-1/2 animate-shimmer shimmer-bg rounded-sm"></div>
 							</div>
 						</div>
 					{/each}
@@ -202,8 +202,8 @@
 					onSort={handleSort}
 				/>
 				{#if selectionCount > 0}
-					<div class="mb-4 flex items-center justify-between rounded-sm border px-4 py-3" style="background-color: var(--bg-secondary); border-color: var(--border-primary);">
-						<span class="text-sm font-medium" style="color: var(--fg-primary);">{selectionCount} selected</span>
+					<div class="bg-secondary mb-4 flex items-center justify-between rounded-sm border border-primary px-4 py-3">
+						<span class="text-fg-primary text-sm font-medium">{selectionCount} selected</span>
 						<div class="flex items-center gap-2">
 							<button class="btn-text flex items-center gap-1 rounded-sm border border-transparent bg-transparent px-3 py-2 text-sm transition-all" onclick={selectAll}>
 								Select All
@@ -220,8 +220,8 @@
 					</div>
 				{/if}
 				{#if filteredAndSortedAnalyses.length === 0}
-					<div class="rounded-sm border border-dashed px-6 py-12 text-center" style="border-color: var(--border-primary);">
-						<p class="m-0 text-sm" style="color: var(--fg-tertiary);">No analyses match your search.</p>
+					<div class="rounded-sm border border-dashed border-primary px-6 py-12 text-center">
+						<p class="text-fg-tertiary m-0 text-sm">No analyses match your search.</p>
 					</div>
 				{:else}
 					<GalleryGrid
@@ -259,6 +259,11 @@
 />
 
 <style>
+	.shimmer-bg {
+		background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-hover) 50%, var(--bg-tertiary) 75%);
+		background-size: 200% 100%;
+	}
+
 	@keyframes shimmer {
 		0% {
 			background-position: 200% 0;
