@@ -183,7 +183,7 @@
 	class:drag-target={isOtherDragging}
 >
 	<div
-		class="absolute left-1/2 -top-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 text-fg-muted"
+		class="absolute left-1/2 -top-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2"
 		style="background-color: var(--fg-muted); border-color: var(--bg-primary);"
 	></div>
 
@@ -294,7 +294,7 @@
 	</div>
 
 	<div
-		class="absolute left-1/2 -bottom-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2 text-fg-muted"
+		class="absolute left-1/2 -bottom-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full border-2"
 		style="background-color: var(--fg-muted); border-color: var(--bg-primary);"
 	></div>
 </div>
