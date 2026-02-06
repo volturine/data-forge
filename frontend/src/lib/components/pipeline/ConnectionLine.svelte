@@ -33,11 +33,16 @@
 	let isDragActive = $derived(drag.active);
 </script>
 
-<div class="connection-line" class:drag-active={isDragActive} class:highlighted>
-	<svg {width} {height} xmlns="http://www.w3.org/2000/svg">
+<div
+	class="connection-line flex w-full shrink-0 items-center justify-center transition-colors"
+	class:drag-active={isDragActive}
+	class:highlighted
+	style="color: {isDragActive ? (highlighted ? 'var(--fg-primary)' : 'var(--fg-faint)') : 'var(--fg-muted)'}; height: var(--pipeline-connection-height);"
+>
+	<svg class="overflow-visible" {width} {height} xmlns="http://www.w3.org/2000/svg">
 		<!-- Dotted vertical line -->
 		{#each dots as y (y)}
-			<circle cx={width / 2} cy={y} r={dotRadius} fill="currentColor" class="dot" />
+			<circle cx={width / 2} cy={y} r={dotRadius} fill="currentColor" class="opacity-80" />
 		{/each}
 
 		<!-- Arrow triangle pointing down -->
@@ -46,46 +51,12 @@
 				arrowHeight -
 				2} {width / 2 + arrowWidth / 2},{height - arrowHeight - 2}"
 			fill="currentColor"
-			class="arrow"
 		/>
 	</svg>
 </div>
 
 <style>
-	.connection-line {
-		width: 100%;
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		color: var(--fg-muted);
-		transition: color var(--transition);
-		height: var(--pipeline-connection-height);
-		flex-shrink: 0;
-	}
-
 	.connection-line:hover {
 		color: var(--fg-primary);
-	}
-
-	/* During drag: all connections visible but greyed out */
-	.connection-line.drag-active {
-		color: var(--fg-faint);
-	}
-
-	/* When highlighted (hovered insert zone): turn bright white */
-	.connection-line.drag-active.highlighted {
-		color: var(--fg-primary);
-	}
-
-	.connection-line svg {
-		overflow: visible;
-	}
-
-	.dot {
-		opacity: 0.8;
-	}
-
-	.arrow {
-		opacity: 1;
 	}
 </style>

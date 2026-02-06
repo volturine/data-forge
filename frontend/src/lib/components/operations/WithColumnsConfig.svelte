@@ -217,9 +217,9 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="With columns configuration">
-	<h3>With Columns</h3>
+	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider" style="color: var(--fg-muted);">With Columns</h3>
 
-	<div class="add-form">
+	<div class="flex flex-col gap-3 mb-5">
 		<select bind:value={exprType}>
 			<option value="column">From column</option>
 			<option value="literal">Literal value</option>
@@ -238,31 +238,31 @@
 		{:else if exprType === 'literal'}
 			<input type="text" bind:value={exprValue} placeholder="Literal value" />
 		{:else}
-			<div class="udf-section">
-				<div class="mode-toggle">
-					<label class="toggle">
+			<div class="flex flex-col gap-3">
+				<div class="flex gap-3 items-center">
+					<label class="inline-flex items-center gap-2 text-sm" style="color: var(--fg-secondary);">
 						<input type="radio" bind:group={useLibrary} value={false} />
 						Inline UDF
 					</label>
-					<label class="toggle">
+					<label class="inline-flex items-center gap-2 text-sm" style="color: var(--fg-secondary);">
 						<input type="radio" bind:group={useLibrary} value={true} />
 						Library UDF
 					</label>
 				</div>
 
 				{#if useLibrary}
-					<div class="library-picker">
+					<div class="flex items-center gap-2">
 						<button type="button" class="btn-secondary btn-sm" onclick={openPicker}>
 							Select UDF
 						</button>
 						{#if exprUdfId}
 							{@const selectedUdf = (udfQuery.data ?? []).find((item) => item.id === exprUdfId)}
-							<span class="selected">Selected: {selectedUdf?.name ?? exprUdfId}</span>
+							<span class="text-xs" style="color: var(--fg-muted);">Selected: {selectedUdf?.name ?? exprUdfId}</span>
 						{:else}
-							<span class="selected">No UDF selected</span>
+							<span class="text-xs" style="color: var(--fg-muted);">No UDF selected</span>
 						{/if}
 					</div>
-					<span class="section-label">Input columns</span>
+					<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Input columns</span>
 					<MultiSelectColumnDropdown
 						{schema}
 						value={exprArgs}
@@ -270,7 +270,7 @@
 						placeholder="Select input columns..."
 					/>
 				{:else}
-					<span class="section-label">Input columns</span>
+					<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Input columns</span>
 					<MultiSelectColumnDropdown
 						{schema}
 						value={exprArgs}
@@ -278,23 +278,24 @@
 						placeholder="Select input columns..."
 					/>
 
-					<div class="code-header">
-						<span class="section-label">Function</span>
+					<div class="flex items-center justify-between">
+						<span class="text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Function</span>
 						<button type="button" class="btn-ghost btn-sm" onclick={openEditor}>Expand</button>
 					</div>
 					<textarea
-						class="code-input"
+						class="resize-y min-h-[100px] text-sm"
+						style="font-family: var(--font-mono);"
 						rows="5"
 						placeholder="def udf(*args):&#10;    return ..."
 						bind:value={exprCode}
 						oninput={() => (codeEdited = true)}
 					></textarea>
-					<label class="toggle save-toggle">
+					<label class="inline-flex items-center gap-2 text-sm mt-2" style="color: var(--fg-secondary);">
 						<input type="checkbox" bind:checked={saveToLibrary} />
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
-						<div class="save-fields">
+						<div class="flex flex-col gap-2 p-3 rounded-sm" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);">
 							<input type="text" placeholder="UDF name" bind:value={saveName} />
 							<input type="text" placeholder="Description" bind:value={saveDescription} />
 							<input type="text" placeholder="Tags (comma-separated)" bind:value={saveTags} />
@@ -312,7 +313,7 @@
 			</div>
 		{/if}
 
-		<div class="form-actions">
+		<div class="flex gap-2">
 			{#if isEditing}
 				<button type="button" class="btn-primary" onclick={saveExpression} disabled={!canAdd}
 					>Save</button
@@ -327,13 +328,13 @@
 	</div>
 
 	{#if (config.expressions ?? []).length > 0}
-		<div class="items-list" role="list">
-			<h4>Columns</h4>
+		<div class="flex flex-col gap-2 p-3 rounded-md" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);" role="list">
+			<h4 class="m-0 mb-3 text-xs uppercase tracking-wider" style="color: var(--fg-muted);">Columns</h4>
 			{#each config.expressions ?? [] as expr, index (index)}
-				<div class="item" class:editing={editIndex === index} role="listitem">
-					<div class="item-info">
-						<span class="item-name" title={expr.name}>{expr.name}</span>
-						<span class="item-meta">
+				<div class="item flex justify-between items-center py-2 px-3 rounded-sm" style="background-color: var(--bg-primary); border: 1px solid var(--border-primary);" class:editing={editIndex === index} role="listitem">
+					<div class="flex items-center gap-3 min-w-0">
+						<span class="font-semibold max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap" style="color: var(--fg-primary);" title={expr.name}>{expr.name}</span>
+						<span class="text-xs" style="color: var(--fg-muted);">
 							{expr.type === 'column'
 								? `← ${expr.column ?? ''}`
 								: expr.type === 'udf'
@@ -341,10 +342,11 @@
 									: `= "${expr.value}"`}
 						</span>
 					</div>
-					<div class="item-actions">
+					<div class="flex gap-1 shrink-0">
 						<button
 							type="button"
-							class="btn-edit"
+							class="w-6 h-6 p-0 inline-flex items-center justify-center bg-transparent rounded-sm cursor-pointer text-base leading-none"
+							style="color: var(--fg-muted); border: 1px solid transparent;"
 							onclick={() => editExpression(index)}
 							aria-label="Edit"
 						>
@@ -362,7 +364,8 @@
 						</button>
 						<button
 							type="button"
-							class="btn-remove"
+							class="btn-remove w-6 h-6 p-0 inline-flex items-center justify-center bg-transparent rounded-sm cursor-pointer text-base leading-none"
+							style="color: var(--fg-muted); border: 1px solid transparent;"
 							onclick={() => removeExpression(index)}
 							aria-label="Remove">×</button
 						>
@@ -371,7 +374,7 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="empty-state">No columns configured yet.</p>
+		<p class="p-6 text-center rounded-md" style="color: var(--fg-muted); background-color: var(--bg-tertiary); border: 1px dashed var(--border-primary);">No columns configured yet.</p>
 	{/if}
 </div>
 
@@ -384,7 +387,7 @@
 		</div>
 		<div class="modal-body">
 			<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
-			<p class="help-text">
+			<p class="text-sm m-0" style="color: var(--fg-muted);">
 				Define a function named <code>udf</code> that returns a value per row.
 			</p>
 		</div>
@@ -402,119 +405,9 @@
 />
 
 <style>
-	h3 {
-		margin: 0 0 var(--space-4) 0;
-		font-size: var(--text-sm);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--fg-muted);
-	}
-	h4 {
-		margin: 0 0 var(--space-3) 0;
-		font-size: var(--text-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--fg-muted);
-	}
-
-	.add-form {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-		margin-bottom: var(--space-5);
-	}
-	.form-actions {
-		display: flex;
-		gap: var(--space-2);
-	}
-
-	.udf-section {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-	.section-label {
-		font-size: var(--text-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--fg-muted);
-	}
-	.code-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-	.code-input {
-		font-family: var(--font-mono);
-		font-size: var(--text-sm);
-		resize: vertical;
-		min-height: 100px;
-	}
-
-	.items-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		background-color: var(--bg-tertiary);
-		border-radius: var(--radius-md);
-		border: 1px solid var(--border-primary);
-	}
-	.item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-2) var(--space-3);
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-	}
-	.item-info {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		min-width: 0;
-	}
-	.item-name {
-		font-weight: 600;
-		color: var(--fg-primary);
-		max-width: 120px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.item-meta {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
 	.item.editing {
 		border-color: var(--accent-primary);
 		background-color: var(--bg-hover);
-	}
-	.item-actions {
-		display: flex;
-		gap: var(--space-1);
-		flex-shrink: 0;
-	}
-	.item-actions button {
-		width: 24px;
-		height: 24px;
-		padding: 0;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		background-color: transparent;
-		color: var(--fg-muted);
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-size: 1rem;
-		line-height: 1;
-	}
-	.item-actions button svg {
-		width: 14px;
-		height: 14px;
-		flex-shrink: 0;
 	}
 	.item-actions button:hover {
 		color: var(--fg-primary);
@@ -525,54 +418,5 @@
 		color: var(--error-fg);
 		background-color: var(--error-bg);
 		border-color: var(--error-border);
-	}
-
-	.empty-state {
-		padding: var(--space-6);
-		text-align: center;
-		color: var(--fg-muted);
-		background-color: var(--bg-tertiary);
-		border-radius: var(--radius-md);
-		border: 1px dashed var(--border-primary);
-	}
-	.mode-toggle {
-		display: flex;
-		gap: var(--space-3);
-		align-items: center;
-	}
-	.toggle {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	.library-picker {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.selected {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-	.save-toggle {
-		margin-top: var(--space-2);
-	}
-	.save-fields {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		background-color: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-	}
-
-	/* modal-backdrop, modal, modal-header, modal-close, modal-body, modal-footer — global in app.css */
-	.help-text {
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-		margin: 0;
 	}
 </style>

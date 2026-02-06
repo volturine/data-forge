@@ -176,13 +176,13 @@
 </script>
 
 <div
-	class="step-node relative w-[min(65%)]"
+	class="step-node relative w-[65%]"
 	class:view-node={step.type === 'view'}
 	class:greyed-out={isDragging}
 	class:drag-target={isOtherDragging}
 >
 	<div
-		class="connection-point absolute left-1/2 -translate-x-1/2 -top-1 z-[2] h-2 w-2 rounded-full"
+		class="absolute left-1/2 -top-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full"
 		style="background-color: var(--fg-muted); border: 2px solid var(--bg-primary);"
 	></div>
 
@@ -194,7 +194,7 @@
 		<div class="mb-3 flex items-center gap-2">
 			<!-- Drag handle (6-dot grip) -->
 			<button
-				class="drag-handle flex flex-shrink-0 cursor-grab items-center justify-center rounded-sm border-none bg-transparent p-1 opacity-40 transition-all select-none"
+				class="drag-handle flex shrink-0 cursor-grab items-center justify-center rounded-sm border-none bg-transparent p-1 opacity-40 transition-all select-none"
 				class:dragging
 				title="Drag to reorder"
 				type="button"
@@ -216,9 +216,9 @@
 				</svg>
 			</button>
 
-			<span class="flex-shrink-0 text-base">{currentStepInfo.icon}</span>
+			<span class="shrink-0 text-base">{currentStepInfo.icon}</span>
 			<span class="flex-1 text-sm font-semibold">{label}</span>
-			<span class="flex-shrink-0 text-xs" style="color: var(--fg-muted);">#{index + 1}</span>
+			<span class="shrink-0 text-xs" style="color: var(--fg-muted);">#{index + 1}</span>
 		</div>
 
 		<div
@@ -303,7 +303,7 @@
 	</div>
 
 	<div
-		class="connection-point absolute left-1/2 -translate-x-1/2 -bottom-1 z-[2] h-2 w-2 rounded-full"
+		class="absolute left-1/2 -bottom-1 z-[2] h-2 w-2 -translate-x-1/2 rounded-full"
 		style="background-color: var(--fg-muted); border: 2px solid var(--bg-primary);"
 	></div>
 </div>

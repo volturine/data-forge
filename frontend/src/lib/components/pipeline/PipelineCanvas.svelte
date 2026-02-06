@@ -217,14 +217,20 @@
 	});
 </script>
 
-<div class="pipeline-canvas">
+<div
+	class="pipeline-canvas flex-1 overflow-y-auto p-6"
+	style="background-color: var(--bg-secondary); background-image: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.04) 0, rgba(0, 0, 0, 0.04) 1px, transparent 1px, transparent 64px), linear-gradient(180deg, transparent 0%, var(--bg-tertiary) 100%); min-height: 400px;"
+>
 	{#if steps.length === 0 && !datasource}
-		<div class="empty-state">
-			<LayoutGrid size={32} strokeWidth={1.5} />
-			<h3>No pipeline steps</h3>
-			<p>Drag operations from the library and drop here</p>
+		<div
+			class="empty-state flex min-h-[400px] h-full flex-col items-center justify-center text-center"
+			style="color: var(--fg-muted);"
+		>
+			<LayoutGrid size={32} strokeWidth={1.5} class="mb-4" style="color: var(--fg-faint);" />
+			<h3 class="m-0 mb-2 text-base font-semibold" style="color: var(--fg-secondary);">No pipeline steps</h3>
+			<p class="m-0 text-sm" style="color: var(--fg-muted);">Drag operations from the library and drop here</p>
 			<div
-				class="insert-zone empty-drop"
+				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2 transition-all"
 				class:ready={canDrop}
 				class:active={hoverIndex === 0}
 				class:invalid={hoverIndex === 0 && !drag.valid}
@@ -247,12 +253,13 @@
 
 				{#if canDrop}
 					<div
-						class="drop-slot"
+						class="drop-slot my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all"
 						class:active={hoverIndex === 0}
 						class:invalid={hoverIndex === 0 && !drag.valid}
+						style="border-color: var(--fg-faint); background-color: transparent;"
 					>
 						{#if hoverIndex === 0}
-							<span class="slot-label">{drag.type ?? 'step'}</span>
+							<span class="font-mono text-sm font-medium lowercase" style="color: var(--fg-primary);">{drag.type ?? 'step'}</span>
 						{/if}
 					</div>
 					<ConnectionLine
@@ -265,7 +272,7 @@
 			</div>
 		</div>
 	{:else}
-		<div class="steps-container" role="list">
+		<div class="steps-container mx-auto flex w-full max-w-full flex-col items-center" role="list">
 			<DatasourceNode
 				{datasource}
 				{analysisId}
@@ -275,7 +282,7 @@
 			/>
 			{#if shouldShowInsert(0)}
 				<div
-					class="insert-zone"
+					class="insert-zone flex w-full cursor-default flex-col items-center py-2 transition-all"
 					class:ready={canDrop}
 					class:active={hoverIndex === 0}
 					class:invalid={hoverIndex === 0 && !drag.valid}
@@ -295,12 +302,13 @@
 					/>
 					{#if canDrop}
 						<div
-							class="drop-slot"
+							class="drop-slot my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all"
 							class:active={hoverIndex === 0}
 							class:invalid={hoverIndex === 0 && !drag.valid}
+							style="border-color: var(--fg-faint); background-color: transparent;"
 						>
 							{#if hoverIndex === 0}
-								<span class="slot-label">{drag.type ?? 'step'}</span>
+								<span class="font-mono text-sm font-medium lowercase" style="color: var(--fg-primary);">{drag.type ?? 'step'}</span>
 							{/if}
 						</div>
 						{#if steps.length > 0}
@@ -314,7 +322,7 @@
 					{/if}
 				</div>
 			{:else if steps.length > 0}
-				<div class="insert-spacer" aria-hidden="true">
+				<div class="insert-spacer flex items-center justify-center py-2" aria-hidden="true">
 					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
 				</div>
 			{/if}
@@ -334,7 +342,7 @@
 				{#if i < steps.length - 1 || canDrop}
 					{#if shouldShowInsert(i + 1)}
 						<div
-							class="insert-zone"
+							class="insert-zone flex w-full cursor-default flex-col items-center py-2 transition-all"
 							class:ready={canDrop}
 							class:active={hoverIndex === i + 1}
 							class:invalid={hoverIndex === i + 1 && !drag.valid}
@@ -356,12 +364,13 @@
 							{/if}
 							{#if canDrop}
 								<div
-									class="drop-slot"
+									class="drop-slot my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center rounded-md border-2 border-dashed px-4 py-2 text-center transition-all"
 									class:active={hoverIndex === i + 1}
 									class:invalid={hoverIndex === i + 1 && !drag.valid}
+									style="border-color: var(--fg-faint); background-color: transparent;"
 								>
 									{#if hoverIndex === i + 1}
-										<span class="slot-label">{drag.type ?? 'step'}</span>
+										<span class="font-mono text-sm font-medium lowercase" style="color: var(--fg-primary);">{drag.type ?? 'step'}</span>
 									{/if}
 								</div>
 								{#if i < steps.length - 1}
@@ -375,7 +384,7 @@
 							{/if}
 						</div>
 					{:else if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
-						<div class="insert-spacer" aria-hidden="true">
+						<div class="insert-spacer flex items-center justify-center py-2" aria-hidden="true">
 							<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
 						</div>
 					{/if}
@@ -386,120 +395,35 @@
 </div>
 
 <style>
-	.pipeline-canvas {
-		flex: 1;
-		padding: var(--space-6);
-		background-color: var(--bg-secondary);
-		background-image:
-			repeating-linear-gradient(
-				90deg,
-				rgba(0, 0, 0, 0.04) 0,
-				rgba(0, 0, 0, 0.04) 1px,
-				transparent 1px,
-				transparent 64px
-			),
-			linear-gradient(180deg, transparent 0%, var(--bg-tertiary) 100%);
-		overflow-y: auto;
-		min-height: 400px;
-	}
-
 	/* When touch-dragging class is on body, prevent any scrolling on the canvas */
 	:global(body.touch-dragging) .pipeline-canvas {
 		overflow: hidden;
 		touch-action: none;
 	}
-	.empty-state {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		height: 100%;
-		min-height: 400px;
-		color: var(--fg-muted);
-		text-align: center;
-	}
-	.empty-state :global(svg) {
-		color: var(--fg-faint);
-		margin-bottom: var(--space-4);
-	}
-	.empty-state h3 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-base);
-		font-weight: 600;
-		color: var(--fg-secondary);
-	}
-	.empty-state p {
-		margin: 0;
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-	}
-	.steps-container {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		width: 100%;
-		max-width: 100%;
-		margin: 0 auto;
-	}
-	.insert-zone {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		width: 100%;
-		cursor: default;
-		transition: all var(--transition);
-		padding: var(--space-2) 0;
-	}
-	.insert-spacer {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-2) 0;
-	}
-	.insert-zone :global(.connection-line),
-	.insert-spacer :global(.connection-line) {
-		flex-shrink: 0;
-	}
+
 	.insert-zone.ready {
 		cursor: pointer;
 	}
+
 	.insert-zone.ready:hover :global(.connection-line) {
 		color: var(--accent-primary);
 	}
-	.drop-slot {
-		width: min(55%, 480px);
-		padding: var(--space-2) var(--space-4);
-		background-color: transparent;
-		border: 2px dashed var(--fg-faint);
-		border-radius: var(--radius-md);
-		text-align: center;
-		min-height: 28px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all var(--transition);
-		margin: var(--space-2) 0;
-		flex-shrink: 0;
-	}
+
 	.drop-slot:hover {
 		border-color: var(--fg-muted);
 		background-color: var(--bg-hover);
 	}
+
 	.drop-slot.active {
 		border-color: var(--fg-primary);
 		background-color: var(--bg-tertiary);
 	}
+
 	.drop-slot.invalid {
 		border-color: var(--error-border);
 		background-color: var(--error-bg);
 	}
-	.slot-label {
-		font-family: var(--font-mono);
-		font-size: var(--text-sm);
-		font-weight: 500;
-		color: var(--fg-primary);
-		text-transform: lowercase;
-	}
+
 	.drop-slot.invalid .slot-label {
 		color: var(--error-fg);
 	}

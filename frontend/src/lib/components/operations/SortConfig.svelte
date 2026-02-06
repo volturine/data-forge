@@ -53,8 +53,8 @@
 <div class="config-panel" role="region" aria-label="Sort configuration">
 	<h3>Sort Configuration</h3>
 
-	<div class="add-rule" role="group" aria-label="Add sort rule form">
-		<div class="column-dropdown-wrapper">
+	<div class="flex gap-2 items-center mb-6 flex-wrap" role="group" aria-label="Add sort rule form">
+		<div class="flex-[2] min-w-[200px]">
 			<span class="sr-only">Select column to sort</span>
 			<ColumnDropdown
 				{schema}
@@ -65,32 +65,34 @@
 			/>
 		</div>
 
-		<div class="direction-select" role="group" aria-label="Sort direction">
+		<div class="flex" role="group" aria-label="Sort direction">
 			<button
 				id="{uid}-ascending"
 				data-testid="sort-ascending-button"
 				type="button"
-				class="dir-btn"
+				class="dir-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all"
+				style="background-color: var(--bg-tertiary); color: var(--fg-secondary); border: 1px solid var(--border-primary);"
 				class:active={!newDescending}
 				onclick={() => (newDescending = false)}
 				title="Ascending"
 				aria-pressed={!newDescending}
 				aria-label="Sort ascending"
 			>
-				<span class="sort-icon" aria-hidden="true">▲</span>
+				<span class="text-sm leading-none" aria-hidden="true">▲</span>
 			</button>
 			<button
 				id="{uid}-descending"
 				data-testid="sort-descending-button"
 				type="button"
-				class="dir-btn"
+				class="dir-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all"
+				style="background-color: var(--bg-tertiary); color: var(--fg-secondary); border: 1px solid var(--border-primary);"
 				class:active={newDescending}
 				onclick={() => (newDescending = true)}
 				title="Descending"
 				aria-pressed={newDescending}
 				aria-label="Sort descending"
 			>
-				<span class="sort-icon" aria-hidden="true">▼</span>
+				<span class="text-sm leading-none" aria-hidden="true">▼</span>
 			</button>
 		</div>
 
@@ -98,7 +100,8 @@
 			id="{uid}-add"
 			data-testid="sort-add-button"
 			type="button"
-			class="add-btn"
+			class="add-btn flex items-center gap-1 py-2 px-4 border-none rounded-sm cursor-pointer whitespace-nowrap"
+			style="background-color: var(--accent-primary); color: var(--bg-primary);"
 			onclick={addSortRule}
 			disabled={!newColumn}
 			aria-label="Add sort rule"
@@ -109,44 +112,47 @@
 	</div>
 
 	{#if safeConfig.columns.length > 0}
-		<div id="sort-rules-list" class="sort-rules" role="region" aria-labelledby="sort-order-heading">
-			<h4 id="sort-order-heading">Sort Order</h4>
+		<div id="sort-rules-list" class="p-4 rounded-md mb-4" style="background-color: var(--panel-muted-bg); border: 1px solid var(--panel-muted-border);" role="region" aria-labelledby="sort-order-heading">
+			<h4 id="sort-order-heading" class="mt-0 mb-3 text-sm uppercase" style="color: var(--fg-muted);">Sort Order</h4>
 			{#each safeConfig.columns as column, i (column)}
-				<div class="sort-rule-item" role="group" aria-label={`Sort rule ${i + 1}: ${column}`}>
-					<span class="rule-column">{column}</span>
+				<div class="flex justify-between items-center py-2 px-3 rounded-sm mb-2 last:mb-0" style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);" role="group" aria-label={`Sort rule ${i + 1}: ${column}`}>
+					<span class="font-medium">{column}</span>
 
-					<div class="rule-actions" role="group" aria-label={`Sort direction for ${column}`}>
+					<div class="rule-actions flex items-center gap-1" role="group" aria-label={`Sort direction for ${column}`}>
 						<button
 							id={`sort-btn-asc-${i}`}
 							data-testid={`sort-ascending-rule-${i}`}
 							type="button"
-							class="dir-btn"
+							class="dir-btn flex items-center justify-center w-7 h-7 p-0 bg-transparent rounded-sm cursor-pointer transition-all"
+							style="color: var(--fg-secondary); border: 1px solid transparent;"
 							class:active={!safeConfig.descending[i]}
 							onclick={() => setDirection(i, false)}
 							title="Ascending"
 							aria-pressed={!safeConfig.descending[i]}
 							aria-label={`Sort ${column} ascending`}
 						>
-							<span class="sort-icon" aria-hidden="true">▲</span>
+							<span class="text-sm leading-none" aria-hidden="true">▲</span>
 						</button>
 						<button
 							id={`sort-btn-desc-${i}`}
 							data-testid={`sort-descending-rule-${i}`}
 							type="button"
-							class="dir-btn"
+							class="dir-btn flex items-center justify-center w-7 h-7 p-0 bg-transparent rounded-sm cursor-pointer transition-all"
+							style="color: var(--fg-secondary); border: 1px solid transparent;"
 							class:active={safeConfig.descending[i]}
 							onclick={() => setDirection(i, true)}
 							title="Descending"
 							aria-pressed={safeConfig.descending[i]}
 							aria-label={`Sort ${column} descending`}
 						>
-							<span class="sort-icon" aria-hidden="true">▼</span>
+							<span class="text-sm leading-none" aria-hidden="true">▼</span>
 						</button>
 						<button
 							id={`sort-btn-remove-${i}`}
 							data-testid={`sort-remove-rule-${i}`}
 							type="button"
-							class="remove-btn"
+							class="remove-btn flex items-center justify-center w-7 h-7 p-0 bg-transparent rounded-sm cursor-pointer transition-all"
+							style="color: var(--fg-secondary); border: 1px solid transparent;"
 							onclick={() => removeSortRule(i)}
 							title="Remove"
 							aria-label={`Remove sort rule for ${column}`}
@@ -158,46 +164,13 @@
 			{/each}
 		</div>
 	{:else}
-		<p id="sort-empty-state" class="empty-state" role="status">
+		<p id="sort-empty-state" class="py-8 text-center rounded-md mb-4" style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px solid var(--panel-muted-border);" role="status">
 			No sort rules configured. Add a column to sort by.
 		</p>
 	{/if}
 </div>
 
 <style>
-	h4 {
-		text-transform: uppercase;
-	}
-
-	.add-rule {
-		display: flex;
-		gap: var(--space-2);
-		align-items: center;
-		margin-bottom: var(--space-6);
-		flex-wrap: wrap;
-	}
-	.column-dropdown-wrapper {
-		flex: 2;
-		min-width: 200px;
-	}
-
-	.direction-select {
-		display: flex;
-	}
-
-	.dir-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 32px;
-		height: 32px;
-		padding: 0;
-		background-color: var(--bg-tertiary);
-		color: var(--fg-secondary);
-		border: 1px solid var(--border-primary);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
 	.dir-btn:first-child {
 		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 		border-right: none;
@@ -214,114 +187,22 @@
 		color: var(--bg-primary);
 		border-color: var(--accent-primary);
 	}
-
-	.add-btn {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		padding: var(--space-2) var(--space-4);
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		white-space: nowrap;
-	}
 	.add-btn:disabled {
 		background-color: var(--border-primary);
 		cursor: not-allowed;
 		color: var(--fg-muted);
 	}
-
-	.sort-rules {
-		padding: var(--space-4);
-		background-color: var(--panel-muted-bg);
-		border-radius: var(--radius-md);
-		margin-bottom: var(--space-4);
-		border: 1px solid var(--panel-muted-border);
-	}
-	.sort-rules h4 {
-		margin-top: 0;
-		margin-bottom: var(--space-3);
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-	}
-
-	.sort-rule-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-2) var(--space-3);
-		background-color: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		margin-bottom: var(--space-2);
-	}
-	.sort-rule-item:last-child {
-		margin-bottom: 0;
-	}
-
-	.rule-column {
-		font-weight: var(--font-medium);
-	}
-	.rule-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-	}
-	.rule-actions button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		padding: 0;
-		background-color: transparent;
-		color: var(--fg-secondary);
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
 	.rule-actions button:hover:not(:disabled) {
 		background-color: var(--bg-tertiary);
 		color: var(--fg-primary);
-	}
-	.rule-actions button:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-
-	.rule-actions .dir-btn {
-		width: 28px;
-		height: 28px;
-		background-color: transparent;
-		color: var(--fg-secondary);
-	}
-	.rule-actions .dir-btn:hover:not(.active) {
-		background-color: var(--bg-tertiary);
 	}
 	.rule-actions .dir-btn.active {
 		background-color: var(--accent-primary);
 		color: var(--bg-primary);
 	}
-
-	.sort-icon {
-		font-size: var(--text-sm);
-		line-height: 1;
-	}
 	.remove-btn:hover {
 		background-color: var(--error-bg) !important;
 		color: var(--error-fg) !important;
 		border-color: var(--error-border) !important;
-	}
-	.empty-state {
-		padding: var(--space-8);
-		text-align: center;
-		color: var(--fg-muted);
-		background-color: var(--panel-muted-bg);
-		border-radius: var(--radius-md);
-		margin-bottom: var(--space-4);
-		border: 1px solid var(--panel-muted-border);
 	}
 </style>
