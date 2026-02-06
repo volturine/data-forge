@@ -181,31 +181,48 @@
 </script>
 
 {#if step === null}
-	<div class="step-config empty">
-		<div class="empty-message">
-			<div class="empty-icon">⚙️</div>
-			<h3>No step selected</h3>
-			<p>Click on a pipeline step to configure it</p>
+	<div
+		class="step-config box-border flex w-full flex-col items-center justify-center overflow-y-auto"
+		style="background-color: var(--panel-bg); color: var(--fg-primary);"
+	>
+		<div class="flex flex-col items-center justify-center p-6 text-center" style="color: var(--fg-muted);">
+			<div class="mb-4 text-4xl opacity-50">⚙️</div>
+			<h3 class="m-0 mb-2 text-lg" style="color: var(--fg-primary);">No step selected</h3>
+			<p class="m-0 text-sm">Click on a pipeline step to configure it</p>
 		</div>
 	</div>
 {:else}
-	<div class="step-config">
-		<div class="config-header">
-			<h3>Configure Step</h3>
-			<button class="close-button" onclick={() => onClose?.()} type="button" title="Close">×</button
-			>
+	<div
+		class="step-config box-border flex w-full flex-col overflow-y-auto"
+		style="background-color: var(--panel-bg); color: var(--fg-primary);"
+	>
+		<div
+			class="config-header relative flex items-center justify-between p-4"
+			style="background-color: var(--panel-bg); box-shadow: inset 0 -1px 0 var(--panel-border), inset 0 -3px 0 var(--panel-border), inset 0 -5px 0 var(--panel-border);"
+		>
+			<h3 class="m-0 text-sm font-semibold uppercase tracking-widest" style="color: var(--fg-primary);">Configure Step</h3>
+			<button
+				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-0 text-2xl leading-none transition-all"
+				onclick={() => onClose?.()}
+				type="button"
+				title="Close"
+				style="color: var(--fg-muted);"
+			>×</button>
 		</div>
 
-		<div class="config-body">
+		<div class="config-body flex-1 overflow-y-auto p-3" style="background-color: var(--panel-bg);">
 			{#if !schema && !isLoadingSchema}
 				<div class="warning-message">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
 					<button onclick={() => onClose?.()} type="button">Close</button>
 				</div>
 			{:else if isLoadingSchema}
-				<div class="loading-message">
+				<div
+					class="flex flex-col items-center justify-center gap-3 p-6 text-center"
+					style="background-color: var(--panel-bg); color: var(--fg-tertiary);"
+				>
 					<div class="spinner-md"></div>
-					<p>Loading schema...</p>
+					<p class="m-0">Loading schema...</p>
 				</div>
 			{:else if step.type === 'filter'}
 				<FilterConfig
@@ -278,8 +295,8 @@
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={draftConfig as unknown as ViewConfigData} />
 			{:else if step.type === 'datasource'}
-				<div class="not-implemented">
-					<p>Datasource options are set during upload.</p>
+				<div class="p-6 text-center" style="background-color: var(--panel-bg);">
+					<p class="m-0 mb-3" style="color: var(--fg-tertiary);">Datasource options are set during upload.</p>
 				</div>
 			{:else if step.type === 'sample'}
 				<SampleConfig bind:config={draftConfig as unknown as SampleConfigData} />
@@ -311,26 +328,36 @@
 					}
 				/>
 			{:else}
-				<div class="not-implemented">
-					<p>Configuration for {step.type} is not yet implemented</p>
-					<button onclick={() => onClose?.()} type="button">Close</button>
+				<div class="p-6 text-center" style="background-color: var(--panel-bg);">
+					<p class="m-0 mb-3" style="color: var(--fg-tertiary);">Configuration for {step.type} is not yet implemented</p>
+					<button
+						class="cursor-pointer rounded-sm border-none px-5 py-2 font-mono"
+						onclick={() => onClose?.()}
+						type="button"
+						style="background-color: var(--accent-primary); color: var(--bg-primary);"
+					>Close</button>
 				</div>
 			{/if}
 		</div>
-		<div class="config-actions">
+		<div
+			class="flex gap-2 border-t p-3"
+			style="border-color: var(--panel-border); background-color: var(--panel-bg);"
+		>
 			<button
-				class="action-button cancel"
+				class="action-button cancel flex-1 cursor-pointer rounded-sm border px-3 py-2 font-mono text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleCancelConfig}
 				disabled={!hasChanges}
 				type="button"
+				style="background-color: transparent; color: var(--fg-primary); border-color: var(--border-primary);"
 			>
 				Cancel
 			</button>
 			<button
-				class="action-button apply"
+				class="action-button apply flex-1 cursor-pointer rounded-sm border px-3 py-2 font-mono text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleApplyConfig}
 				disabled={!hasChanges}
 				type="button"
+				style="background-color: var(--accent-primary); color: var(--bg-primary); border-color: var(--accent-primary);"
 			>
 				Apply Changes
 			</button>
@@ -339,158 +366,17 @@
 {/if}
 
 <style>
-	.step-config {
-		width: 100%;
-		background-color: var(--panel-bg);
-		display: flex;
-		flex-direction: column;
-		overflow-y: auto;
-		color: var(--fg-primary);
-	}
 	.step-config,
-	.step-config * {
+	.step-config :global(*) {
 		box-sizing: border-box;
 	}
-	.step-config.empty {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background-color: var(--panel-bg);
-	}
-	.empty-message {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-6);
-		color: var(--fg-muted);
-		text-align: center;
-	}
-	.empty-icon {
-		font-size: 2.5rem;
-		margin-bottom: var(--space-4);
-		opacity: 0.5;
-	}
-	.empty-message h3 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-lg);
-		color: var(--fg-primary);
-	}
-	.empty-message p {
-		margin: 0;
-		font-size: var(--text-sm);
-	}
-	.config-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-4);
-		border-bottom: none;
-		background-color: var(--panel-bg);
-		position: relative;
-		box-shadow:
-			inset 0 -1px 0 var(--panel-border),
-			inset 0 -3px 0 var(--panel-border),
-			inset 0 -5px 0 var(--panel-border);
-	}
-	.config-header h3 {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: 600;
-		color: var(--fg-primary);
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-	.close-button {
-		width: 32px;
-		height: 32px;
-		padding: 0;
-		background-color: transparent;
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-size: 1.5rem;
-		line-height: 1;
-		color: var(--fg-muted);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all var(--transition);
-	}
+
 	.close-button:hover {
 		background-color: var(--bg-hover);
 		color: var(--fg-primary);
 	}
-	.config-body {
-		flex: 1;
-		overflow-y: auto;
-		padding: var(--space-3);
-		background-color: var(--panel-bg);
-	}
-	.config-actions {
-		display: flex;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		border-top: 1px solid var(--panel-border);
-		background-color: var(--panel-bg);
-	}
-	.action-button {
-		flex: 1;
-		padding: var(--space-2) var(--space-3);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-sm);
-		font-weight: 600;
-		border: 1px solid var(--border-primary);
-		cursor: pointer;
-		transition: all var(--transition);
-		font-family: var(--font-mono);
-	}
-	.action-button.cancel {
-		background-color: transparent;
-		color: var(--fg-primary);
-	}
-	.action-button.apply {
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border-color: var(--accent-primary);
-	}
+
 	.action-button:hover:not(:disabled) {
 		opacity: 0.9;
-	}
-	.action-button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.not-implemented {
-		padding: var(--space-6);
-		text-align: center;
-		background-color: var(--panel-bg);
-	}
-	.not-implemented p {
-		margin: 0 0 var(--space-3) 0;
-		color: var(--fg-tertiary);
-	}
-	.not-implemented button {
-		padding: var(--space-2) var(--space-5);
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-mono);
-	}
-	.not-implemented button:hover {
-		opacity: 0.9;
-	}
-	.loading-message {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-6);
-		color: var(--fg-tertiary);
-		text-align: center;
-		gap: var(--space-3);
-		background-color: var(--panel-bg);
 	}
 </style>

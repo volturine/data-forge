@@ -245,8 +245,8 @@
 								/>
 							</div>
 
-							<div class="field-group operator-group">
-								<label class="field-label" for="{uid}-operator-{i}">Operator</label>
+							<div class="flex flex-col gap-1 min-w-[100px] flex-1">
+								<label class="text-xs font-normal mb-0" style="color: var(--fg-muted);" for="{uid}-operator-{i}">Operator</label>
 								<select
 									id="{uid}-operator-{i}"
 									data-testid={`filter-operator-select-${i}`}
@@ -260,13 +260,14 @@
 							</div>
 
 							{#if !isNull}
-								<div class="field-group value-group">
-									<div class="value-header">
-										<span class="field-label">Compare to</span>
-										<div class="mode-toggle" role="radiogroup" aria-label="Value mode">
+								<div class="flex flex-col gap-1 min-w-[140px] flex-[2]">
+									<div class="flex items-center justify-between gap-2">
+										<span class="text-xs font-normal" style="color: var(--fg-muted);">Compare to</span>
+										<div class="flex" role="radiogroup" aria-label="Value mode">
 											<button
 												type="button"
-												class="mode-btn"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border"
+												style="background-color: transparent; color: var(--fg-muted); border-color: var(--border-primary);"
 												class:active={!isColumn}
 												onclick={() => handleModeChange(i, 'value')}
 												aria-pressed={!isColumn}
@@ -275,7 +276,8 @@
 											</button>
 											<button
 												type="button"
-												class="mode-btn"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border"
+												style="background-color: transparent; color: var(--fg-muted); border-color: var(--border-primary);"
 												class:active={isColumn}
 												onclick={() => handleModeChange(i, 'column')}
 												aria-pressed={isColumn}
@@ -342,9 +344,9 @@
 									{/if}
 								</div>
 							{:else}
-								<div class="field-group value-group">
-									<span class="field-label">Value</span>
-									<div class="null-indicator">
+								<div class="flex flex-col gap-1 min-w-[140px] flex-[2]">
+									<span class="text-xs font-normal" style="color: var(--fg-muted);">Value</span>
+									<div class="flex items-center h-9 px-3 rounded-sm text-sm italic" style="background-color: var(--bg-tertiary); color: var(--fg-muted);">
 										<span>No value needed</span>
 									</div>
 								</div>
