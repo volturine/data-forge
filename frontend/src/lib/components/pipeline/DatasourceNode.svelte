@@ -140,7 +140,7 @@
 
 <div class="datasource-node relative w-[65%]" class:drag-active={isDragActive}>
 	<div
-		class="node-content bg-primary border-secondary border p-4 transition-all hover:border-accent"
+		class="node-content bg-primary border-primary border p-4 transition-all hover:border-primary"
 	>
 		<!-- Header with icon and badge -->
 		<div class="mb-4 flex items-center justify-between border-b border-primary pb-3">
@@ -176,7 +176,7 @@
 				{#if isEditing}
 					<div class="flex items-center gap-1">
 						<input
-							class="min-w-[100px] border border-accent bg-primary px-2 py-0.5 text-sm outline-none"
+						class="min-w-[100px] border border-primary bg-primary px-2 py-0.5 text-sm outline-none"
 							bind:value={draftName}
 							onkeydown={(e) => {
 								if (e.key === 'Enter') commitEdit();
@@ -185,7 +185,7 @@
 							aria-label="Edit tab name"
 						/>
 						<button
-							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-success text-success bg-primary p-0 leading-none transition-all hover:bg-success hover:text-fg-primary"
+						class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-info text-success bg-primary p-0 leading-none transition-all hover:bg-success hover:text-fg-primary"
 							onclick={commitEdit}
 							type="button"
 							aria-label="Save"
@@ -205,7 +205,7 @@
 					<span class="text-sm font-medium">{tabName ?? datasource?.name ?? 'Untitled'}</span>
 					{#if onRenameTab}
 						<button
-							class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-secondary text-fg-muted bg-primary p-0 opacity-50 leading-none transition-all hover:border-accent hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
+						class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-primary text-fg-muted bg-primary p-0 opacity-50 leading-none transition-all hover:border-primary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
 							onclick={startEdit}
 							type="button"
 							aria-label="Edit tab name"
@@ -254,7 +254,7 @@
 							</span>
 						{:else}
 							<button
-								class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-secondary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] transition-all disabled:cursor-not-allowed disabled:opacity-70 hover:border-accent hover:text-fg-primary"
+							class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-primary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] transition-all disabled:cursor-not-allowed disabled:opacity-70 hover:border-primary hover:text-fg-primary"
 								onclick={calculateRowCount}
 								disabled={isLoadingRowCount}
 								type="button"
@@ -272,7 +272,7 @@
 					</div>
 				</div>
 			{:else}
-				<div class="rounded-sm border border-dashed border-secondary p-3 text-center">
+			<div class="rounded-sm border border-dashed border-primary p-3 text-center">
 					<span class="text-xs text-fg-muted">No datasource connected</span>
 				</div>
 			{/if}
@@ -311,7 +311,7 @@
 							>
 							<input
 								id="threads-input"
-								class="resource-input flex-1 border border-primary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent focus:outline-none"
+						class="resource-input flex-1 border border-primary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-info focus:outline-none"
 								type="number"
 								min="1"
 								max="64"
@@ -328,7 +328,7 @@
 							>
 							<select
 								id="memory-select"
-								class="resource-input flex-1 border border-primary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent focus:outline-none"
+						class="resource-input flex-1 border border-primary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-info focus:outline-none"
 								value={effectiveMemoryGb}
 								onchange={(e) => setMemoryGb(parseInt(e.currentTarget.value) || 0)}
 							>
@@ -348,7 +348,7 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-primary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium transition-all hover:bg-tertiary hover:text-fg-primary hover:border-accent [&:hover_svg]:opacity-100"
+		class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-primary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium transition-all hover:bg-tertiary hover:text-fg-primary hover:border-info [&:hover_svg]:opacity-100"
 				onclick={onChangeDatasource}
 				type="button"
 			>
@@ -359,7 +359,7 @@
 	</div>
 
 	<div
-		class="absolute bottom-[-5px] left-1/2 z-[2] h-2.5 w-2.5 -translate-x-1/2 bg-primary border-2 border-accent"
+	class="absolute bottom-[-5px] left-1/2 z-[2] h-2.5 w-2.5 -translate-x-1/2 bg-primary border-2 border-info"
 	></div>
 </div>
 
@@ -382,7 +382,7 @@
 	}
 
 	.datasource-node.drag-active .node-content {
-		border-color: var(--accent-primary);
+	border-color: var(--info-border);
 		border-style: dashed;
 		opacity: 0.85;
 	}

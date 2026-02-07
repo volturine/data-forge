@@ -219,7 +219,7 @@
 
 <div
 	class="pipeline-canvas flex-1 overflow-y-auto p-6"
-	style="background-color: var(--bg-secondary); background-image: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.04) 0, rgba(0, 0, 0, 0.04) 1px, transparent 1px, transparent 64px), linear-gradient(180deg, transparent 0%, var(--bg-tertiary) 100%); min-height: 400px;"
+	style="background-color: var(--bg-secondary); min-height: 400px;"
 >
 	{#if steps.length === 0 && !datasource}
 		<div
@@ -257,8 +257,8 @@
 
 				{#if canDrop}
 					<div
-						class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--fg-faint)] bg-transparent hover:border-[var(--fg-muted)] hover:bg-[var(--bg-hover)]"
-						class:!border-[var(--fg-primary)]={hoverIndex === 0}
+						class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--border-primary)] bg-[var(--color-transparent)] hover:border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
+						class:!border-[var(--info-border)]={hoverIndex === 0}
 						class:!bg-[var(--bg-tertiary)]={hoverIndex === 0}
 						class:!border-[var(--error-border)]={hoverIndex === 0 && !drag.valid}
 						class:!bg-[var(--error-bg)]={hoverIndex === 0 && !drag.valid}
@@ -309,8 +309,8 @@
 					/>
 					{#if canDrop}
 						<div
-							class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--fg-faint)] bg-transparent hover:border-[var(--fg-muted)] hover:bg-[var(--bg-hover)]"
-							class:!border-[var(--fg-primary)]={hoverIndex === 0}
+							class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--border-primary)] bg-[var(--color-transparent)] hover:border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
+							class:!border-[var(--info-border)]={hoverIndex === 0}
 							class:!bg-[var(--bg-tertiary)]={hoverIndex === 0}
 							class:!border-[var(--error-border)]={hoverIndex === 0 && !drag.valid}
 							class:!bg-[var(--error-bg)]={hoverIndex === 0 && !drag.valid}
@@ -373,9 +373,9 @@
 								/>
 							{/if}
 							{#if canDrop}
-								<div
-									class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--fg-faint)] bg-transparent hover:border-[var(--fg-muted)] hover:bg-[var(--bg-hover)]"
-									class:!border-[var(--fg-primary)]={hoverIndex === i + 1}
+							<div
+							class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--border-primary)] bg-[var(--color-transparent)] hover:border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
+								class:!border-[var(--info-border)]={hoverIndex === i + 1}
 									class:!bg-[var(--bg-tertiary)]={hoverIndex === i + 1}
 									class:!border-[var(--error-border)]={hoverIndex === i + 1 && !drag.valid}
 									class:!bg-[var(--error-bg)]={hoverIndex === i + 1 && !drag.valid}

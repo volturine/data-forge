@@ -97,7 +97,7 @@
 
 <div
 	class="fixed inset-0 z-[1000] flex items-center justify-center p-4"
-	style="background: rgba(0, 0, 0, 0.4);"
+	style="background: var(--overlay-soft);"
 	role="button"
 	tabindex="0"
 	aria-label="Close file picker"
@@ -105,14 +105,14 @@
 	onkeydown={handleBackdropKeydown}
 >
 	<div
-		class="flex w-full max-w-[720px] max-h-[70vh] flex-col border bg-panel border-panel"
+		class="flex w-full max-w-[720px] max-h-[70vh] flex-col border bg-panel border-primary"
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
 		onclick={stopPickerEvent}
 		onkeydown={stopPickerEvent}
 	>
-		<div class="grid grid-cols-[1fr_auto] gap-2 border-b p-4 border-panel">
+		<div class="grid grid-cols-[1fr_auto] gap-2 border-b p-4 border-primary">
 			<div class="flex flex-col gap-1">
 				<h4 class="m-0 text-sm font-semibold text-fg-primary">Data directory</h4>
 				<div
@@ -123,7 +123,7 @@
 					{#each crumbs as crumb, index (crumb.path)}
 						<button
 							type="button"
-							class="cursor-pointer border-none bg-transparent p-0 text-xs text-fg-secondary hover:text-fg-primary hover:underline disabled:text-fg-muted disabled:cursor-default disabled:no-underline"
+							class="cursor-pointer border-none bg-[var(--color-transparent)] p-0 text-xs text-fg-secondary hover:text-fg-primary hover:underline disabled:text-fg-muted disabled:cursor-default disabled:no-underline"
 							onclick={() => load(crumb.path)}
 							disabled={loading}
 						>
@@ -141,7 +141,7 @@
 			</div>
 			<div class="flex items-center justify-end gap-2">
 				<button
-					class="cursor-pointer border-none bg-transparent p-0 text-xs text-accent"
+					class="cursor-pointer border-none bg-[var(--color-transparent)] p-0 text-xs text-accent"
 					onclick={oncancel}
 				>
 					Close
@@ -176,7 +176,7 @@
 			{/if}
 		</div>
 
-		<div class="flex justify-between gap-2 border-t p-3 border-panel">
+		<div class="flex justify-between gap-2 border-t p-3 border-primary">
 			<div class="flex items-center gap-2">
 				<button
 					class="inline-flex h-8 w-8 cursor-pointer items-center justify-center border disabled:cursor-not-allowed disabled:opacity-50 bg-primary border-primary text-fg-secondary hover:bg-hover hover:text-fg-primary"
@@ -187,7 +187,7 @@
 					←
 				</button>
 				<button
-					class="cursor-pointer border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-secondary"
+					class="cursor-pointer border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-primary"
 					onclick={() => onselect(path, true)}
 					disabled={loading || !path}
 				>
@@ -195,7 +195,7 @@
 				</button>
 			</div>
 			<button
-				class="cursor-pointer border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-secondary"
+				class="cursor-pointer border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-primary"
 				onclick={() => load(path)}
 				disabled={loading}
 			>

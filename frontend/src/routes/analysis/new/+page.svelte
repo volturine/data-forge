@@ -69,12 +69,12 @@
 		<h1 class="m-0 mb-6 text-2xl font-semibold">New Analysis</h1>
 		<div class="flex items-center gap-2">
 			<div
-				class="step flex items-center gap-2 border-border-secondary text-fg-muted bg-bg-primary"
+				class="step flex items-center gap-2 border-primary text-fg-muted bg-bg-primary"
 				class:active={step === 1}
 				class:completed={step > 1}
 			>
 				<span
-					class="step-number flex h-7 w-7 items-center justify-center border border-border-secondary text-xs font-semibold text-fg-muted bg-bg-primary"
+					class="step-number flex h-7 w-7 items-center justify-center border border-primary text-xs font-semibold text-fg-muted bg-bg-primary"
 				>
 					{step > 1 ? '✓' : '1'}
 				</span>
@@ -85,12 +85,12 @@
 				class:completed={step > 1}
 			></div>
 			<div
-				class="step flex items-center gap-2 border-border-secondary text-fg-muted bg-bg-primary"
+				class="step flex items-center gap-2 border-primary text-fg-muted bg-bg-primary"
 				class:active={step === 2}
 				class:completed={step > 2}
 			>
 				<span
-					class="step-number flex h-7 w-7 items-center justify-center border border-border-secondary text-xs font-semibold text-fg-muted bg-bg-primary"
+					class="step-number flex h-7 w-7 items-center justify-center border border-primary text-xs font-semibold text-fg-muted bg-bg-primary"
 				>
 					{step > 2 ? '✓' : '2'}
 				</span>
@@ -101,11 +101,11 @@
 				class:completed={step > 2}
 			></div>
 			<div
-				class="step flex items-center gap-2 border-border-secondary text-fg-muted bg-bg-primary"
+				class="step flex items-center gap-2 border-primary text-fg-muted bg-bg-primary"
 				class:active={step === 3}
 			>
 				<span
-					class="step-number flex h-7 w-7 items-center justify-center border border-border-secondary text-xs font-semibold text-fg-muted bg-bg-primary"
+					class="step-number flex h-7 w-7 items-center justify-center border border-primary text-xs font-semibold text-fg-muted bg-bg-primary"
 				>
 					3
 				</span>
@@ -129,7 +129,7 @@
 						type="text"
 						bind:value={name}
 						placeholder="My Data Analysis"
-						class="w-full border border-border-secondary bg-bg-primary p-3 text-sm focus:border-border-focus"
+					class="w-full border border-primary bg-bg-primary p-3 text-sm focus:border-info"
 					/>
 				</div>
 				<div class="mb-5 flex flex-col gap-2">
@@ -141,7 +141,7 @@
 						bind:value={description}
 						placeholder="Describe what this analysis does..."
 						rows="4"
-						class="min-h-[100px] w-full resize-y border border-border-secondary bg-bg-primary p-3 text-sm focus:border-border-focus"
+					class="min-h-[100px] w-full resize-y border border-primary bg-bg-primary p-3 text-sm focus:border-info"
 					></textarea>
 				</div>
 			</div>
@@ -158,7 +158,7 @@
 					</div>
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
 					<div
-						class="rounded-sm border border-dashed border-border-primary p-8 text-center text-fg-tertiary"
+					class="rounded-sm border border-dashed border-primary p-8 text-center text-fg-tertiary"
 					>
 						<p>No data sources available.</p>
 						<a href={resolve('/datasources/new')} class="btn btn-secondary" data-sveltekit-reload
@@ -181,7 +181,7 @@
 				<h2 class="m-0 mb-2 text-lg font-semibold">Review & Create</h2>
 				<p class="mb-6 text-fg-tertiary">Review your analysis configuration before creating.</p>
 
-				<div class="mb-6 border-b border-border-primary pb-6">
+			<div class="mb-6 border-b border-primary pb-6">
 					<h3 class="m-0 mb-4 text-sm font-semibold uppercase tracking-wide text-fg-tertiary">
 						Details
 					</h3>
@@ -206,7 +206,7 @@
 					<ul class="m-0 list-none p-0">
 						{#if datasourcesQuery.data}
 							{#each datasourcesQuery.data.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
-								<li class="flex items-center gap-3 border-b border-border-primary py-2">
+						<li class="flex items-center gap-3 border-b border-primary py-2">
 									<span class="text-fg-primary">{ds.name}</span>
 									<span class="text-xs text-fg-muted">
 										{#if ds.source_type === 'file'}
@@ -236,7 +236,7 @@
 		{/if}
 	</div>
 
-	<div class="flex gap-3 border-t border-border-primary pt-6">
+	<div class="flex gap-3 border-t border-primary pt-6">
 		{#if step > 1}
 			<button class="btn btn-secondary" onclick={() => (step -= 1)} disabled={creating}>
 				Back
@@ -265,8 +265,8 @@
 
 <style>
 	.step.active .step-number {
-		border-color: var(--accent-primary);
-		background-color: var(--accent-primary);
+		border-color: var(--info-border);
+		background-color: var(--info-border);
 		color: var(--bg-primary);
 	}
 
@@ -276,12 +276,12 @@
 	}
 
 	.step.completed .step-number {
-		border-color: var(--success-border);
+		border-color: var(--info-border);
 		background-color: var(--success-bg);
 		color: var(--success-fg);
 	}
 
 	.step-line.completed {
-		background-color: var(--success-border);
+		background-color: var(--info-border);
 	}
 </style>

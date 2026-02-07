@@ -9,7 +9,7 @@
 	let { schema }: Props = $props();
 </script>
 
-<div class="overflow-hidden border bg-panel border-panel">
+<div class="overflow-hidden border bg-panel border-primary">
 	<div
 		class="flex justify-between items-center px-5 py-4 border-b border-primary"
 		style="background: var(--panel-header-bg);"

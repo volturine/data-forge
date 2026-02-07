@@ -78,7 +78,7 @@
 					{title}
 				</h2>
 				<button
-					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 transition-all text-[var(--fg-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--fg-primary)]"
+					class="flex cursor-pointer items-center justify-center border-none bg-[var(--color-transparent)] p-1 transition-all text-[var(--fg-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--fg-primary)]"
 					onclick={onCancel}
 					aria-label="Close dialog"
 				>
@@ -96,7 +96,7 @@
 				class="flex justify-end gap-3 border-t p-4 max-sm:flex-col-reverse border-[var(--border-primary)]"
 			>
 				<button
-					class="cursor-pointer border bg-transparent px-4 py-2 font-mono text-sm font-medium transition-all max-sm:w-full text-[var(--fg-primary)] border-[var(--border-secondary)] hover:bg-[var(--bg-hover)]"
+				class="cursor-pointer border bg-[var(--color-transparent)] px-4 py-2 font-mono text-sm font-medium transition-all max-sm:w-full text-[var(--fg-primary)] border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
 					onclick={onCancel}
 				>
 					{cancelText}

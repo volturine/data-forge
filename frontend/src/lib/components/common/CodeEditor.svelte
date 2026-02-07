@@ -20,7 +20,7 @@
 		{
 			'&': { backgroundColor: 'var(--bg-tertiary)', color: 'var(--fg-primary)' },
 			'.cm-content': { caretColor: 'var(--fg-primary)' },
-			'.cm-cursor': { borderLeftColor: 'var(--fg-primary)' },
+			'.cm-cursor': { borderLeftColor: 'var(--border-primary)' },
 			'.cm-scroller': { fontFamily: 'var(--font-mono)' },
 			'.cm-gutters': {
 				backgroundColor: 'var(--bg-tertiary)',
@@ -30,32 +30,32 @@
 			'.cm-activeLineGutter': { backgroundColor: 'var(--bg-hover)' },
 			'.cm-activeLine': { backgroundColor: 'var(--bg-hover)' },
 			'.cm-selectionMatch': {
-				backgroundColor: 'color-mix(in srgb, var(--accent-primary) 50%, transparent)'
+				backgroundColor: 'var(--editor-selection-match)'
 			},
 			'&.cm-focused .cm-selectionBackground': {
-				backgroundColor: 'color-mix(in srgb, var(--accent-primary) 70%, transparent)'
+				backgroundColor: 'var(--editor-selection)'
 			},
 			'.cm-selectionBackground': {
-				backgroundColor: 'color-mix(in srgb, var(--accent-primary) 30%, transparent)'
+				backgroundColor: 'var(--editor-selection-passive)'
 			}
 		},
 		{ dark: true }
 	);
 
 	const highlight = HighlightStyle.define([
-		{ tag: tags.keyword, color: '#c586c0' },
-		{ tag: tags.operator, color: '#d4d4d4' },
-		{ tag: tags.variableName, color: '#9cdcfe' },
-		{ tag: tags.function(tags.variableName), color: '#dcdcaa' },
-		{ tag: tags.definition(tags.variableName), color: '#4fc1ff' },
-		{ tag: tags.string, color: '#ce9178' },
-		{ tag: tags.number, color: '#b5cea8' },
-		{ tag: tags.bool, color: '#569cd6' },
-		{ tag: tags.null, color: '#569cd6' },
-		{ tag: tags.comment, color: '#6a9955', fontStyle: 'italic' },
-		{ tag: tags.className, color: '#4ec9b0' },
-		{ tag: tags.definition(tags.function(tags.variableName)), color: '#dcdcaa' },
-		{ tag: tags.propertyName, color: '#9cdcfe' }
+		{ tag: tags.keyword, color: 'var(--editor-syntax-keyword)' },
+		{ tag: tags.operator, color: 'var(--editor-syntax-operator)' },
+		{ tag: tags.variableName, color: 'var(--editor-syntax-variable)' },
+		{ tag: tags.function(tags.variableName), color: 'var(--editor-syntax-function)' },
+		{ tag: tags.definition(tags.variableName), color: 'var(--editor-syntax-definition)' },
+		{ tag: tags.string, color: 'var(--editor-syntax-string)' },
+		{ tag: tags.number, color: 'var(--editor-syntax-number)' },
+		{ tag: tags.bool, color: 'var(--editor-syntax-boolean)' },
+		{ tag: tags.null, color: 'var(--editor-syntax-null)' },
+		{ tag: tags.comment, color: 'var(--editor-syntax-comment)', fontStyle: 'italic' },
+		{ tag: tags.className, color: 'var(--editor-syntax-class)' },
+		{ tag: tags.definition(tags.function(tags.variableName)), color: 'var(--editor-syntax-function)' },
+		{ tag: tags.propertyName, color: 'var(--editor-syntax-property)' }
 	]);
 
 	function init(host: HTMLElement) {

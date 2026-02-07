@@ -10,7 +10,7 @@
 
 <div
 	class="flex min-h-[400px] flex-col items-center justify-center border border-dashed px-6 py-12 text-center"
-	style="border-color: var(--border-secondary); background-color: var(--bg-primary);"
+	style="border-color: var(--border-primary); background-color: var(--bg-primary);"
 >
 	<div class="mb-6 flex h-16 w-16 items-center justify-center" style="color: var(--fg-faint);">
 		<LayoutGrid size={32} strokeWidth={1.5} />

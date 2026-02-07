@@ -188,7 +188,7 @@
 	}
 </script>
 
-<div class="w-full my-2 overflow-hidden border select-text bg-panel border-panel">
+<div class="w-full my-2 overflow-hidden border select-text bg-panel border-primary">
 	{#if isLoading}
 		<div
 			class="flex flex-col items-center justify-center gap-3 p-8 pointer-events-none text-fg-tertiary"
@@ -203,7 +203,7 @@
 		</div>
 	{:else if headerGroups.length > 0 && data}
 		<div
-			class="flex justify-between items-center px-4 py-3 text-xs border-b text-fg-tertiary border-panel"
+			class="flex justify-between items-center px-4 py-3 text-xs border-b text-fg-tertiary border-primary"
 			style="background: var(--panel-header-bg);"
 		>
 			<span>
@@ -218,9 +218,9 @@
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-								<th class="p-0 text-left font-semibold text-[0.8125rem] border-b-2 border-table">
+						<th class="p-0 text-left font-semibold text-[0.8125rem] border-b-2 border-primary">
 									<button
-										class="flex flex-col items-start gap-1 px-4 py-3 bg-transparent border-none cursor-pointer transition-colors hover:bg-hover"
+									class="flex flex-col items-start gap-1 px-4 py-3 bg-[var(--color-transparent)] border-none cursor-pointer transition-colors hover:bg-hover"
 										style="font-size: inherit; font-weight: inherit; color: inherit;"
 										onclick={() => toggleSort(header.id)}
 									>
@@ -250,7 +250,7 @@
 				<tbody>
 					{#each rows as row (row.id)}
 						<tr
-							class="border-b transition-colors last:border-b-0 border-table even:bg-secondary hover:!bg-hover"
+							class="border-b transition-colors last:border-b-0 border-primary even:bg-secondary hover:!bg-hover"
 						>
 							{#each row.getVisibleCells() as cell (cell.id)}
 								<td
@@ -268,11 +268,11 @@
 
 		{#if totalPages > 1}
 			<div
-				class="flex justify-between items-center px-4 py-3 border-t border-panel"
+				class="flex justify-between items-center px-4 py-3 border-t border-primary"
 				style="background: var(--panel-header-bg);"
 			>
 				<button
-					class="px-4 py-2 border cursor-pointer transition-all border-primary bg-panel hover:bg-hover hover:border-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+					class="px-4 py-2 border cursor-pointer transition-all border-primary bg-panel hover:bg-hover hover:border-primary disabled:opacity-40 disabled:cursor-not-allowed"
 					onclick={prevPage}
 					disabled={currentPage === 1}
 				>
@@ -280,7 +280,7 @@
 				</button>
 				<span class="text-xs text-fg-tertiary">Page {currentPage} of {totalPages}</span>
 				<button
-					class="px-4 py-2 border cursor-pointer transition-all border-primary bg-panel hover:bg-hover hover:border-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+					class="px-4 py-2 border cursor-pointer transition-all border-primary bg-panel hover:bg-hover hover:border-primary disabled:opacity-40 disabled:cursor-not-allowed"
 					onclick={nextPage}
 					disabled={currentPage >= totalPages}
 				>

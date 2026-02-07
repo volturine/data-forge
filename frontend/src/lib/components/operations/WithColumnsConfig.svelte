@@ -376,8 +376,8 @@
 					<div class="flex gap-1 shrink-0">
 						<button
 							type="button"
-							class="w-6 h-6 p-0 inline-flex items-center justify-center bg-transparent cursor-pointer text-base leading-none"
-							style="color: var(--fg-muted); border: 1px solid transparent;"
+						class="w-6 h-6 p-0 inline-flex items-center justify-center bg-[var(--color-transparent)] cursor-pointer text-base leading-none"
+						style="color: var(--fg-muted); border: 1px solid var(--color-transparent);"
 							onclick={() => editExpression(index)}
 							aria-label="Edit"
 						>
@@ -395,8 +395,8 @@
 						</button>
 						<button
 							type="button"
-							class="btn-remove w-6 h-6 p-0 inline-flex items-center justify-center bg-transparent cursor-pointer text-base leading-none"
-							style="color: var(--fg-muted); border: 1px solid transparent;"
+						class="btn-remove w-6 h-6 p-0 inline-flex items-center justify-center bg-[var(--color-transparent)] cursor-pointer text-base leading-none"
+						style="color: var(--fg-muted); border: 1px solid var(--color-transparent);"
 							onclick={() => removeExpression(index)}
 							aria-label="Remove">×</button
 						>
@@ -442,7 +442,7 @@
 
 <style>
 	.item.editing {
-		border-color: var(--accent-primary);
+		border-color: var(--info-border);
 		background-color: var(--bg-hover);
 	}
 	.btn-remove:hover {

@@ -143,7 +143,7 @@
 				{#each safeAggregations as agg, i (i)}
 					<div
 						class="flex justify-between items-center p-3"
-						style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);"
+						style="background-color: var(--panel-bg); border: 1px solid var(--border-primary);"
 						role="listitem"
 					>
 						<span class="text-sm" style="font-family: var(--font-mono); color: var(--fg-primary);">
@@ -172,7 +172,7 @@
 		background-color: var(--bg-muted) !important;
 		cursor: not-allowed;
 		color: var(--fg-muted) !important;
-		border: 1px solid var(--border-secondary);
+		border: 1px solid var(--border-primary);
 	}
 	button:hover:not(:disabled) {
 		opacity: 0.9;

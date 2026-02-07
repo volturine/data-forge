@@ -64,9 +64,9 @@
 		borderColor: variant === 'outline' ? config.colors.color : config.colors.borderColor,
 		backgroundColor:
 			variant === 'outline'
-				? 'transparent'
+				? 'var(--color-transparent)'
 				: variant === 'minimal'
-					? 'transparent'
+					? 'var(--color-transparent)'
 					: config.colors.backgroundColor
 	});
 </script>

@@ -93,7 +93,7 @@
 </script>
 
 <div class="mx-auto max-w-[1000px] p-6">
-	<header class="mb-8 flex items-start justify-between gap-6 border-b border-border-primary pb-6">
+	<header class="mb-8 flex items-start justify-between gap-6 border-b border-primary pb-6">
 		<div>
 			<h1 class="m-0 mb-2 text-2xl font-semibold">Data Sources</h1>
 			<p class="m-0 text-fg-tertiary">Manage your data connections and files</p>
@@ -119,7 +119,7 @@
 	{:else if query.data}
 		{#if query.data.length === 0}
 			<div
-				class="rounded-sm border border-dashed border-border-secondary bg-bg-primary p-12 text-center"
+				class="rounded-sm border border-dashed border-primary bg-bg-primary p-12 text-center"
 			>
 				<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center text-xl text-fg-muted">
 					+
@@ -148,7 +148,7 @@
 					>
 						<span>
 							<button
-								class="expand-btn flex h-7 w-7 items-center justify-center bg-transparent p-0 text-fg-secondary transition-all hover:border-border-secondary hover:bg-bg-hover hover:text-fg-primary"
+							class="expand-btn flex h-7 w-7 items-center justify-center bg-[var(--color-transparent)] p-0 text-fg-secondary transition-all hover:border-primary hover:bg-bg-hover hover:text-fg-primary"
 								onclick={() => togglePreview(datasource.id)}
 								aria-expanded={isExpanded(datasource.id)}
 								aria-label={isExpanded(datasource.id) ? 'Collapse preview' : 'Expand preview'}
@@ -209,7 +209,7 @@
 						</span>
 					</div>
 					{#if isExpanded(datasource.id)}
-						<div class="border-t border-border-primary bg-bg-secondary p-4">
+						<div class="border-t border-primary bg-bg-secondary p-4">
 							<DatasourcePreview datasourceId={datasource.id} datasourceName={datasource.name} />
 						</div>
 					{/if}

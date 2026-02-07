@@ -43,7 +43,7 @@
 		<div
 			id="expr-syntax-help"
 			class="help-text text-sm leading-relaxed p-3"
-			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);"
+		style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
 			aria-label="Syntax help"
 		>
 			<strong>Polars Expression Syntax:</strong><br />

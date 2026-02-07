@@ -67,7 +67,7 @@
 
 <style>
 	.strategy-option:hover {
-		border-color: var(--border-focus);
+		border-color: var(--info-border);
 		background-color: var(--bg-hover);
 	}
 </style>

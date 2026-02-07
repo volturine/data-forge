@@ -10,7 +10,7 @@
 	let hasStats = $derived(stats && Object.keys(stats).length > 0);
 </script>
 
-<div class="overflow-hidden border bg-panel border-panel">
+<div class="overflow-hidden border bg-panel border-primary">
 	<div class="px-5 py-4 border-b border-primary" style="background: var(--panel-header-bg);">
 		<h3 class="m-0">Summary Statistics</h3>
 	</div>

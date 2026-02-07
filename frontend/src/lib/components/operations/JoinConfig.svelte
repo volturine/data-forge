@@ -120,7 +120,7 @@
 		<div
 			id="join-type-help"
 			class="text-sm leading-relaxed p-3 mt-2"
-			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);"
+			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
 			aria-describedby="join-type-help"
 		>
 			<strong>Inner:</strong> Only matching rows from both.<br />
@@ -191,8 +191,8 @@
 						id={`join-btn-remove-${_index}`}
 						data-testid={`join-remove-button-${_index}`}
 						type="button"
-						class="btn-remove p-2 bg-transparent cursor-pointer"
-						style="color: var(--error-fg); border: 1px solid var(--error-fg);"
+						class="btn-remove p-2 bg-[var(--color-transparent)] cursor-pointer"
+					style="color: var(--error-fg); border: 1px solid var(--error-border);"
 						onclick={() => removeJoinColumn(joinCol.id)}
 						aria-label={`Remove join column pair ${_index + 1}`}
 					>
@@ -246,7 +246,7 @@
 		<div
 			id="join-suffix-hint"
 			class="text-sm leading-relaxed p-3 mt-2"
-			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--form-help-border); border-left: 3px solid var(--form-help-accent);"
+			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
 		>
 			Suffix for columns from the right dataset (when names collide)
 		</div>

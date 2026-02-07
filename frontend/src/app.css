@@ -98,73 +98,161 @@
 	--fg-muted: #71717a;
 	--fg-faint: #a1a1aa;
 
-	--border-primary: #e4e4e7;
-	--border-secondary: #d4d4d8;
-	--border-tertiary: #a1a1aa;
-	--border-focus: #09090b;
-
 	--accent-primary: #09090b;
 	--accent-secondary: #27272a;
 	--accent-bg: #f4f4f5;
 	--accent-ring: 0 0 0 4px rgba(12, 15, 23, 0.12);
+	--border-primary: #e0e0e0;
+	--color-transparent: transparent;
+	--header-bg: var(--bg-primary);
 
 	--success-fg: #166534;
 	--success-bg: #dcfce7;
-	--success-border: #86efac;
 
 	--warning-fg: #854d0e;
 	--warning-bg: #fef9c3;
-	--warning-border: #fde047;
+	--warning-border: #854d0e;
 	--warning-hover: #fde047;
+	--warning-contrast: #ffffff;
 
 	--error-fg: #991b1b;
 	--error-bg: #fee2e2;
-	--error-border: #fca5a5;
+	--error-border: #991b1b;
 
 	--info-fg: #1e40af;
 	--info-bg: #dbeafe;
-	--info-border: #93c5fd;
+	--info-border: #1e40af;
 
 	/* Input elements */
 	--input-bg: var(--bg-primary);
-	--input-border: var(--border-primary);
-	--input-focus-border: var(--border-focus);
 
 	/* Component-specific */
 	--card-bg: var(--bg-primary);
-	--card-border: var(--border-primary);
 	--card-shadow: none;
 
 	--panel-bg: var(--bg-primary);
-	--panel-border: var(--border-primary);
 	--panel-muted-bg: var(--bg-tertiary);
-	--panel-muted-border: var(--border-primary);
 	--panel-header-bg: var(--bg-tertiary);
 	--panel-header-fg: var(--fg-primary);
 	--panel-shadow: none;
 
 	--form-section-bg: var(--bg-tertiary);
-	--form-section-border: var(--border-primary);
 	--form-help-bg: var(--bg-primary);
-	--form-help-border: var(--border-secondary);
-	--form-help-accent: var(--info-border);
 	--form-control-bg: var(--input-bg);
-	--form-control-border: var(--input-border);
 
 	--table-header-bg: var(--bg-tertiary);
 	--table-row-hover: var(--bg-hover);
 	--table-row-alt: var(--bg-secondary);
-	--table-border: var(--border-primary);
 
 	--badge-bg: var(--bg-tertiary);
-	--badge-border: var(--border-primary);
 	--badge-fg: var(--fg-tertiary);
 
 	--overlay-bg: rgba(0, 0, 0, 0.55);
+	--overlay-soft: rgba(0, 0, 0, 0.4);
 	--dialog-bg: var(--bg-primary);
-	--dialog-border: var(--border-primary);
 	--dialog-header-bg: var(--bg-tertiary);
 	--dialog-shadow: none;
+
+	/* Editor colors */
+	--editor-selection: color-mix(in srgb, var(--accent-primary) 70%, var(--color-transparent));
+	--editor-selection-passive: color-mix(in srgb, var(--accent-primary) 30%, var(--color-transparent));
+	--editor-selection-match: color-mix(in srgb, var(--accent-primary) 50%, var(--color-transparent));
+	--editor-syntax-keyword: #c586c0;
+	--editor-syntax-operator: #d4d4d4;
+	--editor-syntax-variable: #9cdcfe;
+	--editor-syntax-function: #dcdcaa;
+	--editor-syntax-definition: #4fc1ff;
+	--editor-syntax-string: #ce9178;
+	--editor-syntax-number: #b5cea8;
+	--editor-syntax-boolean: #569cd6;
+	--editor-syntax-null: #569cd6;
+	--editor-syntax-comment: #6a9955;
+	--editor-syntax-class: #4ec9b0;
+	--editor-syntax-property: #9cdcfe;
+
+	/* Inline code */
+	--code-inline-bg: var(--bg-tertiary);
+	--code-inline-fg: var(--fg-secondary);
+	--code-inline-border: var(--border-primary);
+
+	/* Pipeline canvas */
+	--pipeline-grid-line: color-mix(in srgb, var(--fg-primary) 6%, var(--color-transparent));
+	--pipeline-grid-fade: var(--bg-tertiary);
+
+	/* Column type colors */
+	--type-string-fg: #16a34a;
+	--type-string-border: color-mix(in srgb, var(--type-string-fg) 45%, var(--color-transparent));
+	--type-string-bg: color-mix(in srgb, var(--type-string-fg) 12%, var(--color-transparent));
+	--type-integer-fg: #2563eb;
+	--type-integer-border: color-mix(in srgb, var(--type-integer-fg) 45%, var(--color-transparent));
+	--type-integer-bg: color-mix(in srgb, var(--type-integer-fg) 12%, var(--color-transparent));
+	--type-float-fg: #6366f1;
+	--type-float-border: color-mix(in srgb, var(--type-float-fg) 45%, var(--color-transparent));
+	--type-float-bg: color-mix(in srgb, var(--type-float-fg) 12%, var(--color-transparent));
+	--type-temporal-fg: #ea580c;
+	--type-temporal-border: color-mix(in srgb, var(--type-temporal-fg) 45%, var(--color-transparent));
+	--type-temporal-bg: color-mix(in srgb, var(--type-temporal-fg) 12%, var(--color-transparent));
+	--type-boolean-fg: #f59e0b;
+	--type-boolean-border: color-mix(in srgb, var(--type-boolean-fg) 45%, var(--color-transparent));
+	--type-boolean-bg: color-mix(in srgb, var(--type-boolean-fg) 12%, var(--color-transparent));
+	--type-complex-fg: #9333ea;
+	--type-complex-border: color-mix(in srgb, var(--type-complex-fg) 45%, var(--color-transparent));
+	--type-complex-bg: color-mix(in srgb, var(--type-complex-fg) 12%, var(--color-transparent));
+	--type-other-fg: #64748b;
+	--type-other-border: color-mix(in srgb, var(--type-other-fg) 45%, var(--color-transparent));
+	--type-other-bg: color-mix(in srgb, var(--type-other-fg) 12%, var(--color-transparent));
+
+	/* File type colors */
+	--file-csv-fg: #2563eb;
+	--file-csv-border: color-mix(in srgb, var(--file-csv-fg) 45%, var(--color-transparent));
+	--file-csv-bg: color-mix(in srgb, var(--file-csv-fg) 12%, var(--color-transparent));
+	--file-parquet-fg: #8b5cf6;
+	--file-parquet-border: color-mix(in srgb, var(--file-parquet-fg) 45%, var(--color-transparent));
+	--file-parquet-bg: color-mix(in srgb, var(--file-parquet-fg) 12%, var(--color-transparent));
+	--file-json-fg: #0f766e;
+	--file-json-border: color-mix(in srgb, var(--file-json-fg) 45%, var(--color-transparent));
+	--file-json-bg: color-mix(in srgb, var(--file-json-fg) 12%, var(--color-transparent));
+	--file-ndjson-fg: #14b8a6;
+	--file-ndjson-border: color-mix(in srgb, var(--file-ndjson-fg) 45%, var(--color-transparent));
+	--file-ndjson-bg: color-mix(in srgb, var(--file-ndjson-fg) 12%, var(--color-transparent));
+	--file-excel-fg: #b45309;
+	--file-excel-border: color-mix(in srgb, var(--file-excel-fg) 45%, var(--color-transparent));
+	--file-excel-bg: color-mix(in srgb, var(--file-excel-fg) 12%, var(--color-transparent));
+	--file-arrow-fg: #7c3aed;
+	--file-arrow-border: color-mix(in srgb, var(--file-arrow-fg) 45%, var(--color-transparent));
+	--file-arrow-bg: color-mix(in srgb, var(--file-arrow-fg) 12%, var(--color-transparent));
+	--file-avro-fg: #db2777;
+	--file-avro-border: color-mix(in srgb, var(--file-avro-fg) 45%, var(--color-transparent));
+	--file-avro-bg: color-mix(in srgb, var(--file-avro-fg) 12%, var(--color-transparent));
+	--file-delta-fg: #dc2626;
+	--file-delta-border: color-mix(in srgb, var(--file-delta-fg) 45%, var(--color-transparent));
+	--file-delta-bg: color-mix(in srgb, var(--file-delta-fg) 12%, var(--color-transparent));
+	--file-iceberg-fg: #1d4ed8;
+	--file-iceberg-border: color-mix(in srgb, var(--file-iceberg-fg) 45%, var(--color-transparent));
+	--file-iceberg-bg: color-mix(in srgb, var(--file-iceberg-fg) 12%, var(--color-transparent));
+	--file-folder-fg: #2e7d32;
+	--file-folder-border: color-mix(in srgb, var(--file-folder-fg) 40%, var(--color-transparent));
+	--file-folder-bg: color-mix(in srgb, var(--file-folder-fg) 12%, var(--color-transparent));
+	--file-unknown-fg: #64748b;
+	--file-unknown-border: color-mix(in srgb, var(--file-unknown-fg) 45%, var(--color-transparent));
+	--file-unknown-bg: color-mix(in srgb, var(--file-unknown-fg) 12%, var(--color-transparent));
+
+	/* Source type colors */
+	--source-file-fg: var(--file-unknown-fg);
+	--source-file-border: var(--file-unknown-border);
+	--source-file-bg: var(--file-unknown-bg);
+	--source-database-fg: var(--type-string-fg);
+	--source-database-border: var(--type-string-border);
+	--source-database-bg: var(--type-string-bg);
+	--source-api-fg: var(--type-temporal-fg);
+	--source-api-border: var(--type-temporal-border);
+	--source-api-bg: var(--type-temporal-bg);
+	--source-iceberg-fg: var(--file-iceberg-fg);
+	--source-iceberg-border: var(--file-iceberg-border);
+	--source-iceberg-bg: var(--file-iceberg-bg);
+	--source-duckdb-fg: var(--type-boolean-fg);
+	--source-duckdb-border: var(--type-boolean-border);
+	--source-duckdb-bg: var(--type-boolean-bg);
 
 	/* Primary action button colors */
 	--primary-bg: var(--accent-primary);
@@ -188,23 +276,22 @@
 		--fg-muted: #737373;
 		--fg-faint: #525252;
 
-		--border-primary: #262626;
-		--border-secondary: #333333;
-		--border-tertiary: #404040;
-		--border-focus: #fafafa;
-
 		--accent-primary: #fafafa;
 		--accent-secondary: #d4d4d4;
 		--accent-bg: #1f1f1f;
 		--accent-ring: 0 0 0 4px rgba(250, 250, 250, 0.12);
+		--border-primary: #404040;
+		--color-transparent: transparent;
+		--header-bg: #050505;
 
 		--success-fg: #86efac;
 		--success-bg: #14532d;
-		--success-border: #166534;
 
 		--warning-fg: #fde047;
 		--warning-bg: #713f12;
 		--warning-border: #854d0e;
+		--warning-hover: #fde047;
+		--warning-contrast: #ffffff;
 
 		--error-fg: #fca5a5;
 		--error-bg: #7f1d1d;
@@ -216,11 +303,104 @@
 
 		/* Input elements - dark */
 		--input-bg: var(--bg-tertiary);
-		--input-border: var(--border-secondary);
-		--input-focus-border: var(--border-focus);
 
 		--card-shadow: none;
 		--dialog-shadow: none;
+		--overlay-bg: rgba(0, 0, 0, 0.55);
+		--overlay-soft: rgba(0, 0, 0, 0.4);
+		--pipeline-grid-line: color-mix(in srgb, var(--fg-primary) 10%, var(--color-transparent));
+		--pipeline-grid-fade: var(--bg-tertiary);
+		--editor-selection: color-mix(in srgb, var(--accent-primary) 70%, var(--color-transparent));
+		--editor-selection-passive: color-mix(in srgb, var(--accent-primary) 30%, var(--color-transparent));
+		--editor-selection-match: color-mix(in srgb, var(--accent-primary) 50%, var(--color-transparent));
+		--editor-syntax-keyword: #c586c0;
+		--editor-syntax-operator: #d4d4d4;
+		--editor-syntax-variable: #9cdcfe;
+		--editor-syntax-function: #dcdcaa;
+		--editor-syntax-definition: #4fc1ff;
+		--editor-syntax-string: #ce9178;
+		--editor-syntax-number: #b5cea8;
+		--editor-syntax-boolean: #569cd6;
+		--editor-syntax-null: #569cd6;
+		--editor-syntax-comment: #6a9955;
+		--editor-syntax-class: #4ec9b0;
+		--editor-syntax-property: #9cdcfe;
+
+		--code-inline-bg: var(--bg-tertiary);
+		--code-inline-fg: var(--fg-secondary);
+		--code-inline-border: var(--border-primary);
+
+		--type-string-fg: #16a34a;
+		--type-string-border: color-mix(in srgb, var(--type-string-fg) 45%, var(--color-transparent));
+		--type-string-bg: color-mix(in srgb, var(--type-string-fg) 12%, var(--color-transparent));
+		--type-integer-fg: #2563eb;
+		--type-integer-border: color-mix(in srgb, var(--type-integer-fg) 45%, var(--color-transparent));
+		--type-integer-bg: color-mix(in srgb, var(--type-integer-fg) 12%, var(--color-transparent));
+		--type-float-fg: #6366f1;
+		--type-float-border: color-mix(in srgb, var(--type-float-fg) 45%, var(--color-transparent));
+		--type-float-bg: color-mix(in srgb, var(--type-float-fg) 12%, var(--color-transparent));
+		--type-temporal-fg: #ea580c;
+		--type-temporal-border: color-mix(in srgb, var(--type-temporal-fg) 45%, var(--color-transparent));
+		--type-temporal-bg: color-mix(in srgb, var(--type-temporal-fg) 12%, var(--color-transparent));
+		--type-boolean-fg: #f59e0b;
+		--type-boolean-border: color-mix(in srgb, var(--type-boolean-fg) 45%, var(--color-transparent));
+		--type-boolean-bg: color-mix(in srgb, var(--type-boolean-fg) 12%, var(--color-transparent));
+		--type-complex-fg: #9333ea;
+		--type-complex-border: color-mix(in srgb, var(--type-complex-fg) 45%, var(--color-transparent));
+		--type-complex-bg: color-mix(in srgb, var(--type-complex-fg) 12%, var(--color-transparent));
+		--type-other-fg: #64748b;
+		--type-other-border: color-mix(in srgb, var(--type-other-fg) 45%, var(--color-transparent));
+		--type-other-bg: color-mix(in srgb, var(--type-other-fg) 12%, var(--color-transparent));
+
+		--file-csv-fg: #2563eb;
+		--file-csv-border: color-mix(in srgb, var(--file-csv-fg) 45%, var(--color-transparent));
+		--file-csv-bg: color-mix(in srgb, var(--file-csv-fg) 12%, var(--color-transparent));
+		--file-parquet-fg: #8b5cf6;
+		--file-parquet-border: color-mix(in srgb, var(--file-parquet-fg) 45%, var(--color-transparent));
+		--file-parquet-bg: color-mix(in srgb, var(--file-parquet-fg) 12%, var(--color-transparent));
+		--file-json-fg: #0f766e;
+		--file-json-border: color-mix(in srgb, var(--file-json-fg) 45%, var(--color-transparent));
+		--file-json-bg: color-mix(in srgb, var(--file-json-fg) 12%, var(--color-transparent));
+		--file-ndjson-fg: #14b8a6;
+		--file-ndjson-border: color-mix(in srgb, var(--file-ndjson-fg) 45%, var(--color-transparent));
+		--file-ndjson-bg: color-mix(in srgb, var(--file-ndjson-fg) 12%, var(--color-transparent));
+		--file-excel-fg: #b45309;
+		--file-excel-border: color-mix(in srgb, var(--file-excel-fg) 45%, var(--color-transparent));
+		--file-excel-bg: color-mix(in srgb, var(--file-excel-fg) 12%, var(--color-transparent));
+		--file-arrow-fg: #7c3aed;
+		--file-arrow-border: color-mix(in srgb, var(--file-arrow-fg) 45%, var(--color-transparent));
+		--file-arrow-bg: color-mix(in srgb, var(--file-arrow-fg) 12%, var(--color-transparent));
+		--file-avro-fg: #db2777;
+		--file-avro-border: color-mix(in srgb, var(--file-avro-fg) 45%, var(--color-transparent));
+		--file-avro-bg: color-mix(in srgb, var(--file-avro-fg) 12%, var(--color-transparent));
+		--file-delta-fg: #dc2626;
+		--file-delta-border: color-mix(in srgb, var(--file-delta-fg) 45%, var(--color-transparent));
+		--file-delta-bg: color-mix(in srgb, var(--file-delta-fg) 12%, var(--color-transparent));
+		--file-iceberg-fg: #1d4ed8;
+		--file-iceberg-border: color-mix(in srgb, var(--file-iceberg-fg) 45%, var(--color-transparent));
+		--file-iceberg-bg: color-mix(in srgb, var(--file-iceberg-fg) 12%, var(--color-transparent));
+		--file-folder-fg: #2e7d32;
+		--file-folder-border: color-mix(in srgb, var(--file-folder-fg) 40%, var(--color-transparent));
+		--file-folder-bg: color-mix(in srgb, var(--file-folder-fg) 12%, var(--color-transparent));
+		--file-unknown-fg: #64748b;
+		--file-unknown-border: color-mix(in srgb, var(--file-unknown-fg) 45%, var(--color-transparent));
+		--file-unknown-bg: color-mix(in srgb, var(--file-unknown-fg) 12%, var(--color-transparent));
+
+		--source-file-fg: var(--file-unknown-fg);
+		--source-file-border: var(--file-unknown-border);
+		--source-file-bg: var(--file-unknown-bg);
+		--source-database-fg: var(--type-string-fg);
+		--source-database-border: var(--type-string-border);
+		--source-database-bg: var(--type-string-bg);
+		--source-api-fg: var(--type-temporal-fg);
+		--source-api-border: var(--type-temporal-border);
+		--source-api-bg: var(--type-temporal-bg);
+		--source-iceberg-fg: var(--file-iceberg-fg);
+		--source-iceberg-border: var(--file-iceberg-border);
+		--source-iceberg-bg: var(--file-iceberg-bg);
+		--source-duckdb-fg: var(--type-boolean-fg);
+		--source-duckdb-border: var(--type-boolean-border);
+		--source-duckdb-bg: var(--type-boolean-bg);
 
 		/* Primary action button colors - dark */
 		--primary-bg: var(--accent-primary);
@@ -245,22 +425,21 @@
 	--fg-muted: #737373;
 	--fg-faint: #525252;
 
-	--border-primary: #262626;
-	--border-secondary: #333333;
-	--border-tertiary: #404040;
-	--border-focus: #fafafa;
-
 	--accent-primary: #fafafa;
 	--accent-secondary: #d4d4d4;
 	--accent-bg: #1f1f1f;
+	--border-primary: #404040;
+	--color-transparent: transparent;
+	--header-bg: #050505;
 
 	--success-fg: #86efac;
 	--success-bg: #14532d;
-	--success-border: #166534;
 
 	--warning-fg: #fde047;
 	--warning-bg: #713f12;
 	--warning-border: #854d0e;
+	--warning-hover: #fde047;
+	--warning-contrast: #ffffff;
 
 	--error-fg: #fca5a5;
 	--error-bg: #7f1d1d;
@@ -272,11 +451,100 @@
 
 	/* Input elements - dark */
 	--input-bg: var(--bg-tertiary);
-	--input-border: var(--border-secondary);
-	--input-focus-border: var(--border-focus);
 
 	--card-shadow: none;
 	--dialog-shadow: none;
+	--overlay-bg: rgba(0, 0, 0, 0.55);
+	--overlay-soft: rgba(0, 0, 0, 0.4);
+	--pipeline-grid-line: color-mix(in srgb, var(--fg-primary) 14%, var(--color-transparent));
+	--pipeline-grid-fade: var(--bg-tertiary);
+	--editor-selection: color-mix(in srgb, var(--accent-primary) 70%, var(--color-transparent));
+	--editor-selection-passive: color-mix(in srgb, var(--accent-primary) 30%, var(--color-transparent));
+	--editor-selection-match: color-mix(in srgb, var(--accent-primary) 50%, var(--color-transparent));
+	--editor-syntax-keyword: #c586c0;
+	--editor-syntax-operator: #d4d4d4;
+	--editor-syntax-variable: #9cdcfe;
+	--editor-syntax-function: #dcdcaa;
+	--editor-syntax-definition: #4fc1ff;
+	--editor-syntax-string: #ce9178;
+	--editor-syntax-number: #b5cea8;
+	--editor-syntax-boolean: #569cd6;
+	--editor-syntax-null: #569cd6;
+	--editor-syntax-comment: #6a9955;
+	--editor-syntax-class: #4ec9b0;
+	--editor-syntax-property: #9cdcfe;
+	--code-inline-bg: var(--bg-tertiary);
+	--code-inline-fg: var(--fg-secondary);
+	--code-inline-border: var(--border-primary);
+	--type-string-fg: #16a34a;
+	--type-string-border: color-mix(in srgb, var(--type-string-fg) 45%, var(--color-transparent));
+	--type-string-bg: color-mix(in srgb, var(--type-string-fg) 12%, var(--color-transparent));
+	--type-integer-fg: #2563eb;
+	--type-integer-border: color-mix(in srgb, var(--type-integer-fg) 45%, var(--color-transparent));
+	--type-integer-bg: color-mix(in srgb, var(--type-integer-fg) 12%, var(--color-transparent));
+	--type-float-fg: #6366f1;
+	--type-float-border: color-mix(in srgb, var(--type-float-fg) 45%, var(--color-transparent));
+	--type-float-bg: color-mix(in srgb, var(--type-float-fg) 12%, var(--color-transparent));
+	--type-temporal-fg: #ea580c;
+	--type-temporal-border: color-mix(in srgb, var(--type-temporal-fg) 45%, var(--color-transparent));
+	--type-temporal-bg: color-mix(in srgb, var(--type-temporal-fg) 12%, var(--color-transparent));
+	--type-boolean-fg: #f59e0b;
+	--type-boolean-border: color-mix(in srgb, var(--type-boolean-fg) 45%, var(--color-transparent));
+	--type-boolean-bg: color-mix(in srgb, var(--type-boolean-fg) 12%, var(--color-transparent));
+	--type-complex-fg: #9333ea;
+	--type-complex-border: color-mix(in srgb, var(--type-complex-fg) 45%, var(--color-transparent));
+	--type-complex-bg: color-mix(in srgb, var(--type-complex-fg) 12%, var(--color-transparent));
+	--type-other-fg: #64748b;
+	--type-other-border: color-mix(in srgb, var(--type-other-fg) 45%, var(--color-transparent));
+	--type-other-bg: color-mix(in srgb, var(--type-other-fg) 12%, var(--color-transparent));
+	--file-csv-fg: #2563eb;
+	--file-csv-border: color-mix(in srgb, var(--file-csv-fg) 45%, var(--color-transparent));
+	--file-csv-bg: color-mix(in srgb, var(--file-csv-fg) 12%, var(--color-transparent));
+	--file-parquet-fg: #8b5cf6;
+	--file-parquet-border: color-mix(in srgb, var(--file-parquet-fg) 45%, var(--color-transparent));
+	--file-parquet-bg: color-mix(in srgb, var(--file-parquet-fg) 12%, var(--color-transparent));
+	--file-json-fg: #0f766e;
+	--file-json-border: color-mix(in srgb, var(--file-json-fg) 45%, var(--color-transparent));
+	--file-json-bg: color-mix(in srgb, var(--file-json-fg) 12%, var(--color-transparent));
+	--file-ndjson-fg: #14b8a6;
+	--file-ndjson-border: color-mix(in srgb, var(--file-ndjson-fg) 45%, var(--color-transparent));
+	--file-ndjson-bg: color-mix(in srgb, var(--file-ndjson-fg) 12%, var(--color-transparent));
+	--file-excel-fg: #b45309;
+	--file-excel-border: color-mix(in srgb, var(--file-excel-fg) 45%, var(--color-transparent));
+	--file-excel-bg: color-mix(in srgb, var(--file-excel-fg) 12%, var(--color-transparent));
+	--file-arrow-fg: #7c3aed;
+	--file-arrow-border: color-mix(in srgb, var(--file-arrow-fg) 45%, var(--color-transparent));
+	--file-arrow-bg: color-mix(in srgb, var(--file-arrow-fg) 12%, var(--color-transparent));
+	--file-avro-fg: #db2777;
+	--file-avro-border: color-mix(in srgb, var(--file-avro-fg) 45%, var(--color-transparent));
+	--file-avro-bg: color-mix(in srgb, var(--file-avro-fg) 12%, var(--color-transparent));
+	--file-delta-fg: #dc2626;
+	--file-delta-border: color-mix(in srgb, var(--file-delta-fg) 45%, var(--color-transparent));
+	--file-delta-bg: color-mix(in srgb, var(--file-delta-fg) 12%, var(--color-transparent));
+	--file-iceberg-fg: #1d4ed8;
+	--file-iceberg-border: color-mix(in srgb, var(--file-iceberg-fg) 45%, var(--color-transparent));
+	--file-iceberg-bg: color-mix(in srgb, var(--file-iceberg-fg) 12%, var(--color-transparent));
+	--file-folder-fg: #2e7d32;
+	--file-folder-border: color-mix(in srgb, var(--file-folder-fg) 40%, var(--color-transparent));
+	--file-folder-bg: color-mix(in srgb, var(--file-folder-fg) 12%, var(--color-transparent));
+	--file-unknown-fg: #64748b;
+	--file-unknown-border: color-mix(in srgb, var(--file-unknown-fg) 45%, var(--color-transparent));
+	--file-unknown-bg: color-mix(in srgb, var(--file-unknown-fg) 12%, var(--color-transparent));
+	--source-file-fg: var(--file-unknown-fg);
+	--source-file-border: var(--file-unknown-border);
+	--source-file-bg: var(--file-unknown-bg);
+	--source-database-fg: var(--type-string-fg);
+	--source-database-border: var(--type-string-border);
+	--source-database-bg: var(--type-string-bg);
+	--source-api-fg: var(--type-temporal-fg);
+	--source-api-border: var(--type-temporal-border);
+	--source-api-bg: var(--type-temporal-bg);
+	--source-iceberg-fg: var(--file-iceberg-fg);
+	--source-iceberg-border: var(--file-iceberg-border);
+	--source-iceberg-bg: var(--file-iceberg-bg);
+	--source-duckdb-fg: var(--type-boolean-fg);
+	--source-duckdb-border: var(--type-boolean-border);
+	--source-duckdb-bg: var(--type-boolean-bg);
 
 	/* Primary action button colors - dark */
 	--primary-bg: var(--accent-primary);
@@ -307,7 +575,7 @@
 	}
 
 	:focus-visible {
-		outline: 2px solid var(--border-focus);
+		outline: 2px solid var(--border-primary);
 		outline-offset: 2px;
 	}
 
@@ -394,7 +662,7 @@
 		font-size: 0.875rem;
 		color: var(--fg-primary);
 		background-color: var(--input-bg);
-		border: 1px solid var(--input-border);
+		border: 1px solid var(--border-primary);
 		border-radius: 0;
 		padding: 0.5rem 0.75rem;
 		width: 100%;
@@ -407,13 +675,13 @@
 	textarea:focus,
 	select:focus {
 		outline: none;
-		border-color: var(--input-focus-border);
+		border-color: var(--border-primary);
 	}
 
 	input:hover:not(:focus):not(:disabled),
 	textarea:hover:not(:focus):not(:disabled),
 	select:hover:not(:focus):not(:disabled) {
-		border-color: var(--border-tertiary);
+		border-color: var(--border-primary);
 	}
 
 	input:disabled,
@@ -500,7 +768,7 @@
 	td {
 		text-align: left;
 		padding: 0.75rem 1rem;
-		border: 1px solid var(--table-border);
+		border: 1px solid var(--border-primary);
 	}
 
 	th {
@@ -552,7 +820,7 @@ button.btn-primary,
 button[type='submit'] {
 	background-color: var(--accent-primary);
 	color: var(--bg-primary);
-	border-color: var(--accent-primary);
+	border-color: var(--info-border);
 }
 
 button.btn-primary:hover:not(:disabled),
@@ -563,7 +831,7 @@ button[type='submit']:hover:not(:disabled) {
 button.btn-secondary {
 	background-color: transparent;
 	color: var(--fg-primary);
-	border-color: var(--border-secondary);
+	border-color: var(--border-primary);
 }
 
 button.btn-secondary:hover:not(:disabled) {
@@ -604,7 +872,7 @@ button.btn-sm {
 /* Card */
 .card {
 	background-color: var(--card-bg);
-	border: 1px solid var(--card-border);
+	border: 1px solid var(--border-primary);
 	border-radius: 0;
 	padding: 1.25rem;
 }
@@ -642,7 +910,7 @@ button.btn-sm {
 /* Config Panel */
 .config-panel {
 	padding: 0.75rem;
-	border: 1px solid var(--panel-border);
+	border: 1px solid var(--border-primary);
 	border-radius: 0;
 	background-color: var(--panel-bg);
 }
@@ -673,7 +941,7 @@ button.btn-sm {
 	padding: 0.75rem;
 	background-color: var(--form-section-bg);
 	border-radius: 0;
-	border: 1px solid var(--form-section-border);
+	border: 1px solid var(--border-primary);
 }
 
 /* Column List Pattern */
@@ -729,7 +997,7 @@ button.btn-sm {
 	gap: 0.5rem;
 	padding: 0.5rem 0.75rem;
 	border-radius: 0;
-	border: 1px solid var(--border-secondary);
+	border: 1px solid var(--border-primary);
 	background-color: var(--bg-secondary);
 	color: var(--fg-primary);
 	cursor: pointer;
@@ -738,7 +1006,7 @@ button.btn-sm {
 }
 
 .column-trigger:focus-visible {
-	outline: 2px solid var(--accent-primary);
+	outline: 2px solid var(--info-border);
 	outline-offset: 2px;
 }
 
@@ -790,7 +1058,7 @@ button.btn-sm {
 
 .column-search-input:focus {
 	outline: none;
-	border-color: var(--accent-primary);
+	border-color: var(--info-border);
 	background-color: var(--bg-primary);
 }
 
@@ -807,7 +1075,7 @@ button.btn-sm {
 	overflow-x: hidden;
 	padding: 0.5rem;
 	scrollbar-width: thin;
-	scrollbar-color: var(--border-secondary) transparent;
+	scrollbar-color: var(--border-primary) transparent;
 }
 
 .column-options::-webkit-scrollbar {
@@ -819,7 +1087,7 @@ button.btn-sm {
 }
 
 .column-options::-webkit-scrollbar-thumb {
-	background-color: var(--border-secondary);
+	background-color: var(--border-primary);
 	border-radius: 0;
 }
 
@@ -847,12 +1115,12 @@ button.btn-sm {
 
 .column-option:hover {
 	background-color: var(--bg-hover);
-	border-color: var(--border-secondary);
+	border-color: var(--border-primary);
 }
 
 .column-option.selected {
 	background-color: var(--bg-hover);
-	border-color: var(--border-secondary);
+	border-color: var(--border-primary);
 }
 
 .no-results {
@@ -885,7 +1153,7 @@ button.btn-sm {
 
 .type-chip:hover {
 	background-color: var(--bg-hover);
-	border-color: var(--border-focus);
+	border-color: var(--border-primary);
 }
 
 .type-chip .type-name {
@@ -936,13 +1204,13 @@ button.btn-sm {
 
 .warning-box {
 	background-color: var(--panel-muted-bg);
-	border-color: var(--panel-muted-border);
+	border-color: var(--border-primary);
 	color: var(--fg-tertiary);
 }
 
 .success-box {
 	background-color: var(--success-bg);
-	border-color: var(--success-border);
+	border-color: var(--info-border);
 	color: var(--success-fg);
 }
 
@@ -985,7 +1253,7 @@ button.btn-sm {
 	transform: translate(-50%, -50%);
 	width: min(720px, 92vw);
 	background-color: var(--dialog-bg);
-	border: 1px solid var(--dialog-border);
+	border: 1px solid var(--border-primary);
 	border-radius: 0;
 	z-index: calc(var(--z-modal) + 1);
 	display: flex;
@@ -1085,7 +1353,7 @@ button.btn-sm {
 	width: 40px;
 	height: 40px;
 	border: 4px solid var(--border-primary);
-	border-top-color: var(--accent-primary);
+	border-top-color: var(--info-border);
 	border-radius: 50%;
 	animation: spin 0.8s linear infinite;
 }
@@ -1189,45 +1457,19 @@ button.btn-sm {
 	border-color: var(--border-primary);
 }
 
-.border-secondary {
-	border-color: var(--border-secondary);
-}
-
-.border-tertiary {
-	border-color: var(--border-tertiary);
-}
-
-.border-panel {
-	border-color: var(--panel-border);
-}
-
-.border-input {
-	border-color: var(--input-border);
-}
-
 .border-error {
 	border-color: var(--error-border);
 }
 
-.border-success {
-	border-color: var(--success-border);
-}
+
 
 .border-warning {
 	border-color: var(--warning-border);
 }
 
-.border-table {
-	border-color: var(--table-border);
-}
-
-.border-accent {
-	border-color: var(--accent-primary);
-}
-
 /* Combined input styles */
 .input-base {
-	border-color: var(--input-border);
+	border-color: var(--border-primary);
 	background-color: var(--input-bg);
 }
 
@@ -1261,5 +1503,5 @@ button.btn-sm {
 /* Panel styles */
 .panel-base {
 	background-color: var(--panel-bg);
-	border: 1px solid var(--panel-border);
+	border: 1px solid var(--border-primary);
 }

@@ -25,7 +25,7 @@
 			return `
 				color: ${color};
 				border: 1px solid ${borderColor};
-				background-color: transparent;
+				background-color: var(--color-transparent);
 			`;
 		}
 

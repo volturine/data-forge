@@ -68,7 +68,7 @@
 		{#if schema.columns.filter((col) => !safeMapping[col.name]).length === 0}
 			<p
 				class="p-6 text-center mb-4"
-				style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--panel-border);"
+				style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--border-primary);"
 			>
 				All columns have been renamed.
 			</p>
@@ -95,7 +95,7 @@
 			data-testid="rename-add-button"
 			type="button"
 			class="add-btn py-2 px-4 cursor-pointer whitespace-nowrap font-semibold"
-			style="background-color: var(--accent-primary); color: var(--bg-primary); border: 1px solid var(--accent-primary);"
+			style="background-color: var(--accent-primary); color: var(--bg-primary); border: 1px solid var(--info-border);"
 			onclick={addMapping}
 			disabled={!canAdd}
 			aria-label="Add rename mapping"
@@ -108,7 +108,7 @@
 		<div
 			id="rename-mappings-list"
 			class="flex flex-col gap-2 p-3 mb-4"
-			style="background-color: var(--panel-muted-bg); border: 1px solid var(--panel-border);"
+			style="background-color: var(--panel-muted-bg); border: 1px solid var(--border-primary);"
 			role="list"
 			aria-label="Configured renames"
 		>
@@ -118,7 +118,7 @@
 			{#each mappings as mapping (mapping.oldName)}
 				<div
 					class="flex justify-between items-center py-2 px-3"
-					style="background-color: var(--panel-bg); border: 1px solid var(--panel-border);"
+					style="background-color: var(--panel-bg); border: 1px solid var(--border-primary);"
 					role="listitem"
 				>
 					<div
@@ -142,7 +142,7 @@
 						data-testid={`rename-remove-button-${mapping.oldName}`}
 						type="button"
 						class="remove-btn w-7 h-7 inline-flex items-center justify-center cursor-pointer text-lg leading-none"
-						style="background-color: transparent; color: var(--fg-muted); border: 1px solid transparent;"
+					style="background-color: var(--color-transparent); color: var(--fg-muted); border: 1px solid var(--color-transparent);"
 						onclick={() => removeMapping(mapping.oldName)}
 						aria-label={`Remove rename: ${mapping.oldName} to ${mapping.newName}`}
 					>
@@ -155,7 +155,7 @@
 		<p
 			id="rename-empty-state"
 			class="p-6 text-center mb-4"
-			style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--panel-border);"
+			style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--border-primary);"
 			role="status"
 		>
 			No renames yet.
@@ -166,14 +166,14 @@
 <style>
 	.add-btn:disabled {
 		background-color: var(--panel-muted-bg) !important;
-		border-color: var(--panel-border) !important;
+		border-color: var(--border-primary) !important;
 		cursor: not-allowed;
 		color: var(--fg-muted) !important;
 	}
 	.remove-btn:hover:not(:disabled) {
 		color: var(--fg-primary);
 		background-color: var(--bg-hover);
-		border-color: var(--panel-border);
+		border-color: var(--border-primary);
 	}
 	button:hover:not(:disabled) {
 		opacity: 0.9;

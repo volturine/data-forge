@@ -48,17 +48,17 @@
 		class:reorder={isReorder}
 		style="left: {position.x + 12}px; top: {position.y +
 			12}px; background: var(--bg-primary); border-color: {isReorder
-			? 'var(--warning-border, #f59e0b)'
-			: 'var(--accent-primary)'}; box-shadow: var(--shadow-drag); {isReorder
-			? 'background: var(--warning-bg, #fef3c7);'
+			? 'var(--warning-border)'
+			: 'var(--info-border)'}; box-shadow: var(--shadow-drag); {isReorder
+			? 'background: var(--warning-bg);'
 			: ''}"
 	>
 		<span class="text-base">{info.icon}</span>
 		<span class="font-semibold" style="color: var(--fg-primary);">{info.label}</span>
 		{#if isReorder}
 			<span
-				class="rounded-sm px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-white"
-				style="background: var(--warning-fg);">Move</span
+				class="rounded-sm px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide"
+				style="background: var(--warning-fg); color: var(--warning-contrast);">Move</span
 			>
 		{/if}
 	</div>

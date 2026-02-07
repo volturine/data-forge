@@ -169,7 +169,7 @@
 	>
 		{#each stepTypes as stepType (stepType.type)}
 			<button
-				class="step-button relative flex cursor-grab items-center justify-start gap-3 border border-transparent bg-transparent p-3 text-left transition-colors hover:border-border-secondary hover:bg-bg-hover"
+				class="step-button relative flex cursor-grab items-center justify-start gap-3 border border-[var(--color-transparent)] bg-[var(--color-transparent)] p-3 text-left transition-colors hover:border-primary hover:bg-bg-hover"
 				class:dragging
 				onclick={() => handleClick(stepType.type)}
 				onpointerdown={(event) => startDrag(event, stepType.type)}
@@ -189,11 +189,11 @@
 		{/each}
 	</div>
 
-	<div class="mt-4 shrink-0 border-t border-panel-border pt-3">
+	<div class="mt-4 shrink-0 border-t border-primary pt-3">
 		<h4 class="m-0 mb-2 text-xs uppercase tracking-wide text-fg-muted">Quick Insert</h4>
 		<div class="flex flex-col gap-2">
 			<select
-				class="rounded-sm border border-panel-border bg-bg-secondary p-2 text-fg-primary"
+			class="rounded-sm border border-primary bg-bg-secondary p-2 text-fg-primary"
 				value={selectedType ?? ''}
 				onchange={(event) => (selectedType = event.currentTarget.value || null)}
 			>
@@ -204,7 +204,7 @@
 			</select>
 			<div class="grid grid-cols-2 gap-2">
 				<button
-					class="fallback-btn cursor-pointer border border-panel-border bg-transparent p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+					class="fallback-btn cursor-pointer border border-primary bg-[var(--color-transparent)] p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {
@@ -217,7 +217,7 @@
 					Add to end
 				</button>
 				<button
-					class="fallback-btn cursor-pointer border border-panel-border bg-transparent p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+					class="fallback-btn cursor-pointer border border-primary bg-[var(--color-transparent)] p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {

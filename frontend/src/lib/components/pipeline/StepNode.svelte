@@ -184,17 +184,17 @@
 >
 	<div
 		class="absolute left-1/2 -top-1 z-[2] h-2 w-2 -translate-x-1/2 border-2"
-		style="background-color: var(--fg-muted); border-color: var(--bg-primary);"
+		style="background-color: var(--fg-muted); border-color: var(--border-primary);"
 	></div>
 
 	<div
-		class="step-content card-base border p-4 transition-all hover:border-tertiary"
+		class="step-content card-base border p-4 transition-all hover:border-primary"
 		role="listitem"
 	>
 		<div class="mb-3 flex items-center gap-2">
 			<!-- Drag handle (6-dot grip) -->
 			<button
-				class="drag-handle flex shrink-0 cursor-grab items-center justify-center border-none bg-transparent p-1 opacity-40 transition-all select-none text-fg-muted hover:opacity-100 hover:bg-hover active:cursor-grabbing"
+			class="drag-handle flex shrink-0 cursor-grab items-center justify-center border-none bg-[var(--color-transparent)] p-1 opacity-40 transition-all select-none text-fg-muted hover:opacity-100 hover:bg-hover active:cursor-grabbing"
 				class:dragging
 				title="Drag to reorder"
 				type="button"
@@ -229,7 +229,7 @@
 
 		<div class="flex gap-2">
 			<button
-				class="action-btn flex-1 cursor-pointer border border-primary bg-transparent p-2 font-medium uppercase tracking-widest text-[0.625rem] text-fg-secondary hover:bg-hover hover:text-fg-primary transition-all"
+			class="action-btn flex-1 cursor-pointer border border-primary bg-[var(--color-transparent)] p-2 font-medium uppercase tracking-widest text-[0.625rem] text-fg-secondary hover:bg-hover hover:text-fg-primary transition-all"
 				class:inactive={!isApplied}
 				onclick={() => onToggleApply(step.id)}
 				type="button"
@@ -238,14 +238,14 @@
 				{isApplied ? 'disable' : 'enable'}
 			</button>
 			<button
-				class="action-btn flex-1 cursor-pointer border border-primary bg-transparent p-2 text-xs font-medium transition-all text-fg-secondary hover:bg-hover hover:text-fg-primary"
+			class="action-btn flex-1 cursor-pointer border border-primary bg-[var(--color-transparent)] p-2 text-xs font-medium transition-all text-fg-secondary hover:bg-hover hover:text-fg-primary"
 				onclick={() => onEdit(step.id)}
 				type="button"
 			>
 				edit
 			</button>
 			<button
-				class="action-btn danger flex-1 cursor-pointer border border-primary bg-transparent p-2 text-xs font-medium transition-all text-fg-secondary hover:bg-error hover:border-error hover:text-error"
+			class="action-btn danger flex-1 cursor-pointer border border-primary bg-[var(--color-transparent)] p-2 text-xs font-medium transition-all text-fg-secondary hover:bg-error hover:border-error hover:text-error"
 				onclick={() => onDelete(step.id)}
 				type="button"
 			>
@@ -281,7 +281,7 @@
 		{/if}
 
 		{#if step.type === 'view' && datasourceId && analysisId}
-			<div class="mt-3 border-t border-secondary pt-3">
+			<div class="mt-3 border-t border-primary pt-3">
 				<InlineDataTable
 					{analysisId}
 					{datasourceId}
@@ -295,7 +295,7 @@
 
 	<div
 		class="absolute left-1/2 -bottom-1 z-[2] h-2 w-2 -translate-x-1/2 border-2"
-		style="background-color: var(--fg-muted); border-color: var(--bg-primary);"
+		style="background-color: var(--fg-muted); border-color: var(--border-primary);"
 	></div>
 </div>
 
@@ -336,7 +336,7 @@
 
 	.step-node.drag-target .step-content {
 		border-style: dashed;
-		border-color: var(--accent-primary);
+		border-color: var(--info-border);
 		opacity: 0.7;
 		transform: scale(0.98);
 	}

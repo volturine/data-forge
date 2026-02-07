@@ -90,11 +90,11 @@
 			{#if showSelectAll}
 				<div
 					class="flex gap-2 border-b p-2"
-					style="border-color: var(--border-secondary); background-color: var(--bg-secondary);"
+					style="border-color: var(--border-primary); background-color: var(--bg-secondary);"
 				>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-all"
+						class="select-action-btn flex-1 cursor-pointer border bg-[var(--color-transparent)] px-2 py-1 text-xs transition-all"
 						onclick={(e) => {
 							e.stopPropagation();
 							selectAll();
@@ -105,7 +105,7 @@
 					</button>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-all"
+						class="select-action-btn flex-1 cursor-pointer border bg-[var(--color-transparent)] px-2 py-1 text-xs transition-all"
 						onclick={(e) => {
 							e.stopPropagation();
 							deselectAll();
@@ -146,7 +146,7 @@
 {#if selectedCount > 0}
 	<div
 		class="mt-2 max-h-[60px] overflow-y-auto border p-2 text-xs"
-		style="background-color: var(--bg-secondary); border-color: var(--border-secondary); color: var(--fg-secondary);"
+		style="background-color: var(--bg-secondary); border-color: var(--border-primary); color: var(--fg-secondary);"
 	>
 		{value.join(', ')}
 	</div>
@@ -155,8 +155,8 @@
 <style>
 	.select-action-btn:hover {
 		background-color: var(--bg-hover);
-		border-color: var(--accent-primary);
-		color: var(--accent-primary);
+		border-color: var(--info-border);
+		color: var(--info-border);
 	}
 
 	.multi-select-option:hover {

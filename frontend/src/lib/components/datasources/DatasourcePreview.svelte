@@ -72,20 +72,20 @@
 		<h3 class="m-0 text-sm font-semibold truncate text-[var(--fg-primary)]">{datasourceName}</h3>
 		<div class="flex gap-1 shrink-0">
 			<button
-				class="flex items-center gap-1.5 py-1.5 px-3 border border-transparent bg-transparent text-[var(--fg-tertiary)] text-xs font-medium cursor-pointer transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--fg-primary)]"
+			class="flex items-center gap-1.5 py-1.5 px-3 border border-[var(--color-transparent)] bg-[var(--color-transparent)] text-[var(--fg-tertiary)] text-xs font-medium cursor-pointer transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--fg-primary)]"
 				class:!bg-[var(--accent-bg)]={viewMode === 'data'}
 				class:!text-[var(--accent-fg)]={viewMode === 'data'}
-				class:!border-[var(--accent-border)]={viewMode === 'data'}
+			class:!border-[var(--info-border)]={viewMode === 'data'}
 				onclick={() => (viewMode = 'data')}
 			>
 				<Table size={14} />
 				Data
 			</button>
 			<button
-				class="flex items-center gap-1.5 py-1.5 px-3 border border-transparent bg-transparent text-[var(--fg-tertiary)] text-xs font-medium cursor-pointer transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--fg-primary)]"
+			class="flex items-center gap-1.5 py-1.5 px-3 border border-[var(--color-transparent)] bg-[var(--color-transparent)] text-[var(--fg-tertiary)] text-xs font-medium cursor-pointer transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--fg-primary)]"
 				class:!bg-[var(--accent-bg)]={viewMode === 'schema'}
 				class:!text-[var(--accent-fg)]={viewMode === 'schema'}
-				class:!border-[var(--accent-border)]={viewMode === 'schema'}
+			class:!border-[var(--info-border)]={viewMode === 'schema'}
 				onclick={() => (viewMode = 'schema')}
 			>
 				<FileBracesCorner size={14} />

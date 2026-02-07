@@ -117,7 +117,7 @@
 
 <div class="mx-auto max-w-[1100px] px-6 py-7">
 	<header
-		class="mb-6 flex flex-col items-stretch justify-between gap-6 border-b border-border-primary pb-5 md:flex-row md:items-start"
+		class="mb-6 flex flex-col items-stretch justify-between gap-6 border-b border-primary pb-5 md:flex-row md:items-start"
 	>
 		<div>
 			<h1 class="m-0 mb-2 text-2xl">UDF Library</h1>
@@ -151,7 +151,7 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="rounded-sm border border-dashed border-border-primary p-8 text-center">
+			<div class="rounded-sm border border-dashed border-primary p-8 text-center">
 				<p>No UDFs yet.</p>
 				<button class="btn-primary" onclick={openNew}>Create your first UDF</button>
 			</div>
@@ -159,7 +159,7 @@
 			<div class="flex flex-col gap-3">
 				{#each query.data as udf (udf.id)}
 					<div
-						class="row flex flex-col justify-between gap-4 border border-border-primary bg-bg-primary p-4 md:flex-row"
+						class="row flex flex-col justify-between gap-4 border border-primary bg-bg-primary p-4 md:flex-row"
 					>
 						<div class="flex flex-col gap-2">
 							<div class="flex items-center gap-3">

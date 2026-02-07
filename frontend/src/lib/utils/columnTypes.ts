@@ -147,9 +147,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'string',
 		label: 'String',
 		colors: {
-			color: '#16a34a',
-			borderColor: 'rgba(22, 163, 74, 0.45)',
-			backgroundColor: 'rgba(22, 163, 74, 0.12)'
+			color: 'var(--type-string-fg)',
+			borderColor: 'var(--type-string-border)',
+			backgroundColor: 'var(--type-string-bg)'
 		},
 		icon: Type
 	},
@@ -157,9 +157,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'integer',
 		label: 'Integer',
 		colors: {
-			color: '#2563eb',
-			borderColor: 'rgba(37, 99, 235, 0.45)',
-			backgroundColor: 'rgba(37, 99, 235, 0.12)'
+			color: 'var(--type-integer-fg)',
+			borderColor: 'var(--type-integer-border)',
+			backgroundColor: 'var(--type-integer-bg)'
 		},
 		icon: Hash
 	},
@@ -167,9 +167,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'float',
 		label: 'Float',
 		colors: {
-			color: '#6366f1',
-			borderColor: 'rgba(99, 102, 241, 0.45)',
-			backgroundColor: 'rgba(99, 102, 241, 0.12)'
+			color: 'var(--type-float-fg)',
+			borderColor: 'var(--type-float-border)',
+			backgroundColor: 'var(--type-float-bg)'
 		},
 		icon: Binary
 	},
@@ -177,9 +177,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'temporal',
 		label: 'Temporal',
 		colors: {
-			color: '#ea580c',
-			borderColor: 'rgba(234, 88, 12, 0.45)',
-			backgroundColor: 'rgba(234, 88, 12, 0.12)'
+			color: 'var(--type-temporal-fg)',
+			borderColor: 'var(--type-temporal-border)',
+			backgroundColor: 'var(--type-temporal-bg)'
 		},
 		icon: Calendar
 	},
@@ -187,9 +187,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'boolean',
 		label: 'Boolean',
 		colors: {
-			color: '#f59e0b',
-			borderColor: 'rgba(245, 158, 11, 0.45)',
-			backgroundColor: 'rgba(245, 158, 11, 0.12)'
+			color: 'var(--type-boolean-fg)',
+			borderColor: 'var(--type-boolean-border)',
+			backgroundColor: 'var(--type-boolean-bg)'
 		},
 		icon: ToggleLeft
 	},
@@ -197,9 +197,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'complex',
 		label: 'Complex',
 		colors: {
-			color: '#9333ea',
-			borderColor: 'rgba(147, 51, 234, 0.45)',
-			backgroundColor: 'rgba(147, 51, 234, 0.12)'
+			color: 'var(--type-complex-fg)',
+			borderColor: 'var(--type-complex-border)',
+			backgroundColor: 'var(--type-complex-bg)'
 		},
 		icon: Layers
 	},
@@ -207,9 +207,9 @@ export const CATEGORY_REGISTRY: Record<ColumnTypeCategory, CategoryConfig> = {
 		category: 'other',
 		label: 'Other',
 		colors: {
-			color: '#64748b',
-			borderColor: 'rgba(100, 116, 139, 0.45)',
-			backgroundColor: 'rgba(100, 116, 139, 0.12)'
+			color: 'var(--type-other-fg)',
+			borderColor: 'var(--type-other-border)',
+			backgroundColor: 'var(--type-other-bg)'
 		},
 		icon: HelpCircle
 	}

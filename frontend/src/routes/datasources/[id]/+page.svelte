@@ -430,14 +430,14 @@
 
 		<div class="mb-6 flex gap-2 border-b-2 border-primary">
 			<button
-				class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+				class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 				class:active={activeTab === 'general'}
 				onclick={() => (activeTab = 'general')}
 			>
 				General
 			</button>
 			<button
-				class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+				class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 				class:active={activeTab === 'schema'}
 				onclick={() => (activeTab = 'schema')}
 			>
@@ -445,7 +445,7 @@
 			</button>
 			{#if csv}
 				<button
-					class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+				class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 					class:active={activeTab === 'csv'}
 					onclick={() => (activeTab = 'csv')}
 				>
@@ -454,7 +454,7 @@
 			{/if}
 			{#if excel}
 				<button
-					class="tab -mb-0.5 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+				class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 					class:active={activeTab === 'excel'}
 					onclick={() => (activeTab = 'excel')}
 				>
@@ -826,13 +826,13 @@
 <style>
 	.tab.active {
 		color: var(--accent-primary);
-		border-bottom-color: var(--accent-primary);
+		border-bottom-color: var(--info-border);
 	}
 
 	input:focus,
 	select:focus {
 		outline: none;
-		border-color: var(--border-focus);
+		border-color: var(--info-border);
 	}
 
 	input:disabled,

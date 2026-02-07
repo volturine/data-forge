@@ -555,21 +555,21 @@
 
 	<div class="mb-8 flex gap-2 border-b-2 border-primary">
 		<button
-			class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 			class:active={activeTab === 'file'}
 			onclick={() => (activeTab = 'file')}
 		>
 			File Upload
 		</button>
 		<button
-			class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 			class:active={activeTab === 'database'}
 			onclick={() => (activeTab = 'database')}
 		>
 			Database
 		</button>
 		<button
-			class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 			class:active={activeTab === 'api'}
 			onclick={() => (activeTab = 'api')}
 		>
@@ -588,7 +588,7 @@
 					<span class="text-sm font-medium text-fg-secondary">Source</span>
 					<div class="flex flex-col gap-3">
 						<label
-							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border border-primary p-3 transition-all hover:border-secondary hover:bg-hover"
+						class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border border-primary p-3 transition-all hover:border-primary hover:bg-hover"
 						>
 							<input
 								type="radio"
@@ -602,7 +602,7 @@
 							<span class="text-xs text-fg-muted">Upload one or many files in one step</span>
 						</label>
 						<label
-							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border border-primary p-3 transition-all hover:border-secondary hover:bg-hover"
+						class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border border-primary p-3 transition-all hover:border-primary hover:bg-hover"
 						>
 							<input
 								type="radio"
@@ -639,9 +639,9 @@
 									class="mb-2 flex items-center justify-between border-b border-primary pb-2 text-sm text-fg-secondary"
 								>
 									<span>{selectedFiles.length} file(s) selected</span>
-									<button
-										type="button"
-										class="btn-text border-none bg-transparent p-0 text-xs text-accent-primary hover:underline"
+						<button
+							type="button"
+							class="btn-text border-none bg-[var(--color-transparent)] p-0 text-xs text-accent-primary hover:underline"
 										onclick={clearBulkSelection}
 										disabled={loading}>Clear all</button
 									>
@@ -652,9 +652,9 @@
 											class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-fg-primary"
 											>{selectedFile.name}</span
 										>
-										<button
-											type="button"
-											class="btn-remove border-none bg-transparent p-1 text-lg leading-none text-fg-muted hover:text-error-fg"
+						<button
+							type="button"
+							class="btn-remove border-none bg-[var(--color-transparent)] p-1 text-lg leading-none text-fg-muted hover:text-error-fg"
 											onclick={() => removeBulkFile(index)}
 											disabled={loading}>x</button
 										>
@@ -759,13 +759,13 @@
 						></textarea>
 						<p class="m-0 text-xs leading-relaxed text-fg-muted">
 							Advanced Polars scan options in JSON format. Common options: <code
-								class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">ignore_errors</code
+									class="rounded px-1 py-0.5 text-xs bg-[var(--code-inline-bg)] text-[var(--code-inline-fg)] border border-[var(--code-inline-border)]">ignore_errors</code
 							>,
-							<code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">rechunk</code>,
-							<code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800"
+								<code class="rounded px-1 py-0.5 text-xs bg-[var(--code-inline-bg)] text-[var(--code-inline-fg)] border border-[var(--code-inline-border)]">rechunk</code>,
+								<code class="rounded px-1 py-0.5 text-xs bg-[var(--code-inline-bg)] text-[var(--code-inline-fg)] border border-[var(--code-inline-border)]"
 								>low_memory</code
 							>,
-							<code class="rounded bg-gray-100 px-1 py-0.5 text-xs dark:bg-gray-800">n_rows</code>.
+								<code class="rounded px-1 py-0.5 text-xs bg-[var(--code-inline-bg)] text-[var(--code-inline-fg)] border border-[var(--code-inline-border)]">n_rows</code>.
 						</p>
 					</div>
 
@@ -894,8 +894,8 @@
 												{startRow + rowIndex + 1}
 											</button>
 											{#each row as cell, colIndex (colIndex)}
-												<button
-													class="cell cursor-pointer border-b border-r border-primary bg-transparent p-2 text-left text-xs text-fg-secondary"
+									<button
+										class="cell cursor-pointer border-b border-r border-primary bg-[var(--color-transparent)] p-2 text-left text-xs text-fg-secondary"
 													onclick={() => handleStartCol(startCol + colIndex)}
 												>
 													{cell ?? ''}
@@ -1076,7 +1076,7 @@
 							>
 							{#if icebergResolvedPath}
 								<span
-									class="break-all border px-1.5 py-0.5 text-xs text-fg-secondary bg-secondary border-secondary"
+								class="break-all border px-1.5 py-0.5 text-xs text-fg-secondary bg-secondary border-primary"
 									>{icebergResolvedPath}</span
 								>
 							{/if}
@@ -1226,19 +1226,19 @@
 <style>
 	.tab.active {
 		color: var(--accent-primary);
-		border-bottom-color: var(--accent-primary);
+		border-bottom-color: var(--info-border);
 	}
 
 	.radio-option:has(input:checked) {
 		background: var(--accent-bg);
-		border-color: var(--accent-border);
+		border-color: var(--info-border);
 	}
 
 	input:focus,
 	select:focus,
 	textarea:focus {
 		outline: none;
-		border-color: var(--border-focus);
+		border-color: var(--info-border);
 	}
 
 	input:disabled,

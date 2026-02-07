@@ -195,13 +195,13 @@
 		class="step-config box-border flex h-full min-h-0 w-full flex-col overflow-y-auto bg-panel-bg text-fg-primary"
 	>
 		<div
-			class="config-header relative flex items-center justify-between border-b border-border-primary bg-panel-bg p-4"
+			class="config-header relative flex items-center justify-between border-b border-primary bg-panel-bg p-4"
 		>
 			<h3 class="m-0 text-sm font-semibold uppercase tracking-widest text-fg-primary">
 				Configure Step
 			</h3>
 			<button
-				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted transition-all hover:bg-bg-hover hover:text-fg-primary"
+			class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-[var(--color-transparent)] p-0 text-2xl leading-none text-fg-muted transition-all hover:bg-bg-hover hover:text-fg-primary"
 				onclick={() => onClose?.()}
 				type="button"
 				title="Close">×</button
@@ -337,9 +337,9 @@
 				</div>
 			{/if}
 		</div>
-		<div class="flex gap-2 border-t border-panel-border bg-panel-bg p-3">
+		<div class="flex gap-2 border-t border-primary bg-panel-bg p-3">
 			<button
-				class="action-button cancel flex-1 cursor-pointer border border-border-primary bg-transparent px-3 py-2 font-mono text-sm font-semibold text-fg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+		class="action-button cancel flex-1 cursor-pointer border border-primary bg-[var(--color-transparent)] px-3 py-2 font-mono text-sm font-semibold text-fg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleCancelConfig}
 				disabled={!hasChanges}
 				type="button"
@@ -347,7 +347,7 @@
 				Cancel
 			</button>
 			<button
-				class="action-button apply flex-1 cursor-pointer border border-accent-primary bg-accent-primary px-3 py-2 font-mono text-sm font-semibold text-bg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+			class="action-button apply flex-1 cursor-pointer border border-info bg-accent-primary px-3 py-2 font-mono text-sm font-semibold text-bg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleApplyConfig}
 				disabled={!hasChanges}
 				type="button"
