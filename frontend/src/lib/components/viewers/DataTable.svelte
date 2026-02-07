@@ -101,7 +101,9 @@
 
 <div class="relative overflow-hidden border bg-panel border-primary">
 	{#if loading}
-		<div class="flex flex-col items-center justify-center gap-4 p-12 pointer-events-none text-fg-tertiary">
+		<div
+			class="flex flex-col items-center justify-center gap-4 p-12 pointer-events-none text-fg-tertiary"
+		>
 			<div class="spinner"></div>
 			<p class="text-sm m-0 text-fg-tertiary">Loading data...</p>
 		</div>
@@ -118,9 +120,9 @@
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-						<th class="p-0 text-left font-semibold border-b-2 border-primary">
+								<th class="p-0 text-left font-semibold border-b-2 border-primary">
 									<button
-									class="flex items-center justify-between w-full px-4 py-3 bg-[var(--color-transparent)] border-none cursor-pointer text-sm font-semibold transition-colors text-fg-primary hover:bg-hover"
+										class="flex items-center justify-between w-full px-4 py-3 bg-[var(--color-transparent)] border-none cursor-pointer text-sm font-semibold transition-colors text-fg-primary hover:bg-hover"
 										onclick={() => toggleSort(header.id)}
 									>
 										<span class="font-mono">
@@ -141,9 +143,13 @@
 				</thead>
 				<tbody>
 					{#each rows as row (row.id)}
-					<tr class="border-b transition-colors last:border-b-0 border-primary even:bg-secondary hover:!bg-hover">
+						<tr
+							class="border-b transition-colors last:border-b-0 border-primary even:bg-secondary hover:!bg-hover"
+						>
 							{#each row.getVisibleCells() as cell (cell.id)}
-								<td class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px] text-sm text-fg-secondary">
+								<td
+									class="px-4 py-3 whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px] text-sm text-fg-secondary"
+								>
 									{formatValue(cell.getValue() as TableCellValue, cell.column.id)}
 								</td>
 							{/each}

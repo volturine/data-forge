@@ -118,9 +118,7 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div
-				class="rounded-sm border border-dashed border-primary bg-bg-primary p-12 text-center"
-			>
+			<div class="rounded-sm border border-dashed border-primary bg-bg-primary p-12 text-center">
 				<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center text-xl text-fg-muted">
 					+
 				</div>
@@ -148,7 +146,7 @@
 					>
 						<span>
 							<button
-							class="expand-btn flex h-7 w-7 items-center justify-center bg-[var(--color-transparent)] p-0 text-fg-secondary transition-all hover:border-primary hover:bg-bg-hover hover:text-fg-primary"
+								class="expand-btn flex h-7 w-7 items-center justify-center bg-[var(--color-transparent)] p-0 text-fg-secondary transition-all hover:border-primary hover:bg-bg-hover hover:text-fg-primary"
 								onclick={() => togglePreview(datasource.id)}
 								aria-expanded={isExpanded(datasource.id)}
 								aria-label={isExpanded(datasource.id) ? 'Collapse preview' : 'Expand preview'}

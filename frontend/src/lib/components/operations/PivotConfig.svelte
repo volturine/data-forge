@@ -62,10 +62,7 @@
 		<span id="index-columns-label" class="group-label"
 			>Index Columns <span class="text-xs" style="color: var(--fg-muted);">(rows)</span></span
 		>
-		<div
-			class="grid gap-2 p-2 max-h-[150px] overflow-y-auto"
-			style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); border: 1px solid var(--border-primary); background-color: var(--bg-secondary);"
-		>
+		<div class="chip-grid grid gap-2 p-2 max-h-[150px] overflow-y-auto">
 			{#each schema.columns as column (column.name)}
 				<label
 					class="checkbox-label flex items-center gap-2 px-2 py-1 cursor-pointer text-sm hover:bg-[var(--bg-hover)]"

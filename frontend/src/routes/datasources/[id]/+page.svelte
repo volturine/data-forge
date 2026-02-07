@@ -445,7 +445,7 @@
 			</button>
 			{#if csv}
 				<button
-				class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+					class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 					class:active={activeTab === 'csv'}
 					onclick={() => (activeTab = 'csv')}
 				>
@@ -454,7 +454,7 @@
 			{/if}
 			{#if excel}
 				<button
-				class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+					class="tab -mb-0.5 border-b-2 border-[var(--color-transparent)] px-5 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 					class:active={activeTab === 'excel'}
 					onclick={() => (activeTab = 'excel')}
 				>

@@ -141,11 +141,7 @@
 				aria-label="Configured aggregations"
 			>
 				{#each safeAggregations as agg, i (i)}
-					<div
-						class="flex justify-between items-center p-3"
-						style="background-color: var(--panel-bg); border: 1px solid var(--border-primary);"
-						role="listitem"
-					>
+					<div class="flex justify-between items-center p-3 item-row" role="listitem">
 						<span class="text-sm" style="font-family: var(--font-mono); color: var(--fg-primary);">
 							{agg.function}({agg.column}) as {agg.alias}
 						</span>
@@ -153,8 +149,7 @@
 							id={`agg-btn-remove-${i}`}
 							data-testid={`agg-remove-button-${i}`}
 							type="button"
-							class="remove-btn px-3 py-1 text-sm cursor-pointer"
-							style="background-color: var(--error-bg); color: var(--error-fg); border: 1px solid var(--error-border);"
+							class="remove-btn remove-pill px-3 py-1 text-sm cursor-pointer"
 							onclick={() => removeAggregation(i)}
 							aria-label={`Remove aggregation ${agg.alias}`}
 						>

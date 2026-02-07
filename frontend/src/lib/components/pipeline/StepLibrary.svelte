@@ -193,7 +193,7 @@
 		<h4 class="m-0 mb-2 text-xs uppercase tracking-wide text-fg-muted">Quick Insert</h4>
 		<div class="flex flex-col gap-2">
 			<select
-			class="rounded-sm border border-primary bg-bg-secondary p-2 text-fg-primary"
+				class="rounded-sm border border-primary bg-bg-secondary p-2 text-fg-primary"
 				value={selectedType ?? ''}
 				onchange={(event) => (selectedType = event.currentTarget.value || null)}
 			>

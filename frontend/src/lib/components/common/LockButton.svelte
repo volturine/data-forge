@@ -34,7 +34,7 @@
 		class="lock-btn release flex cursor-pointer items-center gap-2 border px-3 py-2 text-sm font-medium transition-all"
 		onclick={handleRelease}
 		type="button"
-		style="background: var(--warning-bg); color: var(--warning-fg); border-color: var(--warning-border);"
+		class:callout-warning={true}
 	>
 		<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
 			<path

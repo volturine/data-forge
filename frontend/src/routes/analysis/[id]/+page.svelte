@@ -507,7 +507,7 @@
 					<div class="tabs flex items-center overflow-x-auto w-full gap-1">
 						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
 							<button
-							class="tab inline-flex items-center bg-[var(--color-transparent)] border-none cursor-pointer text-sm font-medium uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-[0.06em] hover:text-fg-secondary hover:bg-hover"
+								class="tab inline-flex items-center bg-[var(--color-transparent)] border-none cursor-pointer text-sm font-medium uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-[0.06em] hover:text-fg-secondary hover:bg-hover"
 								class:active={analysisStore.activeTab?.id === tab.id}
 								onclick={() => handleSelectTab(tab.id)}
 								type="button"
@@ -534,7 +534,7 @@
 							</button>
 						{/each}
 						<button
-						class="tab add-tab inline-flex items-center bg-[var(--color-transparent)] border-none cursor-pointer text-sm font-semibold uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-[0.06em] hover:text-fg-secondary hover:bg-hover"
+							class="tab add-tab inline-flex items-center bg-[var(--color-transparent)] border-none cursor-pointer text-sm font-semibold uppercase px-2 py-1 text-fg-muted transition-all duration-[160ms] gap-1 tracking-[0.06em] hover:text-fg-secondary hover:bg-hover"
 							onclick={() => openDatasourceModal('add')}
 							type="button"
 						>
@@ -559,8 +559,8 @@
 				style="width: var(--operations-panel-width, 280px); transition: width var(--transition);"
 			>
 				<div class="relative items-center px-1">
-				<button
-					class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-primary text-fg-secondary gap-2 transition-all duration-[160ms] hover:bg-hover hover:border-primary"
+					<button
+						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-primary text-fg-secondary gap-2 transition-all duration-[160ms] hover:bg-hover hover:border-primary"
 						onclick={() => (showModeDropdown = !showModeDropdown)}
 						type="button"
 					>
@@ -569,12 +569,12 @@
 					</button>
 
 					{#if showModeDropdown}
-					<div
-						class="absolute left-0 min-w-[140px] bg-panel border border-primary p-1 z-[100]"
+						<div
+							class="absolute left-0 min-w-[140px] bg-panel border border-primary p-1 z-[100]"
 							style="top: calc(100% + 4px);"
 						>
 							<button
-						class="mode-option flex items-center w-full bg-[var(--color-transparent)] border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-[160ms] hover:bg-hover"
+								class="mode-option flex items-center w-full bg-[var(--color-transparent)] border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-[160ms] hover:bg-hover"
 								onclick={() => setMode('viewing')}
 								type="button"
 							>
@@ -582,7 +582,7 @@
 								<span>Viewing</span>
 							</button>
 							<button
-						class="mode-option flex items-center w-full bg-[var(--color-transparent)] border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-[160ms] hover:bg-hover"
+								class="mode-option flex items-center w-full bg-[var(--color-transparent)] border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-[160ms] hover:bg-hover"
 								onclick={() => setMode('editing')}
 								type="button"
 							>
@@ -594,7 +594,7 @@
 				</div>
 
 				<button
-				class="save-button flex-1 h-full bg-[var(--color-transparent)] border-none text-sm font-medium cursor-pointer transition-all duration-[160ms]"
+					class="save-button flex-1 h-full bg-[var(--color-transparent)] border-none text-sm font-medium cursor-pointer transition-all duration-[160ms]"
 					class:saved={saveStatus.current === 'saved'}
 					class:unsaved={saveStatus.current === 'unsaved'}
 					onclick={handleSave}
@@ -615,8 +615,8 @@
 
 		<div class="flex flex-1 overflow-hidden select-none bg-secondary" role="application">
 			{#if isEditingMode}
-			<div
-				class="left-pane flex-shrink-0 overflow-hidden flex h-full box-border bg-panel border-r border-primary"
+				<div
+					class="left-pane flex-shrink-0 overflow-hidden flex h-full box-border bg-panel border-r border-primary"
 					style="width: var(--operations-panel-width, 280px); transition: width var(--transition), visibility var(--transition);"
 					class:collapsed={leftPaneCollapsed}
 				>
@@ -646,8 +646,8 @@
 			</div>
 
 			{#if isEditingMode}
-			<div
-				class="right-pane flex-shrink-0 overflow-hidden flex h-full box-border bg-panel border-l border-primary"
+				<div
+					class="right-pane flex-shrink-0 overflow-hidden flex h-full box-border bg-panel border-l border-primary"
 					style="width: var(--operations-panel-width, 280px); transition: width var(--transition), visibility var(--transition);"
 					class:collapsed={rightPaneCollapsed}
 				>

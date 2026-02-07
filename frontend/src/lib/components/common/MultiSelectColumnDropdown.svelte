@@ -88,29 +88,24 @@
 				/>
 			</div>
 			{#if showSelectAll}
-				<div
-					class="flex gap-2 border-b p-2"
-					style="border-color: var(--border-primary); background-color: var(--bg-secondary);"
-				>
+				<div class="flex gap-2 border-b p-2 bg-secondary border-primary">
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-[var(--color-transparent)] px-2 py-1 text-xs transition-all"
+						class="select-action-btn flex-1 cursor-pointer border bg-[var(--color-transparent)] px-2 py-1 text-xs transition-all border-primary text-fg-secondary"
 						onclick={(e) => {
 							e.stopPropagation();
 							selectAll();
 						}}
-						style="border-color: var(--border-primary); color: var(--fg-secondary);"
 					>
 						Select All {searchQuery ? 'Filtered' : ''}
 					</button>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-[var(--color-transparent)] px-2 py-1 text-xs transition-all"
+						class="select-action-btn flex-1 cursor-pointer border bg-[var(--color-transparent)] px-2 py-1 text-xs transition-all border-primary text-fg-secondary"
 						onclick={(e) => {
 							e.stopPropagation();
 							deselectAll();
 						}}
-						style="border-color: var(--border-primary); color: var(--fg-secondary);"
 					>
 						Clear
 					</button>
@@ -144,10 +139,7 @@
 </div>
 
 {#if selectedCount > 0}
-	<div
-		class="mt-2 max-h-[60px] overflow-y-auto border p-2 text-xs"
-		style="background-color: var(--bg-secondary); border-color: var(--border-primary); color: var(--fg-secondary);"
-	>
+	<div class="mt-2 max-h-[60px] overflow-y-auto border p-2 text-xs select-mono">
 		{value.join(', ')}
 	</div>
 {/if}

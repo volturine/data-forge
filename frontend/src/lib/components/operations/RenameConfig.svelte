@@ -66,12 +66,7 @@
 			filter={(col) => !safeMapping[col.name]}
 		/>
 		{#if schema.columns.filter((col) => !safeMapping[col.name]).length === 0}
-			<p
-				class="p-6 text-center mb-4"
-				style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--border-primary);"
-			>
-				All columns have been renamed.
-			</p>
+			<p class="empty-dashed p-6 text-center mb-4">All columns have been renamed.</p>
 		{/if}
 	</div>
 
@@ -94,8 +89,7 @@
 			id="rename-btn-add"
 			data-testid="rename-add-button"
 			type="button"
-			class="add-btn py-2 px-4 cursor-pointer whitespace-nowrap font-semibold"
-			style="background-color: var(--accent-primary); color: var(--bg-primary); border: 1px solid var(--info-border);"
+			class="add-btn accent-btn py-2 px-4 cursor-pointer whitespace-nowrap font-semibold"
 			onclick={addMapping}
 			disabled={!canAdd}
 			aria-label="Add rename mapping"
@@ -142,7 +136,7 @@
 						data-testid={`rename-remove-button-${mapping.oldName}`}
 						type="button"
 						class="remove-btn w-7 h-7 inline-flex items-center justify-center cursor-pointer text-lg leading-none"
-					style="background-color: var(--color-transparent); color: var(--fg-muted); border: 1px solid var(--color-transparent);"
+						style="background-color: var(--color-transparent); color: var(--fg-muted); border: 1px solid var(--color-transparent);"
 						onclick={() => removeMapping(mapping.oldName)}
 						aria-label={`Remove rename: ${mapping.oldName} to ${mapping.newName}`}
 					>
@@ -152,12 +146,7 @@
 			{/each}
 		</div>
 	{:else}
-		<p
-			id="rename-empty-state"
-			class="p-6 text-center mb-4"
-			style="color: var(--fg-muted); background-color: var(--panel-muted-bg); border: 1px dashed var(--border-primary);"
-			role="status"
-		>
+		<p id="rename-empty-state" class="empty-dashed p-6 text-center mb-4" role="status">
 			No renames yet.
 		</p>
 	{/if}

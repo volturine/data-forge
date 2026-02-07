@@ -119,8 +119,7 @@
 		</select>
 		<div
 			id="join-type-help"
-			class="text-sm leading-relaxed p-3 mt-2"
-			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
+			class="help-box text-sm leading-relaxed p-3 mt-2"
 			aria-describedby="join-type-help"
 		>
 			<strong>Inner:</strong> Only matching rows from both.<br />
@@ -192,7 +191,7 @@
 						data-testid={`join-remove-button-${_index}`}
 						type="button"
 						class="btn-remove p-2 bg-[var(--color-transparent)] cursor-pointer"
-					style="color: var(--error-fg); border: 1px solid var(--error-border);"
+						style="color: var(--error-fg); border: 1px solid var(--error-border);"
 						onclick={() => removeJoinColumn(joinCol.id)}
 						aria-label={`Remove join column pair ${_index + 1}`}
 					>
@@ -243,11 +242,7 @@
 			placeholder="_right"
 			aria-describedby="join-suffix-hint"
 		/>
-		<div
-			id="join-suffix-hint"
-			class="text-sm leading-relaxed p-3 mt-2"
-			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
-		>
+		<div id="join-suffix-hint" class="help-box text-sm leading-relaxed p-3 mt-2">
 			Suffix for columns from the right dataset (when names collide)
 		</div>
 	</div>

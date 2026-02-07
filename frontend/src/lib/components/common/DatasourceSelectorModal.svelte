@@ -88,7 +88,7 @@
 		aria-label="Close modal"
 	>
 		<div
-		class="flex max-h-[80vh] w-full max-w-[480px] flex-col border focus:outline-none max-sm:max-w-full bg-[var(--panel-bg)] border-[var(--border-primary)] animate-[slideIn_var(--transition)]"
+			class="flex max-h-[80vh] w-full max-w-[480px] flex-col border focus:outline-none max-sm:max-w-full bg-[var(--panel-bg)] border-[var(--border-primary)] animate-[slideIn_var(--transition)]"
 			bind:this={modalRef}
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
@@ -111,7 +111,7 @@
 			</div>
 			<div class="flex flex-col gap-4 overflow-y-auto p-4">
 				<input
-				class="w-full border px-3 py-3 text-sm transition-all focus:outline-none border-[var(--border-primary)] text-[var(--fg-primary)] bg-[var(--bg-primary)] focus:border-[var(--info-border)]"
+					class="w-full border px-3 py-3 text-sm transition-all focus:outline-none border-[var(--border-primary)] text-[var(--fg-primary)] bg-[var(--bg-primary)] focus:border-[var(--info-border)]"
 					type="text"
 					bind:this={searchInput}
 					bind:value={searchQuery}
@@ -129,7 +129,7 @@
 					{:else}
 						{#each filteredDatasources as ds (ds.id)}
 							<button
-					class="flex cursor-pointer items-center justify-between border border-[var(--color-transparent)] bg-[var(--color-transparent)] p-3 text-left transition-all hover:bg-[var(--bg-hover)] hover:border-[var(--border-primary)]"
+								class="flex cursor-pointer items-center justify-between border border-[var(--color-transparent)] bg-[var(--color-transparent)] p-3 text-left transition-all hover:bg-[var(--bg-hover)] hover:border-[var(--border-primary)]"
 								onclick={() => handleSelect(ds.id, ds.name)}
 							>
 								<span class="text-sm font-medium text-[var(--fg-primary)]">{ds.name}</span>

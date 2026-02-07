@@ -121,7 +121,7 @@
 		</label>
 		<p
 			class="text-sm leading-relaxed mt-2 p-3"
-		style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
+			style="color: var(--fg-tertiary); background-color: var(--form-help-bg); border: 1px solid var(--border-primary); border-left: 3px solid var(--info-border);"
 		>
 			When enabled, missing columns are created with null values to keep all rows. Disable to
 			require identical schemas.

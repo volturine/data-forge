@@ -15,7 +15,7 @@
 		<h3 class="m-0">Summary Statistics</h3>
 	</div>
 
-	<div class="grid gap-4 p-5" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+	<div class="stats-summary grid gap-4 p-5">
 		<div class="flex items-center gap-4 p-4 border transition-all bg-tertiary border-primary">
 			<div class="text-3xl leading-none">📊</div>
 			<div class="flex-1">
@@ -58,10 +58,12 @@
 			<h4 class="m-0 mb-4 text-sm font-semibold uppercase tracking-wider text-fg-muted">
 				Column Statistics
 			</h4>
-			<div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
+			<div class="stats-columns grid gap-3">
 				{#each Object.entries(stats) as [column, columnStats] (column)}
 					<div class="p-3 border bg-tertiary border-primary">
-						<div class="text-sm font-semibold font-mono mb-2 pb-2 border-b text-fg-primary border-primary">
+						<div
+							class="text-sm font-semibold font-mono mb-2 pb-2 border-b text-fg-primary border-primary"
+						>
 							{column}
 						</div>
 						<div class="flex flex-col gap-1">
@@ -104,3 +106,13 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.stats-summary {
+		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	}
+
+	.stats-columns {
+		grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+	}
+</style>

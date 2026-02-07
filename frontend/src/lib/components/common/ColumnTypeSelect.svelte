@@ -75,7 +75,8 @@
 			: size === 'lg'
 				? 'px-3 py-2 text-[0.9375rem]'
 				: 'px-2.5 py-1.5 text-sm'}"
-		style="min-width: {selectWidth}; background-color: var(--bg-secondary); border-color: var(--border-primary); color: var(--fg-primary); font-family: var(--font-mono, monospace);"
+		class:select-mono={true}
+		style="min-width: {selectWidth};"
 	>
 		{#if placeholder}
 			<option value="">{placeholder}</option>

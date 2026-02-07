@@ -218,9 +218,9 @@
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-						<th class="p-0 text-left font-semibold text-[0.8125rem] border-b-2 border-primary">
+								<th class="p-0 text-left font-semibold text-[0.8125rem] border-b-2 border-primary">
 									<button
-									class="flex flex-col items-start gap-1 px-4 py-3 bg-[var(--color-transparent)] border-none cursor-pointer transition-colors hover:bg-hover"
+										class="flex flex-col items-start gap-1 px-4 py-3 bg-[var(--color-transparent)] border-none cursor-pointer transition-colors hover:bg-hover"
 										style="font-size: inherit; font-weight: inherit; color: inherit;"
 										onclick={() => toggleSort(header.id)}
 									>

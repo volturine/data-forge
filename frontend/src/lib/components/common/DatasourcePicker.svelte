@@ -176,7 +176,7 @@
 			{:else}
 				{#each filteredOptions() as ds (ds.id)}
 					<button
-					class="picker-option flex w-full cursor-pointer items-center justify-between border-b border-primary bg-[var(--color-transparent)] px-3 py-2 font-mono text-left text-sm text-fg-primary last:border-b-0 hover:bg-bg-hover"
+						class="picker-option flex w-full cursor-pointer items-center justify-between border-b border-primary bg-[var(--color-transparent)] px-3 py-2 font-mono text-left text-sm text-fg-primary last:border-b-0 hover:bg-bg-hover"
 						class:selected={isSelected(ds.id)}
 						class:highlighted={ds.id === highlightId}
 						onmousedown={(e) => {
@@ -189,7 +189,7 @@
 					>
 						<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{ds.name}</span>
 						{#if ds.id === highlightId}
-						<span class="ml-2 border border-info bg-info-bg px-2 py-1 text-xs text-info-fg"
+							<span class="ml-2 border border-info bg-info-bg px-2 py-1 text-xs text-info-fg"
 								>current</span
 							>
 						{:else if ds.source_type === 'file'}
@@ -215,12 +215,12 @@
 		<div class="mt-2 flex flex-wrap gap-2">
 			{#each selectedDatasources() as ds (ds.id)}
 				<span
-				class="chip inline-flex items-center gap-1 border border-primary bg-badge-bg px-2 py-1 text-xs text-badge-fg"
+					class="chip inline-flex items-center gap-1 border border-primary bg-badge-bg px-2 py-1 text-xs text-badge-fg"
 					class:highlighted={ds.id === highlightId}
 				>
 					{ds.name}
 					<button
-					class="chip-remove inline-flex h-4 w-4 cursor-pointer items-center justify-center border-none bg-[var(--color-transparent)] p-0 text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
+						class="chip-remove inline-flex h-4 w-4 cursor-pointer items-center justify-center border-none bg-[var(--color-transparent)] p-0 text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
 						onclick={() => deselect(ds.id)}
 						aria-label={`Remove ${ds.name}`}
 						type="button"

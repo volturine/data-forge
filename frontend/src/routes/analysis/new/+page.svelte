@@ -129,7 +129,7 @@
 						type="text"
 						bind:value={name}
 						placeholder="My Data Analysis"
-					class="w-full border border-primary bg-bg-primary p-3 text-sm focus:border-info"
+						class="w-full border border-primary bg-bg-primary p-3 text-sm focus:border-info"
 					/>
 				</div>
 				<div class="mb-5 flex flex-col gap-2">
@@ -141,7 +141,7 @@
 						bind:value={description}
 						placeholder="Describe what this analysis does..."
 						rows="4"
-					class="min-h-[100px] w-full resize-y border border-primary bg-bg-primary p-3 text-sm focus:border-info"
+						class="min-h-[100px] w-full resize-y border border-primary bg-bg-primary p-3 text-sm focus:border-info"
 					></textarea>
 				</div>
 			</div>
@@ -158,7 +158,7 @@
 					</div>
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
 					<div
-					class="rounded-sm border border-dashed border-primary p-8 text-center text-fg-tertiary"
+						class="rounded-sm border border-dashed border-primary p-8 text-center text-fg-tertiary"
 					>
 						<p>No data sources available.</p>
 						<a href={resolve('/datasources/new')} class="btn btn-secondary" data-sveltekit-reload
@@ -181,7 +181,7 @@
 				<h2 class="m-0 mb-2 text-lg font-semibold">Review & Create</h2>
 				<p class="mb-6 text-fg-tertiary">Review your analysis configuration before creating.</p>
 
-			<div class="mb-6 border-b border-primary pb-6">
+				<div class="mb-6 border-b border-primary pb-6">
 					<h3 class="m-0 mb-4 text-sm font-semibold uppercase tracking-wide text-fg-tertiary">
 						Details
 					</h3>
@@ -206,7 +206,7 @@
 					<ul class="m-0 list-none p-0">
 						{#if datasourcesQuery.data}
 							{#each datasourcesQuery.data.filter( (ds) => selectedDatasourceIds.includes(ds.id) ) as ds (ds.id)}
-						<li class="flex items-center gap-3 border-b border-primary py-2">
+								<li class="flex items-center gap-3 border-b border-primary py-2">
 									<span class="text-fg-primary">{ds.name}</span>
 									<span class="text-xs text-fg-muted">
 										{#if ds.source_type === 'file'}

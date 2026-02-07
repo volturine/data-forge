@@ -31,10 +31,7 @@
 <div class="config-panel">
 	<h3>Explode Configuration</h3>
 
-	<div
-		class="mb-4 border-l-[3px] p-3 text-sm"
-		style="background-color: var(--info-bg); border-color: var(--info-border); color: var(--info-fg);"
-	>
+	<div class="callout-info mb-4 border-l-[3px] p-3 text-sm">
 		Transform list/array columns into multiple rows. Each list element becomes a separate row,
 		duplicating all other column values.
 	</div>
@@ -84,10 +81,7 @@
 		</ul>
 	</div>
 
-	<div
-		class="mb-4 border-l-[3px] p-3 text-sm"
-		style="background-color: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-fg);"
-	>
+	<div class="callout-warning mb-4 border-l-[3px] p-3 text-sm">
 		<strong>Example:</strong> A row with tags=['python', 'data', 'ai'] becomes 3 rows, each with one tag
 		value.
 	</div>

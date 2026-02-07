@@ -54,7 +54,10 @@
 		{ tag: tags.null, color: 'var(--editor-syntax-null)' },
 		{ tag: tags.comment, color: 'var(--editor-syntax-comment)', fontStyle: 'italic' },
 		{ tag: tags.className, color: 'var(--editor-syntax-class)' },
-		{ tag: tags.definition(tags.function(tags.variableName)), color: 'var(--editor-syntax-function)' },
+		{
+			tag: tags.definition(tags.function(tags.variableName)),
+			color: 'var(--editor-syntax-function)'
+		},
 		{ tag: tags.propertyName, color: 'var(--editor-syntax-property)' }
 	]);
 
@@ -102,11 +105,7 @@
 	});
 </script>
 
-<div
-	class="overflow-hidden border"
-	style:height
-	style="border-color: var(--border-primary); background-color: var(--bg-tertiary);"
->
+<div class="overflow-hidden border bg-tertiary border-primary" style:height>
 	<div class="h-full" use:init></div>
 </div>
 

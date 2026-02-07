@@ -149,7 +149,11 @@
 
 	/* Editor colors */
 	--editor-selection: color-mix(in srgb, var(--accent-primary) 70%, var(--color-transparent));
-	--editor-selection-passive: color-mix(in srgb, var(--accent-primary) 30%, var(--color-transparent));
+	--editor-selection-passive: color-mix(
+		in srgb,
+		var(--accent-primary) 30%,
+		var(--color-transparent)
+	);
 	--editor-selection-match: color-mix(in srgb, var(--accent-primary) 50%, var(--color-transparent));
 	--editor-syntax-keyword: #c586c0;
 	--editor-syntax-operator: #d4d4d4;
@@ -305,8 +309,16 @@
 		--pipeline-grid-line: color-mix(in srgb, var(--fg-primary) 10%, var(--color-transparent));
 		--pipeline-grid-fade: var(--bg-tertiary);
 		--editor-selection: color-mix(in srgb, var(--accent-primary) 70%, var(--color-transparent));
-		--editor-selection-passive: color-mix(in srgb, var(--accent-primary) 30%, var(--color-transparent));
-		--editor-selection-match: color-mix(in srgb, var(--accent-primary) 50%, var(--color-transparent));
+		--editor-selection-passive: color-mix(
+			in srgb,
+			var(--accent-primary) 30%,
+			var(--color-transparent)
+		);
+		--editor-selection-match: color-mix(
+			in srgb,
+			var(--accent-primary) 50%,
+			var(--color-transparent)
+		);
 		--editor-syntax-keyword: #c586c0;
 		--editor-syntax-operator: #d4d4d4;
 		--editor-syntax-variable: #9cdcfe;
@@ -334,7 +346,11 @@
 		--type-float-border: color-mix(in srgb, var(--type-float-fg) 45%, var(--color-transparent));
 		--type-float-bg: color-mix(in srgb, var(--type-float-fg) 12%, var(--color-transparent));
 		--type-temporal-fg: #ea580c;
-		--type-temporal-border: color-mix(in srgb, var(--type-temporal-fg) 45%, var(--color-transparent));
+		--type-temporal-border: color-mix(
+			in srgb,
+			var(--type-temporal-fg) 45%,
+			var(--color-transparent)
+		);
 		--type-temporal-bg: color-mix(in srgb, var(--type-temporal-fg) 12%, var(--color-transparent));
 		--type-boolean-fg: #f59e0b;
 		--type-boolean-border: color-mix(in srgb, var(--type-boolean-fg) 45%, var(--color-transparent));
@@ -453,7 +469,11 @@
 	--pipeline-grid-line: color-mix(in srgb, var(--fg-primary) 14%, var(--color-transparent));
 	--pipeline-grid-fade: var(--bg-tertiary);
 	--editor-selection: color-mix(in srgb, var(--accent-primary) 70%, var(--color-transparent));
-	--editor-selection-passive: color-mix(in srgb, var(--accent-primary) 30%, var(--color-transparent));
+	--editor-selection-passive: color-mix(
+		in srgb,
+		var(--accent-primary) 30%,
+		var(--color-transparent)
+	);
 	--editor-selection-match: color-mix(in srgb, var(--accent-primary) 50%, var(--color-transparent));
 	--editor-syntax-keyword: #c586c0;
 	--editor-syntax-operator: #d4d4d4;
@@ -1455,8 +1475,6 @@ button.btn-sm {
 	border-color: var(--error-border);
 }
 
-
-
 .border-warning {
 	border-color: var(--warning-border);
 }
@@ -1498,4 +1516,70 @@ button.btn-sm {
 .panel-base {
 	background-color: var(--panel-bg);
 	border: 1px solid var(--border-primary);
+}
+
+.help-box {
+	color: var(--fg-tertiary);
+	background-color: var(--form-help-bg);
+	border: 1px solid var(--border-primary);
+	border-left: 3px solid var(--info-border);
+}
+
+.callout-info {
+	background-color: var(--info-bg);
+	border-color: var(--info-border);
+	color: var(--info-fg);
+}
+
+.callout-warning {
+	background-color: var(--warning-bg);
+	border-color: var(--warning-border);
+	color: var(--warning-fg);
+}
+
+.empty-dashed {
+	color: var(--fg-muted);
+	background-color: var(--panel-muted-bg);
+	border: 1px dashed var(--border-primary);
+}
+
+.item-row {
+	background-color: var(--panel-bg);
+	border: 1px solid var(--border-primary);
+}
+
+.remove-pill {
+	background-color: var(--error-bg);
+	color: var(--error-fg);
+	border: 1px solid var(--error-border);
+}
+
+.input-styled {
+	border-color: var(--border-primary);
+	color: var(--fg-primary);
+	background-color: var(--bg-primary);
+}
+
+.select-mono {
+	background-color: var(--bg-secondary);
+	border-color: var(--border-primary);
+	color: var(--fg-primary);
+	font-family: var(--font-mono, monospace);
+}
+
+.chip-grid {
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+	border: 1px solid var(--border-primary);
+	background-color: var(--bg-secondary);
+}
+
+.save-box {
+	background-color: var(--bg-tertiary);
+	border: 1px solid var(--border-primary);
+}
+
+.accent-btn {
+	background-color: var(--accent-primary);
+	color: var(--bg-primary);
+	border: 1px solid var(--info-border);
 }

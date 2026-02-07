@@ -38,12 +38,11 @@
 			placeholder="Search analyses..."
 			value={searchQuery}
 			oninput={(e) => onSearch((e.target as HTMLInputElement).value)}
-			class="search-input w-full border py-3 pl-10 pr-10 font-mono text-sm transition-all"
-			style="border-color: var(--border-primary); color: var(--fg-primary); background-color: var(--bg-primary);"
+			class="search-input input-styled w-full border py-3 pl-10 pr-10 font-mono text-sm transition-all"
 		/>
 		{#if searchQuery}
 			<button
-			class="clear-btn absolute right-2 top-1/2 flex -translate-y-1/2 cursor-pointer items-center justify-center border-none bg-[var(--color-transparent)] p-1 transition-all"
+				class="clear-btn absolute right-2 top-1/2 flex -translate-y-1/2 cursor-pointer items-center justify-center border-none bg-[var(--color-transparent)] p-1 transition-all"
 				onclick={() => onSearch('')}
 				aria-label="Clear search"
 				style="color: var(--fg-muted);"
@@ -65,8 +64,7 @@
 			id="sort-select"
 			value={sortOption}
 			onchange={(e) => onSort((e.target as HTMLSelectElement).value as SortOption)}
-			class="sort-select cursor-pointer appearance-none border bg-no-repeat py-2 pl-3 pr-8 font-mono text-sm transition-colors max-sm:flex-1"
-			style="border-color: var(--border-primary); color: var(--fg-primary); background-color: var(--bg-primary);"
+			class="sort-select input-styled cursor-pointer appearance-none border bg-no-repeat py-2 pl-3 pr-8 font-mono text-sm transition-colors max-sm:flex-1"
 		>
 			<option value="newest">Newest</option>
 			<option value="oldest">Oldest</option>
@@ -78,13 +76,13 @@
 	{#if selectionCount > 0}
 		<div class="ml-auto flex items-center gap-2">
 			<button
-			class="btn-text flex items-center gap-1 border border-[var(--color-transparent)] bg-[var(--color-transparent)] px-3 py-2 text-sm transition-all"
+				class="btn-text flex items-center gap-1 border border-[var(--color-transparent)] bg-[var(--color-transparent)] px-3 py-2 text-sm transition-all"
 				onclick={onSelectAll}
 			>
 				Select All
 			</button>
 			<button
-			class="btn-text flex items-center gap-1 border border-[var(--color-transparent)] bg-[var(--color-transparent)] px-3 py-2 text-sm transition-all"
+				class="btn-text flex items-center gap-1 border border-[var(--color-transparent)] bg-[var(--color-transparent)] px-3 py-2 text-sm transition-all"
 				onclick={onClearSelection}
 			>
 				<X size={14} />

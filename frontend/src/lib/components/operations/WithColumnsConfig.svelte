@@ -308,10 +308,7 @@
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
-						<div
-							class="flex flex-col gap-2 p-3"
-							style="background-color: var(--bg-tertiary); border: 1px solid var(--border-primary);"
-						>
+						<div class="flex flex-col gap-2 p-3 save-box">
 							<input type="text" placeholder="UDF name" bind:value={saveName} />
 							<input type="text" placeholder="Description" bind:value={saveDescription} />
 							<input type="text" placeholder="Tags (comma-separated)" bind:value={saveTags} />
@@ -354,8 +351,7 @@
 			</h4>
 			{#each config.expressions ?? [] as expr, index (index)}
 				<div
-					class="item flex justify-between items-center py-2 px-3"
-					style="background-color: var(--bg-primary); border: 1px solid var(--border-primary);"
+					class="item item-row flex justify-between items-center py-2 px-3"
 					class:editing={editIndex === index}
 					role="listitem"
 				>
@@ -376,8 +372,8 @@
 					<div class="flex gap-1 shrink-0">
 						<button
 							type="button"
-						class="w-6 h-6 p-0 inline-flex items-center justify-center bg-[var(--color-transparent)] cursor-pointer text-base leading-none"
-						style="color: var(--fg-muted); border: 1px solid var(--color-transparent);"
+							class="w-6 h-6 p-0 inline-flex items-center justify-center bg-[var(--color-transparent)] cursor-pointer text-base leading-none"
+							style="color: var(--fg-muted); border: 1px solid var(--color-transparent);"
 							onclick={() => editExpression(index)}
 							aria-label="Edit"
 						>
@@ -395,8 +391,8 @@
 						</button>
 						<button
 							type="button"
-						class="btn-remove w-6 h-6 p-0 inline-flex items-center justify-center bg-[var(--color-transparent)] cursor-pointer text-base leading-none"
-						style="color: var(--fg-muted); border: 1px solid var(--color-transparent);"
+							class="btn-remove w-6 h-6 p-0 inline-flex items-center justify-center bg-[var(--color-transparent)] cursor-pointer text-base leading-none"
+							style="color: var(--fg-muted); border: 1px solid var(--color-transparent);"
 							onclick={() => removeExpression(index)}
 							aria-label="Remove">×</button
 						>
@@ -405,12 +401,7 @@
 			{/each}
 		</div>
 	{:else}
-		<p
-			class="p-6 text-center"
-			style="color: var(--fg-muted); background-color: var(--bg-tertiary); border: 1px dashed var(--border-primary);"
-		>
-			No columns configured yet.
-		</p>
+		<p class="empty-dashed p-6 text-center">No columns configured yet.</p>
 	{/if}
 </div>
 

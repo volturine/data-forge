@@ -134,9 +134,7 @@
 
 <QueryClientProvider client={queryClient}>
 	<div class="flex h-screen flex-col">
-		<header
-			class="sticky top-0 z-header bg-panel"
-		>
+		<header class="sticky top-0 z-header bg-panel">
 			<div class="mx-auto flex max-w-[1200px] items-center gap-6 px-6 py-3">
 				<a
 					href={resolve('/')}
@@ -152,7 +150,7 @@
 					{#each navItems as item (item.href)}
 						<a
 							href={resolve(item.href as '/')}
-						class="nav-link border border-[var(--color-transparent)] px-3 py-1.5 text-sm text-fg-tertiary no-underline transition-colors hover:text-fg-primary"
+							class="nav-link border border-[var(--color-transparent)] px-3 py-1.5 text-sm text-fg-tertiary no-underline transition-colors hover:text-fg-primary"
 							class:active={currentPath === item.href ||
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs')}

@@ -96,7 +96,7 @@
 				class="flex justify-end gap-3 border-t p-4 max-sm:flex-col-reverse border-[var(--border-primary)]"
 			>
 				<button
-				class="cursor-pointer border bg-[var(--color-transparent)] px-4 py-2 font-mono text-sm font-medium transition-all max-sm:w-full text-[var(--fg-primary)] border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
+					class="cursor-pointer border bg-[var(--color-transparent)] px-4 py-2 font-mono text-sm font-medium transition-all max-sm:w-full text-[var(--fg-primary)] border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
 					onclick={onCancel}
 				>
 					{cancelText}

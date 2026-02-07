@@ -373,9 +373,9 @@
 								/>
 							{/if}
 							{#if canDrop}
-							<div
-							class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--border-primary)] bg-[var(--color-transparent)] hover:border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
-								class:!border-[var(--info-border)]={hoverIndex === i + 1}
+								<div
+									class="my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all border-[var(--border-primary)] bg-[var(--color-transparent)] hover:border-[var(--border-primary)] hover:bg-[var(--bg-hover)]"
+									class:!border-[var(--info-border)]={hoverIndex === i + 1}
 									class:!bg-[var(--bg-tertiary)]={hoverIndex === i + 1}
 									class:!border-[var(--error-border)]={hoverIndex === i + 1 && !drag.valid}
 									class:!bg-[var(--error-bg)]={hoverIndex === i + 1 && !drag.valid}
