@@ -1,10 +1,6 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import {
-		getDatasource,
-		updateDatasource,
-		getDatasourceSchema
-	} from '$lib/api/datasource';
+	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
 	import { Save, Loader, CircleAlert } from 'lucide-svelte';
 	import type {
 		DataSource,
@@ -15,7 +11,6 @@
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
-	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
 
@@ -74,7 +69,7 @@
 	$effect(() => {
 		const ds = datasource;
 		if (!ds) return;
-		
+
 		// Reset all state for new datasource
 		name = ds.name;
 		columns = [];
@@ -82,7 +77,7 @@
 		schemaModified = false;
 		initialized = false;
 		activeTab = 'general';
-		
+
 		// Initialize type-specific config
 		const config = ds.config as unknown as FileDataSourceConfig;
 		if (isCsv(ds)) {
@@ -197,7 +192,24 @@
 		hasChanges = true;
 	}
 
-	function handleCsvConfigChange<K extends keyof typeof csvConfig>(key: K, value: (typeof csvConfig)[K]) {
+	function handleColumnNameChange(index: number, newName: string) {
+		if (isReadonly(ds)) return;
+		columns = columns.map((col, i) => (i === index ? { ...col, name: newName } : col));
+		hasChanges = true;
+		schemaModified = true;
+	}
+
+	function handleColumnTypeChange(index: number, newType: string) {
+		if (isReadonly(ds)) return;
+		columns = columns.map((col, i) => (i === index ? { ...col, dtype: newType } : col));
+		hasChanges = true;
+		schemaModified = true;
+	}
+
+	function handleCsvConfigChange<K extends keyof typeof csvConfig>(
+		key: K,
+		value: (typeof csvConfig)[K]
+	) {
 		csvConfig = { ...csvConfig, [key]: value };
 		hasChanges = true;
 	}
@@ -339,47 +351,65 @@
 
 				<div class="border-t border-primary pt-4">
 					<h3 class="m-0 mb-3 text-xs font-semibold text-fg-secondary">Source Information</h3>
-					<div class="grid grid-cols-2 gap-3 text-xs">
-						<div class="flex flex-col gap-1">
-							<span class="uppercase tracking-wide text-fg-muted">Type</span>
-							<span class="font-medium text-fg-primary">{ds.source_type}</span>
+					<div class="space-y-3 text-xs">
+						<!-- Type & Schema -->
+						<div class="flex items-center gap-4">
+							<div class="flex items-center gap-2">
+								<span class="uppercase tracking-wide text-fg-muted">Type</span>
+								{#if isFile(ds)}
+									{@const config = ds.config as unknown as FileDataSourceConfig}
+									<FileTypeBadge path={config.file_path} size="sm" />
+								{:else}
+									<FileTypeBadge
+										sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+										size="sm"
+									/>
+								{/if}
+							</div>
+							<div class="flex items-center gap-2">
+								<span class="uppercase tracking-wide text-fg-muted">Schema</span>
+								<span class="font-medium {isReadonly(ds) ? 'text-warning-fg' : 'text-success-fg'}">
+									{isReadonly(ds) ? 'Read-only' : 'Editable'}
+								</span>
+							</div>
 						</div>
+
+						<!-- File Path for file datasources -->
 						{#if isFile(ds)}
 							{@const config = ds.config as unknown as FileDataSourceConfig}
 							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">File Type</span>
-								<FileTypeBadge path={config.file_path} size="sm" />
+								<span class="uppercase tracking-wide text-fg-muted">File Path</span>
+								<span class="break-all text-fg-secondary font-mono">{config.file_path}</span>
 							</div>
 						{/if}
+
+						<!-- Metadata Path for Iceberg -->
 						{#if isIceberg(ds)}
 							{@const config = ds.config as unknown as IcebergDataSourceConfig}
-							<div class="flex flex-col gap-1 col-span-2">
+							<div class="flex flex-col gap-1">
 								<span class="uppercase tracking-wide text-fg-muted">Metadata Path</span>
-								<span class="break-all text-fg-secondary">{config.metadata_path}</span>
+								<span class="break-all text-fg-secondary font-mono">{config.metadata_path}</span>
 							</div>
 						{/if}
-						<div class="flex flex-col gap-1">
-							<span class="uppercase tracking-wide text-fg-muted">Created</span>
-							<span class="font-medium text-fg-primary">{formatDateDisplay(ds.created_at)}</span>
-						</div>
-						<div class="flex flex-col gap-1">
-							<span class="uppercase tracking-wide text-fg-muted">Schema</span>
-							<span class="font-medium {isReadonly(ds) ? 'text-warning-fg' : 'text-success-fg'}">
-								{isReadonly(ds) ? 'Read-only' : 'Editable'}
-							</span>
-						</div>
-						{#if schemaQuery.data}
-							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">Rows</span>
-								<span class="font-medium text-fg-primary">
-									{schemaQuery.data.row_count?.toLocaleString() ?? 'Unknown'}
-								</span>
+
+						<div class="flex items-center gap-4">
+							<div class="flex items-center gap-2">
+								<span class="uppercase tracking-wide text-fg-muted">Created</span>
+								<span class="font-medium text-fg-primary">{formatDateDisplay(ds.created_at)}</span>
 							</div>
-							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">Columns</span>
-								<span class="font-medium text-fg-primary">{schemaQuery.data.columns.length}</span>
-							</div>
-						{/if}
+							{#if schemaQuery.data}
+								<div class="flex items-center gap-2">
+									<span class="uppercase tracking-wide text-fg-muted">Rows</span>
+									<span class="font-medium text-fg-primary"
+										>{schemaQuery.data.row_count?.toLocaleString() ?? 'Unknown'}</span
+									>
+								</div>
+								<div class="flex items-center gap-2">
+									<span class="uppercase tracking-wide text-fg-muted">Columns</span>
+									<span class="font-medium text-fg-primary">{schemaQuery.data.columns.length}</span>
+								</div>
+							{/if}
+						</div>
 					</div>
 				</div>
 
@@ -424,13 +454,40 @@
 								class:border-primary={index > 0}
 							>
 								<span class="text-xs text-fg-faint">{index + 1}</span>
-								<span class="text-sm text-fg-primary truncate">{column.name}</span>
-								<ColumnTypeBadge columnType={column.dtype} size="sm" />
+								<input
+									type="text"
+									class="input-base w-full border px-2 py-1 text-xs"
+									class:opacity-60={isReadonly(ds)}
+									class:cursor-not-allowed={isReadonly(ds)}
+									value={column.name}
+									oninput={(e) => handleColumnNameChange(index, e.currentTarget.value)}
+									disabled={isReadonly(ds)}
+								/>
+								<ColumnTypeDropdown
+									value={column.dtype}
+									onChange={(val) => handleColumnTypeChange(index, val)}
+									placeholder="Type..."
+									disabled={isReadonly(ds)}
+								/>
 							</div>
 						{/each}
 					</div>
 
-
+					{#if hasChanges && !isReadonly(ds)}
+						<button
+							class="btn btn-primary w-full flex items-center justify-center gap-2"
+							onclick={handleSave}
+							disabled={updateMutation.isPending}
+						>
+							{#if updateMutation.isPending}
+								<Loader size={16} class="spin" />
+								Saving...
+							{:else}
+								<Save size={16} />
+								Save Changes
+							{/if}
+						</button>
+					{/if}
 				{:else}
 					<div class="py-6 text-center text-fg-muted text-sm">
 						<p class="m-0">No schema information available.</p>
@@ -443,7 +500,9 @@
 
 				<div class="grid grid-cols-2 gap-3">
 					<div class="flex flex-col gap-1.5">
-						<label for="csv-delimiter-{datasource.id}" class="text-xs font-medium text-fg-secondary">Delimiter</label>
+						<label for="csv-delimiter-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+							>Delimiter</label
+						>
 						<select
 							id="csv-delimiter-{datasource.id}"
 							value={csvConfig.delimiter}
@@ -459,7 +518,9 @@
 					</div>
 
 					<div class="flex flex-col gap-1.5">
-						<label for="csv-quote-{datasource.id}" class="text-xs font-medium text-fg-secondary">Quote</label>
+						<label for="csv-quote-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+							>Quote</label
+						>
 						<select
 							id="csv-quote-{datasource.id}"
 							value={csvConfig.quote_char}
@@ -473,7 +534,9 @@
 					</div>
 
 					<div class="flex flex-col gap-1.5">
-						<label for="csv-encoding-{datasource.id}" class="text-xs font-medium text-fg-secondary">Encoding</label>
+						<label for="csv-encoding-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+							>Encoding</label
+						>
 						<select
 							id="csv-encoding-{datasource.id}"
 							value={csvConfig.encoding}
@@ -488,7 +551,9 @@
 					</div>
 
 					<div class="flex flex-col gap-1.5">
-						<label for="csv-skip-rows-{datasource.id}" class="text-xs font-medium text-fg-secondary">Skip Rows</label>
+						<label for="csv-skip-rows-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+							>Skip Rows</label
+						>
 						<input
 							id="csv-skip-rows-{datasource.id}"
 							type="number"
@@ -536,7 +601,9 @@
 
 				<div class="grid grid-cols-2 gap-3">
 					<div class="flex flex-col gap-1.5">
-						<label for="excel-sheet-{datasource.id}" class="text-xs font-medium text-fg-secondary">Sheet Name</label>
+						<label for="excel-sheet-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+							>Sheet Name</label
+						>
 						<input
 							id="excel-sheet-{datasource.id}"
 							type="text"
@@ -548,7 +615,9 @@
 					</div>
 
 					<div class="flex flex-col gap-1.5">
-						<label for="excel-table-{datasource.id}" class="text-xs font-medium text-fg-secondary">Table Name</label>
+						<label for="excel-table-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+							>Table Name</label
+						>
 						<input
 							id="excel-table-{datasource.id}"
 							type="text"
@@ -561,7 +630,9 @@
 				</div>
 
 				<div class="flex flex-col gap-1.5">
-					<label for="excel-range-{datasource.id}" class="text-xs font-medium text-fg-secondary">Named Range</label>
+					<label for="excel-range-{datasource.id}" class="text-xs font-medium text-fg-secondary"
+						>Named Range</label
+					>
 					<input
 						id="excel-range-{datasource.id}"
 						type="text"
@@ -576,7 +647,10 @@
 					<h4 class="m-0 mb-3 text-xs font-semibold text-fg-secondary">Table Bounds</h4>
 					<div class="grid grid-cols-3 gap-3">
 						<div class="flex flex-col gap-1.5">
-							<label for="excel-start-row-{datasource.id}" class="text-xs font-medium text-fg-secondary">Start Row</label>
+							<label
+								for="excel-start-row-{datasource.id}"
+								class="text-xs font-medium text-fg-secondary">Start Row</label
+							>
 							<input
 								id="excel-start-row-{datasource.id}"
 								type="number"
@@ -590,7 +664,10 @@
 						</div>
 
 						<div class="flex flex-col gap-1.5">
-							<label for="excel-start-col-{datasource.id}" class="text-xs font-medium text-fg-secondary">Start Col</label>
+							<label
+								for="excel-start-col-{datasource.id}"
+								class="text-xs font-medium text-fg-secondary">Start Col</label
+							>
 							<input
 								id="excel-start-col-{datasource.id}"
 								type="number"
@@ -604,7 +681,10 @@
 						</div>
 
 						<div class="flex flex-col gap-1.5">
-							<label for="excel-end-col-{datasource.id}" class="text-xs font-medium text-fg-secondary">End Col</label>
+							<label
+								for="excel-end-col-{datasource.id}"
+								class="text-xs font-medium text-fg-secondary">End Col</label
+							>
 							<input
 								id="excel-end-col-{datasource.id}"
 								type="number"

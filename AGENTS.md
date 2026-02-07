@@ -67,7 +67,12 @@ Use TanStack Query for server state:
 
 ### Styling
 
-Use scoped CSS in Svelte components with the `<style>` tag.
+- **Do not use inline styles** in `.svelte` (except dynamic positioning like drag preview left/top).
+- **Do not use CSS vars in Svelte markup** (`var(--...)` in class attributes or `<style>` blocks). Move styling into `frontend/src/app.css`.
+- **Prefer utility classes** and component classes defined in `frontend/src/app.css`.
+- **Avoid `@apply`** in `app.css` (breaks with custom utility classes). Use explicit CSS properties instead.
+- **Component `<style>` blocks should be avoided** unless absolutely necessary; put shared styles in `app.css`.
+- **Active/selected states** should use theme accent classes (`bg-accent-bg`, `text-accent-primary`, `border-info`) instead of hardcoded colors.
 
 ### File Naming
 

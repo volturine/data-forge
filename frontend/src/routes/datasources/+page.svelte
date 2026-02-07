@@ -123,17 +123,9 @@
 						<!-- Row -->
 						<div class="flex items-center justify-between px-3 py-2.5 transition-colors">
 							<button
-								class="flex items-center gap-3 min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
+								class="flex items-center min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
 								onclick={() => selectDatasource(datasource.id)}
 							>
-								{#if datasource.source_type === 'file'}
-									<FileTypeBadge path={(datasource.config?.file_path as string) ?? ''} size="sm" />
-								{:else}
-									<FileTypeBadge
-										sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-										size="sm"
-									/>
-								{/if}
 								<span
 									class="font-medium truncate text-sm"
 									class:text-accent-primary={selectedId === datasource.id}
