@@ -340,6 +340,19 @@
 		}
 	}
 
+	async function discardChanges() {
+		showModeDropdown = false;
+		if (!analysisId) return;
+		if (saveStatus.current === 'saving') return;
+		if (storageKey && typeof window !== 'undefined') {
+			window.localStorage.removeItem(storageKey);
+		}
+		if (analysisQuery.data) {
+			await analysisStore.loadAnalysis(analysisId);
+			saveStatus.send('saveComplete');
+		}
+	}
+
 	function startLockCheck() {
 		if (keepaliveInterval || !analysisId) return;
 		keepaliveInterval = window.setInterval(async () => {
@@ -442,9 +455,7 @@
 	</div>
 {:else if analysisQuery.isError}
 	<div class="error-box flex h-full flex-col items-center justify-center text-center gap-4">
-		<div
-			class="flex items-center justify-center text-xl font-bold w-13 h-13 border border-primary"
-		>
+		<div class="flex items-center justify-center text-xl font-bold w-13 h-13 border border-primary">
 			!
 		</div>
 		<h2 class="m-0">Error loading analysis</h2>
@@ -589,23 +600,36 @@
 					{/if}
 				</div>
 
-				<button
-					class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer transition-all duration-160"
-					class:saved={saveStatus.current === 'saved'}
-					class:unsaved={saveStatus.current === 'unsaved'}
-					onclick={handleSave}
-					disabled={!isEditingMode ||
-						isSaving ||
-						saveStatus.current === 'saving' ||
-						analysisStore.loading}
-					type="button"
-				>
-					{saveStatus.current === 'saving'
-						? 'Saving...'
-						: saveStatus.current === 'saved'
-							? 'Saved'
-							: 'Save'}
-				</button>
+				<div class="flex h-full flex-1 p-1">
+					<button
+						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer transition-all duration-160 text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						onclick={discardChanges}
+						disabled={!isEditingMode ||
+							saveStatus.current !== 'unsaved' ||
+							isSaving ||
+							analysisStore.loading}
+						type="button"
+					>
+						Cancel
+					</button>
+					<button
+						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer transition-all duration-160"
+						class:saved={saveStatus.current === 'saved'}
+						class:unsaved={saveStatus.current === 'unsaved'}
+						onclick={handleSave}
+						disabled={!isEditingMode ||
+							isSaving ||
+							saveStatus.current === 'saving' ||
+							analysisStore.loading}
+						type="button"
+					>
+						{saveStatus.current === 'saving'
+							? 'Saving...'
+							: saveStatus.current === 'saved'
+								? 'Saved'
+								: 'Save'}
+					</button>
+				</div>
 			</div>
 		</header>
 

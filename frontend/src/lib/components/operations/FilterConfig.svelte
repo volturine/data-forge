@@ -175,9 +175,6 @@
 						type="button"
 						class="logic-btn flex cursor-pointer items-center justify-center border border-primary bg-transparent px-2 py-1 text-xs text-fg-muted transition-all hover:bg-hover hover:text-fg-secondary"
 						class:active={config.logic === 'AND'}
-						class:bg-accent-primary={config.logic === 'AND'}
-						class:text-bg-primary={config.logic === 'AND'}
-						class:border-info={config.logic === 'AND'}
 						onclick={() => (config.logic = 'AND')}
 						aria-pressed={config.logic === 'AND'}
 					>
@@ -187,9 +184,6 @@
 						type="button"
 						class="logic-btn flex cursor-pointer items-center justify-center border border-primary bg-transparent px-2 py-1 text-xs text-fg-muted transition-all hover:bg-hover hover:text-fg-secondary"
 						class:active={config.logic === 'OR'}
-						class:bg-accent-primary={config.logic === 'OR'}
-						class:text-bg-primary={config.logic === 'OR'}
-						class:border-info={config.logic === 'OR'}
 						onclick={() => (config.logic = 'OR')}
 						aria-pressed={config.logic === 'OR'}
 					>
@@ -278,25 +272,19 @@
 									<div class="flex items-center justify-between gap-2">
 										<span class="text-xs font-normal text-fg-muted">Compare to</span>
 										<div class="flex" role="radiogroup" aria-label="Value mode">
-											<button
-												type="button"
-												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-												class:active={!isColumn}
-												class:bg-accent-primary={!isColumn}
-												class:text-bg-primary={!isColumn}
-												class:border-info={!isColumn}
+							<button
+								type="button"
+								class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
+							class:active={!isColumn}
 												onclick={() => handleModeChange(i, 'value')}
 												aria-pressed={!isColumn}
 											>
 												Value
 											</button>
-											<button
-												type="button"
-												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-												class:active={isColumn}
-												class:bg-accent-primary={isColumn}
-												class:text-bg-primary={isColumn}
-												class:border-info={isColumn}
+							<button
+								type="button"
+								class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
+							class:active={isColumn}
 												onclick={() => handleModeChange(i, 'column')}
 												aria-pressed={isColumn}
 											>

@@ -65,15 +65,17 @@
 			/>
 		</div>
 
-		<div class="flex" role="group" aria-label="Sort direction">
+		<div
+			class="sort-direction-group flex"
+			role="group"
+			aria-label="Sort direction"
+		>
 			<button
 				id="{uid}-ascending"
 				data-testid="sort-ascending-button"
 				type="button"
-				class="flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all bg-tertiary text-fg-secondary border border-primary border-r-0 hover:bg-secondary hover:text-fg-primary"
-				class:!bg-accent-primary={!newDescending}
-				class:!text-bg-primary={!newDescending}
-				class:!border-info={!newDescending}
+				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-secondary hover:text-fg-primary"
+				class:active={!newDescending}
 				onclick={() => (newDescending = false)}
 				title="Ascending"
 				aria-pressed={!newDescending}
@@ -85,10 +87,8 @@
 				id="{uid}-descending"
 				data-testid="sort-descending-button"
 				type="button"
-				class="flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all bg-tertiary text-fg-secondary border border-primary hover:bg-secondary hover:text-fg-primary"
-				class:!bg-accent-primary={newDescending}
-				class:!text-bg-primary={newDescending}
-				class:!border-info={newDescending}
+				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-secondary hover:text-fg-primary"
+				class:active={newDescending}
 				onclick={() => (newDescending = true)}
 				title="Descending"
 				aria-pressed={newDescending}
@@ -102,7 +102,7 @@
 			id="{uid}-add"
 			data-testid="sort-add-button"
 			type="button"
-			class="flex items-center gap-1 py-2 px-4 border-none cursor-pointer whitespace-nowrap bg-accent-primary text-bg-primary disabled:bg-border-primary disabled:cursor-not-allowed disabled:text-fg-muted"
+			class="flex items-center gap-1 py-2 px-4 border-none cursor-pointer whitespace-nowrap bg-accent-bg text-accent-primary disabled:bg-border-primary disabled:cursor-not-allowed disabled:text-fg-muted"
 			onclick={addSortRule}
 			disabled={!newColumn}
 			aria-label="Add sort rule"
@@ -129,7 +129,7 @@
 					<span class="font-medium">{column}</span>
 
 					<div
-						class="flex items-center gap-1"
+						class="sort-direction-group flex items-center"
 						role="group"
 						aria-label={`Sort direction for ${column}`}
 					>
@@ -137,9 +137,8 @@
 							id={`sort-btn-asc-${i}`}
 							data-testid={`sort-ascending-rule-${i}`}
 							type="button"
-							class="flex items-center justify-center w-7 h-7 p-0 bg-transparent cursor-pointer transition-all text-fg-secondary border border-transparent hover:bg-tertiary hover:text-fg-primary"
-							class:!bg-accent-primary={!safeConfig.descending[i]}
-							class:!text-bg-primary={!safeConfig.descending[i]}
+							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
+							class:active={!safeConfig.descending[i]}
 							onclick={() => setDirection(i, false)}
 							title="Ascending"
 							aria-pressed={!safeConfig.descending[i]}
@@ -151,9 +150,8 @@
 							id={`sort-btn-desc-${i}`}
 							data-testid={`sort-descending-rule-${i}`}
 							type="button"
-							class="flex items-center justify-center w-7 h-7 p-0 bg-transparent cursor-pointer transition-all text-fg-secondary border border-transparent hover:bg-tertiary hover:text-fg-primary"
-							class:!bg-accent-primary={safeConfig.descending[i]}
-							class:!text-bg-primary={safeConfig.descending[i]}
+							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
+							class:active={safeConfig.descending[i]}
 							onclick={() => setDirection(i, true)}
 							title="Descending"
 							aria-pressed={safeConfig.descending[i]}

@@ -329,8 +329,8 @@
 					<p class="m-0 mb-3 text-fg-tertiary">
 						Configuration for {step.type} is not yet implemented
 					</p>
-					<button
-						class="cursor-pointer border-none bg-accent-primary px-5 py-2 font-mono text-bg-primary"
+				<button
+					class="cursor-pointer border-none bg-accent-bg px-5 py-2 font-mono text-accent-primary"
 						onclick={() => onClose?.()}
 						type="button">Close</button
 					>
@@ -347,7 +347,7 @@
 				Cancel
 			</button>
 			<button
-				class="action-button apply flex-1 cursor-pointer border border-info bg-accent-primary px-3 py-2 font-mono text-sm font-semibold text-bg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class="action-button apply flex-1 cursor-pointer border border-primary bg-accent-bg px-3 py-2 font-mono text-sm font-semibold text-accent-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleApplyConfig}
 				disabled={!hasChanges}
 				type="button"

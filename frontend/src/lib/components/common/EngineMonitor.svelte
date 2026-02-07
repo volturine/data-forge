@@ -47,7 +47,7 @@
 	);
 </script>
 
-<div class="relative">
+	<div class="relative" bind:this={dropdownRef}>
 	<button
 		class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs transition-all text-fg-tertiary hover:text-fg-primary"
 		class:!bg-bg-hover={expanded}
@@ -68,10 +68,7 @@
 	</button>
 
 	{#if expanded}
-		<div
-			class="absolute right-0 top-full z-100 w-70 overflow-hidden border bg-primary border-primary"
-			bind:this={dropdownRef}
-		>
+		<div class="absolute right-0 top-full z-engine w-70 overflow-hidden border bg-primary border-primary">
 			<div class="flex items-center justify-between border-b p-3 bg-secondary border-primary">
 				<span class="text-sm font-semibold text-fg-primary">Active Engines</span>
 				<button
