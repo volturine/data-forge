@@ -142,7 +142,7 @@
 				</div>
 				{#each query.data as datasource (datasource.id)}
 					<div
-						class="list-row grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 px-5 py-4 text-fg-secondary hover:bg-bg-hover"
+						class="list-row grid grid-cols-[48px_1fr_100px_90px_90px_110px_140px] items-center gap-4 border-b border-primary px-5 py-4 text-fg-secondary hover:bg-bg-hover last:border-b-0"
 					>
 						<span>
 							<button
