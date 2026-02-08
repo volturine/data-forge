@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-from sqlmodel import Session
+from sqlmodel import Session, col
 
 from modules.locks.models import Lock
 from modules.locks.schemas import LockResponse, LockStatusResponse
@@ -47,7 +47,7 @@ def acquire_lock(
     now = datetime.now(UTC)
 
     # Check if resource is already locked
-    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -97,7 +97,7 @@ def heartbeat(
     """
     now = datetime.now(UTC)
 
-    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
     lock = result.scalar_one_or_none()
 
     if not lock:
@@ -146,7 +146,7 @@ def release_lock(
     Raises:
         ValueError: If lock doesn't exist or client/token mismatch.
     """
-    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
     lock = result.scalar_one_or_none()
 
     if not lock:
@@ -169,7 +169,7 @@ def get_lock_status(
     # Clean up expired locks first
     cleanup_expired_locks(session)
 
-    result = session.execute(select(Lock).where(Lock.resource_id == resource_id))
+    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
     lock = result.scalar_one_or_none()
 
     if not lock:

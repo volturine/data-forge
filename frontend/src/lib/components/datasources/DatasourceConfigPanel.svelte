@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
-	import { Save, Loader, CircleAlert } from 'lucide-svelte';
+	import { Save, Loader, CircleAlert, RefreshCw } from 'lucide-svelte';
 	import type {
 		DataSource,
 		SchemaInfo,
@@ -60,10 +60,12 @@
 	let name = $state('');
 	let columns = $state<ColumnSchema[]>([]);
 	let hasChanges = $state(false);
-	let schemaModified = $state(false);
+	let isRefreshing = $state(false);
+	let refreshError = $state<string | null>(null);
+	let schemaChanged = $state(false);
+	let schemaDiff = $state<{ added: string[]; removed: string[]; types: string[] } | null>(null);
 	let activeTab = $state<'general' | 'schema' | 'csv' | 'excel'>('general');
 	let initialized = $state(false);
-	let isSavingParsing = $state(false);
 
 	// Reset state when datasource changes
 	$effect(() => {
@@ -74,7 +76,10 @@
 		name = ds.name;
 		columns = [];
 		hasChanges = false;
-		schemaModified = false;
+		isRefreshing = false;
+		refreshError = null;
+		schemaChanged = false;
+		schemaDiff = null;
 		initialized = false;
 		activeTab = 'general';
 
@@ -144,7 +149,7 @@
 	});
 
 	function setSchema(value: SchemaInfo | null | undefined) {
-		if (!value || schemaModified) return;
+		if (!value) return;
 		if (!value.columns?.length) {
 			columns = [];
 			return;
@@ -175,36 +180,11 @@
 		return ds.source_type === 'iceberg';
 	}
 
-	function isReadonly(ds: DataSource): boolean {
-		// Check if datasource has read_only flag in config (e.g., DuckDB)
-		if (ds.config && 'read_only' in ds.config) {
-			return ds.config.read_only === true;
-		}
-		// Database, API, and Iceberg sources have readonly schema
-		if (ds.source_type === 'database' || ds.source_type === 'api' || ds.source_type === 'iceberg') {
-			return true;
-		}
-		return false;
-	}
-
 	function handleNameChange(newName: string) {
 		name = newName;
 		hasChanges = true;
 	}
 
-	function handleColumnNameChange(index: number, newName: string) {
-		if (isReadonly(ds)) return;
-		columns = columns.map((col, i) => (i === index ? { ...col, name: newName } : col));
-		hasChanges = true;
-		schemaModified = true;
-	}
-
-	function handleColumnTypeChange(index: number, newType: string) {
-		if (isReadonly(ds)) return;
-		columns = columns.map((col, i) => (i === index ? { ...col, dtype: newType } : col));
-		hasChanges = true;
-		schemaModified = true;
-	}
 
 	function handleCsvConfigChange<K extends keyof typeof csvConfig>(
 		key: K,
@@ -253,13 +233,41 @@
 			update.config = { ...datasourceQuery.data.config };
 		}
 
-		if (schemaModified && columns.length > 0) {
-			update.config.column_schema = columns;
-		}
-
 		updateMutation.mutate(update);
 		hasChanges = false;
-		schemaModified = false;
+	}
+
+	async function handleRefresh() {
+		refreshError = null;
+		isRefreshing = true;
+		const previousColumns = new Map(columns.map((col) => [col.name, col.dtype]));
+
+		try {
+			const result = await getDatasourceSchema(datasource.id, { refresh: true });
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			const nextSchema = result.value;
+			const nextColumns = nextSchema.columns.map((col) => ({
+				name: col.name,
+				dtype: resolveColumnType(col.dtype)
+			}));
+			const nextMap = new Map(nextColumns.map((col) => [col.name, col.dtype]));
+			const added = nextColumns.filter((col) => !previousColumns.has(col.name)).map((col) => col.name);
+			const removed = Array.from(previousColumns.keys()).filter((col) => !nextMap.has(col));
+			const types = nextColumns
+				.filter((col) => previousColumns.has(col.name) && previousColumns.get(col.name) !== col.dtype)
+				.map((col) => col.name);
+			schemaChanged = added.length > 0 || removed.length > 0 || types.length > 0;
+			schemaDiff = schemaChanged ? { added, removed, types } : null;
+			setSchema(nextSchema);
+			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
+		} catch (error) {
+			refreshError = error instanceof Error ? error.message : 'Failed to refresh schema';
+		} finally {
+			isRefreshing = false;
+		}
 	}
 
 	function cellLabel(col: number): string {
@@ -368,18 +376,49 @@
 							</div>
 							<div class="flex items-center gap-2">
 								<span class="uppercase tracking-wide text-fg-muted">Schema</span>
-								<span class="font-medium {isReadonly(ds) ? 'text-warning-fg' : 'text-success-fg'}">
-									{isReadonly(ds) ? 'Read-only' : 'Editable'}
-								</span>
+								<span class="font-medium text-warning-fg">Read-only</span>
 							</div>
+						</div>
+
+						<div class="flex flex-col gap-1">
+							<span class="uppercase tracking-wide text-fg-muted">Datasource ID</span>
+							<span class="break-all text-fg-secondary font-mono">{ds.id}</span>
 						</div>
 
 						<!-- File Path for file datasources -->
 						{#if isFile(ds)}
 							{@const config = ds.config as unknown as FileDataSourceConfig}
 							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">File Path</span>
+								<span class="uppercase tracking-wide text-fg-muted">Location</span>
 								<span class="break-all text-fg-secondary font-mono">{config.file_path}</span>
+							</div>
+						{/if}
+
+						{#if ds.source_type === 'database'}
+							{@const config = ds.config as unknown as { connection_string?: string }}
+							{#if config.connection_string}
+								<div class="flex flex-col gap-1">
+									<span class="uppercase tracking-wide text-fg-muted">Location</span>
+									<span class="break-all text-fg-secondary font-mono">{config.connection_string}</span>
+								</div>
+							{/if}
+						{/if}
+
+						{#if ds.source_type === 'api'}
+							{@const config = ds.config as unknown as { url?: string }}
+							{#if config.url}
+								<div class="flex flex-col gap-1">
+									<span class="uppercase tracking-wide text-fg-muted">Location</span>
+									<span class="break-all text-fg-secondary font-mono">{config.url}</span>
+								</div>
+							{/if}
+						{/if}
+
+						{#if ds.source_type === 'duckdb'}
+							{@const config = ds.config as unknown as { db_path?: string | null }}
+							<div class="flex flex-col gap-1">
+								<span class="uppercase tracking-wide text-fg-muted">Location</span>
+								<span class="break-all text-fg-secondary font-mono">{config.db_path ?? 'In-memory'}</span>
 							</div>
 						{/if}
 
@@ -387,7 +426,7 @@
 						{#if isIceberg(ds)}
 							{@const config = ds.config as unknown as IcebergDataSourceConfig}
 							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">Metadata Path</span>
+								<span class="uppercase tracking-wide text-fg-muted">Location</span>
 								<span class="break-all text-fg-secondary font-mono">{config.metadata_path}</span>
 							</div>
 						{/if}
@@ -413,10 +452,23 @@
 					</div>
 				</div>
 
-				{#if hasChanges}
-					<div class="border-t border-primary pt-4">
+				<div class="border-t border-primary pt-4 flex items-center justify-between gap-3">
+					<button
+						class="btn btn-secondary flex items-center gap-2"
+						onclick={handleRefresh}
+						disabled={isRefreshing || updateMutation.isPending}
+					>
+						{#if isRefreshing}
+							<Loader size={16} class="spin" />
+							Refreshing...
+						{:else}
+							<RefreshCw size={16} />
+							Refresh
+						{/if}
+					</button>
+					{#if hasChanges}
 						<button
-							class="btn btn-primary w-full flex items-center justify-center gap-2"
+							class="btn btn-primary flex items-center gap-2"
 							onclick={handleSave}
 							disabled={updateMutation.isPending}
 						>
@@ -428,11 +480,37 @@
 								Save Changes
 							{/if}
 						</button>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 		{:else if activeTab === 'schema'}
 			<div class="flex flex-col gap-3">
+				{#if refreshError}
+					<div class="error-box flex items-start gap-3">
+						<CircleAlert size={20} />
+						<div class="flex flex-col gap-1">
+							<p class="m-0 font-semibold">Refresh failed</p>
+							<p class="m-0 text-sm opacity-80">{refreshError}</p>
+						</div>
+					</div>
+				{/if}
+				{#if schemaChanged && schemaDiff}
+					<div class="warning-box flex items-start gap-3">
+						<CircleAlert size={20} />
+						<div class="flex flex-col gap-1">
+							<p class="m-0 font-semibold">Schema changed in source</p>
+							{#if schemaDiff.added.length > 0}
+								<p class="m-0 text-sm opacity-80">Added: {schemaDiff.added.join(', ')}</p>
+							{/if}
+							{#if schemaDiff.removed.length > 0}
+								<p class="m-0 text-sm opacity-80">Removed: {schemaDiff.removed.join(', ')}</p>
+							{/if}
+							{#if schemaDiff.types.length > 0}
+								<p class="m-0 text-sm opacity-80">Type changes: {schemaDiff.types.join(', ')}</p>
+							{/if}
+						</div>
+					</div>
+				{/if}
 				{#if schemaQuery.isLoading}
 					<div class="flex flex-col items-center justify-center gap-3 py-8 text-fg-muted">
 						<Loader size={24} class="spin" />
@@ -456,38 +534,19 @@
 								<span class="text-xs text-fg-faint">{index + 1}</span>
 								<input
 									type="text"
-									class="input-base w-full border px-2 py-1 text-xs"
-									class:opacity-60={isReadonly(ds)}
-									class:cursor-not-allowed={isReadonly(ds)}
+									class="input-base w-full border px-2 py-1 text-xs opacity-60 cursor-not-allowed"
 									value={column.name}
-									oninput={(e) => handleColumnNameChange(index, e.currentTarget.value)}
-									disabled={isReadonly(ds)}
+									disabled
 								/>
 								<ColumnTypeDropdown
 									value={column.dtype}
-									onChange={(val) => handleColumnTypeChange(index, val)}
+									onChange={() => null}
 									placeholder="Type..."
-									disabled={isReadonly(ds)}
+									disabled
 								/>
 							</div>
 						{/each}
 					</div>
-
-					{#if hasChanges && !isReadonly(ds)}
-						<button
-							class="btn btn-primary w-full flex items-center justify-center gap-2"
-							onclick={handleSave}
-							disabled={updateMutation.isPending}
-						>
-							{#if updateMutation.isPending}
-								<Loader size={16} class="spin" />
-								Saving...
-							{:else}
-								<Save size={16} />
-								Save Changes
-							{/if}
-						</button>
-					{/if}
 				{:else}
 					<div class="py-6 text-center text-fg-muted text-sm">
 						<p class="m-0">No schema information available.</p>

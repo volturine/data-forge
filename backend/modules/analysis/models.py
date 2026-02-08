@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, JSON, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import Field, SQLModel
 

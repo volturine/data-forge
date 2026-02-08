@@ -25,41 +25,6 @@ from modules.datasource.schemas import (
     SchemaInfo,
 )
 
-# Polars dtype mapping for schema transformations
-DTYPE_MAP = {
-    # String types
-    'String': pl.Utf8,
-    'Utf8': pl.Utf8,
-    'str': pl.Utf8,
-    'Categorical': pl.Categorical,
-    # Integer types
-    'Int8': pl.Int8,
-    'Int16': pl.Int16,
-    'Int32': pl.Int32,
-    'Int64': pl.Int64,
-    'int': pl.Int64,
-    'UInt8': pl.UInt8,
-    'UInt16': pl.UInt16,
-    'UInt32': pl.UInt32,
-    'UInt64': pl.UInt64,
-    # Float types
-    'Float32': pl.Float32,
-    'Float64': pl.Float64,
-    'float': pl.Float64,
-    # Temporal types
-    'Date': pl.Date,
-    'date': pl.Date,
-    'Datetime': pl.Datetime,
-    'datetime': pl.Datetime,
-    'Time': pl.Time,
-    'Duration': pl.Duration,
-    # Other types
-    'Boolean': pl.Boolean,
-    'bool': pl.Boolean,
-    'Binary': pl.Binary,
-    'Null': pl.Null,
-}
-
 logger = logging.getLogger(__name__)
 
 
@@ -614,60 +579,6 @@ def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> Sc
     )
 
 
-def _transform_to_parquet(
-    datasource: DataSource,
-    column_schema: list[dict],
-) -> Path:
-    """Transform datasource to parquet with new schema and save to clean directory."""
-    if datasource.source_type == 'iceberg':
-        raise DataSourceValidationError(
-            'Schema transformations are not supported for Iceberg datasources',
-            details={'source_type': datasource.source_type},
-        )
-    config = {
-        'source_type': datasource.source_type,
-        **datasource.config,
-    }
-    lazy = load_datasource(config)
-
-    # Build rename and cast expressions
-    original_columns = lazy.collect_schema().names()
-    expressions = []
-
-    for i, col_def in enumerate(column_schema):
-        if i >= len(original_columns):
-            break
-
-        original = original_columns[i]
-        new_name = col_def.get('name', original)
-        new_dtype = col_def.get('dtype', 'String')
-
-        # Get polars dtype
-        polars_dtype = DTYPE_MAP.get(new_dtype, pl.Utf8)
-
-        # Build expression: cast then rename
-        expr = pl.col(original)
-        if polars_dtype != lazy.collect_schema()[original]:
-            expr = expr.cast(polars_dtype, strict=False)
-        if new_name != original:
-            expr = expr.alias(new_name)
-
-        expressions.append(expr)
-
-    # Apply transformations
-    if expressions:
-        lazy = lazy.select(expressions)
-
-    # Generate output path
-    output_path = settings.clean_dir / f'{datasource.id}.parquet'
-
-    # Write to parquet
-    lazy.collect().write_parquet(output_path)
-    logger.info(f'Transformed datasource {datasource.id} to parquet: {output_path}')
-
-    return output_path
-
-
 def list_data_files(path: str | None) -> FileListResponse:
     base_dir = settings.data_dir.resolve()
     target = Path(path) if path else base_dir
@@ -745,51 +656,51 @@ def update_datasource(
 
     # Update config if provided
     if update.config is not None:
-        # Check if column_schema is being modified (indicates schema change)
-        column_schema = update.config.get('column_schema')
-        schema_modified = column_schema is not None
+        if 'column_schema' in update.config:
+            raise DataSourceValidationError(
+                'Datasource schemas are read-only and cannot be modified',
+                details={'datasource_id': datasource_id},
+            )
+
+        immutable_keys = {
+            'file': ['file_path'],
+            'database': ['connection_string'],
+            'api': ['url'],
+            'duckdb': ['db_path'],
+            'iceberg': ['metadata_path'],
+        }
+        for key in immutable_keys.get(datasource.source_type, []):
+            if key not in update.config:
+                continue
+            if update.config.get(key) == datasource.config.get(key):
+                continue
+            raise DataSourceValidationError(
+                'Datasource location is immutable. Create a new datasource to change location.',
+                details={'datasource_id': datasource_id, 'field': key},
+            )
+
+        if (
+            datasource.source_type == 'duckdb'
+            and 'read_only' in update.config
+            and update.config.get('read_only') != datasource.config.get('read_only', True)
+        ):
+            raise DataSourceValidationError(
+                'Datasource mode is immutable. Create a new datasource to change read-only mode.',
+                details={'datasource_id': datasource_id, 'field': 'read_only'},
+            )
 
         # Check if parsing options changed (requires schema re-extraction)
         parsing_changed = any(
             key in update.config for key in ['csv_options', 'sheet_name', 'start_row', 'start_col', 'end_col', 'has_header', 'skip_rows']
         )
 
-        if schema_modified and datasource.source_type == 'file' and isinstance(column_schema, list):
-            # Transform to parquet with new schema
-            parquet_path = _transform_to_parquet(datasource, column_schema)
-
-            # Update config to point to new parquet file
-            datasource.config = {
-                **datasource.config,
-                'file_path': str(parquet_path),
-                'file_type': 'parquet',
-                'original_file_path': datasource.config.get('file_path'),
-                'original_file_type': datasource.config.get('file_type'),
-            }
-            # Remove column_schema from config - it's been applied
-            datasource.config.pop('column_schema', None)
-
-            # Clear schema cache - will be re-extracted from parquet
+        # Merge new config with existing config
+        datasource.config = {**datasource.config, **update.config}
+        if parsing_changed:
             datasource.schema_cache = None
-        else:
-            # Merge new config with existing config
-            datasource.config = {**datasource.config, **update.config}
-            # Clear schema cache if schema or parsing options changed
-            if schema_modified or parsing_changed:
-                datasource.schema_cache = None
 
     session.commit()
     session.refresh(datasource)
-
-    # Re-extract schema if it was modified
-    if update.config and 'column_schema' in update.config:
-        try:
-            schema_info = _extract_schema(datasource)
-            datasource.schema_cache = schema_info.model_dump()
-            session.commit()
-            session.refresh(datasource)
-        except Exception as e:
-            logger.warning(f'Failed to extract schema after update: {e}')
 
     logger.info(f'Updated datasource {datasource_id}')
     return DataSourceResponse.model_validate(datasource)

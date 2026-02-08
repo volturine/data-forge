@@ -1,13 +1,13 @@
 from collections.abc import Callable
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from modules.compute.core.base import OperationHandler, OperationParams
 from core.config import settings
+from modules.compute.core.base import OperationHandler, OperationParams
 
 ValueType = Literal['string', 'number', 'date', 'datetime', 'column', 'boolean']
 
@@ -59,10 +59,7 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
         return datetime.fromisoformat(str(value).replace('Z', '+00:00')).date()
 
     if value_type == 'datetime':
-        if isinstance(value, datetime):
-            dt = value
-        else:
-            dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace('Z', '+00:00'))
         if not dt.tzinfo:
             if settings.normalize_tz:
                 return dt.replace(tzinfo=ZoneInfo(settings.timezone))
