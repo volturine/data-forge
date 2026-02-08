@@ -10,7 +10,7 @@
 		IcebergDataSourceConfig
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
+	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
 
@@ -361,24 +361,20 @@
 					<h3 class="m-0 mb-3 text-xs font-semibold text-fg-secondary">Source Information</h3>
 					<div class="space-y-3 text-xs">
 						<!-- Type & Schema -->
-						<div class="flex items-center gap-4">
-							<div class="flex items-center gap-2">
-								<span class="uppercase tracking-wide text-fg-muted">Type</span>
-								{#if isFile(ds)}
-									{@const config = ds.config as unknown as FileDataSourceConfig}
-									<FileTypeBadge path={config.file_path} size="sm" />
-								{:else}
-									<FileTypeBadge
-										sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-										size="sm"
-									/>
-								{/if}
+							<div class="flex items-center gap-4">
+								<div class="flex items-center gap-2">
+									<span class="uppercase tracking-wide text-fg-muted">Type</span>
+									{#if isFile(ds)}
+										{@const config = ds.config as unknown as FileDataSourceConfig}
+										<FileTypeBadge path={config.file_path} size="sm" />
+									{:else}
+										<FileTypeBadge
+											sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+											size="sm"
+										/>
+									{/if}
+								</div>
 							</div>
-							<div class="flex items-center gap-2">
-								<span class="uppercase tracking-wide text-fg-muted">Schema</span>
-								<span class="font-medium text-warning-fg">Read-only</span>
-							</div>
-						</div>
 
 						<div class="flex flex-col gap-1">
 							<span class="uppercase tracking-wide text-fg-muted">Datasource ID</span>
@@ -532,18 +528,8 @@
 								class:border-primary={index > 0}
 							>
 								<span class="text-xs text-fg-faint">{index + 1}</span>
-								<input
-									type="text"
-									class="input-base w-full border px-2 py-1 text-xs opacity-60 cursor-not-allowed"
-									value={column.name}
-									disabled
-								/>
-								<ColumnTypeDropdown
-									value={column.dtype}
-									onChange={() => null}
-									placeholder="Type..."
-									disabled
-								/>
+								<span class="text-xs text-fg-primary">{column.name}</span>
+								<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
 							</div>
 						{/each}
 					</div>
