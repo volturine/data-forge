@@ -67,16 +67,27 @@
 	const data = $derived(isActiveStep ? query.data : null);
 	const isLoading = $derived(isActiveStep ? query.isLoading : false);
 	const error = $derived(isActiveStep ? query.error : null);
-	const totalPages = $derived(data ? Math.ceil(data.total_rows / rowLimit) : 0);
-	const startRow = $derived((currentPage - 1) * rowLimit + 1);
-	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0);
+	const pageSize = $derived(data?.data?.length ?? 0);
+	const canPrev = $derived(currentPage > 1);
+	const canNext = $derived(pageSize === rowLimit);
+
+	$effect(() => {
+		analysisId;
+		datasourceId;
+		stepId;
+		pipelineKey;
+		rowLimit;
+		currentPage = 1;
+	});
 
 	function nextPage() {
-		if (currentPage < totalPages) currentPage++;
+		if (!canNext) return;
+		currentPage++;
 	}
 
 	function prevPage() {
-		if (currentPage > 1) currentPage--;
+		if (!canPrev) return;
+		currentPage--;
 	}
 </script>
 
@@ -94,53 +105,26 @@
 			<p class="m-0 text-fg-tertiary">{error.message}</p>
 		</div>
 	{:else if data?.columns?.length}
-		<div
-			class="flex justify-between items-center px-4 py-3 text-xs border-b text-fg-tertiary border-tertiary bg-panel-header"
-		>
-			<span>
-				Showing {startRow.toLocaleString()}-{endRow.toLocaleString()} of {data.total_rows.toLocaleString()}
-				rows
-			</span>
-			<input
-				type="text"
-				class="input-base input-compact border px-2 py-1 text-xs"
-				placeholder="Filter columns"
-				bind:value={columnSearch}
-			/>
-		</div>
-
 		<DataTable
 			columns={data.columns}
 			data={data.data}
 			columnTypes={data.column_types}
 			bind:columnSearch
+			showHeader
+			showPagination
+			pagination={{
+				page: currentPage,
+				canPrev,
+				canNext,
+				onPrev: prevPage,
+				onNext: nextPage,
+				loading: isLoading
+			}}
 			showTypeBadges
 			showFooter={false}
 			density="compact"
 			maxHeight="100"
 		/>
-
-		{#if totalPages > 1}
-			<div
-				class="flex justify-between items-center px-4 py-3 border-t border-tertiary bg-panel-header"
-			>
-				<button
-					class="px-4 py-2 border cursor-pointer transition-all border-tertiary bg-panel hover:bg-hover hover:border-tertiary disabled:opacity-40 disabled:cursor-not-allowed"
-					onclick={prevPage}
-					disabled={currentPage === 1}
-				>
-					Previous
-				</button>
-				<span class="text-xs text-fg-tertiary">Page {currentPage} of {totalPages}</span>
-				<button
-					class="px-4 py-2 border cursor-pointer transition-all border-tertiary bg-panel hover:bg-hover hover:border-tertiary disabled:opacity-40 disabled:cursor-not-allowed"
-					onclick={nextPage}
-					disabled={currentPage >= totalPages}
-				>
-					Next
-				</button>
-			</div>
-		{/if}
 	{:else}
 		<div class="p-8 text-center text-fg-muted">
 			<p class="m-0">No data available</p>

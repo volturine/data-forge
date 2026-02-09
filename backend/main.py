@@ -172,6 +172,10 @@ async def serve_static_or_index(full_path: str):
     if path.is_file():
         return FileResponse(str(path))
 
+    fallback_path = frontend_build_dir / '200.html'
+    if fallback_path.exists():
+        return FileResponse(str(fallback_path))
+
     index_path = frontend_build_dir / 'index.html'
     if index_path.exists():
         return FileResponse(str(index_path))

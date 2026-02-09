@@ -27,6 +27,16 @@
 		onSort?: (column: string, direction: 'asc' | 'desc') => void;
 		showTypeBadges?: boolean;
 		showFooter?: boolean;
+		showHeader?: boolean;
+		showPagination?: boolean;
+		pagination?: {
+			page: number;
+			canPrev: boolean;
+			canNext: boolean;
+			onPrev: () => void;
+			onNext: () => void;
+			loading?: boolean;
+		};
 		density?: 'default' | 'compact';
 		enableResize?: boolean;
 		enableCopy?: boolean;
@@ -45,6 +55,9 @@
 		onSort,
 		showTypeBadges = false,
 		showFooter = true,
+		showHeader = false,
+		showPagination = false,
+		pagination,
 		density = 'default',
 		enableResize = true,
 		enableCopy = true,
@@ -467,6 +480,34 @@
 	class:dataset-table--compact={compact}
 	class:dataset-table--resizing={resizing}
 >
+	{#if showHeader}
+		<div class="flex items-center gap-3 px-4 py-2 border-b border-tertiary bg-tertiary">
+			{#if showPagination && pagination}
+				<button
+					class="py-1 px-2.5 border border-tertiary bg-primary text-fg-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+					onclick={pagination.onPrev}
+					disabled={!pagination.canPrev || !!pagination.loading}
+				>
+					Prev
+				</button>
+				<span class="text-xs text-fg-muted">Page {pagination.page}</span>
+				<button
+					class="py-1 px-2.5 border border-tertiary bg-primary text-fg-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+					onclick={pagination.onNext}
+					disabled={!pagination.canNext || !!pagination.loading}
+				>
+					Next
+				</button>
+			{/if}
+			<input
+				type="text"
+				class="input-base border px-2 py-1 text-xs ml-auto w-60"
+				placeholder="Filter columns"
+				bind:value={columnSearch}
+			/>
+		</div>
+	{/if}
+
 	{#if loading}
 		<div
 			class="flex flex-col items-center justify-center gap-4 p-12 pointer-events-none text-fg-tertiary"

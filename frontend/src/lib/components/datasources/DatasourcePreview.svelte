@@ -66,29 +66,6 @@
 			</div>
 		</div>
 	{:else}
-		<div class="flex items-center gap-3 px-4 py-2 border-b border-tertiary bg-tertiary shrink-0">
-			<button
-				class="py-1 px-2.5 border border-tertiary bg-primary text-fg-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-				onclick={goPrev}
-				disabled={!canPrev || isLoading}
-			>
-				Prev
-			</button>
-			<span class="text-xs text-fg-muted">Page {page}</span>
-			<button
-				class="py-1 px-2.5 border border-tertiary bg-primary text-fg-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-				onclick={goNext}
-				disabled={!canNext || isLoading}
-			>
-				Next
-			</button>
-			<input
-				type="text"
-				class="input-base border px-2 py-1 text-xs ml-auto w-60"
-				placeholder="Filter columns"
-				bind:value={columnSearch}
-			/>
-		</div>
 		<div class="flex-1 overflow-hidden">
 			<DataTable
 				columns={data?.columns ?? []}
@@ -97,6 +74,16 @@
 				loading={isLoading}
 				fillContainer
 				bind:columnSearch
+				showHeader
+				showPagination
+				pagination={{
+					page,
+					canPrev,
+					canNext,
+					onPrev: goPrev,
+					onNext: goNext,
+					loading: isLoading
+				}}
 				showTypeBadges
 			/>
 		</div>

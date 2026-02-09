@@ -141,11 +141,7 @@
 	<div class="flex h-screen flex-col">
 		<header class="sticky top-0 z-header bg-panel">
 			<div class="mx-auto flex max-w-300 items-center gap-6 px-6 py-3">
-				<a
-					href={resolve('/')}
-					class="flex items-center gap-1 text-base font-semibold no-underline"
-					data-sveltekit-reload
-				>
+				<a href={resolve('/')} class="flex items-center gap-1 text-base font-semibold no-underline">
 					<span class="text-fg-primary">polars</span>
 					<span class="text-fg-muted">/</span>
 					<span class="text-fg-tertiary">analysis</span>
@@ -159,7 +155,6 @@
 							class:active={currentPath === item.href ||
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs')}
-							data-sveltekit-reload
 						>
 							{item.label}
 						</a>

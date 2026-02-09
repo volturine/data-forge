@@ -5,24 +5,31 @@ export class ConfigStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 	private fetched = false;
+	private pending: Promise<void> | null = null;
 
 	async fetch(): Promise<void> {
 		if (this.fetched) return;
+		if (this.pending) return this.pending;
 
 		this.loading = true;
 		this.error = null;
 
-		await getConfig().match(
+		const request = getConfig().match(
 			(config) => {
 				this.config = config;
-				this.loading = false;
 				this.fetched = true;
 			},
 			(err) => {
 				this.error = err.message;
-				this.loading = false;
 			}
 		);
+
+		this.pending = request.finally(() => {
+			this.loading = false;
+			this.pending = null;
+		});
+
+		return this.pending;
 	}
 
 	// Getters with fallback defaults (in case config not loaded yet)
@@ -53,7 +60,6 @@ export class ConfigStore {
 	get auditLogFlushIntervalMs(): number {
 		return this.config?.log_client_flush_interval_ms ?? 5000;
 	}
-
 
 	get auditLogDedupeWindowMs(): number {
 		return this.config?.log_client_dedupe_window_ms ?? 500;
