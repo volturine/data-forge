@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import { ArrowRight, X } from 'lucide-svelte';
 
 	interface RenameConfigData {
 		column_mapping: { [oldName: string]: string };
@@ -46,10 +47,12 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Rename configuration">
-	<h3>Rename Configuration</h3>
+	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider text-fg-muted">Rename Configuration</h3>
 
-	<div class="form-section" role="group" aria-labelledby="rename-columns-heading">
-		<h4 id="rename-columns-heading">Select Column to Rename</h4>
+	<div class="mb-5" role="group" aria-labelledby="rename-columns-heading">
+		<h4 id="rename-columns-heading" class="m-0 mb-3 text-xs uppercase tracking-wider text-fg-muted">
+			Select Column to Rename
+		</h4>
 		<ColumnDropdown
 			{schema}
 			value={formOldName}
@@ -58,16 +61,19 @@
 			filter={(col) => !safeMapping[col.name]}
 		/>
 		{#if schema.columns.filter((col) => !safeMapping[col.name]).length === 0}
-			<p class="empty-state">All columns have been renamed.</p>
+			<p class="empty-dashed p-6 text-center mb-4">All columns have been renamed.</p>
 		{/if}
 	</div>
 
-	<div class="add-mapping" role="group" aria-label="Add rename mapping form">
+	<div class="grid gap-2 mb-5" role="group" aria-label="Add rename mapping form">
 		<label for="rename-input-new" class="sr-only">New column name</label>
 		<input
 			id="rename-input-new"
 			data-testid="rename-new-name-input"
 			type="text"
+			class="w-full disabled:cursor-not-allowed"
+			class:bg-muted={!formOldName}
+			class:text-fg-muted={!formOldName}
 			bind:value={formNewName}
 			placeholder={formOldName ? `New name for ${formOldName}` : 'Select a column first'}
 			aria-label="Enter new column name"
@@ -78,6 +84,7 @@
 			id="rename-btn-add"
 			data-testid="rename-add-button"
 			type="button"
+			class="add-btn accent-btn py-2 px-4 cursor-pointer whitespace-nowrap font-semibold hover:opacity-90 disabled:bg-panel-muted disabled:border-tertiary disabled:text-fg-muted disabled:cursor-not-allowed"
 			onclick={addMapping}
 			disabled={!canAdd}
 			aria-label="Add rename mapping"
@@ -89,172 +96,40 @@
 	{#if mappings.length > 0}
 		<div
 			id="rename-mappings-list"
-			class="mappings-list"
+			class="flex flex-col gap-2 p-3 mb-4 bg-panel-muted border border-tertiary"
 			role="list"
 			aria-label="Configured renames"
 		>
-			<h4>Renames</h4>
+			<h4 class="mt-0 mb-2 text-xs uppercase tracking-wider text-fg-muted">Renames</h4>
 			{#each mappings as mapping (mapping.oldName)}
-				<div class="mapping-item" role="listitem">
-					<div class="mapping-info">
-						<span class="old-name" title={mapping.oldName}>{mapping.oldName}</span>
-						<span class="arrow" aria-hidden="true">→</span>
-						<span class="new-name" title={mapping.newName}>{mapping.newName}</span>
+				<div class="flex justify-between items-center py-2 px-3 item-row" role="listitem">
+					<div class="flex items-center gap-2 min-w-0 text-sm font-mono">
+						<span
+							class="font-semibold max-w-40 overflow-hidden text-ellipsis whitespace-nowrap text-fg-primary"
+							title={mapping.oldName}>{mapping.oldName}</span
+						>
+						<ArrowRight size={12} class="text-fg-muted" aria-hidden="true" />
+						<span
+							class="font-semibold max-w-40 overflow-hidden text-ellipsis whitespace-nowrap text-accent-primary"
+							title={mapping.newName}>{mapping.newName}</span
+						>
 					</div>
 					<button
 						id={`rename-btn-remove-${mapping.oldName}`}
 						data-testid={`rename-remove-button-${mapping.oldName}`}
 						type="button"
+						class="remove-btn w-7 h-7 inline-flex items-center justify-center cursor-pointer text-lg leading-none bg-transparent text-fg-muted border border-transparent hover:text-fg-primary hover:bg-hover hover:border-tertiary"
 						onclick={() => removeMapping(mapping.oldName)}
 						aria-label={`Remove rename: ${mapping.oldName} to ${mapping.newName}`}
 					>
-						×
+						<X size={12} />
 					</button>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<p id="rename-empty-state" class="empty-state" role="status">No renames yet.</p>
+		<p id="rename-empty-state" class="empty-dashed p-6 text-center mb-4" role="status">
+			No renames yet.
+		</p>
 	{/if}
 </div>
-
-<style>
-	/* Component-specific styles - dropdown pattern defined in app.css */
-	h3 {
-		margin: 0 0 var(--space-4) 0;
-		font-size: var(--text-sm);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--fg-muted);
-	}
-	h4 {
-		margin: 0 0 var(--space-3) 0;
-		font-size: var(--text-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--fg-muted);
-	}
-	.form-section {
-		margin-bottom: var(--space-5);
-	}
-	.add-mapping {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: var(--space-2);
-		margin-bottom: var(--space-5);
-	}
-	.add-mapping input {
-		width: 100%;
-		min-width: 0;
-	}
-	.add-mapping input:disabled {
-		background-color: var(--bg-muted);
-		cursor: not-allowed;
-		color: var(--fg-muted);
-	}
-	.add-mapping button {
-		padding: var(--space-2) var(--space-4);
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border: 1px solid var(--accent-primary);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		white-space: nowrap;
-		font-weight: 600;
-	}
-	.add-mapping button:disabled {
-		background-color: var(--panel-muted-bg);
-		border-color: var(--panel-border);
-		cursor: not-allowed;
-		color: var(--fg-muted);
-	}
-	.mappings-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		background-color: var(--panel-muted-bg);
-		border-radius: var(--radius-md);
-		margin-bottom: var(--space-4);
-		border: 1px solid var(--panel-border);
-	}
-	.mappings-list h4 {
-		margin-top: 0;
-		margin-bottom: var(--space-2);
-	}
-	.mapping-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-2) var(--space-3);
-		background-color: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-	}
-	.mapping-info {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-family: var(--font-mono);
-		font-size: var(--text-sm);
-		min-width: 0;
-	}
-	.old-name {
-		font-weight: 600;
-		color: var(--fg-primary);
-		max-width: 160px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.arrow {
-		color: var(--fg-muted);
-	}
-	.new-name {
-		font-weight: 600;
-		color: var(--accent-primary);
-		max-width: 160px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.mapping-item button {
-		width: 28px;
-		height: 28px;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		background-color: transparent;
-		color: var(--fg-muted);
-		border: 1px solid transparent;
-		border-radius: 999px;
-		cursor: pointer;
-		font-size: 1.1rem;
-		line-height: 1;
-	}
-	.mapping-item button:hover:not(:disabled) {
-		color: var(--fg-primary);
-		background-color: var(--bg-hover);
-		border-color: var(--panel-border);
-	}
-	.empty-state {
-		padding: var(--space-6);
-		text-align: center;
-		color: var(--fg-muted);
-		background-color: var(--panel-muted-bg);
-		border-radius: var(--radius-md);
-		margin-bottom: var(--space-4);
-		border: 1px dashed var(--panel-border);
-	}
-	button:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-	@media (max-width: 640px) {
-		.add-mapping {
-			grid-template-columns: 1fr;
-		}
-		.add-mapping button {
-			width: 100%;
-		}
-	}
-</style>

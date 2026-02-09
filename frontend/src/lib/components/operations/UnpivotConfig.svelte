@@ -18,7 +18,7 @@
 	<h3>Unpivot Configuration</h3>
 	<p class="description">Transform wide data to long format (melt operation).</p>
 
-	<div class="form-group">
+	<div class="form-group mb-4">
 		<div class="form-label">Index columns (identifiers)</div>
 		<MultiSelectColumnDropdown
 			{schema}
@@ -26,10 +26,10 @@
 			onChange={(val) => (config.index = val)}
 			placeholder="Select index columns..."
 		/>
-		<span class="hint">Columns to use as identifiers</span>
+		<span class="mt-1 block text-xs text-fg-tertiary">Columns to use as identifiers</span>
 	</div>
 
-	<div class="form-group">
+	<div class="form-group mb-4">
 		<div class="form-label">Columns to unpivot</div>
 		<MultiSelectColumnDropdown
 			{schema}
@@ -37,10 +37,11 @@
 			onChange={(val) => (config.on = val)}
 			placeholder="Select columns to unpivot..."
 		/>
-		<span class="hint">Columns that will be transformed to rows</span>
+		<span class="mt-1 block text-xs text-fg-tertiary">Columns that will be transformed to rows</span
+		>
 	</div>
 
-	<div class="form-group">
+	<div class="form-group mb-4">
 		<label for="unpivot-input-variable">Variable column name</label>
 		<input
 			id="unpivot-input-variable"
@@ -52,7 +53,7 @@
 		/>
 	</div>
 
-	<div class="form-group">
+	<div class="form-group mb-0">
 		<label for="unpivot-input-value">Value column name</label>
 		<input
 			id="unpivot-input-value"
@@ -64,18 +65,3 @@
 		/>
 	</div>
 </div>
-
-<style>
-	.form-group {
-		margin-bottom: var(--space-4);
-	}
-	.form-group:last-child {
-		margin-bottom: 0;
-	}
-	.hint {
-		font-size: var(--text-xs);
-		color: var(--fg-tertiary);
-		display: block;
-		margin-top: var(--space-1);
-	}
-</style>

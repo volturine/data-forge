@@ -82,7 +82,7 @@
 				col.dtype.toLowerCase() === 'datetime'}
 		/>
 		{#if dateColumns.length === 0}
-			<p id="ts-no-columns-warning" class="warning-box" role="alert">
+			<p id="ts-no-columns-warning" class="text-sm mt-2 mb-0 text-error-fg" role="alert">
 				No date/time columns detected in schema
 			</p>
 		{/if}
@@ -135,26 +135,34 @@
 					>
 				{/each}
 			</select>
-			<p class="help-text">Convert datetime to integer timestamp in the specified time unit.</p>
+			<p class="text-sm mt-2 mb-0 text-fg-muted">
+				Convert datetime to integer timestamp in the specified time unit.
+			</p>
 		</div>
 	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
 		<div class="form-section" role="group" aria-labelledby="ts-period-heading">
 			<h4 id="ts-period-heading">Time Period</h4>
-			<div class="inline-group">
-				<div class="input-group">
-					<label for="ts-input-value">Value:</label>
+			<div class="flex gap-2">
+				<div class="flex-1">
+					<label for="ts-input-value" class="block text-sm mb-1 text-fg-secondary">Value:</label>
 					<input
 						id="ts-input-value"
 						data-testid="ts-value-input"
 						type="number"
+						class="flex-1"
 						bind:value={config.value}
 						min="0"
 						aria-label="Time period value"
 					/>
 				</div>
-				<div class="input-group">
-					<label for="ts-select-unit">Unit:</label>
-					<select id="ts-select-unit" data-testid="ts-unit-select" bind:value={config.unit}>
+				<div class="flex-1">
+					<label for="ts-select-unit" class="block text-sm mb-1 text-fg-secondary">Unit:</label>
+					<select
+						id="ts-select-unit"
+						data-testid="ts-unit-select"
+						class="flex-1"
+						bind:value={config.unit}
+					>
 						{#each timeUnits as unit (unit)}
 							<option value={unit}>{unit}</option>
 						{/each}
@@ -190,35 +198,3 @@
 		/>
 	</div>
 </div>
-
-<style>
-	.warning-box {
-		font-size: var(--text-sm);
-		color: var(--error-fg);
-		margin-top: var(--space-2);
-		margin-bottom: 0;
-	}
-	.help-text {
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-		margin-top: var(--space-2);
-		margin-bottom: 0;
-	}
-	.input-group {
-		flex: 1;
-	}
-	.input-group label {
-		display: block;
-		font-size: var(--text-sm);
-		margin-bottom: var(--space-1);
-		color: var(--fg-secondary);
-	}
-	.inline-group {
-		display: flex;
-		gap: var(--space-2);
-	}
-	.inline-group input,
-	.inline-group select {
-		flex: 1;
-	}
-</style>

@@ -115,13 +115,15 @@
 	}
 </script>
 
-<div class="container">
-	<header class="page-header">
-		<div class="header-text">
-			<h1>UDF Library</h1>
-			<p class="subtitle">Reusable Python transforms stored globally</p>
+<div class="udfs-page mx-auto max-w-275 px-6 py-7">
+	<header
+		class="mb-6 flex flex-col items-stretch justify-between gap-6 border-b border-tertiary pb-5 md:flex-row md:items-start"
+	>
+		<div>
+			<h1 class="m-0 mb-2 text-2xl">UDF Library</h1>
+			<p class="m-0 text-fg-tertiary">Reusable Python transforms stored globally</p>
 		</div>
-		<div class="header-actions">
+		<div class="flex flex-wrap gap-2">
 			<button class="btn-secondary" onclick={() => (importOpen = true)}>
 				<Upload size={16} />
 				Import
@@ -137,8 +139,8 @@
 		</div>
 	</header>
 
-	<div class="toolbar">
-		<input type="text" placeholder="Search UDFs..." bind:value={search} />
+	<div class="mb-4 flex items-center gap-3">
+		<input type="text" placeholder="Search UDFs..." bind:value={search} class="max-w-90" />
 	</div>
 
 	{#if query.isLoading}
@@ -149,42 +151,46 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="empty-state">
+			<div class="rounded-sm border border-dashed border-tertiary p-8 text-center">
 				<p>No UDFs yet.</p>
 				<button class="btn-primary" onclick={openNew}>Create your first UDF</button>
 			</div>
 		{:else}
-			<div class="list">
+			<div class="flex flex-col gap-3">
 				{#each query.data as udf (udf.id)}
-					<div class="row">
-						<div class="row-main">
-							<div class="row-title">
-								<h3>{udf.name}</h3>
-								<div class="row-signature">
+					<div
+						class="row flex flex-col justify-between gap-4 border border-tertiary bg-bg-primary p-4 md:flex-row"
+					>
+						<div class="flex flex-col gap-2">
+							<div class="flex items-center gap-3">
+								<h3 class="m-0 text-base">{udf.name}</h3>
+								<div class="flex flex-wrap items-center gap-1">
 									{#if udf.signature?.inputs?.length}
 										{#each udf.signature.inputs as input, i (i)}
 											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
 											{#if i < udf.signature.inputs.length - 1}
-												<span class="signature-separator">,</span>
+												<span class="mx-0.5 text-xs text-fg-muted">,</span>
 											{/if}
 										{/each}
 									{:else}
-										<span class="no-inputs">No inputs</span>
+										<span class="text-xs uppercase tracking-wide text-fg-muted">No inputs</span>
 									{/if}
 								</div>
 							</div>
 							{#if udf.description}
-								<p class="row-description">{udf.description}</p>
+								<p class="m-0 text-fg-tertiary">{udf.description}</p>
 							{/if}
 							{#if udf.tags?.length}
-								<div class="row-tags">
+								<div class="flex flex-wrap gap-2">
 									{#each udf.tags as tag (tag)}
-										<span class="tag">{tag}</span>
+										<span class="rounded-sm bg-bg-tertiary px-1.5 py-0.5 text-xs text-fg-muted"
+											>{tag}</span
+										>
 									{/each}
 								</div>
 							{/if}
 						</div>
-						<div class="row-actions">
+						<div class="flex items-center gap-2">
 							<button class="btn-ghost btn-sm" onclick={() => editUdf(udf.id)}>
 								<Pencil size={14} />
 								Edit
@@ -220,12 +226,16 @@
 		<div class="modal">
 			<div class="modal-header">
 				<h2>Import UDFs</h2>
-				<button class="modal-close" onclick={() => (importOpen = false)}>×</button>
+				<button class="modal-close" onclick={() => (importOpen = false)}>x</button>
 			</div>
 			<div class="modal-body">
-				<textarea rows="10" placeholder="Paste exported JSON here..." bind:value={importText}
+				<textarea
+					rows="10"
+					placeholder="Paste exported JSON here..."
+					bind:value={importText}
+					class="font-mono"
 				></textarea>
-				<label class="checkbox">
+				<label class="flex items-center gap-2 text-fg-secondary">
 					<input type="checkbox" bind:checked={overwriteImport} />
 					Overwrite existing by name
 				</label>
@@ -240,140 +250,3 @@
 		</div>
 	{/if}
 </div>
-
-<style>
-	.container {
-		max-width: 1100px;
-		margin: 0 auto;
-		padding: var(--space-7) var(--space-6);
-		min-height: 100%;
-	}
-	.page-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: var(--space-6);
-		margin-bottom: var(--space-6);
-		padding-bottom: var(--space-5);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.header-text h1 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-2xl);
-	}
-	.subtitle {
-		margin: 0;
-		color: var(--fg-tertiary);
-	}
-	.header-actions {
-		display: flex;
-		gap: var(--space-2);
-		flex-wrap: wrap;
-	}
-	.toolbar {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		margin-bottom: var(--space-4);
-	}
-	.toolbar input {
-		max-width: 360px;
-	}
-	.list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-	.row {
-		display: flex;
-		justify-content: space-between;
-		gap: var(--space-4);
-		padding: var(--space-4);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-primary);
-	}
-	.row-main {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	.row-title {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-	}
-	.row-title h3 {
-		margin: 0;
-		font-size: var(--text-base);
-	}
-	.row-signature {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		flex-wrap: wrap;
-	}
-	.signature-separator {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		margin: 0 0.125rem;
-	}
-	.no-inputs {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-	.row-description {
-		margin: 0;
-		color: var(--fg-tertiary);
-	}
-	.row-tags {
-		display: flex;
-		gap: var(--space-2);
-		flex-wrap: wrap;
-	}
-	.tag {
-		font-size: var(--text-xs);
-		padding: 2px 6px;
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-tertiary);
-		color: var(--fg-muted);
-	}
-	.row-actions {
-		display: flex;
-		gap: var(--space-2);
-		align-items: center;
-	}
-	.empty-state {
-		padding: var(--space-8);
-		text-align: center;
-		border: 1px dashed var(--border-primary);
-		border-radius: var(--radius-sm);
-	}
-	/* modal-backdrop, modal, modal-header, modal-close, modal-body, modal-footer — global in app.css */
-	.modal-body textarea {
-		font-family: var(--font-mono);
-	}
-	.checkbox {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		color: var(--fg-secondary);
-	}
-	@media (max-width: 900px) {
-		.page-header {
-			flex-direction: column;
-			align-items: stretch;
-		}
-		.header-actions {
-			justify-content: flex-start;
-		}
-		.row {
-			flex-direction: column;
-		}
-		.row-actions {
-			justify-content: flex-start;
-		}
-	}
-</style>

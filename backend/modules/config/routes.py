@@ -16,6 +16,11 @@ class FrontendConfig(BaseModel):
     job_timeout: int  # seconds
     timezone: str
     normalize_tz: bool
+    log_client_batch_size: int
+    log_client_flush_interval_ms: int
+    log_client_dedupe_window_ms: int
+    log_client_flush_cooldown_ms: int
+    log_queue_max_size: int
 
 
 @router.get('', response_model=FrontendConfig)
@@ -27,4 +32,9 @@ def get_config():
         job_timeout=settings.job_timeout,
         timezone=settings.timezone,
         normalize_tz=settings.normalize_tz,
+        log_client_batch_size=settings.log_client_batch_size,
+        log_client_flush_interval_ms=settings.log_client_flush_interval_ms,
+        log_client_dedupe_window_ms=settings.log_client_dedupe_window_ms,
+        log_client_flush_cooldown_ms=settings.log_client_flush_cooldown_ms,
+        log_queue_max_size=settings.log_queue_max_size,
     )

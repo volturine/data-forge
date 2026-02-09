@@ -37,7 +37,6 @@
 		$props();
 
 	const conditions = $derived(config.conditions ?? [defaultCondition]);
-	const logic = $derived(config.logic ?? 'AND');
 
 	const COMPARISON_OPS = ['=', '!=', '>', '<', '>=', '<='];
 	const STRING_OPS = ['contains', 'not_contains', 'starts_with', 'ends_with', 'regex'];
@@ -167,13 +166,13 @@
 	<h3>Filter Configuration</h3>
 
 	<div class="form-section" role="group" aria-labelledby="{uid}-conditions-heading">
-		<div class="section-header">
-			<h4 id="{uid}-conditions-heading">Conditions</h4>
-			<div class="header-actions">
-				<div class="logic-toggle" role="radiogroup" aria-label="Condition logic">
+		<div class="mb-4 flex items-center justify-between">
+			<h4 id="{uid}-conditions-heading" class="mb-0">Conditions</h4>
+			<div class="flex items-center gap-2">
+				<div class="flex" role="radiogroup" aria-label="Condition logic">
 					<button
 						type="button"
-						class="logic-btn"
+						class="logic-btn flex cursor-pointer items-center justify-center border border-tertiary bg-transparent px-2 py-1 text-xs text-fg-muted transition-all hover:bg-hover hover:text-fg-secondary"
 						class:active={config.logic === 'AND'}
 						onclick={() => (config.logic = 'AND')}
 						aria-pressed={config.logic === 'AND'}
@@ -182,7 +181,7 @@
 					</button>
 					<button
 						type="button"
-						class="logic-btn"
+						class="logic-btn flex cursor-pointer items-center justify-center border border-tertiary bg-transparent px-2 py-1 text-xs text-fg-muted transition-all hover:bg-hover hover:text-fg-secondary"
 						class:active={config.logic === 'OR'}
 						onclick={() => (config.logic = 'OR')}
 						aria-pressed={config.logic === 'OR'}
@@ -192,7 +191,7 @@
 				</div>
 				<button
 					type="button"
-					class="btn-add"
+					class="btn-add flex h-7 w-7 cursor-pointer items-center justify-center border border-tertiary bg-tertiary p-0 text-fg-secondary hover:bg-hover hover:text-fg-primary"
 					onclick={addCondition}
 					aria-label="Add filter condition"
 				>
@@ -206,22 +205,30 @@
 				No conditions configured. Click "+ Add" to create one.
 			</p>
 		{:else}
-			<div class="conditions-list" role="list" aria-label="Filter conditions" aria-live="polite">
+			<div
+				class="flex flex-col gap-3"
+				role="list"
+				aria-label="Filter conditions"
+				aria-live="polite"
+			>
 				{#each conditions as cond, i (i)}
 					{@const colType = getColumnType(cond.column)}
 					{@const isColumn = cond.value_type === 'column'}
 					{@const isNull = isNullOperator(cond.operator)}
 					{@const ops = getOperatorsForType(colType, isColumn)}
 
-					<div class="condition-card" role="listitem">
-						<div class="condition-header">
-							<span class="condition-number">#{i + 1}</span>
+					<div
+						class="condition-card filter-config border border-tertiary bg-panel p-3"
+						role="listitem"
+					>
+						<div class="mb-3 flex items-center gap-2 border-b border-tertiary pb-2">
+							<span class="text-xs font-semibold text-fg-muted">#{i + 1}</span>
 							{#if cond.column}
-								<span class="condition-column">{cond.column}</span>
+								<span class="text-sm font-medium text-fg-primary">{cond.column}</span>
 							{/if}
 							<button
 								type="button"
-								class="btn-remove"
+								class="btn-remove ml-auto flex h-6 w-6 cursor-pointer items-center justify-center border border-transparent bg-transparent p-0 text-fg-muted transition-all hover:border-error hover:bg-error hover:text-error disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-fg-muted"
 								onclick={() => removeCondition(i)}
 								disabled={conditions.length === 1}
 								aria-label={`Remove condition ${i + 1}`}
@@ -230,9 +237,11 @@
 							</button>
 						</div>
 
-						<div class="condition-row">
-							<div class="field-group">
-								<label class="field-label" for="{uid}-column-{i}">Column</label>
+						<div class="relative flex flex-wrap items-start gap-3">
+							<div class="flex min-w-30 flex-1 flex-col gap-1">
+								<label class="mb-0 text-xs font-normal text-fg-muted" for="{uid}-column-{i}"
+									>Column</label
+								>
 								<ColumnDropdown
 									{schema}
 									value={cond.column}
@@ -241,8 +250,10 @@
 								/>
 							</div>
 
-							<div class="field-group operator-group">
-								<label class="field-label" for="{uid}-operator-{i}">Operator</label>
+							<div class="flex flex-col gap-1 min-w-25 flex-1">
+								<label class="text-xs font-normal mb-0 text-fg-muted" for="{uid}-operator-{i}"
+									>Operator</label
+								>
 								<select
 									id="{uid}-operator-{i}"
 									data-testid={`filter-operator-select-${i}`}
@@ -256,13 +267,13 @@
 							</div>
 
 							{#if !isNull}
-								<div class="field-group value-group">
-									<div class="value-header">
-										<span class="field-label">Compare to</span>
-										<div class="mode-toggle" role="radiogroup" aria-label="Value mode">
+								<div class="flex flex-col gap-1 min-w-35 flex-2">
+									<div class="flex items-center justify-between gap-2">
+										<span class="text-xs font-normal text-fg-muted">Compare to</span>
+										<div class="flex" role="radiogroup" aria-label="Value mode">
 											<button
 												type="button"
-												class="mode-btn"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-tertiary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
 												class:active={!isColumn}
 												onclick={() => handleModeChange(i, 'value')}
 												aria-pressed={!isColumn}
@@ -271,7 +282,7 @@
 											</button>
 											<button
 												type="button"
-												class="mode-btn"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-tertiary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
 												class:active={isColumn}
 												onclick={() => handleModeChange(i, 'column')}
 												aria-pressed={isColumn}
@@ -338,9 +349,9 @@
 									{/if}
 								</div>
 							{:else}
-								<div class="field-group value-group">
-									<span class="field-label">Value</span>
-									<div class="null-indicator">
+								<div class="flex flex-col gap-1 min-w-35 flex-2">
+									<span class="text-xs font-normal text-fg-muted">Value</span>
+									<div class="flex items-center h-9 px-3 text-sm italic bg-tertiary text-fg-muted">
 										<span>No value needed</span>
 									</div>
 								</div>
@@ -352,228 +363,3 @@
 		{/if}
 	</div>
 </div>
-
-<style>
-	.section-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: var(--space-4);
-	}
-	.section-header h4 {
-		margin-bottom: 0;
-	}
-
-	.header-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
-	.logic-toggle,
-	.mode-toggle {
-		display: flex;
-	}
-
-	.logic-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-1) var(--space-2);
-		background-color: transparent;
-		color: var(--fg-muted);
-		border: 1px solid var(--border-primary);
-		cursor: pointer;
-		transition: all var(--transition);
-		font-size: var(--text-xs);
-	}
-	.logic-btn:first-child {
-		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-		border-right: none;
-	}
-	.logic-btn:last-child {
-		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-	}
-	.logic-btn:hover:not(.active) {
-		background-color: var(--bg-hover);
-		color: var(--fg-secondary);
-	}
-	.logic-btn.active {
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border-color: var(--accent-primary);
-	}
-
-	.mode-toggle {
-		display: flex;
-	}
-
-	.mode-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-1) var(--space-2);
-		background-color: transparent;
-		color: var(--fg-muted);
-		border: 1px solid var(--border-primary);
-		cursor: pointer;
-		transition: all var(--transition);
-		font-size: var(--text-xs);
-	}
-	.mode-btn:first-child {
-		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-		border-right: none;
-	}
-	.mode-btn:last-child {
-		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-	}
-	.mode-btn:hover:not(.active) {
-		background-color: var(--bg-hover);
-		color: var(--fg-secondary);
-	}
-	.mode-btn.active {
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border-color: var(--accent-primary);
-	}
-
-	.btn-add {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		padding: 0;
-		background-color: var(--bg-tertiary);
-		color: var(--fg-secondary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-	}
-	.btn-add:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	/* .empty-message — global in app.css */
-
-	.conditions-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-
-	.condition-card {
-		background-color: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		padding: var(--space-3);
-	}
-
-	.condition-header {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		margin-bottom: var(--space-3);
-		padding-bottom: var(--space-2);
-		border-bottom: 1px solid var(--border-primary);
-	}
-
-	.condition-number {
-		font-size: var(--text-xs);
-		font-weight: var(--font-semibold);
-		color: var(--fg-muted);
-	}
-
-	.condition-column {
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		color: var(--fg-primary);
-	}
-
-	.btn-remove {
-		margin-left: auto;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		padding: 0;
-		background-color: transparent;
-		color: var(--fg-muted);
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
-	.btn-remove:hover:not(:disabled) {
-		background-color: var(--error-bg);
-		color: var(--error-fg);
-		border-color: var(--error-border);
-	}
-	.btn-remove:disabled {
-		opacity: 0.3;
-		cursor: not-allowed;
-	}
-
-	.condition-row {
-		display: flex;
-		gap: var(--space-3);
-		align-items: flex-start;
-		flex-wrap: wrap;
-		position: relative;
-	}
-
-	.field-group {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		flex: 1;
-		min-width: 120px;
-	}
-
-	.operator-group {
-		flex: 0.8;
-		min-width: 100px;
-	}
-
-	.value-group {
-		flex: 1.5;
-		min-width: 150px;
-	}
-
-	.field-label {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		margin-bottom: 0;
-		font-weight: var(--font-normal);
-	}
-
-	.value-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
-	.null-indicator {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 34px;
-		background-color: var(--bg-tertiary);
-		border: 1px dashed var(--border-secondary);
-		border-radius: var(--radius-sm);
-		color: var(--fg-muted);
-		font-size: var(--text-sm);
-		font-style: italic;
-	}
-
-	.condition-card :global(.column-select) {
-		position: static;
-	}
-	.condition-card :global(.column-menu) {
-		top: inherit;
-		margin-top: 48px;
-	}
-</style>

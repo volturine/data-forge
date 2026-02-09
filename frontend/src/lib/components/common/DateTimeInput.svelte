@@ -41,76 +41,32 @@
 	}
 </script>
 
-<div class="datetime-input">
-	<input type="date" id={id ? `${id}-date` : undefined} value={dateValue} onchange={handleDateChange} />
-	<div class="time-wrapper">
+<div class="flex gap-1 overflow-hidden">
+	<input
+		type="date"
+		id={id ? `${id}-date` : undefined}
+		value={dateValue}
+		onchange={handleDateChange}
+		class="min-w-0 flex-1 px-1.5 py-1 text-xs"
+	/>
+	<div class="relative min-w-0 flex-1">
 		<input
 			type="time"
 			id={id ? `${id}-time` : undefined}
 			value={timeValue}
 			onchange={handleTimeChange}
 			disabled={!dateValue}
+			class="w-full px-1.5 py-1 pr-6 text-xs disabled:cursor-not-allowed disabled:opacity-50"
 		/>
 		{#if timeValue}
-			<button type="button" class="clear-btn" onclick={clearTime} title="Clear time">
+			<button
+				type="button"
+				class="clear-btn absolute right-1 top-1/2 -translate-y-1/2 flex h-4.5 w-4.5 cursor-pointer items-center justify-center border-none bg-transparent p-0 transition-all text-fg-muted"
+				onclick={clearTime}
+				title="Clear time"
+			>
 				<X size={12} />
 			</button>
 		{/if}
 	</div>
 </div>
-
-<style>
-	.datetime-input {
-		display: flex;
-		gap: var(--space-2);
-	}
-
-	.datetime-input > input {
-		flex: 1;
-		min-width: 0;
-	}
-
-	.time-wrapper {
-		position: relative;
-		flex: 1;
-		min-width: 0;
-	}
-
-	.time-wrapper input {
-		width: 100%;
-		padding-right: var(--space-6);
-	}
-
-	.time-wrapper input:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.clear-btn {
-		position: absolute;
-		right: var(--space-1);
-		top: 50%;
-		transform: translateY(-50%);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 18px;
-		height: 18px;
-		padding: 0;
-		background: transparent;
-		border: none;
-		border-radius: var(--radius-sm);
-		color: var(--fg-muted);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
-
-	.clear-btn:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.clear-btn:active {
-		background-color: var(--bg-tertiary);
-	}
-</style>

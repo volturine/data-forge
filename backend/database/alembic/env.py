@@ -2,15 +2,10 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import create_engine, pool
+from sqlmodel import SQLModel
 
 # Import the Base and settings
 from core.config import settings
-from sqlmodel import SQLModel
-
-from modules.analysis.models import Analysis, AnalysisDataSource
-from modules.datasource.models import DataSource
-from modules.locks.models import Lock
-from modules.udf.models import Udf
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -122,7 +122,7 @@ class DataSourceResponse(BaseModel):
 
 
 class DataSourceUpdate(BaseModel):
-    """Update a datasource configuration."""
+    """Update a datasource configuration (schema is read-only)."""
 
     model_config = ConfigDict(from_attributes=True)
 

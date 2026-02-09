@@ -16,7 +16,7 @@
 	import type { BulkUploadResult } from '$lib/api/datasource';
 	import FileBrowser from '$lib/components/common/FileBrowser.svelte';
 	import { detectFileType } from '$lib/utils/fileTypes';
-	import { MessageCircleQuestionMark } from 'lucide-svelte';
+	import { MessageCircleQuestionMark, Check, X } from 'lucide-svelte';
 
 	type Tab = 'file' | 'database' | 'api';
 	type DatabaseType = 'duckdb' | 'iceberg' | 'other';
@@ -545,24 +545,34 @@
 	}
 </script>
 
-<div class="container">
-	<header>
-		<h1>Add Data Source</h1>
-		<a href={resolve('/datasources')} class="btn-secondary" data-sveltekit-reload>Cancel</a>
+<div class="datasource-new-page mx-auto box-border max-w-200 p-8">
+	<header class="mb-8 flex items-center justify-between">
+		<h1 class="m-0 text-2xl font-semibold">Add Data Source</h1>
+		<a href={resolve('/datasources')} class="btn-secondary no-underline" data-sveltekit-reload
+			>Cancel</a
+		>
 	</header>
 
-	<div class="tabs">
-		<button class="tab" class:active={activeTab === 'file'} onclick={() => (activeTab = 'file')}>
+	<div class="mb-8 flex gap-2 border-b-2 border-tertiary">
+		<button
+			class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class:active={activeTab === 'file'}
+			onclick={() => (activeTab = 'file')}
+		>
 			File Upload
 		</button>
 		<button
-			class="tab"
+			class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
 			class:active={activeTab === 'database'}
 			onclick={() => (activeTab = 'database')}
 		>
 			Database
 		</button>
-		<button class="tab" class:active={activeTab === 'api'} onclick={() => (activeTab = 'api')}>
+		<button
+			class="tab -mb-0.5 border-b-2 border-transparent px-6 py-3 text-sm font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class:active={activeTab === 'api'}
+			onclick={() => (activeTab = 'api')}
+		>
 			API
 		</button>
 	</div>
@@ -571,40 +581,46 @@
 		<div class="error-box">{error}</div>
 	{/if}
 
-	<div class="content">
+	<div class="card-base border p-8">
 		{#if activeTab === 'file'}
-			<div class="form">
-				<div class="form-group">
-					<span class="form-label">Source</span>
-					<div class="radio-group">
-						<label class="radio-option">
+			<div class="flex flex-col gap-6">
+				<div class="flex flex-col gap-2">
+					<span class="text-sm font-medium text-fg-secondary">Source</span>
+					<div class="flex flex-col gap-3">
+						<label
+							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border border-tertiary p-3 transition-all hover:border-tertiary hover:bg-hover"
+						>
 							<input
 								type="radio"
 								name="file-mode"
 								value="upload"
 								bind:group={fileMode}
 								disabled={loading}
+								class="row-span-2 h-4 w-4 cursor-pointer self-center"
 							/>
-							<span class="radio-label">Upload</span>
-							<span class="radio-desc">Upload one or many files in one step</span>
+							<span class="text-sm font-medium">Upload</span>
+							<span class="text-xs text-fg-muted">Upload one or many files in one step</span>
 						</label>
-						<label class="radio-option">
+						<label
+							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border border-tertiary p-3 transition-all hover:border-tertiary hover:bg-hover"
+						>
 							<input
 								type="radio"
 								name="file-mode"
 								value="path"
 								bind:group={fileMode}
 								disabled={loading}
+								class="row-span-2 h-4 w-4 cursor-pointer self-center"
 							/>
-							<span class="radio-label">Path</span>
-							<span class="radio-desc">Point to a local file or folder path</span>
+							<span class="text-sm font-medium">Path</span>
+							<span class="text-xs text-fg-muted">Point to a local file or folder path</span>
 						</label>
 					</div>
 				</div>
 
 				{#if fileMode === 'upload'}
-					<div class="form-group">
-						<label for="file-input">Files</label>
+					<div class="flex flex-col gap-2">
+						<label for="file-input" class="text-sm font-medium text-fg-secondary">Files</label>
 						<input
 							id="file-input"
 							type="file"
@@ -612,32 +628,36 @@
 							accept=".csv,.parquet,.json,.ndjson,.jsonl,.xlsx"
 							onchange={handleFileChange}
 							disabled={loading}
+							class="rounded-sm border border-input p-2"
 						/>
-						<p class="hint">Select one or more files. Names are derived from filenames.</p>
+						<p class="m-0 text-xs leading-relaxed text-fg-muted">
+							Select one or more files. Names are derived from filenames.
+						</p>
 						{#if selectedFiles.length > 0}
-							<div class="file-list">
-								<div class="file-list-header">
+							<div class="mt-3 border border-tertiary bg-tertiary p-3">
+								<div
+									class="mb-2 flex items-center justify-between border-b border-tertiary pb-2 text-sm text-fg-secondary"
+								>
 									<span>{selectedFiles.length} file(s) selected</span>
 									<button
 										type="button"
-										class="btn-text"
+										class="btn-text border-none bg-transparent p-0 text-xs text-accent-primary hover:underline"
 										onclick={clearBulkSelection}
-										disabled={loading}
+										disabled={loading}>Clear all</button
 									>
-										Clear all
-									</button>
 								</div>
 								{#each selectedFiles as selectedFile, index (index)}
-									<div class="file-item">
-										<span class="file-name">{selectedFile.name}</span>
+									<div class="flex items-center justify-between border-b border-tertiary p-2">
+										<span
+											class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-fg-primary"
+											>{selectedFile.name}</span
+										>
 										<button
 											type="button"
-											class="btn-remove"
+											class="btn-remove border-none bg-transparent p-1 text-lg leading-none text-fg-muted hover:text-error-fg"
 											onclick={() => removeBulkFile(index)}
-											disabled={loading}
+											disabled={loading}>x</button
 										>
-											×
-										</button>
 									</div>
 								{/each}
 							</div>
@@ -645,53 +665,65 @@
 					</div>
 
 					{#if selectedFiles.length === 1}
-						<div class="form-group">
-							<label for="file-name">Name</label>
+						<div class="flex flex-col gap-2">
+							<label for="file-name" class="text-sm font-medium text-fg-secondary">Name</label>
 							<input
 								id="file-name"
 								type="text"
 								bind:value={fileName}
 								placeholder="My Dataset"
 								disabled={loading}
+								class="input-base border px-3 py-2 text-sm"
 							/>
 							{#if file}
-								<p class="file-info">Selected: {file.name}</p>
+								<p class="m-0 text-sm text-fg-secondary">Selected: {file.name}</p>
 							{/if}
 						</div>
 					{/if}
 
 					{#if showBulkResults && bulkResults.length > 0}
-						<div class="bulk-results">
-							<h4>Upload Results</h4>
+						<div class="mt-4 border border-tertiary bg-tertiary p-4">
+							<h4 class="m-0 mb-3 text-sm font-semibold text-fg-secondary">Upload Results</h4>
 							{#each bulkResults as result (result.name)}
 								<div
-									class="result-item"
-									class:success={result.success}
-									class:error={!result.success}
+									class="flex items-center gap-2 border-b border-tertiary p-2 text-sm"
+									class:text-success={result.success}
+									class:text-error={!result.success}
 								>
-									<span class="result-icon">{result.success ? '✓' : '✗'}</span>
-									<span class="result-name">{result.name}</span>
+									<span class="w-5 text-center font-bold">
+										{#if result.success}
+											<Check size={12} />
+										{:else}
+											<X size={12} />
+										{/if}
+									</span>
+									<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+										>{result.name}</span
+									>
 									{#if result.error}
-										<span class="result-error">{result.error}</span>
+										<span class="max-w-50 overflow-hidden text-ellipsis text-xs text-fg-muted"
+											>{result.error}</span
+										>
 									{/if}
 								</div>
 							{/each}
 						</div>
 					{/if}
 				{:else}
-					<div class="form-group">
-						<label for="path-name">Name</label>
+					<div class="flex flex-col gap-2">
+						<label for="path-name" class="text-sm font-medium text-fg-secondary">Name</label>
 						<input
 							id="path-name"
 							type="text"
 							bind:value={pathName}
 							placeholder="My Dataset"
 							disabled={loading}
+							class="input-base border px-3 py-2 text-sm"
 						/>
 					</div>
 
-					<div class="form-group">
-						<label for="path-value">Path</label>
+					<div class="flex flex-col gap-2">
+						<label for="path-value" class="text-sm font-medium text-fg-secondary">Path</label>
 						<input
 							id="path-value"
 							type="text"
@@ -699,27 +731,29 @@
 							placeholder="/path/to/data"
 							oninput={handlePathInput}
 							disabled={loading}
+							class="input-base border px-3 py-2 text-sm"
 						/>
-						<div class="path-actions">
-							<button class="btn-secondary" type="button" onclick={openPicker} disabled={loading}>
-								Browse server
-							</button>
+						<div class="flex flex-wrap items-center gap-2">
+							<button class="btn-secondary" type="button" onclick={openPicker} disabled={loading}
+								>Browse server</button
+							>
 						</div>
 					</div>
 
-					<div class="form-group">
-						<label for="path-options" class="label-with-help">
+					<div class="flex flex-col gap-2">
+						<label
+							for="path-options"
+							class="flex items-center gap-2 text-sm font-medium text-fg-secondary"
+						>
 							<span>Options (optional)</span>
-							<span class="help-icon" title="Click to view Polars documentation">
-								<a
-									href="https://docs.pola.rs/api/python/stable/reference/io.html"
-									target="_blank"
-									rel="noopener noreferrer"
-									class="help-link"
-								>
-									<MessageCircleQuestionMark size={16} />
-								</a>
-							</span>
+							<a
+								href="https://docs.pola.rs/api/python/stable/reference/io.html"
+								target="_blank"
+								rel="noopener noreferrer"
+								class="inline-flex items-center no-underline transition-colors text-fg-muted"
+							>
+								<MessageCircleQuestionMark size={16} />
+							</a>
 						</label>
 						<textarea
 							id="path-options"
@@ -727,11 +761,15 @@
 							placeholder={'{"ignore_errors": true, "rechunk": false}'}
 							rows="3"
 							disabled={loading}
+							class="resize-y border px-3 py-2 text-sm input-base"
 						></textarea>
-						<p class="hint">
-							Advanced Polars scan options in JSON format. Common options: <code>ignore_errors</code
+						<p class="m-0 text-xs leading-relaxed text-fg-muted">
+							Advanced Polars scan options in JSON format. Common options: <code
+								class="code-inline rounded px-1 py-0.5 text-xs">ignore_errors</code
 							>,
-							<code>rechunk</code>, <code>low_memory</code>, <code>n_rows</code>.
+							<code class="code-inline rounded px-1 py-0.5 text-xs">rechunk</code>,
+							<code class="code-inline rounded px-1 py-0.5 text-xs">low_memory</code>,
+							<code class="code-inline rounded px-1 py-0.5 text-xs">n_rows</code>.
 						</p>
 					</div>
 
@@ -749,16 +787,17 @@
 				{/if}
 
 				{#if fileMode === 'upload' && file?.name.endsWith('.xlsx')}
-					<div class="excel-preflight">
-						<h3>Excel Table Selection</h3>
-						<div class="form-row">
-							<div class="form-group">
-								<label for="excel-sheet">Sheet</label>
+					<div class="flex flex-col gap-4 border p-4 bg-tertiary border-tertiary">
+						<h3 class="m-0 text-sm font-semibold text-fg-secondary">Excel Table Selection</h3>
+						<div class="grid grid-cols-2 gap-4">
+							<div class="flex flex-col gap-2">
+								<label for="excel-sheet" class="text-sm font-medium text-fg-secondary">Sheet</label>
 								<select
 									id="excel-sheet"
 									value={selectedSheet}
 									onchange={(event) => applySheet(event.currentTarget.value)}
 									disabled={loading || previewLoading || !sheetNames.length}
+									class="rounded-sm border px-3 py-2 text-sm input-base"
 								>
 									<option value="">Select sheet</option>
 									{#each sheetNames as sheet (sheet)}
@@ -766,13 +805,16 @@
 									{/each}
 								</select>
 							</div>
-							<div class="form-group">
-								<label for="excel-table">Excel Table</label>
+							<div class="flex flex-col gap-2">
+								<label for="excel-table" class="text-sm font-medium text-fg-secondary"
+									>Excel Table</label
+								>
 								<select
 									id="excel-table"
 									value={selectedTable}
 									onchange={(event) => applyTable(event.currentTarget.value)}
 									disabled={loading || previewLoading || !selectedSheet}
+									class="rounded-sm border px-3 py-2 text-sm input-base"
 								>
 									<option value="">Manual selection</option>
 									{#each tableMap[selectedSheet] ?? [] as table (table)}
@@ -780,13 +822,16 @@
 									{/each}
 								</select>
 							</div>
-							<div class="form-group">
-								<label for="excel-range">Named Range</label>
+							<div class="flex flex-col gap-2">
+								<label for="excel-range" class="text-sm font-medium text-fg-secondary"
+									>Named Range</label
+								>
 								<select
 									id="excel-range"
 									value={selectedRange}
 									onchange={(event) => applyNamedRange(event.currentTarget.value)}
 									disabled={loading || previewLoading}
+									class="rounded-sm border px-3 py-2 text-sm input-base"
 								>
 									<option value="">None</option>
 									{#each namedRanges as range (range)}
@@ -796,16 +841,19 @@
 							</div>
 						</div>
 
-						<div class="form-row">
-							<div class="form-group checkbox-group">
+						<div class="flex items-center gap-4">
+							<div class="flex items-center gap-2">
 								<input
 									id="excel-header"
 									type="checkbox"
 									bind:checked={excelHeader}
 									onchange={() => refreshPreview()}
 									disabled={loading || previewLoading}
+									class="h-4 w-4 cursor-pointer"
 								/>
-								<label for="excel-header">First row is header</label>
+								<label for="excel-header" class="m-0 text-sm font-medium text-fg-secondary"
+									>First row is header</label
+								>
 							</div>
 							<button
 								type="button"
@@ -813,13 +861,13 @@
 								onclick={runPreflight}
 								disabled={loading || previewLoading}
 							>
-								{previewLoading ? 'Loading preview…' : 'Run preflight'}
+								{previewLoading ? 'Loading preview...' : 'Run preflight'}
 							</button>
 						</div>
 
 						{#if preflightId}
-							<div class="preview-panel">
-								<div class="preview-meta">
+							<div class="overflow-hidden border border-tertiary bg-primary">
+								<div class="flex flex-wrap gap-3 px-3 py-2 text-xs bg-tertiary text-fg-muted">
 									<span>Start row: {startRow + 1}</span>
 									<span>Start col: {cellLabel(startCol)}</span>
 									<span>End col: {cellLabel(endCol)}</span>
@@ -827,25 +875,33 @@
 										<span>Detected end row: {detectedEndRow + 1}</span>
 									{/if}
 								</div>
-								<div class="preview-grid">
-									<div class="preview-row header">
-										<div class="cell corner"></div>
+								<div class="max-h-80 overflow-auto">
+									<div class="preview-row grid grid-flow-col auto-cols-[minmax(120px,1fr)]">
+										<div
+											class="cell border-b border-r border-tertiary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary"
+										></div>
 										{#each previewGrid[0] ?? [] as _cell, index (index)}
-											<button class="cell header" onclick={() => handleEndCol(startCol + index)}>
+											<button
+												class="cell cursor-pointer border-b border-r border-tertiary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary"
+												onclick={() => handleEndCol(startCol + index)}
+											>
 												{cellLabel(startCol + index)}
 											</button>
 										{/each}
 									</div>
 									{#each previewGrid as row, rowIndex (rowIndex)}
-										<div class="preview-row">
+										<div class="preview-row grid grid-flow-col auto-cols-[minmax(120px,1fr)]">
 											<button
-												class="cell header"
+												class="cell cursor-pointer border-b border-r border-tertiary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary"
 												onclick={() => handleStartRow(startRow + rowIndex)}
 											>
 												{startRow + rowIndex + 1}
 											</button>
 											{#each row as cell, colIndex (colIndex)}
-												<button class="cell" onclick={() => handleStartCol(startCol + colIndex)}>
+												<button
+													class="cell cursor-pointer border-b border-r border-tertiary bg-transparent p-2 text-left text-xs text-fg-secondary"
+													onclick={() => handleStartCol(startCol + colIndex)}
+												>
 													{cell ?? ''}
 												</button>
 											{/each}
@@ -874,206 +930,248 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'database'}
-			<div class="form">
-				<div class="form-group">
-					<label for="db-type">Database Type</label>
-					<div class="radio-group">
-						<label class="radio-option">
+			<div class="flex flex-col gap-6">
+				<div class="flex flex-col gap-2">
+					<label for="db-type" class="text-sm font-medium text-fg-secondary">Database Type</label>
+					<div class="flex flex-col gap-3">
+						<label
+							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border p-3 transition-all border-tertiary"
+						>
 							<input
 								type="radio"
 								name="db-type"
 								value="duckdb"
 								bind:group={databaseType}
 								disabled={loading}
+								class="row-span-2 h-4 w-4 cursor-pointer self-center"
 							/>
-							<span class="radio-label">DuckDB</span>
-							<span class="radio-desc">In-memory or file-based analytics database</span>
+							<span class="text-sm font-medium">DuckDB</span>
+							<span class="text-xs text-fg-muted">In-memory or file-based analytics database</span>
 						</label>
-						<label class="radio-option">
+						<label
+							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border p-3 transition-all border-tertiary"
+						>
 							<input
 								type="radio"
 								name="db-type"
 								value="iceberg"
 								bind:group={databaseType}
 								disabled={loading}
+								class="row-span-2 h-4 w-4 cursor-pointer self-center"
 							/>
-							<span class="radio-label">Iceberg</span>
-							<span class="radio-desc">Connect to an Iceberg table via metadata JSON</span>
+							<span class="text-sm font-medium">Iceberg</span>
+							<span class="text-xs text-fg-muted"
+								>Connect to an Iceberg table via metadata JSON</span
+							>
 						</label>
-						<label class="radio-option">
+						<label
+							class="radio-option grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 border p-3 transition-all border-tertiary"
+						>
 							<input
 								type="radio"
 								name="db-type"
 								value="other"
 								bind:group={databaseType}
 								disabled={loading}
+								class="row-span-2 h-4 w-4 cursor-pointer self-center"
 							/>
-							<span class="radio-label">Other Database</span>
-							<span class="radio-desc">PostgreSQL, MySQL, SQLite via connection string</span>
+							<span class="text-sm font-medium">Other Database</span>
+							<span class="text-xs text-fg-muted"
+								>PostgreSQL, MySQL, SQLite via connection string</span
+							>
 						</label>
 					</div>
 				</div>
 
 				{#if databaseType === 'duckdb'}
-					<div class="form-group">
-						<label for="duckdb-name">Name</label>
+					<div class="flex flex-col gap-2">
+						<label for="duckdb-name" class="text-sm font-medium text-fg-secondary">Name</label>
 						<input
 							id="duckdb-name"
 							type="text"
 							bind:value={duckdbName}
 							placeholder="My DuckDB Data"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
 					</div>
 
-					<div class="form-group">
-						<label for="duckdb-path">Database Path (optional)</label>
+					<div class="flex flex-col gap-2">
+						<label for="duckdb-path" class="text-sm font-medium text-fg-secondary"
+							>Database Path (optional)</label
+						>
 						<input
 							id="duckdb-path"
 							type="text"
 							bind:value={duckdbPath}
 							placeholder="/path/to/database.duckdb"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
-						<p class="hint">Leave empty for in-memory database</p>
+						<p class="m-0 text-xs text-fg-muted">Leave empty for in-memory database</p>
 					</div>
 
-					<div class="form-group">
-						<label for="duckdb-query">Query</label>
+					<div class="flex flex-col gap-2">
+						<label for="duckdb-query" class="text-sm font-medium text-fg-secondary">Query</label>
 						<textarea
 							id="duckdb-query"
 							bind:value={duckdbQuery}
 							placeholder="SELECT * FROM read_csv_auto('data.csv')"
 							rows="5"
 							disabled={loading}
+							class="resize-y border px-3 py-2 text-sm input-base"
 						></textarea>
-						<p class="hint">
+						<p class="m-0 text-xs text-fg-muted">
 							DuckDB can read CSV, Parquet, JSON directly: read_csv_auto(), read_parquet(),
 							read_json_auto()
 						</p>
 					</div>
 
-					<div class="form-group checkbox-group">
+					<div class="flex items-center gap-2">
 						<input
 							id="duckdb-readonly"
 							type="checkbox"
 							bind:checked={duckdbReadOnly}
 							disabled={loading}
+							class="h-4 w-4 cursor-pointer"
 						/>
-						<label for="duckdb-readonly">Read-only mode</label>
+						<label for="duckdb-readonly" class="m-0 text-sm font-medium text-fg-secondary"
+							>Read-only mode</label
+						>
 					</div>
 
 					<button class="btn-primary" onclick={handleDuckDBConnect} disabled={loading}>
 						{loading ? 'Connecting...' : 'Connect'}
 					</button>
 				{:else if databaseType === 'iceberg'}
-					<div class="form-group">
-						<label for="iceberg-name">Name</label>
+					<div class="flex flex-col gap-2">
+						<label for="iceberg-name" class="text-sm font-medium text-fg-secondary">Name</label>
 						<input
 							id="iceberg-name"
 							type="text"
 							bind:value={icebergName}
 							placeholder="My Iceberg Table"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
 					</div>
 
-					<div class="form-group">
-						<label for="iceberg-metadata">Metadata JSON Path</label>
+					<div class="flex flex-col gap-2">
+						<label for="iceberg-metadata" class="text-sm font-medium text-fg-secondary"
+							>Metadata JSON Path</label
+						>
 						<input
 							id="iceberg-metadata"
 							type="text"
 							bind:value={icebergMetadataPath}
 							placeholder="/path/to/table/metadata or metadata.json"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
-						<p class="hint">
+						<p class="m-0 text-xs text-fg-muted">
 							Point to metadata.json or a folder containing metadata/*.metadata.json
 						</p>
-						<div class="resolve-row">
+						<div class="flex flex-wrap items-center gap-2">
 							<button
 								class="btn-secondary"
 								type="button"
 								onclick={resolveMetadataPath}
-								disabled={loading}
+								disabled={loading}>Resolve Path</button
 							>
-								Resolve Path
-							</button>
 							{#if icebergResolvedPath}
-								<span class="resolve-value">{icebergResolvedPath}</span>
+								<span
+									class="break-all border px-1.5 py-0.5 text-xs text-fg-secondary bg-secondary border-tertiary"
+									>{icebergResolvedPath}</span
+								>
 							{/if}
 						</div>
 					</div>
 
-					<div class="form-group">
-						<label for="iceberg-snapshot">Snapshot ID (optional)</label>
+					<div class="flex flex-col gap-2">
+						<label for="iceberg-snapshot" class="text-sm font-medium text-fg-secondary"
+							>Snapshot ID (optional)</label
+						>
 						<input
 							id="iceberg-snapshot"
 							type="number"
 							bind:value={icebergSnapshotId}
 							placeholder="7051579356916758811"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
 					</div>
 
-					<div class="form-group">
-						<label for="iceberg-reader">Reader Override (optional)</label>
+					<div class="flex flex-col gap-2">
+						<label for="iceberg-reader" class="text-sm font-medium text-fg-secondary"
+							>Reader Override (optional)</label
+						>
 						<input
 							id="iceberg-reader"
 							type="text"
 							bind:value={icebergReader}
 							placeholder="native or pyiceberg"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
 					</div>
 
-					<div class="form-group">
-						<label for="iceberg-storage">Storage Options (optional)</label>
+					<div class="flex flex-col gap-2">
+						<label for="iceberg-storage" class="text-sm font-medium text-fg-secondary"
+							>Storage Options (optional)</label
+						>
 						<textarea
 							id="iceberg-storage"
 							bind:value={icebergStorageOptions}
 							placeholder={'{"s3.region": "us-east-1"}'}
 							rows="3"
 							disabled={loading}
+							class="resize-y border px-3 py-2 text-sm input-base"
 						></textarea>
-						<p class="hint">JSON map of storage options for S3/GCS/Azure</p>
+						<p class="m-0 text-xs text-fg-muted">JSON map of storage options for S3/GCS/Azure</p>
 					</div>
 
 					<button class="btn-primary" onclick={handleIcebergConnect} disabled={loading}>
 						{loading ? 'Connecting...' : 'Connect'}
 					</button>
 				{:else}
-					<div class="form-group">
-						<label for="db-name">Name</label>
+					<div class="flex flex-col gap-2">
+						<label for="db-name" class="text-sm font-medium text-fg-secondary">Name</label>
 						<input
 							id="db-name"
 							type="text"
 							bind:value={dbName}
 							placeholder="My Database"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
 					</div>
 
-					<div class="form-group">
-						<label for="connection-string">Connection String</label>
+					<div class="flex flex-col gap-2">
+						<label for="connection-string" class="text-sm font-medium text-fg-secondary"
+							>Connection String</label
+						>
 						<input
 							id="connection-string"
 							type="text"
 							bind:value={connectionString}
 							placeholder="postgresql://user:pass@localhost/db"
 							disabled={loading}
+							class="rounded-sm border px-3 py-2 text-sm input-base"
 						/>
-						<p class="hint">Example: postgresql://user:pass@localhost/dbname</p>
+						<p class="m-0 text-xs text-fg-muted">
+							Example: postgresql://user:pass@localhost/dbname
+						</p>
 					</div>
 
-					<div class="form-group">
-						<label for="query">Query</label>
+					<div class="flex flex-col gap-2">
+						<label for="query" class="text-sm font-medium text-fg-secondary">Query</label>
 						<textarea
 							id="query"
 							bind:value={query}
 							placeholder="SELECT * FROM table"
 							rows="5"
 							disabled={loading}
+							class="resize-y border px-3 py-2 text-sm input-base"
 						></textarea>
 					</div>
 
@@ -1083,32 +1181,39 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'api'}
-			<div class="form">
-				<div class="form-group">
-					<label for="api-name">Name</label>
+			<div class="flex flex-col gap-6">
+				<div class="flex flex-col gap-2">
+					<label for="api-name" class="text-sm font-medium text-fg-secondary">Name</label>
 					<input
 						id="api-name"
 						type="text"
 						bind:value={apiName}
 						placeholder="My API"
 						disabled={loading}
+						class="rounded-sm border px-3 py-2 text-sm input-base"
 					/>
 				</div>
 
-				<div class="form-group">
-					<label for="api-url">URL</label>
+				<div class="flex flex-col gap-2">
+					<label for="api-url" class="text-sm font-medium text-fg-secondary">URL</label>
 					<input
 						id="api-url"
 						type="url"
 						bind:value={apiUrl}
 						placeholder="https://api.example.com/data"
 						disabled={loading}
+						class="rounded-sm border px-3 py-2 text-sm input-base"
 					/>
 				</div>
 
-				<div class="form-group">
-					<label for="api-method">Method</label>
-					<select id="api-method" bind:value={apiMethod} disabled={loading}>
+				<div class="flex flex-col gap-2">
+					<label for="api-method" class="text-sm font-medium text-fg-secondary">Method</label>
+					<select
+						id="api-method"
+						bind:value={apiMethod}
+						disabled={loading}
+						class="rounded-sm border px-3 py-2 text-sm input-base"
+					>
 						<option value="GET">GET</option>
 						<option value="POST">POST</option>
 					</select>
@@ -1121,409 +1226,3 @@
 		{/if}
 	</div>
 </div>
-
-<style>
-	.container {
-		max-width: 800px;
-		margin: 0 auto;
-		padding: var(--space-8);
-		min-height: 100%;
-		box-sizing: border-box;
-	}
-	header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: var(--space-8);
-	}
-	h1 {
-		font-size: var(--text-2xl);
-		font-weight: var(--font-semibold);
-		margin: 0;
-	}
-	.btn-secondary {
-		text-decoration: none;
-	}
-	.tabs {
-		display: flex;
-		gap: var(--space-2);
-		border-bottom: 2px solid var(--border-primary);
-		margin-bottom: var(--space-8);
-	}
-	.tab {
-		padding: var(--space-3) var(--space-6);
-		background: none;
-		border: none;
-		border-bottom: 2px solid transparent;
-		cursor: pointer;
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		color: var(--fg-muted);
-		margin-bottom: -2px;
-		transition: all var(--transition);
-	}
-	.tab:hover {
-		color: var(--fg-secondary);
-	}
-	.tab.active {
-		color: var(--accent-primary);
-		border-bottom-color: var(--accent-primary);
-	}
-	.content {
-		background-color: var(--card-bg);
-		padding: var(--space-8);
-		border-radius: var(--radius-md);
-		box-shadow: var(--card-shadow);
-	}
-	.form {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-6);
-	}
-	.form-group {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	label {
-		font-weight: var(--font-medium);
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	input[type='text'],
-	input[type='url'],
-	select,
-	textarea {
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--input-border);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-sm);
-		background-color: var(--input-bg);
-		transition: border-color var(--transition);
-	}
-	input[type='text']:focus,
-	input[type='url']:focus,
-	select:focus,
-	textarea:focus {
-		outline: none;
-		border-color: var(--border-focus);
-		box-shadow: 0 0 0 3px var(--accent-bg);
-	}
-	input[type='text']:disabled,
-	input[type='url']:disabled,
-	select:disabled,
-	textarea:disabled {
-		background: var(--bg-tertiary);
-		cursor: not-allowed;
-	}
-	input[type='file'] {
-		padding: var(--space-2);
-		border: 1px solid var(--input-border);
-		border-radius: var(--radius-sm);
-	}
-	textarea {
-		resize: vertical;
-	}
-	.path-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		flex-wrap: wrap;
-	}
-	.resolve-row {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		flex-wrap: wrap;
-	}
-	.resolve-value {
-		font-size: var(--text-xs);
-		color: var(--fg-secondary);
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-secondary);
-		padding: 2px 6px;
-		border-radius: var(--radius-sm);
-		word-break: break-all;
-	}
-	.hint,
-	.file-info {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		margin: 0;
-		line-height: 1.5;
-	}
-	.hint code {
-		font-family: var(--font-mono);
-		background: var(--bg-tertiary);
-		padding: 1px 4px;
-		border-radius: 3px;
-		font-size: 0.9em;
-		color: var(--fg-secondary);
-	}
-	.file-info {
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	.label-with-help {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.help-icon {
-		display: inline-flex;
-		align-items: center;
-		flex-shrink: 0;
-	}
-	.help-link {
-		display: inline-flex;
-		align-items: center;
-		color: var(--fg-muted);
-		transition: color var(--transition);
-		text-decoration: none;
-	}
-	.help-link:hover {
-		color: var(--accent-primary);
-	}
-	.form-row {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: var(--space-4);
-	}
-	.excel-preflight {
-		background-color: var(--bg-tertiary);
-		padding: var(--space-4);
-		border-radius: var(--radius-md);
-		border: 1px solid var(--border-primary);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-	}
-	.excel-preflight h3 {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		color: var(--fg-secondary);
-	}
-	.preview-panel {
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		overflow: hidden;
-		background: var(--bg-primary);
-	}
-	.preview-meta {
-		display: flex;
-		gap: var(--space-3);
-		padding: var(--space-2) var(--space-3);
-		background: var(--bg-tertiary);
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		flex-wrap: wrap;
-	}
-	.preview-grid {
-		overflow: auto;
-		max-height: 320px;
-	}
-	.preview-row {
-		display: grid;
-		grid-auto-flow: column;
-		grid-auto-columns: minmax(120px, 1fr);
-	}
-	.cell {
-		padding: var(--space-2);
-		border-bottom: 1px solid var(--border-primary);
-		border-right: 1px solid var(--border-primary);
-		background: transparent;
-		text-align: left;
-		font-size: var(--text-xs);
-		color: var(--fg-secondary);
-		cursor: pointer;
-	}
-	.cell.header {
-		background: var(--bg-tertiary);
-		font-weight: var(--font-semibold);
-		color: var(--fg-primary);
-	}
-	.cell.corner {
-		background: var(--bg-tertiary);
-	}
-	.checkbox-group {
-		flex-direction: row;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.checkbox-group input {
-		width: auto;
-	}
-	.checkbox-group label {
-		margin: 0;
-	}
-	input[type='checkbox'] {
-		width: 1rem;
-		height: 1rem;
-		cursor: pointer;
-	}
-	.radio-group {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-	.radio-option {
-		display: grid;
-		grid-template-columns: auto 1fr;
-		grid-template-rows: auto auto;
-		gap: 0 var(--space-3);
-		padding: var(--space-3) var(--space-4);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
-	.radio-option:hover {
-		background: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-	.radio-option:has(input:checked) {
-		background: var(--accent-bg);
-		border-color: var(--accent-border);
-	}
-	.radio-option input[type='radio'] {
-		grid-row: span 2;
-		align-self: center;
-		width: 1rem;
-		height: 1rem;
-		cursor: pointer;
-	}
-	.radio-label {
-		font-weight: var(--font-medium);
-		font-size: var(--text-sm);
-	}
-	.radio-desc {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-
-	/* Bulk upload styles */
-	.file-list {
-		background-color: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		padding: var(--space-3);
-		margin-top: var(--space-3);
-	}
-	.file-list-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: var(--space-2);
-		padding-bottom: var(--space-2);
-		border-bottom: 1px solid var(--border-primary);
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	.btn-text {
-		background: transparent;
-		border: none;
-		color: var(--accent-primary);
-		font-size: var(--text-xs);
-		cursor: pointer;
-		padding: 0;
-	}
-	.btn-text:hover {
-		text-decoration: underline;
-	}
-	.btn-text:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.file-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-2);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.file-item:last-child {
-		border-bottom: none;
-	}
-	.file-name {
-		font-size: var(--text-sm);
-		color: var(--fg-primary);
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.btn-remove {
-		background: transparent;
-		border: none;
-		color: var(--fg-muted);
-		font-size: var(--text-lg);
-		cursor: pointer;
-		padding: var(--space-1);
-		line-height: 1;
-	}
-	.btn-remove:hover {
-		color: var(--error-fg);
-	}
-	.btn-remove:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	/* Bulk results */
-	.bulk-results {
-		background-color: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		padding: var(--space-4);
-		margin-top: var(--space-4);
-	}
-	.bulk-results h4 {
-		margin: 0 0 var(--space-3) 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		color: var(--fg-secondary);
-	}
-	.result-item {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2);
-		border-bottom: 1px solid var(--border-primary);
-		font-size: var(--text-sm);
-	}
-	.result-item:last-child {
-		border-bottom: none;
-	}
-	.result-item.success {
-		color: var(--success-fg);
-	}
-	.result-item.error {
-		color: var(--error-fg);
-	}
-	.result-icon {
-		font-weight: var(--font-bold);
-		width: 20px;
-		text-align: center;
-	}
-	.result-name {
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.result-error {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		max-width: 200px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	/* Form label for non-control labels */
-	.form-label {
-		font-weight: var(--font-medium);
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-</style>

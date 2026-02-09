@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Literal, cast
 
 import polars as pl
 
@@ -56,8 +57,10 @@ class TimeseriesHandler(OperationHandler):
             return lf.with_columns(getattr(pl.col(validated.column).dt, method)().alias(validated.new_column))
 
         if validated.operation_type == 'timestamp':
-            unit = validated.unit or 'us'  # Default to microseconds
-            return lf.with_columns(pl.col(validated.column).dt.timestamp(unit).alias(validated.new_column))
+            valid_units = {'ns', 'us', 'ms'}
+            unit = validated.unit if validated.unit in valid_units else 'us'
+            unit_literal = cast(Literal['ns', 'us', 'ms'], unit)
+            return lf.with_columns(pl.col(validated.column).dt.timestamp(unit_literal).alias(validated.new_column))
 
         if validated.operation_type in {'add', 'subtract', 'offset'}:
             if validated.value is None:

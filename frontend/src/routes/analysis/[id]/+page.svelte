@@ -18,6 +18,7 @@
 	import { spawnEngine } from '$lib/api/compute';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import { track } from '$lib/utils/audit-log';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -25,6 +26,7 @@
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
+	import { ChevronDown, ChevronLeft, ChevronRight, Plus, X } from 'lucide-svelte';
 
 	const analysisId = $derived($page.params.id);
 
@@ -118,6 +120,7 @@
 		saving: { saveComplete: 'saved', saveError: 'unsaved' }
 	});
 	let isLoadingSchema = $state(false);
+	const HEARTBEAT_INTERVAL_MS = 10000;
 	let showDatasourceModal = $state(false);
 	let modalMode = $state<'add' | 'change'>('add');
 	let leftPaneCollapsed = $state(false);
@@ -180,7 +183,14 @@
 					analysisStore.setEngineDefaults(status.defaults);
 				}
 			},
-			() => {}
+			(err) => {
+				track({
+					event: 'engine_error',
+					action: 'spawn',
+					target: analysisId,
+					meta: { message: err.message }
+				});
+			}
 		);
 	});
 
@@ -198,7 +208,12 @@
 				isLoadingSchema = false;
 			},
 			(err) => {
-				console.error('Failed to load schema:', err);
+				track({
+					event: 'schema_error',
+					action: 'load',
+					target: datasourceIdValue,
+					meta: { message: err.message }
+				});
 				isLoadingSchema = false;
 			}
 		);
@@ -340,6 +355,19 @@
 		}
 	}
 
+	async function discardChanges() {
+		showModeDropdown = false;
+		if (!analysisId) return;
+		if (saveStatus.current === 'saving') return;
+		if (storageKey && typeof window !== 'undefined') {
+			window.localStorage.removeItem(storageKey);
+		}
+		if (analysisQuery.data) {
+			await analysisStore.loadAnalysis(analysisId);
+			saveStatus.send('saveComplete');
+		}
+	}
+
 	function startLockCheck() {
 		if (keepaliveInterval || !analysisId) return;
 		keepaliveInterval = window.setInterval(async () => {
@@ -350,7 +378,7 @@
 				isEditingMode = false;
 				stopLockCheck();
 			}
-		}, 10000);
+		}, HEARTBEAT_INTERVAL_MS);
 	}
 
 	function stopLockCheck() {
@@ -436,29 +464,39 @@
 </script>
 
 {#if analysisQuery.isLoading}
-	<div class="info-box loading-container">
+	<div class="info-box flex h-full flex-col items-center justify-center text-center gap-4">
 		<div class="spinner"></div>
-		<p>Loading analysis...</p>
+		<p class="m-0">Loading analysis...</p>
 	</div>
 {:else if analysisQuery.isError}
-	<div class="error-box error-container">
-		<div class="error-icon">!</div>
-		<h2>Error loading analysis</h2>
-		<p>{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}</p>
+	<div class="error-box flex h-full flex-col items-center justify-center text-center gap-4">
+		<div
+			class="flex items-center justify-center text-xl font-bold w-13 h-13 border border-tertiary"
+		>
+			!
+		</div>
+		<h2 class="m-0">Error loading analysis</h2>
+		<p class="m-0">
+			{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}
+		</p>
 		<button
-			class="btn-primary"
+			class="btn-primary mt-4"
 			onclick={() => goto(resolve('/'), { invalidateAll: true })}
 			type="button">Back to Gallery</button
 		>
 	</div>
 {:else if analysisQuery.data}
-	<div class="editor-container">
-		<header class="editor-header">
-			<div class="header-left">
-				<div class="analysis-name">
+	<div class="analysis-page flex h-full flex-col bg-secondary">
+		<header
+			class="analysis-header flex items-stretch sticky top-0 h-12 bg-panel border-y border-tertiary"
+		>
+			<div
+				class="header-left flex items-center h-full box-border border-r border-tertiary panel-width"
+			>
+				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-4">
 					<h1
 						contenteditable="true"
-						class="editable-title"
+						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none cursor-text text-fg-primary tracking-[0.02em]"
 						onblur={(e) => {
 							const newName = e.currentTarget.textContent?.trim();
 							if (newName && newName !== analysisQuery.data.name) {
@@ -472,13 +510,16 @@
 						{analysisQuery.data.name}
 					</h1>
 					{#if analysisQuery.data.description}
-						<span class="description">{analysisQuery.data.description}</span>
+						<span
+							class="text-xs whitespace-nowrap overflow-hidden text-ellipsis text-fg-muted tracking-[0.02em]"
+							>{analysisQuery.data.description}</span
+						>
 					{/if}
 				</div>
 			</div>
-			<div class="header-middle">
+			<div class="flex-1 min-w-0 overflow-hidden flex items-center justify-center gap-0">
 				<button
-					class="collapse-arrow collapse-arrow-left"
+					class="collapse-arrow collapse-arrow-left w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted transition-colors duration-160 border-r border-tertiary hover:text-fg-primary hover:bg-hover"
 					class:collapsed={leftPaneCollapsed}
 					class:hidden={!isEditingMode}
 					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
@@ -486,43 +527,51 @@
 					title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
 					disabled={!isEditingMode}
 				>
-					{leftPaneCollapsed ? '>' : '<'}
+					{#if leftPaneCollapsed}
+						<ChevronRight size={14} />
+					{:else}
+						<ChevronLeft size={14} />
+					{/if}
 				</button>
-				<div class="header-tabs">
-					<div class="tabs">
+				<div class="flex-1 overflow-hidden flex items-center px-4">
+					<div class="tabs flex items-center overflow-x-auto w-full gap-1">
 						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
-							<button
-								class="tab"
+							<div
+								class="tab inline-flex items-center bg-transparent border-none text-sm font-medium uppercase px-2 py-1 text-fg-muted gap-1 tracking-[0.06em]"
 								class:active={analysisStore.activeTab?.id === tab.id}
-								onclick={() => handleSelectTab(tab.id)}
-								type="button"
 							>
-								<span class="tab-label">
-									<span class="tab-name">{tab.name}</span>
-								</span>
-								{#if analysisStore.tabs.length > 1}
-									<span
-										class="tab-remove"
-										onclick={(e) => {
-											e.stopPropagation();
-											handleRemoveTab(tab.id);
-										}}
-										role="button"
-										tabindex="0"
-										onkeydown={(e) => e.key === 'Enter' && handleRemoveTab(tab.id)}
+								<button
+									class="tab-label inline-flex items-center min-w-0 bg-transparent border-none cursor-pointer"
+									onclick={() => handleSelectTab(tab.id)}
+									type="button"
+								>
+									<span class="whitespace-nowrap overflow-hidden text-ellipsis max-w-37.5"
+										>{tab.name}</span
 									>
-										&times;
-									</span>
+								</button>
+								{#if analysisStore.tabs.length > 1}
+									<button
+										class="tab-remove text-base leading-none ml-1 opacity-50 hover:opacity-100 hover:text-error"
+										onclick={() => handleRemoveTab(tab.id)}
+										type="button"
+										aria-label="Remove tab"
+									>
+										<X size={12} />
+									</button>
 								{/if}
-							</button>
+							</div>
 						{/each}
-						<button class="tab add-tab" onclick={() => openDatasourceModal('add')} type="button">
-							+
+						<button
+							class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-semibold uppercase px-2 py-1 text-fg-muted gap-1 tracking-[0.06em]"
+							onclick={() => openDatasourceModal('add')}
+							type="button"
+						>
+							<Plus size={14} />
 						</button>
 					</div>
 				</div>
 				<button
-					class="collapse-arrow collapse-arrow-right"
+					class="collapse-arrow collapse-arrow-right w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted transition-colors duration-160 border-l border-tertiary hover:text-fg-primary hover:bg-hover"
 					class:collapsed={rightPaneCollapsed}
 					class:hidden={!isEditingMode}
 					onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
@@ -530,62 +579,106 @@
 					title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
 					disabled={!isEditingMode}
 				>
-					{rightPaneCollapsed ? '<' : '>'}
+					{#if rightPaneCollapsed}
+						<ChevronLeft size={14} />
+					{:else}
+						<ChevronRight size={14} />
+					{/if}
 				</button>
 			</div>
-			<div class="header-right">
-				<div class="mode-toggle-container">
+			<div
+				class="header-right flex items-center justify-end h-full box-border border-l border-tertiary panel-width"
+			>
+				<div class="relative items-center px-1">
 					<button
-						class="mode-toggle"
+						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 transition-all duration-160 hover:bg-hover hover:border-tertiary"
 						onclick={() => (showModeDropdown = !showModeDropdown)}
 						type="button"
 					>
 						{isEditingMode ? 'Editing' : 'Viewing'}
-						<span class="dropdown-arrow">▼</span>
+						<ChevronDown size={12} class="text-fg-muted" />
 					</button>
 
 					{#if showModeDropdown}
-						<div class="mode-dropdown">
-							<button class="mode-option" onclick={() => setMode('viewing')} type="button">
-								<span class="radio">{isEditingMode ? '○' : '●'}</span>
+						<div
+							class="mode-dropdown absolute left-0 min-w-35 bg-panel border border-tertiary p-1 z-100"
+						>
+							<button
+								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-160 hover:bg-hover"
+								onclick={() => setMode('viewing')}
+								type="button"
+							>
+								{#if isEditingMode}
+									<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+								{:else}
+									<div class="w-4 h-4 rounded-full bg-accent-primary"></div>
+								{/if}
 								<span>Viewing</span>
 							</button>
-							<button class="mode-option" onclick={() => setMode('editing')} type="button">
-								<span class="radio">{isEditingMode ? '●' : '○'}</span>
+							<button
+								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-160 hover:bg-hover"
+								onclick={() => setMode('editing')}
+								type="button"
+							>
+								{#if isEditingMode}
+									<div class="w-4 h-4 rounded-full bg-accent-primary"></div>
+								{:else}
+									<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+								{/if}
 								<span>Editing</span>
 							</button>
 						</div>
 					{/if}
 				</div>
 
-				<button
-					class="save-button"
-					class:saved={saveStatus.current === 'saved'}
-					class:unsaved={saveStatus.current === 'unsaved'}
-					onclick={handleSave}
-					disabled={!isEditingMode ||
-						isSaving ||
-						saveStatus.current === 'saving' ||
-						analysisStore.loading}
-					type="button"
-				>
-					{saveStatus.current === 'saving'
-						? 'Saving...'
-						: saveStatus.current === 'saved'
-							? 'Saved'
-							: 'Save'}
-				</button>
+				<div class="flex h-full flex-1 p-1">
+					<button
+						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer transition-all duration-160 text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						onclick={discardChanges}
+						disabled={!isEditingMode ||
+							saveStatus.current !== 'unsaved' ||
+							isSaving ||
+							analysisStore.loading}
+						type="button"
+					>
+						Cancel
+					</button>
+					<button
+						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer transition-all duration-160"
+						class:saved={saveStatus.current === 'saved'}
+						class:unsaved={saveStatus.current === 'unsaved'}
+						onclick={handleSave}
+						disabled={!isEditingMode ||
+							isSaving ||
+							saveStatus.current === 'saving' ||
+							analysisStore.loading}
+						type="button"
+					>
+						{saveStatus.current === 'saving'
+							? 'Saving...'
+							: saveStatus.current === 'saved'
+								? 'Saved'
+								: 'Save'}
+					</button>
+				</div>
 			</div>
 		</header>
 
-		<div class="editor-workspace" role="application">
+		<div class="flex flex-1 overflow-hidden select-none bg-secondary" role="application">
 			{#if isEditingMode}
-				<div class="left-pane" class:collapsed={leftPaneCollapsed}>
+				<div
+					class="left-pane shrink-0 overflow-hidden flex h-full box-border bg-panel border-r border-tertiary panel-width"
+					class:collapsed={leftPaneCollapsed}
+				>
 					<StepLibrary onAddStep={handleAddStep} onInsertStep={handleInsertStep} />
 				</div>
 			{/if}
 
-			<div class="center-pane" class:readonly={!isEditingMode} class:expanded={!isEditingMode}>
+			<div
+				class="center-pane flex-1 min-w-50 flex bg-secondary"
+				class:readonly={!isEditingMode}
+				class:expanded={!isEditingMode}
+			>
 				<PipelineCanvas
 					steps={analysisStore.pipeline}
 					{analysisId}
@@ -603,7 +696,10 @@
 			</div>
 
 			{#if isEditingMode}
-				<div class="right-pane" class:collapsed={rightPaneCollapsed}>
+				<div
+					class="right-pane shrink-0 overflow-hidden flex h-full box-border bg-panel border-l border-tertiary panel-width"
+					class:collapsed={rightPaneCollapsed}
+				>
 					<StepConfig
 						bind:step={selectedStepState}
 						schema={analysisStore.calculatedSchema}
@@ -627,410 +723,3 @@
 />
 
 <DragPreview />
-
-<style>
-	.loading-container,
-	.error-container {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		height: calc(100vh - 60px);
-		gap: var(--space-4);
-		text-align: center;
-	}
-
-	.spinner {
-		width: 32px;
-		height: 32px;
-		border: 2px solid var(--border-primary);
-		border-top-color: var(--fg-primary);
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-	}
-
-	.loading-container p {
-		margin: 0;
-	}
-
-	.error-icon {
-		width: 52px;
-		height: 52px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xl);
-		font-weight: var(--font-bold);
-		box-shadow: var(--shadow-soft);
-	}
-
-	.error-container h2,
-	.error-container p {
-		margin: 0;
-	}
-	.error-container button {
-		margin-top: var(--space-4);
-	}
-
-	.editor-container {
-		display: flex;
-		flex-direction: column;
-		height: calc(100vh - 60px);
-		background-color: var(--bg-secondary);
-	}
-
-	.editor-header {
-		display: flex;
-		align-items: stretch;
-		border-bottom: 1px solid var(--panel-border);
-		background-color: var(--panel-bg);
-		height: 48px;
-		position: sticky;
-		top: 0;
-		z-index: var(--z-header);
-	}
-
-	.header-left {
-		display: flex;
-		align-items: center;
-		width: var(--operations-panel-width, 280px);
-		height: 100%;
-		border-right: 1px solid var(--panel-border);
-		box-sizing: border-box;
-		transition: width var(--transition);
-	}
-
-	.header-middle {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0;
-	}
-
-	.header-tabs {
-		flex: 1;
-		overflow: hidden;
-		display: flex;
-		align-items: center;
-		padding: 0 var(--space-4);
-	}
-
-	.header-right {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		width: var(--operations-panel-width, 280px);
-		height: 100%;
-		border-left: 1px solid var(--panel-border);
-		box-sizing: border-box;
-		transition: width var(--transition);
-	}
-
-	.analysis-name {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-		overflow: hidden;
-		padding: 0 var(--space-4);
-	}
-
-	.editable-title {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		letter-spacing: 0.02em;
-		text-transform: uppercase;
-		color: var(--fg-primary);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		outline: none;
-		cursor: text;
-	}
-
-	.editable-title:focus {
-		background-color: var(--bg-hover);
-		border-radius: var(--radius-sm);
-		padding: 0 var(--space-1);
-		margin: 0 calc(var(--space-1) * -1);
-	}
-
-	.description {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		letter-spacing: 0.02em;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.collapse-arrow {
-		width: 24px;
-		height: 100%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: none;
-		border: none;
-		color: var(--fg-muted);
-		font-size: var(--text-lg);
-		cursor: pointer;
-		transition: color var(--transition);
-		flex-shrink: 0;
-	}
-
-	.collapse-arrow:hover:not(:disabled) {
-		color: var(--fg-primary);
-		background-color: var(--bg-hover);
-	}
-	.collapse-arrow.hidden {
-		visibility: hidden;
-		pointer-events: none;
-	}
-	.collapse-arrow-left {
-		border-right: 1px solid var(--panel-border);
-	}
-	.collapse-arrow-right {
-		border-left: 1px solid var(--panel-border);
-	}
-
-	.save-button {
-		flex: 1;
-		height: 100%;
-		background: none;
-		border: none;
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
-
-	.save-button.saved {
-		color: var(--success-fg);
-	}
-	.save-button.unsaved {
-		background-color: var(--warning-bg);
-		color: var(--warning-fg);
-		border-left: 1px solid var(--warning-border);
-	}
-	.save-button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	/* Mode toggle styles */
-	.mode-toggle-container {
-		position: relative;
-		align-items: center;
-		/* flex: 1; */
-		padding: 0 var(--space-4);
-	}
-
-	.mode-toggle {
-		padding: var(--space-2) var(--space-3);
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		color: var(--fg-secondary);
-		font-size: var(--text-sm);
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		transition: all var(--transition);
-	}
-
-	.mode-toggle:hover {
-		background: var(--bg-hover);
-		border-color: var(--border-secondary);
-	}
-
-	.dropdown-arrow {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-
-	.mode-dropdown {
-		position: absolute;
-		top: calc(100% + 4px);
-		left: 0;
-		background: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		box-shadow: var(--shadow-soft);
-		z-index: 100;
-		min-width: 140px;
-		padding: var(--space-1);
-	}
-
-	.mode-option {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		width: 100%;
-		background: none;
-		border: none;
-		color: var(--fg-secondary);
-		font-size: var(--text-sm);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		transition: background-color var(--transition);
-		text-align: left;
-	}
-
-	.mode-option:hover {
-		background: var(--bg-hover);
-	}
-
-	.radio {
-		color: var(--accent-primary);
-		font-weight: var(--font-bold);
-	}
-
-	.tabs {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		overflow-x: auto;
-		width: 100%;
-	}
-
-	.tab {
-		padding: var(--space-1) var(--space-2);
-		background: none;
-		border: none;
-		cursor: pointer;
-		font-size: var(--text-sm);
-		color: var(--fg-muted);
-		font-weight: var(--font-medium);
-		transition: all var(--transition);
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		border-radius: var(--radius-sm);
-	}
-
-	.tab:hover {
-		color: var(--fg-secondary);
-		background-color: var(--bg-hover);
-	}
-	.tab.active {
-		color: var(--fg-primary);
-		background-color: var(--bg-secondary);
-	}
-
-	.tab-label {
-		display: inline-flex;
-		align-items: center;
-		min-width: 0;
-	}
-	.tab-name {
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		max-width: 150px;
-	}
-	.tab-remove {
-		margin-left: var(--space-1);
-		opacity: 0.5;
-		font-size: var(--text-base);
-		line-height: 1;
-	}
-	.tab-remove:hover {
-		opacity: 1;
-		color: var(--error-fg);
-	}
-	.add-tab {
-		font-weight: var(--font-semibold);
-	}
-
-	.editor-workspace {
-		display: flex;
-		flex: 1;
-		overflow: hidden;
-		user-select: none;
-		background-color: var(--bg-secondary);
-	}
-
-	.left-pane,
-	.right-pane {
-		flex-shrink: 0;
-		overflow: hidden;
-		display: flex;
-		width: var(--operations-panel-width, 280px);
-		background-color: var(--panel-bg);
-		box-sizing: border-box;
-		transition:
-			width var(--transition),
-			visibility var(--transition);
-	}
-
-	.left-pane {
-		border-right: 1px solid var(--panel-border);
-	}
-	.right-pane {
-		border-left: 1px solid var(--panel-border);
-	}
-
-	.left-pane.collapsed,
-	.right-pane.collapsed {
-		width: 0;
-		border: none;
-	}
-
-	.left-pane :global(> *),
-	.right-pane :global(> *) {
-		width: 100%;
-		visibility: visible;
-		transition: visibility var(--transition);
-	}
-
-	.left-pane.collapsed :global(> *),
-	.right-pane.collapsed :global(> *) {
-		visibility: hidden;
-	}
-
-	.center-pane {
-		flex: 1;
-		min-width: 200px;
-		display: flex;
-		background-color: var(--bg-secondary);
-	}
-	.center-pane :global(> *) {
-		width: 100%;
-	}
-
-	/* Readonly mode - disable editing but allow scrolling */
-	.readonly {
-		opacity: 0.7;
-	}
-
-	/* Block interactions in readonly mode but keep scroll */
-	.readonly :global(.step-node),
-	.readonly :global(.step-button),
-	.readonly :global(.drag-handle),
-	.readonly :global(.action-btn),
-	.readonly :global(.drop-slot),
-	.readonly :global(.datasource-node) {
-		pointer-events: none !important;
-	}
-
-	/* Expanded center pane when side panes are hidden */
-	.center-pane.expanded {
-		flex: 1;
-	}
-
-	/* Keep the mode toggle clickable even in readonly */
-	.header-right :global(.mode-toggle-container),
-	.header-right :global(.mode-toggle-container *) {
-		pointer-events: auto !important;
-		opacity: 1 !important;
-	}
-</style>

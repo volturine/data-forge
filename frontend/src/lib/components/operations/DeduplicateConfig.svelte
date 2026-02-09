@@ -26,14 +26,17 @@
 
 	<div class="form-section" role="radiogroup" aria-labelledby="keep-strategy-heading">
 		<h4 id="keep-strategy-heading">Keep Strategy</h4>
-		<div class="strategy-grid">
+		<div class="flex flex-col gap-3">
 			{#each keepStrategies as strategy (strategy.value)}
-				<label class="strategy-option">
+				<label
+					class="flex cursor-pointer items-start gap-3 border p-3 transition-all bg-primary border-tertiary hover:border-info hover:bg-hover"
+				>
 					<input
 						type="radio"
 						name="keep-strategy"
 						bind:group={config.keep}
 						value={strategy.value}
+						class="mr-2 cursor-pointer"
 					/>
 					<span>{strategy.label}</span>
 				</label>
@@ -52,41 +55,11 @@
 		/>
 
 		{#if config.subset && config.subset.length > 0}
-			<div class="info-box" aria-live="polite">
+			<div class="info-box mt-2" aria-live="polite">
 				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''} for duplicates
 			</div>
 		{:else}
-			<div class="info-box">No columns selected - will check all columns for duplicates</div>
+			<div class="info-box mt-2">No columns selected - will check all columns for duplicates</div>
 		{/if}
 	</div>
 </div>
-
-<style>
-	.info-box {
-		margin-top: var(--space-2);
-	}
-	.strategy-grid {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-	.strategy-option {
-		display: flex;
-		align-items: flex-start;
-		gap: var(--space-3);
-		padding: var(--space-3);
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		transition: all var(--transition);
-	}
-	.strategy-option:hover {
-		border-color: var(--border-focus);
-		background-color: var(--bg-hover);
-	}
-	.strategy-option input[type='radio'] {
-		margin-right: var(--space-2);
-		cursor: pointer;
-	}
-</style>

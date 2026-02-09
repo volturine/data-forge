@@ -7,6 +7,7 @@
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import { X } from 'lucide-svelte';
 
 	const uid = $props.id();
 
@@ -98,7 +99,7 @@
 			}}
 		/>
 		{#if rightSchema}
-			<div id="join-schema-preview" class="schema-preview" aria-live="polite">
+			<div id="join-schema-preview" class="mt-2 p-2 bg-panel" aria-live="polite">
 				<strong>{rightSchema.columns.length} columns</strong>
 			</div>
 		{/if}
@@ -112,7 +113,11 @@
 				<option value={joinType.value}>{joinType.label}</option>
 			{/each}
 		</select>
-		<div id="join-type-help" class="help-text" aria-describedby="join-type-help">
+		<div
+			id="join-type-help"
+			class="help-box text-sm leading-relaxed p-3 mt-2"
+			aria-describedby="join-type-help"
+		>
 			<strong>Inner:</strong> Only matching rows from both.<br />
 			<strong>Left:</strong> All left rows, matching right rows.<br />
 			<strong>Right:</strong> All right rows, matching left rows.<br />
@@ -123,13 +128,13 @@
 
 	{#if !isCrossJoin}
 		<div class="form-section" role="group" aria-labelledby="join-columns-heading">
-			<div class="section-header">
-				<h4 id="join-columns-heading">Join Columns</h4>
+			<div class="flex justify-between items-center mb-4">
+				<h4 id="join-columns-heading" class="mb-0">Join Columns</h4>
 				<button
 					id="join-btn-add-column"
 					data-testid="join-add-column-button"
 					type="button"
-					class="btn-add"
+					class="btn-add py-1 px-3 border-none cursor-pointer text-sm bg-primary-action text-primary-fg hover:bg-primary-hover"
 					onclick={addJoinColumn}
 					aria-label="Add join column pair"
 				>
@@ -144,9 +149,15 @@
 			{/if}
 
 			{#each config.join_columns ?? [] as joinCol, _index (joinCol.id)}
-				<div class="join-column-row" role="group" aria-label={`Join column pair ${_index + 1}`}>
-					<div class="column-dropdown-wrapper">
-						<label for={`join-left-${joinCol.id}`}>Left Column</label>
+				<div
+					class="flex gap-2 items-end mb-3 p-3 bg-panel"
+					role="group"
+					aria-label={`Join column pair ${_index + 1}`}
+				>
+					<div class="flex-1">
+						<label for={`join-left-${joinCol.id}`} class="block text-xs mb-1 text-fg-muted"
+							>Left Column</label
+						>
 						<ColumnDropdown
 							{schema}
 							value={joinCol.left_column ?? ''}
@@ -154,8 +165,10 @@
 							placeholder="Select..."
 						/>
 					</div>
-					<div class="column-dropdown-wrapper">
-						<label for={`join-right-${joinCol.id}`}>Right Column</label>
+					<div class="flex-1">
+						<label for={`join-right-${joinCol.id}`} class="block text-xs mb-1 text-fg-muted"
+							>Right Column</label
+						>
 						<ColumnDropdown
 							schema={{ columns: rightColumns, row_count: rightSchema?.row_count ?? 0 }}
 							value={joinCol.right_column ?? ''}
@@ -167,11 +180,11 @@
 						id={`join-btn-remove-${_index}`}
 						data-testid={`join-remove-button-${_index}`}
 						type="button"
-						class="btn-remove"
+						class="btn-remove p-2 bg-transparent cursor-pointer text-error-fg border border-error hover:bg-error"
 						onclick={() => removeJoinColumn(joinCol.id)}
 						aria-label={`Remove join column pair ${_index + 1}`}
 					>
-						✕
+						<X size={14} />
 					</button>
 				</div>
 			{/each}
@@ -218,92 +231,8 @@
 			placeholder="_right"
 			aria-describedby="join-suffix-hint"
 		/>
-		<div id="join-suffix-hint" class="help-text">
+		<div id="join-suffix-hint" class="help-box text-sm leading-relaxed p-3 mt-2">
 			Suffix for columns from the right dataset (when names collide)
 		</div>
 	</div>
 </div>
-
-<style>
-	.section-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: var(--space-4);
-	}
-	.section-header h4 {
-		margin-bottom: 0;
-	}
-
-	.form-section select,
-	.form-section input {
-		width: 100%;
-		margin-bottom: var(--space-2);
-	}
-
-	.join-column-row {
-		display: flex;
-		gap: var(--space-2);
-		align-items: flex-end;
-		margin-bottom: var(--space-3);
-		padding: var(--space-3);
-		background-color: var(--panel-bg);
-		border-radius: var(--radius-sm);
-	}
-
-	.column-dropdown-wrapper {
-		flex: 1;
-	}
-	.column-dropdown-wrapper label {
-		display: block;
-		font-size: var(--text-xs);
-		margin-bottom: var(--space-1);
-		color: var(--fg-muted);
-	}
-
-	.btn-add {
-		padding: var(--space-1) var(--space-3);
-		background-color: var(--primary-bg);
-		color: var(--primary-fg);
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-size: var(--text-sm);
-	}
-	.btn-add:hover {
-		background-color: var(--primary-hover);
-	}
-
-	.btn-remove {
-		padding: var(--space-2);
-		background-color: transparent;
-		color: var(--error-fg);
-		border: 1px solid var(--error-fg);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-	}
-	.btn-remove:hover {
-		background-color: var(--error-bg);
-	}
-
-	.schema-preview {
-		margin-top: var(--space-2);
-		padding: var(--space-2);
-		background-color: var(--panel-bg);
-		border-radius: var(--radius-sm);
-	}
-
-	.help-text {
-		font-size: var(--text-sm);
-		color: var(--fg-tertiary);
-		line-height: 1.5;
-		padding: var(--space-3);
-		background-color: var(--form-help-bg);
-		border-left: 3px solid var(--form-help-accent);
-		border-radius: var(--radius-sm);
-		margin-top: var(--space-2);
-		border: 1px solid var(--form-help-border);
-	}
-
-	/* .empty-message — global in app.css */
-</style>

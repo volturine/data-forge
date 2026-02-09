@@ -1,8 +1,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from core.config import settings
 from modules.datasource.models import DataSource
 

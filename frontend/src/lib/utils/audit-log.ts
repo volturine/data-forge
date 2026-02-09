@@ -1,5 +1,7 @@
 import { browser } from '$app/environment';
+import { ResultAsync, errAsync, okAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
+import { configStore } from '$lib/stores/config.svelte';
 
 export type AuditField = {
 	name: string;
@@ -22,12 +24,8 @@ export type AuditLogItem = {
 const endpoint = '/api/v1/logs/client';
 const buffer: AuditLogItem[] = [];
 const dedupe = new Map<string, number>();
-const batch = 20;
-const interval = 5000;
-const limit = 512;
-const cap = 200;
-const mask = /(token|secret|key|auth|bearer)/i;
-const jwt = /eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/;
+const flushFailures = new Map<string, number>();
+
 const state = {
 	timer: null as number | null,
 	session: '',
@@ -54,17 +52,7 @@ function shouldSkipTarget(el: Element | null): boolean {
 	return false;
 }
 
-function redactValue(
-	name: string,
-	value: string,
-	el?: Element | null
-): { value: string; redacted: boolean } {
-	if (el && el.closest('[data-audit="redact"]')) return { value: '[redacted]', redacted: true };
-	if (el instanceof HTMLInputElement && el.type === 'password')
-		return { value: '[redacted]', redacted: true };
-	if (mask.test(name)) return { value: '[redacted]', redacted: true };
-	if (jwt.test(value)) return { value: '[redacted]', redacted: true };
-	if (value.length > limit) return { value: value.slice(0, limit), redacted: true };
+function redactValue(value: string): { value: string; redacted: boolean } {
 	return { value, redacted: false };
 }
 
@@ -101,8 +89,8 @@ function extractFields(form: HTMLFormElement): AuditField[] {
 			element.getAttribute('data-audit-label') ||
 			element.tagName.toLowerCase();
 		const raw = element.value ?? '';
-		const { value, redacted } = redactValue(name, raw, element);
-		fields.push({ name, value, redacted });
+		const result = redactValue(raw);
+		fields.push({ name, value: result.value, redacted: result.redacted });
 	}
 	return fields;
 }
@@ -113,40 +101,95 @@ function pushLog(item: AuditLogItem) {
 		...item,
 		session_id: item.session_id ?? ensureSessionId()
 	};
+	const config = configStore.config;
+	if (!config) return;
+	buffer.push(payload);
 	const now = Date.now();
 	const key = `${payload.event}:${payload.action ?? ''}:${payload.target ?? ''}`;
 	const last = dedupe.get(key);
-	if (last && now - last < 500) return;
+	const dedupeWindowMs = config.log_client_dedupe_window_ms;
+	if (last && now - last < dedupeWindowMs) return;
 	dedupe.set(key, now);
-	buffer.push(payload);
-	if (buffer.length > cap) {
-		buffer.splice(0, buffer.length - cap);
+	const maxBuffer = config.log_queue_max_size;
+	if (buffer.length > maxBuffer) {
+		buffer.splice(0, buffer.length - maxBuffer);
+		if (state.timer) return;
+		const flushIntervalMs = config.log_client_flush_interval_ms;
+		state.timer = window.setTimeout(() => {
+			state.timer = null;
+			flush();
+		}, flushIntervalMs);
+		return;
 	}
-	if (buffer.length >= batch) {
+	const batchSize = config.log_client_batch_size;
+	if (buffer.length >= batchSize) {
 		flush();
 		return;
 	}
 	if (state.timer) return;
+	const flushIntervalMs = config.log_client_flush_interval_ms;
 	state.timer = window.setTimeout(() => {
 		state.timer = null;
 		flush();
-	}, interval);
+	}, flushIntervalMs);
+}
+
+function recordFlushFailure(error: string, payload: AuditLogItem[]) {
+	const config = configStore.config;
+	if (!config) return;
+	const last = flushFailures.get(error);
+	const now = Date.now();
+	const flushCooldownMs = config.log_client_flush_cooldown_ms;
+	if (last && now - last < flushCooldownMs) return;
+	flushFailures.set(error, now);
+	buffer.unshift(
+		{
+			event: 'audit_error',
+			action: 'flush',
+			target: 'client',
+			meta: { error, dropped: payload.length }
+		},
+		...payload
+	);
+	if (state.timer) return;
+	const flushIntervalMs = config.log_client_flush_interval_ms;
+	state.timer = window.setTimeout(() => {
+		state.timer = null;
+		flush();
+	}, flushIntervalMs);
 }
 
 export function flush() {
 	if (!browser || buffer.length === 0) return;
-	const { clientId } = getClientIdentity();
+	const clientId = getClientIdentity().clientId;
 	const payload = buffer.splice(0, buffer.length);
-	fetch(endpoint, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			'X-Client-Id': clientId,
-			'X-Client-Session': ensureSessionId()
-		},
-		body: JSON.stringify({ logs: payload }),
-		keepalive: true
-	}).catch(() => {});
+
+	ResultAsync.fromPromise(
+		fetch(endpoint, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'X-Client-Id': clientId,
+				'X-Client-Session': ensureSessionId()
+			},
+			body: JSON.stringify({ logs: payload }),
+			keepalive: true
+		}),
+		(error) => (error instanceof Error ? error.message : 'Audit log network error')
+	)
+		.andThen((response) => {
+			if (response.ok) return okAsync(true);
+			const fallback = response.statusText || `Audit log request failed (${response.status})`;
+			return ResultAsync.fromPromise(response.text(), () => fallback).andThen((body) =>
+				errAsync(body || fallback)
+			);
+		})
+		.match(
+			() => {},
+			(error) => {
+				recordFlushFailure(String(error), payload);
+			}
+		);
 }
 
 export function setAuditPage(path: string) {
@@ -201,12 +244,12 @@ export function installAuditListeners() {
 		if (shouldSkipTarget(target)) return;
 		if (target instanceof HTMLInputElement && target.type === 'text') return;
 		const name = target.name || target.id || target.tagName.toLowerCase();
-		const { value, redacted } = redactValue(name, target.value ?? '', target);
+		const result = redactValue(target.value ?? '');
 		pushLog({
 			event: 'change',
 			action: target.type || target.tagName.toLowerCase(),
 			target: name,
-			fields: [{ name, value, redacted }],
+			fields: [{ name, value: result.value, redacted: result.redacted }],
 			page: state.page,
 			session_id: state.session
 		});

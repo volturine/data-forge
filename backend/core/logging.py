@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import pyarrow as pa
+import pyarrow as pa  # type: ignore[import-untyped]
 from fastapi import Request, Response
 from pyiceberg.catalog import load_catalog
 from pyiceberg.schema import Schema
@@ -344,9 +344,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         else:
             response_body = response_data
         # Apply size limit to response body
-        if self.max_body_size > 0 and len(response_body) > self.max_body_size:
-            response_body = None
-        self._log_request(request, response, duration_ms, request_id, request_body, response_body, chunk_index=0)
+        body: bytes | None = response_body
+        if body is not None and self.max_body_size > 0 and len(body) > self.max_body_size:
+            body = None
+        self._log_request(request, response, duration_ms, request_id, request_body, body, chunk_index=0)
         return response
 
     def _log_request(

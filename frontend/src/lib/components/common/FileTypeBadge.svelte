@@ -52,34 +52,22 @@
 
 	// Size configurations
 	const sizeConfig = {
-		sm: { fontSize: '10px', padding: '2px 6px', iconSize: 12 },
-		md: { fontSize: '11px', padding: '2px 8px', iconSize: 14 },
-		lg: { fontSize: '12px', padding: '3px 10px', iconSize: 16 }
+		sm: { iconSize: 12 },
+		md: { iconSize: 14 },
+		lg: { iconSize: 16 }
 	};
 
-	let styles = $derived({
-		fontSize: sizeConfig[size].fontSize,
-		padding: sizeConfig[size].padding,
-		color: variant === 'minimal' ? config.colors.color : config.colors.color,
-		borderColor: variant === 'outline' ? config.colors.color : config.colors.borderColor,
-		backgroundColor:
-			variant === 'outline'
-				? 'transparent'
-				: variant === 'minimal'
-					? 'transparent'
-					: config.colors.backgroundColor
+	const sizeClass = $derived(`size-${size}`);
+	const variantClass = $derived(variant === 'default' ? '' : `variant-${variant}`);
+	const typeClass = $derived.by(() => {
+		if (sourceType) return `source-${sourceType}`;
+		const typed = config.type;
+		return `file-${typed}`;
 	});
 </script>
 
 <span
-	class="file-type-badge"
-	class:minimal={variant === 'minimal'}
-	class:outline={variant === 'outline'}
-	style:font-size={styles.fontSize}
-	style:padding={styles.padding}
-	style:color={styles.color}
-	style:border-color={styles.borderColor}
-	style:background-color={styles.backgroundColor}
+	class="file-badge {typeClass} {sizeClass} {variantClass}"
 	role="img"
 	aria-label="{config.label} file type"
 	title={config.description}
@@ -89,30 +77,3 @@
 	{/if}
 	{config.label}
 </span>
-
-<style>
-	.file-type-badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		font-family: var(--font-mono);
-		font-weight: var(--font-medium);
-		border-radius: var(--radius-sm);
-		border-width: 1px;
-		border-style: solid;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		flex-shrink: 0;
-		white-space: nowrap;
-		transition: all var(--transition);
-	}
-
-	.file-type-badge.minimal {
-		border: none;
-		padding: 0;
-	}
-
-	.file-type-badge.outline {
-		border-width: 1px;
-	}
-</style>

@@ -9,6 +9,7 @@
 	import { initializeStores } from '$lib/stores/context.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
+	import { untrack } from 'svelte';
 	import '$lib/../app.css';
 
 	let { children } = $props();
@@ -18,7 +19,10 @@
 	initializeStores();
 
 	// Use runed's PersistedState for persisted theme state across tabs/sessions
-	const theme = new PersistedState<'light' | 'dark'>('theme', 'dark');
+	const themeAttribute =
+		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
+	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
+	const theme = new PersistedState<'light' | 'dark'>('theme', initialTheme);
 	let currentPath = $derived(page.url.pathname);
 
 	$effect(() => {
@@ -27,15 +31,17 @@
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
-		configStore.fetch();
+		untrack(() => configStore.fetch());
 	});
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
+		if (!configStore.config) return;
 		installAuditListeners();
 	});
 
 	$effect(() => {
+		if (!configStore.config) return;
 		setAuditPage(currentPath);
 	});
 
@@ -132,20 +138,24 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	<div class="app">
-		<header class="header">
-			<div class="header-content">
-				<a href={resolve('/')} class="logo" data-sveltekit-reload>
-					<span class="logo-text">polars</span>
-					<span class="logo-divider">/</span>
-					<span class="logo-sub">analysis</span>
+	<div class="flex h-screen flex-col">
+		<header class="sticky top-0 z-header bg-panel">
+			<div class="mx-auto flex max-w-300 items-center gap-6 px-6 py-3">
+				<a
+					href={resolve('/')}
+					class="flex items-center gap-1 text-base font-semibold no-underline"
+					data-sveltekit-reload
+				>
+					<span class="text-fg-primary">polars</span>
+					<span class="text-fg-muted">/</span>
+					<span class="text-fg-tertiary">analysis</span>
 				</a>
 
-				<nav class="nav">
+				<nav class="flex items-center gap-1">
 					{#each navItems as item (item.href)}
 						<a
 							href={resolve(item.href as '/')}
-							class="nav-link"
+							class="nav-link border border-transparent px-3 py-1.5 text-sm text-fg-tertiary no-underline transition-colors hover:text-fg-primary"
 							class:active={currentPath === item.href ||
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs')}
@@ -156,10 +166,10 @@
 					{/each}
 				</nav>
 
-				<div class="header-actions">
+				<div class="ml-auto flex items-center gap-2">
 					<EngineMonitor />
 					<button
-						class="theme-toggle"
+						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary transition-all hover:bg-bg-hover hover:text-fg-primary"
 						onclick={toggleTheme}
 						title="Toggle theme"
 						aria-label="Toggle theme"
@@ -174,106 +184,8 @@
 			</div>
 		</header>
 
-		<main class="main">
+		<main class="min-h-0 flex-1 overflow-y-auto bg-bg-secondary">
 			{@render children()}
 		</main>
 	</div>
 </QueryClientProvider>
-
-<style>
-	:global(html, body) {
-		height: 100%;
-		overflow: hidden;
-	}
-	.app {
-		height: 100vh;
-		display: flex;
-		flex-direction: column;
-	}
-	.header {
-		border-bottom: 1px solid var(--border-primary);
-		background-color: var(--bg-primary);
-		position: sticky;
-		top: 0;
-		z-index: var(--z-header);
-		backdrop-filter: blur(8px);
-	}
-	.header-content {
-		max-width: 1200px;
-		margin: 0 auto;
-		padding: var(--space-3) var(--space-6);
-		display: flex;
-		align-items: center;
-		gap: var(--space-6);
-	}
-	.logo {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		text-decoration: none;
-		font-weight: var(--font-semibold);
-		font-size: var(--text-base);
-	}
-	.logo-text {
-		color: var(--fg-primary);
-	}
-	.logo-divider {
-		color: var(--fg-muted);
-	}
-	.logo-sub {
-		color: var(--fg-tertiary);
-	}
-	.nav {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-	}
-	.nav-link {
-		padding: var(--space-2) var(--space-3);
-		text-decoration: none;
-		color: var(--fg-tertiary);
-		font-size: var(--text-sm);
-		border-radius: var(--radius-sm);
-		transition: all var(--transition);
-		border: 1px solid transparent;
-	}
-	.nav-link:hover {
-		color: var(--fg-primary);
-		background-color: var(--bg-hover);
-		border-color: var(--border-primary);
-	}
-	.nav-link.active {
-		color: var(--fg-primary);
-		background-color: var(--bg-tertiary);
-		border-color: var(--border-primary);
-	}
-	.header-actions {
-		margin-left: auto;
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.theme-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-2);
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		color: var(--fg-secondary);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		transition: all var(--transition);
-		box-shadow: var(--card-shadow);
-	}
-	.theme-toggle:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-	.main {
-		flex: 1;
-		background-color: var(--bg-secondary);
-		overflow-y: auto;
-		min-height: 0;
-	}
-</style>

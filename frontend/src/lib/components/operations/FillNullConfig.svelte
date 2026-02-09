@@ -42,6 +42,7 @@
 			id="fill-select-strategy"
 			data-testid="fill-strategy-select"
 			bind:value={config.strategy}
+			class="mb-2 w-full"
 		>
 			{#each strategies as strategy (strategy.value)}
 				<option value={strategy.value}>{strategy.label}</option>
@@ -58,6 +59,7 @@
 				type="text"
 				bind:value={config.value}
 				placeholder="Enter value (e.g., 0, N/A)"
+				class="mb-2 w-full"
 			/>
 			<ColumnTypeDropdown
 				value={config.value_type ?? 'Utf8'}
@@ -84,11 +86,3 @@
 		{/if}
 	</div>
 </div>
-
-<style>
-	select,
-	input[type='text'] {
-		width: 100%;
-		margin-bottom: var(--space-2);
-	}
-</style>

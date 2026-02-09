@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
 	import { onClickOutside } from 'runed';
+	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
 
@@ -8,7 +9,7 @@
 	let killing = $state<string | null>(null);
 
 	$effect(() => {
-		enginesStore.startPolling();
+		untrack(() => enginesStore.startPolling());
 		return () => enginesStore.stopPolling();
 	});
 
@@ -34,6 +35,9 @@
 
 	function toggleExpanded() {
 		expanded = !expanded;
+		if (expanded) {
+			enginesStore.fetch();
+		}
 	}
 
 	let dropdownRef = $state<HTMLElement>();
@@ -46,74 +50,92 @@
 	);
 </script>
 
-<div class="engine-monitor">
+<div class="relative" bind:this={dropdownRef}>
 	<button
-		class="trigger"
-		class:active={expanded}
-		class:has-engines={enginesStore.count > 0}
+		class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs transition-all text-fg-tertiary hover:text-fg-primary"
+		class:!bg-bg-hover={expanded}
+		class:!text-fg-primary={expanded}
+		class:text-fg-secondary={enginesStore.count > 0}
 		onclick={toggleExpanded}
 		title="Engine Monitor"
 	>
 		<Cpu size={16} />
 		{#if enginesStore.count > 0}
-			<span class="count">{enginesStore.count}</span>
+			<span class="min-w-4.5 px-2 text-center text-xs font-semibold bg-accent text-bg-primary">
+				{enginesStore.count}
+			</span>
 		{/if}
-		<ChevronDown size={12} class="chevron" />
+		<span class="transition-transform" class:rotate-180={expanded}>
+			<ChevronDown size={12} />
+		</span>
 	</button>
 
 	{#if expanded}
-		<div class="dropdown" bind:this={dropdownRef}>
-			<div class="dropdown-header">
-				<span class="dropdown-title">Active Engines</span>
-				<button class="close-btn" onclick={() => (expanded = false)}>
+		<div
+			class="absolute right-0 top-full z-engine w-70 overflow-hidden border bg-primary border-tertiary"
+		>
+			<div class="flex items-center justify-between border-b p-3 bg-secondary border-tertiary">
+				<span class="text-sm font-semibold text-fg-primary">Active Engines</span>
+				<button
+					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 transition-all text-fg-muted hover:bg-hover hover:text-fg-primary"
+					onclick={() => (expanded = false)}
+				>
 					<X size={14} />
 				</button>
 			</div>
 
-			<div class="dropdown-content">
+			<div class="max-h-75 overflow-y-auto">
 				{#if enginesStore.count === 0}
 					{#if enginesStore.loading}
-						<div class="empty">
-							<LoaderCircle size={16} class="spinner" />
+						<div
+							class="flex items-center justify-center gap-2 p-6 text-center text-sm text-fg-muted"
+						>
+							<LoaderCircle size={16} class="animate-spin" />
 							<span>Loading...</span>
 						</div>
 					{:else}
-						<div class="empty">
+						<div class="p-6 text-center text-sm text-fg-muted">
 							<span>No active engines</span>
 						</div>
 					{/if}
 				{:else}
-					<ul class="engine-list">
+					<ul class="m-0 list-none p-0">
 						{#each enginesStore.engines as engine (engine.analysis_id)}
-							<li class="engine-item">
-								<div class="engine-info">
-									<div class="engine-row">
-										<span class="engine-id" title={engine.analysis_id}>
+							<li class="flex items-center gap-3 border-b p-3 last:border-b-0 border-tertiary">
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2">
+										<span class="font-mono text-xs text-fg-primary" title={engine.analysis_id}>
 											{engine.analysis_id.slice(0, 8)}...
 										</span>
 										<span
-											class="engine-status"
-											class:healthy={engine.status === 'healthy'}
-											class:terminated={engine.status === 'terminated'}
+											class="rounded-full px-2 py-px text-xs font-medium uppercase"
+											class:bg-accent-bg={engine.status === 'healthy'}
+											class:text-accent-primary={engine.status === 'healthy'}
+											class:bg-tertiary={engine.status !== 'healthy'}
+											class:text-fg-muted={engine.status !== 'healthy'}
 										>
 											{engine.status}
 										</span>
 									</div>
-									<div class="engine-meta">
+									<div class="mt-1 flex items-center gap-2">
 										{#if engine.current_job_id}
-											<span class="job-badge">Job: {engine.current_job_id.slice(0, 6)}</span>
+											<span class="font-mono text-xs text-accent">
+												Job: {engine.current_job_id.slice(0, 6)}
+											</span>
 										{/if}
-										<span class="last-activity">{formatTime(engine.last_activity)}</span>
+										<span class="text-xs text-fg-muted">
+											{formatTime(engine.last_activity)}
+										</span>
 									</div>
 								</div>
 								<button
-									class="kill-btn"
+									class="flex cursor-pointer items-center justify-center border p-1 transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-transparent border-tertiary text-fg-muted hover:bg-error hover:border-error hover:text-error-fg"
 									onclick={() => handleKill(engine.analysis_id)}
 									disabled={killing === engine.analysis_id}
 									title="Shutdown engine"
 								>
 									{#if killing === engine.analysis_id}
-										<LoaderCircle size={12} class="spinner" />
+										<LoaderCircle size={12} class="animate-spin" />
 									{:else}
 										<X size={12} />
 									{/if}
@@ -125,208 +147,10 @@
 			</div>
 
 			{#if enginesStore.error}
-				<div class="error">{enginesStore.error}</div>
+				<div class="border-t p-2 text-xs bg-error text-error-fg border-error">
+					{enginesStore.error}
+				</div>
 			{/if}
 		</div>
-		<button class="backdrop" aria-label="Close engine monitor"></button>
 	{/if}
 </div>
-
-<style>
-	.engine-monitor {
-		position: relative;
-	}
-	.trigger {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		color: var(--fg-tertiary);
-		font-size: var(--text-xs);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		transition: all var(--transition);
-		box-shadow: var(--card-shadow);
-	}
-	.trigger:hover,
-	.trigger.active {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-	.trigger.has-engines {
-		color: var(--fg-secondary);
-	}
-	.count {
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		padding: 0 var(--space-2);
-		border-radius: var(--radius-full);
-		font-size: var(--text-xs);
-		font-weight: 600;
-		min-width: 18px;
-		text-align: center;
-	}
-	.trigger :global(.chevron) {
-		transition: transform var(--transition);
-	}
-	.trigger.active :global(.chevron) {
-		transform: rotate(180deg);
-	}
-	.backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 99;
-		background: transparent;
-		border: none;
-		cursor: default;
-	}
-	.dropdown {
-		position: absolute;
-		top: calc(100% + var(--space-2));
-		right: 0;
-		width: 280px;
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		box-shadow: var(--dialog-shadow);
-		z-index: 100;
-		overflow: hidden;
-	}
-	.dropdown-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-3);
-		border-bottom: 1px solid var(--border-primary);
-		background-color: var(--bg-secondary);
-	}
-	.dropdown-title {
-		font-size: var(--text-sm);
-		font-weight: 600;
-		color: var(--fg-primary);
-	}
-	.close-btn {
-		background: transparent;
-		border: none;
-		padding: var(--space-1);
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: var(--radius-sm);
-		color: var(--fg-muted);
-		transition: all var(--transition);
-	}
-	.close-btn:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-	.dropdown-content {
-		max-height: 300px;
-		overflow-y: auto;
-	}
-	.empty {
-		padding: var(--space-6);
-		text-align: center;
-		color: var(--fg-muted);
-		font-size: var(--text-sm);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-2);
-	}
-	.engine-list {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-	}
-	.engine-item {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		padding: var(--space-3);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.engine-item:last-child {
-		border-bottom: none;
-	}
-	.engine-info {
-		flex: 1;
-		min-width: 0;
-	}
-	.engine-row {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.engine-id {
-		font-family: var(--font-mono);
-		font-size: var(--text-xs);
-		color: var(--fg-primary);
-	}
-	.engine-status {
-		font-size: var(--text-xs);
-		padding: 1px var(--space-2);
-		border-radius: var(--radius-full);
-		background-color: var(--bg-tertiary);
-		color: var(--fg-muted);
-		text-transform: uppercase;
-		font-weight: 500;
-	}
-	.engine-status.healthy {
-		background-color: var(--success-bg);
-		color: var(--success-fg);
-	}
-	.engine-status.terminated {
-		background-color: var(--bg-tertiary);
-		color: var(--fg-muted);
-	}
-	.engine-meta {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		margin-top: var(--space-1);
-	}
-	.job-badge {
-		font-size: var(--text-xs);
-		color: var(--accent-primary);
-		font-family: var(--font-mono);
-	}
-	.last-activity {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-	.kill-btn {
-		background-color: transparent;
-		border: 1px solid var(--border-primary);
-		color: var(--fg-muted);
-		padding: var(--space-1);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all var(--transition);
-	}
-	.kill-btn:hover:not(:disabled) {
-		background-color: var(--error-bg);
-		border-color: var(--error-border);
-		color: var(--error-fg);
-	}
-	.kill-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.error {
-		padding: var(--space-2) var(--space-3);
-		background-color: var(--error-bg);
-		color: var(--error-fg);
-		font-size: var(--text-xs);
-		border-top: 1px solid var(--error-border);
-	}
-	:global(.spinner) {
-		animation: spin 1s linear infinite;
-	}
-</style>

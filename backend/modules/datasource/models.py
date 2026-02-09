@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, JSON, String
+from sqlalchemy import JSON, Column, DateTime, String
 from sqlmodel import Field, SQLModel
 
 

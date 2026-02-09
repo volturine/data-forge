@@ -130,15 +130,17 @@
 	const canSave = $derived(name.trim().length > 0 && code.trim().length > 0);
 </script>
 
-<div class="container">
-	<header class="page-header">
-		<div class="header-left">
-			<button class="btn-back" onclick={handleBack}>
+<div class="max-w-240 mx-auto p-6 h-full overflow-auto">
+	<header
+		class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 pb-5 border-b border-tertiary"
+	>
+		<div class="flex items-center gap-3">
+			<button class="btn-back" onclick={handleBack} type="button">
 				<ArrowLeft size={18} />
 			</button>
 			<div>
 				<h1>{mode === 'create' ? 'New UDF' : 'Edit UDF'}</h1>
-				<p class="subtitle">Reusable Python transforms for your pipelines</p>
+				<p class="m-0 text-fg-tertiary">Reusable Python transforms for your pipelines</p>
 			</div>
 		</div>
 		<button class="btn-primary" onclick={() => saveMutation.mutate()} disabled={!canSave || saving}>
@@ -150,25 +152,25 @@
 	{#if query.isLoading}
 		<div class="info-box">Loading UDF...</div>
 	{:else}
-		<div class="content">
-			<div class="form">
-				<div class="form-group">
-					<label for="udf-name">Name</label>
+		<div class="flex flex-col gap-5">
+			<div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4">
+				<div class="flex flex-col gap-2">
+					<label for="udf-name" class="text-sm text-fg-secondary">Name</label>
 					<input id="udf-name" type="text" bind:value={name} placeholder="UDF name" />
 				</div>
-				<div class="form-group">
-					<label for="udf-description">Description</label>
+				<div class="flex flex-col gap-2">
+					<label for="udf-description" class="text-sm text-fg-secondary">Description</label>
 					<textarea id="udf-description" rows="3" bind:value={description}></textarea>
 				</div>
-				<div class="form-group">
-					<label for="udf-tags">Tags (comma-separated)</label>
+				<div class="flex flex-col gap-2">
+					<label for="udf-tags" class="text-sm text-fg-secondary">Tags (comma-separated)</label>
 					<input id="udf-tags" type="text" bind:value={tags} placeholder="math, text, date" />
 				</div>
 			</div>
 
-			<div class="panel">
+			<div class="flex flex-col gap-3 p-4 border bg-primary border-tertiary">
 				<UdfSignatureBuilder {inputs} onChange={updateInputs} />
-				<div class="output">
+				<div class="flex flex-col gap-2">
 					<label for="udf-output">Output dtype</label>
 					<ColumnTypeDropdown
 						value={outputDtype}
@@ -178,10 +180,10 @@
 				</div>
 			</div>
 
-			<div class="panel">
-				<div class="panel-header">
-					<h4>Code</h4>
-					<span class="hint">Define a function named <code>udf</code></span>
+			<div class="flex flex-col gap-3 p-4 border bg-primary border-tertiary">
+				<div class="flex justify-between items-center">
+					<h4 class="m-0 text-sm text-fg-secondary">Code</h4>
+					<span class="text-xs text-fg-muted">Define a function named <code>udf</code></span>
 				</div>
 				<CodeEditor bind:value={code} height="360px" />
 			</div>
@@ -192,103 +194,3 @@
 		</div>
 	{/if}
 </div>
-
-<style>
-	.container {
-		max-width: 960px;
-		margin: 0 auto;
-		padding: var(--space-6);
-		height: 100%;
-		overflow: auto;
-	}
-	.page-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: var(--space-4);
-		margin-bottom: var(--space-6);
-		padding-bottom: var(--space-5);
-		border-bottom: 1px solid var(--border-primary);
-	}
-	.header-left {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-	}
-	.btn-back {
-		width: 36px;
-		height: 36px;
-		padding: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background-color: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		color: var(--fg-secondary);
-	}
-	.btn-back:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-	.subtitle {
-		margin: 0;
-		color: var(--fg-tertiary);
-	}
-	.content {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-5);
-	}
-	.form {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-		gap: var(--space-4);
-	}
-	.form-group {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	.form-group label {
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	.panel {
-		background-color: var(--bg-primary);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		padding: var(--space-4);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-	.panel-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-	.panel-header h4 {
-		margin: 0;
-		font-size: var(--text-sm);
-		color: var(--fg-secondary);
-	}
-	.hint {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-	}
-	.output {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	@media (max-width: 720px) {
-		.page-header {
-			flex-direction: column;
-			align-items: stretch;
-		}
-		.form {
-			grid-template-columns: 1fr;
-		}
-	}
-</style>

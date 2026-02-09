@@ -55,7 +55,7 @@ def create_udf(session: Session, data: UdfCreateSchema) -> UdfResponseSchema:
 
 
 def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))
+    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
@@ -73,7 +73,7 @@ def list_udfs(
     # Apply SQL-level text search filtering
     if query:
         q = f'%{query.lower()}%'
-        stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))
+        stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))  # type: ignore[arg-type, attr-defined, union-attr]
 
     result = session.execute(stmt)
     udfs = result.scalars().all()
@@ -97,7 +97,7 @@ def list_udfs(
 
 
 def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))
+    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
@@ -123,7 +123,7 @@ def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfRespo
 
 
 def delete_udf(session: Session, udf_id: str) -> None:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))
+    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
@@ -132,7 +132,7 @@ def delete_udf(session: Session, udf_id: str) -> None:
 
 
 def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfResponseSchema:
-    result = session.execute(select(Udf).where(Udf.id == udf_id))
+    result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
         raise ValueError(f'UDF {udf_id} not found')
@@ -177,7 +177,7 @@ def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseS
         for item in payload.udfs:
             _validate_code(item.code)
 
-            existing_result = session.execute(select(Udf).where(Udf.name == item.name))
+            existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
             udf = existing_result.scalar_one_or_none()
 
             if udf and not payload.overwrite:
@@ -232,7 +232,10 @@ def seed_defaults(session: Session) -> list[UdfResponseSchema]:
                 output_dtype='Float64',
             ),
             code=(
-                'def udf(numerator, denominator):\n    if denominator in (0, None):\n        return None\n    return numerator / denominator\n'
+                'def udf(numerator, denominator):\n'
+                '    if denominator in (0, None):\n'
+                '        return None\n'
+                '    return numerator / denominator\n'
             ),
             tags=['math', 'ratio'],
             source='seeded',

@@ -22,7 +22,7 @@
 <div class="config-panel" role="region" aria-label="Top K configuration">
 	<h3>Top K Configuration</h3>
 
-	<div class="form-group">
+	<div class="form-group mb-4">
 		<div class="form-label">Column to sort by</div>
 		<ColumnDropdown
 			{schema}
@@ -32,7 +32,7 @@
 		/>
 	</div>
 
-	<div class="form-group">
+	<div class="form-group mb-4">
 		<label for="topk-input-k">Number of rows (k)</label>
 		<input
 			id="topk-input-k"
@@ -45,8 +45,8 @@
 		/>
 	</div>
 
-	<div class="form-group">
-		<label class="checkbox-label">
+	<div class="form-group mb-0">
+		<label class="flex cursor-pointer items-center gap-2">
 			<input
 				id="topk-checkbox-descending"
 				data-testid="topk-descending-checkbox"
@@ -62,18 +62,3 @@
 		>
 	</div>
 </div>
-
-<style>
-	.form-group {
-		margin-bottom: var(--space-4);
-	}
-	.form-group:last-child {
-		margin-bottom: 0;
-	}
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		cursor: pointer;
-	}
-</style>

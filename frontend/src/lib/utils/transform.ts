@@ -126,8 +126,7 @@ export function groupbyTransform(input: Schema | null, config: StepConfig): Sche
 	for (const col of groupBy ?? []) {
 		result.push({
 			name: col,
-			dtype:
-				normalizeDtype(input.columns.find((column) => column.name === col)?.dtype) ?? 'Any',
+			dtype: normalizeDtype(input.columns.find((column) => column.name === col)?.dtype) ?? 'Any',
 			nullable: false
 		});
 	}

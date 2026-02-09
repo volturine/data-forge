@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from modules.compute.engine import PolarsComputeEngine
 from modules.datasource.models import DataSource
 

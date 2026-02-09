@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { DataSource } from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 
@@ -41,12 +42,12 @@
 
 	const selectedSet = $derived(() => {
 		if (mode === 'single') {
-			return selected ? new Set([selected as string]) : new Set<string>();
+			return selected ? new SvelteSet([selected as string]) : new SvelteSet<string>();
 		}
-		return new Set((selected as string[]) ?? []);
+		return new SvelteSet((selected as string[]) ?? []);
 	});
 
-	const excludedSet = $derived(new Set(excludeIds));
+	const excludedSet = $derived(new SvelteSet(excludeIds));
 
 	const availableOptions = $derived(datasources.filter((ds) => !excludedSet.has(ds.id)));
 
@@ -72,7 +73,7 @@
 		}
 		const arr = selected as string[] | undefined;
 		if (!arr?.length) return [];
-		const set = new Set(arr);
+		const set = new SvelteSet(arr);
 		return datasources.filter((ds) => set.has(ds.id));
 	});
 
@@ -98,8 +99,7 @@
 			search = '';
 		} else {
 			const arr = (selected as string[]) ?? [];
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const set = new Set(arr);
+			const set = new SvelteSet(arr);
 			if (set.has(id)) {
 				set.delete(id);
 				onDeselect?.(id);
@@ -115,8 +115,7 @@
 		if (mode !== 'multi') return;
 		const filtered = filteredOptions();
 		const filteredIds = filtered.map((ds) => ds.id);
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const current = new Set((selected as string[]) ?? []);
+		const current = new SvelteSet((selected as string[]) ?? []);
 		filteredIds.forEach((id) => current.add(id));
 		selected = Array.from(current);
 		filtered.forEach((ds) => {
@@ -148,14 +147,10 @@
 	const listboxId = $derived(id ? `${id}-datasource-listbox` : 'datasource-listbox');
 </script>
 
-<div
-	class="datasource-picker"
-	class:mode-single={mode === 'single'}
-	class:mode-multi={mode === 'multi'}
->
+<div class="relative w-full">
 	<input
 		type="text"
-		class="picker-input"
+		class="w-full border border-tertiary bg-panel-bg px-3 py-2 font-mono text-sm text-fg-primary focus:border-info focus:outline-none"
 		bind:value={search}
 		onfocus={handleFocus}
 		onblur={handleBlur}
@@ -169,13 +164,18 @@
 	/>
 
 	{#if showPicker}
-		<div class="picker-dropdown" role="listbox" id={listboxId} aria-label="Available datasources">
+		<div
+			class="absolute left-0 right-0 top-full z-50 mt-1 max-h-50 overflow-y-auto border border-tertiary bg-panel-bg"
+			role="listbox"
+			id={listboxId}
+			aria-label="Available datasources"
+		>
 			{#if filteredOptions().length === 0}
-				<div class="picker-empty">No datasources found</div>
+				<div class="p-4 text-center text-sm text-fg-muted">No datasources found</div>
 			{:else}
 				{#each filteredOptions() as ds (ds.id)}
 					<button
-						class="picker-option"
+						class="picker-option flex w-full cursor-pointer items-center justify-between border-b border-tertiary bg-transparent px-3 py-2 font-mono text-left text-sm text-fg-primary last:border-b-0 hover:bg-bg-hover"
 						class:selected={isSelected(ds.id)}
 						class:highlighted={ds.id === highlightId}
 						onmousedown={(e) => {
@@ -186,9 +186,11 @@
 						aria-selected={isSelected(ds.id)}
 						type="button"
 					>
-						<span class="option-name">{ds.name}</span>
+						<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{ds.name}</span>
 						{#if ds.id === highlightId}
-							<span class="option-badge current">current</span>
+							<span class="ml-2 border border-info bg-info-bg px-2 py-1 text-xs text-info-fg"
+								>current</span
+							>
 						{:else if ds.source_type === 'file'}
 							<FileTypeBadge
 								path={(ds.config?.file_path as string) ?? ''}
@@ -209,12 +211,15 @@
 	{/if}
 
 	{#if mode === 'multi' && showChips && selectedDatasources().length > 0}
-		<div class="picker-chips">
+		<div class="mt-2 flex flex-wrap gap-2">
 			{#each selectedDatasources() as ds (ds.id)}
-				<span class="chip" class:highlighted={ds.id === highlightId}>
+				<span
+					class="chip inline-flex items-center gap-1 border border-tertiary bg-badge-bg px-2 py-1 text-xs text-badge-fg"
+					class:highlighted={ds.id === highlightId}
+				>
 					{ds.name}
 					<button
-						class="chip-remove"
+						class="chip-remove inline-flex h-4 w-4 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
 						onclick={() => deselect(ds.id)}
 						aria-label={`Remove ${ds.name}`}
 						type="button"
@@ -227,159 +232,9 @@
 	{/if}
 
 	{#if mode === 'multi' && showBulkActions && filteredOptions().length > 0}
-		<div class="picker-actions">
+		<div class="mt-2 flex gap-2">
 			<button class="btn-secondary btn-sm" onclick={selectAll} type="button">Select All</button>
 			<button class="btn-secondary btn-sm" onclick={deselectAll} type="button">Deselect All</button>
 		</div>
 	{/if}
 </div>
-
-<style>
-	.datasource-picker {
-		position: relative;
-		width: 100%;
-	}
-
-	.picker-input {
-		width: 100%;
-		padding: var(--space-2) var(--space-3);
-		font-size: var(--text-sm);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		background-color: var(--panel-bg);
-		color: var(--fg-primary);
-		font-family: var(--font-mono);
-	}
-
-	.picker-input:focus {
-		outline: none;
-		border-color: var(--accent-primary);
-	}
-
-	.picker-dropdown {
-		position: absolute;
-		top: 100%;
-		left: 0;
-		right: 0;
-		margin-top: var(--space-1);
-		background-color: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		box-shadow: var(--shadow-dropdown);
-		z-index: var(--z-dropdown);
-		max-height: 200px;
-		overflow-y: auto;
-	}
-
-	.picker-option {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		width: 100%;
-		padding: var(--space-2) var(--space-3);
-		background: none;
-		border: none;
-		cursor: pointer;
-		text-align: left;
-		font-family: var(--font-mono);
-		font-size: var(--text-sm);
-		color: var(--fg-primary);
-		border-bottom: 1px solid var(--panel-border);
-	}
-
-	.picker-option:last-child {
-		border-bottom: none;
-	}
-
-	.picker-option:hover {
-		background-color: var(--bg-hover);
-	}
-
-	.picker-option.selected {
-		background-color: var(--accent-bg);
-	}
-
-	.picker-option.highlighted {
-		border-left: 3px solid var(--accent-primary);
-	}
-
-	.option-name {
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.option-badge {
-		font-size: var(--text-xs);
-		padding: var(--space-1) var(--space-2);
-		background-color: var(--badge-bg);
-		border: 1px solid var(--badge-border);
-		border-radius: var(--radius-sm);
-		color: var(--badge-fg);
-		margin-left: var(--space-2);
-	}
-
-	.option-badge.current {
-		background-color: var(--info-bg);
-		border-color: var(--info-border);
-		color: var(--info-fg);
-	}
-
-	.picker-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		margin-top: var(--space-2);
-	}
-
-	.chip {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-		padding: var(--space-1) var(--space-2);
-		background-color: var(--badge-bg);
-		border: 1px solid var(--badge-border);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-xs);
-		color: var(--badge-fg);
-	}
-
-	.chip.highlighted {
-		background-color: var(--info-bg);
-		border-color: var(--info-border);
-		color: var(--info-fg);
-	}
-
-	.chip-remove {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0;
-		background: none;
-		border: none;
-		cursor: pointer;
-		color: var(--fg-muted);
-		border-radius: var(--radius-sm);
-		width: 16px;
-		height: 16px;
-	}
-
-	.chip-remove:hover {
-		color: var(--fg-primary);
-		background-color: var(--bg-hover);
-	}
-
-	.picker-actions {
-		display: flex;
-		gap: var(--space-2);
-		margin-top: var(--space-2);
-	}
-
-	.picker-empty {
-		padding: var(--space-4);
-		text-align: center;
-		color: var(--fg-muted);
-		font-size: var(--text-sm);
-	}
-</style>

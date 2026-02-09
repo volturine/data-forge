@@ -102,9 +102,11 @@
 	{#if needsParam('start') || needsParam('end')}
 		<div class="form-section" role="group" aria-labelledby="slice-params-heading">
 			<h4 id="slice-params-heading">Slice Parameters</h4>
-			<div class="inline-group">
-				<div class="input-group">
-					<label for="str-input-start">Start Index:</label>
+			<div class="flex gap-4">
+				<div class="flex-1">
+					<label for="str-input-start" class="block text-sm font-medium mb-1 text-fg-secondary"
+						>Start Index:</label
+					>
 					<input
 						id="str-input-start"
 						data-testid="str-start-input"
@@ -114,8 +116,10 @@
 					/>
 					<span id="str-start-help" class="sr-only">Starting index for substring</span>
 				</div>
-				<div class="input-group">
-					<label for="str-input-end">End Index (optional):</label>
+				<div class="flex-1">
+					<label for="str-input-end" class="block text-sm font-medium mb-1 text-fg-secondary"
+						>End Index (optional):</label
+					>
 					<input
 						id="str-input-end"
 						data-testid="str-end-input"
@@ -135,8 +139,10 @@
 	{#if needsParam('pattern') && needsParam('replacement')}
 		<div class="form-section" role="group" aria-labelledby="replace-params-heading">
 			<h4 id="replace-params-heading">Replace Parameters</h4>
-			<div class="input-group">
-				<label for="str-input-pattern">Pattern to find:</label>
+			<div>
+				<label for="str-input-pattern" class="block text-sm font-medium mb-1 text-fg-secondary"
+					>Pattern to find:</label
+				>
 				<input
 					id="str-input-pattern"
 					data-testid="str-pattern-input"
@@ -149,8 +155,10 @@
 					>Text or regular expression pattern to find and replace</span
 				>
 			</div>
-			<div class="input-group">
-				<label for="str-input-replacement">Replacement:</label>
+			<div>
+				<label for="str-input-replacement" class="block text-sm font-medium mb-1 text-fg-secondary"
+					>Replacement:</label
+				>
 				<input
 					id="str-input-replacement"
 					data-testid="str-replacement-input"
@@ -169,8 +177,11 @@
 	{#if needsParam('pattern') && needsParam('group_index')}
 		<div class="form-section" role="group" aria-labelledby="extract-params-heading">
 			<h4 id="extract-params-heading">Extract Parameters</h4>
-			<div class="input-group">
-				<label for="str-input-extract-pattern">Regex Pattern:</label>
+			<div>
+				<label
+					for="str-input-extract-pattern"
+					class="block text-sm font-medium mb-1 text-fg-secondary">Regex Pattern:</label
+				>
 				<input
 					id="str-input-extract-pattern"
 					data-testid="str-extract-pattern-input"
@@ -183,8 +194,10 @@
 					>Regular expression with capture group to extract</span
 				>
 			</div>
-			<div class="input-group">
-				<label for="str-input-group-index">Group Index:</label>
+			<div>
+				<label for="str-input-group-index" class="block text-sm font-medium mb-1 text-fg-secondary"
+					>Group Index:</label
+				>
 				<input
 					id="str-input-group-index"
 					data-testid="str-group-index-input"
@@ -203,8 +216,11 @@
 	{#if needsParam('delimiter') && !needsParam('index')}
 		<div class="form-section" role="group" aria-labelledby="split-delimiter-heading">
 			<h4 id="split-delimiter-heading">Split Delimiter</h4>
-			<div class="input-group">
-				<label for="str-input-delimiter-only">Delimiter:</label>
+			<div>
+				<label
+					for="str-input-delimiter-only"
+					class="block text-sm font-medium mb-1 text-fg-secondary">Delimiter:</label
+				>
 				<input
 					id="str-input-delimiter-only"
 					data-testid="str-delimiter-only-input"
@@ -223,8 +239,10 @@
 	{#if needsParam('delimiter') && needsParam('index')}
 		<div class="form-section" role="group" aria-labelledby="split-params-heading">
 			<h4 id="split-params-heading">Split & Take Parameters</h4>
-			<div class="input-group">
-				<label for="str-input-delimiter">Delimiter:</label>
+			<div>
+				<label for="str-input-delimiter" class="block text-sm font-medium mb-1 text-fg-secondary"
+					>Delimiter:</label
+				>
 				<input
 					id="str-input-delimiter"
 					data-testid="str-delimiter-input"
@@ -237,8 +255,10 @@
 					>Delimiter character or string to split on</span
 				>
 			</div>
-			<div class="input-group">
-				<label for="str-input-part-index">Part Index:</label>
+			<div>
+				<label for="str-input-part-index" class="block text-sm font-medium mb-1 text-fg-secondary"
+					>Part Index:</label
+				>
 				<input
 					id="str-input-part-index"
 					data-testid="str-part-index-input"
@@ -270,26 +290,3 @@
 		>
 	</div>
 </div>
-
-<style>
-	.warning-box {
-		font-size: var(--text-sm);
-		color: var(--error-fg);
-		margin-top: var(--space-2);
-		margin-bottom: 0;
-	}
-	.inline-group {
-		display: flex;
-		gap: var(--space-4);
-	}
-	.input-group {
-		flex: 1;
-	}
-	.input-group label {
-		display: block;
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		margin-bottom: var(--space-1);
-		color: var(--fg-secondary);
-	}
-</style>

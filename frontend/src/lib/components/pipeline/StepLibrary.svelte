@@ -4,7 +4,7 @@
 	interface StepType {
 		type: string;
 		label: string;
-		icon: string;
+		icon: typeof Filter;
 		description: string;
 	}
 
@@ -103,64 +103,123 @@
 		cancelLongPress();
 	}
 
+	import {
+		ArrowUpDown,
+		BarChart3,
+		Bomb,
+		Brush,
+		Calculator,
+		Calendar,
+		CircleHelp,
+		Dices,
+		Eye,
+		Filter,
+		LayoutGrid,
+		Link,
+		Pencil,
+		Repeat,
+		Repeat2,
+		Scissors,
+		Trophy,
+		Type,
+		Upload,
+		Wrench,
+		ListChecks,
+		Trash2
+	} from 'lucide-svelte';
+
 	const stepTypes: StepType[] = [
-		{ type: 'filter', label: 'Filter', icon: '🔍', description: 'Filter rows by conditions' },
-		{ type: 'select', label: 'Select', icon: '📋', description: 'Select specific columns' },
-		{ type: 'groupby', label: 'Group By', icon: '📊', description: 'Group and aggregate data' },
-		{ type: 'sort', label: 'Sort', icon: '↕️', description: 'Sort rows by columns' },
-		{ type: 'rename', label: 'Rename', icon: '✏️', description: 'Rename columns' },
-		{ type: 'drop', label: 'Drop', icon: '🗑️', description: 'Remove columns' },
-		{ type: 'join', label: 'Join', icon: '🔗', description: 'Join with another dataset' },
-		{ type: 'expression', label: 'Expression', icon: '🧮', description: 'Create computed columns' },
-		{ type: 'with_columns', label: 'With Columns', icon: '🧮', description: 'Add/Update columns' },
-		{ type: 'pivot', label: 'Pivot', icon: '🔄', description: 'Reshape data wide' },
-		{ type: 'unpivot', label: 'Unpivot', icon: '🔃', description: 'Reshape data long' },
-		{ type: 'fill_null', label: 'Fill Null', icon: '🔧', description: 'Handle missing values' },
-		{ type: 'deduplicate', label: 'Deduplicate', icon: '🧹', description: 'Remove duplicate rows' },
-		{ type: 'explode', label: 'Explode', icon: '💥', description: 'Expand list columns' },
-		{ type: 'timeseries', label: 'Time Series', icon: '📅', description: 'Date/time operations' },
+		{ type: 'filter', label: 'Filter', icon: Filter, description: 'Filter rows by conditions' },
+		{ type: 'select', label: 'Select', icon: ListChecks, description: 'Select specific columns' },
+		{
+			type: 'groupby',
+			label: 'Group By',
+			icon: BarChart3,
+			description: 'Group and aggregate data'
+		},
+		{ type: 'sort', label: 'Sort', icon: ArrowUpDown, description: 'Sort rows by columns' },
+		{ type: 'rename', label: 'Rename', icon: Pencil, description: 'Rename columns' },
+		{ type: 'drop', label: 'Drop', icon: Trash2, description: 'Remove columns' },
+		{ type: 'join', label: 'Join', icon: Link, description: 'Join with another dataset' },
+		{
+			type: 'expression',
+			label: 'Expression',
+			icon: Calculator,
+			description: 'Create computed columns'
+		},
+		{
+			type: 'with_columns',
+			label: 'With Columns',
+			icon: Calculator,
+			description: 'Add/Update columns'
+		},
+		{ type: 'pivot', label: 'Pivot', icon: Repeat, description: 'Reshape data wide' },
+		{ type: 'unpivot', label: 'Unpivot', icon: Repeat2, description: 'Reshape data long' },
+		{ type: 'fill_null', label: 'Fill Null', icon: Wrench, description: 'Handle missing values' },
+		{
+			type: 'deduplicate',
+			label: 'Deduplicate',
+			icon: Brush,
+			description: 'Remove duplicate rows'
+		},
+		{ type: 'explode', label: 'Explode', icon: Bomb, description: 'Expand list columns' },
+		{
+			type: 'timeseries',
+			label: 'Time Series',
+			icon: Calendar,
+			description: 'Date/time operations'
+		},
 		{
 			type: 'string_transform',
 			label: 'String Transform',
-			icon: '📝',
+			icon: Type,
 			description: 'Text manipulation'
 		},
-		{ type: 'sample', label: 'Sample', icon: '🎲', description: 'Random sample rows' },
-		{ type: 'limit', label: 'Limit', icon: '✂️', description: 'Keep first N rows' },
-		{ type: 'topk', label: 'Top K', icon: '🏆', description: 'Get top K rows by column' },
+		{ type: 'sample', label: 'Sample', icon: Dices, description: 'Random sample rows' },
+		{ type: 'limit', label: 'Limit', icon: Scissors, description: 'Keep first N rows' },
+		{ type: 'topk', label: 'Top K', icon: Trophy, description: 'Get top K rows by column' },
 		{
 			type: 'null_count',
 			label: 'Null Count',
-			icon: '❓',
+			icon: CircleHelp,
 			description: 'Count null values per column'
 		},
 		{
 			type: 'value_counts',
 			label: 'Value Counts',
-			icon: '📊',
+			icon: BarChart3,
 			description: 'Get value frequencies'
 		},
-		{ type: 'view', label: 'View', icon: '👁️', description: 'Preview data at this step' },
+		{ type: 'view', label: 'View', icon: Eye, description: 'Preview data at this step' },
 		{
 			type: 'union_by_name',
 			label: 'Union By Name',
-			icon: '🧩',
+			icon: LayoutGrid,
 			description: 'Union rows from multiple datasources'
 		},
-		{ type: 'export', label: 'Export', icon: '📤', description: 'Export data to file' }
+		{ type: 'export', label: 'Export', icon: Upload, description: 'Export data to file' }
 	];
 
 	// Quick insert selected type
 	let selectedType = $state<string | null>(null);
 </script>
 
-<div class="step-library">
-	<img class="drag-preview" alt="" bind:this={dragImageEl} />
-	<h3>Operations</h3>
-	<div class="step-list" role="list">
+<div
+	class="step-library flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden bg-panel-bg px-3 py-4"
+>
+	<img
+		class="drag-preview pointer-events-none fixed -left-2500 -top-2500 h-px w-px opacity-0"
+		alt=""
+		bind:this={dragImageEl}
+	/>
+	<h3 class="m-0 mb-3 shrink-0 text-sm uppercase tracking-widest text-fg-primary">Operations</h3>
+	<div
+		class="step-list flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden"
+		role="list"
+	>
 		{#each stepTypes as stepType (stepType.type)}
 			<button
-				class="step-button"
+				class="step-button relative flex cursor-grab items-center justify-start gap-3 border border-transparent bg-transparent p-3 text-left transition-colors hover:border-tertiary hover:bg-bg-hover"
 				class:dragging
 				onclick={() => handleClick(stepType.type)}
 				onpointerdown={(event) => startDrag(event, stepType.type)}
@@ -171,19 +230,20 @@
 				data-step={stepType.type}
 				data-drag-handle="true"
 			>
-				<span class="step-icon" data-drag-handle="true">{stepType.icon}</span>
-				<div class="step-info">
-					<span class="step-label">{stepType.label}</span>
-					<span class="step-description">{stepType.description}</span>
+				<stepType.icon size={18} class="shrink-0" data-drag-handle="true" />
+				<div class="flex min-w-0 flex-col items-start gap-0.5">
+					<span class="text-sm font-semibold text-fg-primary">{stepType.label}</span>
+					<span class="truncate text-xs text-fg-muted">{stepType.description}</span>
 				</div>
 			</button>
 		{/each}
 	</div>
 
-	<div class="fallback-actions">
-		<h4>Quick Insert</h4>
-		<div class="fallback-controls">
+	<div class="mt-4 shrink-0 border-t border-tertiary pt-3">
+		<h4 class="m-0 mb-2 text-xs uppercase tracking-wide text-fg-muted">Quick Insert</h4>
+		<div class="flex flex-col gap-2">
 			<select
+				class="rounded-sm border border-tertiary bg-bg-secondary p-2 text-fg-primary"
 				value={selectedType ?? ''}
 				onchange={(event) => (selectedType = event.currentTarget.value || null)}
 			>
@@ -192,8 +252,9 @@
 					<option value={stepType.type}>{stepType.label}</option>
 				{/each}
 			</select>
-			<div class="fallback-buttons">
+			<div class="grid grid-cols-2 gap-2">
 				<button
+					class="fallback-btn cursor-pointer border border-tertiary bg-transparent p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {
@@ -206,6 +267,7 @@
 					Add to end
 				</button>
 				<button
+					class="fallback-btn cursor-pointer border border-tertiary bg-transparent p-2 text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {
@@ -221,150 +283,3 @@
 		</div>
 	</div>
 </div>
-
-<style>
-	.step-library {
-		width: 100%;
-		padding: var(--space-4) var(--space-3);
-		background-color: var(--panel-bg);
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
-		gap: var(--space-3);
-	}
-	.drag-preview {
-		position: fixed;
-		top: -9999px;
-		left: -9999px;
-		width: 1px;
-		height: 1px;
-		opacity: 0;
-		pointer-events: none;
-	}
-	h3 {
-		margin-top: 0;
-		margin-bottom: var(--space-3);
-		font-size: var(--text-sm);
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--fg-primary);
-		flex-shrink: 0;
-	}
-	.step-list {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		overflow-y: auto;
-		overflow-x: hidden;
-		flex: 1;
-		min-height: 0;
-	}
-	.step-button {
-		display: flex;
-		align-items: center;
-		justify-content: flex-start;
-		gap: 0.75rem;
-		padding: var(--space-3);
-		background-color: transparent;
-		border: 1px solid transparent;
-		border-radius: 6px;
-		cursor: grab;
-		transition:
-			background-color var(--transition),
-			border-color var(--transition);
-		text-align: left;
-		position: relative;
-	}
-	.step-button::before {
-		content: '';
-		position: absolute;
-		top: 6px;
-		left: 6px;
-		bottom: 6px;
-		right: 6px;
-		border-radius: 6px;
-	}
-	.step-button:hover {
-		border-color: var(--border-secondary);
-		background-color: var(--bg-hover);
-	}
-	.step-button:active {
-		cursor: grabbing;
-	}
-	.step-button.dragging {
-		user-select: none;
-		-webkit-user-select: none;
-		-webkit-touch-callout: none;
-		touch-action: none;
-	}
-	:global(body.touch-dragging) {
-		user-select: none;
-		-webkit-user-select: none;
-		-webkit-touch-callout: none;
-	}
-	.step-icon {
-		font-size: 1.25rem;
-		flex-shrink: 0;
-	}
-	.step-info {
-		display: flex;
-		flex-direction: column;
-		gap: 0.125rem;
-		align-items: flex-start;
-		min-width: 0;
-	}
-	.step-label {
-		font-weight: 600;
-		color: var(--fg-primary);
-		font-size: var(--text-sm);
-	}
-	.step-description {
-		font-size: 0.75rem;
-		color: var(--fg-muted);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.fallback-actions {
-		margin-top: var(--space-4);
-		padding-top: var(--space-3);
-		border-top: 1px solid var(--panel-border);
-		flex-shrink: 0;
-	}
-	.fallback-actions h4 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-xs);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--fg-muted);
-	}
-	.fallback-controls {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-	.fallback-controls select {
-		padding: 0.5rem;
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-secondary);
-		color: var(--fg-primary);
-	}
-	.fallback-buttons {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: var(--space-2);
-	}
-	.fallback-controls button {
-		padding: 0.5rem;
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		background-color: transparent;
-		color: var(--fg-primary);
-		cursor: pointer;
-	}
-	.fallback-controls button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-</style>

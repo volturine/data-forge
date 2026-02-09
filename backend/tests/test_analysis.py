@@ -1,4 +1,3 @@
-import pytest
 from sqlalchemy import select
 
 from modules.analysis.models import Analysis, AnalysisDataSource
@@ -351,18 +350,16 @@ class TestAnalysisDelete:
         assert 'not found' in response.json()['detail']
 
     def test_delete_analysis_cascades_links(self, client, sample_analysis: Analysis, test_db_session):
-        from sqlalchemy import select
-
         analysis_id = sample_analysis.id
 
-        result = test_db_session.execute(select(AnalysisDataSource).where((AnalysisDataSource.analysis_id == analysis_id)))  # type: ignore[arg-type]
+        result = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
         links_before = result.scalars().all()
         assert len(links_before) > 0
 
         response = client.delete(f'/api/v1/analysis/{analysis_id}')
         assert response.status_code == 200
 
-        result = test_db_session.execute(select(AnalysisDataSource).where((AnalysisDataSource.analysis_id == analysis_id)))  # type: ignore[arg-type]
+        result = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
         links_after = result.scalars().all()
         assert len(links_after) == 0
 

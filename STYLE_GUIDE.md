@@ -1,71 +1,64 @@
-## Style Guide
+# Style Guide
 
-- Keep things in one function unless composable or reusable
-- Avoid unnecessary destructuring. Instead of `const { a, b } = obj`, use `obj.a` and `obj.b` to preserve context
-- Avoid `try`/`catch` where possible
-- Avoid using the `any` type
-- Prefer single word variable names where possible
-- Use Bun APIs when possible, like `Bun.file()`
+**MANDATORY READ FOR AI ASSISTANTS** - OpenCode, Copilot, Claude Code must follow this guidance when working on this repository.
 
-# Avoid let statements
+Code style standards for this repository. See `AGENTS.md` for project-specific patterns.
 
-We don't like `let` statements, especially combined with if/else statements.
-Prefer `const`.
+## Core Principles
 
-Good:
+- **Prefer `const`** over `let` - avoid reassigning variables
+- **Avoid `else`** - use early returns
+- **Single word names** - keep identifiers short
+- **Unified functions** - don't split unless composable
+- **No unnecessary destructuring** - use `obj.a` instead of `const { a } = obj`
+- **Avoid `try/catch`** - handle errors at boundaries
+- **No `any`** type - use proper types
+
+## Examples
+
+### Prefer const
 
 ```ts
+// Good
 const foo = condition ? 1 : 2;
-```
 
-Bad:
-
-```ts
+// Bad
 let foo;
-
 if (condition) foo = 1;
 else foo = 2;
 ```
 
-# Avoid else statements
-
-Prefer early returns or using an `iife` to avoid else statements.
-
-Good:
+### Avoid else
 
 ```ts
+// Good
 function foo() {
   if (condition) return 1;
   return 2;
 }
-```
 
-Bad:
-
-```ts
+// Bad
 function foo() {
   if (condition) return 1;
   else return 2;
 }
 ```
 
-# Prefer single word naming
-
-Try your best to find a single word name for your variables, functions, etc.
-Only use multiple words if you cannot.
-
-Good:
+### Single word naming
 
 ```ts
+// Good
 const foo = 1;
 const bar = 2;
-const baz = 3;
-```
 
-Bad:
-
-```ts
+// Bad
 const fooBar = 1;
 const barBaz = 2;
-const bazFoo = 3;
 ```
+
+## File Naming
+
+- Python: `snake_case.py`
+- TypeScript: `kebab-case.ts`
+- Svelte components: `PascalCase.svelte`
+- Stores: `*.svelte.ts`

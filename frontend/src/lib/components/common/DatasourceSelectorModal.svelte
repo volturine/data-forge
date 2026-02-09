@@ -80,7 +80,7 @@
 
 {#if show}
 	<div
-		class="modal-backdrop"
+		class="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-overlay animate-fade-in"
 		onclick={handleClose}
 		onkeydown={handleBackdropKeydown}
 		role="button"
@@ -88,7 +88,7 @@
 		aria-label="Close modal"
 	>
 		<div
-			class="modal"
+			class="flex max-h-[80vh] w-full max-w-120 flex-col border focus:outline-none max-sm:max-w-full bg-panel border-tertiary animate-slide-up"
 			bind:this={modalRef}
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={(e) => e.stopPropagation()}
@@ -97,32 +97,41 @@
 			aria-labelledby="modal-title"
 			tabindex="-1"
 		>
-			<div class="modal-header">
-				<h2 id="modal-title">{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}</h2>
-				<button class="modal-close" onclick={handleClose} aria-label="Close">
+			<div class="flex items-center justify-between border-b p-4 border-tertiary">
+				<h2 id="modal-title" class="m-0 text-sm font-semibold text-fg-primary">
+					{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}
+				</h2>
+				<button
+					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 transition-all text-fg-muted hover:bg-hover hover:text-fg-primary"
+					onclick={handleClose}
+					aria-label="Close"
+				>
 					<X size={20} />
 				</button>
 			</div>
-			<div class="modal-body">
+			<div class="flex flex-col gap-4 overflow-y-auto p-4">
 				<input
-					class="search-input"
+					class="w-full border px-3 py-3 text-sm transition-all focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-info"
 					type="text"
 					bind:this={searchInput}
 					bind:value={searchQuery}
 					placeholder="Search datasources..."
 				/>
-				<div class="datasource-list">
+				<div class="flex max-h-75 flex-col gap-1 overflow-y-auto">
 					{#if isLoading}
-						<div class="list-empty">Loading...</div>
+						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">Loading...</div>
 					{:else if filteredDatasources.length === 0}
-						<div class="list-empty">
+						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
 							{searchQuery ? 'No matching datasources' : 'No datasources available'}
 						</div>
 					{:else}
 						{#each filteredDatasources as ds (ds.id)}
-							<button class="datasource-item" onclick={() => handleSelect(ds.id, ds.name)}>
-								<span class="datasource-name">{ds.name}</span>
-								<span class="datasource-type">
+							<button
+								class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left transition-all hover:bg-hover hover:border-tertiary"
+								onclick={() => handleSelect(ds.id, ds.name)}
+							>
+								<span class="text-sm font-medium text-fg-primary">{ds.name}</span>
+								<span class="flex items-center gap-1 text-fg-muted">
 									{#if ds.source_type === 'file'}
 										<FileTypeBadge path={ds.config.file_path as string} size="sm" showIcon={true} />
 									{:else}
@@ -141,165 +150,3 @@
 		</div>
 	</div>
 {/if}
-
-<style>
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background-color: var(--overlay-bg);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-		padding: var(--space-4);
-		animation: fadeIn var(--transition);
-	}
-
-	@keyframes fadeIn {
-		from {
-			opacity: 0;
-		}
-		to {
-			opacity: 1;
-		}
-	}
-
-	.modal {
-		background-color: var(--panel-bg);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-md);
-		box-shadow: var(--shadow-lg);
-		max-width: 480px;
-		width: 100%;
-		max-height: 80vh;
-		display: flex;
-		flex-direction: column;
-		animation: slideIn var(--transition);
-	}
-
-	@keyframes slideIn {
-		from {
-			transform: translateY(-10px);
-			opacity: 0;
-		}
-		to {
-			transform: translateY(0);
-			opacity: 1;
-		}
-	}
-
-	.modal:focus {
-		outline: none;
-	}
-
-	.modal-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-4);
-		border-bottom: 1px solid var(--panel-border);
-	}
-
-	.modal-header h2 {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: var(--font-semibold);
-		color: var(--fg-primary);
-	}
-
-	.modal-close {
-		background: transparent;
-		border: none;
-		padding: var(--space-1);
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: var(--radius-sm);
-		color: var(--fg-muted);
-		transition: all var(--transition);
-	}
-
-	.modal-close:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-
-	.modal-body {
-		padding: var(--space-4);
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-	}
-
-	.search-input {
-		width: 100%;
-		padding: var(--space-3) var(--space-3);
-		border: 1px solid var(--panel-border);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-sm);
-		color: var(--fg-primary);
-		background-color: var(--bg-primary);
-		transition: border-color var(--transition);
-	}
-
-	.search-input:focus {
-		outline: none;
-		border-color: var(--accent-primary);
-	}
-
-	.datasource-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		max-height: 300px;
-		overflow-y: auto;
-	}
-
-	.datasource-item {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-3);
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		text-align: left;
-		transition: all var(--transition);
-	}
-
-	.datasource-item:hover {
-		background-color: var(--bg-hover);
-		border-color: var(--panel-border);
-	}
-
-	.datasource-name {
-		font-size: var(--text-sm);
-		font-weight: 500;
-		color: var(--fg-primary);
-	}
-
-	.datasource-type {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		color: var(--fg-muted);
-	}
-
-	.list-empty {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-8);
-		color: var(--fg-muted);
-		font-size: var(--text-sm);
-	}
-
-	@media (max-width: 640px) {
-		.modal {
-			max-width: 100%;
-		}
-	}
-</style>

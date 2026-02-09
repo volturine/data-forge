@@ -29,7 +29,6 @@ class DatasourceParams(OperationParams):
     query: str | None = None
     db_path: str | None = None
     read_only: bool = True
-    column_schema: list[dict] | None = None
     metadata_path: str | None = None
     snapshot_id: int | None = None
     storage_options: dict | None = None

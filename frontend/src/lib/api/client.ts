@@ -54,9 +54,13 @@ export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAs
 				target: endpoint,
 				meta: { status: response.status, statusText: response.statusText }
 			});
-			return ResultAsync.fromPromise(
-				response.text().catch(() => response.statusText),
-				() => createApiError('http', response.statusText, response.status, response.statusText)
+			return ResultAsync.fromPromise(response.text(), (error) =>
+				createApiError(
+					'http',
+					error instanceof Error ? error.message : response.statusText,
+					response.status,
+					response.statusText
+				)
 			).andThen((errorText) =>
 				err(
 					createApiError(
@@ -110,9 +114,13 @@ export function apiBlobRequest(
 				target: endpoint,
 				meta: { status: response.status, statusText: response.statusText }
 			});
-			return ResultAsync.fromPromise(
-				response.text().catch(() => response.statusText),
-				() => createApiError('http', response.statusText, response.status, response.statusText)
+			return ResultAsync.fromPromise(response.text(), (error) =>
+				createApiError(
+					'http',
+					error instanceof Error ? error.message : response.statusText,
+					response.status,
+					response.statusText
+				)
 			).andThen((errorText) =>
 				err(
 					createApiError(

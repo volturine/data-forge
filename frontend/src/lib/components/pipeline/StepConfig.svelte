@@ -26,6 +26,7 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
+	import { track } from '$lib/utils/audit-log';
 	import { normalizeConfig } from '$lib/utils/step-config-defaults';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
@@ -51,6 +52,7 @@
 	import UnpivotConfig from '$lib/components/operations/UnpivotConfig.svelte';
 	import ExportConfig from '$lib/components/operations/ExportConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
+	import { Settings2, X } from 'lucide-svelte';
 
 	type WithColumnsConfigShape = {
 		expressions: Array<{
@@ -158,7 +160,13 @@
 				fetchingPivotSchema = false;
 			})
 			.mapErr((error: unknown) => {
-				console.error('Failed to fetch pivot schema:', error);
+				const err = error instanceof Error ? error.message : String(error);
+				track({
+					event: 'schema_error',
+					action: 'pivot_schema',
+					target: step.id,
+					meta: { message: err }
+				});
 				fetchingPivotSchema = false;
 			});
 	}
@@ -181,31 +189,47 @@
 </script>
 
 {#if step === null}
-	<div class="step-config empty">
-		<div class="empty-message">
-			<div class="empty-icon">⚙️</div>
-			<h3>No step selected</h3>
-			<p>Click on a pipeline step to configure it</p>
+	<div
+		class="step-config box-border flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto bg-panel-bg text-fg-primary"
+	>
+		<div class="flex flex-col items-center justify-center p-6 text-center text-fg-muted">
+			<div class="mb-4 opacity-50"><Settings2 size={32} /></div>
+			<h3 class="m-0 mb-2 text-lg text-fg-primary">No step selected</h3>
+			<p class="m-0 text-sm">Click on a pipeline step to configure it</p>
 		</div>
 	</div>
 {:else}
-	<div class="step-config">
-		<div class="config-header">
-			<h3>Configure Step</h3>
-			<button class="close-button" onclick={() => onClose?.()} type="button" title="Close">×</button
+	<div
+		class="step-config box-border flex h-full min-h-0 w-full flex-col overflow-y-auto bg-panel-bg text-fg-primary"
+	>
+		<div
+			class="config-header relative flex items-center justify-between border-b border-tertiary bg-panel-bg p-4"
+		>
+			<h3 class="m-0 text-sm font-semibold uppercase tracking-widest text-fg-primary">
+				Configure Step
+			</h3>
+			<button
+				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted transition-all hover:bg-bg-hover hover:text-fg-primary"
+				onclick={() => onClose?.()}
+				type="button"
+				title="Close"
 			>
+				<X size={16} />
+			</button>
 		</div>
 
-		<div class="config-body">
+		<div class="config-body flex-1 overflow-y-auto bg-panel-bg p-3">
 			{#if !schema && !isLoadingSchema}
 				<div class="warning-message">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
 					<button onclick={() => onClose?.()} type="button">Close</button>
 				</div>
 			{:else if isLoadingSchema}
-				<div class="loading-message">
+				<div
+					class="flex flex-col items-center justify-center gap-3 bg-panel-bg p-6 text-center text-fg-tertiary"
+				>
 					<div class="spinner-md"></div>
-					<p>Loading schema...</p>
+					<p class="m-0">Loading schema...</p>
 				</div>
 			{:else if step.type === 'filter'}
 				<FilterConfig
@@ -278,8 +302,8 @@
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={draftConfig as unknown as ViewConfigData} />
 			{:else if step.type === 'datasource'}
-				<div class="not-implemented">
-					<p>Datasource options are set during upload.</p>
+				<div class="bg-panel-bg p-6 text-center">
+					<p class="m-0 mb-3 text-fg-tertiary">Datasource options are set during upload.</p>
 				</div>
 			{:else if step.type === 'sample'}
 				<SampleConfig bind:config={draftConfig as unknown as SampleConfigData} />
@@ -311,15 +335,21 @@
 					}
 				/>
 			{:else}
-				<div class="not-implemented">
-					<p>Configuration for {step.type} is not yet implemented</p>
-					<button onclick={() => onClose?.()} type="button">Close</button>
+				<div class="bg-panel-bg p-6 text-center">
+					<p class="m-0 mb-3 text-fg-tertiary">
+						Configuration for {step.type} is not yet implemented
+					</p>
+					<button
+						class="cursor-pointer border-none bg-accent-bg px-5 py-2 font-mono text-accent-primary"
+						onclick={() => onClose?.()}
+						type="button">Close</button
+					>
 				</div>
 			{/if}
 		</div>
-		<div class="config-actions">
+		<div class="flex gap-2 border-t border-tertiary bg-panel-bg p-3">
 			<button
-				class="action-button cancel"
+				class="action-button cancel flex-1 cursor-pointer border border-tertiary bg-transparent px-3 py-2 font-mono text-sm font-semibold text-fg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleCancelConfig}
 				disabled={!hasChanges}
 				type="button"
@@ -327,7 +357,7 @@
 				Cancel
 			</button>
 			<button
-				class="action-button apply"
+				class="action-button apply flex-1 cursor-pointer border border-tertiary bg-accent-bg px-3 py-2 font-mono text-sm font-semibold text-accent-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleApplyConfig}
 				disabled={!hasChanges}
 				type="button"
@@ -337,160 +367,3 @@
 		</div>
 	</div>
 {/if}
-
-<style>
-	.step-config {
-		width: 100%;
-		background-color: var(--panel-bg);
-		display: flex;
-		flex-direction: column;
-		overflow-y: auto;
-		color: var(--fg-primary);
-	}
-	.step-config,
-	.step-config * {
-		box-sizing: border-box;
-	}
-	.step-config.empty {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background-color: var(--panel-bg);
-	}
-	.empty-message {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-6);
-		color: var(--fg-muted);
-		text-align: center;
-	}
-	.empty-icon {
-		font-size: 2.5rem;
-		margin-bottom: var(--space-4);
-		opacity: 0.5;
-	}
-	.empty-message h3 {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--text-lg);
-		color: var(--fg-primary);
-	}
-	.empty-message p {
-		margin: 0;
-		font-size: var(--text-sm);
-	}
-	.config-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-4);
-		border-bottom: none;
-		background-color: var(--panel-bg);
-		position: relative;
-		box-shadow:
-			inset 0 -1px 0 var(--panel-border),
-			inset 0 -3px 0 var(--panel-border),
-			inset 0 -5px 0 var(--panel-border);
-	}
-	.config-header h3 {
-		margin: 0;
-		font-size: var(--text-sm);
-		font-weight: 600;
-		color: var(--fg-primary);
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-	.close-button {
-		width: 32px;
-		height: 32px;
-		padding: 0;
-		background-color: transparent;
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-size: 1.5rem;
-		line-height: 1;
-		color: var(--fg-muted);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all var(--transition);
-	}
-	.close-button:hover {
-		background-color: var(--bg-hover);
-		color: var(--fg-primary);
-	}
-	.config-body {
-		flex: 1;
-		overflow-y: auto;
-		padding: var(--space-3);
-		background-color: var(--panel-bg);
-	}
-	.config-actions {
-		display: flex;
-		gap: var(--space-2);
-		padding: var(--space-3);
-		border-top: 1px solid var(--panel-border);
-		background-color: var(--panel-bg);
-	}
-	.action-button {
-		flex: 1;
-		padding: var(--space-2) var(--space-3);
-		border-radius: var(--radius-sm);
-		font-size: var(--text-sm);
-		font-weight: 600;
-		border: 1px solid var(--border-primary);
-		cursor: pointer;
-		transition: all var(--transition);
-		font-family: var(--font-mono);
-	}
-	.action-button.cancel {
-		background-color: transparent;
-		color: var(--fg-primary);
-	}
-	.action-button.apply {
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border-color: var(--accent-primary);
-	}
-	.action-button:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-	.action-button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.not-implemented {
-		padding: var(--space-6);
-		text-align: center;
-		background-color: var(--panel-bg);
-	}
-	.not-implemented p {
-		margin: 0 0 var(--space-3) 0;
-		color: var(--fg-tertiary);
-	}
-	.not-implemented button {
-		padding: var(--space-2) var(--space-5);
-		background-color: var(--accent-primary);
-		color: var(--bg-primary);
-		border: none;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-mono);
-	}
-	.not-implemented button:hover {
-		opacity: 0.9;
-	}
-	.loading-message {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-6);
-		color: var(--fg-tertiary);
-		text-align: center;
-		gap: var(--space-3);
-		background-color: var(--panel-bg);
-	}
-</style>

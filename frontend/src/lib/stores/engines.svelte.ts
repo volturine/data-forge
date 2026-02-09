@@ -9,15 +9,13 @@ export class EnginesStore {
 
 	private interval: number | null = null;
 
-	get count(): number {
-		return this.engines.length;
-	}
+	count = $derived(this.engines.length);
 
 	async fetch(): Promise<void> {
 		this.loading = true;
 		this.error = null;
 
-		listEngines().match(
+		await listEngines().match(
 			(response) => {
 				this.engines = response.engines;
 				this.loading = false;
@@ -30,7 +28,7 @@ export class EnginesStore {
 	}
 
 	async shutdownEngine(analysisId: string): Promise<void> {
-		shutdownEngineApi(analysisId).match(
+		await shutdownEngineApi(analysisId).match(
 			() => {
 				this.engines = this.engines.filter((e) => e.analysis_id !== analysisId);
 			},
@@ -44,8 +42,10 @@ export class EnginesStore {
 	async startPolling(): Promise<void> {
 		if (this.interval !== null) return;
 
-		// Ensure config is loaded before polling
-		await configStore.fetch();
+		// Try to load config but don't block polling if it fails
+		if (!configStore.config) {
+			await configStore.fetch();
+		}
 
 		this.fetch();
 

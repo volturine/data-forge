@@ -30,6 +30,7 @@
 		<textarea
 			id="expr-textarea-expression"
 			data-testid="expr-expression-textarea"
+			class="w-full resize-y mb-2"
 			bind:value={config.expression}
 			placeholder="e.g., pl.col(&quot;price&quot;) * 1.2"
 			rows="4"
@@ -39,14 +40,37 @@
 			>Enter a Polars expression using pl.col() to reference columns</span
 		>
 
-		<div id="expr-syntax-help" class="help-text" aria-label="Syntax help">
+		<div
+			id="expr-syntax-help"
+			class="help-text help-box text-sm leading-relaxed p-3"
+			aria-label="Syntax help"
+		>
 			<strong>Polars Expression Syntax:</strong><br />
-			Use <code>pl.col("column")</code> to reference columns.<br />
+			Use
+			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
+				>pl.col("column")</code
+			>
+			to reference columns.<br />
 			Examples:<br />
-			• <code>pl.col("price") * 1.2</code> - Multiply<br />
-			• <code>pl.col("value").cast(pl.Float64)</code> - Cast type<br />
-			• <code>pl.col("name").str.to_uppercase()</code> - String method<br />
-			• <code>pl.col("date").dt.year()</code> - Date component
+			-
+			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
+				>pl.col("price") * 1.2</code
+			>
+			- Multiply<br />
+			-
+			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
+				>pl.col("value").cast(pl.Float64)</code
+			>
+			- Cast type<br />
+			-
+			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
+				>pl.col("name").str.to_uppercase()</code
+			>
+			- String method<br />
+			-
+			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
+				>pl.col("date").dt.year()</code
+			> - Date component
 		</div>
 	</div>
 
@@ -66,37 +90,12 @@
 		<h4 id="expr-columns-heading">Insert Column</h4>
 		<ColumnDropdown
 			{schema}
-			value={''}
+			value=""
 			onChange={(val) => insertColumn(val)}
 			placeholder="Select column to insert..."
 		/>
-		<p class="help-text">Select a column to insert it into the expression above.</p>
+		<p class="text-sm mt-2 text-fg-tertiary">
+			Select a column to insert it into the expression above.
+		</p>
 	</div>
 </div>
-
-<style>
-	/* Component-specific styles - dropdown pattern defined in app.css */
-	textarea {
-		width: 100%;
-		resize: vertical;
-		margin-bottom: var(--space-2);
-	}
-	.help-text {
-		font-size: var(--text-sm);
-		color: var(--fg-tertiary);
-		line-height: 1.6;
-		padding: var(--space-3);
-		background-color: var(--form-help-bg);
-		border: 1px solid var(--form-help-border);
-		border-left: 3px solid var(--form-help-accent);
-		border-radius: var(--radius-sm);
-	}
-	.help-text code {
-		background-color: var(--bg-tertiary);
-		padding: var(--space-1) var(--space-2);
-		border-radius: 3px;
-		font-family: var(--font-mono);
-		font-size: 0.85em;
-		color: var(--accent-primary);
-	}
-</style>

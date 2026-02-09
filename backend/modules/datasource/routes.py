@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 
 from core.config import settings
 from core.database import get_db, run_db
-from core.exceptions import DataSourceNotFoundError
+from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
@@ -460,6 +460,8 @@ def update_datasource(
         return service.update_datasource(session, datasource_id, update)
     except (ValueError, DataSourceNotFoundError) as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except DataSourceValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to update datasource: {str(e)}')
 

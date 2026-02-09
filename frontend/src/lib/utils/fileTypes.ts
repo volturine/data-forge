@@ -88,9 +88,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'CSV',
 		extensions: ['.csv', '.tsv'],
 		colors: {
-			color: '#2563eb',
-			borderColor: 'rgba(37, 99, 235, 0.45)',
-			backgroundColor: 'rgba(37, 99, 235, 0.12)'
+			color: 'var(--file-csv-fg)',
+			borderColor: 'var(--file-csv-border)',
+			backgroundColor: 'var(--file-csv-bg)'
 		},
 		icon: FileSpreadsheet,
 		description: 'Comma-separated or Tab-separated values'
@@ -100,9 +100,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Parquet',
 		extensions: ['.parquet'],
 		colors: {
-			color: '#8b5cf6',
-			borderColor: 'rgba(139, 92, 246, 0.45)',
-			backgroundColor: 'rgba(139, 92, 246, 0.12)'
+			color: 'var(--file-parquet-fg)',
+			borderColor: 'var(--file-parquet-border)',
+			backgroundColor: 'var(--file-parquet-bg)'
 		},
 		icon: FileTypeIcon,
 		description: 'Apache Parquet columnar storage format'
@@ -112,9 +112,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'JSON',
 		extensions: ['.json'],
 		colors: {
-			color: '#0f766e',
-			borderColor: 'rgba(15, 118, 110, 0.45)',
-			backgroundColor: 'rgba(15, 118, 110, 0.12)'
+			color: 'var(--file-json-fg)',
+			borderColor: 'var(--file-json-border)',
+			backgroundColor: 'var(--file-json-bg)'
 		},
 		icon: FileBracesCorner,
 		description: 'JavaScript Object Notation'
@@ -124,9 +124,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'NDJSON',
 		extensions: ['.ndjson', '.jsonl'],
 		colors: {
-			color: '#14b8a6',
-			borderColor: 'rgba(20, 184, 166, 0.45)',
-			backgroundColor: 'rgba(20, 184, 166, 0.12)'
+			color: 'var(--file-ndjson-fg)',
+			borderColor: 'var(--file-ndjson-border)',
+			backgroundColor: 'var(--file-ndjson-bg)'
 		},
 		icon: FileBracesCorner,
 		description: 'Newline-delimited JSON'
@@ -136,9 +136,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Excel',
 		extensions: ['.xlsx', '.xls', '.xlsm', '.xlsb'],
 		colors: {
-			color: '#b45309',
-			borderColor: 'rgba(180, 83, 9, 0.45)',
-			backgroundColor: 'rgba(180, 83, 9, 0.12)'
+			color: 'var(--file-excel-fg)',
+			borderColor: 'var(--file-excel-border)',
+			backgroundColor: 'var(--file-excel-bg)'
 		},
 		icon: FileSpreadsheet,
 		description: 'Microsoft Excel workbook'
@@ -148,9 +148,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Arrow',
 		extensions: ['.arrow', '.ipc', '.feather'],
 		colors: {
-			color: '#7c3aed',
-			borderColor: 'rgba(124, 58, 237, 0.45)',
-			backgroundColor: 'rgba(124, 58, 237, 0.12)'
+			color: 'var(--file-arrow-fg)',
+			borderColor: 'var(--file-arrow-border)',
+			backgroundColor: 'var(--file-arrow-bg)'
 		},
 		icon: Database,
 		description: 'Apache Arrow IPC format'
@@ -160,9 +160,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Avro',
 		extensions: ['.avro'],
 		colors: {
-			color: '#db2777',
-			borderColor: 'rgba(219, 39, 119, 0.45)',
-			backgroundColor: 'rgba(219, 39, 119, 0.12)'
+			color: 'var(--file-avro-fg)',
+			borderColor: 'var(--file-avro-border)',
+			backgroundColor: 'var(--file-avro-bg)'
 		},
 		icon: FileCode,
 		description: 'Apache Avro binary format'
@@ -172,9 +172,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Delta',
 		extensions: ['_delta_log'],
 		colors: {
-			color: '#dc2626',
-			borderColor: 'rgba(220, 38, 38, 0.45)',
-			backgroundColor: 'rgba(220, 38, 38, 0.12)'
+			color: 'var(--file-delta-fg)',
+			borderColor: 'var(--file-delta-border)',
+			backgroundColor: 'var(--file-delta-bg)'
 		},
 		icon: Layers,
 		description: 'Delta Lake table format'
@@ -184,9 +184,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Iceberg',
 		extensions: ['metadata'],
 		colors: {
-			color: '#1d4ed8',
-			borderColor: 'rgba(29, 78, 216, 0.45)',
-			backgroundColor: 'rgba(29, 78, 216, 0.12)'
+			color: 'var(--file-iceberg-fg)',
+			borderColor: 'var(--file-iceberg-border)',
+			backgroundColor: 'var(--file-iceberg-bg)'
 		},
 		icon: Snowflake,
 		description: 'Apache Iceberg table format'
@@ -196,9 +196,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'Folder',
 		extensions: [],
 		colors: {
-			color: '#2e7d32',
-			borderColor: 'rgba(46, 125, 50, 0.4)',
-			backgroundColor: 'rgba(46, 125, 50, 0.12)'
+			color: 'var(--file-folder-fg)',
+			borderColor: 'var(--file-folder-border)',
+			backgroundColor: 'var(--file-folder-bg)'
 		},
 		icon: FolderIcon,
 		description: 'Directory or Parquet dataset'
@@ -208,9 +208,9 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		label: 'File',
 		extensions: [],
 		colors: {
-			color: '#64748b',
-			borderColor: 'rgba(100, 116, 139, 0.45)',
-			backgroundColor: 'rgba(100, 116, 139, 0.12)'
+			color: 'var(--file-unknown-fg)',
+			borderColor: 'var(--file-unknown-border)',
+			backgroundColor: 'var(--file-unknown-bg)'
 		},
 		icon: File,
 		description: 'Unknown file type'
@@ -227,9 +227,9 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		label: 'File',
 		extensions: [],
 		colors: {
-			color: '#64748b',
-			borderColor: 'rgba(100, 116, 139, 0.45)',
-			backgroundColor: 'rgba(100, 116, 139, 0.12)'
+			color: 'var(--source-file-fg)',
+			borderColor: 'var(--source-file-border)',
+			backgroundColor: 'var(--source-file-bg)'
 		},
 		icon: File,
 		description: 'File-based datasource'
@@ -239,9 +239,9 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		label: 'Database',
 		extensions: [],
 		colors: {
-			color: '#16a34a',
-			borderColor: 'rgba(22, 163, 74, 0.45)',
-			backgroundColor: 'rgba(22, 163, 74, 0.12)'
+			color: 'var(--source-database-fg)',
+			borderColor: 'var(--source-database-border)',
+			backgroundColor: 'var(--source-database-bg)'
 		},
 		icon: Database,
 		description: 'Database connection'
@@ -251,9 +251,9 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		label: 'API',
 		extensions: [],
 		colors: {
-			color: '#ea580c',
-			borderColor: 'rgba(234, 88, 12, 0.45)',
-			backgroundColor: 'rgba(234, 88, 12, 0.12)'
+			color: 'var(--source-api-fg)',
+			borderColor: 'var(--source-api-border)',
+			backgroundColor: 'var(--source-api-bg)'
 		},
 		icon: Globe,
 		description: 'API endpoint'
@@ -263,9 +263,9 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		label: 'Iceberg',
 		extensions: [],
 		colors: {
-			color: '#1d4ed8',
-			borderColor: 'rgba(29, 78, 216, 0.45)',
-			backgroundColor: 'rgba(29, 78, 216, 0.12)'
+			color: 'var(--source-iceberg-fg)',
+			borderColor: 'var(--source-iceberg-border)',
+			backgroundColor: 'var(--source-iceberg-bg)'
 		},
 		icon: Snowflake,
 		description: 'Apache Iceberg table'
@@ -275,9 +275,9 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		label: 'DuckDB',
 		extensions: ['.duckdb', '.db'],
 		colors: {
-			color: '#f59e0b',
-			borderColor: 'rgba(245, 158, 11, 0.45)',
-			backgroundColor: 'rgba(245, 158, 11, 0.12)'
+			color: 'var(--source-duckdb-fg)',
+			borderColor: 'var(--source-duckdb-border)',
+			backgroundColor: 'var(--source-duckdb-bg)'
 		},
 		icon: Database,
 		description: 'DuckDB database'
@@ -358,7 +358,7 @@ export function getFileTypeConfig(fileType: FileType): FileTypeConfig {
  * @example
  * ```typescript
  * const colors = getFileTypeColors('csv');
- * // Returns { color: '#2563eb', borderColor: '...', backgroundColor: '...' }
+ * // Returns { color: 'var(--file-csv-fg)', borderColor: '...', backgroundColor: '...' }
  * ```
  */
 export function getFileTypeColors(fileType: FileType): FileTypeColors {

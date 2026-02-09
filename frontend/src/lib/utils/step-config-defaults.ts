@@ -3,7 +3,7 @@
  * Centralizes config shape definitions to eliminate defensive $effect blocks in components.
  */
 
-import type { FilterCondition, FilterValueType, JoinColumn } from '$lib/types/operation-config';
+import type { FilterCondition, JoinColumn } from '$lib/types/operation-config';
 
 export interface SelectConfigData {
 	columns: string[];

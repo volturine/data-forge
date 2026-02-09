@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Udf } from '$lib/types/udf';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { X } from 'lucide-svelte';
 
 	interface Props {
 		show: boolean;
@@ -24,33 +25,37 @@
 	<div class="modal" role="dialog" aria-modal="true">
 		<div class="modal-header">
 			<h2>Select UDF</h2>
-			<button class="modal-close" onclick={onClose} aria-label="Close">×</button>
+			<button class="modal-close" onclick={onClose} aria-label="Close">
+				<X size={16} />
+			</button>
 		</div>
 		<div class="modal-body">
 			<input type="text" placeholder="Search UDFs..." bind:value={search} />
-			<div class="list">
+			<div class="flex flex-col gap-2 max-h-90 overflow-auto">
 				{#if filtered.length === 0}
-					<p class="empty">No matching UDFs.</p>
+					<p class="m-0 text-fg-muted">No matching UDFs.</p>
 				{:else}
 					{#each filtered as udf (udf.id)}
-						<button class="row" type="button" onclick={() => onSelect(udf)}>
-							<div class="title">
+						<button class="row udf-row" type="button" onclick={() => onSelect(udf)}>
+							<div class="flex justify-between gap-3 font-medium">
 								<span>{udf.name}</span>
-								<div class="signature">
+								<div class="flex items-center gap-1 flex-wrap">
 									{#if udf.signature?.inputs?.length}
 										{#each udf.signature.inputs as input, i (i)}
 											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
 											{#if i < udf.signature.inputs.length - 1}
-												<span class="signature-separator">,</span>
+												<span class="text-xs mx-0.5 text-fg-muted">,</span>
 											{/if}
 										{/each}
 									{:else}
-										<span class="no-inputs">No inputs</span>
+										<span class="text-xs uppercase tracking-wide text-fg-muted">No inputs</span>
 									{/if}
 								</div>
 							</div>
 							{#if udf.description}
-								<p class="desc">{udf.description}</p>
+								<p class="mt-2 mb-0 text-sm text-fg-secondary">
+									{udf.description}
+								</p>
 							{/if}
 						</button>
 					{/each}
@@ -62,59 +67,3 @@
 		</div>
 	</div>
 {/if}
-
-<style>
-	/* modal-backdrop, modal, modal-header, modal-close, modal-body, modal-footer — global in app.css */
-	.list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-		max-height: 360px;
-		overflow: auto;
-	}
-	.row {
-		text-align: left;
-		padding: var(--space-3);
-		border: 1px solid var(--border-primary);
-		border-radius: var(--radius-sm);
-		background-color: var(--bg-secondary);
-		color: var(--fg-primary);
-		cursor: pointer;
-	}
-	.row:hover {
-		background-color: var(--bg-hover);
-	}
-	.title {
-		display: flex;
-		justify-content: space-between;
-		gap: var(--space-3);
-		font-weight: var(--font-medium);
-	}
-	.signature {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		flex-wrap: wrap;
-	}
-	.signature-separator {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		margin: 0 0.125rem;
-	}
-	.no-inputs {
-		font-size: var(--text-xs);
-		color: var(--fg-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	.desc {
-		margin: var(--space-2) 0 0 0;
-		color: var(--fg-secondary);
-		font-size: var(--text-sm);
-	}
-	.empty {
-		margin: 0;
-		color: var(--fg-muted);
-	}
-
-</style>
