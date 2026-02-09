@@ -96,6 +96,20 @@ class Settings(BaseSettings):
     # Normalize datetime values to TIMEZONE
     normalize_tz: bool = Field(default=False, alias='NORMALIZE_TZ')
 
+    # Client audit log configuration (frontend)
+    # Batch size per flush request
+    log_client_batch_size: int = Field(default=20, alias='LOG_CLIENT_BATCH_SIZE')
+
+    # Flush interval in milliseconds
+    log_client_flush_interval_ms: int = Field(default=5000, alias='LOG_CLIENT_FLUSH_INTERVAL_MS')
+
+    # Dedupe window in milliseconds for repeated events
+    log_client_dedupe_window_ms: int = Field(default=500, alias='LOG_CLIENT_DEDUPE_WINDOW_MS')
+
+    # Cooldown in milliseconds before logging repeated flush failures
+    log_client_flush_cooldown_ms: int = Field(default=3000, alias='LOG_CLIENT_FLUSH_COOLDOWN_MS')
+
+    # Server-side log directory for Iceberg logs and metadata
     # Iceberg log base path (catalog + warehouse)
     log_iceberg_path: Path = Field(default=DATA_DIR / 'logs' / 'iceberg', alias='LOG_ICEBERG_PATH')
 
@@ -221,6 +235,18 @@ class Settings(BaseSettings):
     def _validate_log_max_body_size(cls, value: int) -> int:
         if value < 0:
             raise ValueError(f'log_max_body_size must be non-negative (0 = unlimited), got {value}')
+        return value
+
+    @field_validator(
+        'log_client_batch_size',
+        'log_client_flush_interval_ms',
+        'log_client_dedupe_window_ms',
+        'log_client_flush_cooldown_ms',
+    )
+    @classmethod
+    def _validate_log_client_values(cls, value: int, info) -> int:
+        if value < 1:
+            raise ValueError(f'{info.field_name} must be at least 1, got {value}')
         return value
 
     @model_validator(mode='after')

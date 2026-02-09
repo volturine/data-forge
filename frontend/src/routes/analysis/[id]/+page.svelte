@@ -18,6 +18,7 @@
 	import { spawnEngine } from '$lib/api/compute';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import { track } from '$lib/utils/audit-log';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -119,6 +120,7 @@
 		saving: { saveComplete: 'saved', saveError: 'unsaved' }
 	});
 	let isLoadingSchema = $state(false);
+	const HEARTBEAT_INTERVAL_MS = 10000;
 	let showDatasourceModal = $state(false);
 	let modalMode = $state<'add' | 'change'>('add');
 	let leftPaneCollapsed = $state(false);
@@ -181,7 +183,14 @@
 					analysisStore.setEngineDefaults(status.defaults);
 				}
 			},
-			() => {}
+			(err) => {
+				track({
+					event: 'engine_error',
+					action: 'spawn',
+					target: analysisId,
+					meta: { message: err.message }
+				});
+			}
 		);
 	});
 
@@ -199,7 +208,12 @@
 				isLoadingSchema = false;
 			},
 			(err) => {
-				console.error('Failed to load schema:', err);
+				track({
+					event: 'schema_error',
+					action: 'load',
+					target: datasourceIdValue,
+					meta: { message: err.message }
+				});
 				isLoadingSchema = false;
 			}
 		);
@@ -364,7 +378,7 @@
 				isEditingMode = false;
 				stopLockCheck();
 			}
-		}, 10000);
+		}, HEARTBEAT_INTERVAL_MS);
 	}
 
 	function stopLockCheck() {

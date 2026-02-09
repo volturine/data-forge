@@ -8,6 +8,11 @@ export interface FrontendConfig {
 	job_timeout: number; // seconds
 	timezone: string;
 	normalize_tz: boolean;
+	log_client_batch_size: number;
+	log_client_flush_interval_ms: number;
+	log_client_dedupe_window_ms: number;
+	log_client_flush_cooldown_ms: number;
+	log_queue_max_size: number;
 }
 
 export function getConfig(): ResultAsync<FrontendConfig, ApiError> {

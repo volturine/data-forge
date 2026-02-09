@@ -2,6 +2,7 @@
 	import type { DataSource } from '$lib/types/datasource';
 	import { getDatasourceSchema } from '$lib/api/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { track } from '$lib/utils/audit-log';
 	import {
 		FileText,
 		Database,
@@ -128,7 +129,12 @@
 				isLoadingRowCount = false;
 			},
 			(error) => {
-				console.error('Failed to get row count:', error);
+				track({
+					event: 'schema_error',
+					action: 'row_count',
+					target: datasource.id,
+					meta: { message: error.message }
+				});
 				isLoadingRowCount = false;
 			}
 		);

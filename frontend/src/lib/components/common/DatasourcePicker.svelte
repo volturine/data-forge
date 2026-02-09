@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X } from 'lucide-svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { DataSource } from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 
@@ -41,12 +42,12 @@
 
 	const selectedSet = $derived(() => {
 		if (mode === 'single') {
-			return selected ? new Set([selected as string]) : new Set<string>();
+			return selected ? new SvelteSet([selected as string]) : new SvelteSet<string>();
 		}
-		return new Set((selected as string[]) ?? []);
+		return new SvelteSet((selected as string[]) ?? []);
 	});
 
-	const excludedSet = $derived(new Set(excludeIds));
+	const excludedSet = $derived(new SvelteSet(excludeIds));
 
 	const availableOptions = $derived(datasources.filter((ds) => !excludedSet.has(ds.id)));
 
@@ -72,7 +73,7 @@
 		}
 		const arr = selected as string[] | undefined;
 		if (!arr?.length) return [];
-		const set = new Set(arr);
+		const set = new SvelteSet(arr);
 		return datasources.filter((ds) => set.has(ds.id));
 	});
 
@@ -98,8 +99,7 @@
 			search = '';
 		} else {
 			const arr = (selected as string[]) ?? [];
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const set = new Set(arr);
+			const set = new SvelteSet(arr);
 			if (set.has(id)) {
 				set.delete(id);
 				onDeselect?.(id);
@@ -115,8 +115,7 @@
 		if (mode !== 'multi') return;
 		const filtered = filteredOptions();
 		const filteredIds = filtered.map((ds) => ds.id);
-		// eslint-disable-next-line svelte/prefer-svelte-reactivity
-		const current = new Set((selected as string[]) ?? []);
+		const current = new SvelteSet((selected as string[]) ?? []);
 		filteredIds.forEach((id) => current.add(id));
 		selected = Array.from(current);
 		filtered.forEach((ds) => {

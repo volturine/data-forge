@@ -197,10 +197,7 @@ class FilterHandler(OperationHandler):
 
     @property
     def _schema(self) -> dict[str, pl.DataType] | None:
-        try:
-            return self._last_schema
-        except AttributeError:
-            return None
+        return getattr(self, '_last_schema', None)
 
     def _normalize_datetime_col(self, expr: pl.Expr, dtype: pl.DataType) -> pl.Expr:
         if not isinstance(dtype, pl.Datetime):

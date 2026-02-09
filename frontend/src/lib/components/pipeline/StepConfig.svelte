@@ -26,6 +26,7 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
+	import { track } from '$lib/utils/audit-log';
 	import { normalizeConfig } from '$lib/utils/step-config-defaults';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
@@ -159,7 +160,13 @@
 				fetchingPivotSchema = false;
 			})
 			.mapErr((error: unknown) => {
-				console.error('Failed to fetch pivot schema:', error);
+				const err = error instanceof Error ? error.message : String(error);
+				track({
+					event: 'schema_error',
+					action: 'pivot_schema',
+					target: step.id,
+					meta: { message: err }
+				});
 				fetchingPivotSchema = false;
 			});
 	}

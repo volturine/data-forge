@@ -95,15 +95,17 @@
 		};
 	}
 
-	const hardMin = 220;
-	const defaultWidth = 150;
-	const hoverDelay = 400;
+	const minColumnWidthPx = 220;
+	const defaultColumnWidthPx = 150;
+	const columnHoverDelayMs = 400;
 	let panelWidth = $state(0);
 	const softMin = $derived(
-		columns.length ? Math.max(defaultWidth, Math.floor(panelWidth / columns.length)) : defaultWidth
+		columns.length
+			? Math.max(defaultColumnWidthPx, Math.floor(panelWidth / columns.length))
+			: defaultColumnWidthPx
 	);
 
-	let initialSize = $state(defaultWidth);
+	let initialSize = $state(defaultColumnWidthPx);
 
 	$effect(() => {
 		initialSize = softMin;
@@ -146,7 +148,7 @@
 			accessorKey: col,
 			header: col,
 			size: initialSize,
-			minSize: hardMin
+			minSize: minColumnWidthPx
 		}));
 
 		return createTable({
@@ -208,7 +210,7 @@
 
 	function normalizeSizing(next: ColumnSizingState): ColumnSizingState {
 		const safe = Object.fromEntries(
-			Object.entries(next).map(([key, value]) => [key, Math.max(hardMin, value)])
+			Object.entries(next).map(([key, value]) => [key, Math.max(minColumnWidthPx, value)])
 		);
 		if (!panelWidth) return safe;
 		const order = columnOrder.length ? columnOrder : columns;
@@ -428,7 +430,7 @@
 		timer = window.setTimeout(() => {
 			if (hover !== id || currentHover !== id) return;
 			tip = pending;
-		}, hoverDelay);
+		}, columnHoverDelayMs);
 	}
 
 	function tipMove(event: MouseEvent, id: string) {

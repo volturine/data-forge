@@ -43,10 +43,8 @@ export class EnginesStore {
 		if (this.interval !== null) return;
 
 		// Try to load config but don't block polling if it fails
-		try {
+		if (!configStore.config) {
 			await configStore.fetch();
-		} catch {
-			// Config fetch failed — use default interval
 		}
 
 		this.fetch();

@@ -118,7 +118,7 @@
 		const params = args.map(toArg).join(', ');
 		if (!params) return 'def udf():\n    return None\n';
 		const first = params.split(', ')[0] ?? 'value';
-		return `def udf(${params}):\n    # TODO: return a value\n    return ${first}\n`;
+		return `def udf(${params}):\n    return ${first}\n`;
 	}
 
 	$effect(() => {

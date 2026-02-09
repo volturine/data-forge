@@ -36,10 +36,12 @@
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
+		if (!configStore.config) return;
 		installAuditListeners();
 	});
 
 	$effect(() => {
+		if (!configStore.config) return;
 		setAuditPage(currentPath);
 	});
 

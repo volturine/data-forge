@@ -52,8 +52,8 @@ function sortKeys(obj: unknown): unknown {
  * Good for detecting changes, not for security
  */
 function cyrb53(str: string): string {
-	let h1 = 0xdeadbeef;
-	let h2 = 0x41c6ce57;
+	let h1 = 0xdeadbeef; // Initial seed
+	let h2 = 0x41c6ce57; // Initial seed
 
 	for (let i = 0; i < str.length; i++) {
 		const ch = str.charCodeAt(i);

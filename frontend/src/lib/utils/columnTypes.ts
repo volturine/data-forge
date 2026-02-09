@@ -16,12 +16,12 @@
  *
  * // Get full configuration for a type
  * const config = getColumnTypeConfig('Int64');
- * console.log(config.label); // "Int64"
- * console.log(config.category); // "integer"
+ * Example: config.label === "Int64"
+ * Example: config.category === "integer"
  *
  * // Normalize Polars type strings from backend
  * const normalized = normalizeColumnType("Datetime(time_unit='us', time_zone=None)");
- * console.log(normalized); // "Datetime"
+ * Example: normalized === "Datetime"
  *
  * // Handle aliases
  * const stringType = normalizeColumnType('Utf8'); // Returns 'String'
