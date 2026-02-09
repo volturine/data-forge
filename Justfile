@@ -15,13 +15,6 @@ dev:
     @echo "Starting servers..."
     (cd backend && uv run --env-file .env ./main.py) & (cd frontend && npm run dev) & wait
 
-# Lint everything
-lint:
-    @echo "Linting backend..."
-    cd backend && uv run ruff check .
-    @echo "Linting frontend..."
-    cd frontend && npm run lint
-
 # Format code
 format:
     @echo "Formatting backend..."
@@ -30,6 +23,8 @@ format:
     cd frontend && npm run format
 
 # Build for production
-build:
+prod:
     @echo "Building frontend..."
     cd frontend && npm run build
+    @echo "Starting backend in production mode..."
+    cd backend && uv run --env-file .prod.env ./main.py
