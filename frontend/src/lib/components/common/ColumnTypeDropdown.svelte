@@ -2,6 +2,7 @@
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { getAllColumnTypes } from '$lib/utils/columnTypes';
 	import { onClickOutside } from 'runed';
+	import { ChevronDown } from 'lucide-svelte';
 
 	interface Props {
 		value: string;
@@ -10,7 +11,12 @@
 		disabled?: boolean;
 	}
 
-	let { value = $bindable(), onChange, placeholder = 'Select type...', disabled = false }: Props = $props();
+	let {
+		value = $bindable(),
+		onChange,
+		placeholder = 'Select type...',
+		disabled = false
+	}: Props = $props();
 
 	let menuOpen = $state(false);
 	let menuRef = $state<HTMLElement>();
@@ -53,21 +59,21 @@
 </script>
 
 <div class="column-select" bind:this={menuRef}>
-	<button 
-		type="button" 
-		class="column-trigger" 
+	<button
+		type="button"
+		class="column-trigger"
 		class:opacity-60={disabled}
 		class:cursor-not-allowed={disabled}
-		onclick={openMenu} 
+		onclick={openMenu}
 		aria-expanded={menuOpen}
-		disabled={disabled}
+		{disabled}
 	>
 		{#if selectedType}
 			<ColumnTypeBadge columnType={selectedType.type} size="sm" />
 		{:else}
 			<span class="column-placeholder">{placeholder}</span>
 		{/if}
-		<span class="chevron">▾</span>
+		<ChevronDown size={14} class="chevron" />
 	</button>
 	{#if menuOpen}
 		<div class="column-menu" role="listbox">

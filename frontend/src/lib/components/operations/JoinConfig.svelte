@@ -7,6 +7,7 @@
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import { X } from 'lucide-svelte';
 
 	const uid = $props.id();
 
@@ -183,7 +184,7 @@
 						onclick={() => removeJoinColumn(joinCol.id)}
 						aria-label={`Remove join column pair ${_index + 1}`}
 					>
-						✕
+						<X size={14} />
 					</button>
 				</div>
 			{/each}

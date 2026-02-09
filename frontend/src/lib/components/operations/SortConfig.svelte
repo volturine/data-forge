@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { X, Plus } from 'lucide-svelte';
+	import { X, Plus, ArrowUp, ArrowDown } from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 
 	const uid = $props.id();
@@ -65,11 +65,7 @@
 			/>
 		</div>
 
-		<div
-			class="sort-direction-group flex"
-			role="group"
-			aria-label="Sort direction"
-		>
+		<div class="sort-direction-group flex" role="group" aria-label="Sort direction">
 			<button
 				id="{uid}-ascending"
 				data-testid="sort-ascending-button"
@@ -81,7 +77,7 @@
 				aria-pressed={!newDescending}
 				aria-label="Sort ascending"
 			>
-				<span class="text-sm leading-none" aria-hidden="true">▲</span>
+				<ArrowUp size={14} aria-hidden="true" />
 			</button>
 			<button
 				id="{uid}-descending"
@@ -94,7 +90,7 @@
 				aria-pressed={newDescending}
 				aria-label="Sort descending"
 			>
-				<span class="text-sm leading-none" aria-hidden="true">▼</span>
+				<ArrowDown size={14} aria-hidden="true" />
 			</button>
 		</div>
 
@@ -144,7 +140,7 @@
 							aria-pressed={!safeConfig.descending[i]}
 							aria-label={`Sort ${column} ascending`}
 						>
-							<span class="text-sm leading-none" aria-hidden="true">▲</span>
+							<ArrowUp size={12} aria-hidden="true" />
 						</button>
 						<button
 							id={`sort-btn-desc-${i}`}
@@ -157,7 +153,7 @@
 							aria-pressed={safeConfig.descending[i]}
 							aria-label={`Sort ${column} descending`}
 						>
-							<span class="text-sm leading-none" aria-hidden="true">▼</span>
+							<ArrowDown size={12} aria-hidden="true" />
 						</button>
 						<button
 							id={`sort-btn-remove-${i}`}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
+	import { AlertTriangle } from 'lucide-svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 
 	interface DropConfigData {
@@ -33,7 +34,10 @@
 
 	{#if safeColumns.length > 0}
 		<div class="warning-box" aria-live="polite">
-			<strong>⚠️ Columns to Drop ({safeColumns.length}):</strong>
+			<strong class="inline-flex items-center gap-2">
+				<AlertTriangle size={14} />
+				Columns to Drop ({safeColumns.length}):
+			</strong>
 			<p>These columns will be removed from the dataset.</p>
 		</div>
 	{:else}

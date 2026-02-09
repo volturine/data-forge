@@ -65,7 +65,6 @@
 	let schemaChanged = $state(false);
 	let schemaDiff = $state<{ added: string[]; removed: string[]; types: string[] } | null>(null);
 	let activeTab = $state<'general' | 'schema' | 'csv' | 'excel'>('general');
-	let initialized = $state(false);
 
 	// Reset state when datasource changes
 	$effect(() => {
@@ -80,7 +79,6 @@
 		refreshError = null;
 		schemaChanged = false;
 		schemaDiff = null;
-		initialized = false;
 		activeTab = 'general';
 
 		// Initialize type-specific config
@@ -106,7 +104,6 @@
 				has_header: config.has_header ?? true
 			};
 		}
-		initialized = true;
 	});
 
 	// CSV-specific state
@@ -185,7 +182,6 @@
 		hasChanges = true;
 	}
 
-
 	function handleCsvConfigChange<K extends keyof typeof csvConfig>(
 		key: K,
 		value: (typeof csvConfig)[K]
@@ -253,10 +249,14 @@
 				dtype: resolveColumnType(col.dtype)
 			}));
 			const nextMap = new Map(nextColumns.map((col) => [col.name, col.dtype]));
-			const added = nextColumns.filter((col) => !previousColumns.has(col.name)).map((col) => col.name);
+			const added = nextColumns
+				.filter((col) => !previousColumns.has(col.name))
+				.map((col) => col.name);
 			const removed = Array.from(previousColumns.keys()).filter((col) => !nextMap.has(col));
 			const types = nextColumns
-				.filter((col) => previousColumns.has(col.name) && previousColumns.get(col.name) !== col.dtype)
+				.filter(
+					(col) => previousColumns.has(col.name) && previousColumns.get(col.name) !== col.dtype
+				)
 				.map((col) => col.name);
 			schemaChanged = added.length > 0 || removed.length > 0 || types.length > 0;
 			schemaDiff = schemaChanged ? { added, removed, types } : null;
@@ -361,20 +361,20 @@
 					<h3 class="m-0 mb-3 text-xs font-semibold text-fg-secondary">Source Information</h3>
 					<div class="space-y-3 text-xs">
 						<!-- Type & Schema -->
-							<div class="flex items-center gap-4">
-								<div class="flex items-center gap-2">
-									<span class="uppercase tracking-wide text-fg-muted">Type</span>
-									{#if isFile(ds)}
-										{@const config = ds.config as unknown as FileDataSourceConfig}
-										<FileTypeBadge path={config.file_path} size="sm" />
-									{:else}
-										<FileTypeBadge
-											sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-											size="sm"
-										/>
-									{/if}
-								</div>
+						<div class="flex items-center gap-4">
+							<div class="flex items-center gap-2">
+								<span class="uppercase tracking-wide text-fg-muted">Type</span>
+								{#if isFile(ds)}
+									{@const config = ds.config as unknown as FileDataSourceConfig}
+									<FileTypeBadge path={config.file_path} size="sm" />
+								{:else}
+									<FileTypeBadge
+										sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+										size="sm"
+									/>
+								{/if}
 							</div>
+						</div>
 
 						<div class="flex flex-col gap-1">
 							<span class="uppercase tracking-wide text-fg-muted">Datasource ID</span>
@@ -395,7 +395,9 @@
 							{#if config.connection_string}
 								<div class="flex flex-col gap-1">
 									<span class="uppercase tracking-wide text-fg-muted">Location</span>
-									<span class="break-all text-fg-secondary font-mono">{config.connection_string}</span>
+									<span class="break-all text-fg-secondary font-mono"
+										>{config.connection_string}</span
+									>
 								</div>
 							{/if}
 						{/if}
@@ -414,7 +416,9 @@
 							{@const config = ds.config as unknown as { db_path?: string | null }}
 							<div class="flex flex-col gap-1">
 								<span class="uppercase tracking-wide text-fg-muted">Location</span>
-								<span class="break-all text-fg-secondary font-mono">{config.db_path ?? 'In-memory'}</span>
+								<span class="break-all text-fg-secondary font-mono"
+									>{config.db_path ?? 'In-memory'}</span
+								>
 							</div>
 						{/if}
 

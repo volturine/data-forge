@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	
+
 	const id = page.params.id;
 	if (id) {
-		goto(`/datasources?id=${id}`, { replaceState: true });
+		goto(resolve('/datasources'), { replaceState: true });
 	}
 </script>
 

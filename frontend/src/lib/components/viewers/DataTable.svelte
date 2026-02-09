@@ -77,6 +77,24 @@
 	let tipRef = $state<HTMLDivElement>();
 	let scrollRef = $state<HTMLDivElement>();
 
+	function setWidth(node: HTMLElement, size: number) {
+		node.style.width = `${size}px`;
+		return {
+			update(next: number) {
+				node.style.width = `${next}px`;
+			}
+		};
+	}
+
+	function setResizeOffset(node: HTMLElement, offset: number) {
+		node.style.setProperty('--resize-offset', `${offset}px`);
+		return {
+			update(next: number) {
+				node.style.setProperty('--resize-offset', `${next}px`);
+			}
+		};
+	}
+
 	const hardMin = 220;
 	const defaultWidth = 150;
 	const hoverDelay = 400;
@@ -93,7 +111,7 @@
 	});
 
 	$effect(() => {
-		columnsKey;
+		if (!columnsKey) return;
 		columnOrder = [...columns];
 		columnVisibility = {};
 		columnPinning = { left: [], right: [] };
@@ -225,18 +243,6 @@
 		columnPinning = { left, right };
 	}
 
-	function moveColumn(columnId: string, direction: 'left' | 'right') {
-		const order = columnOrder.length ? [...columnOrder] : [...columns];
-		const currentIndex = order.indexOf(columnId);
-		if (currentIndex === -1) return;
-		const nextIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
-		if (nextIndex < 0 || nextIndex >= order.length) return;
-		const updated = [...order];
-		const [item] = updated.splice(currentIndex, 1);
-		updated.splice(nextIndex, 0, item);
-		columnOrder = updated;
-	}
-
 	function toggleColumnMenu(columnId: string) {
 		activeColumn = activeColumn === columnId ? null : columnId;
 	}
@@ -343,7 +349,7 @@
 	}
 
 	function formatValue(value: TableCellValue, columnId: string): string {
-		if (value === null || value === undefined) return '—';
+		if (value === null || value === undefined) return '-';
 		const temporal = getTemporalType(resolveColumnType(columnTypes[columnId]));
 		if (temporal === 'date') return formatDateDisplay(value as string);
 		if (temporal === 'datetime') return formatDateTimeDisplay(value as string);
@@ -371,27 +377,6 @@
 
 	function isListType(columnType: string): boolean {
 		return columnType.includes('List') || columnType === 'list';
-	}
-
-	function toggleSort(columnId: string) {
-		const existing = sorting.find((s: SortingState[number]) => s.id === columnId);
-		if (!existing) {
-			sorting = [{ id: columnId, desc: false }];
-		} else if (!existing.desc) {
-			sorting = [{ id: columnId, desc: true }];
-		} else {
-			sorting = [];
-		}
-
-		if (onSort && sorting.length > 0) {
-			onSort(sorting[0].id, sorting[0].desc ? 'desc' : 'asc');
-		}
-	}
-
-	function getSortDirection(columnId: string): 'asc' | 'desc' | false {
-		const sort = sorting.find((s: SortingState[number]) => s.id === columnId);
-		if (!sort) return false;
-		return sort.desc ? 'desc' : 'asc';
 	}
 
 	async function copyValue(event: MouseEvent, id: string, value: string) {
@@ -470,7 +455,6 @@
 			ref.style.setProperty('--tip-top', `${top}px`);
 		});
 	});
-
 </script>
 
 <div
@@ -504,24 +488,23 @@
 		>
 			<table
 				class="dataset-table__table w-full border-collapse text-sm"
-				style={`width: ${table?.getTotalSize() ?? 0}px`}
+				use:setWidth={table?.getTotalSize() ?? 0}
 			>
 				<thead class="dataset-table__thead sticky top-0 z-50 bg-table-header">
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
-							{#each headerGroup.headers as header, index (header.id)}
+							{#each headerGroup.headers as header (header.id)}
 								<th
 									class="dataset-table__th p-0 text-left font-semibold border-b border-primary"
 									class:dataset-table__th--drag={dragOver === header.id}
 									class:dataset-table__th--dragging={dragColumn === header.id}
-									style={`width: ${header.getSize()}px`}
+									use:setWidth={header.getSize()}
 									ondragover={(event) => handleDragOver(event, header.id)}
 									ondragleave={() => handleDragLeave(header.id)}
 									ondrop={(event) => handleDrop(event, header.id)}
 								>
 									<div
 										class="dataset-table__header flex items-start justify-between w-full px-4 py-2"
-										style={`width: ${header.getSize()}px`}
 									>
 										<div class="dataset-table__header-left">
 											<div class="dataset-table__header-actions">
@@ -557,7 +540,7 @@
 															showIcon={false}
 														/>
 													{:else}
-														<span class="dataset-table__type-text">—</span>
+														<span class="dataset-table__type-text">-</span>
 													{/if}
 												{/if}
 											</div>
@@ -575,10 +558,10 @@
 									{#if enableResize}
 										<button
 											class="dataset-table__resizer"
+											use:setResizeOffset={columnSizingInfo.deltaOffset ?? 0}
 											onmousedown={header.getResizeHandler()}
 											ontouchstart={header.getResizeHandler()}
 											aria-label="Resize column"
-											style={`transform: translateX(${columnSizingInfo.deltaOffset ?? 0}px)`}
 											class:dataset-table__resizer--active={header.column.getIsResizing()}
 										></button>
 									{/if}
@@ -628,7 +611,7 @@
 						>
 							{#each row.getVisibleCells() as cell (cell.id)}
 								{@const display = formatValue(cell.getValue() as TableCellValue, cell.column.id)}
-								<td class="dataset-table__td" style={`width: ${cell.column.getSize()}px`}>
+								<td class="dataset-table__td" use:setWidth={cell.column.getSize()}>
 									<div
 										class="dataset-table__cell px-4 text-sm text-fg-secondary"
 										class:text-xs={isListType(getColumnType(cell.column.id))}
@@ -674,5 +657,4 @@
 			{tip.text}
 		</div>
 	{/if}
-
 </div>

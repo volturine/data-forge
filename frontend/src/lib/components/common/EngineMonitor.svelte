@@ -50,7 +50,7 @@
 	);
 </script>
 
-	<div class="relative" bind:this={dropdownRef}>
+<div class="relative" bind:this={dropdownRef}>
 	<button
 		class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs transition-all text-fg-tertiary hover:text-fg-primary"
 		class:!bg-bg-hover={expanded}
@@ -71,7 +71,9 @@
 	</button>
 
 	{#if expanded}
-		<div class="absolute right-0 top-full z-engine w-70 overflow-hidden border bg-primary border-primary">
+		<div
+			class="absolute right-0 top-full z-engine w-70 overflow-hidden border bg-primary border-primary"
+		>
 			<div class="flex items-center justify-between border-b p-3 bg-secondary border-primary">
 				<span class="text-sm font-semibold text-fg-primary">Active Engines</span>
 				<button
@@ -105,15 +107,15 @@
 										<span class="font-mono text-xs text-fg-primary" title={engine.analysis_id}>
 											{engine.analysis_id.slice(0, 8)}...
 										</span>
-						<span
-							class="rounded-full px-2 py-px text-xs font-medium uppercase"
-							class:bg-accent-bg={engine.status === 'healthy'}
-							class:text-accent-primary={engine.status === 'healthy'}
-							class:bg-tertiary={engine.status !== 'healthy'}
-							class:text-fg-muted={engine.status !== 'healthy'}
-						>
-							{engine.status}
-						</span>
+										<span
+											class="rounded-full px-2 py-px text-xs font-medium uppercase"
+											class:bg-accent-bg={engine.status === 'healthy'}
+											class:text-accent-primary={engine.status === 'healthy'}
+											class:bg-tertiary={engine.status !== 'healthy'}
+											class:text-fg-muted={engine.status !== 'healthy'}
+										>
+											{engine.status}
+										</span>
 									</div>
 									<div class="mt-1 flex items-center gap-2">
 										{#if engine.current_job_id}

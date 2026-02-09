@@ -2,11 +2,9 @@
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
-	import { Plus, Trash2, Search } from 'lucide-svelte';
-	import type { DataSource } from '$lib/types/datasource';
+	import { Plus, Trash2, Search, LoaderCircle } from 'lucide-svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
-	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 
@@ -42,9 +40,7 @@
 	const datasources = $derived(query.data ?? []);
 	const filteredDatasources = $derived(
 		searchQuery
-			? datasources.filter((d) =>
-					d.name.toLowerCase().includes(searchQuery.toLowerCase())
-				)
+			? datasources.filter((d) => d.name.toLowerCase().includes(searchQuery.toLowerCase()))
 			: datasources
 	);
 	const selectedDatasource = $derived(datasources.find((d) => d.id === selectedId) ?? null);
@@ -68,7 +64,9 @@
 
 <div class="flex h-full">
 	<!-- Left Pane -->
-	<aside class="w-(--datasource-panel-width) border-r border-primary flex flex-col bg-bg-primary shrink-0">
+	<aside
+		class="w-(--datasource-panel-width) border-r border-primary flex flex-col bg-bg-primary shrink-0"
+	>
 		<!-- Header -->
 		<header class="flex flex-col gap-2 px-4 py-3 border-b border-primary">
 			<div class="flex items-center justify-between">
@@ -96,9 +94,7 @@
 		<!-- Datasource List -->
 		<div class="flex-1 overflow-y-auto">
 			{#if query.isLoading}
-				<div class="p-8 text-center text-sm text-fg-muted">
-					Loading...
-				</div>
+				<div class="p-8 text-center text-sm text-fg-muted">Loading...</div>
 			{:else if query.isError}
 				<div class="error-box m-4 text-sm">
 					Error: {query.error instanceof Error ? query.error.message : 'Unknown error'}
@@ -106,7 +102,11 @@
 			{:else if datasources.length === 0}
 				<div class="p-8 text-center">
 					<p class="text-sm text-fg-muted mb-4">No data sources yet.</p>
-					<a href={resolve('/datasources/new')} class="inline-flex items-center gap-1 text-sm font-medium px-3 py-2 no-underline bg-accent text-bg-primary border border-info" data-sveltekit-reload>
+					<a
+						href={resolve('/datasources/new')}
+						class="inline-flex items-center gap-1 text-sm font-medium px-3 py-2 no-underline bg-accent text-bg-primary border border-info"
+						data-sveltekit-reload
+					>
 						Create your first data source
 					</a>
 				</div>
@@ -141,7 +141,7 @@
 									disabled={deleteMutation.isPending && deletingId === datasource.id}
 								>
 									{#if deleteMutation.isPending && deletingId === datasource.id}
-										<span class="animate-spin">⟳</span>
+										<LoaderCircle size={14} class="spinning" />
 									{:else}
 										<Trash2 size={14} />
 									{/if}

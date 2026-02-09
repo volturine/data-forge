@@ -3,6 +3,7 @@
 	import { listDataFiles } from '$lib/api/datasource';
 	import type { FileListItem, FileListResponse } from '$lib/api/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import { ArrowUp } from 'lucide-svelte';
 
 	let {
 		initialPath = '',
@@ -183,7 +184,7 @@
 					disabled={!canUp}
 					aria-label="Go up"
 				>
-					←
+					<ArrowUp size={14} />
 				</button>
 				<button
 					class="cursor-pointer border px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-primary hover:bg-hover hover:border-primary"

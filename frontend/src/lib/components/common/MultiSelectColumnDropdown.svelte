@@ -2,6 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { onClickOutside } from 'runed';
+	import { ChevronDown } from 'lucide-svelte';
 
 	interface Props {
 		schema: Schema;
@@ -74,7 +75,7 @@
 		{:else}
 			<span class="column-placeholder">{placeholder}</span>
 		{/if}
-		<span class="chevron">▾</span>
+		<ChevronDown size={14} class="chevron" />
 	</button>
 	{#if menuOpen}
 		<div class="column-menu" role="listbox" aria-multiselectable="true">

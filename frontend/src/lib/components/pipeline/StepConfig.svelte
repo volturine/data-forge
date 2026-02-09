@@ -51,6 +51,7 @@
 	import UnpivotConfig from '$lib/components/operations/UnpivotConfig.svelte';
 	import ExportConfig from '$lib/components/operations/ExportConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
+	import { Settings2, X } from 'lucide-svelte';
 
 	type WithColumnsConfigShape = {
 		expressions: Array<{
@@ -185,7 +186,7 @@
 		class="step-config box-border flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto bg-panel-bg text-fg-primary"
 	>
 		<div class="flex flex-col items-center justify-center p-6 text-center text-fg-muted">
-			<div class="mb-4 text-4xl opacity-50">⚙️</div>
+			<div class="mb-4 opacity-50"><Settings2 size={32} /></div>
 			<h3 class="m-0 mb-2 text-lg text-fg-primary">No step selected</h3>
 			<p class="m-0 text-sm">Click on a pipeline step to configure it</p>
 		</div>
@@ -204,8 +205,10 @@
 				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted transition-all hover:bg-bg-hover hover:text-fg-primary"
 				onclick={() => onClose?.()}
 				type="button"
-				title="Close">×</button
+				title="Close"
 			>
+				<X size={16} />
+			</button>
 		</div>
 
 		<div class="config-body flex-1 overflow-y-auto bg-panel-bg p-3">
@@ -329,8 +332,8 @@
 					<p class="m-0 mb-3 text-fg-tertiary">
 						Configuration for {step.type} is not yet implemented
 					</p>
-				<button
-					class="cursor-pointer border-none bg-accent-bg px-5 py-2 font-mono text-accent-primary"
+					<button
+						class="cursor-pointer border-none bg-accent-bg px-5 py-2 font-mono text-accent-primary"
 						onclick={() => onClose?.()}
 						type="button">Close</button
 					>

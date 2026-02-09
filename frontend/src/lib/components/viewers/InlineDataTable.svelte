@@ -18,8 +18,6 @@
 		rowLimit?: number;
 	}
 
-	type RowData = Record<string, unknown>;
-
 	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props();
 	let currentPage = $state(1);
 	let columnSearch = $state('');
@@ -73,7 +71,6 @@
 	const startRow = $derived((currentPage - 1) * rowLimit + 1);
 	const endRow = $derived(data ? Math.min(currentPage * rowLimit, data.total_rows) : 0);
 
-
 	function nextPage() {
 		if (currentPage < totalPages) currentPage++;
 	}
@@ -81,7 +78,6 @@
 	function prevPage() {
 		if (currentPage > 1) currentPage--;
 	}
-
 </script>
 
 <div class="w-full my-2 overflow-hidden select-text bg-panel">
@@ -107,10 +103,9 @@
 			</span>
 			<input
 				type="text"
-				class="input-base border px-2 py-1 text-xs"
+				class="input-base input-compact border px-2 py-1 text-xs"
 				placeholder="Filter columns"
 				bind:value={columnSearch}
-				style="width: 180px"
 			/>
 		</div>
 

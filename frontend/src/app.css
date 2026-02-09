@@ -765,7 +765,6 @@ button.btn-sm {
 }
 
 .chevron {
-	font-size: 0.75rem;
 	color: var(--fg-muted);
 }
 
@@ -1326,6 +1325,10 @@ button.btn-sm {
 .input-base {
 	border-color: var(--border-primary);
 	background-color: var(--input-bg);
+}
+
+.input-compact {
+	width: 180px;
 }
 
 /* Card styles */
@@ -2107,7 +2110,7 @@ body.touch-dragging .pipeline-canvas {
 	height: 100%;
 	cursor: col-resize;
 	background: transparent;
-	transform: translateX(2px);
+	transform: translateX(var(--resize-offset, 2px));
 	padding: 0;
 }
 
@@ -2317,7 +2320,6 @@ body.touch-dragging .pipeline-canvas {
 	white-space: normal;
 	word-break: break-word;
 }
-
 
 .dataset-table--compact .dataset-table__cell {
 	padding-top: 0.5rem;

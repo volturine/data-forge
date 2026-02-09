@@ -16,7 +16,7 @@
 	import type { BulkUploadResult } from '$lib/api/datasource';
 	import FileBrowser from '$lib/components/common/FileBrowser.svelte';
 	import { detectFileType } from '$lib/utils/fileTypes';
-	import { MessageCircleQuestionMark } from 'lucide-svelte';
+	import { MessageCircleQuestionMark, Check, X } from 'lucide-svelte';
 
 	type Tab = 'file' | 'database' | 'api';
 	type DatabaseType = 'duckdb' | 'iceberg' | 'other';
@@ -690,7 +690,13 @@
 									class:text-success={result.success}
 									class:text-error={!result.success}
 								>
-									<span class="w-5 text-center font-bold">{result.success ? '✓' : '✗'}</span>
+									<span class="w-5 text-center font-bold">
+										{#if result.success}
+											<Check size={12} />
+										{:else}
+											<X size={12} />
+										{/if}
+									</span>
 									<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
 										>{result.name}</span
 									>

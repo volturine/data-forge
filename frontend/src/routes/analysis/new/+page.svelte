@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { Check } from 'lucide-svelte';
 	import { resolve } from '$app/paths';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listDatasources } from '$lib/api/datasource';
@@ -76,7 +77,11 @@
 				<span
 					class="step-number flex h-7 w-7 items-center justify-center border border-primary text-xs font-semibold text-fg-muted bg-bg-primary"
 				>
-					{step > 1 ? '✓' : '1'}
+					{#if step > 1}
+						<Check size={12} />
+					{:else}
+						1
+					{/if}
 				</span>
 				<span class="text-sm text-fg-muted">Details</span>
 			</div>
@@ -92,7 +97,11 @@
 				<span
 					class="step-number flex h-7 w-7 items-center justify-center border border-primary text-xs font-semibold text-fg-muted bg-bg-primary"
 				>
-					{step > 2 ? '✓' : '2'}
+					{#if step > 2}
+						<Check size={12} />
+					{:else}
+						2
+					{/if}
 				</span>
 				<span class="text-sm text-fg-muted">Data Source</span>
 			</div>

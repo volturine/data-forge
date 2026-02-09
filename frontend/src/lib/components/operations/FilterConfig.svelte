@@ -37,7 +37,6 @@
 		$props();
 
 	const conditions = $derived(config.conditions ?? [defaultCondition]);
-	const logic = $derived(config.logic ?? 'AND');
 
 	const COMPARISON_OPS = ['=', '!=', '>', '<', '>=', '<='];
 	const STRING_OPS = ['contains', 'not_contains', 'starts_with', 'ends_with', 'regex'];
@@ -272,19 +271,19 @@
 									<div class="flex items-center justify-between gap-2">
 										<span class="text-xs font-normal text-fg-muted">Compare to</span>
 										<div class="flex" role="radiogroup" aria-label="Value mode">
-							<button
-								type="button"
-								class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-							class:active={!isColumn}
+											<button
+												type="button"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
+												class:active={!isColumn}
 												onclick={() => handleModeChange(i, 'value')}
 												aria-pressed={!isColumn}
 											>
 												Value
 											</button>
-							<button
-								type="button"
-								class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-							class:active={isColumn}
+											<button
+												type="button"
+												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer transition-all border border-primary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
+												class:active={isColumn}
 												onclick={() => handleModeChange(i, 'column')}
 												aria-pressed={isColumn}
 											>

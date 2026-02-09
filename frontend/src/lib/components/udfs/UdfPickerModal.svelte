@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Udf } from '$lib/types/udf';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { X } from 'lucide-svelte';
 
 	interface Props {
 		show: boolean;
@@ -24,7 +25,9 @@
 	<div class="modal" role="dialog" aria-modal="true">
 		<div class="modal-header">
 			<h2>Select UDF</h2>
-			<button class="modal-close" onclick={onClose} aria-label="Close">×</button>
+			<button class="modal-close" onclick={onClose} aria-label="Close">
+				<X size={16} />
+			</button>
 		</div>
 		<div class="modal-body">
 			<input type="text" placeholder="Search UDFs..." bind:value={search} />

@@ -8,12 +8,11 @@
 	interface Props {
 		analysis: AnalysisGalleryItem;
 		selected: boolean;
-		anySelected: boolean;
 		onDelete: (id: string) => void;
 		onToggleSelect: (id: string) => void;
 	}
 
-	let { analysis, selected, anySelected, onDelete, onToggleSelect }: Props = $props();
+	let { analysis, selected, onDelete, onToggleSelect }: Props = $props();
 
 	function handleClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;

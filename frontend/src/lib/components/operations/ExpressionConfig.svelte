@@ -52,22 +52,22 @@
 			>
 			to reference columns.<br />
 			Examples:<br />
-			•
+			-
 			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
 				>pl.col("price") * 1.2</code
 			>
 			- Multiply<br />
-			•
+			-
 			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
 				>pl.col("value").cast(pl.Float64)</code
 			>
 			- Cast type<br />
-			•
+			-
 			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
 				>pl.col("name").str.to_uppercase()</code
 			>
 			- String method<br />
-			•
+			-
 			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
 				>pl.col("date").dt.year()</code
 			> - Date component
@@ -90,7 +90,7 @@
 		<h4 id="expr-columns-heading">Insert Column</h4>
 		<ColumnDropdown
 			{schema}
-			value={''}
+			value=""
 			onChange={(val) => insertColumn(val)}
 			placeholder="Select column to insert..."
 		/>

@@ -306,9 +306,7 @@
 				{#if engineExpanded}
 					<div class="flex flex-col gap-2 border-t border-primary bg-primary p-3">
 						<div class="flex items-center gap-3">
-							<label for="threads-input" class="min-w-15 text-xs text-fg-secondary"
-								>Threads</label
-							>
+							<label for="threads-input" class="min-w-15 text-xs text-fg-secondary">Threads</label>
 							<input
 								id="threads-input"
 								class="resource-input flex-1 border border-primary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-info focus:outline-none"
@@ -323,9 +321,7 @@
 							{/if}
 						</div>
 						<div class="flex items-center gap-3">
-							<label for="memory-select" class="min-w-15 text-xs text-fg-secondary"
-								>Memory</label
-							>
+							<label for="memory-select" class="min-w-15 text-xs text-fg-secondary">Memory</label>
 							<select
 								id="memory-select"
 								class="resource-input flex-1 border border-primary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-info focus:outline-none"

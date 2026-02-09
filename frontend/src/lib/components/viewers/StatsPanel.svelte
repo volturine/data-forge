@@ -5,6 +5,8 @@
 		stats?: Record<string, { mean?: number; min?: number; max?: number; nullCount?: number }>;
 	}
 
+	import { BarChart3, Binary, ListChecks } from 'lucide-svelte';
+
 	let { rowCount, columnCount, stats }: Props = $props();
 
 	let hasStats = $derived(stats && Object.keys(stats).length > 0);
@@ -17,7 +19,7 @@
 
 	<div class="stats-summary grid gap-4 p-5">
 		<div class="flex items-center gap-4 p-4 border transition-all bg-tertiary border-primary">
-			<div class="text-3xl leading-none">📊</div>
+			<BarChart3 size={24} class="text-fg-primary" />
 			<div class="flex-1">
 				<div class="text-xs font-medium uppercase tracking-wider mb-1 text-fg-muted">
 					Total Rows
@@ -29,7 +31,7 @@
 		</div>
 
 		<div class="flex items-center gap-4 p-4 border transition-all bg-tertiary border-primary">
-			<div class="text-3xl leading-none">📋</div>
+			<ListChecks size={24} class="text-fg-primary" />
 			<div class="flex-1">
 				<div class="text-xs font-medium uppercase tracking-wider mb-1 text-fg-muted">
 					Total Columns
@@ -41,7 +43,7 @@
 		</div>
 
 		<div class="flex items-center gap-4 p-4 border transition-all bg-tertiary border-primary">
-			<div class="text-3xl leading-none">🔢</div>
+			<Binary size={24} class="text-fg-primary" />
 			<div class="flex-1">
 				<div class="text-xs font-medium uppercase tracking-wider mb-1 text-fg-muted">
 					Data Points

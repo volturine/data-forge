@@ -10,18 +10,10 @@
 	}
 
 	let { analyses, selectedIds, onDelete, onToggleSelect }: Props = $props();
-
-	const anySelected = $derived(selectedIds.size > 0);
 </script>
 
 <div class="grid w-full grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
 	{#each analyses as analysis (analysis.id)}
-		<AnalysisCard
-			{analysis}
-			selected={selectedIds.has(analysis.id)}
-			{anySelected}
-			{onDelete}
-			{onToggleSelect}
-		/>
+		<AnalysisCard {analysis} selected={selectedIds.has(analysis.id)} {onDelete} {onToggleSelect} />
 	{/each}
 </div>

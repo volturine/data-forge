@@ -124,6 +124,26 @@ function buildStep(type: string): PipelineStep {
 }
 ```
 
+### Icon Migration Patterns
+
+Replace emoji and custom icons with Lucide equivalents: close buttons use `X`, sort arrows use `ArrowUp`/`ArrowDown`, dropdown chevrons use `ChevronDown`, file navigation use `ArrowUp`.
+
+Remove non-ASCII glyphs (em dash, arrows, bullets) with ASCII equivalents or appropriate icons.
+
+### Svelte Actions for Dynamic Styles
+
+Use Svelte actions like `use:setWidth` to apply dynamic widths without inline styles, avoiding lint errors. For offsets, use CSS vars like `--resize-offset` set via actions.
+
+Width attributes cause Svelte check errors; replace with actions or CSS classes.
+
+### Pipeline Step Icons
+
+Store Lucide icons as imported component references in `stepTypes` array; render directly as `<stepType.icon />` instead of icon strings, enabling proper component rendering.
+
+### Nested Button Elements
+
+Nested `<button>` elements in tabs cause warnings; replace tab container with `<div>` and use separate buttons.
+
 ### Svelte 5 $effect Patterns
 
 **DO NOT use `$effect` for data validation or initialization** - these are code smells indicating data should be fixed at the source:

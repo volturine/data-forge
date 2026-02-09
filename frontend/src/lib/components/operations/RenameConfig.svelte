@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import { ArrowRight, X } from 'lucide-svelte';
 
 	interface RenameConfigData {
 		column_mapping: { [oldName: string]: string };
@@ -107,7 +108,7 @@
 							class="font-semibold max-w-40 overflow-hidden text-ellipsis whitespace-nowrap text-fg-primary"
 							title={mapping.oldName}>{mapping.oldName}</span
 						>
-						<span class="text-fg-muted" aria-hidden="true">→</span>
+						<ArrowRight size={12} class="text-fg-muted" aria-hidden="true" />
 						<span
 							class="font-semibold max-w-40 overflow-hidden text-ellipsis whitespace-nowrap text-accent-primary"
 							title={mapping.newName}>{mapping.newName}</span
@@ -121,7 +122,7 @@
 						onclick={() => removeMapping(mapping.oldName)}
 						aria-label={`Remove rename: ${mapping.oldName} to ${mapping.newName}`}
 					>
-						×
+						<X size={12} />
 					</button>
 				</div>
 			{/each}

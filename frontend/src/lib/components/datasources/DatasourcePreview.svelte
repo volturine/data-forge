@@ -14,7 +14,7 @@
 	let columnSearch = $state('');
 
 	$effect(() => {
-		datasourceId;
+		if (!datasourceId) return;
 		page = 1;
 	});
 

@@ -1,37 +1,61 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
+	import {
+		ArrowUpDown,
+		BarChart3,
+		Bomb,
+		Brush,
+		Calculator,
+		Calendar,
+		CircleHelp,
+		Dices,
+		Eye,
+		Filter,
+		Link,
+		Pencil,
+		Repeat,
+		Repeat2,
+		Scissors,
+		Trophy,
+		Type,
+		Upload,
+		Wrench,
+		ListChecks,
+		Trash2
+	} from 'lucide-svelte';
 
 	// Step type metadata with icons and labels
-	const stepTypeInfo: Record<string, { label: string; icon: string }> = {
-		filter: { label: 'Filter', icon: '🔍' },
-		select: { label: 'Select', icon: '📋' },
-		groupby: { label: 'Group By', icon: '📊' },
-		sort: { label: 'Sort', icon: '↕️' },
-		rename: { label: 'Rename', icon: '✏️' },
-		drop: { label: 'Drop', icon: '🗑️' },
-		join: { label: 'Join', icon: '🔗' },
-		expression: { label: 'Expression', icon: '🧮' },
-		with_columns: { label: 'With Columns', icon: '🧮' },
-		pivot: { label: 'Pivot', icon: '🔄' },
-		unpivot: { label: 'Unpivot', icon: '🔃' },
-		fill_null: { label: 'Fill Null', icon: '🔧' },
-		deduplicate: { label: 'Deduplicate', icon: '🧹' },
-		explode: { label: 'Explode', icon: '💥' },
-		timeseries: { label: 'Time Series', icon: '📅' },
-		string_transform: { label: 'String Transform', icon: '📝' },
-		sample: { label: 'Sample', icon: '🎲' },
-		limit: { label: 'Limit', icon: '✂️' },
-		topk: { label: 'Top K', icon: '🏆' },
-		null_count: { label: 'Null Count', icon: '❓' },
-		value_counts: { label: 'Value Counts', icon: '📊' },
-		view: { label: 'View', icon: '👁️' },
-		export: { label: 'Export', icon: '📤' }
+	const stepTypeInfo: Record<string, { label: string; icon: typeof Filter }> = {
+		filter: { label: 'Filter', icon: Filter },
+		select: { label: 'Select', icon: ListChecks },
+		groupby: { label: 'Group By', icon: BarChart3 },
+		sort: { label: 'Sort', icon: ArrowUpDown },
+		rename: { label: 'Rename', icon: Pencil },
+		drop: { label: 'Drop', icon: Trash2 },
+		join: { label: 'Join', icon: Link },
+		expression: { label: 'Expression', icon: Calculator },
+		with_columns: { label: 'With Columns', icon: Calculator },
+		pivot: { label: 'Pivot', icon: Repeat },
+		unpivot: { label: 'Unpivot', icon: Repeat2 },
+		fill_null: { label: 'Fill Null', icon: Wrench },
+		deduplicate: { label: 'Deduplicate', icon: Brush },
+		explode: { label: 'Explode', icon: Bomb },
+		timeseries: { label: 'Time Series', icon: Calendar },
+		string_transform: { label: 'String Transform', icon: Type },
+		sample: { label: 'Sample', icon: Dices },
+		limit: { label: 'Limit', icon: Scissors },
+		topk: { label: 'Top K', icon: Trophy },
+		null_count: { label: 'Null Count', icon: CircleHelp },
+		value_counts: { label: 'Value Counts', icon: BarChart3 },
+		view: { label: 'View', icon: Eye },
+		export: { label: 'Export', icon: Upload }
 	};
 
 	// Derive reactive values from drag store
 	let active = $derived(drag.active);
 	let type = $derived(drag.type);
 	let info = $derived(type ? stepTypeInfo[type] : null);
+	let Icon = $derived(info?.icon ?? Filter);
 	let isReorder = $derived(drag.isReorder);
 	let pointerX = $derived(drag.pointerX);
 	let pointerY = $derived(drag.pointerY);
@@ -48,7 +72,7 @@
 		class:reorder={isReorder}
 		style="left: {position.x + 12}px; top: {position.y + 12}px;"
 	>
-		<span class="text-base">{info.icon}</span>
+		<Icon size={16} class="text-base" />
 		<span class="font-semibold text-fg-primary">{info.label}</span>
 		{#if isReorder}
 			<span

@@ -345,7 +345,7 @@
 						>
 						<span class="text-xs text-fg-muted">
 							{expr.type === 'column'
-								? `← ${expr.column ?? ''}`
+								? `<- ${expr.column ?? ''}`
 								: expr.type === 'udf'
 									? `udf(${(expr.args ?? []).length} args${expr.udf_id ? ', library' : ''})`
 									: `= "${expr.value}"`}
@@ -382,7 +382,9 @@
 	<div class="modal" role="dialog" aria-modal="true" bind:this={modalRef}>
 		<div class="modal-header">
 			<h2>UDF Editor</h2>
-			<button class="modal-close" onclick={() => (showEditor = false)} aria-label="Close">×</button>
+			<button class="modal-close" onclick={() => (showEditor = false)} aria-label="Close">
+				<X size={16} />
+			</button>
 		</div>
 		<div class="modal-body">
 			<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />

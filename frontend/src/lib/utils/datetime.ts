@@ -116,14 +116,6 @@ export function formatDateTimeValue(
 	return format.format(date);
 }
 
-function parseDateInput(value: string): { year: number; month: number; day: number } | null {
-	const match = /^\d{4}-\d{2}-\d{2}$/.exec(value);
-	if (!match) return null;
-	const [year, month, day] = value.split('-').map((part) => Number(part));
-	if (!year || !month || !day) return null;
-	return { year, month, day };
-}
-
 function parseDateTimeInput(value: string): {
 	year: number;
 	month: number;

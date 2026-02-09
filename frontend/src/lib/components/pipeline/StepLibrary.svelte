@@ -4,7 +4,7 @@
 	interface StepType {
 		type: string;
 		label: string;
-		icon: string;
+		icon: typeof Filter;
 		description: string;
 	}
 
@@ -103,51 +103,101 @@
 		cancelLongPress();
 	}
 
+	import {
+		ArrowUpDown,
+		BarChart3,
+		Bomb,
+		Brush,
+		Calculator,
+		Calendar,
+		CircleHelp,
+		Dices,
+		Eye,
+		Filter,
+		LayoutGrid,
+		Link,
+		Pencil,
+		Repeat,
+		Repeat2,
+		Scissors,
+		Trophy,
+		Type,
+		Upload,
+		Wrench,
+		ListChecks,
+		Trash2
+	} from 'lucide-svelte';
+
 	const stepTypes: StepType[] = [
-		{ type: 'filter', label: 'Filter', icon: '🔍', description: 'Filter rows by conditions' },
-		{ type: 'select', label: 'Select', icon: '📋', description: 'Select specific columns' },
-		{ type: 'groupby', label: 'Group By', icon: '📊', description: 'Group and aggregate data' },
-		{ type: 'sort', label: 'Sort', icon: '↕️', description: 'Sort rows by columns' },
-		{ type: 'rename', label: 'Rename', icon: '✏️', description: 'Rename columns' },
-		{ type: 'drop', label: 'Drop', icon: '🗑️', description: 'Remove columns' },
-		{ type: 'join', label: 'Join', icon: '🔗', description: 'Join with another dataset' },
-		{ type: 'expression', label: 'Expression', icon: '🧮', description: 'Create computed columns' },
-		{ type: 'with_columns', label: 'With Columns', icon: '🧮', description: 'Add/Update columns' },
-		{ type: 'pivot', label: 'Pivot', icon: '🔄', description: 'Reshape data wide' },
-		{ type: 'unpivot', label: 'Unpivot', icon: '🔃', description: 'Reshape data long' },
-		{ type: 'fill_null', label: 'Fill Null', icon: '🔧', description: 'Handle missing values' },
-		{ type: 'deduplicate', label: 'Deduplicate', icon: '🧹', description: 'Remove duplicate rows' },
-		{ type: 'explode', label: 'Explode', icon: '💥', description: 'Expand list columns' },
-		{ type: 'timeseries', label: 'Time Series', icon: '📅', description: 'Date/time operations' },
+		{ type: 'filter', label: 'Filter', icon: Filter, description: 'Filter rows by conditions' },
+		{ type: 'select', label: 'Select', icon: ListChecks, description: 'Select specific columns' },
+		{
+			type: 'groupby',
+			label: 'Group By',
+			icon: BarChart3,
+			description: 'Group and aggregate data'
+		},
+		{ type: 'sort', label: 'Sort', icon: ArrowUpDown, description: 'Sort rows by columns' },
+		{ type: 'rename', label: 'Rename', icon: Pencil, description: 'Rename columns' },
+		{ type: 'drop', label: 'Drop', icon: Trash2, description: 'Remove columns' },
+		{ type: 'join', label: 'Join', icon: Link, description: 'Join with another dataset' },
+		{
+			type: 'expression',
+			label: 'Expression',
+			icon: Calculator,
+			description: 'Create computed columns'
+		},
+		{
+			type: 'with_columns',
+			label: 'With Columns',
+			icon: Calculator,
+			description: 'Add/Update columns'
+		},
+		{ type: 'pivot', label: 'Pivot', icon: Repeat, description: 'Reshape data wide' },
+		{ type: 'unpivot', label: 'Unpivot', icon: Repeat2, description: 'Reshape data long' },
+		{ type: 'fill_null', label: 'Fill Null', icon: Wrench, description: 'Handle missing values' },
+		{
+			type: 'deduplicate',
+			label: 'Deduplicate',
+			icon: Brush,
+			description: 'Remove duplicate rows'
+		},
+		{ type: 'explode', label: 'Explode', icon: Bomb, description: 'Expand list columns' },
+		{
+			type: 'timeseries',
+			label: 'Time Series',
+			icon: Calendar,
+			description: 'Date/time operations'
+		},
 		{
 			type: 'string_transform',
 			label: 'String Transform',
-			icon: '📝',
+			icon: Type,
 			description: 'Text manipulation'
 		},
-		{ type: 'sample', label: 'Sample', icon: '🎲', description: 'Random sample rows' },
-		{ type: 'limit', label: 'Limit', icon: '✂️', description: 'Keep first N rows' },
-		{ type: 'topk', label: 'Top K', icon: '🏆', description: 'Get top K rows by column' },
+		{ type: 'sample', label: 'Sample', icon: Dices, description: 'Random sample rows' },
+		{ type: 'limit', label: 'Limit', icon: Scissors, description: 'Keep first N rows' },
+		{ type: 'topk', label: 'Top K', icon: Trophy, description: 'Get top K rows by column' },
 		{
 			type: 'null_count',
 			label: 'Null Count',
-			icon: '❓',
+			icon: CircleHelp,
 			description: 'Count null values per column'
 		},
 		{
 			type: 'value_counts',
 			label: 'Value Counts',
-			icon: '📊',
+			icon: BarChart3,
 			description: 'Get value frequencies'
 		},
-		{ type: 'view', label: 'View', icon: '👁️', description: 'Preview data at this step' },
+		{ type: 'view', label: 'View', icon: Eye, description: 'Preview data at this step' },
 		{
 			type: 'union_by_name',
 			label: 'Union By Name',
-			icon: '🧩',
+			icon: LayoutGrid,
 			description: 'Union rows from multiple datasources'
 		},
-		{ type: 'export', label: 'Export', icon: '📤', description: 'Export data to file' }
+		{ type: 'export', label: 'Export', icon: Upload, description: 'Export data to file' }
 	];
 
 	// Quick insert selected type
@@ -180,7 +230,7 @@
 				data-step={stepType.type}
 				data-drag-handle="true"
 			>
-				<span class="shrink-0 text-xl" data-drag-handle="true">{stepType.icon}</span>
+				<stepType.icon size={18} class="shrink-0" data-drag-handle="true" />
 				<div class="flex min-w-0 flex-col items-start gap-0.5">
 					<span class="text-sm font-semibold text-fg-primary">{stepType.label}</span>
 					<span class="truncate text-xs text-fg-muted">{stepType.description}</span>

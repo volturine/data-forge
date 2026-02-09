@@ -43,8 +43,8 @@
 	const dragThreshold = 8;
 
 	// Derived values from declarative config
-	let stepConfig = $derived(stepTypes[step.type] || defaultStepType);
-	let currentStepInfo = $derived({ label: stepConfig.label, icon: stepConfig.icon });
+	let stepConfig = $derived(stepTypes[step.type] ?? defaultStepType);
+	let Icon = $derived(stepConfig.icon);
 	let label = $derived(stepConfig.typeLabel);
 	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
 	let isApplied = $derived((step as PipelineStep & { is_applied?: boolean }).is_applied !== false);
@@ -205,7 +205,7 @@
 				<GripVertical size={16} />
 			</button>
 
-			<span class="shrink-0 text-base">{currentStepInfo.icon}</span>
+			<Icon size={14} class="shrink-0" />
 			<span class="flex-1 text-sm font-semibold">{label}</span>
 			<span class="shrink-0 text-xs text-fg-muted">#{index + 1}</span>
 		</div>
