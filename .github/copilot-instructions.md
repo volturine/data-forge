@@ -6,9 +6,9 @@ Follow `AGENTS.md` and `STYLE_GUIDE.md` at all times.
 
 - Explore first: read relevant files for context.
 - Plan before coding: use `/plan` and wait for approval.
-- After planning, run `vibe_check`.
+- After planning, use `vibe_check` mcp.
 - Use the Second Opinion agent before completing tasks.
-- Use `vibe_learn` to record discoveries.
+- Use `vibe_learn` mcp to record discoveries.
 - Create local commits only; never push to remote.
 
 ## Stack
