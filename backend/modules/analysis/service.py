@@ -13,6 +13,7 @@ from modules.analysis.schemas import (
     TabSchema,
 )
 from modules.datasource.models import DataSource
+from modules.locks import service as lock_service
 
 
 def create_analysis(
@@ -141,6 +142,8 @@ def delete_analysis(
 
     session.delete(analysis)
     session.commit()
+
+    lock_service.clear_lock(session, analysis_id)
 
 
 def link_datasource(

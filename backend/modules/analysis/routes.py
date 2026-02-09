@@ -3,6 +3,7 @@ from sqlmodel import Session
 
 from core.database import get_db
 from modules.analysis import schemas, service
+from modules.locks import service as lock_service
 
 router = APIRouter(prefix='/analysis', tags=['analysis'])
 
@@ -51,6 +52,19 @@ def update_analysis(
     session: Session = Depends(get_db),
 ):
     """Update an existing analysis."""
+    try:
+        service.get_analysis(session, analysis_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    if not data.client_id or not data.lock_token:
+        raise HTTPException(status_code=409, detail='Editing lock required')
+
+    try:
+        lock_service.validate_lock(session, analysis_id, data.client_id, data.lock_token)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     try:
         return service.update_analysis(session, analysis_id, data)
     except ValueError as e:

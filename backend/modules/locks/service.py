@@ -160,6 +160,16 @@ def release_lock(
     session.commit()
 
 
+def clear_lock(session: Session, resource_id: str) -> None:
+    """Remove any lock for a resource (admin cleanup)."""
+    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
+    lock = result.scalar_one_or_none()
+    if not lock:
+        return
+    session.delete(lock)
+    session.commit()
+
+
 def get_lock_status(
     session: Session,
     resource_id: str,
@@ -181,3 +191,34 @@ def get_lock_status(
         client_id=lock.client_id,
         expires_at=lock.expires_at.isoformat(),
     )
+
+
+def validate_lock(
+    session: Session,
+    resource_id: str,
+    client_id: str,
+    lock_token: str,
+) -> None:
+    """Validate that a lock is held by the client and not expired."""
+    cleanup_expired_locks(session)
+
+    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
+    lock = result.scalar_one_or_none()
+
+    if not lock:
+        raise ValueError('Lock not found or expired')
+
+    if lock.client_id != client_id:
+        raise ValueError('Lock held by another client')
+
+    if lock.lock_token != lock_token:
+        raise ValueError('Invalid lock token')
+
+    now = datetime.now(UTC)
+    expires_at = lock.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at < now:
+        session.delete(lock)
+        session.commit()
+        raise ValueError('Lock expired')

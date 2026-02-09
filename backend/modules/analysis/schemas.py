@@ -39,6 +39,8 @@ class AnalysisUpdateSchema(BaseModel):
     pipeline_steps: list[PipelineStepSchema] | None = None
     status: str | None = None
     tabs: list[TabSchema] | None = None
+    client_id: str | None = None
+    lock_token: str | None = None
 
 
 class AnalysisResponseSchema(BaseModel):

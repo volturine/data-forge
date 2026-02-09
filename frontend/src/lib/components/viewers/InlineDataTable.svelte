@@ -91,7 +91,7 @@
 	}
 </script>
 
-<div class="w-full my-2 overflow-hidden select-text bg-panel">
+<div class="inline-preview-table w-full my-2 h-100 overflow-hidden select-text bg-panel">
 	{#if isLoading}
 		<div
 			class="flex flex-col items-center justify-center gap-3 p-8 pointer-events-none text-fg-tertiary"

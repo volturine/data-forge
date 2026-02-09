@@ -36,6 +36,8 @@ export interface AnalysisUpdate {
 	pipeline_steps?: PipelineStep[] | null;
 	status?: string | null;
 	tabs?: AnalysisTab[] | null;
+	client_id?: string | null;
+	lock_token?: string | null;
 }
 
 export interface Analysis {

@@ -390,6 +390,9 @@
 
 	$effect(() => {
 		return () => {
+			if (analysisId && hasLock(analysisId)) {
+				void releaseLock(analysisId);
+			}
 			stopLockCheck();
 		};
 	});
@@ -495,9 +498,15 @@
 			>
 				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-4">
 					<h1
-						contenteditable="true"
-						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none cursor-text text-fg-primary tracking-[0.02em]"
+						contenteditable={isEditingMode}
+						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none text-fg-primary tracking-[0.02em]"
+						class:cursor-text={isEditingMode}
+						class:cursor-default={!isEditingMode}
 						onblur={(e) => {
+							if (!isEditingMode) {
+								e.currentTarget.textContent = analysisQuery.data.name;
+								return;
+							}
 							const newName = e.currentTarget.textContent?.trim();
 							if (newName && newName !== analysisQuery.data.name) {
 								analysisStore.update({ name: newName });
