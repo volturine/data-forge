@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
+	import { LoaderCircle, Play, Bug } from 'lucide-svelte';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
 
@@ -60,12 +61,17 @@
 </script>
 
 <div class="h-full flex flex-col">
-	{#if error}
-		<div class="flex-1 flex items-center justify-center">
-			<div class="text-center">
-				<p class="m-0 mb-2 font-semibold text-error-fg">Failed to load preview</p>
-				<p class="m-0 text-xs text-fg-tertiary">{error.message}</p>
-			</div>
+
+	{#if isLoading}
+		<div class="flex h-full flex-col items-center justify-center gap-3 text-fg-tertiary">
+			<LoaderCircle size={18} class="animate-spin" />
+			<p class="m-0 text-fg-tertiary">Loading</p>
+		</div>
+	{:else if error}
+		<div class="flex h-full flex-col items-center justify-center gap-3 text-fg-tertiary">
+			<Bug size={18} class="animate-spin" />
+			<p class="m-0 text-fg-tertiary">Failed</p>
+			<p class="m-0 text-fg-tertiary">{error.message}</p>
 		</div>
 	{:else}
 		<div class="flex-1 overflow-hidden">
@@ -73,7 +79,6 @@
 				columns={data?.columns ?? []}
 				data={data?.data ?? []}
 				columnTypes={data?.column_types ?? {}}
-				loading={isLoading}
 				fillContainer
 				bind:columnSearch
 				showHeader
@@ -84,7 +89,6 @@
 					canNext,
 					onPrev: goPrev,
 					onNext: goNext,
-					loading: isLoading
 				}}
 				showTypeBadges
 			/>
