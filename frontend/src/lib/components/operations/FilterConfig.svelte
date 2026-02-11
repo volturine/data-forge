@@ -247,7 +247,7 @@
 						</div>
 
 						<div class="relative flex flex-wrap items-start gap-3">
-						<div class="flex min-w-55 flex-[2] flex-col gap-1">
+							<div class="flex min-w-55 flex-2 flex-col gap-1">
 								<label class="mb-0 text-xs font-normal text-fg-muted" for="{uid}-column-{i}"
 									>Column</label
 								>
@@ -259,7 +259,7 @@
 								/>
 							</div>
 
-						<div class="flex min-w-37.5 flex-[1] flex-col gap-1">
+							<div class="flex min-w-37.5 flex-1 flex-col gap-1">
 								<label class="text-xs font-normal mb-0 text-fg-muted" for="{uid}-operator-{i}"
 									>Operator</label
 								>
@@ -276,7 +276,7 @@
 							</div>
 
 							{#if !isNull}
-								<div class="flex min-w-60 flex-[2] flex-col gap-1">
+								<div class="flex min-w-60 flex-2 flex-col gap-1">
 									<div class="flex items-center justify-between gap-2">
 										<span class="text-xs font-normal text-fg-muted">Compare to</span>
 										<div class="flex" role="radiogroup" aria-label="Value mode">
@@ -314,7 +314,9 @@
 											data-testid={`filter-value-input-${i}`}
 											type="number"
 											step="any"
-											value={typeof cond.value === 'number' ? String(cond.value) : cond.value ?? ''}
+											value={typeof cond.value === 'number'
+												? String(cond.value)
+												: (cond.value ?? '')}
 											oninput={(e) => updateCondition(i, { value: e.currentTarget.value }, false)}
 											onblur={(e) => updateCondition(i, { value: e.currentTarget.value })}
 											placeholder="0"
@@ -356,7 +358,7 @@
 									{/if}
 								</div>
 							{:else}
-								<div class="flex min-w-60 flex-[2] flex-col gap-1">
+								<div class="flex min-w-60 flex-2 flex-col gap-1">
 									<span class="text-xs font-normal text-fg-muted">Value</span>
 									<div class="flex items-center h-9 px-3 text-sm italic bg-tertiary text-fg-muted">
 										<span>No value needed</span>

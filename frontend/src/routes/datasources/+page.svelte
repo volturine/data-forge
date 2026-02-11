@@ -75,7 +75,7 @@
 		class="w-(--datasource-panel-width) border-r border-tertiary flex flex-col bg-bg-primary shrink-0"
 	>
 		<!-- Header -->
-		<header class="flex flex-col gap-2 px-4 py-3 border-b border-tertiary h-[100px] box-border">
+		<header class="flex flex-col gap-2 px-4 py-3 border-b border-tertiary h-25 box-border">
 			<div class="flex items-center justify-between">
 				<h1 class="text-sm font-semibold">Data Sources</h1>
 				<a
@@ -182,7 +182,9 @@
 							onConfigChange={handleSnapshotConfigChange}
 						/>
 					{:else}
-						<div class="text-xs text-fg-tertiary">Time travel is available for Iceberg datasources.</div>
+						<div class="text-xs text-fg-tertiary">
+							Time travel is available for Iceberg datasources.
+						</div>
 					{/if}
 				</div>
 				<div class="flex-1">

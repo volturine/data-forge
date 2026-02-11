@@ -36,9 +36,7 @@
 	let selectedDay = $state('');
 	let snapshotList = $state<
 		Array<{ id: string; timestamp: number; operation?: string | null; is_current?: boolean }>
-	>(
-		[]
-	);
+	>([]);
 	let selectedSnapshotId = $state<string | null>(null);
 	let selectedSnapshotLabel = $state<string | null>(null);
 	let calendarDays = $state<Array<{ key: string; day: number; count: number; inMonth: boolean }>>(
@@ -142,8 +140,9 @@
 		const monthOptions = Array.from(
 			new Set(list.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
 		).sort((a, b) => (a > b ? -1 : 1));
-		const persistedMonth = (datasourceConfig.time_travel_ui as Record<string, unknown>)
-			?.month as string | undefined;
+		const persistedMonth = (datasourceConfig.time_travel_ui as Record<string, unknown>)?.month as
+			| string
+			| undefined;
 		if (persistedMonth && monthOptions.includes(persistedMonth)) {
 			selectMonth(persistedMonth);
 			return;
@@ -272,7 +271,10 @@
 		};
 	}
 
-	function applyPopoverPosition(node: HTMLElement | undefined, rect: { left: number; top: number; width: number }) {
+	function applyPopoverPosition(
+		node: HTMLElement | undefined,
+		rect: { left: number; top: number; width: number }
+	) {
 		if (!node) return;
 		node.style.setProperty('--popover-left', `${rect.left}px`);
 		node.style.setProperty('--popover-top', `${rect.top}px`);
@@ -392,7 +394,10 @@
 					Latest
 				</span>
 			{/if}
-			<span class="chevron flex items-center transition-transform text-fg-muted" class:expanded={snapshotsOpen}>
+			<span
+				class="chevron flex items-center transition-transform text-fg-muted"
+				class:expanded={snapshotsOpen}
+			>
 				<ChevronDown size={12} />
 			</span>
 		</div>
@@ -406,8 +411,8 @@
 		>
 			<div class="flex items-center justify-between border border-tertiary bg-secondary px-2 py-1">
 				<div class="text-xs text-fg-muted text-left">
-				{#if selectedSnapshotId}
-					Current: #{selectedSnapshotId}
+					{#if selectedSnapshotId}
+						Current: #{selectedSnapshotId}
 						{#if selectedSnapshotLabel}
 							· {selectedSnapshotLabel}
 						{/if}
@@ -492,27 +497,26 @@
 							{#each filteredSnapshots as snap (snap.id)}
 								<div
 									class="flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-xs hover:bg-tertiary"
-									class:bg-tertiary={
-										selectedSnapshotId === snap.id || (!selectedSnapshotId && snap.is_current)
-									}
+									class:bg-tertiary={selectedSnapshotId === snap.id ||
+										(!selectedSnapshotId && snap.is_current)}
 								>
-					<button
-						class="flex flex-1 items-center justify-start gap-2 bg-transparent p-0 text-left"
+									<button
+										class="flex flex-1 items-center justify-start gap-2 bg-transparent p-0 text-left"
 										onclick={() => setSnapshot(snap.id, snap.timestamp)}
 										type="button"
 									>
-									{#if snap.operation}
-										<span class="text-[10px] uppercase text-fg-tertiary">
-											{formatOperation(snap.operation)}
+										{#if snap.operation}
+											<span class="text-[10px] uppercase text-fg-tertiary">
+												{formatOperation(snap.operation)}
+											</span>
+										{/if}
+										<span
+											class="font-mono"
+											class:text-fg-secondary={selectedSnapshotId !== snap.id}
+											class:text-fg-primary={selectedSnapshotId === snap.id}
+										>
+											{formatSnapshotTime(snap.timestamp)}
 										</span>
-									{/if}
-									<span
-										class="font-mono"
-										class:text-fg-secondary={selectedSnapshotId !== snap.id}
-										class:text-fg-primary={selectedSnapshotId === snap.id}
-									>
-										{formatSnapshotTime(snap.timestamp)}
-									</span>
 									</button>
 									{#if showDelete && !snap.is_current}
 										{#if deleteConfirmId === snap.id}

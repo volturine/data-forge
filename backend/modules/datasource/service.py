@@ -8,11 +8,11 @@ from pathlib import Path
 import polars as pl
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
+from pyiceberg.catalog import load_catalog
 from sqlalchemy import select
 from sqlmodel import Session
 
 from core.config import settings
-from pyiceberg.catalog import load_catalog
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError, FileError
 from modules.compute.operations.datasource import load_datasource, resolve_iceberg_metadata_path
 from modules.datasource.models import DataSource

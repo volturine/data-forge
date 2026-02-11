@@ -156,7 +156,6 @@
 	--dialog-header-bg: var(--bg-tertiary);
 	--dialog-shadow: none;
 
-
 	/* Inline code */
 	--code-inline-bg: var(--bg-tertiary);
 	--code-inline-fg: var(--fg-secondary);
@@ -754,7 +753,6 @@ button.btn-sm {
 .chevron {
 	color: var(--fg-muted);
 }
-
 
 .column-menu {
 	position: absolute;

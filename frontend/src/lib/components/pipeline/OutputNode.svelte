@@ -20,6 +20,7 @@
 	let exporting = $state(false);
 	let error = $state<string | null>(null);
 	let success = $state<string | null>(null);
+	const idPrefix = $derived(() => `output-${analysisId ?? datasourceId ?? 'node'}`);
 
 	let outputConfig = $derived.by(() => {
 		const tab = activeTab;
@@ -125,9 +126,10 @@
 		<div class="mt-3 border-t border-tertiary pt-3">
 			<div class="flex flex-col gap-3">
 				<div class="flex items-center gap-2">
-					<label class="text-xs text-fg-muted">Destination</label>
+					<label class="text-xs text-fg-muted" for={`${idPrefix}-destination`}>Destination</label>
 					<select
 						class="resource-input border border-tertiary bg-secondary text-fg-primary p-1 px-2 text-xs"
+						id={`${idPrefix}-destination`}
 						value={outputConfig.datasource_type}
 						onchange={(e) => updateOutputConfig({ datasource_type: e.currentTarget.value })}
 					>
@@ -140,9 +142,12 @@
 				{#if outputConfig.datasource_type === 'iceberg'}
 					<div class="grid grid-cols-2 gap-2">
 						<div class="flex flex-col gap-1">
-							<label class="text-[10px] uppercase text-fg-muted">Namespace</label>
+							<label class="text-[10px] uppercase text-fg-muted" for={`${idPrefix}-iceberg-namespace`}>
+								Namespace
+							</label>
 							<input
 								class="resource-input border border-tertiary bg-secondary text-fg-primary p-1 px-2 text-xs"
+								id={`${idPrefix}-iceberg-namespace`}
 								value={outputConfig.iceberg.namespace}
 								oninput={(e) =>
 									updateOutputConfig({
@@ -154,9 +159,12 @@
 							/>
 						</div>
 						<div class="flex flex-col gap-1">
-							<label class="text-[10px] uppercase text-fg-muted">Table</label>
+							<label class="text-[10px] uppercase text-fg-muted" for={`${idPrefix}-iceberg-table`}>
+								Table
+							</label>
 							<input
 								class="resource-input border border-tertiary bg-secondary text-fg-primary p-1 px-2 text-xs"
+								id={`${idPrefix}-iceberg-table`}
 								value={outputConfig.iceberg.table_name}
 								oninput={(e) =>
 									updateOutputConfig({
@@ -170,9 +178,12 @@
 					</div>
 				{:else if outputConfig.datasource_type === 'duckdb'}
 					<div class="flex flex-col gap-1">
-						<label class="text-[10px] uppercase text-fg-muted">Table</label>
+						<label class="text-[10px] uppercase text-fg-muted" for={`${idPrefix}-duckdb-table`}>
+							Table
+						</label>
 						<input
 							class="resource-input border border-tertiary bg-secondary text-fg-primary p-1 px-2 text-xs"
+							id={`${idPrefix}-duckdb-table`}
 							value={outputConfig.duckdb.table_name}
 							oninput={(e) =>
 								updateOutputConfig({
@@ -183,17 +194,23 @@
 				{:else}
 					<div class="grid grid-cols-2 gap-2">
 						<div class="flex flex-col gap-1">
-							<label class="text-[10px] uppercase text-fg-muted">Filename</label>
+							<label class="text-[10px] uppercase text-fg-muted" for={`${idPrefix}-file-name`}>
+								Filename
+							</label>
 							<input
 								class="resource-input border border-tertiary bg-secondary text-fg-primary p-1 px-2 text-xs"
+								id={`${idPrefix}-file-name`}
 								value={outputConfig.filename}
 								oninput={(e) => updateOutputConfig({ filename: e.currentTarget.value })}
 							/>
 						</div>
 						<div class="flex flex-col gap-1">
-							<label class="text-[10px] uppercase text-fg-muted">Format</label>
+							<label class="text-[10px] uppercase text-fg-muted" for={`${idPrefix}-file-format`}>
+								Format
+							</label>
 							<select
 								class="resource-input border border-tertiary bg-secondary text-fg-primary p-1 px-2 text-xs"
+								id={`${idPrefix}-file-format`}
 								value={outputConfig.format}
 								onchange={(e) => updateOutputConfig({ format: e.currentTarget.value })}
 							>

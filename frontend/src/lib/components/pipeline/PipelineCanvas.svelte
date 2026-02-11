@@ -406,7 +406,7 @@
 					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
 				</div>
 			{/if}
-		<OutputNode {steps} {analysisId} {datasourceId} {activeTab} datasource={datasource} />
+			<OutputNode {steps} {analysisId} {datasourceId} {activeTab} {datasource} />
 		</div>
 	{/if}
 </div>
