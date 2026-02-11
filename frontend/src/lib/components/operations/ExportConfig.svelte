@@ -44,14 +44,14 @@
 
 <div class="config-panel" role="region" aria-label="Export configuration">
 	<div class="form-group mb-4">
-		<label class="flex items-center gap-2">
+		<div class="flex items-center gap-2">
 			Destination
 			<span
 				class="rounded-sm border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
 			>
 				Browser download
 			</span>
-		</label>
+		</div>
 		<span class="hint mt-1 block text-xs text-fg-muted">
 			File will be downloaded to your browser
 		</span>
