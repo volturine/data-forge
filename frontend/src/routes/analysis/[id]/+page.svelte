@@ -125,6 +125,17 @@
 		window.localStorage.setItem(storageKey, JSON.stringify(payload));
 	});
 
+	$effect(() => {
+		if (!analysisId) return;
+		if (!isEditingMode) return;
+		if (saveStatus.current === 'saving') return;
+		if (analysisStore.isDirty()) {
+			saveStatus.send('markUnsaved');
+			return;
+		}
+		saveStatus.send('saveComplete');
+	});
+
 	type SaveStates = 'saved' | 'unsaved' | 'saving';
 	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
 	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
@@ -423,7 +434,6 @@
 
 	function handleSelectTab(tabId: string) {
 		analysisStore.setActiveTab(tabId);
-		saveStatus.send('saveComplete');
 	}
 
 	function handleAddTab(datasourceId: string, name: string) {

@@ -62,3 +62,25 @@ const barBaz = 2;
 - TypeScript: `kebab-case.ts`
 - Svelte components: `PascalCase.svelte`
 - Stores: `*.svelte.ts`
+
+## Patterns
+
+**Config Defaults:** Centralize in `step-config-defaults.ts`
+
+```typescript
+export function getDefaultConfig(stepType: string) {
+  const defaults = { select: { columns: [] }, filter: { conditions: [] } };
+  return JSON.parse(JSON.stringify(defaults[stepType] ?? {}));
+}
+```
+
+**Icons:** Use Lucide. Store as component references, render as `<Icon />`.
+
+**Dynamic Styles:** Use Svelte actions (e.g., `use:setWidth`) not inline styles.
+
+**$effect Rules (Strict):**
+
+- **Allowed only for side effects** that cannot be expressed via `$derived` or pure functions.
+- **Allowed examples:** DOM access, event listeners, subscriptions, timers, network calls, localStorage/sessionStorage.
+- **Explicitly forbidden:** data initialization, validation, derived state, mapping, filtering, sorting, or transforming props/state.
+- **Requirement:** if `$effect` is used, include a one-line comment explaining why `$derived` is not sufficient.

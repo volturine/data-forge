@@ -156,7 +156,13 @@ npm run check && npm run lint && npm run format
 - **Filter Layout Responsiveness:** In complex filter UIs, use `min-w-55` and `min-w-37.5` custom utilities with flexible layouts to accommodate varying column name lengths without cramping the interface.
 - **Svelte Action-Based Positioning for Popovers:** Use Svelte actions to set CSS variables on portal elements for dynamic positioning, then consume them in dedicated CSS classes instead of inline `style=`.
 - **Inline Style Exceptions in Svelte:** Keep inline `style=` for drag previews that require runtime mouse-following, as CSS-only positioning doesn't suffice for dynamic pointer tracking.
-- **Portal Element Styling:** For elements appended to document.body via portal actions, use CSS variables set by the action to handle positioning without inline styles.
+- **Analysis-Wide Save Status:** Save status is tracked at the analysis level instead of per-tab, ensuring consistent feedback across all tabs and requiring centralized state management in stores.
+- **Preview Caching Key:** Preview caching uses a composite key of datasource + snapshot + pipeline to avoid redundant API calls, improving performance when switching between similar configurations.
+- **Preview Persistence Across Navigation:** Previews persist across route changes by storing the preview state in a reactive store that survives navigation, maintaining user context.
+- **Tab Change Preview Exclusion:** Tab changes no longer trigger preview refreshes, preventing unnecessary API calls and improving UI responsiveness during navigation.
+- **Auto-Refresh Previews on Apply Changes:** Previews automatically refresh when "Apply Changes" is triggered, ensuring the data view stays synchronized with configuration updates.
+- **Lucide Icon Consistency:** Use Lucide icons throughout the frontend for UI elements to maintain visual consistency and leverage their component-based rendering.
+- **Svelte A11y Compliance:** Remove inline styles and use semantic roles (e.g., role="button") to fix accessibility warnings in Svelte components.
 
 ## Datasource Architecture
 

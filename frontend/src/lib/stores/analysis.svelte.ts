@@ -23,6 +23,8 @@ export class AnalysisStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 	loadId = $state(0);
+	lastSaved = $state<{ name: string; description: string | null } | null>(null);
+	previewRuns = $state(new SvelteMap<string, boolean>());
 
 	activeTab = $derived.by(() => {
 		const match = this.tabs.find((tab) => tab.id === this.activeTabId) ?? null;
@@ -61,6 +63,7 @@ export class AnalysisStore {
 	applyAnalysis(analysis: Analysis): void {
 		const previousId = this.current?.id ?? null;
 		this.current = analysis;
+		this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
 		if (previousId !== analysis.id) {
 			this.activeTabId = null;
 			this.sourceSchemas.clear();
@@ -116,6 +119,7 @@ export class AnalysisStore {
 			.andThen((analysis) => {
 				if (this.loadId !== token) return ok(undefined);
 				this.current = analysis;
+				this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
 
 				const definition = analysis.pipeline_definition as {
 					steps?: PipelineStep[];
@@ -159,6 +163,50 @@ export class AnalysisStore {
 				this.loading = false;
 				return error;
 			});
+	}
+
+	isDirty(): boolean {
+		if (!this.current) return false;
+		const savedMeta = this.lastSaved ?? { name: this.current.name, description: this.current.description ?? null };
+		if (this.current.name !== savedMeta.name) return true;
+		if ((this.current.description ?? null) !== savedMeta.description) return true;
+		if (this.tabs.length !== this.savedTabs.length) return true;
+		for (let i = 0; i < this.tabs.length; i += 1) {
+			const currentTab = this.tabs[i];
+			const savedTab = this.savedTabs[i];
+			if (!savedTab) return true;
+			if (currentTab.id !== savedTab.id) return true;
+			if (currentTab.name !== savedTab.name) return true;
+			if (currentTab.type !== savedTab.type) return true;
+			if ((currentTab.parent_id ?? null) !== (savedTab.parent_id ?? null)) return true;
+			if ((currentTab.datasource_id ?? null) !== (savedTab.datasource_id ?? null)) return true;
+			const currentConfig = JSON.stringify(currentTab.datasource_config ?? {});
+			const savedConfig = JSON.stringify(savedTab.datasource_config ?? {});
+			if (currentConfig !== savedConfig) return true;
+			const currentSteps = currentTab.steps ?? [];
+			const savedSteps = savedTab.steps ?? [];
+			if (currentSteps.length !== savedSteps.length) return true;
+			for (let j = 0; j < currentSteps.length; j += 1) {
+				const currentStep = currentSteps[j];
+				const savedStep = savedSteps[j];
+				if (!savedStep) return true;
+				if (currentStep.id !== savedStep.id) return true;
+				if (currentStep.type !== savedStep.type) return true;
+				const currentDepends = currentStep.depends_on ?? [];
+				const savedDepends = savedStep.depends_on ?? [];
+				if (currentDepends.length !== savedDepends.length) return true;
+				for (let k = 0; k < currentDepends.length; k += 1) {
+					if (currentDepends[k] !== savedDepends[k]) return true;
+				}
+				const currentConfig = JSON.stringify(currentStep.config ?? {});
+				const savedConfig = JSON.stringify(savedStep.config ?? {});
+				if (currentConfig !== savedConfig) return true;
+				const currentApplied = currentStep.is_applied !== false;
+				const savedApplied = savedStep.is_applied !== false;
+				if (currentApplied !== savedApplied) return true;
+			}
+		}
+		return false;
 	}
 
 	private logStep(action: string, step: PipelineStep, meta?: Record<string, unknown>): void {
@@ -496,6 +544,7 @@ export class AnalysisStore {
 		return updateAnalysis(this.current.id, update)
 			.andThen((updated) => {
 				this.current = updated;
+				this.lastSaved = { name: updated.name, description: updated.description ?? null };
 				const tabs = updated.tabs ?? [];
 				if (tabs.length) {
 					const normalized = this.normalizeTabSteps(tabs);
@@ -547,6 +596,7 @@ export class AnalysisStore {
 		this.sourceSchemas.clear();
 		this.resourceConfig = null;
 		this.engineDefaults = null;
+		this.lastSaved = null;
 		this.loading = false;
 		this.error = null;
 	}
