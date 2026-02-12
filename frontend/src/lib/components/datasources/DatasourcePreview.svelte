@@ -60,7 +60,7 @@
 </script>
 
 <div class="h-full flex flex-col">
-	<div class="flex-1 overflow-hidden">
+	<div class="overflow-hidden h-full">
 		<DataTable
 			columns={data?.columns ?? []}
 			data={data?.data ?? []}

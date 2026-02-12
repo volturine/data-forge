@@ -571,8 +571,6 @@
 	{:else if headerGroups.length > 0}
 		<div
 			class="dataset-table__scroll overflow-x-auto overflow-y-auto bg-panel"
-			class:max-h-150={!fillContainer && maxHeight === '150'}
-			class:max-h-100={!fillContainer && maxHeight === '100'}
 			class:flex-1={fillContainer}
 			bind:this={scrollRef}
 		>
