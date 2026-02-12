@@ -466,9 +466,13 @@ export class AnalysisStore {
 		if (!this.activeTab) return;
 		const steps = [...this.activeTab.steps];
 		const [moved] = steps.splice(fromIndex, 1);
-		steps.splice(toIndex, 0, moved);
+		const movedCopy = {
+			...moved,
+			config: JSON.parse(JSON.stringify(moved.config))
+		};
+		steps.splice(toIndex, 0, movedCopy);
 		this.updateTabSteps(this.activeTab.id, steps);
-		this.logStep('reorder', moved, { from: fromIndex, to: toIndex });
+		this.logStep('reorder', movedCopy, { from: fromIndex, to: toIndex });
 	}
 
 	/**

@@ -95,13 +95,10 @@
 	const canPrev = $derived(currentPage > 1);
 	const canNext = $derived(pageSize === rowLimit);
 
-	// Reset page when key dependencies change
 	const resetKey = $derived(
 		`${analysisId}-${datasourceId}-${stepId}-${rowLimit}-${pipelineKey}-${datasourceKey}`
 	);
 	$effect(() => {
-		// $derived can't reset paging when the preview scope changes.
-		// Track resetKey to trigger page reset
 		void resetKey;
 		currentPage = 1;
 	});
