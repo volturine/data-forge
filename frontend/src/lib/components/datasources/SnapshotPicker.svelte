@@ -371,7 +371,7 @@
 
 <div>
 	<button
-		class="engine-header flex w-full cursor-pointer items-center justify-between border border-tertiary bg-secondary p-2 px-3 transition-all hover:bg-tertiary"
+		class="engine-header flex w-full cursor-pointer items-center justify-between border border-tertiary bg-secondary p-2 px-3 transition-colors hover:bg-tertiary"
 		onclick={toggleSnapshots}
 		type="button"
 		bind:this={triggerRef}

@@ -13,6 +13,7 @@ export interface FrontendConfig {
 	log_client_dedupe_window_ms: number;
 	log_client_flush_cooldown_ms: number;
 	log_queue_max_size: number;
+	public_idb_debug: boolean;
 }
 
 export function getConfig(): ResultAsync<FrontendConfig, ApiError> {

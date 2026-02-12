@@ -57,8 +57,16 @@
 	let info = $derived(type ? stepTypeInfo[type] : null);
 	let Icon = $derived(info?.icon ?? Filter);
 	let isReorder = $derived(drag.isReorder);
-	let pointerX = $derived(drag.pointerX);
-	let pointerY = $derived(drag.pointerY);
+
+	// Local reactive state for pointer position (drag store uses non-reactive getters)
+	let pointerX = $state<number | null>(null);
+	let pointerY = $state<number | null>(null);
+
+	// Sync with drag store - needed because pointerX/Y are non-reactive getters
+	$effect(() => {
+		pointerX = drag.pointerX;
+		pointerY = drag.pointerY;
+	});
 
 	// Position is simply the tracked pointer coordinates
 	let position = $derived(

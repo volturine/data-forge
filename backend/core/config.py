@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     # Max body size to log in bytes (default 1MB, 0 = unlimited)
     log_max_body_size: int = Field(default=1 * 1024 * 1024, alias='LOG_MAX_BODY_SIZE')
 
+    # Frontend debug panels
+    public_idb_debug: bool = Field(default=True, alias='PUBLIC_IDB_DEBUG')
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""

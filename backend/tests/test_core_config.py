@@ -14,7 +14,8 @@ class TestSettings:
 
     def test_default_settings(self, monkeypatch):
         """Test default configuration values."""
-        for key in os.environ:
+        keys = list(os.environ.keys())
+        for key in keys:
             if key.startswith('POLARS_') or key in [
                 'DEBUG',
                 'DATABASE_URL',
@@ -25,9 +26,11 @@ class TestSettings:
                 'JOB_TIMEOUT',
                 'LOG_LEVEL',
                 'LOG_ICEBERG_PATH',
+                'PUBLIC_IDB_DEBUG',
                 'WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'false')
 
         settings = Settings()
 
@@ -38,6 +41,7 @@ class TestSettings:
         assert settings.job_timeout == 300
         assert settings.engine_idle_timeout == 120
         assert settings.engine_pooling_interval == 30
+        assert settings.public_idb_debug is False
 
     def test_custom_settings_from_env(self, monkeypatch):
         """Test configuration from environment variables."""
@@ -46,6 +50,7 @@ class TestSettings:
         monkeypatch.setenv('UPLOAD_DIR', '/tmp/uploads')
         monkeypatch.setenv('UPLOAD_CHUNK_SIZE', '2000000')
         monkeypatch.setenv('JOB_TIMEOUT', '3600')
+        monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'true')
 
         settings = Settings()
 
@@ -54,6 +59,7 @@ class TestSettings:
         assert settings.upload_dir == Path('/tmp/uploads')
         assert settings.upload_chunk_size == 2000000
         assert settings.job_timeout == 3600
+        assert settings.public_idb_debug is True
 
     def test_polars_settings(self, monkeypatch):
         """Test Polars-specific configuration."""

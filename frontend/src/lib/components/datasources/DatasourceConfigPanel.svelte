@@ -345,14 +345,14 @@
 
 	<div class="flex gap-0 border-b border-tertiary px-4 pt-3">
 		<button
-			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:text-fg-secondary"
 			class:active={activeTab === 'general'}
 			onclick={() => (activeTab = 'general')}
 		>
 			General
 		</button>
 		<button
-			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:text-fg-secondary"
 			class:active={activeTab === 'schema'}
 			onclick={() => (activeTab = 'schema')}
 		>
@@ -360,7 +360,7 @@
 		</button>
 		{#if csv}
 			<button
-				class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-all hover:text-fg-secondary"
+				class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:text-fg-secondary"
 				class:active={activeTab === 'csv'}
 				onclick={() => (activeTab = 'csv')}
 			>
@@ -369,7 +369,7 @@
 		{/if}
 		{#if excel}
 			<button
-				class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-all hover:text-fg-secondary"
+				class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:text-fg-secondary"
 				class:active={activeTab === 'excel'}
 				onclick={() => (activeTab = 'excel')}
 			>
@@ -377,7 +377,7 @@
 			</button>
 		{/if}
 		<button
-			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-all hover:text-fg-secondary"
+			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:text-fg-secondary"
 			class:active={activeTab === 'runs'}
 			onclick={() => (activeTab = 'runs')}
 		>

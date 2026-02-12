@@ -70,7 +70,7 @@
 				id="{uid}-ascending"
 				data-testid="sort-ascending-button"
 				type="button"
-				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-secondary hover:text-fg-primary"
+				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-colors text-fg-secondary hover:bg-secondary hover:text-fg-primary"
 				class:active={!newDescending}
 				onclick={() => (newDescending = false)}
 				title="Ascending"
@@ -83,7 +83,7 @@
 				id="{uid}-descending"
 				data-testid="sort-descending-button"
 				type="button"
-				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-secondary hover:text-fg-primary"
+				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer transition-colors text-fg-secondary hover:bg-secondary hover:text-fg-primary"
 				class:active={newDescending}
 				onclick={() => (newDescending = true)}
 				title="Descending"
@@ -133,7 +133,7 @@
 							id={`sort-btn-asc-${i}`}
 							data-testid={`sort-ascending-rule-${i}`}
 							type="button"
-							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
+							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer transition-colors text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
 							class:active={!safeConfig.descending[i]}
 							onclick={() => setDirection(i, false)}
 							title="Ascending"
@@ -146,7 +146,7 @@
 							id={`sort-btn-desc-${i}`}
 							data-testid={`sort-descending-rule-${i}`}
 							type="button"
-							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer transition-all text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
+							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer transition-colors text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
 							class:active={safeConfig.descending[i]}
 							onclick={() => setDirection(i, true)}
 							title="Descending"
@@ -159,7 +159,7 @@
 							id={`sort-btn-remove-${i}`}
 							data-testid={`sort-remove-rule-${i}`}
 							type="button"
-							class="flex items-center justify-center w-7 h-7 p-0 bg-transparent cursor-pointer transition-all text-fg-secondary border border-transparent hover:bg-error! hover:text-error-fg! hover:border-error!"
+							class="flex items-center justify-center w-7 h-7 p-0 bg-transparent cursor-pointer transition-colors text-fg-secondary border border-transparent hover:bg-error! hover:text-error-fg! hover:border-error!"
 							onclick={() => removeSortRule(i)}
 							title="Remove"
 							aria-label={`Remove sort rule for ${column}`}

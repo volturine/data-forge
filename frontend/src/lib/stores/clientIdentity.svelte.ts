@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { idbGet, idbSet } from '$lib/utils/indexeddb';
 
 export interface Fingerprint {
 	screen: string;
@@ -22,14 +23,18 @@ function generateUUID(): string {
 	});
 }
 
-function getOrCreateClientId(): string {
-	if (!browser) return '';
-	let id = localStorage.getItem('lock_client_id');
-	if (!id) {
-		id = generateUUID();
-		localStorage.setItem('lock_client_id', id);
+let clientIdValue = '';
+
+async function initClientId(): Promise<void> {
+	if (!browser) return;
+	const existing = await idbGet<string>('lock_client_id');
+	if (existing) {
+		clientIdValue = existing;
+		return;
 	}
-	return id;
+	const id = generateUUID();
+	clientIdValue = id;
+	await idbSet('lock_client_id', id);
 }
 
 function generateFingerprint(): Fingerprint {
@@ -55,8 +60,10 @@ export function hashFingerprint(fp: Fingerprint): string {
 	return hash.toString(16);
 }
 
-// Client ID - persisted in localStorage
-const clientIdValue = browser ? getOrCreateClientId() : '';
+// Client ID - persisted in IndexedDB
+if (browser) {
+	void initClientId();
+}
 
 // Fingerprint
 const fingerprintValue: Fingerprint = browser
@@ -65,6 +72,9 @@ const fingerprintValue: Fingerprint = browser
 
 // Get current client identity for API calls
 export function getClientIdentity(): { clientId: string; clientSignature: string } {
+	if (!clientIdValue && browser) {
+		void initClientId();
+	}
 	return {
 		clientId: clientIdValue,
 		clientSignature: hashFingerprint(fingerprintValue)

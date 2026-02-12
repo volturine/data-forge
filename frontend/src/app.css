@@ -394,9 +394,7 @@
 		border-radius: 0;
 		padding: 0.5rem 0.75rem;
 		width: 100%;
-		transition:
-			border-color var(--transition),
-			background-color var(--transition);
+		transition: border-color var(--transition);
 	}
 
 	input:focus,
@@ -445,7 +443,7 @@
 		margin-left: 0.25rem;
 		border-radius: 0;
 		opacity: 1;
-		transition: all var(--transition);
+		transition: opacity var(--transition), background-color var(--transition);
 	}
 
 	input[type='date']::-webkit-calendar-picker-indicator:hover,
@@ -472,7 +470,11 @@
 		border: 1px solid transparent;
 		border-radius: 0;
 		padding: 0.5rem 1rem;
-		transition: all var(--transition);
+		transition:
+			color var(--transition),
+			background-color var(--transition),
+			border-color var(--transition),
+			opacity var(--transition);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -781,7 +783,9 @@ button.btn-sm {
 	color: var(--fg-primary);
 	font-size: 0.875rem;
 	font-family: inherit;
-	transition: all var(--transition);
+	transition:
+		border-color var(--transition),
+		background-color var(--transition);
 }
 
 .column-search-input:focus {
@@ -836,7 +840,10 @@ button.btn-sm {
 	justify-content: flex-start;
 	gap: 0.5rem;
 	cursor: pointer;
-	transition: all var(--transition);
+	transition:
+		color var(--transition),
+		background-color var(--transition),
+		border-color var(--transition);
 	color: var(--fg-primary);
 	font-size: 0.875rem;
 }
@@ -887,7 +894,10 @@ button.btn-sm {
 	border: 1px solid var(--info-border);
 	border-radius: 0;
 	cursor: pointer;
-	transition: all 0.2s;
+	transition:
+		color 0.2s,
+		background-color 0.2s,
+		border-color 0.2s;
 	color: var(--info-fg);
 }
 
@@ -1029,7 +1039,9 @@ button.btn-sm {
 	align-items: center;
 	justify-content: center;
 	border-radius: 0;
-	transition: all var(--transition);
+	transition:
+		color var(--transition),
+		background-color var(--transition);
 }
 
 .modal-close:hover {
@@ -1511,7 +1523,7 @@ button.btn-sm {
 	white-space: nowrap;
 	line-height: 1;
 	user-select: none;
-	transition: all 160ms ease;
+	transition: opacity 160ms ease;
 }
 
 .type-badge:hover {
@@ -1593,7 +1605,10 @@ button.btn-sm {
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
-	transition: all var(--transition);
+	transition:
+		color var(--transition),
+		background-color var(--transition),
+		border-color var(--transition);
 	font-family: var(--font-mono, monospace);
 }
 
@@ -1797,6 +1812,31 @@ button.btn-sm {
 .step-node.view-node {
 	width: 85%;
 	min-width: 320px;
+}
+
+/* Isolate InlineDataTable paint/layout from parent pipeline canvas.
+   Without this, scrolling the DataTable triggers repaints across the
+   entire PipelineCanvas compositing layer. */
+.inline-preview-table {
+	contain: content;
+}
+
+/* Skip rendering off-screen step nodes in the pipeline canvas.
+   The browser only renders steps visible in the scroll viewport. */
+.step-node {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 200px;
+}
+
+.step-node.view-node {
+	contain-intrinsic-size: auto 500px;
+}
+
+/* Isolate StepLibrary scroll from PipelineCanvas compositing layer.
+   Without this, scrolling the step list can trigger repaints in the
+   adjacent PipelineCanvas. */
+.step-library {
+	contain: content;
 }
 
 .drag-handle.dragging,
@@ -2121,6 +2161,7 @@ body.touch-dragging .pipeline-canvas {
 
 .dataset-table__table {
 	table-layout: fixed;
+	min-width: 100%;
 }
 
 .dataset-table__th {
@@ -2388,6 +2429,87 @@ tbody tr:last-child .dataset-table__td {
 	opacity: 0;
 	visibility: hidden;
 	pointer-events: none;
+}
+
+.idb-debug-panel {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	width: min(480px, 90vw);
+	max-height: 60vh;
+	background: var(--bg-primary);
+	border: 1px solid var(--border-tertiary);
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+	z-index: 9999;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px;
+	font-size: 0.8125rem;
+}
+
+.idb-debug-panel__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.idb-debug-panel__title {
+	font-weight: 600;
+	color: var(--fg-primary);
+}
+
+.idb-debug-panel__actions {
+	display: flex;
+	gap: 6px;
+}
+
+.idb-debug-panel__btn {
+	border: 1px solid var(--border-tertiary);
+	background: var(--bg-secondary);
+	color: var(--fg-primary);
+	padding: 4px 8px;
+	font-size: 0.75rem;
+	cursor: pointer;
+}
+
+.idb-debug-panel__btn--danger {
+	border-color: var(--border-error);
+	color: var(--error-fg);
+}
+
+.idb-debug-panel__status {
+	color: var(--fg-tertiary);
+	padding: 6px 0;
+}
+
+.idb-debug-panel__list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	overflow-y: auto;
+}
+
+.idb-debug-panel__row {
+	display: grid;
+	grid-template-columns: 1fr 2fr auto;
+	gap: 8px;
+	align-items: start;
+	border-top: 1px solid var(--border-tertiary);
+	padding-top: 8px;
+}
+
+.idb-debug-panel__key {
+	font-weight: 600;
+	color: var(--fg-primary);
+	word-break: break-word;
+}
+
+.idb-debug-panel__value {
+	color: var(--fg-secondary);
+	word-break: break-word;
+	white-space: pre-wrap;
 }
 
 .dataset-table--compact .dataset-table__cell {

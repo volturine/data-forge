@@ -92,7 +92,7 @@
 				<div class="flex gap-2 border-b p-2 bg-secondary border-tertiary">
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-all border-tertiary text-fg-secondary"
+						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-colors border-tertiary text-fg-secondary"
 						onclick={(e) => {
 							e.stopPropagation();
 							selectAll();
@@ -102,7 +102,7 @@
 					</button>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-all border-tertiary text-fg-secondary"
+						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-colors border-tertiary text-fg-secondary"
 						onclick={(e) => {
 							e.stopPropagation();
 							deselectAll();

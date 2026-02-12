@@ -2,6 +2,7 @@ import { browser } from '$app/environment';
 import { ResultAsync, errAsync, okAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { configStore } from '$lib/stores/config.svelte';
+import { idbGet, idbSet } from '$lib/utils/indexeddb';
 
 export type AuditField = {
 	name: string;
@@ -33,16 +34,19 @@ const state = {
 	installed: false
 };
 
+if (browser) {
+	void idbGet<string>('audit_session').then((stored) => {
+		if (!stored) return;
+		if (state.session) return;
+		state.session = stored;
+	});
+}
+
 function ensureSessionId(): string {
 	if (!browser) return '';
 	if (state.session) return state.session;
-	const stored = sessionStorage.getItem('audit_session');
-	if (stored) {
-		state.session = stored;
-		return state.session;
-	}
 	state.session = `s-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
-	sessionStorage.setItem('audit_session', state.session);
+	void idbSet('audit_session', state.session);
 	return state.session;
 }
 

@@ -2,10 +2,11 @@
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { PersistedState } from 'runed';
+	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
 	import { Sun, Moon } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
+	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
@@ -18,16 +19,23 @@
 	// This creates fresh store instances per request, preventing state leakage
 	initializeStores();
 
-	// Use runed's PersistedState for persisted theme state across tabs/sessions
 	const themeAttribute =
 		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
-	const theme = new PersistedState<'light' | 'dark'>('theme', initialTheme);
+	let theme = $state<'light' | 'dark'>(initialTheme);
 	let currentPath = $derived(page.url.pathname);
 
 	$effect(() => {
-		document.documentElement.setAttribute('data-theme', theme.current);
+		document.documentElement.setAttribute('data-theme', theme);
+		void idbSet('theme', theme);
 	});
+
+	if (typeof window !== 'undefined') {
+		void idbGet<'light' | 'dark'>('theme').then((value) => {
+			if (!value) return;
+			theme = value;
+		});
+	}
 
 	$effect(() => {
 		if (typeof window === 'undefined') return;
@@ -71,43 +79,10 @@
 		};
 	});
 
-	const findScrollableX = (node: Element | null): HTMLElement | null => {
-		if (!node) return null;
-		if (node instanceof HTMLElement) {
-			const style = getComputedStyle(node);
-			const canScrollX = style.overflowX === 'auto' || style.overflowX === 'scroll';
-			if (canScrollX && node.scrollWidth > node.clientWidth) {
-				return node;
-			}
-		}
-		return findScrollableX(node.parentElement);
-	};
-
-	$effect(() => {
-		if (typeof window === 'undefined') return;
-		const handler = (event: WheelEvent) => {
-			if (event.defaultPrevented) return;
-			if (event.deltaX !== 0 && !event.shiftKey) return;
-			if (!event.shiftKey || event.deltaY === 0) return;
-			const target = event.target instanceof Element ? event.target : null;
-			if (target && target.closest('input, textarea, select, button, [contenteditable="true"]')) {
-				return;
-			}
-			const scroller =
-				findScrollableX(target) ??
-				(document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null);
-			if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
-			scroller.scrollBy({ left: event.deltaY, behavior: 'auto' });
-			event.preventDefault();
-		};
-		window.addEventListener('wheel', handler, { passive: false, capture: true });
-		return () => {
-			window.removeEventListener('wheel', handler, { capture: true } as AddEventListenerOptions);
-		};
-	});
+	// Shift-scroll handling is now scoped to DataTable only.
 
 	function toggleTheme() {
-		theme.current = theme.current === 'light' ? 'dark' : 'light';
+		theme = theme === 'light' ? 'dark' : 'light';
 	}
 
 	const queryClient = new QueryClient({
@@ -167,13 +142,14 @@
 
 				<div class="ml-auto flex items-center gap-2">
 					<EngineMonitor />
+					<IndexedDbButton />
 					<button
-						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary transition-all hover:bg-bg-hover hover:text-fg-primary"
+						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary transition-colors hover:bg-bg-hover hover:text-fg-primary"
 						onclick={toggleTheme}
 						title="Toggle theme"
 						aria-label="Toggle theme"
 					>
-						{#if theme.current === 'light'}
+						{#if theme === 'light'}
 							<Sun size={16} />
 						{:else}
 							<Moon size={16} />

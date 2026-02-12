@@ -52,7 +52,6 @@
 		density?: 'default' | 'compact';
 		enableResize?: boolean;
 		enableCopy?: boolean;
-		maxHeight?: '100' | '150';
 		columnSearch?: string;
 	}
 
@@ -76,7 +75,6 @@
 		density = 'default',
 		enableResize = true,
 		enableCopy = true,
-		maxHeight = '150',
 		columnSearch = $bindable('')
 	}: Props = $props();
 
@@ -516,16 +514,6 @@
 		}, columnHoverDelayMs);
 	}
 
-	function tipMove(event: MouseEvent, id: string) {
-		if (tipState.hoverId !== id || !tipState.visible || !tipRef) return;
-		const target = event.currentTarget as HTMLElement;
-		const valueEl = target.querySelector('[data-cell-value="true"]') as HTMLElement | null;
-		if (!valueEl) return;
-		const rect = valueEl.getBoundingClientRect();
-		tipState.x = rect.left + rect.width / 2;
-		tipState.y = rect.bottom + 8;
-		updateTooltip();
-	}
 </script>
 
 <div

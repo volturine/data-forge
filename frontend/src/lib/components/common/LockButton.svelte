@@ -32,7 +32,7 @@
 
 {#if isMine}
 	<button
-		class="lock-btn release flex cursor-pointer items-center gap-2 border px-3 py-2 text-sm font-medium transition-all"
+		class="lock-btn release flex cursor-pointer items-center gap-2 border px-3 py-2 text-sm font-medium transition-colors"
 		onclick={handleRelease}
 		type="button"
 		class:callout-warning={true}
@@ -42,7 +42,7 @@
 	</button>
 {:else}
 	<button
-		class="lock-btn acquire flex items-center gap-2 border border-transparent px-3 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed {isLocked
+		class="lock-btn acquire flex items-center gap-2 border border-transparent px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed {isLocked
 			? 'cursor-not-allowed'
 			: 'cursor-pointer hover:opacity-90'}"
 		class:locked={isLocked}

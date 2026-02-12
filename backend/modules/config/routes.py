@@ -21,6 +21,7 @@ class FrontendConfig(BaseModel):
     log_client_dedupe_window_ms: int
     log_client_flush_cooldown_ms: int
     log_queue_max_size: int
+    public_idb_debug: bool
 
 
 @router.get('', response_model=FrontendConfig)
@@ -37,4 +38,5 @@ def get_config():
         log_client_dedupe_window_ms=settings.log_client_dedupe_window_ms,
         log_client_flush_cooldown_ms=settings.log_client_flush_cooldown_ms,
         log_queue_max_size=settings.log_queue_max_size,
+        public_idb_debug=settings.public_idb_debug,
     )

@@ -209,7 +209,7 @@
 				Configure Step
 			</h3>
 			<button
-				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted transition-all hover:bg-bg-hover hover:text-fg-primary"
+				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted transition-colors hover:bg-bg-hover hover:text-fg-primary"
 				onclick={() => onClose?.()}
 				type="button"
 				title="Close"
@@ -349,7 +349,7 @@
 		</div>
 		<div class="flex gap-2 border-t border-tertiary bg-panel-bg p-3">
 			<button
-				class="action-button cancel flex-1 cursor-pointer border border-tertiary bg-transparent px-3 py-2 font-mono text-sm font-semibold text-fg-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class="action-button cancel flex-1 cursor-pointer border border-tertiary bg-transparent px-3 py-2 font-mono text-sm font-semibold text-fg-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleCancelConfig}
 				disabled={!hasChanges}
 				type="button"
@@ -357,7 +357,7 @@
 				Cancel
 			</button>
 			<button
-				class="action-button apply flex-1 cursor-pointer border border-tertiary bg-accent-bg px-3 py-2 font-mono text-sm font-semibold text-accent-primary transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class="action-button apply flex-1 cursor-pointer border border-tertiary bg-accent-bg px-3 py-2 font-mono text-sm font-semibold text-accent-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 				onclick={handleApplyConfig}
 				disabled={!hasChanges}
 				type="button"

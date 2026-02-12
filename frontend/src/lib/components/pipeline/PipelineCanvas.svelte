@@ -229,7 +229,7 @@
 			<h3 class="m-0 mb-2 text-base font-semibold text-fg-secondary">No pipeline steps</h3>
 			<p class="m-0 text-sm text-fg-muted">Drag operations from the library and drop here</p>
 			<div
-				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2 transition-all"
+				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2 transition-colors"
 				class:ready={canDrop}
 				class:active={hoverIndex === 0}
 				class:invalid={hoverIndex === 0 && !drag.valid}
@@ -252,7 +252,7 @@
 
 				{#if canDrop}
 					<div
-						class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all"
+						class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-colors"
 						class:active={hoverIndex === 0}
 						class:invalid={hoverIndex === 0 && !drag.valid}
 					>
@@ -283,7 +283,7 @@
 			/>
 			{#if shouldShowInsert(0)}
 				<div
-					class="insert-zone flex w-full cursor-default flex-col items-center py-2 transition-all"
+					class="insert-zone flex w-full cursor-default flex-col items-center py-2 transition-colors"
 					class:ready={canDrop}
 					class:active={hoverIndex === 0}
 					class:invalid={hoverIndex === 0 && !drag.valid}
@@ -303,7 +303,7 @@
 					/>
 					{#if canDrop}
 						<div
-							class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all"
+							class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-colors"
 							class:active={hoverIndex === 0}
 							class:invalid={hoverIndex === 0 && !drag.valid}
 						>
@@ -344,7 +344,7 @@
 				{#if i < steps.length - 1 || canDrop}
 					{#if shouldShowInsert(i + 1)}
 						<div
-							class="insert-zone flex w-full cursor-default flex-col items-center py-2 transition-all"
+							class="insert-zone flex w-full cursor-default flex-col items-center py-2 transition-colors"
 							class:ready={canDrop}
 							class:active={hoverIndex === i + 1}
 							class:invalid={hoverIndex === i + 1 && !drag.valid}
@@ -366,7 +366,7 @@
 							{/if}
 							{#if canDrop}
 								<div
-									class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-all"
+									class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center transition-colors"
 									class:active={hoverIndex === i + 1}
 									class:invalid={hoverIndex === i + 1 && !drag.valid}
 								>

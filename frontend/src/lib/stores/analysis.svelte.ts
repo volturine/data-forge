@@ -11,33 +11,19 @@ import { getLockPayload } from '$lib/stores/lockManager.svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, err, ok } from 'neverthrow';
 import type { ApiError } from '$lib/api/client';
-import { browser } from '$app/environment';
+import { idbGet, idbSet } from '$lib/utils/indexeddb';
 
-function loadPreviewRuns(): SvelteMap<string, boolean> {
-	const map = new SvelteMap<string, boolean>();
-	if (!browser) return map;
-	try {
-		const stored = sessionStorage.getItem('analysis_preview_runs');
-		if (stored) {
-			const parsed = JSON.parse(stored) as Array<[string, boolean]>;
-			for (const [key, value] of parsed) {
-				map.set(key, value);
-			}
-		}
-	} catch {
-		// Ignore parse errors
+async function loadPreviewRuns(map: SvelteMap<string, boolean>): Promise<void> {
+	const stored = await idbGet<Array<[string, boolean]>>('analysis_preview_runs');
+	if (!stored) return;
+	for (const [key, value] of stored) {
+		map.set(key, value);
 	}
-	return map;
 }
 
 function savePreviewRuns(map: SvelteMap<string, boolean>): void {
-	if (!browser) return;
-	try {
-		const entries = Array.from(map.entries());
-		sessionStorage.setItem('analysis_preview_runs', JSON.stringify(entries));
-	} catch {
-		// Ignore storage errors
-	}
+	const entries = Array.from(map.entries());
+	void idbSet('analysis_preview_runs', entries);
 }
 
 export class AnalysisStore {
@@ -52,7 +38,11 @@ export class AnalysisStore {
 	error = $state<string | null>(null);
 	loadId = $state(0);
 	lastSaved = $state<{ name: string; description: string | null } | null>(null);
-	previewRuns = $state(loadPreviewRuns());
+	previewRuns = $state(new SvelteMap<string, boolean>());
+
+	constructor() {
+		void loadPreviewRuns(this.previewRuns);
+	}
 
 	setPreviewRun(key: string, value: boolean): void {
 		this.previewRuns.set(key, value);

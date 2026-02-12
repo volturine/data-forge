@@ -18,6 +18,7 @@
 	import { spawnEngine } from '$lib/api/compute';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
@@ -39,6 +40,8 @@
 	});
 	let isSaving = $state(false);
 	let draftLoaded = $state(false);
+	let isDirty = $state(false);
+	let draftTimer: number | null = null;
 
 	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
@@ -59,7 +62,6 @@
 	});
 
 	$effect(() => {
-		if (typeof window === 'undefined') return;
 		if (!storageKey || draftLoaded) return;
 		if (!analysisStore.tabs.length) return;
 
@@ -67,50 +69,46 @@
 		// If no lock, discard draft and load saved state
 		if (!analysisId || !hasLock(analysisId)) {
 			// Clear stale draft
-			window.localStorage.removeItem(storageKey);
+			void idbDelete(storageKey);
 			draftLoaded = true;
 			return;
 		}
 
-		const raw = window.localStorage.getItem(storageKey);
-		if (!raw) {
+		void idbGet<string>(storageKey).then((raw) => {
+			if (!raw) {
+				draftLoaded = true;
+				return;
+			}
+			const parsed = JSON.parse(raw) as {
+				analysisId: string;
+				tabs: AnalysisTab[];
+				activeTabId: string | null;
+				resourceConfig: EngineResourceConfig | null;
+				engineDefaults: EngineDefaults | null;
+				selectedStepId: string | null;
+				leftPaneCollapsed: boolean;
+				rightPaneCollapsed: boolean;
+			};
+			if (parsed.analysisId !== analysisId) {
+				draftLoaded = true;
+				return;
+			}
+			analysisStore.setTabs(parsed.tabs);
+			analysisStore.activeTabId = parsed.activeTabId;
+			analysisStore.setResourceConfig(parsed.resourceConfig);
+			analysisStore.setEngineDefaults(parsed.engineDefaults);
+			selectedStepId = parsed.selectedStepId;
+			leftPaneCollapsed = parsed.leftPaneCollapsed;
+			rightPaneCollapsed = parsed.rightPaneCollapsed;
+			isDirty = true;
 			draftLoaded = true;
-			return;
-		}
-		const parsed = JSON.parse(raw) as {
-			analysisId: string;
-			tabs: AnalysisTab[];
-			activeTabId: string | null;
-			resourceConfig: EngineResourceConfig | null;
-			engineDefaults: EngineDefaults | null;
-			selectedStepId: string | null;
-			leftPaneCollapsed: boolean;
-			rightPaneCollapsed: boolean;
-			saveStatus: SaveStates;
-		};
-		if (parsed.analysisId !== analysisId) {
-			draftLoaded = true;
-			return;
-		}
-		analysisStore.setTabs(parsed.tabs);
-		analysisStore.activeTabId = parsed.activeTabId;
-		analysisStore.setResourceConfig(parsed.resourceConfig);
-		analysisStore.setEngineDefaults(parsed.engineDefaults);
-		selectedStepId = parsed.selectedStepId;
-		leftPaneCollapsed = parsed.leftPaneCollapsed;
-		rightPaneCollapsed = parsed.rightPaneCollapsed;
-		if (parsed.saveStatus === 'unsaved') {
-			saveStatus.send('markUnsaved');
-		} else {
-			saveStatus.send('saveComplete');
-		}
-		draftLoaded = true;
+		});
 	});
 
 	$effect(() => {
-		if (typeof window === 'undefined') return;
 		if (!storageKey || !draftLoaded) return;
 		if (!analysisStore.tabs.length) return;
+		if (!isEditingMode) return;
 		const payload = {
 			analysisId,
 			tabs: analysisStore.tabs,
@@ -119,29 +117,18 @@
 			engineDefaults: analysisStore.engineDefaults,
 			selectedStepId,
 			leftPaneCollapsed,
-			rightPaneCollapsed,
-			saveStatus: saveStatus.current
+			rightPaneCollapsed
 		};
-		window.localStorage.setItem(storageKey, JSON.stringify(payload));
+		if (draftTimer) window.clearTimeout(draftTimer);
+		draftTimer = window.setTimeout(() => {
+			void idbSet(storageKey, JSON.stringify(payload));
+		}, 400);
 	});
 
 	$effect(() => {
 		if (!analysisId) return;
 		if (!isEditingMode) return;
-		if (saveStatus.current === 'saving') return;
-		if (analysisStore.isDirty()) {
-			saveStatus.send('markUnsaved');
-			return;
-		}
-		saveStatus.send('saveComplete');
-	});
-
-	type SaveStates = 'saved' | 'unsaved' | 'saving';
-	type SaveEvents = 'markUnsaved' | 'startSave' | 'saveComplete' | 'saveError';
-	const saveStatus = new FiniteStateMachine<SaveStates, SaveEvents>('saved', {
-		saved: { markUnsaved: 'unsaved', saveComplete: 'saved' },
-		unsaved: { markUnsaved: 'unsaved', startSave: 'saving', saveComplete: 'saved' },
-		saving: { saveComplete: 'saved', saveError: 'unsaved' }
+		isDirty = analysisStore.isDirty();
 	});
 	let isLoadingSchema = $state(false);
 	const HEARTBEAT_INTERVAL_MS = 10000;
@@ -180,7 +167,7 @@
 				throw new Error(result.error.message);
 			}
 			analysisStore.applyAnalysis(result.value);
-			saveStatus.send('saveComplete');
+			isDirty = false;
 			return result.value;
 		},
 		staleTime: 0,
@@ -272,9 +259,8 @@
 	}
 
 	function markUnsaved() {
-		if (saveStatus.current !== 'saving' && isEditingMode) {
-			saveStatus.send('markUnsaved');
-		}
+		if (!isEditingMode) return;
+		isDirty = true;
 	}
 
 	function handleAddStep(type: string) {
@@ -326,23 +312,21 @@
 	}
 
 	async function handleSave() {
-		if (isSaving || saveStatus.current === 'saving') return;
+		if (isSaving) return;
 
 		isSaving = true;
-		saveStatus.send('startSave');
 
 		analysisStore.save().match(
 			() => {
-				saveStatus.send('saveComplete');
+				isDirty = false;
 				selectedStepId = null;
 				isSaving = false;
 
-				if (storageKey && typeof window !== 'undefined') {
-					window.localStorage.removeItem(storageKey);
+				if (storageKey) {
+					void idbDelete(storageKey);
 				}
 			},
 			(error) => {
-				saveStatus.send('saveError');
 				alert(`Failed to save pipeline: ${error.message}`);
 				isSaving = false;
 			}
@@ -369,14 +353,19 @@
 			isEditingMode = false;
 
 			// Clear draft - unsaved changes are discarded
-			if (storageKey && typeof window !== 'undefined') {
-				window.localStorage.removeItem(storageKey);
+			if (storageKey) {
+				void idbDelete(storageKey);
 			}
 
 			// Reset to saved state
 			if (analysisQuery.data) {
+				const currentTabId = analysisStore.activeTabId;
 				await analysisStore.loadAnalysis(analysisId);
-				saveStatus.send('saveComplete');
+				// Restore the tab that was active before switching to viewing mode
+				if (currentTabId && analysisStore.tabs.some((t) => t.id === currentTabId)) {
+					analysisStore.activeTabId = currentTabId;
+				}
+				isDirty = false;
 			}
 		}
 	}
@@ -384,13 +373,18 @@
 	async function discardChanges() {
 		showModeDropdown = false;
 		if (!analysisId) return;
-		if (saveStatus.current === 'saving') return;
-		if (storageKey && typeof window !== 'undefined') {
-			window.localStorage.removeItem(storageKey);
+		if (isSaving) return;
+		if (storageKey) {
+			void idbDelete(storageKey);
 		}
 		if (analysisQuery.data) {
+			const currentTabId = analysisStore.activeTabId;
 			await analysisStore.loadAnalysis(analysisId);
-			saveStatus.send('saveComplete');
+			// Restore the tab that was active before discarding changes
+			if (currentTabId && analysisStore.tabs.some((t) => t.id === currentTabId)) {
+				analysisStore.activeTabId = currentTabId;
+			}
+			isDirty = false;
 		}
 	}
 
@@ -624,7 +618,7 @@
 			>
 				<div class="relative items-center px-1">
 					<button
-						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 transition-all duration-160 hover:bg-hover hover:border-tertiary"
+						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 transition-colors duration-160 hover:bg-hover hover:border-tertiary"
 						onclick={() => (showModeDropdown = !showModeDropdown)}
 						type="button"
 					>
@@ -666,32 +660,22 @@
 
 				<div class="flex h-full flex-1 p-1">
 					<button
-						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer transition-all duration-160 text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer transition-colors duration-160 text-fg-secondary hover:bg-hover hover:text-fg-primary"
 						onclick={discardChanges}
-						disabled={!isEditingMode ||
-							saveStatus.current !== 'unsaved' ||
-							isSaving ||
-							analysisStore.loading}
+						disabled={!isEditingMode || !isDirty || isSaving || analysisStore.loading}
 						type="button"
 					>
 						Cancel
 					</button>
 					<button
-						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer transition-all duration-160"
-						class:saved={saveStatus.current === 'saved'}
-						class:unsaved={saveStatus.current === 'unsaved'}
+						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer transition-colors duration-160"
+						class:saved={!isDirty}
+						class:unsaved={isDirty}
 						onclick={handleSave}
-						disabled={!isEditingMode ||
-							isSaving ||
-							saveStatus.current === 'saving' ||
-							analysisStore.loading}
+						disabled={!isEditingMode || isSaving || analysisStore.loading}
 						type="button"
 					>
-						{saveStatus.current === 'saving'
-							? 'Saving...'
-							: saveStatus.current === 'saved'
-								? 'Saved'
-								: 'Save'}
+						{isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
 					</button>
 				</div>
 			</div>

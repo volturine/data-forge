@@ -72,6 +72,10 @@ export class ConfigStore {
 	get logQueueMaxSize(): number {
 		return this.config?.log_queue_max_size ?? 2000;
 	}
+
+	get publicIdbDebug(): boolean {
+		return this.config?.public_idb_debug ?? false;
+	}
 }
 
 export const configStore = new ConfigStore();

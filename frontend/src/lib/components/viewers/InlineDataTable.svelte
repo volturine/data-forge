@@ -2,6 +2,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
+	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
 
@@ -24,7 +25,7 @@
 
 	let activePipeline = $derived(applySteps(pipeline));
 	let isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
-	const pipelineKey = $derived(JSON.stringify(activePipeline));
+	const pipelineKey = $derived.by(() => hashPipeline(activePipeline));
 	const datasourceConfig = $derived(analysisStore.activeTab?.datasource_config ?? {});
 	const datasourceKey = $derived.by(() => {
 		const config = datasourceConfig as Record<string, unknown>;
@@ -102,7 +103,7 @@
 		// $derived can't reset paging when the preview scope changes.
 		// Track resetKey to trigger page reset
 		void resetKey;
-		currentPage = 1;
+				currentPage = 1;
 	});
 
 	function runPreview() {
@@ -122,7 +123,7 @@
 	}
 </script>
 
-<div class="inline-preview-table w-full my-2 h-100 overflow-hidden select-text bg-panel">
+<div class="inline-preview-table w-full h-100 overflow-hidden">
 	<DataTable
 		columns={data?.columns ?? []}
 		data={data?.data ?? []}
@@ -140,11 +141,9 @@
 			canPrev,
 			canNext,
 			onPrev: prevPage,
-			onNext: nextPage,
-			loading: isLoading
+			onNext: nextPage
 		}}
 		showTypeBadges
-		maxHeight="100"
 		showFooter={false}
 	/>
 </div>

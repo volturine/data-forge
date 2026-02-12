@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { PersistedState } from 'runed';
+	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -26,8 +26,17 @@
 		}
 	}));
 
-	const searchQuery = new PersistedState('analysis-search', '');
-	const sortOption = new PersistedState<SortOption>('analysis-sort', 'newest');
+	let searchQuery = $state('');
+	let sortOption = $state<SortOption>('newest');
+
+	if (typeof window !== 'undefined') {
+		void idbGet<string>('analysis-search').then((value) => {
+			if (value !== null) searchQuery = value;
+		});
+		void idbGet<SortOption>('analysis-sort').then((value) => {
+			if (value !== null) sortOption = value;
+		});
+	}
 
 	// Selection state
 	const selectedIds = new SvelteSet<string>();
@@ -39,15 +48,15 @@
 
 		let result = [...query.data];
 
-		if (searchQuery.current) {
-			const lowerQuery = searchQuery.current.toLowerCase();
+		if (searchQuery) {
+			const lowerQuery = searchQuery.toLowerCase();
 			result = result.filter((analysis) => analysis.name.toLowerCase().includes(lowerQuery));
 		}
 
 		result.sort((a, b) => {
 			const left = toEpochDisplay(a.updated_at);
 			const right = toEpochDisplay(b.updated_at);
-			switch (sortOption.current) {
+			switch (sortOption) {
 				case 'newest':
 					return right - left;
 				case 'oldest':
@@ -70,11 +79,13 @@
 	}
 
 	function handleSearch(query: string) {
-		searchQuery.current = query;
+		searchQuery = query;
+		void idbSet('analysis-search', query);
 	}
 
 	function handleSort(option: SortOption) {
-		sortOption.current = option;
+		sortOption = option;
+		void idbSet('analysis-sort', option);
 	}
 
 	function toggleSelect(id: string) {
@@ -189,8 +200,8 @@
 				<EmptyState />
 			{:else}
 				<AnalysisFilters
-					searchQuery={searchQuery.current}
-					sortOption={sortOption.current}
+					{searchQuery}
+					{sortOption}
 					onSearch={handleSearch}
 					onSort={handleSort}
 					{selectionCount}

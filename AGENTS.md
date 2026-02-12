@@ -66,6 +66,22 @@ const query = createQuery({ queryKey: ["items"], queryFn: fetchItems });
 - Use `border-tertiary` for table/view borders (matches header)
 - Use theme accents: `bg-accent-bg`, `text-accent-primary`, `border-info`
 
+### Transitions (Strict)
+
+- **Never use `transition-all`** — it forces the browser to track every CSS property during style recalc. With hundreds of elements this causes scroll jank and paint storms.
+- **Always use specific transition properties:**
+  - `transition-colors` for hover effects that change color/background/border
+  - `transition-opacity` for fade effects
+  - `transition-[color,background-color,border-color,opacity]` when both color and opacity change
+  - `transition-[color,background-color,border-color,opacity,transform]` when transform also changes (e.g., drag targets)
+- The global `button` base style in `app.css` uses specific properties — do not revert to `transition: all`.
+
+### CSS Containment (Strict)
+
+- **Embedded scrollable components** (e.g., DataTable inside StepNode inside PipelineCanvas) must use `contain: content` on their wrapper to isolate paint/layout from parent compositing layers. Without this, scrolling triggers repaints across the entire parent tree.
+- **Repeated list items** inside scroll containers (e.g., `.step-node` inside PipelineCanvas) should use `content-visibility: auto` with `contain-intrinsic-size` to skip rendering off-screen items.
+- When adding a new scrollable component embedded inside a complex DOM tree, always check if it needs paint isolation.
+
 ### File Naming
 
 - Components: `PascalCase.svelte`
@@ -163,6 +179,8 @@ npm run check && npm run lint && npm run format
 - **Auto-Refresh Previews on Apply Changes:** Previews automatically refresh when "Apply Changes" is triggered, ensuring the data view stays synchronized with configuration updates.
 - **Lucide Icon Consistency:** Use Lucide icons throughout the frontend for UI elements to maintain visual consistency and leverage their component-based rendering.
 - **Svelte A11y Compliance:** Remove inline styles and use semantic roles (e.g., role="button") to fix accessibility warnings in Svelte components.
+- **CSS Paint Isolation for Embedded Scroll:** InlineDataTable scroll was janky because its DataTable scroll container had no paint isolation from PipelineCanvas. Fix: `contain: content` on `.inline-preview-table` + `content-visibility: auto` on `.step-node`. The root cause was NOT reactive re-renders — no `$state`/`$derived` changes during scroll. It was pure CSS compositing: the browser repainted the entire PipelineCanvas layer on every scroll frame.
+- **transition-all Causes Style Recalc Bloat:** The global `button { transition: all }` base style combined with `transition-all` on pipeline elements forced the browser to check every CSS property for transitions during style recalc — across 1000+ buttons in DataTable cells. Fix: narrow to specific properties (`color`, `background-color`, `border-color`, `opacity`, `transform` only where needed).
 
 ## Datasource Architecture
 
