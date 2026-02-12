@@ -134,7 +134,7 @@
 					id="join-btn-add-column"
 					data-testid="join-add-column-button"
 					type="button"
-					class="btn-add py-1 px-3 border-none cursor-pointer text-sm bg-primary-action text-primary-fg hover:bg-primary-hover"
+						class="btn-add py-1 px-3 border-none cursor-pointer text-sm bg-accent text-bg-primary hover:bg-accent-primary"
 					onclick={addJoinColumn}
 					aria-label="Add join column pair"
 				>

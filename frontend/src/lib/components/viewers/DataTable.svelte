@@ -594,7 +594,7 @@
 				class="dataset-table__table w-full border-collapse text-sm"
 				use:setWidth={table?.getTotalSize() ?? 0}
 			>
-				<thead class="dataset-table__thead sticky top-0 z-20 bg-table-header">
+				<thead class="dataset-table__thead sticky top-0 z-20 bg-tertiary">
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
@@ -746,7 +746,7 @@
 	{/if}
 
 	{#if showFooter && !loading && data.length > 0}
-		<div class="px-4 py-3 border-t border-tertiary bg-panel-header">
+		<div class="px-4 py-3 border-t border-tertiary bg-tertiary">
 			<span class="text-xs text-fg-tertiary">
 				Showing {data.length.toLocaleString()} row{data.length !== 1 ? 's' : ''}
 			</span>

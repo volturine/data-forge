@@ -13,7 +13,7 @@
 </script>
 
 <div class="stats-panel overflow-hidden border bg-panel border-tertiary">
-	<div class="px-5 py-4 border-b border-tertiary bg-panel-header">
+	<div class="px-5 py-4 border-b border-tertiary bg-tertiary">
 		<h3 class="m-0">Summary Statistics</h3>
 	</div>
 

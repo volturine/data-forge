@@ -111,7 +111,7 @@
 	{#if safeConfig.columns.length > 0}
 		<div
 			id="sort-rules-list"
-			class="p-4 mb-4 bg-panel-muted border border-tertiary"
+			class="p-4 mb-4 bg-tertiary border border-tertiary"
 			role="region"
 			aria-labelledby="sort-order-heading"
 		>
@@ -173,7 +173,7 @@
 	{:else}
 		<p
 			id="sort-empty-state"
-			class="py-8 text-center mb-4 text-fg-muted bg-panel-muted border border-tertiary"
+			class="py-8 text-center mb-4 text-fg-muted bg-tertiary border border-tertiary"
 			role="status"
 		>
 			No sort rules configured. Add a column to sort by.

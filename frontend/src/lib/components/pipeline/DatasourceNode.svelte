@@ -226,7 +226,7 @@
 							aria-label="Edit tab name"
 						/>
 						<button
-							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-info text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
+						class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
 							onclick={commitEdit}
 							type="button"
 							aria-label="Save"
@@ -347,7 +347,7 @@
 							<label for="threads-input" class="min-w-15 text-xs text-fg-secondary">Threads</label>
 							<input
 								id="threads-input"
-								class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-info focus:outline-none"
+						class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
 								type="number"
 								min="1"
 								max="64"
@@ -362,7 +362,7 @@
 							<label for="memory-select" class="min-w-15 text-xs text-fg-secondary">Memory</label>
 							<select
 								id="memory-select"
-								class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-info focus:outline-none"
+						class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
 								value={effectiveMemoryGb}
 								onchange={(e) => setMemoryGb(parseInt(e.currentTarget.value) || 0)}
 							>
@@ -396,7 +396,7 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-info [&:hover_svg]:opacity-100"
+		class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
 				onclick={onChangeDatasource}
 				type="button"
 			>
@@ -407,6 +407,6 @@
 	</div>
 
 	<div
-		class="absolute -bottom-1.25 left-1/2 z-2 h-2.5 w-2.5 -translate-x-1/2 bg-primary border-2 border-info"
+		class="absolute -bottom-1.25 left-1/2 z-2 h-2.5 w-2.5 -translate-x-1/2 bg-primary border-2 border-accent-primary"
 	></div>
 </div>

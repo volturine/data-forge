@@ -10,7 +10,7 @@
 </script>
 
 <div class="schema-viewer overflow-hidden border bg-panel border-tertiary">
-	<div class="flex justify-between items-center px-5 py-4 border-b border-tertiary bg-panel-header">
+	<div class="flex justify-between items-center px-5 py-4 border-b border-tertiary bg-tertiary">
 		<h3 class="m-0 text-lg font-semibold text-fg-primary">Schema</h3>
 		{#if schema.row_count !== null}
 			<span class="text-sm text-fg-muted">{schema.row_count.toLocaleString()} rows</span>
@@ -19,7 +19,7 @@
 
 	<div class="max-h-125 overflow-y-auto">
 		<div
-			class="schema-header-grid grid gap-4 px-5 py-3 border-b text-xs font-semibold uppercase tracking-wider border-tertiary text-fg-muted bg-table-header"
+			class="schema-header-grid grid gap-4 px-5 py-3 border-b text-xs font-semibold uppercase tracking-wider border-tertiary text-fg-muted bg-tertiary"
 		>
 			<div>Column</div>
 			<div>Type</div>

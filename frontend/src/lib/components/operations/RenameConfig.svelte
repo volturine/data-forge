@@ -84,7 +84,7 @@
 			id="rename-btn-add"
 			data-testid="rename-add-button"
 			type="button"
-			class="add-btn accent-btn py-2 px-4 cursor-pointer whitespace-nowrap font-semibold hover:opacity-90 disabled:bg-panel-muted disabled:border-tertiary disabled:text-fg-muted disabled:cursor-not-allowed"
+			class="add-btn accent-btn py-2 px-4 cursor-pointer whitespace-nowrap font-semibold hover:opacity-90 disabled:bg-tertiary disabled:border-tertiary disabled:text-fg-muted disabled:cursor-not-allowed"
 			onclick={addMapping}
 			disabled={!canAdd}
 			aria-label="Add rename mapping"
@@ -96,7 +96,7 @@
 	{#if mappings.length > 0}
 		<div
 			id="rename-mappings-list"
-			class="flex flex-col gap-2 p-3 mb-4 bg-panel-muted border border-tertiary"
+		class="flex flex-col gap-2 p-3 mb-4 bg-tertiary border border-tertiary"
 			role="list"
 			aria-label="Configured renames"
 		>

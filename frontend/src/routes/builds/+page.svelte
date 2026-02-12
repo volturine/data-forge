@@ -169,7 +169,7 @@
 							<td class="border-b border-tertiary px-3 py-2">
 								<span class="inline-flex items-center gap-1.5">
 									{#if run.kind === 'preview'}
-										<Eye size={14} class="text-info-fg" />
+									<Eye size={14} class="text-accent" />
 										<span>Preview</span>
 									{:else}
 										<Download size={14} class="text-success-fg" />

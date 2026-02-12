@@ -334,7 +334,7 @@
 				<div
 					class="item item-row flex justify-between items-center py-2 px-3"
 					class:editing={editIndex === index}
-					class:border-info={editIndex === index}
+					class:border-accent-primary={editIndex === index}
 					class:bg-hover={editIndex === index}
 					role="listitem"
 				>
