@@ -103,7 +103,7 @@
 		// $derived can't reset paging when the preview scope changes.
 		// Track resetKey to trigger page reset
 		void resetKey;
-				currentPage = 1;
+		currentPage = 1;
 	});
 
 	function runPreview() {

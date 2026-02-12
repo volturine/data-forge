@@ -32,7 +32,7 @@
 
 	let isDragActive = $derived(drag.active);
 	let lineClass = $derived(
-		`connection-line flex w-full shrink-0 items-center justify-center transition-colors h-pipeline-connection${
+		`connection-line flex w-full shrink-0 items-center justify-center h-pipeline-connection${
 			isDragActive ? ' drag-active' : ''
 		}${highlighted ? ' highlighted' : ''}`
 	);

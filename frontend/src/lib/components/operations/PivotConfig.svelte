@@ -114,7 +114,7 @@
 			<button
 				id="pivot-btn-refresh"
 				data-testid="pivot-refresh-button"
-				class="w-full py-2 px-3 border-none text-sm font-medium cursor-pointer flex items-center justify-center gap-2 transition-opacity accent-btn hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+				class="w-full py-2 px-3 border-none text-sm font-medium cursor-pointer flex items-center justify-center gap-2 accent-btn hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
 				onclick={onRefreshSchema}
 				disabled={!isConfigValid || isRefreshing}
 				type="button"

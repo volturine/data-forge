@@ -546,7 +546,7 @@
 			</div>
 			<div class="flex-1 min-w-0 overflow-hidden flex items-center justify-center gap-0">
 				<button
-					class="collapse-arrow collapse-arrow-left w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted transition-colors duration-160 border-r border-tertiary hover:text-fg-primary hover:bg-hover"
+					class="collapse-arrow collapse-arrow-left w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-r border-tertiary hover:text-fg-primary hover:bg-hover"
 					class:collapsed={leftPaneCollapsed}
 					class:hidden={!isEditingMode}
 					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
@@ -598,7 +598,7 @@
 					</div>
 				</div>
 				<button
-					class="collapse-arrow collapse-arrow-right w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted transition-colors duration-160 border-l border-tertiary hover:text-fg-primary hover:bg-hover"
+					class="collapse-arrow collapse-arrow-right w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-l border-tertiary hover:text-fg-primary hover:bg-hover"
 					class:collapsed={rightPaneCollapsed}
 					class:hidden={!isEditingMode}
 					onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
@@ -618,7 +618,7 @@
 			>
 				<div class="relative items-center px-1">
 					<button
-						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 transition-colors duration-160 hover:bg-hover hover:border-tertiary"
+						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 hover:bg-hover hover:border-tertiary"
 						onclick={() => (showModeDropdown = !showModeDropdown)}
 						type="button"
 					>
@@ -631,7 +631,7 @@
 							class="mode-dropdown absolute left-0 min-w-35 bg-panel border border-tertiary p-1 z-100"
 						>
 							<button
-								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-160 hover:bg-hover"
+								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary hover:bg-hover"
 								onclick={() => setMode('viewing')}
 								type="button"
 							>
@@ -643,7 +643,7 @@
 								<span>Viewing</span>
 							</button>
 							<button
-								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary transition-colors duration-160 hover:bg-hover"
+								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary hover:bg-hover"
 								onclick={() => setMode('editing')}
 								type="button"
 							>
@@ -660,7 +660,7 @@
 
 				<div class="flex h-full flex-1 p-1">
 					<button
-						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer transition-colors duration-160 text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer text-fg-secondary hover:bg-hover hover:text-fg-primary"
 						onclick={discardChanges}
 						disabled={!isEditingMode || !isDirty || isSaving || analysisStore.loading}
 						type="button"
@@ -668,7 +668,7 @@
 						Cancel
 					</button>
 					<button
-						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer transition-colors duration-160"
+						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer"
 						class:saved={!isDirty}
 						class:unsaved={isDirty}
 						onclick={handleSave}

@@ -443,7 +443,9 @@
 		margin-left: 0.25rem;
 		border-radius: 0;
 		opacity: 1;
-		transition: opacity var(--transition), background-color var(--transition);
+		transition:
+			opacity var(--transition),
+			background-color var(--transition);
 	}
 
 	input[type='date']::-webkit-calendar-picker-indicator:hover,
@@ -506,8 +508,9 @@
 		color: var(--fg-primary);
 	}
 
-	/* Hide scrollbars globally */
+	/* Hide scrollbars globally, disable all transitions for instant state changes */
 	* {
+		transition: none;
 		scrollbar-width: none;
 	}
 }
@@ -1075,26 +1078,6 @@ button.btn-sm {
 }
 
 /* Animations & Spinner */
-@keyframes fadeIn {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-@keyframes slideUp {
-	from {
-		opacity: 0;
-		transform: translateY(10px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-
 @keyframes spin {
 	to {
 		transform: rotate(360deg);
@@ -2704,30 +2687,6 @@ tbody tr:last-child .dataset-table__td {
 .nav-link.active {
 	color: var(--fg-primary);
 	border-bottom: 1px solid var(--info-border);
-}
-
-/* Shimmer */
-.shimmer-bg {
-	background: linear-gradient(
-		90deg,
-		var(--bg-tertiary) 25%,
-		var(--bg-hover) 50%,
-		var(--bg-tertiary) 75%
-	);
-	background-size: 200% 100%;
-}
-
-@keyframes shimmer {
-	0% {
-		background-position: 200% 0;
-	}
-	100% {
-		background-position: -200% 0;
-	}
-}
-
-.animate-shimmer {
-	animation: shimmer 1.5s infinite;
 }
 
 @media (max-width: 900px) {

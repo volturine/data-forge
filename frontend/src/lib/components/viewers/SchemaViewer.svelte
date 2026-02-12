@@ -28,7 +28,7 @@
 
 		{#each schema.columns as column (column.name)}
 			<div
-				class="schema-header-grid grid gap-4 px-5 py-3.5 border-b transition-colors last:border-b-0 border-tertiary hover:bg-hover"
+				class="schema-header-grid grid gap-4 px-5 py-3.5 border-b last:border-b-0 border-tertiary hover:bg-hover"
 			>
 				<div class="flex items-center gap-2 font-medium text-fg-primary">
 					<span class="font-mono text-sm">{column.name}</span>

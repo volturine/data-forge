@@ -92,7 +92,7 @@
 				<div class="flex gap-2 border-b p-2 bg-secondary border-tertiary">
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-colors border-tertiary text-fg-secondary"
+						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs border-tertiary text-fg-secondary"
 						onclick={(e) => {
 							e.stopPropagation();
 							selectAll();
@@ -102,7 +102,7 @@
 					</button>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs transition-colors border-tertiary text-fg-secondary"
+						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs border-tertiary text-fg-secondary"
 						onclick={(e) => {
 							e.stopPropagation();
 							deselectAll();
@@ -115,7 +115,7 @@
 			<div class="column-options">
 				{#each filteredColumns as column (column.name)}
 					<label
-						class="multi-select-option flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors text-fg-primary"
+						class="multi-select-option flex cursor-pointer items-center gap-2 px-3 py-2 text-fg-primary"
 					>
 						<input
 							type="checkbox"

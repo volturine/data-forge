@@ -187,7 +187,7 @@
 					<ArrowUp size={14} />
 				</button>
 				<button
-					class="cursor-pointer border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-tertiary hover:bg-hover hover:border-tertiary"
+					class="cursor-pointer border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-tertiary hover:bg-hover hover:border-tertiary"
 					onclick={() => onselect(path, true)}
 					disabled={loading || !path}
 				>
@@ -195,7 +195,7 @@
 				</button>
 			</div>
 			<button
-				class="cursor-pointer border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-tertiary hover:bg-hover hover:border-tertiary"
+				class="cursor-pointer border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-tertiary hover:bg-hover hover:border-tertiary"
 				onclick={() => load(path)}
 				disabled={loading}
 			>

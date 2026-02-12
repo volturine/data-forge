@@ -78,7 +78,7 @@
 					{title}
 				</h2>
 				<button
-					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 transition-colors text-fg-muted hover:bg-hover hover:text-fg-primary"
+					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
 					onclick={onCancel}
 					aria-label="Close dialog"
 				>
@@ -94,13 +94,13 @@
 
 			<div class="flex justify-end gap-3 border-t p-4 max-sm:flex-col-reverse border-tertiary">
 				<button
-					class="cursor-pointer border bg-transparent px-4 py-2 font-mono text-sm font-medium transition-colors max-sm:w-full text-fg-primary border-tertiary hover:bg-hover"
+					class="cursor-pointer border bg-transparent px-4 py-2 font-mono text-sm font-medium max-sm:w-full text-fg-primary border-tertiary hover:bg-hover"
 					onclick={onCancel}
 				>
 					{cancelText}
 				</button>
 				<button
-					class="cursor-pointer border px-4 py-2 font-mono text-sm font-medium transition-[color,background-color,border-color,opacity] max-sm:w-full bg-error text-error-fg border-error hover:opacity-85"
+					class="cursor-pointer border px-4 py-2 font-mono text-sm font-medium max-sm:w-full bg-error text-error-fg border-error hover:opacity-85"
 					onclick={onConfirm}
 				>
 					{confirmText}

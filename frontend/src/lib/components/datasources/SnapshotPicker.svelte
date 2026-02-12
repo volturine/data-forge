@@ -371,7 +371,7 @@
 
 <div>
 	<button
-		class="engine-header flex w-full cursor-pointer items-center justify-between border border-tertiary bg-secondary p-2 px-3 transition-colors hover:bg-tertiary"
+		class="engine-header flex w-full cursor-pointer items-center justify-between border border-tertiary bg-secondary p-2 px-3 hover:bg-tertiary"
 		onclick={toggleSnapshots}
 		type="button"
 		bind:this={triggerRef}
@@ -394,10 +394,7 @@
 					Latest
 				</span>
 			{/if}
-			<span
-				class="chevron flex items-center transition-transform text-fg-muted"
-				class:expanded={snapshotsOpen}
-			>
+			<span class="chevron flex items-center text-fg-muted" class:expanded={snapshotsOpen}>
 				<ChevronDown size={12} />
 			</span>
 		</div>

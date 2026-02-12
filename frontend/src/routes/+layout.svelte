@@ -129,7 +129,7 @@
 					{#each navItems as item (item.href)}
 						<a
 							href={resolve(item.href as '/')}
-							class="nav-link border border-transparent px-3 py-1.5 text-sm text-fg-tertiary no-underline transition-colors hover:text-fg-primary"
+							class="nav-link border border-transparent px-3 py-1.5 text-sm text-fg-tertiary no-underline hover:text-fg-primary"
 							class:active={currentPath === item.href ||
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs') ||
@@ -144,7 +144,7 @@
 					<EngineMonitor />
 					<IndexedDbButton />
 					<button
-						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary transition-colors hover:bg-bg-hover hover:text-fg-primary"
+						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
 						onclick={toggleTheme}
 						title="Toggle theme"
 						aria-label="Toggle theme"

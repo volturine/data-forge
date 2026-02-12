@@ -102,7 +102,7 @@
 					{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}
 				</h2>
 				<button
-					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 transition-colors text-fg-muted hover:bg-hover hover:text-fg-primary"
+					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
 					onclick={handleClose}
 					aria-label="Close"
 				>
@@ -111,7 +111,7 @@
 			</div>
 			<div class="flex flex-col gap-4 overflow-y-auto p-4">
 				<input
-					class="w-full border px-3 py-3 text-sm transition-colors focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-info"
+					class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-info"
 					type="text"
 					bind:this={searchInput}
 					bind:value={searchQuery}
@@ -127,7 +127,7 @@
 					{:else}
 						{#each filteredDatasources as ds (ds.id)}
 							<button
-								class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left transition-colors hover:bg-hover hover:border-tertiary"
+								class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left hover:bg-hover hover:border-tertiary"
 								onclick={() => handleSelect(ds.id, ds.name)}
 							>
 								<span class="text-sm font-medium text-fg-primary">{ds.name}</span>

@@ -40,7 +40,7 @@
 </script>
 
 <div
-	class="analysis-card group relative cursor-pointer overflow-hidden transition-colors bg-primary"
+	class="analysis-card group relative cursor-pointer overflow-hidden bg-primary"
 	class:selected
 	onclick={handleClick}
 	onkeypress={handleKeyPress}

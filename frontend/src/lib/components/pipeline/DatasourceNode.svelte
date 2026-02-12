@@ -180,9 +180,7 @@
 </script>
 
 <div class="datasource-node relative w-[65%]" class:drag-active={isDragActive}>
-	<div
-		class="node-content bg-primary border-tertiary border p-4 transition-[color,background-color,border-color,opacity] hover:border-tertiary"
-	>
+	<div class="node-content bg-primary border-tertiary border p-4 hover:border-tertiary">
 		<!-- Header with icon and badge -->
 		<div class="mb-4 flex items-center justify-between border-b border-tertiary pb-3">
 			<div class="flex items-center gap-2">
@@ -228,7 +226,7 @@
 							aria-label="Edit tab name"
 						/>
 						<button
-							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-info text-success bg-primary p-0 leading-none transition-colors hover:bg-success hover:text-fg-primary"
+							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-info text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
 							onclick={commitEdit}
 							type="button"
 							aria-label="Save"
@@ -236,7 +234,7 @@
 							<Check size={12} class="shrink-0" />
 						</button>
 						<button
-							class="icon-btn cancel inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-error text-error bg-primary p-0 leading-none transition-colors hover:bg-error hover:text-fg-primary"
+							class="icon-btn cancel inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-error text-error bg-primary p-0 leading-none hover:bg-error hover:text-fg-primary"
 							onclick={cancelEdit}
 							type="button"
 							aria-label="Cancel"
@@ -248,7 +246,7 @@
 					<span class="text-sm font-medium">{tabName ?? datasource?.name ?? 'Untitled'}</span>
 					{#if onRenameTab}
 						<button
-							class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none transition-[color,background-color,border-color,opacity] hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
+							class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
 							onclick={startEdit}
 							type="button"
 							aria-label="Edit tab name"
@@ -297,7 +295,7 @@
 							</span>
 						{:else}
 							<button
-								class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-tertiary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-70 hover:border-tertiary hover:text-fg-primary"
+								class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-tertiary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] disabled:cursor-not-allowed disabled:opacity-70 hover:border-tertiary hover:text-fg-primary"
 								onclick={calculateRowCount}
 								disabled={isLoadingRowCount}
 								type="button"
@@ -325,7 +323,7 @@
 		{#if analysisId}
 			<div class="mb-3 overflow-hidden border border-tertiary">
 				<button
-					class="engine-header flex w-full cursor-pointer items-center justify-between border-none bg-secondary p-2 px-3 transition-colors hover:bg-tertiary"
+					class="engine-header flex w-full cursor-pointer items-center justify-between border-none bg-secondary p-2 px-3 hover:bg-tertiary"
 					onclick={() => (engineExpanded = !engineExpanded)}
 					type="button"
 				>
@@ -337,10 +335,7 @@
 						<span class="font-mono text-[10px] text-fg-secondary">
 							{effectiveThreads} threads, {effectiveMemoryGb}GB
 						</span>
-						<span
-							class="chevron flex items-center transition-transform text-fg-muted"
-							class:expanded={engineExpanded}
-						>
+						<span class="chevron flex items-center text-fg-muted" class:expanded={engineExpanded}>
 							<ChevronDown size={12} />
 						</span>
 					</div>
@@ -401,7 +396,7 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium transition-colors hover:bg-tertiary hover:text-fg-primary hover:border-info [&:hover_svg]:opacity-100"
+				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-info [&:hover_svg]:opacity-100"
 				onclick={onChangeDatasource}
 				type="button"
 			>

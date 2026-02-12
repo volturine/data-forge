@@ -164,10 +164,7 @@
 							onclick={() => toggleExpand(run.id)}
 						>
 							<td class="border-b border-tertiary px-3 py-2">
-								<ChevronDown
-									size={14}
-									class="transition-transform {expandedId === run.id ? '' : '-rotate-90'}"
-								/>
+								<ChevronDown size={14} class={expandedId === run.id ? '' : '-rotate-90'} />
 							</td>
 							<td class="border-b border-tertiary px-3 py-2">
 								<span class="inline-flex items-center gap-1.5">
@@ -219,8 +216,7 @@
 										<!-- Tab buttons -->
 										<div class="flex gap-1 mb-4 border-b border-tertiary">
 											<button
-												class="px-3 py-1.5 text-sm border-b-2 -mb-px transition-colors {activeTab ===
-												'request'
+												class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === 'request'
 													? 'border-accent-primary text-fg-primary'
 													: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
 												onclick={(e) => {
@@ -231,8 +227,7 @@
 												Request Config
 											</button>
 											<button
-												class="px-3 py-1.5 text-sm border-b-2 -mb-px transition-colors {activeTab ===
-												'result'
+												class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === 'result'
 													? 'border-accent-primary text-fg-primary'
 													: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
 												onclick={(e) => {
@@ -244,8 +239,7 @@
 											</button>
 											{#if hasPlans(run)}
 												<button
-													class="px-3 py-1.5 text-sm border-b-2 -mb-px transition-colors {activeTab ===
-													'plans'
+													class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === 'plans'
 														? 'border-accent-primary text-fg-primary'
 														: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
 													onclick={(e) => {

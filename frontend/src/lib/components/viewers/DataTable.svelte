@@ -513,7 +513,6 @@
 			updateTooltip();
 		}, columnHoverDelayMs);
 	}
-
 </script>
 
 <div

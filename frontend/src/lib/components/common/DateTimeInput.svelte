@@ -61,7 +61,7 @@
 		{#if timeValue}
 			<button
 				type="button"
-				class="clear-btn absolute right-1 top-1/2 -translate-y-1/2 flex h-4.5 w-4.5 cursor-pointer items-center justify-center border-none bg-transparent p-0 transition-colors text-fg-muted"
+				class="clear-btn absolute right-1 top-1/2 -translate-y-1/2 flex h-4.5 w-4.5 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-fg-muted"
 				onclick={clearTime}
 				title="Clear time"
 			>

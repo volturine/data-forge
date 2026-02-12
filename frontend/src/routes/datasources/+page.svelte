@@ -130,7 +130,7 @@
 						class:selected={selectedId === datasource.id}
 					>
 						<!-- Row -->
-						<div class="flex items-center justify-between px-3 py-2.5 transition-colors">
+						<div class="flex items-center justify-between px-3 py-2.5">
 							<button
 								class="flex items-center min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
 								onclick={() => selectDatasource(datasource.id)}

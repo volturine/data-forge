@@ -233,7 +233,7 @@
 						<span>Output datasource</span>
 					</div>
 					<button
-						class="export-btn flex items-center gap-2 border-none px-3 py-2 text-xs font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-bg-primary hover:opacity-90 hover:enabled:opacity-90"
+						class="export-btn flex items-center gap-2 border-none px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-bg-primary hover:opacity-90 hover:enabled:opacity-90"
 						onclick={handleExport}
 						disabled={exporting}
 						type="button"

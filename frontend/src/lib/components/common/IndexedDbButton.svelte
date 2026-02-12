@@ -53,7 +53,7 @@
 {#if configStore.publicIdbDebug}
 	<div class="relative" bind:this={dropdownRef}>
 		<button
-			class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs transition-colors text-fg-tertiary hover:text-fg-primary"
+			class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs text-fg-tertiary hover:text-fg-primary"
 			class:!bg-bg-hover={open}
 			class:!text-fg-primary={open}
 			onclick={toggle}

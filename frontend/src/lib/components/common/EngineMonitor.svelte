@@ -52,7 +52,7 @@
 
 <div class="relative" bind:this={dropdownRef}>
 	<button
-		class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs transition-colors text-fg-tertiary hover:text-fg-primary"
+		class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs text-fg-tertiary hover:text-fg-primary"
 		class:!bg-bg-hover={expanded}
 		class:!text-fg-primary={expanded}
 		class:text-fg-secondary={enginesStore.count > 0}
@@ -65,7 +65,7 @@
 				{enginesStore.count}
 			</span>
 		{/if}
-		<span class="transition-transform" class:rotate-180={expanded}>
+		<span class="rotate-180" class:rotate-180={expanded}>
 			<ChevronDown size={12} />
 		</span>
 	</button>
@@ -77,7 +77,7 @@
 			<div class="flex items-center justify-between border-b p-3 bg-secondary border-tertiary">
 				<span class="text-sm font-semibold text-fg-primary">Active Engines</span>
 				<button
-					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 transition-colors text-fg-muted hover:bg-hover hover:text-fg-primary"
+					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
 					onclick={() => (expanded = false)}
 				>
 					<X size={14} />
@@ -129,7 +129,7 @@
 									</div>
 								</div>
 								<button
-									class="flex cursor-pointer items-center justify-center border p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-transparent border-tertiary text-fg-muted hover:bg-error hover:border-error hover:text-error-fg"
+									class="flex cursor-pointer items-center justify-center border p-1 disabled:cursor-not-allowed disabled:opacity-50 bg-transparent border-tertiary text-fg-muted hover:bg-error hover:border-error hover:text-error-fg"
 									onclick={() => handleKill(engine.analysis_id)}
 									disabled={killing === engine.analysis_id}
 									title="Shutdown engine"

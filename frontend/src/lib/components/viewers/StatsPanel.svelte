@@ -18,7 +18,7 @@
 	</div>
 
 	<div class="stats-summary grid gap-4 p-5">
-		<div class="flex items-center gap-4 p-4 border transition-colors bg-tertiary border-tertiary">
+		<div class="flex items-center gap-4 p-4 border bg-tertiary border-tertiary">
 			<BarChart3 size={24} class="text-fg-primary" />
 			<div class="flex-1">
 				<div class="text-xs font-medium uppercase tracking-wider mb-1 text-fg-muted">
@@ -30,7 +30,7 @@
 			</div>
 		</div>
 
-		<div class="flex items-center gap-4 p-4 border transition-colors bg-tertiary border-tertiary">
+		<div class="flex items-center gap-4 p-4 border bg-tertiary border-tertiary">
 			<ListChecks size={24} class="text-fg-primary" />
 			<div class="flex-1">
 				<div class="text-xs font-medium uppercase tracking-wider mb-1 text-fg-muted">
@@ -42,7 +42,7 @@
 			</div>
 		</div>
 
-		<div class="flex items-center gap-4 p-4 border transition-colors bg-tertiary border-tertiary">
+		<div class="flex items-center gap-4 p-4 border bg-tertiary border-tertiary">
 			<Binary size={24} class="text-fg-primary" />
 			<div class="flex-1">
 				<div class="text-xs font-medium uppercase tracking-wider mb-1 text-fg-muted">
