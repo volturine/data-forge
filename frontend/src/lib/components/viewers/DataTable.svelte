@@ -99,11 +99,50 @@
 	let dragColumn = $state<string | null>(null);
 	let dragOver = $state<string | null>(null);
 	let copied = $state<Record<string, boolean>>({});
-	let tip = $state<{ text: string; x: number; y: number } | null>(null);
-	let hover = $state<string | null>(null);
-	let timer = $state<number | null>(null);
 	let tipRef = $state<HTMLDivElement>();
 	let scrollRef = $state<HTMLDivElement>();
+
+	// Non-reactive tooltip state to avoid table re-renders
+	let tipState = {
+		text: '',
+		x: 0,
+		y: 0,
+		visible: false,
+		timer: null as number | null,
+		hoverId: ''
+	};
+
+	let lastTooltipUpdate = { text: '', x: 0, y: 0, visible: false };
+
+	function updateTooltip() {
+		if (!tipRef) return;
+		if (
+			tipState.text === lastTooltipUpdate.text &&
+			tipState.x === lastTooltipUpdate.x &&
+			tipState.y === lastTooltipUpdate.y &&
+			tipState.visible === lastTooltipUpdate.visible
+		) {
+			return;
+		}
+		lastTooltipUpdate = {
+			text: tipState.text,
+			x: tipState.x,
+			y: tipState.y,
+			visible: tipState.visible
+		};
+		if (tipState.visible) {
+			if (tipRef.textContent !== tipState.text) {
+				tipRef.textContent = tipState.text;
+			}
+			tipRef.style.setProperty('--tip-left', `${tipState.x}px`);
+			tipRef.style.setProperty('--tip-top', `${tipState.y}px`);
+			tipRef.style.opacity = '1';
+			tipRef.style.visibility = 'visible';
+		} else {
+			tipRef.style.opacity = '0';
+			tipRef.style.visibility = 'hidden';
+		}
+	}
 
 	function setWidth(node: HTMLElement, size: number) {
 		node.style.width = `${size}px`;
@@ -125,7 +164,7 @@
 
 	const minColumnWidthPx = 220;
 	const defaultColumnWidthPx = 150;
-	const columnHoverDelayMs = 400;
+	const columnHoverDelayMs = 1000;
 	let panelWidth = $state(0);
 	const softMin = $derived(
 		columns.length
@@ -135,38 +174,45 @@
 
 	let initialSize = $state(defaultColumnWidthPx);
 
-	$effect(() => {
-		initialSize = softMin;
-		sizingReady = false;
-	});
+	// $effect(() => {
+	// 	initialSize = softMin;
+	// 	sizingReady = false;
+	// });
 
-	$effect(() => {
-		if (!columnsKey) return;
-		columnOrder = [...columns];
-		columnVisibility = {};
-		columnPinning = { left: [], right: [] };
-		columnSizing = {};
-		columnSizingInfo = {
-			columnSizingStart: [],
-			deltaOffset: null,
-			deltaPercentage: null,
-			isResizingColumn: false,
-			startOffset: null,
-			startSize: null
-		};
-		sizingReady = false;
-	});
+	// $effect(() => {
+	// 	if (!columnsKey) return;
+	// 	columnOrder = [...columns];
+	// 	columnVisibility = {};
+	// 	columnPinning = { left: [], right: [] };
+	// 	columnSizing = {};
+	// 	columnSizingInfo = {
+	// 		columnSizingStart: [],
+	// 		deltaOffset: null,
+	// 		deltaPercentage: null,
+	// 		isResizingColumn: false,
+	// 		startOffset: null,
+	// 		startSize: null
+	// 	};
+	// 	sizingReady = false;
+	// });
 
-	$effect(() => {
-		const node = scrollRef;
-		if (!node) return;
-		const observer = new ResizeObserver(() => {
-			panelWidth = node.clientWidth;
-			ensureSizingReady();
-		});
-		observer.observe(node);
-		return () => observer.disconnect();
-	});
+	// $effect(() => {
+	// 	const node = scrollRef;
+	// 	if (!node) return;
+	// 	let rafId: number | null = null;
+	// 	const observer = new ResizeObserver(() => {
+	// 		if (rafId) cancelAnimationFrame(rafId);
+	// 		rafId = requestAnimationFrame(() => {
+	// 			panelWidth = node.clientWidth;
+	// 			ensureSizingReady();
+	// 		});
+	// 	});
+	// 	observer.observe(node);
+	// 	return () => {
+	// 		if (rafId) cancelAnimationFrame(rafId);
+	// 		observer.disconnect();
+	// 	};
+	// });
 
 	const table = $derived.by(() => {
 		if (data.length === 0 || columns.length === 0) return null;
@@ -437,66 +483,55 @@
 	}
 
 	function tipHide(id: string) {
-		if (hover !== id) return;
-		hover = null;
-		if (timer) {
-			window.clearTimeout(timer);
-			timer = null;
+		if (tipState.hoverId !== id) return;
+		tipState.hoverId = '';
+		if (tipState.timer) {
+			window.clearTimeout(tipState.timer);
+			tipState.timer = null;
 		}
-		tip = null;
+		tipState.visible = false;
+		updateTooltip();
 	}
 
 	function tipShow(event: MouseEvent, id: string, value: string) {
-		const target = event.currentTarget as HTMLElement;
-		const valueEl = target.querySelector('[data-cell-value="true"]') as HTMLElement | null;
+		const target = event.target as HTMLElement;
+		if (target?.closest('button')) return;
+		const currentTarget = event.currentTarget as HTMLElement;
+		const valueEl = currentTarget.querySelector('[data-cell-value="true"]') as HTMLElement | null;
 		if (!valueEl) return;
 		const overflow = valueEl.scrollWidth > valueEl.clientWidth;
-		hover = id;
-		if (timer) {
-			window.clearTimeout(timer);
-			timer = null;
+		tipState.hoverId = id;
+		if (tipState.timer) {
+			window.clearTimeout(tipState.timer);
+			tipState.timer = null;
 		}
 		if (!overflow) {
-			tip = null;
+			tipState.visible = false;
+			updateTooltip();
 			return;
 		}
 		const rect = valueEl.getBoundingClientRect();
-		const pending = {
-			text: value,
-			x: rect.left + rect.width / 2,
-			y: rect.bottom + 8
-		};
-		const currentHover = hover;
-		timer = window.setTimeout(() => {
-			if (hover !== id || currentHover !== id) return;
-			tip = pending;
+		tipState.text = value;
+		tipState.x = rect.left + rect.width / 2;
+		tipState.y = rect.bottom + 8;
+		const hoverId = id;
+		tipState.timer = window.setTimeout(() => {
+			if (tipState.hoverId !== hoverId) return;
+			tipState.visible = true;
+			updateTooltip();
 		}, columnHoverDelayMs);
 	}
 
 	function tipMove(event: MouseEvent, id: string) {
-		if (hover !== id || !tip || !tipRef) return;
+		if (tipState.hoverId !== id || !tipState.visible || !tipRef) return;
 		const target = event.currentTarget as HTMLElement;
 		const valueEl = target.querySelector('[data-cell-value="true"]') as HTMLElement | null;
 		if (!valueEl) return;
 		const rect = valueEl.getBoundingClientRect();
-		tip = { ...tip, x: rect.left + rect.width / 2, y: rect.bottom + 8 };
+		tipState.x = rect.left + rect.width / 2;
+		tipState.y = rect.bottom + 8;
+		updateTooltip();
 	}
-
-	$effect(() => {
-		const current = tip;
-		const ref = tipRef;
-		if (!current || !ref) return;
-		window.requestAnimationFrame(() => {
-			const width = ref.offsetWidth;
-			const height = ref.offsetHeight;
-			const maxX = window.innerWidth - width - 12;
-			const left = Math.min(Math.max(12, current.x - width / 2), maxX);
-			const below = current.y + height + 12 <= window.innerHeight;
-			const top = below ? current.y : current.y - height - 12;
-			ref.style.setProperty('--tip-left', `${left}px`);
-			ref.style.setProperty('--tip-top', `${top}px`);
-		});
-	});
 </script>
 
 <div
@@ -694,16 +729,15 @@
 				</thead>
 				<tbody>
 					{#each rows as row (row.id)}
-						<tr class="dataset-table__row transition-colors even:bg-secondary hover:bg-hover!">
+						<tr class="dataset-table__row">
 							{#each row.getVisibleCells() as cell (cell.id)}
 								{@const display = formatValue(cell.getValue() as TableCellValue, cell.column.id)}
-								<td class="dataset-table__td" use:setWidth={cell.column.getSize()}>
+								<td class="dataset-table__td">
 									<div
 										class="dataset-table__cell px-4 text-sm text-fg-secondary"
 										class:text-xs={isListType(getColumnType(cell.column.id))}
 										role="presentation"
 										onmouseenter={(event) => tipShow(event, cell.id, display)}
-										onmousemove={(event) => tipMove(event, cell.id)}
 										onmouseleave={() => tipHide(cell.id)}
 									>
 										<span class="dataset-table__value" data-cell-value="true">{display}</span>
@@ -738,9 +772,5 @@
 		</div>
 	{/if}
 
-	{#if tip}
-		<div class="dataset-table__tooltip" bind:this={tipRef}>
-			{tip.text}
-		</div>
-	{/if}
+	<div class="dataset-table__tooltip" bind:this={tipRef}></div>
 </div>

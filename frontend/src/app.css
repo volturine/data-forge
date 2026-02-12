@@ -504,10 +504,6 @@
 		color: var(--fg-primary);
 	}
 
-	tr:hover {
-		background-color: var(--table-row-hover);
-	}
-
 	/* Hide scrollbars globally */
 	* {
 		scrollbar-width: none;
@@ -2319,6 +2315,10 @@ tbody tr:last-child .dataset-table__td {
 	display: block;
 }
 
+.dataset-table__row:hover {
+	background-color: var(--bg-hover);
+}
+
 .dataset-table__copy {
 	position: absolute;
 	top: 50%;
@@ -2330,10 +2330,16 @@ tbody tr:last-child .dataset-table__td {
 	align-items: center;
 	justify-content: center;
 	background-color: transparent;
-	transition:
-		opacity var(--transition),
-		color var(--transition);
 	padding: 0;
+	transition: none;
+}
+
+@media (hover: hover) {
+	.dataset-table__copy {
+		transition:
+			opacity var(--transition),
+			color var(--transition);
+	}
 }
 
 .dataset-table__copy svg {
@@ -2351,8 +2357,8 @@ tbody tr:last-child .dataset-table__td {
 
 .dataset-table__tooltip {
 	position: fixed;
-	left: var(--tip-left);
-	top: var(--tip-top);
+	left: var(--tip-left, -9999px);
+	top: var(--tip-top, -9999px);
 	max-width: min(420px, 80vw);
 	padding: 0.5rem 0.75rem;
 	border: 1px solid var(--border-primary);
@@ -2363,6 +2369,9 @@ tbody tr:last-child .dataset-table__td {
 	z-index: var(--z-tooltip);
 	white-space: normal;
 	word-break: break-word;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
 }
 
 .dataset-table--compact .dataset-table__cell {
