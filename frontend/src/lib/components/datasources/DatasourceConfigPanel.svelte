@@ -858,7 +858,7 @@
 							>
 								<div class="flex items-center gap-2 text-xs">
 									{#if (run.kind as string) === 'preview'}
-										<Eye size={14} class="text-info-fg shrink-0" />
+										<Eye size={14} class="text-accent shrink-0" />
 										<span>Preview</span>
 									{:else if (run.kind as string) === 'datasource_create'}
 										<Save size={14} class="text-accent-primary shrink-0" />

@@ -5,10 +5,10 @@
 
 	interface Props {
 		datasourceId: string;
-		datasourceConfig?: Record<string, unknown> | null;
+		datasourceConfig?: Record<string, unknown>;
 	}
 
-	let { datasourceId, datasourceConfig = null }: Props = $props();
+	let { datasourceId, datasourceConfig = {} }: Props = $props();
 
 	let page = $state(1);
 	let rowLimit = $state(100);

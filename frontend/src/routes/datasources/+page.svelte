@@ -80,7 +80,7 @@
 				<h1 class="text-sm font-semibold">Data Sources</h1>
 				<a
 					href={resolve('/datasources/new')}
-					class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 no-underline bg-accent text-bg-primary border border-info"
+						class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 no-underline bg-accent text-bg-primary border border-accent-primary"
 					data-sveltekit-reload
 				>
 					<Plus size={14} />
@@ -113,7 +113,7 @@
 					<p class="text-sm text-fg-muted mb-4">No data sources yet.</p>
 					<a
 						href={resolve('/datasources/new')}
-						class="inline-flex items-center gap-1 text-sm font-medium px-3 py-2 no-underline bg-accent text-bg-primary border border-info"
+					class="inline-flex items-center gap-1 text-sm font-medium px-3 py-2 no-underline bg-accent text-bg-primary border border-accent-primary"
 						data-sveltekit-reload
 					>
 						Create your first data source

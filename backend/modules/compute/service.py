@@ -463,9 +463,9 @@ def export_data(
                 except Exception:
                     if os.path.exists(tmp_db_path):
                         os.unlink(tmp_db_path)
-                    raise
                     if os.path.exists(tmp_output):
                         os.unlink(tmp_output)
+                    raise
 
             result_meta = _build_export_result_metadata(
                 data=data,

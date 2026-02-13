@@ -205,7 +205,7 @@
 </script>
 
 <div
-	class="step-library flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden bg-panel-bg px-3 py-4"
+	class="step-library flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden bg-primary px-3 py-4"
 >
 	<img
 		class="drag-preview pointer-events-none fixed -left-2500 -top-2500 h-px w-px opacity-0"

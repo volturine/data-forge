@@ -111,7 +111,7 @@
 			</div>
 			<div class="flex flex-col gap-4 overflow-y-auto p-4">
 				<input
-					class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-info"
+				class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-accent-primary"
 					type="text"
 					bind:this={searchInput}
 					bind:value={searchQuery}

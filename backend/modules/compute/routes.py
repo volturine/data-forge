@@ -187,7 +187,9 @@ def export_data(
 
     if request.destination == schemas.ExportDestination.DOWNLOAD:
         if file_bytes is None or filename is None or content_type is None:
-            raise ValueError('Download export missing file content')
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=500, detail='Export file content not available')
         return Response(
             content=file_bytes,
             media_type=content_type,

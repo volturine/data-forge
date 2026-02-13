@@ -150,7 +150,7 @@
 <div class="relative w-full">
 	<input
 		type="text"
-		class="w-full border border-tertiary bg-panel-bg px-3 py-2 font-mono text-sm text-fg-primary focus:border-info focus:outline-none"
+		class="w-full border border-tertiary bg-primary px-3 py-2 font-mono text-sm text-fg-primary focus:border-accent-primary focus:outline-none"
 		bind:value={search}
 		onfocus={handleFocus}
 		onblur={handleBlur}
@@ -165,7 +165,7 @@
 
 	{#if showPicker}
 		<div
-			class="absolute left-0 right-0 top-full z-50 mt-1 max-h-50 overflow-y-auto border border-tertiary bg-panel-bg"
+			class="absolute left-0 right-0 top-full z-50 mt-1 max-h-50 overflow-y-auto border border-tertiary bg-primary"
 			role="listbox"
 			id={listboxId}
 			aria-label="Available datasources"
@@ -188,9 +188,9 @@
 					>
 						<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{ds.name}</span>
 						{#if ds.id === highlightId}
-							<span class="ml-2 border border-info bg-info-bg px-2 py-1 text-xs text-info-fg"
-								>current</span
-							>
+						<span class="ml-2 border border-accent-primary bg-accent-bg px-2 py-1 text-xs text-accent-primary"
+							>current</span
+						>
 						{:else if ds.source_type === 'file'}
 							<FileTypeBadge
 								path={(ds.config?.file_path as string) ?? ''}

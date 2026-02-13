@@ -99,6 +99,9 @@
 	let sizingReady = $state(false);
 	let dragColumn = $state<string | null>(null);
 	let dragOver = $state<string | null>(null);
+	let dragPointerX = $state<number | null>(null);
+	let dragPointerY = $state<number | null>(null);
+	let dragLabel = $state<string | null>(null);
 	let tipRef = $state<HTMLDivElement>();
 	let scrollRef = $state<HTMLDivElement>();
 
@@ -225,7 +228,10 @@
 					columnSizingInfo = next;
 					resizeOffset.delta = next.deltaOffset ?? 0;
 					resizeOffset.start = next.startOffset ?? 0;
-					if (!isResizing) {
+					if (isResizing) {
+						document.body.classList.add('touch-dragging');
+					} else {
+						document.body.classList.remove('touch-dragging');
 						document.documentElement.style.removeProperty('--resize-delta');
 					}
 				}
@@ -297,59 +303,57 @@
 		activeColumn = activeColumn === columnId ? null : columnId;
 	}
 
-	function handleDragStart(event: DragEvent, columnId: string) {
+	function handleColumnPointerDown(event: PointerEvent, columnId: string, label: string) {
+		if (event.button !== 0) return;
+		event.preventDefault();
 		dragColumn = columnId;
-		if (event.dataTransfer) {
-			event.dataTransfer.effectAllowed = 'move';
-			event.dataTransfer.setData('text/plain', columnId);
-		}
+		dragLabel = label;
+		dragPointerX = event.clientX;
+		dragPointerY = event.clientY;
+
 		const target = event.currentTarget as HTMLElement;
-		const header = target.closest('th') as HTMLElement | null;
-		if (header && event.dataTransfer) {
-			event.dataTransfer.setDragImage(header, 12, 12);
+		target.setPointerCapture(event.pointerId);
+		document.body.classList.add('touch-dragging');
+	}
+
+	function handleColumnPointerMove(event: PointerEvent) {
+		if (!dragColumn) return;
+		event.preventDefault();
+		dragPointerX = event.clientX;
+		dragPointerY = event.clientY;
+
+		// Hit-test which <th> the pointer is over
+		const els = document.elementsFromPoint(event.clientX, event.clientY);
+		const th = els.find((el) => el.closest('.dataset-table__th')) as HTMLElement | undefined;
+		const header = th?.closest('.dataset-table__th') as HTMLElement | null;
+		if (header) {
+			const id = header.dataset.columnId ?? null;
+			dragOver = id && id !== dragColumn ? id : null;
+		} else {
+			dragOver = null;
 		}
 	}
 
-	function handleDragEnd() {
+	function handleColumnPointerUp() {
+		if (!dragColumn) return;
+		if (dragOver) {
+			const source = dragColumn;
+			const order = columnOrder.length ? [...columnOrder] : [...columns];
+			const sourceIndex = order.indexOf(source);
+			const targetIndex = order.indexOf(dragOver);
+			if (sourceIndex !== -1 && targetIndex !== -1) {
+				const updated = [...order];
+				const [item] = updated.splice(sourceIndex, 1);
+				updated.splice(targetIndex, 0, item);
+				columnOrder = updated;
+			}
+		}
 		dragColumn = null;
 		dragOver = null;
-	}
-
-	function handleDragOver(event: DragEvent, columnId: string) {
-		event.preventDefault();
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-		dragOver = columnId;
-	}
-
-	function handleDragLeave(columnId: string) {
-		if (dragOver !== columnId) return;
-		dragOver = null;
-	}
-
-	function handleDrop(event: DragEvent, columnId: string) {
-		event.preventDefault();
-		event.stopPropagation();
-		const source = dragColumn;
-		if (!source || source === columnId) {
-			dragColumn = null;
-			dragOver = null;
-			return;
-		}
-		const order = columnOrder.length ? [...columnOrder] : [...columns];
-		const sourceIndex = order.indexOf(source);
-		const targetIndex = order.indexOf(columnId);
-		if (sourceIndex === -1 || targetIndex === -1) {
-			dragColumn = null;
-			dragOver = null;
-			return;
-		}
-		const updated = [...order];
-		const [item] = updated.splice(sourceIndex, 1);
-		const adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-		updated.splice(adjustedTarget, 0, item);
-		columnOrder = updated;
-		dragColumn = null;
-		dragOver = null;
+		dragPointerX = null;
+		dragPointerY = null;
+		dragLabel = null;
+		document.body.classList.remove('touch-dragging');
 	}
 
 	function setSort(columnId: string, direction: 'asc' | 'desc' | 'none') {
@@ -594,18 +598,17 @@
 				class="dataset-table__table w-full border-collapse text-sm"
 				use:setWidth={table?.getTotalSize() ?? 0}
 			>
-				<thead class="dataset-table__thead sticky top-0 z-20 bg-table-header">
+				<thead class="dataset-table__thead sticky top-0 z-20 bg-tertiary">
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
+								{@const headerLabel = typeof header.column.columnDef.header === 'string' ? header.column.columnDef.header : header.id}
 								<th
 									class="dataset-table__th p-0 text-left font-semibold border-b border-tertiary"
 									class:dataset-table__th--drag={dragOver === header.id}
 									class:dataset-table__th--dragging={dragColumn === header.id}
+									data-column-id={header.id}
 									use:setWidth={header.getSize()}
-									ondragover={(event) => handleDragOver(event, header.id)}
-									ondragleave={() => handleDragLeave(header.id)}
-									ondrop={(event) => handleDrop(event, header.id)}
 								>
 									<div
 										class="dataset-table__header flex items-start justify-between w-full px-4 py-2"
@@ -618,9 +621,10 @@
 													{:else}
 														<button
 															class="dataset-table__drag"
-															draggable={true}
-															ondragstart={(event) => handleDragStart(event, header.id)}
-															ondragend={handleDragEnd}
+															onpointerdown={(event) => handleColumnPointerDown(event, header.id, headerLabel)}
+															onpointermove={handleColumnPointerMove}
+															onpointerup={handleColumnPointerUp}
+															onpointercancel={handleColumnPointerUp}
 															aria-label="Drag to reorder"
 														>
 															<GripVertical size={12} />
@@ -746,7 +750,7 @@
 	{/if}
 
 	{#if showFooter && !loading && data.length > 0}
-		<div class="px-4 py-3 border-t border-tertiary bg-panel-header">
+		<div class="px-4 py-3 border-t border-tertiary bg-tertiary">
 			<span class="text-xs text-fg-tertiary">
 				Showing {data.length.toLocaleString()} row{data.length !== 1 ? 's' : ''}
 			</span>
@@ -755,3 +759,13 @@
 
 	<div class="dataset-table__tooltip" bind:this={tipRef}></div>
 </div>
+
+{#if dragColumn && dragPointerX !== null && dragPointerY !== null}
+	<div
+		class="dataset-table__drag-preview pointer-events-none fixed z-9999 flex items-center gap-2 whitespace-nowrap border px-3 py-1.5 text-sm font-semibold border-tertiary bg-panel text-fg-primary"
+		style="left: {dragPointerX + 12}px; top: {dragPointerY + 12}px;"
+	>
+		<GripVertical size={12} class="text-fg-muted" />
+		<span class="font-mono">{dragLabel}</span>
+	</div>
+{/if}

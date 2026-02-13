@@ -40,10 +40,7 @@
 		onRenameTab: _onRenameTab
 	}: Props = $props();
 
-	// Derived: whether we can accept drops
 	let canDrop = $derived(drag.active);
-
-	// Derived: current hovered target index
 	let hoverIndex = $derived(drag.target?.index ?? null);
 
 	function getParentId(index: number): string | null {
@@ -184,7 +181,6 @@
 		drag.setTarget(target, valid);
 	});
 
-	// Auto-scroll when dragging near edges
 	const scrollThreshold = 60;
 	const scrollSpeed = 15;
 
@@ -192,12 +188,10 @@
 		canvasEl.getBoundingClientRect();
 		const viewportHeight = window.innerHeight;
 
-		// Check if pointer is near the bottom of the viewport
 		if (pointerY > viewportHeight - scrollThreshold) {
 			canvasEl.scrollTop += scrollSpeed;
 		}
 
-		// Check if pointer is near the top of the viewport
 		if (pointerY < scrollThreshold) {
 			canvasEl.scrollTop -= scrollSpeed;
 		}

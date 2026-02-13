@@ -68,6 +68,7 @@ def list_engine_runs(
     offset: int = 0,
 ) -> list[EngineRunResponseSchema]:
     stmt = select(EngineRun)
+    # SQLModel type annotations not fully compatible with Pydantic v2 - needed for .where() calls
     if analysis_id is not None:
         stmt = stmt.where(EngineRun.analysis_id == analysis_id)  # type: ignore[arg-type]
     if datasource_id is not None:

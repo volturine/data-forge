@@ -62,7 +62,13 @@ class PolarsComputeEngine:
             with contextlib.suppress(Exception):
                 self.process.join(timeout=0.1)
             self.process = None
-        # Create fresh queues (old ones may be corrupted)
+        # Close old queues before creating new ones (old ones may be corrupted)
+        if hasattr(self, 'command_queue'):
+            with contextlib.suppress(Exception):
+                self.command_queue.close()
+        if hasattr(self, 'result_queue'):
+            with contextlib.suppress(Exception):
+                self.result_queue.close()
         self.command_queue = mp.Queue()
         self.result_queue = mp.Queue()
 
@@ -244,9 +250,11 @@ class PolarsComputeEngine:
                 self.current_job_id = None
             return result
         except Empty:
+            self.current_job_id = None
             return None
         except Exception as e:
             logger.warning(f'Error getting result from queue: {e}')
+            self.current_job_id = None
             return None
 
     def shutdown(self) -> None:
