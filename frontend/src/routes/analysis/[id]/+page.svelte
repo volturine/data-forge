@@ -13,7 +13,12 @@
 		checkLockStatus,
 		hasLock
 	} from '$lib/stores/lockManager.svelte';
-	import { getAnalysis, listAnalysisVersions, restoreAnalysisVersion } from '$lib/api/analysis';
+	import {
+		getAnalysis,
+		listAnalysisVersions,
+		restoreAnalysisVersion,
+		renameAnalysisVersion
+	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { spawnEngine } from '$lib/api/compute';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
@@ -28,7 +33,7 @@
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { ChevronDown, ChevronLeft, ChevronRight, Plus, X } from 'lucide-svelte';
+	import { ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, X } from 'lucide-svelte';
 
 	const analysisId = $derived($page.params.id ?? null);
 	let lastAnalysisId = $state<string | null>(null);
@@ -141,6 +146,8 @@
 	let showModeDropdown = $state(false);
 	let showVersionModal = $state(false);
 	let versionError = $state<string | null>(null);
+	let editingVersionId = $state<string | null>(null);
+	let editingVersionName = $state('');
 	let keepaliveInterval: number | null = null;
 
 	// Responsive: auto-collapse panes on narrow screens
@@ -518,6 +525,12 @@
 		analysisStore.setActiveTab(tabId);
 	}
 
+	function buildInitialSteps(): PipelineStep[] {
+		const step = buildStep('view');
+		step.depends_on = [];
+		return [step];
+	}
+
 	function handleAddTab(datasourceId: string, name: string) {
 		const tab: AnalysisTab = {
 			id: `tab-${datasourceId}-${Date.now()}`,
@@ -525,7 +538,7 @@
 			type: 'datasource',
 			parent_id: null,
 			datasource_id: datasourceId,
-			steps: []
+			steps: buildInitialSteps()
 		};
 		analysisStore.addTab(tab);
 		analysisStore.setActiveTab(tab.id);
@@ -557,7 +570,7 @@
 			datasource_config: sourceTabId
 				? { analysis_id: sourceAnalysisId, analysis_tab_id: sourceTabId }
 				: { analysis_id: sourceAnalysisId },
-			steps: []
+			steps: buildInitialSteps()
 		};
 		analysisStore.addTab(tab);
 		analysisStore.setActiveTab(tab.id);
@@ -603,7 +616,7 @@
 				parent_id: null,
 				datasource_id: null,
 				datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
-				steps: []
+				steps: buildInitialSteps()
 			};
 			analysisStore.addTab(tab);
 			analysisStore.setActiveTab(tab.id);
@@ -680,6 +693,27 @@
 		analysisStore.applyAnalysis(result.value);
 		showVersionModal = false;
 		isDirty = false;
+	}
+
+	function startRenameVersion(id: string, name: string) {
+		editingVersionId = id;
+		editingVersionName = name;
+	}
+
+	async function commitRenameVersion(version: number) {
+		if (!analysisId || !editingVersionId) return;
+		const trimmed = editingVersionName.trim();
+		if (!trimmed) {
+			editingVersionId = null;
+			return;
+		}
+		const result = await renameAnalysisVersion(analysisId, version, trimmed);
+		if (result.isErr()) {
+			versionError = result.error.message;
+		} else {
+			versionsQuery.refetch();
+		}
+		editingVersionId = null;
 	}
 </script>
 
@@ -985,9 +1019,31 @@
 								<div class="text-[0.65rem] uppercase tracking-[0.1em] text-fg-muted">
 									Version {version.version} · {formatVersionDate(version.created_at)}
 								</div>
-								<div class="text-sm font-semibold text-fg-primary">
-									{version.name}
-								</div>
+								{#if editingVersionId === version.id}
+									<input
+										type="text"
+										class="text-sm font-semibold text-fg-primary bg-transparent border border-tertiary px-1 py-0.5 w-full"
+										bind:value={editingVersionName}
+										onblur={() => commitRenameVersion(version.version)}
+										onkeydown={(e) => {
+											if (e.key === 'Enter') commitRenameVersion(version.version);
+											if (e.key === 'Escape') editingVersionId = null;
+										}}
+									/>
+								{:else}
+									<div class="flex items-center gap-1.5">
+										<span class="text-sm font-semibold text-fg-primary">
+											{version.name}
+										</span>
+										<button
+											class="p-0.5 bg-transparent border-transparent text-fg-muted hover:text-fg-primary"
+											title="Rename version"
+											onclick={() => startRenameVersion(version.id, version.name)}
+										>
+											<Pencil size={12} />
+										</button>
+									</div>
+								{/if}
 								{#if version.description}
 									<div class="text-xs text-fg-muted">{version.description}</div>
 								{/if}

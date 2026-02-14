@@ -359,10 +359,17 @@ def convert_ai_config(config: dict) -> dict:
     # Parse string JSON to dict if needed (frontend sends textarea value as string)
     if isinstance(raw_options, str):
         raw_options = raw_options.strip() or None
-    return {
+
+    # Support both legacy input_column (singular) and input_columns (plural)
+    input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
+    legacy_col = config.get('input_column') or config.get('inputColumn')
+    if legacy_col and legacy_col not in input_columns:
+        input_columns = [legacy_col, *input_columns]
+
+    result: dict[str, object] = {
         'provider': config.get('provider', 'ollama'),
         'model': config.get('model', 'llama2'),
-        'input_column': config.get('input_column') or config.get('inputColumn'),
+        'input_columns': input_columns,
         'output_column': config.get('output_column') or config.get('outputColumn') or 'ai_result',
         'prompt_template': config.get('prompt_template') or config.get('promptTemplate') or 'Classify this text: {{text}}',
         'batch_size': config.get('batch_size', 10),
@@ -370,21 +377,23 @@ def convert_ai_config(config: dict) -> dict:
         'api_key': config.get('api_key') or config.get('apiKey'),
         'request_options': raw_options,
     }
+    return result
 
 
 def convert_notification_config(config: dict) -> dict:
+    """Convert notification config — per-row UDF with column inputs."""
+    input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
+
     return {
         'method': config.get('method', 'email'),
         'recipient': config.get('recipient', ''),
-        'subject_template': config.get('subject_template') or config.get('subjectTemplate') or 'Build Complete: {{analysis_name}}',
-        'body_template': config.get('body_template')
-        or config.get('bodyTemplate')
-        or 'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}',
-        'attach_result': config.get('attach_result', False),
-        'attach_error': config.get('attach_error', True),
-        'webhook_url': config.get('webhook_url') or config.get('webhookUrl'),
+        'bot_token': config.get('bot_token', ''),
+        'input_columns': input_columns,
+        'output_column': config.get('output_column') or config.get('outputColumn') or 'notification_status',
+        'message_template': config.get('message_template') or config.get('messageTemplate') or '{{message}}',
+        'subject_template': config.get('subject_template') or config.get('subjectTemplate') or 'Notification',
+        'batch_size': config.get('batch_size', 10),
         'timeout_seconds': config.get('timeout_seconds', 20),
-        'retries': config.get('retries', 0),
     }
 
 

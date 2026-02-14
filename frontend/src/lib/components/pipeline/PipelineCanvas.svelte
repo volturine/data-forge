@@ -93,14 +93,6 @@
 		return deps[0] === parentId;
 	}
 
-	function isChartType(type: string | null | undefined): boolean {
-		return type === 'chart' || type?.startsWith('plot_') === true;
-	}
-
-	function hasChartStep(): boolean {
-		return steps.some((step) => step.type === 'chart');
-	}
-
 	function handleDragEnter(event: DragEvent, index: number) {
 		if (!drag.active) return;
 		event.preventDefault();
@@ -140,28 +132,9 @@
 
 		if (drag.isReorder && drag.stepId) {
 			// Moving existing step
-			const moving = steps.find((step) => step.id === drag.stepId) ?? null;
-			if (moving && moving.type === 'chart') {
-				const nextId = target.nextId ?? null;
-				if (nextId) {
-					drag.end();
-					return;
-				}
-			}
 			onMoveStep(drag.stepId, target);
 		} else if (drag.isInsert && drag.type) {
 			// Inserting new step from library
-			if (isChartType(drag.type)) {
-				if (hasChartStep()) {
-					drag.end();
-					return;
-				}
-				const nextId = target.nextId ?? null;
-				if (nextId) {
-					drag.end();
-					return;
-				}
-			}
 			onInsertStep(drag.type, target);
 		}
 
@@ -242,7 +215,7 @@
 </script>
 
 <div class="pipeline-canvas flex-1 overflow-y-auto p-6 bg-secondary min-h-100">
-	{#if steps.length === 0 && !datasource}
+	{#if steps.length === 0 && !datasource && !activeTab?.datasource_config}
 		<div
 			class="empty-state flex min-h-100 h-full flex-col items-center justify-center text-center text-fg-muted"
 		>
@@ -427,7 +400,7 @@
 					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
 				</div>
 			{/if}
-			<OutputNode {steps} {analysisId} {datasourceId} {activeTab} {datasource} />
+			<OutputNode {analysisId} {datasourceId} {activeTab} {datasource} />
 		</div>
 	{/if}
 </div>

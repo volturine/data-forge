@@ -14,7 +14,8 @@
 		ChevronDown,
 		ArrowUp,
 		ArrowDown,
-		Timer
+		Timer,
+		CalendarClock
 	} from 'lucide-svelte';
 
 	let search = $state('');
@@ -139,6 +140,11 @@
 				const bn = b.analysis_id ? (analysisNames.get(b.analysis_id) ?? b.analysis_id) : '';
 				return dir * an.localeCompare(bn);
 			}
+			if (sortColumn === 'output') {
+				const an = getOutputName(a) ?? '';
+				const bn = getOutputName(b) ?? '';
+				return dir * an.localeCompare(bn);
+			}
 			return 0;
 		});
 	}
@@ -220,6 +226,13 @@
 	function resolveName(id: string, map: Map<string, string>): string {
 		return map.get(id) ?? id.slice(0, 8) + '...';
 	}
+
+	function getOutputName(run: EngineRun): string | null {
+		if (run.kind !== 'export' || !run.result_json) return null;
+		const name = run.result_json.datasource_name;
+		if (typeof name === 'string') return name;
+		return null;
+	}
 </script>
 
 <div class="builds-page mx-auto max-w-300 px-6 py-7">
@@ -291,7 +304,7 @@
 				<thead>
 					<tr class="bg-bg-tertiary">
 						<th class="w-8 border-b border-tertiary px-3 py-2 text-left font-medium"></th>
-						{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
+						{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'output', label: 'Output' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
 							<th
 								class="cursor-pointer border-b border-tertiary px-3 py-2 text-left font-medium transition-colors hover:bg-hover"
 								onclick={() => toggleSort(col.key)}
@@ -329,6 +342,14 @@
 										<Download size={14} class="text-success-fg" />
 										<span>Export</span>
 									{/if}
+									{#if run.triggered_by === 'schedule'}
+										<span
+											class="ml-1 inline-flex items-center gap-0.5 rounded-sm bg-accent-bg px-1 py-0.5 text-xs text-accent-primary"
+											title="Triggered by schedule"
+										>
+											<CalendarClock size={11} />
+										</span>
+									{/if}
 								</span>
 							</td>
 							<td class="border-b border-tertiary px-3 py-2">
@@ -356,6 +377,15 @@
 									<span class="text-fg-muted">-</span>
 								{/if}
 							</td>
+							<td class="border-b border-tertiary px-3 py-2">
+								{#if getOutputName(run)}
+									<span class="text-xs text-fg-secondary" title={getOutputName(run) ?? ''}
+										>{getOutputName(run)}</span
+									>
+								{:else}
+									<span class="text-fg-muted">-</span>
+								{/if}
+							</td>
 							<td class="border-b border-tertiary px-3 py-2 font-mono text-xs">
 								{formatDuration(run.duration_ms)}
 							</td>
@@ -365,7 +395,7 @@
 						</tr>
 						{#if expandedId === run.id}
 							<tr>
-								<td colspan="7" class="border-b border-tertiary bg-bg-primary p-0">
+								<td colspan="8" class="border-b border-tertiary bg-bg-primary p-0">
 									<div class="p-4">
 										<!-- Tab buttons -->
 										<div class="mb-4 flex gap-1 border-b border-tertiary">
@@ -441,6 +471,17 @@
 															<span class="text-fg-muted">Analysis:</span>
 															<span class="ml-2 text-xs">
 																{resolveName(run.analysis_id, analysisNames)}
+															</span>
+														</div>
+													{/if}
+													{#if run.triggered_by}
+														<div>
+															<span class="text-fg-muted">Triggered by:</span>
+															<span
+																class="ml-2 inline-flex items-center gap-1 text-xs text-accent-primary"
+															>
+																<CalendarClock size={12} />
+																{run.triggered_by}
 															</span>
 														</div>
 													{/if}

@@ -2,19 +2,22 @@
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
-	import { Plus, Trash2, Search, LoaderCircle } from 'lucide-svelte';
+	import { Plus, Trash2, Search, LoaderCircle, Download, Eye, EyeOff } from 'lucide-svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
+	import { exportData } from '$lib/api/compute';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 
 	const queryClient = useQueryClient();
 
+	let showHidden = $state(false);
+
 	const query = createQuery(() => ({
-		queryKey: ['datasources'],
+		queryKey: ['datasources', showHidden],
 		queryFn: async () => {
-			const result = await listDatasources();
+			const result = await listDatasources(showHidden);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -46,6 +49,7 @@
 	);
 	const selectedDatasource = $derived(datasources.find((d) => d.id === selectedId) ?? null);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
+	let downloading = $state(false);
 
 	function selectDatasource(id: string | null) {
 		selectedId = id;
@@ -67,6 +71,21 @@
 	function handleSnapshotConfigChange(config: Record<string, unknown>) {
 		snapshotConfig = config;
 	}
+
+	async function handleDownload(format: 'csv' | 'parquet' | 'json') {
+		if (!selectedDatasource || downloading) return;
+		downloading = true;
+		await exportData({
+			datasource_id: selectedDatasource.id,
+			pipeline_steps: [],
+			target_step_id: 'source',
+			format,
+			filename: selectedDatasource.name,
+			destination: 'download',
+			datasource_config: snapshotConfig ?? selectedDatasource.config
+		});
+		downloading = false;
+	}
 </script>
 
 <div class="flex h-full">
@@ -78,14 +97,30 @@
 		<header class="flex flex-col gap-2 px-4 py-3 border-b border-tertiary h-25 box-border">
 			<div class="flex items-center justify-between">
 				<h1 class="text-sm font-semibold">Data Sources</h1>
-				<a
-					href={resolve('/datasources/new')}
-					class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 no-underline bg-accent text-bg-primary border border-accent-primary"
-					data-sveltekit-reload
-				>
-					<Plus size={14} />
-					Add
-				</a>
+				<div class="flex items-center gap-1">
+					<button
+						class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary"
+						class:text-accent-primary={showHidden}
+						title={showHidden
+							? 'Hide auto-generated datasources'
+							: 'Show auto-generated datasources'}
+						onclick={() => (showHidden = !showHidden)}
+					>
+						{#if showHidden}
+							<Eye size={14} />
+						{:else}
+							<EyeOff size={14} />
+						{/if}
+					</button>
+					<a
+						href={resolve('/datasources/new')}
+						class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 no-underline bg-accent text-bg-primary border border-accent-primary"
+						data-sveltekit-reload
+					>
+						<Plus size={14} />
+						Add
+					</a>
+				</div>
 			</div>
 			<div class="relative">
 				<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
@@ -172,20 +207,55 @@
 	<main class="flex-1 overflow-hidden">
 		{#if selectedDatasource}
 			<div class="h-full flex flex-col">
-				<div class="border-b border-tertiary bg-bg-secondary p-3">
-					{#if selectedDatasource.source_type === 'iceberg'}
-						<SnapshotPicker
-							datasourceId={selectedDatasource.id}
-							datasourceConfig={snapshotConfig ?? selectedDatasource.config}
-							label="Time Travel"
-							showDelete
-							onConfigChange={handleSnapshotConfigChange}
-						/>
-					{:else}
-						<div class="text-xs text-fg-tertiary">
-							Time travel is available for Iceberg datasources.
-						</div>
-					{/if}
+				<div
+					class="border-b border-tertiary bg-bg-secondary p-3 flex items-center justify-between gap-3"
+				>
+					<div class="flex-1 min-w-0">
+						{#if selectedDatasource.source_type === 'iceberg'}
+							<SnapshotPicker
+								datasourceId={selectedDatasource.id}
+								datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+								label="Time Travel"
+								showDelete
+								onConfigChange={handleSnapshotConfigChange}
+							/>
+						{:else}
+							<div class="text-xs text-fg-tertiary">
+								Time travel is available for Iceberg datasources.
+							</div>
+						{/if}
+					</div>
+					<div class="flex items-center gap-1 shrink-0">
+						<button
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
+							title="Download as CSV"
+							disabled={downloading}
+							onclick={() => handleDownload('csv')}
+						>
+							{#if downloading}
+								<LoaderCircle size={14} class="spinning" />
+							{:else}
+								<Download size={14} />
+							{/if}
+							CSV
+						</button>
+						<button
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
+							title="Download as Parquet"
+							disabled={downloading}
+							onclick={() => handleDownload('parquet')}
+						>
+							Parquet
+						</button>
+						<button
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
+							title="Download as JSON"
+							disabled={downloading}
+							onclick={() => handleDownload('json')}
+						>
+							JSON
+						</button>
+					</div>
 				</div>
 				<div class="flex-1 min-h-0 overflow-hidden">
 					<DatasourcePreview

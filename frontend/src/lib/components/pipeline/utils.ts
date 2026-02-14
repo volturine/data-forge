@@ -332,10 +332,10 @@ const stepTypes: Record<string, StepTypeConfig> = {
 		icon: Sparkles,
 		typeLabel: 'ai',
 		summary: (c) => {
-			const input = c.input_column as string;
+			const cols = c.input_columns as string[] | undefined;
 			const output = c.output_column as string;
-			if (!input || !output) return 'not configured';
-			return `${input} → ${output}`;
+			if (!cols?.length || !output) return 'not configured';
+			return `${cols.join(', ')} → ${output}`;
 		}
 	},
 	view: {

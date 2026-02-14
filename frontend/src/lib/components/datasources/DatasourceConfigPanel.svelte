@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
 	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
-	import { listHealthChecks } from '$lib/api/healthcheck';
+	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
 		Save,
 		Loader,
@@ -25,6 +25,7 @@
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import HealthChecksTab from '$lib/components/datasources/HealthChecksTab.svelte';
+	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
 
@@ -78,6 +79,16 @@
 		enabled: !!datasource.id
 	}));
 
+	const healthResultsQuery = createQuery(() => ({
+		queryKey: ['healthcheck-results', datasource.id],
+		queryFn: async () => {
+			const result = await listHealthCheckResults(datasource.id, 50);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		enabled: !!datasource.id
+	}));
+
 	const updateMutation = createMutation(() => ({
 		mutationFn: async (update: { name: string; config: Record<string, unknown> }) => {
 			const result = await updateDatasource(datasource.id, update);
@@ -99,11 +110,13 @@
 	let refreshError = $state<string | null>(null);
 	let schemaChanged = $state(false);
 	let schemaDiff = $state<{ added: string[]; removed: string[]; types: string[] } | null>(null);
-	let activeTab = $state<'general' | 'schema' | 'csv' | 'excel' | 'runs' | 'health'>('general');
+	let activeTab = $state<'general' | 'schema' | 'csv' | 'excel' | 'runs' | 'health' | 'schedules'>(
+		'general'
+	);
 	let statsOpen = $state(false);
 	let statsColumn = $state<string | null>(null);
 
-	// Reset state when datasource changes
+	// Reset state when datasource changes — DOM-dependent state reset, $derived insufficient
 	$effect(() => {
 		const ds = datasource;
 		if (!ds) return;
@@ -117,6 +130,8 @@
 		schemaChanged = false;
 		schemaDiff = null;
 		activeTab = 'general';
+		statsOpen = false;
+		statsColumn = null;
 
 		// Initialize type-specific config
 		const config = ds.config as unknown as FileDataSourceConfig;
@@ -325,10 +340,28 @@
 
 	const healthChecks = $derived(healthChecksQuery.data ?? []);
 	const activeHealthChecks = $derived(healthChecks.filter((hc) => hc.enabled));
+	const healthStatus = $derived.by(() => {
+		const results = healthResultsQuery.data ?? [];
+		if (activeHealthChecks.length === 0 || results.length === 0) return 'none';
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Map for computation, not reactive state
+		const latestPerCheck = new Map<string, boolean>();
+		for (const r of results) {
+			if (!latestPerCheck.has(r.healthcheck_id)) {
+				latestPerCheck.set(r.healthcheck_id, r.passed);
+			}
+		}
+		for (const passed of latestPerCheck.values()) {
+			if (!passed) return 'failing';
+		}
+		return 'passing';
+	});
 	const ds = $derived(datasourceQuery.data ?? datasource);
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
 	const runs = $derived(runsQuery.data ?? []);
+	const scheduleAnalysisId = $derived(
+		ds.created_by_analysis_id ?? (ds.config?.analysis_id as string | undefined) ?? null
+	);
 
 	function formatDuration(ms: number | null): string {
 		if (ms === null) return '-';
@@ -417,8 +450,31 @@
 			Health Checks
 			{#if activeHealthChecks.length > 0}
 				<span class="ml-1 text-fg-tertiary">({activeHealthChecks.length})</span>
+				{#if healthStatus === 'passing'}
+					<span
+						class="ml-1 inline-block h-2 w-2 rounded-full bg-success-fg"
+						title="All checks passing"
+					></span>
+				{:else if healthStatus === 'failing'}
+					<span
+						class="ml-1 inline-block h-2 w-2 rounded-full bg-error-fg"
+						title="Some checks failing"
+					></span>
+				{:else}
+					<span class="ml-1 inline-block h-2 w-2 rounded-full bg-fg-muted" title="No results yet"
+					></span>
+				{/if}
 			{/if}
 		</button>
+		{#if scheduleAnalysisId}
+			<button
+				class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted hover:text-fg-secondary"
+				class:active={activeTab === 'schedules'}
+				onclick={() => (activeTab = 'schedules')}
+			>
+				Schedules
+			</button>
+		{/if}
 	</div>
 
 	<div class="p-4">
@@ -455,6 +511,15 @@
 									/>
 								{/if}
 							</div>
+							{#if ds.is_hidden}
+								<div class="flex items-center gap-1.5">
+									<span
+										class="rounded-sm bg-warning-bg border border-warning-fg/20 px-1.5 py-0.5 text-[10px] uppercase font-medium text-warning-fg"
+									>
+										Hidden
+									</span>
+								</div>
+							{/if}
 						</div>
 
 						<div class="flex flex-col gap-1">
@@ -974,6 +1039,8 @@
 			</div>
 		{:else if activeTab === 'health'}
 			<HealthChecksTab datasourceId={datasource.id} />
+		{:else if activeTab === 'schedules' && scheduleAnalysisId}
+			<ScheduleManager analysisId={scheduleAnalysisId} datasourceId={datasource.id} compact />
 		{/if}
 	</div>
 </div>

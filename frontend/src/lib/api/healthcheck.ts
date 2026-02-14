@@ -51,3 +51,21 @@ export function updateHealthCheck(
 export function deleteHealthCheck(id: string): ResultAsync<{ message: string }, ApiError> {
 	return apiRequest<{ message: string }>(`/v1/healthchecks/${id}`, { method: 'DELETE' });
 }
+
+export interface HealthCheckResult {
+	id: string;
+	healthcheck_id: string;
+	passed: boolean;
+	message: string;
+	details: Record<string, unknown>;
+	checked_at: string;
+}
+
+export function listHealthCheckResults(
+	datasourceId: string,
+	limit: number = 10
+): ResultAsync<HealthCheckResult[], ApiError> {
+	return apiRequest<HealthCheckResult[]>(
+		`/v1/healthchecks/results?datasource_id=${datasourceId}&limit=${limit}`
+	);
+}

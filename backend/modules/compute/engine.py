@@ -13,6 +13,7 @@ from core.exceptions import PipelineValidationError
 from modules.compute.core.exports import get_export_format
 from modules.compute.operations import get_operation_handlers
 from modules.compute.operations.datasource import load_datasource
+from modules.compute.operations.plot import compute_chart_data
 from modules.compute.step_converter import convert_config_to_params, convert_step_format
 from modules.compute.utils import normalize_timezones
 
@@ -444,22 +445,6 @@ class PolarsComputeEngine:
             dependents.setdefault(dep_id, []).append(step_id)
             in_degree[step_id] = in_degree.get(step_id, 0) + 1
 
-        chart_ids = [
-            step_id for step_id, step in step_map.items() if step.get('type') == 'chart' or str(step.get('type', '')).startswith('plot_')
-        ]
-        if len(chart_ids) > 1:
-            raise PipelineValidationError(
-                'Only one chart step is allowed per pipeline.',
-                details={'chart_step_ids': chart_ids},
-            )
-        if chart_ids:
-            chart_id = chart_ids[0]
-            if dependents.get(chart_id):
-                raise PipelineValidationError(
-                    'Chart steps must be terminal and cannot have dependents.',
-                    step_id=chart_id,
-                )
-
         queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
         ordered_steps: list[dict] = []
         while queue:
@@ -516,7 +501,13 @@ class PolarsComputeEngine:
                 right_sources=right_sources,
                 right_lf=right_lf,
             )
-            step_timings[step_id] = (time.perf_counter() - step_start) * 1000
+            timing_label = step_type or f'step_{idx + 1}'
+            if timing_label in step_timings:
+                counter = 2
+                while f'{timing_label}_{counter}' in step_timings:
+                    counter += 1
+                timing_label = f'{timing_label}_{counter}'
+            step_timings[timing_label] = (time.perf_counter() - step_start) * 1000
 
         # Return the final LazyFrame
         last_step = ordered_steps[-1]
@@ -526,6 +517,25 @@ class PolarsComputeEngine:
         last_frame = schema_map.get(last_id)
         if last_frame is None:
             raise ValueError(f'Missing frame for step {last_id}')
+
+        # Chart steps are pass-through in the DAG. When the final step of a
+        # preview request is a chart, compute visualization data from its input.
+        last_type = last_step.get('type', '')
+        if last_type == 'chart' or str(last_type).startswith('plot_'):
+            chart_config = last_step.get('config', {})
+            # Normalize plot_* type to inject chart_type into config
+            if str(last_type).startswith('plot_'):
+                chart_sub = str(last_type).replace('plot_', '')
+                chart_config = {**chart_config, 'chart_type': chart_sub}
+            try:
+                backend_params = convert_config_to_params(
+                    'chart',
+                    chart_config,
+                )
+            except Exception:
+                backend_params = chart_config
+            last_frame = compute_chart_data(last_frame, backend_params)
+
         return last_frame, step_timings
 
     @staticmethod

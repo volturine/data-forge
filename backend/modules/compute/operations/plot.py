@@ -20,7 +20,38 @@ class ChartParams(OperationParams):
     group_column: str | None = None
 
 
+def compute_chart_data(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
+    """Compute visualization data for a chart step.
+
+    This is called separately from the pipeline DAG — chart steps are pass-through
+    in the DAG but produce visualization data when previewed directly.
+    """
+    p = ChartParams.model_validate(params)
+
+    if p.chart_type == 'bar':
+        return _aggregate_bar(lf, p)
+    if p.chart_type == 'line':
+        return _aggregate_line(lf, p)
+    if p.chart_type == 'pie':
+        return _aggregate_pie(lf, p)
+    if p.chart_type == 'histogram':
+        return _build_histogram(lf, p)
+    if p.chart_type == 'scatter':
+        return _build_scatter(lf, p)
+    if p.chart_type == 'boxplot':
+        return _build_boxplot(lf, p)
+
+    return lf
+
+
 class ChartHandler(OperationHandler):
+    """Chart handler — pass-through for DAG.
+
+    Chart nodes do NOT modify the pipeline data. They exist for visualization only.
+    Downstream steps receive the same data as if the chart node were not there.
+    Visualization data is computed separately via compute_chart_data().
+    """
+
     @property
     def name(self) -> str:
         return 'chart'
@@ -33,147 +64,144 @@ class ChartHandler(OperationHandler):
         right_lf: pl.LazyFrame | None = None,
         right_sources: dict[str, pl.LazyFrame] | None = None,
     ) -> pl.LazyFrame:
-        p = ChartParams.model_validate(params)
-
-        if p.chart_type == 'bar':
-            return self._aggregate_bar(lf, p)
-        if p.chart_type == 'line':
-            return self._aggregate_line(lf, p)
-        if p.chart_type == 'pie':
-            return self._aggregate_pie(lf, p)
-        if p.chart_type == 'histogram':
-            return self._build_histogram(lf, p)
-        if p.chart_type == 'scatter':
-            return self._build_scatter(lf, p)
-        if p.chart_type == 'boxplot':
-            return self._build_boxplot(lf, p)
-
+        # Validate params but return input unchanged — chart is pass-through
+        ChartParams.model_validate(params)
         return lf
 
-    def _agg_expr(self, col: str, agg: str) -> pl.Expr:
-        if agg == 'sum':
-            return pl.col(col).sum().alias('y')
-        if agg == 'mean':
-            return pl.col(col).mean().alias('y')
-        if agg == 'count':
-            return pl.col(col).count().alias('y')
-        if agg == 'min':
-            return pl.col(col).min().alias('y')
-        if agg == 'max':
-            return pl.col(col).max().alias('y')
+
+# --- Chart computation functions (used by compute_chart_data) ---
+
+
+def _agg_expr(col: str, agg: str) -> pl.Expr:
+    if agg == 'sum':
         return pl.col(col).sum().alias('y')
+    if agg == 'mean':
+        return pl.col(col).mean().alias('y')
+    if agg == 'count':
+        return pl.col(col).count().alias('y')
+    if agg == 'min':
+        return pl.col(col).min().alias('y')
+    if agg == 'max':
+        return pl.col(col).max().alias('y')
+    return pl.col(col).sum().alias('y')
 
-    def _aggregate_bar(self, lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-        group_cols = [p.x_column]
-        if p.group_column:
-            group_cols.append(p.group_column)
 
-        agg_expr = self._agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
+def _aggregate_bar(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+    group_cols = [p.x_column]
+    if p.group_column:
+        group_cols.append(p.group_column)
 
-        result = lf.group_by(group_cols).agg(agg_expr).sort(p.x_column)
-        return result.rename({p.x_column: 'x'})
+    agg_expr = _agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
 
-    def _aggregate_line(self, lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-        group_cols = [p.x_column]
-        if p.group_column:
-            group_cols.append(p.group_column)
+    result = lf.group_by(group_cols).agg(agg_expr).sort(p.x_column)
+    return result.rename({p.x_column: 'x'})
 
-        agg_expr = self._agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
 
-        result = lf.group_by(group_cols).agg(agg_expr).sort(p.x_column)
-        return result.rename({p.x_column: 'x'})
+def _aggregate_line(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+    group_cols = [p.x_column]
+    if p.group_column:
+        group_cols.append(p.group_column)
 
-    def _aggregate_pie(self, lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-        agg_expr = self._agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
+    agg_expr = _agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
 
-        result = lf.group_by(p.x_column).agg(agg_expr).sort('y', descending=True)
-        return result.rename({p.x_column: 'label'})
+    result = lf.group_by(group_cols).agg(agg_expr).sort(p.x_column)
+    return result.rename({p.x_column: 'x'})
 
-    def _build_histogram(self, lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-        col = p.x_column
-        bins = p.bins
 
-        df = lf.select(pl.col(col).cast(pl.Float64).alias('value')).collect()
+def _aggregate_pie(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+    agg_expr = _agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
 
-        if df.is_empty():
-            return pl.LazyFrame({'bin_start': [], 'bin_end': [], 'count': []})
+    result = lf.group_by(p.x_column).agg(agg_expr).sort('y', descending=True)
+    return result.rename({p.x_column: 'label'})
 
-        min_raw = df['value'].min()
-        max_raw = df['value'].max()
 
-        if min_raw is None or max_raw is None:
-            return pl.LazyFrame({'bin_start': [], 'bin_end': [], 'count': []})
+def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+    col = p.x_column
+    bins = p.bins
 
-        # Column is cast to Float64 above, so min/max are always float.
-        # Polars type stubs return PythonLiteral; explicit cast narrows for mypy.
-        fmin: float = float(min_raw)  # type: ignore[arg-type]
-        fmax: float = float(max_raw)  # type: ignore[arg-type]
+    df = lf.select(pl.col(col).cast(pl.Float64).alias('value')).collect()
 
-        if fmin == fmax:
-            return pl.LazyFrame(
-                {
-                    'bin_start': [fmin],
-                    'bin_end': [fmax],
-                    'count': [len(df)],
-                }
-            )
+    if df.is_empty():
+        return pl.LazyFrame({'bin_start': [], 'bin_end': [], 'count': []})
 
-        bin_width = (fmax - fmin) / bins
-        bin_starts = [fmin + i * bin_width for i in range(bins)]
-        bin_ends = [fmin + (i + 1) * bin_width for i in range(bins)]
+    min_raw = df['value'].min()
+    max_raw = df['value'].max()
 
-        counts = []
-        for i in range(bins):
-            start = bin_starts[i]
-            end = bin_ends[i]
-            if i < bins - 1:
-                count = df.filter((pl.col('value') >= start) & (pl.col('value') < end)).height
-            else:
-                count = df.filter((pl.col('value') >= start) & (pl.col('value') <= end)).height
-            counts.append(count)
+    if min_raw is None or max_raw is None:
+        return pl.LazyFrame({'bin_start': [], 'bin_end': [], 'count': []})
 
+    # Column is cast to Float64 above, so min/max are always float.
+    # Polars type stubs return PythonLiteral; explicit cast narrows for mypy.
+    fmin: float = float(min_raw)  # type: ignore[arg-type]
+    fmax: float = float(max_raw)  # type: ignore[arg-type]
+
+    if fmin == fmax:
         return pl.LazyFrame(
             {
-                'bin_start': bin_starts,
-                'bin_end': bin_ends,
-                'count': counts,
+                'bin_start': [fmin],
+                'bin_end': [fmax],
+                'count': [len(df)],
             }
         )
 
-    def _build_scatter(self, lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-        cols = [pl.col(p.x_column).alias('x')]
-        if p.y_column:
-            cols.append(pl.col(p.y_column).alias('y'))
-        if p.group_column:
-            cols.append(pl.col(p.group_column).alias('group'))
+    bin_width = (fmax - fmin) / bins
+    bin_starts = [fmin + i * bin_width for i in range(bins)]
+    bin_ends = [fmin + (i + 1) * bin_width for i in range(bins)]
 
-        return lf.select(cols).limit(5000)
-
-    def _build_boxplot(self, lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-        col = p.x_column if not p.y_column else p.y_column
-        group_col = p.x_column if p.y_column else None
-
-        if group_col:
-            result = (
-                lf.group_by(group_col)
-                .agg(
-                    pl.col(col).min().alias('min'),
-                    pl.col(col).quantile(0.25).alias('q1'),
-                    pl.col(col).median().alias('median'),
-                    pl.col(col).quantile(0.75).alias('q3'),
-                    pl.col(col).max().alias('max'),
-                )
-                .sort(group_col)
-                .rename({group_col: 'group'})
-            )
+    counts = []
+    for i in range(bins):
+        start = bin_starts[i]
+        end = bin_ends[i]
+        if i < bins - 1:
+            count = df.filter((pl.col('value') >= start) & (pl.col('value') < end)).height
         else:
-            result = lf.select(
+            count = df.filter((pl.col('value') >= start) & (pl.col('value') <= end)).height
+        counts.append(count)
+
+    return pl.LazyFrame(
+        {
+            'bin_start': bin_starts,
+            'bin_end': bin_ends,
+            'count': counts,
+        }
+    )
+
+
+def _build_scatter(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+    cols = [pl.col(p.x_column).alias('x')]
+    if p.y_column:
+        cols.append(pl.col(p.y_column).alias('y'))
+    if p.group_column:
+        cols.append(pl.col(p.group_column).alias('group'))
+
+    return lf.select(cols).limit(5000)
+
+
+def _build_boxplot(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
+    col = p.x_column if not p.y_column else p.y_column
+    group_col = p.x_column if p.y_column else None
+
+    if group_col:
+        result = (
+            lf.group_by(group_col)
+            .agg(
                 pl.col(col).min().alias('min'),
                 pl.col(col).quantile(0.25).alias('q1'),
                 pl.col(col).median().alias('median'),
                 pl.col(col).quantile(0.75).alias('q3'),
                 pl.col(col).max().alias('max'),
-                pl.lit('all').alias('group'),
             )
+            .sort(group_col)
+            .rename({group_col: 'group'})
+        )
+    else:
+        result = lf.select(
+            pl.col(col).min().alias('min'),
+            pl.col(col).quantile(0.25).alias('q1'),
+            pl.col(col).median().alias('median'),
+            pl.col(col).quantile(0.75).alias('q3'),
+            pl.col(col).max().alias('max'),
+            pl.lit('all').alias('group'),
+        )
 
-        return result
+    return result

@@ -22,3 +22,4 @@ class EngineRun(SQLModel, table=True):  # type: ignore[call-arg, assignment]
     query_plan: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     progress: float = Field(default=0.0, sa_column=Column(Float, nullable=False))
     current_step: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    triggered_by: str | None = Field(default=None, sa_column=Column(String, nullable=True))

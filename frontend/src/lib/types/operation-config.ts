@@ -182,10 +182,13 @@ export interface NotificationConfigData {
 export interface AIConfigData {
 	provider: 'ollama' | 'openai';
 	model: string;
-	input_column: string;
+	input_columns: string[];
 	output_column: string;
 	prompt_template: string;
 	batch_size: number;
+	endpoint_url: string;
+	api_key: string;
+	request_options?: Record<string, unknown> | null;
 }
 
 // Union type for all possible config types

@@ -22,6 +22,7 @@ class TabSchema(BaseModel):
     parent_id: str | None = None
     datasource_id: str | None = None
     datasource_config: dict | None = None
+    output_datasource_id: str | None = None
     steps: list[PipelineStepSchema] = []
 
 

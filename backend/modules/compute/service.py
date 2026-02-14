@@ -33,12 +33,40 @@ logger = logging.getLogger(__name__)
 def _send_pipeline_notifications(
     pipeline_steps: list[dict],
     context: dict[str, object],
+    output_notification: dict | None = None,
 ) -> None:
-    """Send notifications for any notification steps in the pipeline."""
+    """Send build-status notifications after export.
+
+    Checks for notification config on the output node (item 21)
+    and also handles legacy notification steps for backward compat.
+    """
+    # Output node notification (build-status alert baked into output)
+    if output_notification:
+        method = output_notification.get('method', 'email')
+        recipient = output_notification.get('recipient', '')
+        if recipient:
+            subject_template = output_notification.get('subject_template', 'Build Complete')
+            body_template = output_notification.get('body_template', '')
+            subject = render_template(subject_template, context)
+            body = render_template(body_template, context)
+            try:
+                if method == 'email':
+                    notification_service.send_email(to=recipient, subject=subject, body=body)
+                    logger.info(f'Output notification email sent to {recipient}')
+                elif method == 'telegram':
+                    notification_service.send_telegram(chat_id=recipient, message=f'{subject}\n\n{body}')
+                    logger.info(f'Output notification telegram sent to {recipient}')
+            except Exception as e:
+                logger.warning(f'Failed to send output {method} notification to {recipient}: {e}')
+
+    # Legacy: notification steps with old build-status format (backward compat)
     for step in pipeline_steps:
         if step.get('type') != 'notification':
             continue
         config = step.get('config', {})
+        # Skip per-row notification steps (they have input_columns)
+        if config.get('input_columns'):
+            continue
         method = config.get('method', 'email')
         recipient = config.get('recipient', '')
         if not recipient:
@@ -58,6 +86,72 @@ def _send_pipeline_notifications(
                 logger.info(f'Notification telegram sent to {recipient}')
         except Exception as e:
             logger.warning(f'Failed to send {method} notification to {recipient}: {e}')
+
+    # Subscriber-based notifications (from Telegram bot /subscribe)
+    datasource_id = str(context.get('datasource_id', ''))
+    if datasource_id:
+        try:
+            from core.database import run_db
+            from modules.settings.service import get_resolved_telegram_token
+            from modules.telegram.service import get_notification_chat_ids
+
+            chat_ids: list[str] = run_db(get_notification_chat_ids, datasource_id)
+            if chat_ids:
+                token = get_resolved_telegram_token()
+                if token:
+                    status = str(context.get('status', 'unknown'))
+                    analysis_name = str(context.get('analysis_name', ''))
+                    row_count = str(context.get('row_count', ''))
+                    duration = str(context.get('duration_ms', ''))
+                    msg = f'Build complete: {analysis_name}\nStatus: {status}\nRows: {row_count}\nDuration: {duration}ms'
+                    for cid in chat_ids:
+                        try:
+                            notification_service.send_telegram(chat_id=cid, message=msg)
+                        except Exception as e:
+                            logger.warning(f'Failed to notify subscriber {cid}: {e}')
+        except Exception as e:
+            logger.warning(f'Failed to send subscriber notifications: {e}')
+
+
+def _upsert_output_datasource(
+    session: Session,
+    output_datasource_id: str | None,
+    name: str,
+    source_type: str,
+    config: dict,
+    schema_cache: dict,
+    analysis_id: str | None,
+) -> DataSource:
+    """Create or update the output datasource for an export.
+
+    If ``output_datasource_id`` points to an existing row, update it in-place.
+    Otherwise create a brand-new ``DataSource``.  Returns the DB object.
+    """
+    if output_datasource_id:
+        existing = session.get(DataSource, output_datasource_id)
+        if existing:
+            existing.name = name
+            existing.source_type = source_type
+            existing.config = config
+            existing.schema_cache = schema_cache
+            existing.created_by_analysis_id = analysis_id
+            session.add(existing)
+            session.commit()
+            return existing
+
+    new_id = str(uuid.uuid4())
+    ds = DataSource(
+        id=new_id,
+        name=name,
+        source_type=source_type,
+        config=config,
+        schema_cache=schema_cache,
+        created_by_analysis_id=analysis_id,
+        created_at=datetime.now(UTC),
+    )
+    session.add(ds)
+    session.commit()
+    return ds
 
 
 def _build_preview_result_metadata(
@@ -200,6 +294,7 @@ def preview_step(
     resource_config: dict | None = None,
     datasource_config: dict | None = None,
     request_json: dict | None = None,
+    triggered_by: str | None = None,
 ):
     """Preview the result of executing pipeline up to a specific step with pagination."""
     from modules.compute.schemas import StepPreviewResponse
@@ -302,6 +397,7 @@ def preview_step(
             query_plan=query_plan,
             progress=1.0,
             current_step=current_step_id,
+            triggered_by=triggered_by,
         )
         engine_run_service.create_engine_run(session, payload)
 
@@ -330,6 +426,7 @@ def preview_step(
             step_timings=step_timings,
             progress=0.0,
             current_step=current_step_id,
+            triggered_by=triggered_by,
         )
         engine_run_service.create_engine_run(session, payload)
         raise
@@ -412,6 +509,8 @@ def export_data(
     timeout: int | None = None,
     analysis_id: str | None = None,
     request_json: dict | None = None,
+    triggered_by: str | None = None,
+    output_datasource_id: str | None = None,
 ) -> tuple[bytes | None, str | None, str | None, str | None, str | None, dict | None]:
     """
     Export pipeline result to file or datasource.
@@ -571,11 +670,19 @@ def export_data(
                         healthcheck_service.run_healthcheck(session, check, lf)
 
             # Send notifications for notification steps in the pipeline
+            # and output node notification (build-status alerts)
             analysis_name = ''
             if run_analysis_id:
                 analysis_obj = session.get(Analysis, run_analysis_id)
                 if analysis_obj:
                     analysis_name = analysis_obj.name
+
+            output_notification = None
+            if isinstance(datasource_config, dict):
+                output_cfg = datasource_config.get('output')
+                if isinstance(output_cfg, dict):
+                    output_notification = output_cfg.get('notification')
+
             _send_pipeline_notifications(
                 pipeline_steps=export_steps,
                 context={
@@ -587,6 +694,7 @@ def export_data(
                     'format': export_format,
                     'destination': destination,
                 },
+                output_notification=output_notification,
             )
 
             # Download - return bytes
@@ -604,6 +712,7 @@ def export_data(
                     step_timings=step_timings,
                     query_plan=query_plan,
                     progress=1.0,
+                    triggered_by=triggered_by,
                 )
                 engine_run_service.create_engine_run(session, payload)
                 with open(output_path, 'rb') as f:
@@ -625,6 +734,7 @@ def export_data(
                     step_timings=step_timings,
                     query_plan=query_plan,
                     progress=1.0,
+                    triggered_by=triggered_by,
                 )
                 engine_run_service.create_engine_run(session, payload)
                 file_name = f'{filename}.{result_format}'
@@ -650,6 +760,7 @@ def export_data(
                     step_timings=step_timings,
                     query_plan=query_plan,
                     progress=1.0,
+                    triggered_by=triggered_by,
                 )
                 engine_run_service.create_engine_run(session, payload)
                 if datasource_type == 'file':
@@ -660,23 +771,22 @@ def export_data(
                     with open(file_path, 'wb') as f:
                         f.write(file_bytes)
 
-                    new_id = str(uuid.uuid4())
-                    new_datasource = DataSource(
-                        id=new_id,
+                    file_config: dict[str, object] = {
+                        'file_path': str(file_path.absolute()),
+                        'file_type': result_format,
+                        'options': {},
+                        'csv_options': None,
+                    }
+                    target_ds = _upsert_output_datasource(
+                        session=session,
+                        output_datasource_id=output_datasource_id,
                         name=filename,
                         source_type='file',
-                        config={
-                            'file_path': str(file_path.absolute()),
-                            'file_type': result_format,
-                            'options': {},
-                            'csv_options': None,
-                        },
+                        config=file_config,
                         schema_cache=data.get('schema', {}),
-                        created_by_analysis_id=run_analysis_id,
-                        created_at=datetime.now(UTC),
+                        analysis_id=run_analysis_id,
                     )
-                    session.add(new_datasource)
-                    session.commit()
+                    new_id = target_ds.id
 
                     result_meta['datasource_id'] = new_id
                     result_meta['datasource_name'] = filename
@@ -693,6 +803,7 @@ def export_data(
                         step_timings=step_timings,
                         query_plan=query_plan,
                         progress=1.0,
+                        triggered_by=triggered_by,
                     )
                     engine_run_service.create_engine_run(session, payload)
 
@@ -709,28 +820,28 @@ def export_data(
                     table_name = 'data'
                     if duckdb_options:
                         table_name = duckdb_options.get('table_name', 'data')
-                    new_id = str(uuid.uuid4())
-                    new_datasource = DataSource(
-                        id=new_id,
+
+                    duckdb_config = {
+                        'db_path': str(file_path.absolute()),
+                        'query': f'SELECT * FROM {table_name}',
+                        'read_only': True,
+                    }
+                    target_ds = _upsert_output_datasource(
+                        session=session,
+                        output_datasource_id=output_datasource_id,
                         name=filename,
                         source_type='duckdb',
-                        config={
-                            'db_path': str(file_path.absolute()),
-                            'query': f'SELECT * FROM {table_name}',
-                            'read_only': True,
-                        },
+                        config=duckdb_config,
                         schema_cache=data.get('schema', {}),
-                        created_by_analysis_id=run_analysis_id,
-                        created_at=datetime.now(UTC),
+                        analysis_id=run_analysis_id,
                     )
-                    session.add(new_datasource)
-                    session.commit()
+                    ds_id = target_ds.id
 
-                    result_meta['datasource_id'] = new_id
+                    result_meta['datasource_id'] = ds_id
                     result_meta['datasource_name'] = filename
                     payload = engine_run_service.create_engine_run_payload(
                         analysis_id=run_analysis_id,
-                        datasource_id=new_id,
+                        datasource_id=ds_id,
                         kind='datasource_create',
                         status='success',
                         request_json=request_payload,
@@ -741,10 +852,11 @@ def export_data(
                         step_timings=step_timings,
                         query_plan=query_plan,
                         progress=1.0,
+                        triggered_by=triggered_by,
                     )
                     engine_run_service.create_engine_run(session, payload)
 
-                    return None, file_name, content_type, str(file_path.absolute()), new_id, result_meta
+                    return None, file_name, content_type, str(file_path.absolute()), ds_id, result_meta
 
                 if datasource_type == 'iceberg':
                     iceberg_opts = iceberg_options or {}
@@ -772,63 +884,42 @@ def export_data(
                     identifier = f'{namespace}.{unique_table}'
 
                     arrow_table = pl.read_parquet(output_path).to_arrow()
-                    table = None
                     if catalog.table_exists(identifier):
-                        table = catalog.load_table(identifier)
-                        table.overwrite(arrow_table)
+                        iceberg_table = catalog.load_table(identifier)
+                        iceberg_table.overwrite(arrow_table)
                     else:
-                        table = catalog.create_table(identifier, schema=arrow_table.schema)
-                        table.append(arrow_table)
+                        iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema)
+                        iceberg_table.append(arrow_table)
 
-                    metadata_path = str(table.metadata_location)
+                    metadata_path = str(iceberg_table.metadata_location)
                     resolved_metadata = resolve_iceberg_metadata_path(metadata_path)
                     table_dir = str(Path(resolved_metadata).parents[1])
-                    existing = session.execute(select(DataSource).filter_by(source_type='iceberg', name=unique_table)).scalar_one_or_none()
-                    if existing:
-                        existing_namespace = str(existing.config.get('namespace', ''))
-                        existing_catalog = str(existing.config.get('catalog_uri', ''))
-                        expected_catalog = f'sqlite:///{catalog_path}'
-                        if existing_namespace != namespace or existing_catalog != expected_catalog:
-                            existing = None
 
-                    datasource_id_value = str(uuid.uuid4())
-                    run_kind = 'datasource_create'
-                    if existing:
-                        existing.config = {
-                            **existing.config,
-                            'metadata_path': table_dir,
-                        }
-                        existing.schema_cache = data.get('schema', {})
-                        existing.created_by_analysis_id = run_analysis_id
-                        session.add(existing)
-                        session.commit()
-                        datasource_id_value = existing.id
-                        run_kind = 'datasource_update'
-                    else:
-                        new_datasource = DataSource(
-                            id=datasource_id_value,
-                            name=unique_table,
-                            source_type='iceberg',
-                            config={
-                                'catalog_type': 'sql',
-                                'catalog_uri': f'sqlite:///{catalog_path}',
-                                'warehouse': f'file://{warehouse_path}',
-                                'namespace': namespace,
-                                'table': unique_table,
-                                'metadata_path': table_dir,
-                            },
-                            schema_cache=data.get('schema', {}),
-                            created_by_analysis_id=run_analysis_id,
-                            created_at=datetime.now(UTC),
-                        )
-                        session.add(new_datasource)
-                        session.commit()
+                    iceberg_ds_config = {
+                        'catalog_type': 'sql',
+                        'catalog_uri': f'sqlite:///{catalog_path}',
+                        'warehouse': f'file://{warehouse_path}',
+                        'namespace': namespace,
+                        'table': unique_table,
+                        'metadata_path': table_dir,
+                    }
+                    target_ds = _upsert_output_datasource(
+                        session=session,
+                        output_datasource_id=output_datasource_id,
+                        name=unique_table,
+                        source_type='iceberg',
+                        config=iceberg_ds_config,
+                        schema_cache=data.get('schema', {}),
+                        analysis_id=run_analysis_id,
+                    )
+                    ds_id = target_ds.id
+                    run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'
 
-                    result_meta['datasource_id'] = datasource_id_value
+                    result_meta['datasource_id'] = ds_id
                     result_meta['datasource_name'] = unique_table
                     payload = engine_run_service.create_engine_run_payload(
                         analysis_id=run_analysis_id,
-                        datasource_id=datasource_id_value,
+                        datasource_id=ds_id,
                         kind=run_kind,
                         status='success',
                         request_json=request_payload,
@@ -839,10 +930,11 @@ def export_data(
                         step_timings=step_timings,
                         query_plan=query_plan,
                         progress=1.0,
+                        triggered_by=triggered_by,
                     )
                     engine_run_service.create_engine_run(session, payload)
 
-                    return None, unique_table, content_type, table_dir, datasource_id_value, result_meta
+                    return None, unique_table, content_type, table_dir, ds_id, result_meta
 
             return None, None, None, None, None, result_meta
         except Exception as exc:
@@ -863,6 +955,7 @@ def export_data(
                 step_timings=step_timings,
                 query_plan=query_plan,
                 progress=0.0,
+                triggered_by=triggered_by,
             )
             engine_run_service.create_engine_run(session, payload)
             raise

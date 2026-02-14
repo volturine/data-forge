@@ -54,6 +54,16 @@ def get_version(session: Session, analysis_id: str, version: int) -> AnalysisVer
     return result.scalar_one_or_none()
 
 
+def rename_version(session: Session, analysis_id: str, version: int, name: str) -> AnalysisVersion:
+    target = get_version(session, analysis_id, version)
+    if not target:
+        raise ValueError(f'Version {version} not found for analysis {analysis_id}')
+    target.name = name
+    session.commit()
+    session.refresh(target)
+    return target
+
+
 def restore_version(session: Session, analysis_id: str, version: int) -> Analysis:
     analysis = session.execute(select(Analysis).where(Analysis.id == analysis_id)).scalar_one_or_none()  # type: ignore[arg-type]
     if not analysis:

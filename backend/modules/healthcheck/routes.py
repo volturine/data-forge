@@ -14,6 +14,12 @@ def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
     return service.list_healthchecks(session, datasource_id)
 
 
+@router.get('/results', response_model=list[schemas.HealthCheckResultResponse])
+@handle_errors(operation='list healthcheck results')
+def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
+    return service.list_results(session, datasource_id, limit)
+
+
 @router.post('', response_model=schemas.HealthCheckResponse)
 @handle_errors(operation='create healthcheck')
 def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = Depends(get_db)):

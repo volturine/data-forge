@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
-from modules.healthcheck.schemas import HealthCheckCreate, HealthCheckResponse, HealthCheckUpdate
+from modules.healthcheck.schemas import HealthCheckCreate, HealthCheckResponse, HealthCheckResultResponse, HealthCheckUpdate
 
 
 def list_healthchecks(session: Session, datasource_id: str) -> list[HealthCheckResponse]:
@@ -54,6 +54,34 @@ def delete_healthcheck(session: Session, healthcheck_id: str) -> None:
         raise ValueError('Healthcheck not found')
     session.delete(check)
     session.commit()
+
+
+def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[HealthCheckResultResponse]:
+    """Get recent healthcheck results for all checks on a datasource."""
+    checks = session.execute(
+        select(HealthCheck.id).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type, call-overload]
+    )
+    check_ids = [row[0] for row in checks.all()]
+    if not check_ids:
+        return []
+    results = session.execute(
+        select(HealthCheckResult)
+        .where(HealthCheckResult.healthcheck_id.in_(check_ids))  # type: ignore[union-attr, attr-defined]
+        .order_by(HealthCheckResult.checked_at.desc())  # type: ignore[union-attr, attr-defined]
+        .limit(limit)
+    )
+    return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
+
+
+def list_results_for_check(session: Session, healthcheck_id: str, limit: int = 10) -> list[HealthCheckResultResponse]:
+    """Get recent results for a single healthcheck."""
+    results = session.execute(
+        select(HealthCheckResult)
+        .where(HealthCheckResult.healthcheck_id == healthcheck_id)  # type: ignore[arg-type]
+        .order_by(HealthCheckResult.checked_at.desc())  # type: ignore[union-attr, attr-defined]
+        .limit(limit)
+    )
+    return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
 
 def _check_column_null_percentage(lf: pl.LazyFrame, column: str, threshold: float) -> tuple[bool, str]:

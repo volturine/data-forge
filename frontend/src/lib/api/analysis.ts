@@ -43,6 +43,17 @@ export function restoreAnalysisVersion(
 	});
 }
 
+export function renameAnalysisVersion(
+	analysisId: string,
+	version: number,
+	name: string
+): ResultAsync<AnalysisVersion, ApiError> {
+	return apiRequest<AnalysisVersion>(`/v1/analysis/${analysisId}/versions/${version}`, {
+		method: 'PATCH',
+		body: JSON.stringify({ name })
+	});
+}
+
 export function deleteAnalysis(id: string): ResultAsync<void, ApiError> {
 	return apiRequest<void>(`/v1/analysis/${id}`, {
 		method: 'DELETE'

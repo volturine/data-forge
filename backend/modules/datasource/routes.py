@@ -412,10 +412,10 @@ def connect_datasource(
 
 
 @router.get('', response_model=list[schemas.DataSourceResponse])
-def list_datasources(session: Session = Depends(get_db)):
-    """List all data sources."""
+def list_datasources(include_hidden: bool = False, session: Session = Depends(get_db)):
+    """List all data sources. Set include_hidden=true to include auto-generated hidden datasources."""
     try:
-        return service.list_datasources(session)
+        return service.list_datasources(session, include_hidden=include_hidden)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to list datasources: {str(e)}')
 

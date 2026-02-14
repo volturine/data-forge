@@ -18,6 +18,7 @@ export interface EngineRun {
 	query_plan: string | null;
 	progress: number;
 	current_step: string | null;
+	triggered_by: string | null;
 }
 
 export interface ListEngineRunsParams {

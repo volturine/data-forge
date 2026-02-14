@@ -13,3 +13,7 @@ class AnalysisVersionResponse(BaseModel):
     description: str | None
     pipeline_definition: dict
     created_at: datetime
+
+
+class AnalysisVersionUpdate(BaseModel):
+    name: str

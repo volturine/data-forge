@@ -3,11 +3,14 @@
 		createHealthCheck,
 		deleteHealthCheck,
 		listHealthChecks,
+		listHealthCheckResults,
 		updateHealthCheck,
-		type HealthCheck
+		type HealthCheck,
+		type HealthCheckResult
 	} from '$lib/api/healthcheck';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
-	import { Loader, Trash2 } from 'lucide-svelte';
+	import { Loader, Trash2, Check, X, AlertTriangle } from 'lucide-svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {
 		datasourceId: string;
@@ -26,6 +29,27 @@
 		enabled: !!datasourceId
 	}));
 
+	const resultsQuery = createQuery(() => ({
+		queryKey: ['healthcheck-results', datasourceId],
+		queryFn: async () => {
+			const result = await listHealthCheckResults(datasourceId, 50);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		enabled: !!datasourceId
+	}));
+
+	const latestResults: SvelteMap<string, HealthCheckResult> = $derived.by(() => {
+		const results = resultsQuery.data ?? [];
+		const map = new SvelteMap<string, HealthCheckResult>();
+		for (const r of results) {
+			if (!map.has(r.healthcheck_id)) {
+				map.set(r.healthcheck_id, r);
+			}
+		}
+		return map;
+	});
+
 	const createCheckMutation = createMutation(() => ({
 		mutationFn: async (payload: Omit<HealthCheck, 'id' | 'created_at'>) => {
 			const result = await createHealthCheck(payload);
@@ -34,6 +58,7 @@
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['healthchecks', datasourceId] });
+			queryClient.invalidateQueries({ queryKey: ['healthcheck-results', datasourceId] });
 		}
 	}));
 
@@ -45,6 +70,7 @@
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['healthchecks', datasourceId] });
+			queryClient.invalidateQueries({ queryKey: ['healthcheck-results', datasourceId] });
 		}
 	}));
 
@@ -56,6 +82,7 @@
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['healthchecks', datasourceId] });
+			queryClient.invalidateQueries({ queryKey: ['healthcheck-results', datasourceId] });
 		}
 	}));
 
@@ -228,10 +255,25 @@
 		{:else}
 			<div class="flex flex-col gap-2">
 				{#each listQuery.data ?? [] as check (check.id)}
+					{@const latest = latestResults.get(check.id)}
 					<div class="flex items-center justify-between border border-tertiary bg-bg-secondary p-3">
-						<div class="flex flex-col gap-1">
-							<span class="text-sm font-semibold text-fg-primary">{check.name}</span>
-							<span class="text-xs text-fg-tertiary">{check.check_type}</span>
+						<div class="flex items-center gap-2">
+							{#if latest}
+								{#if latest.passed}
+									<Check size={16} class="text-success-fg shrink-0" />
+								{:else}
+									<X size={16} class="text-error-fg shrink-0" />
+								{/if}
+							{:else}
+								<AlertTriangle size={16} class="text-fg-muted shrink-0" />
+							{/if}
+							<div class="flex flex-col gap-1">
+								<span class="text-sm font-semibold text-fg-primary">{check.name}</span>
+								<span class="text-xs text-fg-tertiary">{check.check_type}</span>
+								{#if latest}
+									<span class="text-xs text-fg-muted">{latest.message}</span>
+								{/if}
+							</div>
 						</div>
 						<div class="flex items-center gap-2">
 							<label class="flex items-center gap-2 text-xs text-fg-secondary">

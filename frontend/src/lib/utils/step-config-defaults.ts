@@ -95,24 +95,24 @@ export type ChartConfigData = PlotConfigData;
 export interface NotificationConfigData {
 	method: 'email' | 'telegram';
 	recipient: string;
+	bot_token: string;
+	input_columns: string[];
+	output_column: string;
+	message_template: string;
 	subject_template: string;
-	body_template: string;
-	attach_result: boolean;
-	attach_error: boolean;
-	webhook_url?: string | null;
-	timeout_seconds?: number;
-	retries?: number;
+	batch_size: number;
+	timeout_seconds: number;
 }
 
 export interface AIConfigData {
 	provider: 'ollama' | 'openai';
 	model: string;
-	input_column: string;
+	input_columns: string[];
 	output_column: string;
 	prompt_template: string;
 	batch_size: number;
-	endpoint_url?: string | null;
-	api_key?: string | null;
+	endpoint_url: string;
+	api_key: string;
 	request_options?: Record<string, unknown> | null;
 }
 
@@ -206,7 +206,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 	} satisfies TopKConfigData,
 
 	view: {
-		rowLimit: null
+		rowLimit: 100
 	} satisfies ViewConfigData,
 
 	export: {
@@ -227,25 +227,24 @@ const defaultConfigs: Record<string, StepConfig> = {
 	notification: {
 		method: 'email',
 		recipient: '',
-		subject_template: 'Build Complete: {{analysis_name}}',
-		body_template:
-			'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}',
-		attach_result: false,
-		attach_error: true,
-		webhook_url: null,
-		timeout_seconds: 20,
-		retries: 0
+		bot_token: '',
+		input_columns: [],
+		output_column: 'notification_status',
+		message_template: '{{message}}',
+		subject_template: 'Notification',
+		batch_size: 10,
+		timeout_seconds: 20
 	} satisfies NotificationConfigData,
 
 	ai: {
 		provider: 'ollama',
 		model: 'llama2',
-		input_column: '',
+		input_columns: [],
 		output_column: 'ai_result',
 		prompt_template: 'Classify this text: {{text}}',
 		batch_size: 10,
-		endpoint_url: null,
-		api_key: null,
+		endpoint_url: '',
+		api_key: '',
 		request_options: null
 	} satisfies AIConfigData,
 
@@ -311,5 +310,21 @@ export function normalizeConfig(stepType: string, config: Record<string, unknown
 		}));
 	}
 
-	return { ...defaults, ...config };
+	const merged = { ...defaults, ...config };
+
+	// Stabilize null/undefined → '' for string fields bound to HTML inputs.
+	// HTML inputs convert null to "", which would mutate config and trigger
+	// infinite reactivity loops with TanStack Query keys.
+	if (normalizedType === 'ai') {
+		const ai = merged as Record<string, unknown>;
+		ai.endpoint_url = ai.endpoint_url ?? '';
+		ai.api_key = ai.api_key ?? '';
+	}
+	if (normalizedType === 'notification') {
+		const notif = merged as Record<string, unknown>;
+		notif.bot_token = notif.bot_token ?? '';
+		notif.recipient = notif.recipient ?? '';
+	}
+
+	return merged;
 }

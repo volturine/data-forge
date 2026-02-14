@@ -29,6 +29,7 @@ def create_engine_run(
         query_plan=payload.query_plan,
         progress=payload.progress,
         current_step=payload.current_step,
+        triggered_by=payload.triggered_by,
     )
     session.add(run)
     session.commit()
@@ -51,6 +52,7 @@ def create_engine_run_payload(
     query_plan: str | None = None,
     progress: float = 0.0,
     current_step: str | None = None,
+    triggered_by: str | None = None,
 ) -> EngineRunCreateSchema:
     return EngineRunCreateSchema(
         id=str(uuid.uuid4()),
@@ -68,6 +70,7 @@ def create_engine_run_payload(
         query_plan=query_plan,
         progress=progress,
         current_step=current_step,
+        triggered_by=triggered_by,
     )
 
 

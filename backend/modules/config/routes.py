@@ -1,9 +1,12 @@
 """Configuration endpoints for frontend."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlmodel import Session
 
 from core.config import settings
+from core.database import get_db
+from modules.settings.service import get_settings
 
 router = APIRouter(prefix='/config', tags=['config'])
 
@@ -27,8 +30,9 @@ class FrontendConfig(BaseModel):
 
 
 @router.get('', response_model=FrontendConfig)
-def get_config():
+def get_config(session: Session = Depends(get_db)) -> FrontendConfig:
     """Get configuration values for frontend."""
+    db_settings = get_settings(session)
     return FrontendConfig(
         engine_pooling_interval=settings.engine_pooling_interval * 1000,  # Convert to ms
         engine_idle_timeout=settings.engine_idle_timeout,
@@ -40,7 +44,7 @@ def get_config():
         log_client_dedupe_window_ms=settings.log_client_dedupe_window_ms,
         log_client_flush_cooldown_ms=settings.log_client_flush_cooldown_ms,
         log_queue_max_size=settings.log_queue_max_size,
-        public_idb_debug=settings.public_idb_debug,
-        smtp_enabled=bool(settings.smtp_host and settings.smtp_user),
-        telegram_enabled=bool(settings.telegram_bot_token),
+        public_idb_debug=db_settings.public_idb_debug,
+        smtp_enabled=bool(db_settings.smtp_host and db_settings.smtp_user),
+        telegram_enabled=bool(db_settings.telegram_bot_token),
     )

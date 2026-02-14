@@ -68,10 +68,38 @@ class TestAIParams:
         )
         assert params.provider == 'ollama'
         assert params.model == 'llama2'
-        assert params.input_column == 'text'
+        assert params.input_columns == ['text']
+        assert params.input_column is None  # legacy field cleared
         assert params.output_column == 'result'
         assert params.batch_size == 10
         assert params.request_options is None
+
+    def test_multi_column_input(self):
+        params = AIParams.model_validate(
+            {
+                'input_columns': ['title', 'body'],
+                'output_column': 'result',
+            }
+        )
+        assert params.input_columns == ['title', 'body']
+
+    def test_legacy_input_column_promoted(self):
+        params = AIParams.model_validate(
+            {
+                'input_column': 'text',
+                'output_column': 'result',
+            }
+        )
+        assert params.input_columns == ['text']
+        assert params.input_column is None
+
+    def test_no_input_raises(self):
+        with pytest.raises(ValidationError, match='input'):
+            AIParams.model_validate(
+                {
+                    'output_column': 'result',
+                }
+            )
 
     def test_request_options_string_to_dict(self):
         params = AIParams.model_validate(
@@ -409,7 +437,7 @@ class TestAIHandler:
         handler = AIHandler()
         df = pl.DataFrame({'name': ['Alice']})
 
-        with pytest.raises(ValueError, match='Input column not found'):
+        with pytest.raises(ValueError, match=r'Input column\(s\) not found'):
             handler(
                 df.lazy(),
                 {
@@ -528,6 +556,41 @@ class TestAIHandler:
             call_kwargs = mock_client.generate_batch.call_args[1]
             assert call_kwargs['options'] == {'temperature': 0.1}
 
+    def test_multi_column_prompt(self):
+        handler = AIHandler()
+        df = pl.DataFrame({'title': ['Hello'], 'body': ['World']})
+
+        mock_client = MagicMock()
+        mock_client.generate_batch.return_value = ['result']
+
+        with patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client):
+            handler(
+                df.lazy(),
+                {
+                    'input_columns': ['title', 'body'],
+                    'output_column': 'result',
+                    'prompt_template': 'Title: {{title}} Body: {{body}}',
+                    'batch_size': 10,
+                },
+            )
+            prompts = mock_client.generate_batch.call_args[0][0]
+            assert prompts == ['Title: Hello Body: World']
+
+    def test_missing_multi_column_raises(self):
+        handler = AIHandler()
+        df = pl.DataFrame({'title': ['Hello']})
+
+        with pytest.raises(ValueError, match='Input column'):
+            handler(
+                df.lazy(),
+                {
+                    'input_columns': ['title', 'body'],
+                    'output_column': 'result',
+                    'prompt_template': '{{title}} {{body}}',
+                    'batch_size': 5,
+                },
+            )
+
 
 # ---------------------------------------------------------------------------
 # convert_ai_config (step converter)
@@ -550,7 +613,7 @@ class TestConvertAIConfig:
         result = convert_ai_config(config)
         assert result['provider'] == 'openai'
         assert result['model'] == 'gpt-4o'
-        assert result['input_column'] == 'text'
+        assert result['input_columns'] == ['text']
         assert result['output_column'] == 'result'
         assert result['batch_size'] == 5
         assert result['request_options'] == '{"temperature": 0.2}'
@@ -563,10 +626,37 @@ class TestConvertAIConfig:
             'requestOptions': '{"temperature": 0.5}',
         }
         result = convert_ai_config(config)
-        assert result['input_column'] == 'text'
+        assert result['input_columns'] == ['text']
         assert result['output_column'] == 'result'
         assert result['prompt_template'] == 'Hello {{text}}'
         assert result['request_options'] == '{"temperature": 0.5}'
+
+    def test_multi_column_conversion(self):
+        config = {
+            'input_columns': ['title', 'body'],
+            'output_column': 'result',
+            'prompt_template': 'Title: {{title}} Body: {{body}}',
+        }
+        result = convert_ai_config(config)
+        assert result['input_columns'] == ['title', 'body']
+
+    def test_legacy_and_multi_merged(self):
+        config = {
+            'input_column': 'extra',
+            'input_columns': ['title', 'body'],
+            'output_column': 'result',
+        }
+        result = convert_ai_config(config)
+        assert result['input_columns'] == ['extra', 'title', 'body']
+
+    def test_legacy_no_duplicate(self):
+        config = {
+            'input_column': 'title',
+            'input_columns': ['title', 'body'],
+            'output_column': 'result',
+        }
+        result = convert_ai_config(config)
+        assert result['input_columns'] == ['title', 'body']
 
     def test_empty_request_options(self):
         config = {

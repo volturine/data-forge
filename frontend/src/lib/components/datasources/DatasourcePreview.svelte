@@ -30,9 +30,11 @@
 	}
 
 	$effect(() => {
-		// Reset pagination when datasource selection changes; requires effect to update state.
+		// Reset pagination and close stats when datasource changes; requires effect to update state.
 		if (!datasourceId) return;
 		page = 1;
+		statsOpen = false;
+		statsColumn = null;
 	});
 
 	$effect(() => {
@@ -109,7 +111,7 @@
 	}
 </script>
 
-<div class="h-full flex flex-col">
+<div class="relative h-full flex flex-col">
 	<div class="overflow-hidden h-full">
 		<DataTable
 			columns={data?.columns ?? []}

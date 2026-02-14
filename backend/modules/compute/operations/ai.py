@@ -1,22 +1,41 @@
+"""AI handler — UDF wrapper for LLM chat APIs.
+
+Takes column input(s) from the DataFrame, interpolates them into a prompt
+template, calls the configured LLM endpoint, and writes the response into
+a result column.  This is NOT a general-purpose AI assistant — it is a
+predefined UDF with wiring to LLM request endpoints.
+"""
+
 import logging
+import re
 from typing import Literal
 
 import polars as pl
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, field_validator, model_validator
 
 from modules.ai.service import AIError, get_ai_client, parse_request_options
 from modules.compute.core.base import OperationHandler, OperationParams
 
 logger = logging.getLogger(__name__)
 
+_PLACEHOLDER_RE = re.compile(r'\{\{(\w+)\}\}')
+
 
 class AIParams(OperationParams):
+    """Parameters for the AI UDF handler.
+
+    Supports multiple input columns via ``input_columns``.  The legacy
+    ``input_column`` (singular) field is accepted for backward compatibility
+    and automatically promoted into the list.
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     provider: Literal['ollama', 'openai'] = 'ollama'
     model: str = 'llama2'
-    input_column: str
-    output_column: str
+    input_columns: list[str] = []
+    input_column: str | None = None  # legacy — promoted into input_columns
+    output_column: str = 'ai_result'
     prompt_template: str = 'Classify this text: {{text}}'
     batch_size: int = 10
     endpoint_url: str | None = None
@@ -27,6 +46,32 @@ class AIParams(OperationParams):
     @classmethod
     def _parse_options(cls, v: str | dict | None) -> dict | None:
         return parse_request_options(v)
+
+    @model_validator(mode='after')
+    def _promote_legacy_input(self) -> 'AIParams':
+        """Merge legacy ``input_column`` into ``input_columns``."""
+        if self.input_column and self.input_column not in self.input_columns:
+            self.input_columns = [self.input_column, *self.input_columns]
+        # Clear legacy field so it's not serialized twice
+        self.input_column = None
+        if not self.input_columns:
+            raise ValueError('At least one input column is required (input_columns)')
+        return self
+
+
+def _build_prompt(template: str, row: dict[str, object]) -> str:
+    """Replace ``{{col}}`` placeholders with row values.
+
+    Falls back to ``{{text}}`` → first column value for single-column prompts.
+    """
+
+    def _replace(m: re.Match[str]) -> str:
+        key = m.group(1)
+        if key in row:
+            return str(row[key])
+        return m.group(0)  # leave unknown placeholders untouched
+
+    return _PLACEHOLDER_RE.sub(_replace, template)
 
 
 class AIHandler(OperationHandler):
@@ -46,12 +91,26 @@ class AIHandler(OperationHandler):
         if validated.batch_size < 1:
             raise ValueError('batch_size must be at least 1')
         df = lf.collect()
-        if validated.input_column not in df.columns:
-            raise ValueError(f'Input column not found: {validated.input_column}')
 
-        texts = df[validated.input_column].to_list()
-        if not texts:
-            return df.with_columns(pl.Series(name=validated.output_column, values=[], dtype=pl.Utf8)).lazy()
+        # Validate all input columns exist
+        missing = [c for c in validated.input_columns if c not in df.columns]
+        if missing:
+            raise ValueError(f'Input column(s) not found: {", ".join(missing)}')
+
+        row_count = df.height
+        if row_count == 0:
+            return df.with_columns(
+                pl.Series(name=validated.output_column, values=[], dtype=pl.Utf8),
+            ).lazy()
+
+        # Build row dicts for template interpolation
+        select_cols = validated.input_columns
+        rows = df.select(select_cols).to_dicts()
+
+        # Legacy compat: if template uses {{text}} and there's one input column,
+        # inject the single column value as 'text' key
+        uses_text = '{{text}}' in validated.prompt_template
+        single_col = len(select_cols) == 1
 
         client = get_ai_client(
             validated.provider,
@@ -59,10 +118,13 @@ class AIHandler(OperationHandler):
             api_key=validated.api_key,
         )
         results: list[str] = []
-        total = len(texts)
-        for offset in range(0, total, validated.batch_size):
-            batch = texts[offset : offset + validated.batch_size]
-            prompts = [validated.prompt_template.replace('{{text}}', str(text)) for text in batch]
+        for offset in range(0, row_count, validated.batch_size):
+            batch_rows = rows[offset : offset + validated.batch_size]
+            prompts: list[str] = []
+            for row in batch_rows:
+                if uses_text and single_col:
+                    row['text'] = row[select_cols[0]]
+                prompts.append(_build_prompt(validated.prompt_template, row))
             try:
                 outputs = client.generate_batch(
                     prompts,
@@ -71,12 +133,12 @@ class AIHandler(OperationHandler):
                 )
                 results.extend(outputs)
             except AIError as exc:
-                logger.error('AI batch failed at row %d-%d: %s', offset, offset + len(batch), exc)
-                results.extend([f'[error: {exc}]'] * len(batch))
+                logger.error('AI batch failed at row %d-%d: %s', offset, offset + len(batch_rows), exc)
+                results.extend([f'[error: {exc}]'] * len(batch_rows))
             except Exception as exc:
-                logger.error('Unexpected AI error at row %d-%d: %s', offset, offset + len(batch), exc)
-                results.extend([f'[error: {exc}]'] * len(batch))
+                logger.error('Unexpected AI error at row %d-%d: %s', offset, offset + len(batch_rows), exc)
+                results.extend([f'[error: {exc}]'] * len(batch_rows))
 
-        if len(results) != total:
-            raise ValueError(f'AI output length mismatch: got {len(results)}, expected {total}')
+        if len(results) != row_count:
+            raise ValueError(f'AI output length mismatch: got {len(results)}, expected {row_count}')
         return df.with_columns(pl.Series(name=validated.output_column, values=results)).lazy()

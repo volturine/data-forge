@@ -18,6 +18,7 @@ export interface AnalysisTab {
 	type: AnalysisTabType;
 	parent_id: string | null;
 	datasource_id: string | null;
+	output_datasource_id?: string | null;
 	datasource_config?: Record<string, unknown> | null;
 	steps: PipelineStep[];
 }

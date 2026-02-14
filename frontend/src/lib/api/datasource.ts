@@ -337,8 +337,13 @@ export function listIcebergSnapshots(
 	return apiRequest<IcebergSnapshotsResponse>(`/v1/compute/iceberg/${datasourceId}/snapshots`);
 }
 
-export function listDatasources(): ResultAsync<DataSource[], ApiError> {
-	return apiRequest<DataSource[]>('/v1/datasource');
+export function listDatasources(includeHidden?: boolean): ResultAsync<DataSource[], ApiError> {
+	const params = new URLSearchParams();
+	if (includeHidden) {
+		params.set('include_hidden', 'true');
+	}
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<DataSource[]>(`/v1/datasource${suffix}`);
 }
 
 export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
@@ -365,6 +370,12 @@ export function getDatasourceSchema(
 	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema${suffix}`);
 }
 
+export interface HistogramBin {
+	start: number;
+	end: number;
+	count: number;
+}
+
 export interface ColumnStatsResponse {
 	column: string;
 	dtype: string;
@@ -385,6 +396,7 @@ export interface ColumnStatsResponse {
 	max_length?: number | null;
 	avg_length?: number | null;
 	top_values?: Array<Record<string, unknown>> | null;
+	histogram?: HistogramBin[] | null;
 }
 
 export function getColumnStats(
@@ -411,6 +423,7 @@ export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
 export interface DataSourceUpdate {
 	name?: string;
 	config?: Record<string, unknown>;
+	is_hidden?: boolean;
 }
 
 export function updateDatasource(

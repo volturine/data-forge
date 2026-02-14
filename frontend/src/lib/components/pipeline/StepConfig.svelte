@@ -29,7 +29,11 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
-	import { normalizeConfig } from '$lib/utils/step-config-defaults';
+	import {
+		normalizeConfig,
+		type NotificationConfigData,
+		type AIConfigData
+	} from '$lib/utils/step-config-defaults';
 	import { buildDatasourceConfig } from '$lib/utils/analysis-pipeline';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
@@ -360,14 +364,12 @@
 				/>
 			{:else if step.type === 'notification'}
 				<NotificationConfig
-					bind:config={draftConfig as unknown as Record<string, unknown>}
+					schema={inputSchema}
+					bind:config={draftConfig as unknown as NotificationConfigData}
 					{configFlags}
 				/>
 			{:else if step.type === 'ai'}
-				<AIConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as Record<string, unknown>}
-				/>
+				<AIConfig schema={inputSchema} bind:config={draftConfig as unknown as AIConfigData} />
 			{:else}
 				<div class="bg-primary p-6 text-center">
 					<p class="m-0 mb-3 text-fg-tertiary">

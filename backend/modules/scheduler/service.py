@@ -14,10 +14,16 @@ from modules.scheduler.schemas import ScheduleCreate, ScheduleResponse, Schedule
 logger = logging.getLogger(__name__)
 
 
-def list_schedules(session: Session, analysis_id: str | None = None) -> list[ScheduleResponse]:
+def list_schedules(
+    session: Session,
+    analysis_id: str | None = None,
+    datasource_id: str | None = None,
+) -> list[ScheduleResponse]:
     query = select(Schedule)
     if analysis_id:
         query = query.where(Schedule.analysis_id == analysis_id)  # type: ignore[arg-type]
+    if datasource_id:
+        query = query.where(Schedule.datasource_id == datasource_id)  # type: ignore[arg-type]
     result = session.execute(query)
     schedules = result.scalars().all()
     return [ScheduleResponse.model_validate(schedule) for schedule in schedules]
@@ -28,8 +34,10 @@ def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleRespon
     record = Schedule(
         id=str(uuid.uuid4()),
         analysis_id=payload.analysis_id,
+        datasource_id=payload.datasource_id,
         cron_expression=payload.cron_expression,
         enabled=payload.enabled,
+        depends_on=payload.depends_on,
         last_run=None,
         next_run=next_run,
         created_at=datetime.now(UTC),
@@ -44,7 +52,7 @@ def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate)
     schedule = session.get(Schedule, schedule_id)
     if not schedule:
         raise ValueError('Schedule not found')
-    update_data = payload.model_dump(exclude_none=True)
+    update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(schedule, key, value)
     if payload.cron_expression:
@@ -132,8 +140,12 @@ def mark_schedule_run(session: Session, schedule_id: str) -> None:
     session.commit()
 
 
-def run_analysis_build(session: Session, analysis_id: str) -> dict:
-    """Execute a full build for an analysis — run exports for all tabs with output config.
+def run_analysis_build(session: Session, analysis_id: str, datasource_id: str | None = None) -> dict:
+    """Execute a full build for an analysis — run all tabs.
+
+    Tabs with output config export data via export_data().
+    Tabs without output config run via preview_step() to trigger notifications.
+    All engine runs are tagged with triggered_by='schedule'.
 
     Returns a dict with build results per tab.
     """
@@ -155,58 +167,93 @@ def run_analysis_build(session: Session, analysis_id: str) -> dict:
     for tab in tabs:
         tab_id = tab.get('id', 'unknown')
         tab_name = tab.get('name', 'unnamed')
-        datasource_id = tab.get('datasource_id')
+        tab_datasource_id = tab.get('datasource_id')
         steps = tab.get('steps', [])
         datasource_config = tab.get('datasource_config')
 
-        # Only build tabs that have output configuration
+        # Tabs without a datasource cannot run at all
+        if not tab_datasource_id:
+            continue
+
+        # If a specific datasource_id was requested, skip non-matching tabs
+        if datasource_id and tab_datasource_id != datasource_id:
+            continue
+
+        # Extract output config if present
         output_config = None
         if isinstance(datasource_config, dict):
             output_config = datasource_config.get('output')
-
-        if not output_config or not datasource_id:
-            continue
 
         # Determine the target step (last step, or 'source' if no steps)
         target_step_id = 'source'
         if steps:
             target_step_id = steps[-1].get('id', 'source')
 
-        # Extract export parameters from output config
-        datasource_type = output_config.get('datasource_type', 'iceberg')
-        export_format = output_config.get('format', 'csv')
-        filename = output_config.get('filename', f'{tab_name}_out')
-
-        iceberg_options = None
-        iceberg_cfg = output_config.get('iceberg')
-        if iceberg_cfg and isinstance(iceberg_cfg, dict):
-            iceberg_options = {
-                'table_name': iceberg_cfg.get('table_name', 'exported_data'),
-                'namespace': iceberg_cfg.get('namespace', 'exports'),
-            }
-
-        duckdb_options = None
-        duckdb_cfg = output_config.get('duckdb')
-        if duckdb_cfg and isinstance(duckdb_cfg, dict):
-            duckdb_options = {
-                'table_name': duckdb_cfg.get('table_name', 'data'),
-            }
-
         try:
-            compute_service.export_data(
-                session=session,
-                datasource_id=datasource_id,
-                pipeline_steps=steps,
-                target_step_id=target_step_id,
-                export_format=export_format,
-                filename=filename,
-                destination='datasource',
-                datasource_type=datasource_type,
-                iceberg_options=iceberg_options,
-                duckdb_options=duckdb_options,
-                datasource_config=datasource_config,
-                analysis_id=analysis_id,
-            )
+            if output_config:
+                # Tab has export config — run full export
+                datasource_type = output_config.get('datasource_type', 'iceberg')
+                export_format = output_config.get('format', 'csv')
+                filename = output_config.get('filename', f'{tab_name}_out')
+
+                iceberg_options = None
+                iceberg_cfg = output_config.get('iceberg')
+                if iceberg_cfg and isinstance(iceberg_cfg, dict):
+                    iceberg_options = {
+                        'table_name': iceberg_cfg.get('table_name', 'exported_data'),
+                        'namespace': iceberg_cfg.get('namespace', 'exports'),
+                    }
+
+                duckdb_options = None
+                duckdb_cfg = output_config.get('duckdb')
+                if duckdb_cfg and isinstance(duckdb_cfg, dict):
+                    duckdb_options = {
+                        'table_name': duckdb_cfg.get('table_name', 'data'),
+                    }
+
+                compute_service.export_data(
+                    session=session,
+                    datasource_id=tab_datasource_id,
+                    pipeline_steps=steps,
+                    target_step_id=target_step_id,
+                    export_format=export_format,
+                    filename=filename,
+                    destination='datasource',
+                    datasource_type=datasource_type,
+                    iceberg_options=iceberg_options,
+                    duckdb_options=duckdb_options,
+                    datasource_config=datasource_config,
+                    analysis_id=analysis_id,
+                    triggered_by='schedule',
+                    output_datasource_id=tab.get('output_datasource_id'),
+                )
+            else:
+                # Tab without export config — run pipeline via preview for notifications
+                compute_service.preview_step(
+                    session=session,
+                    datasource_id=tab_datasource_id,
+                    pipeline_steps=steps,
+                    target_step_id=target_step_id,
+                    row_limit=1,
+                    analysis_id=analysis_id,
+                    datasource_config=datasource_config,
+                    triggered_by='schedule',
+                )
+                # Send notifications for notification steps (preview_step doesn't do this)
+                analysis_name = analysis.name if analysis else ''
+                compute_service._send_pipeline_notifications(
+                    pipeline_steps=steps,
+                    context={
+                        'analysis_name': analysis_name,
+                        'status': 'success',
+                        'duration_ms': '0',
+                        'row_count': '0',
+                        'datasource_id': tab_datasource_id,
+                        'format': 'preview',
+                        'destination': 'none',
+                    },
+                )
+
             tabs_built += 1
             results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'success'})
             logger.info(f'Scheduler: built tab {tab_name} ({tab_id}) for analysis {analysis_id}')

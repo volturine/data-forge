@@ -21,6 +21,7 @@ class EngineRunCreateSchema(BaseModel):
     query_plan: str | None = None
     progress: float = 0.0
     current_step: str | None = None
+    triggered_by: str | None = None
 
 
 class EngineRunResponseSchema(BaseModel):
@@ -41,3 +42,4 @@ class EngineRunResponseSchema(BaseModel):
     query_plan: str | None
     progress: float = 0.0
     current_step: str | None
+    triggered_by: str | None = None

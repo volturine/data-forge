@@ -78,5 +78,6 @@ export interface DataSource {
 	config: Record<string, unknown>;
 	schema_cache: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;
+	is_hidden: boolean;
 	created_at: string;
 }

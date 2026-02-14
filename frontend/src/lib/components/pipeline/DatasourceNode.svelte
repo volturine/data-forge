@@ -25,11 +25,13 @@
 		Check,
 		X,
 		Cpu,
-		ChevronDown
+		ChevronDown,
+		Calendar
 	} from 'lucide-svelte';
 	import { drag } from '$lib/stores/drag.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
+	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
 
 	interface Props {
@@ -51,6 +53,7 @@
 
 	// Engine config - simple state bound to store
 	let engineExpanded = $state(false);
+	let schedulesExpanded = $state(false);
 
 	// Use defaults from store (fetched by analysis page on load)
 	let defaults = $derived(analysisStore.engineDefaults);
@@ -458,6 +461,30 @@
 					onUiChange={updateTimeTravelUi}
 					onSelect={handleSnapshotSelect}
 				/>
+			</div>
+		{/if}
+
+		<!-- Schedules Section -->
+		{#if analysisId}
+			<div class="mb-3 overflow-hidden border border-tertiary">
+				<button
+					class="flex w-full cursor-pointer items-center justify-between border-none bg-secondary p-2 px-3 hover:bg-tertiary"
+					onclick={() => (schedulesExpanded = !schedulesExpanded)}
+					type="button"
+				>
+					<div class="flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
+						<Calendar size={12} />
+						<span>Schedules</span>
+					</div>
+					<span class="chevron flex items-center text-fg-muted" class:expanded={schedulesExpanded}>
+						<ChevronDown size={12} />
+					</span>
+				</button>
+				{#if schedulesExpanded}
+					<div class="border-t border-tertiary bg-primary p-3">
+						<ScheduleManager {analysisId} compact />
+					</div>
+				{/if}
 			</div>
 		{/if}
 

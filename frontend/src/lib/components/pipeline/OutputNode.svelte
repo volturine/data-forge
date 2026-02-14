@@ -1,48 +1,97 @@
 <script lang="ts">
-	import type { AnalysisTab, PipelineStep } from '$lib/types/analysis';
+	import type { AnalysisTab } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
-	import { exportData, type ExportRequest } from '$lib/api/compute';
-	import { useQueryClient } from '@tanstack/svelte-query';
+	import type { Subscriber } from '$lib/api/settings';
+	import { getSubscribers } from '$lib/api/settings';
+	import { updateDatasource } from '$lib/api/datasource';
+	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { Database, Check } from 'lucide-svelte';
-	import { buildDatasourceConfig } from '$lib/utils/analysis-pipeline';
+	import { configStore } from '$lib/stores/config.svelte';
+	import { Database, Bell, ChevronDown, ChevronRight, Eye, EyeOff, Search } from 'lucide-svelte';
 
 	interface Props {
-		steps: PipelineStep[];
 		analysisId?: string;
 		datasourceId?: string;
 		activeTab?: AnalysisTab | null;
 		datasource?: DataSource | null;
 	}
 
-	let { steps, analysisId, datasourceId, activeTab = null, datasource = null }: Props = $props();
+	let { analysisId, datasourceId, activeTab = null, datasource = null }: Props = $props();
 
 	const queryClient = useQueryClient();
-	let exporting = $state(false);
+	let toggling = $state(false);
 	let error = $state<string | null>(null);
-	let success = $state<string | null>(null);
-	const idPrefix = $derived(() => `output-${analysisId ?? datasourceId ?? 'node'}`);
+	let notifyOpen = $state(false);
+	let search = $state('');
+	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
 
-	let outputConfig = $derived.by(() => {
+	const hidden = $derived(datasource?.is_hidden ?? true);
+	const outputDatasourceId = $derived(activeTab?.output_datasource_id ?? null);
+	const canTelegram = $derived(configStore.telegramEnabled);
+
+	const subscribersQuery = createQuery(() => ({
+		queryKey: ['telegram-subscribers'],
+		queryFn: async () => {
+			const result = await getSubscribers();
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		staleTime: 30_000
+	}));
+
+	const outputConfig = $derived.by(() => {
 		const tab = activeTab;
-		const sourceName = datasource?.name ?? tab?.name ?? 'analysis_output';
-		const baseName = `${sourceName}_out`;
 		const base = (tab?.datasource_config ?? {}) as Record<string, unknown>;
 		const output = (base.output as Record<string, unknown> | undefined) ?? {};
 		return {
 			datasource_type: (output.datasource_type as string) || 'iceberg',
 			format: (output.format as string) || 'parquet',
-			filename: (output.filename as string) || baseName,
+			filename: (output.filename as string) || 'export',
 			iceberg: (output.iceberg as Record<string, unknown> | undefined) ?? {
 				namespace: 'exports',
-				table_name: baseName
+				table_name: 'export'
 			},
 			duckdb: (output.duckdb as Record<string, unknown> | undefined) ?? {
 				table_name: 'data'
-			}
+			},
+			notification: (output.notification as Record<string, unknown> | undefined) ?? null
 		};
 	});
+
+	const notifyConfig = $derived.by(() => {
+		const n = outputConfig.notification;
+		if (!n) {
+			return {
+				enabled: false,
+				excluded_recipients: [] as string[],
+				body_template:
+					'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+			};
+		}
+		return {
+			enabled: true,
+			excluded_recipients: (n.excluded_recipients as string[] | undefined) ?? [],
+			body_template:
+				(n.body_template as string) ||
+				'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+		};
+	});
+
+	const activeSubscribers = $derived(
+		(subscribersQuery.data ?? []).filter((s: Subscriber) => s.is_active)
+	);
+
+	const filtered = $derived.by(() => {
+		const q = search.toLowerCase().trim();
+		if (!q) return activeSubscribers;
+		return activeSubscribers.filter(
+			(s: Subscriber) => s.title.toLowerCase().includes(q) || s.chat_id.toLowerCase().includes(q)
+		);
+	});
+
+	const selectedCount = $derived(
+		activeSubscribers.length - notifyConfig.excluded_recipients.length
+	);
 
 	function updateOutputConfig(patch: Record<string, unknown>) {
 		const tab = activeTab;
@@ -53,66 +102,53 @@
 		analysisStore.updateTab(tab.id, { datasource_config: next });
 	}
 
-	async function handleExport() {
-		if (!datasourceId || !analysisId || exporting) return;
-		exporting = true;
-		error = null;
-		success = null;
-
-		const format = outputConfig.datasource_type === 'file' ? outputConfig.format : undefined;
-		const filename = outputConfig.filename;
-		const datasourceConfig = buildDatasourceConfig({
-			analysisId: analysisId ?? null,
-			tab: activeTab,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
+	function toggleNotification() {
+		if (notifyConfig.enabled) {
+			updateOutputConfig({ notification: null });
+			return;
+		}
+		updateOutputConfig({
+			notification: {
+				method: 'telegram',
+				excluded_recipients: [],
+				body_template:
+					'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
+			}
 		});
-		const request = {
-			analysis_id: analysisId,
-			datasource_id: datasourceId,
-			pipeline_steps: steps.map((s) => ({
-				id: s.id,
-				type: s.type,
-				config: s.config,
-				depends_on: s.depends_on
-			})),
-			target_step_id: steps.length ? (steps[steps.length - 1]?.id ?? 'source') : 'source',
-			format,
-			filename,
-			destination: 'datasource',
-			datasource_type: outputConfig.datasource_type,
-			iceberg_options:
-				outputConfig.datasource_type === 'iceberg'
-					? {
-							namespace: outputConfig.iceberg.namespace,
-							table_name: outputConfig.iceberg.table_name
-						}
-					: undefined,
-			duckdb_options:
-				outputConfig.datasource_type === 'duckdb'
-					? {
-							table_name: outputConfig.duckdb.table_name
-						}
-					: undefined,
-			datasource_config: datasourceConfig
-		} as unknown as ExportRequest;
+	}
 
-		exportData(request).match(
-			(result) => {
-				if (result instanceof Blob) {
-					exporting = false;
-					return;
-				}
-				const response = result as import('$lib/api/compute').ExportResponse & {
-					datasource_name?: string | null;
-				};
-				success = `Saved output: ${response.datasource_name ?? response.filename}`;
+	function updateNotification(patch: Record<string, unknown>) {
+		const current = outputConfig.notification ?? {};
+		updateOutputConfig({ notification: { ...current, ...patch } });
+	}
+
+	function toggleSubscriber(chatId: string) {
+		const excluded = [...notifyConfig.excluded_recipients];
+		const idx = excluded.indexOf(chatId);
+		if (idx >= 0) {
+			excluded.splice(idx, 1);
+		} else {
+			excluded.push(chatId);
+		}
+		updateNotification({ excluded_recipients: excluded });
+	}
+
+	function isIncluded(chatId: string): boolean {
+		return !notifyConfig.excluded_recipients.includes(chatId);
+	}
+
+	async function toggleHidden() {
+		if (!outputDatasourceId || toggling) return;
+		toggling = true;
+		const result = await updateDatasource(outputDatasourceId, { is_hidden: !hidden });
+		result.match(
+			() => {
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
-				exporting = false;
+				toggling = false;
 			},
 			(err) => {
 				error = err.message;
-				exporting = false;
+				toggling = false;
 			}
 		);
 	}
@@ -235,35 +271,161 @@
 					</div>
 				{/if}
 
-				<div class="flex items-center justify-between gap-2 border-t border-tertiary pt-3">
+				<!-- Build Notification Section -->
+				<div class="border-t border-tertiary pt-3">
+					<button
+						type="button"
+						class="flex w-full cursor-pointer items-center gap-2 border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+						onclick={() => (notifyOpen = !notifyOpen)}
+					>
+						{#if notifyOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
+						{/if}
+						<Bell size={12} />
+						<span>Build Notification</span>
+						{#if notifyConfig.enabled}
+							<span
+								class="ml-auto rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary"
+							>
+								{selectedCount}/{activeSubscribers.length}
+							</span>
+						{/if}
+					</button>
+
+					{#if notifyOpen}
+						<div class="mt-2 flex flex-col gap-2 pl-5">
+							<label class="flex cursor-pointer items-center gap-2 text-xs">
+								<input
+									type="checkbox"
+									checked={notifyConfig.enabled}
+									onchange={toggleNotification}
+								/>
+								<span>Notify subscribers on build</span>
+							</label>
+
+							{#if notifyConfig.enabled}
+								<div class="flex flex-col gap-2">
+									{#if !canTelegram}
+										<div
+											class="border border-warning bg-warning-bg p-2 text-[10px] text-warning-fg"
+										>
+											Telegram not configured. Set bot token in global settings.
+										</div>
+									{:else}
+										<!-- Subscriber Picker -->
+										<div class="flex flex-col gap-1">
+											<span class="text-[10px] uppercase text-fg-muted">Recipients</span>
+											<div class="relative">
+												<Search
+													size={12}
+													class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-fg-muted"
+												/>
+												<input
+													class="resource-input w-full border border-tertiary bg-secondary py-1 pl-7 pr-2 text-xs text-fg-primary"
+													placeholder="Search subscribers..."
+													value={search}
+													oninput={(e) => (search = e.currentTarget.value)}
+												/>
+											</div>
+											<div class="max-h-32 overflow-y-auto border border-tertiary bg-secondary">
+												{#if subscribersQuery.isPending}
+													<div class="p-2 text-center text-[10px] text-fg-muted">Loading...</div>
+												{:else if subscribersQuery.isError}
+													<div class="p-2 text-center text-[10px] text-error">
+														Failed to load subscribers
+													</div>
+												{:else if activeSubscribers.length === 0}
+													<div class="p-2 text-center text-[10px] text-fg-muted">
+														No subscribers. Users can subscribe via /subscribe in Telegram.
+													</div>
+												{:else if filtered.length === 0}
+													<div class="p-2 text-center text-[10px] text-fg-muted">No matches</div>
+												{:else}
+													{#each filtered as sub (sub.id)}
+														<label
+															class="flex cursor-pointer items-center gap-2 border-b border-tertiary px-2 py-1.5 last:border-b-0 hover:bg-tertiary"
+														>
+															<input
+																type="checkbox"
+																checked={isIncluded(sub.chat_id)}
+																onchange={() => toggleSubscriber(sub.chat_id)}
+															/>
+															<span class="truncate text-xs text-fg-primary">
+																{sub.title}
+															</span>
+															<span class="ml-auto shrink-0 text-[10px] text-fg-muted">
+																{sub.chat_id}
+															</span>
+														</label>
+													{/each}
+												{/if}
+											</div>
+										</div>
+									{/if}
+
+									<div class="flex flex-col gap-1">
+										<label
+											class="text-[10px] uppercase text-fg-muted"
+											for={`${idPrefix}-notify-body`}
+										>
+											Message Template
+										</label>
+										<textarea
+											class="resource-input border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
+											id={`${idPrefix}-notify-body`}
+											rows="3"
+											value={notifyConfig.body_template}
+											oninput={(e) =>
+												updateNotification({
+													body_template: e.currentTarget.value
+												})}
+										></textarea>
+										<span class="text-[10px] text-fg-muted">
+											{'{{analysis_name}}'}, {'{{status}}'}, {'{{duration_ms}}'},
+											{'{{row_count}}'}
+										</span>
+									</div>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<!-- Output Datasource Section -->
+				<div class="flex flex-col gap-2 border-t border-tertiary pt-3">
 					<div class="flex items-center gap-2 text-xs text-fg-tertiary">
 						<Database size={14} />
 						<span>Output datasource</span>
 					</div>
-					<button
-						class="export-btn flex items-center gap-2 border-none px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-bg-primary hover:opacity-90 hover:enabled:opacity-90"
-						onclick={handleExport}
-						disabled={exporting}
-						type="button"
-					>
-						{#if exporting}
-							<span class="spinner spinner-sm"></span>
-							Saving...
-						{:else}
-							<Database size={14} />
-							Save Output
-						{/if}
-					</button>
+
+					{#if outputDatasourceId}
+						<button
+							type="button"
+							class="flex w-full cursor-pointer items-center gap-2 border border-tertiary bg-secondary px-2 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+							onclick={toggleHidden}
+							disabled={toggling}
+							title={hidden
+								? 'Datasource is hidden from datasources page'
+								: 'Datasource is visible on datasources page'}
+						>
+							{#if hidden}
+								<EyeOff size={12} class="text-fg-muted" />
+								<span class="text-fg-muted">Hidden</span>
+							{:else}
+								<Eye size={12} class="text-success-fg" />
+								<span class="text-success-fg">Visible</span>
+							{/if}
+							<span class="ml-auto text-[10px] text-fg-tertiary">
+								{hidden ? 'Not shown on datasources page' : 'Shown on datasources page'}
+							</span>
+						</button>
+					{/if}
 				</div>
 
 				{#if error}
 					<div class="mt-2 border border-error bg-error p-2 text-xs text-error">{error}</div>
-				{/if}
-				{#if success}
-					<div class="mt-2 border border-success bg-success-bg p-2 text-xs text-success-fg">
-						<Check size={12} class="inline-block mr-1" />
-						{success}
-					</div>
 				{/if}
 			</div>
 		</div>

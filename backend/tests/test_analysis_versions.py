@@ -65,3 +65,60 @@ def test_restore_version_updates_analysis(test_db_session, client):
     assert response.status_code == 200
     payload = response.json()
     assert payload['name'] == 'Restored'
+
+
+def test_rename_version(test_db_session, client):
+    analysis_id = 'analysis-version-rename'
+    analysis = Analysis(
+        id=analysis_id,
+        name='Rename Test',
+        description=None,
+        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        status='draft',
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    version = AnalysisVersion(
+        id='version-rename-1',
+        analysis_id=analysis_id,
+        version=1,
+        name='Original Name',
+        description=None,
+        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(analysis)
+    test_db_session.add(version)
+    test_db_session.commit()
+
+    response = client.patch(
+        f'/api/v1/analysis/{analysis_id}/versions/1',
+        json={'name': 'Renamed Version'},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data['name'] == 'Renamed Version'
+    assert data['version'] == 1
+
+
+def test_rename_version_not_found(test_db_session, client):
+    analysis_id = 'analysis-version-rename-nf'
+    analysis = Analysis(
+        id=analysis_id,
+        name='Not Found Test',
+        description=None,
+        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        status='draft',
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    test_db_session.add(analysis)
+    test_db_session.commit()
+
+    response = client.patch(
+        f'/api/v1/analysis/{analysis_id}/versions/999',
+        json={'name': 'Does Not Exist'},
+    )
+
+    assert response.status_code == 404

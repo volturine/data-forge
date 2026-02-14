@@ -12,6 +12,8 @@ from modules.healthcheck import router as healthcheck_router
 from modules.locks import router as locks_router
 from modules.logs import router as logs_router
 from modules.scheduler import router as scheduler_router
+from modules.settings import router as settings_router
+from modules.telegram import router as telegram_router
 from modules.udf import router as udf_router
 
 router = APIRouter(prefix='/v1')
@@ -27,5 +29,7 @@ router.include_router(healthcheck_router)
 router.include_router(locks_router)
 router.include_router(health_router)
 router.include_router(logs_router)
+router.include_router(settings_router)
+router.include_router(telegram_router)
 router.include_router(udf_router)
 router.include_router(scheduler_router)

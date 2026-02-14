@@ -182,6 +182,40 @@ class TestScheduleCrud:
         with pytest.raises(ValueError, match='Schedule not found'):
             delete_schedule(test_db_session, 'nonexistent')
 
+    def test_create_schedule_with_datasource_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
+        payload = ScheduleCreate(
+            analysis_id=sample_analysis.id,
+            cron_expression='0 * * * *',
+            datasource_id=sample_datasource.id,
+        )
+        result = create_schedule(test_db_session, payload)
+        assert result.datasource_id == sample_datasource.id
+        assert result.analysis_id == sample_analysis.id
+
+    def test_create_schedule_without_datasource_id(self, test_db_session: Session, sample_analysis: Analysis):
+        payload = ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *')
+        result = create_schedule(test_db_session, payload)
+        assert result.datasource_id is None
+
+    def test_list_schedules_filter_by_datasource(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
+        ds_id_1 = sample_datasource.id
+        ds_id_2 = str(uuid.uuid4())
+        create_schedule(
+            test_db_session,
+            ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *', datasource_id=ds_id_1),
+        )
+        create_schedule(
+            test_db_session,
+            ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 0 * * *', datasource_id=ds_id_2),
+        )
+
+        result = list_schedules(test_db_session, datasource_id=ds_id_1)
+        assert len(result) == 1
+        assert result[0].datasource_id == ds_id_1
+
+        result_all = list_schedules(test_db_session)
+        assert len(result_all) == 2
+
 
 # ---------------------------------------------------------------------------
 # get_due_schedules()
@@ -372,42 +406,124 @@ class TestRunAnalysisBuild:
         assert result['results'] == []
 
     def test_tabs_without_output_skipped(self, test_db_session: Session, sample_analysis: Analysis):
-        """Tabs without output config should be skipped."""
+        """Tabs without output config but missing datasource_config still skip preview."""
         result = run_analysis_build(test_db_session, sample_analysis.id)
+        # sample_analysis tab has datasource_id but no datasource_config key,
+        # so preview_step runs but fails (no engine) — caught as error, tabs_built stays 0
         assert result['tabs_built'] == 0
 
+    @patch('modules.compute.service._send_pipeline_notifications')
+    @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
-    def test_builds_tab_with_output(self, mock_export, test_db_session: Session, analysis_with_output: Analysis):
-        """Tab with output config should call export_data."""
+    def test_builds_all_tabs(self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis):
+        """All tabs with datasource_id should be built — export for output tabs, preview for others."""
         mock_export.return_value = None
+        mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        assert result['tabs_built'] == 1
-        assert len(result['results']) == 1
+        # Both tabs have datasource_id: tab-1 via export_data, tab-2 via preview_step
+        assert result['tabs_built'] == 2
+        assert len(result['results']) == 2
         assert result['results'][0]['status'] == 'success'
         assert result['results'][0]['tab_name'] == 'Export Tab'
+        assert result['results'][1]['status'] == 'success'
+        assert result['results'][1]['tab_name'] == 'No Output Tab'
         mock_export.assert_called_once()
+        mock_preview.assert_called_once()
 
+    @patch('modules.compute.service._send_pipeline_notifications')
+    @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
-    def test_build_failure_captured(self, mock_export, test_db_session: Session, analysis_with_output: Analysis):
-        """Failed export should be recorded but not crash the build."""
+    def test_export_failure_captured(
+        self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis
+    ):
+        """Failed export should be recorded but not crash the build; other tabs still run."""
         mock_export.side_effect = RuntimeError('Export failed')
+        mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        assert result['tabs_built'] == 0
-        assert len(result['results']) == 1
-        assert result['results'][0]['status'] == 'failed'
-        assert 'Export failed' in result['results'][0]['error']
-
-    @patch('modules.compute.service.export_data')
-    def test_builds_only_tabs_with_output(self, mock_export, test_db_session: Session, analysis_with_output: Analysis):
-        """Only the tab with output config should be built, not the one without."""
-        mock_export.return_value = None
-
-        result = run_analysis_build(test_db_session, analysis_with_output.id)
-        # analysis_with_output has 2 tabs: one with output, one without
+        # Tab-1 fails (export), tab-2 succeeds (preview)
         assert result['tabs_built'] == 1
+        assert len(result['results']) == 2
+        failed = [r for r in result['results'] if r['status'] == 'failed']
+        succeeded = [r for r in result['results'] if r['status'] == 'success']
+        assert len(failed) == 1
+        assert 'Export failed' in failed[0]['error']
+        assert len(succeeded) == 1
+        assert succeeded[0]['tab_name'] == 'No Output Tab'
+
+    @patch('modules.compute.service._send_pipeline_notifications')
+    @patch('modules.compute.service.preview_step')
+    @patch('modules.compute.service.export_data')
+    def test_export_called_only_for_output_tabs(
+        self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis
+    ):
+        """export_data is called only for tabs with output config; preview_step for the rest."""
+        mock_export.return_value = None
+        mock_preview.return_value = None
+
+        result = run_analysis_build(test_db_session, analysis_with_output.id)
+        # analysis_with_output has 2 tabs: tab-1 with output, tab-2 without
+        assert result['tabs_built'] == 2
         assert mock_export.call_count == 1
+        assert mock_preview.call_count == 1
+
+    @patch('modules.compute.service._send_pipeline_notifications')
+    @patch('modules.compute.service.preview_step')
+    @patch('modules.compute.service.export_data')
+    def test_build_only_matching_datasource_tab(
+        self, mock_export, mock_preview, mock_notify, test_db_session: Session, sample_datasource: DataSource
+    ):
+        """When datasource_id is provided, only the tab with that datasource runs."""
+        other_ds_id = str(uuid.uuid4())
+        analysis_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+        pipeline = {
+            'tabs': [
+                {
+                    'id': 'tab-a',
+                    'name': 'Tab A',
+                    'type': 'datasource',
+                    'datasource_id': sample_datasource.id,
+                    'datasource_config': {},
+                    'steps': [],
+                },
+                {
+                    'id': 'tab-b',
+                    'name': 'Tab B',
+                    'type': 'datasource',
+                    'datasource_id': other_ds_id,
+                    'datasource_config': {},
+                    'steps': [],
+                },
+            ],
+        }
+        analysis = Analysis(
+            id=analysis_id,
+            name='Multi DS',
+            description='',
+            pipeline_definition=pipeline,
+            status='draft',
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(analysis)
+        test_db_session.commit()
+
+        mock_preview.return_value = None
+
+        # Build only for sample_datasource — tab-a should run, tab-b should be skipped
+        result = run_analysis_build(test_db_session, analysis_id, datasource_id=sample_datasource.id)
+        assert result['tabs_built'] == 1
+        assert len(result['results']) == 1
+        assert result['results'][0]['tab_name'] == 'Tab A'
+
+        # Without datasource_id filter — both tabs run
+        mock_preview.reset_mock()
+        mock_notify.reset_mock()
+        result_all = run_analysis_build(test_db_session, analysis_id)
+        assert result_all['tabs_built'] == 2
+        assert len(result_all['results']) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -470,3 +586,32 @@ class TestScheduleRoutes:
     def test_delete_nonexistent_404(self, client):
         response = client.delete('/api/v1/schedules/nonexistent')
         assert response.status_code == 404
+
+    def test_create_with_datasource_id(self, client, sample_analysis: Analysis, sample_datasource: DataSource):
+        payload = {
+            'analysis_id': sample_analysis.id,
+            'cron_expression': '0 * * * *',
+            'datasource_id': sample_datasource.id,
+        }
+        response = client.post('/api/v1/schedules', json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data['datasource_id'] == sample_datasource.id
+
+    def test_list_filtered_by_datasource_id(self, client, sample_analysis: Analysis, sample_datasource: DataSource):
+        ds_id = sample_datasource.id
+        other_ds_id = str(uuid.uuid4())
+        client.post(
+            '/api/v1/schedules',
+            json={'analysis_id': sample_analysis.id, 'cron_expression': '0 * * * *', 'datasource_id': ds_id},
+        )
+        client.post(
+            '/api/v1/schedules',
+            json={'analysis_id': sample_analysis.id, 'cron_expression': '0 0 * * *', 'datasource_id': other_ds_id},
+        )
+
+        response = client.get(f'/api/v1/schedules?datasource_id={ds_id}')
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]['datasource_id'] == ds_id

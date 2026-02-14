@@ -47,11 +47,15 @@
 	let exportError = $state<string | null>(null);
 	let exportSuccess = $state<string | null>(null);
 
-	// Chart preview query (only for plot steps)
+	const isChart = $derived(
+		step.type === 'chart' || step.type === 'plot' || step.type.startsWith('plot_')
+	);
+
+	// Chart preview query (only for chart/plot steps) — auto-runs like view nodes
 	const chartPipeline = $derived(applySteps(allSteps));
 	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
 	const chartDatasourceConfig = $derived.by(() => {
-		if (step.type !== 'plot') return {};
+		if (!isChart) return {};
 		return (
 			buildDatasourceConfig({
 				analysisId: analysisId ?? null,
@@ -94,17 +98,8 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
-		enabled: step.type === 'plot' && !!datasourceId && !!analysisId && chartHasRun
+		enabled: isChart && !!datasourceId && !!analysisId
 	}));
-
-	const chartRunKey = $derived(`chart:${analysisId}:${datasourceId}:${step.id}`);
-	const chartHasRun = $derived(analysisStore.previewRuns.get(chartRunKey) ?? false);
-
-	function runChartPreview() {
-		if (step.type !== 'plot') return;
-		if (!chartHasRun) analysisStore.setPreviewRun(chartRunKey, true);
-		chartQuery.refetch();
-	}
 
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
@@ -370,17 +365,9 @@
 			</div>
 		{/if}
 
-		{#if step.type === 'plot' && datasourceId && analysisId}
+		{#if isChart && datasourceId && analysisId}
 			<div class="mt-3 border-t border-tertiary pt-3">
-				{#if !chartHasRun}
-					<button
-						class="flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-transparent px-3 py-2 text-xs font-medium text-fg-secondary hover:bg-hover hover:text-fg-primary"
-						onclick={runChartPreview}
-						type="button"
-					>
-						Preview Chart
-					</button>
-				{:else if chartQuery.isFetching}
+				{#if chartQuery.isFetching}
 					<div class="flex items-center justify-center gap-2 py-4 text-xs text-fg-muted">
 						<span class="spinner spinner-sm"></span>
 						Loading chart...

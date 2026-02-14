@@ -119,20 +119,48 @@ def update_analysis(
             for tab in tabs_payload:
                 config = tab.get('datasource_config') or {}
                 source_analysis_id = config.get('analysis_id')
-                if not source_analysis_id:
-                    continue
-                if str(source_analysis_id) == analysis_id and not config.get('analysis_tab_id'):
-                    raise ValueError('Analysis cannot use itself as a datasource')
-                datasource_id = tab.get('datasource_id')
-                if datasource_id and session.get(DataSource, datasource_id):
-                    continue
-                created = datasource_service.create_analysis_datasource(
-                    session=session,
-                    name=tab.get('name') or 'Analysis Source',
-                    analysis_id=str(source_analysis_id),
-                    analysis_tab_id=(str(config.get('analysis_tab_id')) if config.get('analysis_tab_id') else None),
-                )
-                tab['datasource_id'] = created.id
+
+                # Cross-analysis source tabs: validate and auto-create analysis datasource
+                if source_analysis_id:
+                    if str(source_analysis_id) == analysis_id and not config.get('analysis_tab_id'):
+                        raise ValueError('Analysis cannot use itself as a datasource')
+                    datasource_id = tab.get('datasource_id')
+                    if not (datasource_id and session.get(DataSource, datasource_id)):
+                        created = datasource_service.create_analysis_datasource(
+                            session=session,
+                            name=tab.get('name') or 'Analysis Source',
+                            analysis_id=str(source_analysis_id),
+                            analysis_tab_id=(str(config.get('analysis_tab_id')) if config.get('analysis_tab_id') else None),
+                        )
+                        tab['datasource_id'] = created.id
+                else:
+                    # All other tabs: ensure they have an input datasource_id.
+                    # Derived tabs without a datasource get a hidden analysis datasource.
+                    datasource_id = tab.get('datasource_id')
+                    if not (datasource_id and session.get(DataSource, datasource_id)):
+                        tab_id = tab.get('id', '')
+                        created = datasource_service.create_analysis_datasource(
+                            session=session,
+                            name=tab.get('name') or f'Tab {tab_id}',
+                            analysis_id=analysis_id,
+                            analysis_tab_id=tab_id or None,
+                            is_hidden=True,
+                        )
+                        tab['datasource_id'] = created.id
+
+                # Every tab always gets an output datasource for builds,
+                # timetravel, healthchecks, and scheduling.
+                output_ds_id = tab.get('output_datasource_id')
+                if not (output_ds_id and session.get(DataSource, output_ds_id)):
+                    tab_id = tab.get('id', '')
+                    output_ds = datasource_service.create_analysis_datasource(
+                        session=session,
+                        name=f'{tab.get("name") or "Tab"} Output',
+                        analysis_id=analysis_id,
+                        analysis_tab_id=tab_id or None,
+                        is_hidden=True,
+                    )
+                    tab['output_datasource_id'] = output_ds.id
         datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
         if data.tabs is not None:
             datasource_ids = [tab.get('datasource_id') for tab in tabs_payload if tab.get('datasource_id')]

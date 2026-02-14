@@ -20,6 +20,14 @@ class SchemaInfo(BaseModel):
     sheet_names: list[str] | None = None
 
 
+class HistogramBin(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    start: float
+    end: float
+    count: int
+
+
 class ColumnStatsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -42,6 +50,7 @@ class ColumnStatsResponse(BaseModel):
     max_length: int | None = None
     avg_length: float | None = None
     top_values: list[dict[str, object]] | None = None
+    histogram: list[HistogramBin] | None = None
 
 
 class ExcelPreflightResponse(BaseModel):
@@ -149,6 +158,7 @@ class DataSourceResponse(BaseModel):
     config: dict
     schema_cache: dict | None
     created_by_analysis_id: str | None = None
+    is_hidden: bool = False
     created_at: datetime
 
 
@@ -159,6 +169,7 @@ class DataSourceUpdate(BaseModel):
 
     name: str | None = None
     config: dict | None = None
+    is_hidden: bool | None = None
 
 
 class FileListItem(BaseModel):

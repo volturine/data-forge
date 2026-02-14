@@ -538,9 +538,7 @@ button.btn-sm {
 	box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
-.lineage-canvas {
-	min-height: 420px;
-}
+/* lineage-canvas removed — LineageGraph now uses flex layout */
 
 /* Form Section */
 .form-section {

@@ -109,6 +109,7 @@ def create_analysis_datasource(
     name: str,
     analysis_id: str,
     analysis_tab_id: str | None = None,
+    is_hidden: bool = False,
 ) -> DataSourceResponse:
     from modules.analysis.models import Analysis
 
@@ -128,6 +129,7 @@ def create_analysis_datasource(
         source_type='analysis',
         config=config,
         created_by_analysis_id=analysis_id,
+        is_hidden=is_hidden,
         created_at=datetime.now(UTC),
     )
 
@@ -737,8 +739,12 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     return DataSourceResponse.model_validate(datasource)
 
 
-def list_datasources(session: Session) -> list[DataSourceResponse]:
-    result = session.execute(select(DataSource))
+def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceResponse]:
+    query = select(DataSource)
+    if not include_hidden:
+        # SQLModel field typed as bool; == creates SA expression at runtime
+        query = query.where(DataSource.is_hidden == False)  # type: ignore[arg-type]  # noqa: E712
+    result = session.execute(query)
     datasources = result.scalars().all()
 
     # Populate schema_cache for datasources that don't have it
@@ -771,6 +777,10 @@ def update_datasource(
     # Update name if provided
     if update.name is not None:
         datasource.name = update.name
+
+    # Update is_hidden if provided
+    if update.is_hidden is not None:
+        datasource.is_hidden = update.is_hidden
 
     # Update config if provided
     if update.config is not None:
@@ -834,6 +844,27 @@ def update_datasource(
     return DataSourceResponse.model_validate(datasource)
 
 
+def _compute_histogram(series: pl.Series, bins: int = 20) -> list[dict[str, object]]:
+    """Compute histogram bins for a numeric series."""
+    if series.is_empty():
+        return []
+    min_val = float(series.min())  # type: ignore[arg-type]
+    max_val = float(series.max())  # type: ignore[arg-type]
+    if min_val == max_val:
+        return [{'start': min_val, 'end': max_val, 'count': len(series)}]
+    width = (max_val - min_val) / bins
+    result: list[dict[str, object]] = []
+    for i in range(bins):
+        start = min_val + i * width
+        end = min_val + (i + 1) * width
+        if i == bins - 1:
+            bin_count = series.filter((series >= start) & (series <= end)).len()
+        else:
+            bin_count = series.filter((series >= start) & (series < end)).len()
+        result.append({'start': round(start, 4), 'end': round(end, 4), 'count': bin_count})
+    return result
+
+
 def get_column_stats(
     session: Session,
     datasource_id: str,
@@ -876,6 +907,7 @@ def get_column_stats(
     }
 
     if isinstance(dtype, (pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64, pl.Float32, pl.Float64)):
+        non_null = series.drop_nulls()
         stats.update(
             {
                 'mean': series.mean(),
@@ -885,6 +917,7 @@ def get_column_stats(
                 'median': series.median(),
                 'q25': series.quantile(0.25),
                 'q75': series.quantile(0.75),
+                'histogram': _compute_histogram(non_null),
             }
         )
         return ColumnStatsResponse.model_validate(stats)

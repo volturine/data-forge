@@ -34,6 +34,12 @@ Use `vibe_check` after planning. Use `vibe_learn` to record discoveries.
 
 **Do not ask for confirmation on implementation details.** Make decisions, implement, verify. Stop and ask only when there is genuine ambiguity about requirements or when a change conflicts with these rules.
 
+**Self-evolving rules:** When you fix something you got wrong on a first implementation (e.g., using `Map` instead of `SvelteMap`, incorrect rune usage, wrong transition property), add the lesson to the Key Learnings section of this file. The goal is to implement correctly from the start rather than fixing mistakes after the fact. This self-evolving behavior is itself a rule.
+
+**Re-read `docs/bugs.md` before declaring any bug/task done.** The file can change while you work — the user may add clarifications, new requirements, or corrections at any time.
+
+**Propositions:** While working on features and bugs, if you think of improvements or new features worth considering, add them to `docs/propositions.md`. The user will vet them and promote approved ones to `docs/bugs.md`.
+
 ## Non-Negotiables (Strict Enforcement)
 
 - **No workaround solutions.** Do not ship hacks, temporary fixes, or "good enough" patches. Fix root causes or stop and ask for direction.
@@ -227,7 +233,7 @@ HTTP request → routes.py → service.py → engine subprocess (via queue)
 
 - **Tabs** live inside `Analysis.pipeline_definition` as a JSON array — NOT a separate DB table
 - **Datasources** are immutable. Schema and location cannot change after creation. Refresh re-extracts schema.
-- **Settings** (SMTP/Telegram/AI) are env-var-based via pydantic-settings, not runtime-editable
+- **Settings** (SMTP/Telegram/AI) are env-var-based via pydantic-settings, prepopulated from env vars but editable at runtime via global settings popup
 - **DataTable** is a pure presentation component — no `datasource_id` prop. Receives `columns`, `data`, `columnTypes` already resolved.
 - **Analysis-source tabs** defer datasource creation to save. Backend `update_analysis` auto-creates analysis datasources when `datasource_id` is null.
 
@@ -269,6 +275,24 @@ import {
 - **SQLite Naive Datetimes:** Always normalize to naive UTC before comparison. `datetime.now(UTC).replace(tzinfo=None)` for storage.
 - **Pydantic Field Validators:** Use `field_validator` for type coercion (e.g., JSON string → dict) instead of fixing every caller
 - **Cross-Tab Invalidation:** When modifying steps in tab A, also mark view steps in dependent tabs for re-run
+- **DB Migrations:** `init_db()` uses `create_all()` which won't add columns to existing tables — use `_run_migrations()` with `ALTER TABLE` for new columns
+- **Chart/View Nodes:** Chart and view nodes are pass-through — they do NOT modify the DAG. They take input data, visualize it, and let downstream steps see the same data as if the chart node weren't there.
+- **AI Handler Architecture:** The AI node is a UDF wrapper for LLM chat APIs. It is NOT a general-purpose AI assistant — it's a predefined UDF with wiring to LLM endpoints. `AIParams` supports `input_columns: list[str]` (multi-column) with backward compat for legacy `input_column` (singular) via `model_validator`. Prompt templates use `{{column_name}}` placeholders (e.g., `Classify: {{title}} — {{body}}`). Legacy `{{text}}` still works for single-column input. The handler runs in an engine subprocess — sync HTTP calls (e.g., `httpx`) are fine. Output is a single result column added to the DataFrame.
+- **EngineRun `triggered_by`:** Distinguishes schedule-triggered vs user-triggered builds. Pass through `export_data()` and `preview_step()`.
+- **Schedule Execution:** `run_analysis_build()` must execute ALL tabs — tabs with output config use `export_data()`, tabs without output but with `datasource_id` use `preview_step()` + notifications. Never skip tabs without export config.
+- **SQLModel `.where()` mypy:** All `.where(Model.field == value)` clauses on SQLModel fields typed as `str`, `int`, etc. need `# type: ignore[arg-type]` for mypy. For `bool` fields also add `# noqa: E712`.
+- **Svelte component prop types:** When a config component uses a specific typed interface (e.g., `NotificationConfigData`), use that type in the `Props` interface — not `Record<string, unknown>`. Parent components cast with `as unknown as SpecificType`.
+- **`Mapping` vs `dict` in function params:** When a function only reads from a dict (e.g., membership checks), use `Mapping[K, V]` instead of `dict[K, V]` to accept covariant subtypes.
+- **Ruff SIM102:** Never nest `if` statements when they can be combined with `and`. Ruff catches this as SIM102.
+- **Telegram Bot Architecture:** `TelegramBot` singleton does long-polling via `getUpdates` in a background thread. Bot auto-starts on app startup if token is configured, restarts on settings change. Subscribers are stored in DB, not env vars.
+- **Schedule Dependencies:** `depends_on` field on `Schedule` model references another schedule ID. Scheduler loop does topological sort within each analysis's due schedules.
+- **HTML Input Null-to-Empty Coercion:** HTML `<input>` elements convert `null` bound values to `""`, mutating config and triggering reactive loops. Default string fields in config to `''` not `null` in `step-config-defaults.ts`.
+- **TanStack QueryKey Stability:** Never include mutable config values (e.g., `endpoint_url`, `api_key`) in queryKeys — they change during initialization, causing infinite refetch loops. Use only stable identifiers like `provider`.
+- **CSS `isolation: isolate`:** Use on canvas containers to scope child stacking contexts. Prevents CSS `transform` on child elements from creating new stacking contexts that paint over higher z-index siblings (e.g., slide panels).
+- **Pydantic `exclude_unset` vs `exclude_none`:** Use `model_dump(exclude_unset=True)` for PATCH/update endpoints — `exclude_none=True` silently drops intentional `null` values (e.g., clearing `depends_on` or `datasource_id`).
+- **Backend-generated fields should be optional in frontend types:** When the backend auto-creates/fills a field on save (e.g., `output_datasource_id`), make it optional (`?`) in the TypeScript interface. Frontend constructs objects without it; backend fills it in on response.
+- **Mypy `var-annotated` on dict literals:** When assigning a dict literal to a variable inside a branch, mypy requires an explicit type annotation (e.g., `file_config: dict[str, object] = {…}`). Use `object` as the value type for mixed-value dicts.
+- **`output_datasource_id` architecture:** `datasource_id` on a tab is the INPUT source only. `output_datasource_id` is a separate field pointing to the hidden output datasource auto-created by `update_analysis()`. `_upsert_output_datasource()` is the DRY helper for all export paths. The scheduler passes `output_datasource_id` through to `export_data()`.
 
 ## Agents
 

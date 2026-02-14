@@ -31,6 +31,21 @@ def get_version(
     return result
 
 
+@router.patch('/{analysis_id}/versions/{version}', response_model=schemas.AnalysisVersionResponse)
+def rename_version(
+    analysis_id: str,
+    version: int,
+    body: schemas.AnalysisVersionUpdate,
+    session: Session = Depends(get_db),
+):
+    try:
+        return service.rename_version(session, analysis_id, version, body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to rename version: {str(e)}')
+
+
 @router.post('/{analysis_id}/versions/{version}/restore', response_model=analysis_schemas.AnalysisResponseSchema)
 def restore_version(
     analysis_id: str,

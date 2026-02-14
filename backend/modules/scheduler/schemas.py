@@ -9,6 +9,8 @@ class ScheduleCreate(BaseModel):
     analysis_id: str
     cron_expression: str
     enabled: bool = True
+    datasource_id: str | None = None
+    depends_on: str | None = None
 
 
 class ScheduleUpdate(BaseModel):
@@ -16,6 +18,8 @@ class ScheduleUpdate(BaseModel):
 
     cron_expression: str | None = None
     enabled: bool | None = None
+    datasource_id: str | None = None
+    depends_on: str | None = None
 
 
 class ScheduleResponse(BaseModel):
@@ -23,8 +27,10 @@ class ScheduleResponse(BaseModel):
 
     id: str
     analysis_id: str
+    datasource_id: str | None = None
     cron_expression: str
     enabled: bool
+    depends_on: str | None = None
     last_run: dt.datetime | None
     next_run: dt.datetime | None
     created_at: dt.datetime

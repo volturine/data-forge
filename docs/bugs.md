@@ -1,126 +1,158 @@
-original taskfile:
+# bugs.md can change while you work read it before saing a bug/tast is done if clarifications were added
 
-1. graphical nodes
-1. all the basic plots
-1. all the basic graphs
-1. add notification node
-   1. notification configs should be configurable all in one in the nodes
-      1. smtp
-      2. telegram
-1. AI API support node ollama/openai
-   1. custom API endpoints
-   2. configurable to wire localhosted or prod endpoints
-1. add suport to directly ingest another analysis/id/ tab as source
-   1. each analysis/id tab should have last node pose two functions export as datasource and second is point to the output lazyframe in the engine
-   2. withing same analysis/id/ one should be able to use any tab as an input
-   3. only withing the same analysis/id because we want to directly use the lazyframe
-   4. when in different analysis we are still dependend to use Datasource witch can be only updated manualy from the analysis or by schedule
-   5. basicaly this add same behaviour as python files.. each analysis id is a python file with transformation
-      1. within same python file for optimal performance we use direct lazy frame
-      2. between python files we are dependent on what was build and when it was build and if we want fresh data we need to schedule back to back builds
-1. add healthecks (send notification)
-   1. lives in datasources config panel
-   2. on successfull full builds
-   3. column rules
-   4. row count
-1. data lineage tab
-   1. used for visualisation of datasources
-   2. datsource lineage (if one is derived from another bacause it was generated with analysis)
-   3. graphical UI with dragable nodes of all datasrouces and their relations.
-   4. used for scheduling.
-      1. cron schedules with DAGs for sequential builds of dependent datasets
-      2. should use the backed analysis to build the datasets with correct logic
-1. preview of running build
-   1. since some builds might take longer would be nice to see the execution time and such in graphical way..
-   2. spark has special ui for stages and such not sure what does polars have either way visualisating schedules and their builds is nice to have as we see what is building for how long and what will be built after
-1. builds UI improvements
-   1. as mentioned before some more graphics and relations
-   2. better filters
-1. column stats in datasources
-1. when clicking on column we should trigger a column stats compute..
-1. it should come from the bottom
-1. have all the related stats for column of type.
-1. think polars has some exact thing that will do it automaticaly
-1. this should be displayed in pretty manner
-1. the indexeddb popup
-   1. should have truncated rows to fixed size
-   2. expand on click
-   3. have a copy button
-1. we need an analysis version history
-   1. with ui for selecting the version we want
-   2. should be saved in backend with unlimited retentions
-   3. each hit of save button should append a new analysis version that will be backed.
-   4. the mode selet button in analysis
-      1. will have a third button, that is rollback
-      2. it will show a full big popup in the middle of the screen with the past version to choose from
-   5. reverting to version is just another append to the version history
+# whilst working on features and bugs you may think of improvements and new features worhi of considerations.. you may add them to docs/propositions.md i'll wet them if i like them and them here
 
-
----
-found bugs and further specificaitons for allignemnt
 main point dont stop until you have tested these with python tests for all backend.. and verified frontend does make equvalient calls and all datatypes are correct
 
+---
 
-1. SMTP and Telegram settings are configured via environment variables and cannot be changed here. should be configurable inside the frontend.. but can be prepopulaated with env variables
-2. the lineage tab has broken physics and is ever expanding.
-    1. i would say it should take up most of the screen
-    2. i would like it to be that the schedules ui would be available as common component
-        1. in datasource config pannel
-        2. analysis/id/ in the datasource node as expanding view
-        3. in its own schedules page
-        4. in datalineage as panel
-    3. it also has the links graphicali in wrong place not even attached to the nodes
-3. when i create a derived analysis from a tab it say there are no nodes..
-    1. it shoulp populate the datasource node and export node straing away not wait for me to add some node so that the two fixed node can appear
-4. graph nodes are still not treated as only visualisation nodes for the incomings data
-    1. they should not affect the data comming in/out.. same way inline table does not affect data
-    2. it should only take input data and visualize it into the desired graph
-    3. use https://datavisualizationwithsvelte.com/
-    4. it takes data in, visualizes it, and lets the dag work as if its not there. same as inlinepreviewnode
-    5. i still cant put chart to any place i want
-    6. where are the prety graphs?? only thing i see when i add graphs is some string saying what should be actualy visualized
-    7. what i ment as leafs they act exactly like inline dataset previews they dont modify the DAG can be wherever..
-    8. they react to data
-    9. visualize it in inline node
-    10. maybe use some visualisation library for the diferent graphs standard one best for svelte that we could use even when hosting with fastapi..
-        1. d3 for example https://datavisualizationwithsvelte.com/
-    11. they can be wherever in thed dag
-5. i see that as soon as i ingest analysis/id tab as input for another tab
-    1. a new datasource is added.. i hope this is not used as the source for the second analysis tab and is only for other logic
-    2. in the second analysis tab i only want to rely on the lazyframe
-    3. but i understan that for the visualisation purposes, healthchecks and schedules it does need a representation elsewhere
-    4. so it may be correct as is but it need to be verified
-6. i see step execution timeline
-    1. i have no idea what these id's mean there
-    2. its just id and the execution time but the id tels me nothing realy.
-    3. therefore it needs improvements for this ui to be usefull
-7. schedule is doing god knows what
-    1. schedule is saing its executing analysis
-    2. i dont see the build logged in the ui of build nor the asociated datasets
-    3. added export of datasource from an analysis and a schedule but i dont see in timetravelui new snapshots so it means that actual build has not run
-    4. adding to chedule longer named analysis will make the chedule rows 2 line high. breaking the ui.. truncate the name.
-        1. make the rows expandable with editing of schedule possible
-    5. i see that builds says schedule was executed and data exported but thats no the case as timetravelui does not show it
-    6. also som analysis that first were no real datasource out and were scheduled seem to do nothing on schedule execution not even end up in builds
-    7. build detail ui should show if something was executed from schedule
-    8. also any analysis should be exacutable even if there is no output datasource... as they can be for notification purposes.. but im not sure why when i first scheduled a analysis without output it didnt execute at all even after i aded the exports.
-8. lets add option to directly download a datasource from the datasources ui
-9. let me rename analysis version title
-    1. basicaly allowing me to distinguis different versions
-10. builds ui should include the ouput of build as column also
-11. healthchecks tab should show how many healthcheks are active
-    1. their status past few exports
-12. lets add a global configuration for the notification base settings
-    1. these can be used as default in the notification node
-    2. should be a small button in line where we have engines/cache/theme/settings
-    3. it will have the base smtp and telegram settings i can configure/test
-    4. it can have the configuration on whether to hide/unhide indexdb cache button
-    5. it should be a popup in the middle of the screen
-13. lets allign on the ai handler.. it should be nothing more than wrapper to call llm chat apis with inputs from the row/columns on polars
-    1. basicaly its a udf with column input/inputs and then calling the ai endpoint with promt being either the input or literal
-    2. output from the ai is a result column
-    3. basicaly ai node is just custom predefined udf node with wiring to llm requests
-    4. also update the agents.md if there is mention of this.
-14. agents.md should reflect our general ideas and standards
-    1. if you fix something after yourself implemented it for the first time and its just mismatched proper usage of standards for example as using Map instead of sveltemap that should be used.. always update your findings in agents.md so that we dont have to fix things rather implement correctly from the get go..
-    2. also add this self evolving behaviour as a rule in agents.md
+consolidated requirements (source: original taskfile + bugs/spec clarifications)
+
+1. Visualization nodes
+   - Provide core chart/graph node types.
+   - Charts are view-only nodes: they consume input data, render inline visuals, and do not alter DAG data flow.
+   - Chart nodes must be insertable anywhere in the pipeline (same behavior as inline preview).
+   - Use Svelte + D3 patterns (reference: https://datavisualizationwithsvelte.com/).
+
+2. Notification node
+   - Support per-row execution with configurable input column(s) and output status column.
+   - Support SMTP and Telegram in node config.
+   - Allow using global defaults or node-level overrides.
+
+3. AI node
+   - AI node is a predefined UDF wrapper for chat APIs (OpenAI/Ollama/custom endpoint).
+   - Support one or more input columns and prompt templates/literals.
+   - Output must be written to a new result column per row.
+
+4. Analysis tab dependencies (same analysis vs external)
+   - Within the same analysis, tabs may use other tabs as direct lazyframe inputs.
+   - Cross-analysis usage must use exported datasources.
+   - Building a tab that depends on another tab in the same analysis must execute upstream + downstream logic and show all steps in build logs.
+   - Building a tab that depends on an export from another analysis or the same analysis must execute only the downstream logic and therefore only show downstream steps in build logs since no upstream logic is executed as it uses the exported datasource and not the lazyframe of the other tab.
+
+5. Export/output model
+   - Every analysis tab has an output/export node by default.
+   - Every output is materialized as an Iceberg table.
+   - `is_hidden` controls visibility to other analyses only (not whether export exists).
+   - `is_hidden` must not disable column stats, healthchecks, schedules, lineage, or same-analysis tab dependencies.
+   - Output node includes: export name (alias of datasource name in datasources tab), notification settings, schedule settings, hidden toggle, manual build action.
+
+6. Scheduling
+   - Schedules are bound to output datasets (not generic analysis-level intent).
+   - Scheduled runs produce build records and timetravel snapshots when export is expected (which is always) as we are building datasets.
+   - Support dependency chains:
+     - Cron-based runs
+     - Run B after A completes
+     - Optional event trigger (run when dataset A updates)
+   - Schedule UI requirements:
+     - Reusable schedule component in datasource panel, analysis panel in export node, schedules page, and lineage panel.
+     - Truncated long names, expandable/editable rows.
+
+7. Lineage page
+   - Default layout is horizontal; include explicit layout controls.
+   - Canvas should fill available workspace area (minus headers).
+   - Support panning/drag navigation of the canvas.
+   - Left panel must not be occluded by nodes; either reserve canvas space after panel or keep panel always topmost.
+   - Schedules panel should open from the left when datasource nodes are selected.
+
+8. Builds and execution observability
+   - Step timeline must show human-meaningful step labels (not opaque IDs only).
+   - Build detail must identify schedule-triggered executions.
+   - Builds table should include output target column.
+   - Improve filters and execution flow readability.
+
+9. Datasource page
+   - Add direct datasource download action.
+   - Show clear `is_hidden` indicator in datasource settings.
+   - `is_hidden` filtering must work reliably.
+   - If datasource changes, close/reset any open column-stats panel.
+
+10. Column stats UX
+    - Clicking a column triggers stats computation.
+    - Show stats in a bottom panel with fixed, consistent height.
+    - Include type-relevant metrics and richer visualizations (not cards only).
+
+11. Healthchecks
+    - Healthcheck config lives in datasource settings.
+    - Support rules for row-count and column-level checks.
+    - Show active healthcheck count and recent status history.
+
+12. Global settings popup
+    - Add a global settings entry in top controls.
+    - Popup includes default SMTP/Telegram settings (prepopulate from env if present, but editable in UI and persisted in DB).
+    - Include app-level toggles such as IndexedDB debug visibility.
+
+13. Telegram system behavior
+    - Global Telegram config stores bot token and subscriber management in DB.
+    - Saving token starts/updates long-running bot polling thread.
+    - Bot must handle `/subscribe` and `/unsubscribe` reliably.
+    - Maintain mapping of bot → subscribers and listener bindings.
+    - Default listeners can be auto-populated for analysis outputs (removable).
+    - Notification node can optionally detect chat for custom bot flow and send to one or many chat IDs per row.
+
+14. Analysis version history
+    - Save action always appends a new version (unlimited retention).
+    - Provide rollback UI (modal selector of past versions).
+    - Revert action creates a new version entry.
+    - Allow renaming version titles for easier identification.
+
+15. Preview node behavior
+    - Default preview row limit is 100.
+    - Preview runs immediately from current settings (no separate "apply" step).
+
+16. IndexedDB debug popup
+    - Truncate rows to fixed size.
+    - Expand on click.
+    - Provide copy action.
+
+17. Documentation and standards
+    - `AGENTS.md` must reflect architecture decisions and implementation standards.
+    - If a fix corrects prior implementation mistakes, add the lesson to `AGENTS.md` (self-evolving rule).
+
+---
+
+latest findings
+
+Telegram bot has some problems with the flow.. and even though i was able to subscribe at the end i had some conflics after unsubscribing ans subcribing back.
+2026-02-14 21:01:09,278 - modules.telegram.bot - WARNING - Telegram getUpdates failed: 409 (error 4/10)
+INFO: 127.0.0.1:41166 - "POST /api/v1/logs/client HTTP/1.1" 200 OK
+2026-02-14 21:01:14,369 - httpx - INFO - HTTP Request: GET https://api.telegram.org/bot8129401613:AAEF86ryXiBsEHa-bY9klb5h1-Yn4ohZYwU/getUpdates?offset=456099984&timeout=30 "HTTP/1.1 409 Conflict"
+2026-02-14 21:01:14,369 - modules.telegram.bot - WARNING - Telegram getUpdates failed: 409 (error 4/10)
+
+Lineage page is still not fixed. the left pane is still on the same level as the nodes so when i move the nodes they overlap with the left pane and make it unusable.. you need to change the layout of the page so that the canvas starts after the left pane and not from the start of the screen.. or you need to make sure that left pane is always top most element and nodes cant go over it.. either way its a layout problem that needs to be fixed with different approach as your last 3 attempts did not fix it at all..
+
+adding ai/notification node still freezes the ui.. both have the same error:
+chunk-65GEI2FJ.js?v=d1e4d673:724 Uncaught TypeError: Cannot read properties of undefined (reading 'length')
+
+    in <unknown>
+    in StepConfig.svelte
+    in +page.svelte
+    in QueryClientProvider.svelte
+    in +layout.svelte
+    in root.svelte
+
+    at NotificationConfig.svelte:42:12
+
+im unable to drag and drop the chart to any place.. i can only add it to end.. and then only relocate.. makes no sense.. if its a visualisation node it should be able to be anywhere in the analysis and not affect the data flow.. its just for visualisation of the data at that point.. same as inline preview node.. but with different visualisation options..
+
+Analysis flow:
+
+Export node is still wrong:
+is_hidden is basicaly just a flag that makes it hidden for other analysis.. therefore its also filterable in the datasources page
+But it still should be exported as a proper iceberg table...
+
+- you create and analysis/id
+- export node is created with name export
+- notification settings
+- schedule setting (as schedules are bound to outputs not inputs)
+- left side it has a small button that will toggle is_hidden as datasource for external analysis/id
+- right side has manual build button
+
+  when i build an analysis/id tab 2 that has as input lazyframe of an tab 1 i would expect all transformation logic from tab 1 + tab 2 would be executed an visible in the build panel with all steps.. for each run either preview or export/build
+
+  right now the "visible" icon does god know what.. scrape it and redesign it to what it should be.. which is just a toggle to make the export datasource hidden or not for other analysis/id tabs.. it should not affect the actual export of the datasource as iceberg table and it should not affect the availability of the datasource for column stats and healthchecks and schedules and so on.. it should only affect if this datasource is visible in the datasource page for other analysis/id tabs to use as input or not.. but it should be always available for other tabs in the same analysis as input as they use the direct lazyframe and not the datasource export..
+
+  my key is consistency and logic.. all exports write to iceberg tables. some of them are just hidden for different analysis/id's. if i toggle the is_hidden on export node it should not affect the actual export of the datasource as iceberg table and it should not affect the availability of the datasource for column stats and healthchecks and schedules and so on.. it should only affect if this datasource is visible in the datasource page for other analysis/id's.. within the same analysis it should be always available as input as they use the direct lazyframe and not the datasource export.. and therefore building an analysis/id tab that has as input lazyframe of an tab 1 should execute all transformation logic from tab 1 + tab 2 and be visible in the build panel with all steps for each run either preview or export/build
+
+good addition:
+Build comparison view — Side-by-side diff of two builds showing row count changes, schema changes, and sample data deltas. Useful for monitoring data quality over time.
