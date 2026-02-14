@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { getLineage } from '$lib/api/lineage';
+	import { getLineage, type LineageResponse } from '$lib/api/lineage';
 	import LineageGraph from '$lib/components/common/LineageGraph.svelte';
 	import { Loader } from 'lucide-svelte';
 
@@ -13,7 +13,8 @@
 		}
 	}));
 
-	const lineage = $derived(query.data ?? { nodes: [], edges: [] });
+	const emptyLineage: LineageResponse = { nodes: [], edges: [] };
+	const lineage = $derived(query.data ?? emptyLineage);
 </script>
 
 <div class="mx-auto max-w-300 px-6 py-7">

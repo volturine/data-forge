@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listEngineRuns, type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
+	import { listDatasources } from '$lib/api/datasource';
+	import { listAnalyses } from '$lib/api/analysis';
 	import {
 		Search,
 		CircleCheck,
@@ -9,15 +11,22 @@
 		Download,
 		ChevronLeft,
 		ChevronRight,
-		ChevronDown
+		ChevronDown,
+		ArrowUp,
+		ArrowDown,
+		Timer
 	} from 'lucide-svelte';
 
 	let search = $state('');
 	let kindFilter = $state<string>('');
 	let statusFilter = $state<'success' | 'failed' | ''>('');
+	let dateFrom = $state('');
+	let dateTo = $state('');
 	let page = $state(1);
 	let expandedId = $state<string | null>(null);
-	let activeTab = $state<'request' | 'result' | 'plans'>('request');
+	let activeTab = $state<'request' | 'result' | 'plans' | 'timings'>('request');
+	let sortColumn = $state<string>('created_at');
+	let sortDir = $state<'asc' | 'desc'>('desc');
 	const limit = 50;
 
 	const params = $derived({
@@ -36,18 +45,112 @@
 		}
 	}));
 
+	const datasourcesQuery = createQuery(() => ({
+		queryKey: ['datasources-lookup'],
+		queryFn: async () => {
+			const result = await listDatasources();
+			if (result.isErr()) return [];
+			return result.value;
+		},
+		staleTime: 60_000
+	}));
+
+	const analysesQuery = createQuery(() => ({
+		queryKey: ['analyses-lookup'],
+		queryFn: async () => {
+			const result = await listAnalyses();
+			if (result.isErr()) return [];
+			return result.value;
+		},
+		staleTime: 60_000
+	}));
+
+	const dsNames = $derived.by(() => {
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- recreated on each derivation, not mutable state
+		const map = new Map<string, string>();
+		for (const ds of datasourcesQuery.data ?? []) {
+			map.set(ds.id, ds.name);
+		}
+		return map;
+	});
+
+	const analysisNames = $derived.by(() => {
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- recreated on each derivation, not mutable state
+		const map = new Map<string, string>();
+		for (const a of analysesQuery.data ?? []) {
+			map.set(a.id, a.name);
+		}
+		return map;
+	});
+
 	const runs = $derived(query.data ?? []);
 
-	const filteredRuns = $derived(
-		search
-			? runs.filter(
-					(r) =>
-						r.id.toLowerCase().includes(search.toLowerCase()) ||
-						r.datasource_id.toLowerCase().includes(search.toLowerCase()) ||
-						(r.analysis_id && r.analysis_id.toLowerCase().includes(search.toLowerCase()))
-				)
-			: runs
-	);
+	const filteredRuns = $derived.by(() => {
+		let result = runs;
+
+		if (search) {
+			const q = search.toLowerCase();
+			result = result.filter(
+				(r) =>
+					r.id.toLowerCase().includes(q) ||
+					r.datasource_id.toLowerCase().includes(q) ||
+					(r.analysis_id && r.analysis_id.toLowerCase().includes(q)) ||
+					(dsNames.get(r.datasource_id) ?? '').toLowerCase().includes(q) ||
+					(r.analysis_id && (analysisNames.get(r.analysis_id) ?? '').toLowerCase().includes(q))
+			);
+		}
+
+		if (dateFrom) {
+			const from = new Date(dateFrom);
+			result = result.filter((r) => new Date(r.created_at) >= from);
+		}
+		if (dateTo) {
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Date for comparison, not reactive state
+			const to = new Date(dateTo);
+			to.setHours(23, 59, 59, 999);
+			result = result.filter((r) => new Date(r.created_at) <= to);
+		}
+
+		return sortRuns(result);
+	});
+
+	function sortRuns(list: EngineRun[]): EngineRun[] {
+		const dir = sortDir === 'asc' ? 1 : -1;
+		return [...list].sort((a, b) => {
+			if (sortColumn === 'created_at') {
+				return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+			}
+			if (sortColumn === 'duration_ms') {
+				return dir * ((a.duration_ms ?? 0) - (b.duration_ms ?? 0));
+			}
+			if (sortColumn === 'kind') {
+				return dir * a.kind.localeCompare(b.kind);
+			}
+			if (sortColumn === 'status') {
+				return dir * a.status.localeCompare(b.status);
+			}
+			if (sortColumn === 'datasource') {
+				const an = dsNames.get(a.datasource_id) ?? a.datasource_id;
+				const bn = dsNames.get(b.datasource_id) ?? b.datasource_id;
+				return dir * an.localeCompare(bn);
+			}
+			if (sortColumn === 'analysis') {
+				const an = a.analysis_id ? (analysisNames.get(a.analysis_id) ?? a.analysis_id) : '';
+				const bn = b.analysis_id ? (analysisNames.get(b.analysis_id) ?? b.analysis_id) : '';
+				return dir * an.localeCompare(bn);
+			}
+			return 0;
+		});
+	}
+
+	function toggleSort(col: string) {
+		if (sortColumn === col) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+			return;
+		}
+		sortColumn = col;
+		sortDir = col === 'created_at' || col === 'duration_ms' ? 'desc' : 'asc';
+	}
 
 	function formatDuration(ms: number | null): string {
 		if (ms === null) return '-';
@@ -71,10 +174,10 @@
 	function toggleExpand(id: string) {
 		if (expandedId === id) {
 			expandedId = null;
-		} else {
-			expandedId = id;
-			activeTab = 'request';
+			return;
 		}
+		expandedId = id;
+		activeTab = 'request';
 	}
 
 	function getQueryPlans(run: EngineRun): { optimized: string; unoptimized: string } | null {
@@ -98,6 +201,25 @@
 	function hasPlans(run: EngineRun): boolean {
 		return getQueryPlans(run) !== null;
 	}
+
+	function hasTimings(run: EngineRun): boolean {
+		return Object.keys(run.step_timings ?? {}).length > 0;
+	}
+
+	function getTimingEntries(run: EngineRun): { name: string; ms: number; pct: number }[] {
+		const timings = run.step_timings ?? {};
+		const entries = Object.entries(timings).map(([name, ms]) => ({
+			name,
+			ms: ms as number
+		}));
+		const total = entries.reduce((sum, e) => sum + e.ms, 0);
+		if (total === 0) return entries.map((e) => ({ ...e, pct: 0 }));
+		return entries.map((e) => ({ ...e, pct: (e.ms / total) * 100 }));
+	}
+
+	function resolveName(id: string, map: Map<string, string>): string {
+		return map.get(id) ?? id.slice(0, 8) + '...';
+	}
 </script>
 
 <div class="builds-page mx-auto max-w-300 px-6 py-7">
@@ -107,12 +229,12 @@
 	</header>
 
 	<div class="mb-4 flex flex-wrap items-center gap-3">
-		<div class="relative flex-1 min-w-60 max-w-100">
+		<div class="relative min-w-60 max-w-100 flex-1">
 			<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 			<input
 				type="text"
-				placeholder="Search by ID, datasource, or analysis..."
-				class="w-full bg-transparent border border-tertiary px-3 py-1.5 pl-8 text-sm"
+				placeholder="Search by name, ID, datasource, or analysis..."
+				class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
 				bind:value={search}
 			/>
 		</div>
@@ -132,6 +254,20 @@
 			<option value="success">Success</option>
 			<option value="failed">Failed</option>
 		</select>
+		<div class="flex items-center gap-1.5 text-sm">
+			<span class="text-fg-muted">From</span>
+			<input
+				type="date"
+				class="border border-tertiary bg-transparent px-2 py-1 text-sm"
+				bind:value={dateFrom}
+			/>
+			<span class="text-fg-muted">To</span>
+			<input
+				type="date"
+				class="border border-tertiary bg-transparent px-2 py-1 text-sm"
+				bind:value={dateTo}
+			/>
+		</div>
 	</div>
 
 	{#if query.isLoading}
@@ -154,13 +290,24 @@
 			<table class="w-full border-collapse text-sm">
 				<thead>
 					<tr class="bg-bg-tertiary">
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium w-8"></th>
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium">Type</th>
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium">Status</th>
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium">Datasource</th>
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium">Analysis</th>
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium">Duration</th>
-						<th class="border-b border-tertiary px-3 py-2 text-left font-medium">Created</th>
+						<th class="w-8 border-b border-tertiary px-3 py-2 text-left font-medium"></th>
+						{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
+							<th
+								class="cursor-pointer border-b border-tertiary px-3 py-2 text-left font-medium transition-colors hover:bg-hover"
+								onclick={() => toggleSort(col.key)}
+							>
+								<span class="inline-flex items-center gap-1">
+									{col.label}
+									{#if sortColumn === col.key}
+										{#if sortDir === 'asc'}
+											<ArrowUp size={12} />
+										{:else}
+											<ArrowDown size={12} />
+										{/if}
+									{/if}
+								</span>
+							</th>
+						{/each}
 					</tr>
 				</thead>
 				<tbody>
@@ -196,14 +343,14 @@
 								</span>
 							</td>
 							<td class="border-b border-tertiary px-3 py-2">
-								<span class="font-mono text-xs text-fg-secondary" title={run.datasource_id}>
-									{run.datasource_id.slice(0, 8)}...
+								<span class="text-xs text-fg-secondary" title={run.datasource_id}>
+									{resolveName(run.datasource_id, dsNames)}
 								</span>
 							</td>
 							<td class="border-b border-tertiary px-3 py-2">
 								{#if run.analysis_id}
-									<span class="font-mono text-xs text-fg-secondary" title={run.analysis_id}>
-										{run.analysis_id.slice(0, 8)}...
+									<span class="text-xs text-fg-secondary" title={run.analysis_id}>
+										{resolveName(run.analysis_id, analysisNames)}
 									</span>
 								{:else}
 									<span class="text-fg-muted">-</span>
@@ -221,9 +368,9 @@
 								<td colspan="7" class="border-b border-tertiary bg-bg-primary p-0">
 									<div class="p-4">
 										<!-- Tab buttons -->
-										<div class="flex gap-1 mb-4 border-b border-tertiary">
+										<div class="mb-4 flex gap-1 border-b border-tertiary">
 											<button
-												class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === 'request'
+												class="border-b-2 px-3 py-1.5 text-sm -mb-px {activeTab === 'request'
 													? 'border-accent-primary text-fg-primary'
 													: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
 												onclick={(e) => {
@@ -234,7 +381,7 @@
 												Request Config
 											</button>
 											<button
-												class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === 'result'
+												class="border-b-2 px-3 py-1.5 text-sm -mb-px {activeTab === 'result'
 													? 'border-accent-primary text-fg-primary'
 													: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
 												onclick={(e) => {
@@ -244,9 +391,25 @@
 											>
 												Result
 											</button>
+											{#if hasTimings(run)}
+												<button
+													class="border-b-2 px-3 py-1.5 text-sm -mb-px {activeTab === 'timings'
+														? 'border-accent-primary text-fg-primary'
+														: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
+													onclick={(e) => {
+														e.stopPropagation();
+														activeTab = 'timings';
+													}}
+												>
+													<span class="inline-flex items-center gap-1">
+														<Timer size={13} />
+														Step Timings
+													</span>
+												</button>
+											{/if}
 											{#if hasPlans(run)}
 												<button
-													class="px-3 py-1.5 text-sm border-b-2 -mb-px {activeTab === 'plans'
+													class="border-b-2 px-3 py-1.5 text-sm -mb-px {activeTab === 'plans'
 														? 'border-accent-primary text-fg-primary'
 														: 'border-transparent text-fg-tertiary hover:text-fg-secondary'}"
 													onclick={(e) => {
@@ -269,21 +432,25 @@
 													</div>
 													<div>
 														<span class="text-fg-muted">Datasource:</span>
-														<span class="ml-2 font-mono text-xs">{run.datasource_id}</span>
+														<span class="ml-2 text-xs">
+															{resolveName(run.datasource_id, dsNames)}
+														</span>
 													</div>
 													{#if run.analysis_id}
 														<div>
 															<span class="text-fg-muted">Analysis:</span>
-															<span class="ml-2 font-mono text-xs">{run.analysis_id}</span>
+															<span class="ml-2 text-xs">
+																{resolveName(run.analysis_id, analysisNames)}
+															</span>
 														</div>
 													{/if}
 												</div>
 												<div>
-													<h4 class="text-sm font-medium text-fg-secondary mb-2">
+													<h4 class="mb-2 text-sm font-medium text-fg-secondary">
 														Request Payload
 													</h4>
 													<pre
-														class="bg-bg-tertiary border border-tertiary p-3 text-xs font-mono overflow-x-auto max-h-80">{JSON.stringify(
+														class="max-h-80 overflow-x-auto border border-tertiary bg-bg-tertiary p-3 font-mono text-xs">{JSON.stringify(
 															run.request_json,
 															null,
 															2
@@ -294,17 +461,17 @@
 											<div class="space-y-3">
 												{#if run.status === 'failed' && run.error_message}
 													<div class="error-box">
-														<h4 class="text-sm font-medium mb-1">Error</h4>
+														<h4 class="mb-1 text-sm font-medium">Error</h4>
 														<p class="text-sm">{run.error_message}</p>
 													</div>
 												{/if}
 												{#if run.result_json}
 													{@const result = run.result_json}
 													<div>
-														<h4 class="text-sm font-medium text-fg-secondary mb-2">
+														<h4 class="mb-2 text-sm font-medium text-fg-secondary">
 															Result Metadata
 														</h4>
-														<div class="grid grid-cols-2 gap-4 text-sm mb-3">
+														<div class="mb-3 grid grid-cols-2 gap-4 text-sm">
 															{#if 'row_count' in result}
 																<div>
 																	<span class="text-fg-muted">Rows:</span>
@@ -340,9 +507,9 @@
 														</div>
 														{#if 'schema' in result && result.schema}
 															<div>
-																<h4 class="text-sm font-medium text-fg-secondary mb-2">Schema</h4>
+																<h4 class="mb-2 text-sm font-medium text-fg-secondary">Schema</h4>
 																<div
-																	class="bg-bg-tertiary border border-tertiary p-3 text-xs font-mono overflow-x-auto max-h-40"
+																	class="max-h-40 overflow-x-auto border border-tertiary bg-bg-tertiary p-3 font-mono text-xs"
 																>
 																	{#each Object.entries(result.schema as Record<string, string>) as [col, dtype] (col)}
 																		<div>
@@ -355,7 +522,40 @@
 														{/if}
 													</div>
 												{:else}
-													<p class="text-fg-muted text-sm">No result data available.</p>
+													<p class="text-sm text-fg-muted">No result data available.</p>
+												{/if}
+											</div>
+										{:else if activeTab === 'timings'}
+											{@const entries = getTimingEntries(run)}
+											<div class="space-y-2">
+												<h4 class="mb-3 text-sm font-medium text-fg-secondary">
+													Step Execution Timeline
+												</h4>
+												{#each entries as entry (entry.name)}
+													<div class="flex items-center gap-3 text-xs">
+														<span
+															class="w-36 shrink-0 truncate font-mono text-fg-secondary"
+															title={entry.name}
+														>
+															{entry.name}
+														</span>
+														<div class="relative h-5 flex-1 bg-bg-tertiary">
+															<div
+																class="absolute inset-y-0 left-0 bg-accent-bg"
+																style="width: {Math.max(entry.pct, 1)}%"
+															></div>
+														</div>
+														<span class="w-16 shrink-0 text-right font-mono text-fg-muted">
+															{formatDuration(entry.ms)}
+														</span>
+													</div>
+												{/each}
+												{#if entries.length > 0}
+													<div
+														class="mt-3 border-t border-tertiary pt-2 text-right font-mono text-xs text-fg-muted"
+													>
+														Total: {formatDuration(run.duration_ms)}
+													</div>
 												{/if}
 											</div>
 										{:else if activeTab === 'plans'}
@@ -363,24 +563,24 @@
 											{#if plans}
 												<div class="space-y-4">
 													<div>
-														<h4 class="text-sm font-medium text-fg-secondary mb-2">
+														<h4 class="mb-2 text-sm font-medium text-fg-secondary">
 															Optimized Plan
 														</h4>
 														<pre
-															class="bg-bg-tertiary border border-tertiary p-3 text-xs font-mono overflow-x-auto max-h-60 whitespace-pre-wrap">{plans.optimized ||
+															class="max-h-60 overflow-x-auto whitespace-pre-wrap border border-tertiary bg-bg-tertiary p-3 font-mono text-xs">{plans.optimized ||
 																'N/A'}</pre>
 													</div>
 													<div>
-														<h4 class="text-sm font-medium text-fg-secondary mb-2">
+														<h4 class="mb-2 text-sm font-medium text-fg-secondary">
 															Unoptimized Plan
 														</h4>
 														<pre
-															class="bg-bg-tertiary border border-tertiary p-3 text-xs font-mono overflow-x-auto max-h-60 whitespace-pre-wrap">{plans.unoptimized ||
+															class="max-h-60 overflow-x-auto whitespace-pre-wrap border border-tertiary bg-bg-tertiary p-3 font-mono text-xs">{plans.unoptimized ||
 																'N/A'}</pre>
 													</div>
 												</div>
 											{:else}
-												<p class="text-fg-muted text-sm">No query plans available for this run.</p>
+												<p class="text-sm text-fg-muted">No query plans available for this run.</p>
 											{/if}
 										{/if}
 									</div>

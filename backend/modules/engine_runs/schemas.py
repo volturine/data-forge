@@ -39,5 +39,5 @@ class EngineRunResponseSchema(BaseModel):
     duration_ms: int | None
     step_timings: dict
     query_plan: str | None
-    progress: float
+    progress: float = 0.0
     current_step: str | None

@@ -50,6 +50,7 @@
 			loading?: boolean;
 		};
 		onPreview?: () => void;
+		onColumnStats?: (columnName: string) => void;
 		density?: 'default' | 'compact';
 		enableResize?: boolean;
 		enableCopy?: boolean;
@@ -73,6 +74,7 @@
 		showPagination = false,
 		pagination,
 		onPreview,
+		onColumnStats,
 		density = 'default',
 		enableResize = true,
 		enableCopy = true,
@@ -673,6 +675,17 @@
 											>
 												{(columnVisibility[header.id] ?? true) ? 'Hide column' : 'Show column'}
 											</button>
+											{#if onColumnStats}
+												<button
+													class="dataset-table__menu-btn"
+													onclick={() => {
+														onColumnStats(header.id);
+														activeColumn = null;
+													}}
+												>
+													Column stats
+												</button>
+											{/if}
 										</div>
 									{/if}
 								</th>

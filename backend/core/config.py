@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # How often to check engine states and cleanup idle engines
     engine_pooling_interval: int = Field(default=30, alias='ENGINE_POOLING_INTERVAL')
 
+    # Scheduler check interval in seconds (default 60 seconds)
+    # How often to check for schedules that need to run
+    scheduler_check_interval: int = Field(default=60, alias='SCHEDULER_CHECK_INTERVAL')
+
     # Job execution timeout in seconds (default 5 minutes)
     # Jobs that exceed this duration will be terminated
     job_timeout: int = Field(default=300, alias='JOB_TIMEOUT')
@@ -161,7 +165,7 @@ class Settings(BaseSettings):
             raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
         return _resolve_dir(path_value)
 
-    @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval')
+    @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval', 'scheduler_check_interval')
     @classmethod
     def _validate_positive_timeout(cls, value: int, info) -> int:
         """Ensure timeout values are positive."""

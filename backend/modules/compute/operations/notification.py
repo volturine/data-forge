@@ -1,9 +1,12 @@
+import logging
 from typing import Literal
 
 import polars as pl
 from pydantic import ConfigDict
 
 from modules.compute.core.base import OperationHandler, OperationParams
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationParams(OperationParams):
@@ -21,6 +24,12 @@ class NotificationParams(OperationParams):
 
 
 class NotificationHandler(OperationHandler):
+    """Notification is a leaf node.
+
+    Validates config during pipeline build,
+    actual sending is handled post-export by the service layer.
+    """
+
     @property
     def name(self) -> str:
         return 'notification'

@@ -71,7 +71,7 @@ export function buildAnalysisPipelinePayload(
 		}
 		sources[id] = { source_type: ds.source_type, ...ds.config };
 	}
-	if (sourceIds.size && Object.keys(sources).length !== sourceIds.size) return null;
+	if (sourceIds.size && Object.keys(sources).length === 0) return null;
 
 	const pipelineTabs = tabs.map((tab) => ({
 		id: tab.id,

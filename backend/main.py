@@ -15,6 +15,7 @@ from core.config import settings
 from core.database import get_db, init_db
 from core.logging import RequestLoggingMiddleware, configure_logging
 from modules.compute.manager import get_manager
+from modules.scheduler import service as scheduler_service
 from modules.udf.seed import ensure_udf_seeds
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,53 @@ async def engine_cleanup_loop():
             logger.error(f'Error in engine cleanup: {e}', exc_info=True)
 
 
+async def scheduler_loop():
+    """Periodically check schedules and trigger builds for due analyses."""
+    while True:
+        await asyncio.sleep(settings.scheduler_check_interval)
+        try:
+            for session in get_db():
+                due = scheduler_service.get_due_schedules(session)
+                if not due:
+                    logger.debug('No schedules due')
+                    break
+
+                # Build a topological order to respect analysis dependencies
+                all_analysis_ids = {s.analysis_id for s in due}
+                ordered_ids: list[str] = []
+                for aid in all_analysis_ids:
+                    build_order = scheduler_service.get_build_order(session, aid)
+                    for oid in build_order:
+                        if oid in all_analysis_ids and oid not in ordered_ids:
+                            ordered_ids.append(oid)
+
+                # Add any remaining IDs not in the build order
+                for aid in all_analysis_ids:
+                    if aid not in ordered_ids:
+                        ordered_ids.append(aid)
+
+                # Map schedule by analysis_id for marking
+                schedule_map: dict[str, list] = {}
+                for s in due:
+                    schedule_map.setdefault(s.analysis_id, []).append(s)
+
+                for aid in ordered_ids:
+                    logger.info(f'Scheduler: running build for analysis {aid}')
+                    try:
+                        result = scheduler_service.run_analysis_build(session, aid)
+                        for s in schedule_map.get(aid, []):
+                            scheduler_service.mark_schedule_run(session, s.id)
+                        logger.info(f'Scheduler: build complete for analysis {aid} — {result["tabs_built"]} tab(s) built')
+                    except Exception as e:
+                        logger.error(f'Scheduler: build failed for analysis {aid}: {e}', exc_info=True)
+                        # Still mark the schedule as run to prevent retry storms
+                        for s in schedule_map.get(aid, []):
+                            scheduler_service.mark_schedule_run(session, s.id)
+                break
+        except Exception as e:
+            logger.error(f'Error in scheduler loop: {e}', exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
@@ -49,13 +97,17 @@ async def lifespan(app: FastAPI):
 
     # Start background cleanup task
     cleanup_task = asyncio.create_task(engine_cleanup_loop())
+    scheduler_task = asyncio.create_task(scheduler_loop())
 
     yield
 
-    # Cancel cleanup task
+    # Cancel background tasks
     cleanup_task.cancel()
+    scheduler_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await cleanup_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await scheduler_task
 
     # Cleanup compute processes on shutdown
     logger.info('Shutting down compute processes...')

@@ -2,8 +2,18 @@
 	import type { PipelineStep } from '$lib/types/analysis';
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
 	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
+	import ChartPreview from '$lib/components/viewers/ChartPreview.svelte';
+	import { createQuery } from '@tanstack/svelte-query';
+	import {
+		previewStepData,
+		exportData,
+		downloadBlob,
+		type StepPreviewResponse,
+		type ExportRequest
+	} from '$lib/api/compute';
+	import { applySteps } from '$lib/utils/pipeline';
+	import { hashPipeline } from '$lib/utils/hash';
 	import { Download, GripVertical } from 'lucide-svelte';
-	import { exportData, downloadBlob, type ExportRequest } from '$lib/api/compute';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
@@ -36,6 +46,65 @@
 	let isExporting = $state(false);
 	let exportError = $state<string | null>(null);
 	let exportSuccess = $state<string | null>(null);
+
+	// Chart preview query (only for plot steps)
+	const chartPipeline = $derived(applySteps(allSteps));
+	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
+	const chartDatasourceConfig = $derived.by(() => {
+		if (step.type !== 'plot') return {};
+		return (
+			buildDatasourceConfig({
+				analysisId: analysisId ?? null,
+				tab: analysisStore.activeTab ?? null,
+				tabs: analysisStore.tabs,
+				datasources: datasourceStore.datasources
+			}) ??
+			analysisStore.activeTab?.datasource_config ??
+			{}
+		);
+	});
+
+	const chartQuery = createQuery(() => ({
+		queryKey: [
+			'chart-preview',
+			analysisId,
+			datasourceId,
+			step.id,
+			chartPipelineKey,
+			JSON.stringify(chartDatasourceConfig)
+		],
+		queryFn: async (): Promise<StepPreviewResponse> => {
+			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
+				string,
+				unknown
+			> | null;
+			const result = await previewStepData({
+				analysis_id: analysisId!,
+				datasource_id: datasourceId!,
+				pipeline_steps: chartPipeline,
+				target_step_id: step.id,
+				row_limit: 5000,
+				page: 1,
+				resource_config: resourceConfig,
+				datasource_config: chartDatasourceConfig
+			});
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		staleTime: Infinity,
+		gcTime: Infinity,
+		refetchOnMount: false,
+		enabled: step.type === 'plot' && !!datasourceId && !!analysisId && chartHasRun
+	}));
+
+	const chartRunKey = $derived(`chart:${analysisId}:${datasourceId}:${step.id}`);
+	const chartHasRun = $derived(analysisStore.previewRuns.get(chartRunKey) ?? false);
+
+	function runChartPreview() {
+		if (step.type !== 'plot') return;
+		if (!chartHasRun) analysisStore.setPreviewRun(chartRunKey, true);
+		chartQuery.refetch();
+	}
 
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
@@ -298,6 +367,41 @@
 					stepId={step.id}
 					rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
 				/>
+			</div>
+		{/if}
+
+		{#if step.type === 'plot' && datasourceId && analysisId}
+			<div class="mt-3 border-t border-tertiary pt-3">
+				{#if !chartHasRun}
+					<button
+						class="flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-transparent px-3 py-2 text-xs font-medium text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						onclick={runChartPreview}
+						type="button"
+					>
+						Preview Chart
+					</button>
+				{:else if chartQuery.isFetching}
+					<div class="flex items-center justify-center gap-2 py-4 text-xs text-fg-muted">
+						<span class="spinner spinner-sm"></span>
+						Loading chart...
+					</div>
+				{:else if chartQuery.error}
+					<div class="border border-error bg-error p-2 text-xs text-error">
+						{chartQuery.error.message}
+					</div>
+				{:else if chartQuery.data}
+					<ChartPreview
+						data={chartQuery.data.data}
+						chartType={(step.config.chart_type as
+							| 'bar'
+							| 'line'
+							| 'pie'
+							| 'histogram'
+							| 'scatter'
+							| 'boxplot') ?? 'bar'}
+						config={step.config}
+					/>
+				{/if}
 			</div>
 		{/if}
 	</div>

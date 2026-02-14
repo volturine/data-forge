@@ -24,9 +24,40 @@ from modules.datasource.models import DataSource
 from modules.engine_runs import service as engine_run_service
 from modules.healthcheck import service as healthcheck_service
 from modules.healthcheck.models import HealthCheck
+from modules.notification.service import notification_service, render_template
 from modules.udf.models import Udf
 
 logger = logging.getLogger(__name__)
+
+
+def _send_pipeline_notifications(
+    pipeline_steps: list[dict],
+    context: dict[str, object],
+) -> None:
+    """Send notifications for any notification steps in the pipeline."""
+    for step in pipeline_steps:
+        if step.get('type') != 'notification':
+            continue
+        config = step.get('config', {})
+        method = config.get('method', 'email')
+        recipient = config.get('recipient', '')
+        if not recipient:
+            continue
+
+        subject_template = config.get('subject_template', 'Build Complete')
+        body_template = config.get('body_template', '')
+        subject = render_template(subject_template, context)
+        body = render_template(body_template, context)
+
+        try:
+            if method == 'email':
+                notification_service.send_email(to=recipient, subject=subject, body=body)
+                logger.info(f'Notification email sent to {recipient}')
+            elif method == 'telegram':
+                notification_service.send_telegram(chat_id=recipient, message=f'{subject}\n\n{body}')
+                logger.info(f'Notification telegram sent to {recipient}')
+        except Exception as e:
+            logger.warning(f'Failed to send {method} notification to {recipient}: {e}')
 
 
 def _build_preview_result_metadata(
@@ -121,9 +152,8 @@ def _get_additional_datasources(
                     }
             if config_override is None:
                 continue
-            if analysis_id and config_override.get('source_type') == 'analysis':
-                if str(config_override.get('analysis_id')) == analysis_id:
-                    config_override = {**config_override, 'analysis_pipeline': analysis_pipeline}
+            if analysis_id and config_override.get('source_type') == 'analysis' and str(config_override.get('analysis_id')) == analysis_id:
+                config_override = {**config_override, 'analysis_pipeline': analysis_pipeline}
             additional[source_id] = config_override
 
     return additional
@@ -539,6 +569,25 @@ def export_data(
                     )
                     for check in checks:
                         healthcheck_service.run_healthcheck(session, check, lf)
+
+            # Send notifications for notification steps in the pipeline
+            analysis_name = ''
+            if run_analysis_id:
+                analysis_obj = session.get(Analysis, run_analysis_id)
+                if analysis_obj:
+                    analysis_name = analysis_obj.name
+            _send_pipeline_notifications(
+                pipeline_steps=export_steps,
+                context={
+                    'analysis_name': analysis_name,
+                    'status': 'success',
+                    'duration_ms': str(duration_ms),
+                    'row_count': str(row_count),
+                    'datasource_id': datasource_id,
+                    'format': export_format,
+                    'destination': destination,
+                },
+            )
 
             # Download - return bytes
             if destination == 'download':

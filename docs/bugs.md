@@ -55,194 +55,72 @@ original taskfile:
       2. it will show a full big popup in the middle of the screen with the past version to choose from
    5. reverting to version is just another append to the version history
 
----
 
+---
 found bugs and further specificaitons for allignemnt
+main point dont stop until you have tested these with python tests for all backend.. and verified frontend does make equvalient calls and all datatypes are correct
 
-# main point dont stop until you have tested these with python tests for all backend.. and verified frontend does make equvalient calls and all datatypes are correct
 
-1. when i create a new tab it should not be a datasource imidietly.. only when i save it
-2. analysis tab that uses another tab as input was not updated after i updated the tab
-3. healthchecks tab should show how many healthcheks are active
-   1. their status past few exports
-4. lets add a global configuration for the notification base settings
-   1. these can be used as default in the notification node
-   2. should be a small button in line where we have engines/cache/theme/settings
-   3. it will have the base smtp and telegram settings i can configure/test
-   4. it can have the configuration on whether to hide/unhide indexdb cache button
-   5. it should be a popup in the middle of the screen
-5. where are the prety graphs?? only thing i see when i add graphs is some string saying what should be actualy visualized
-   1. what i ment as leafs they act exactly like inline dataset previews they dont modify the DAG can be wherever..
-   2. react to data. and
-   3. visualize. it approprietly..
-   4. maybe use some visualisation library for the diferent graphs standard one best for svelte that we could use even when hosting with fastapi..
-   5. they can be wherever in thed dag
-6. opening lineage tab triggers infinite effects loop
-   1. effect_update_depth_exceeded @ chunk-65GEI2FJ.js?v=b0d4693a:321
-      infinite_loop_guard @ chunk-65GEI2FJ.js?v=b0d4693a:2522
-      flush_effects @ chunk-65GEI2FJ.js?v=b0d4693a:2496
-      flush @ chunk-65GEI2FJ.js?v=b0d4693a:2301
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:2422
-      run_all @ chunk-65GEI2FJ.js?v=b0d4693a:43
-      run_micro_tasks @ chunk-65GEI2FJ.js?v=b0d4693a:669
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:675
-      chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush_effects @ chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush @ chunk-65GEI2FJ.js?v=b0d4693a:2301
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:2422
-      run_all @ chunk-65GEI2FJ.js?v=b0d4693a:43
-      run_micro_tasks @ chunk-65GEI2FJ.js?v=b0d4693a:669
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:675
-      chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush_effects @ chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush @ chunk-65GEI2FJ.js?v=b0d4693a:2301
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:2422
-      run_all @ chunk-65GEI2FJ.js?v=b0d4693a:43
-      run_micro_tasks @ chunk-65GEI2FJ.js?v=b0d4693a:669
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:675
-      chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush_effects @ chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush @ chunk-65GEI2FJ.js?v=b0d4693a:2301
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:2422
-      run_all @ chunk-65GEI2FJ.js?v=b0d4693a:43
-      run_micro_tasks @ chunk-65GEI2FJ.js?v=b0d4693a:669
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:675
-      chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush_effects @ chunk-65GEI2FJ.js?v=b0d4693a:2492
-      flush @ chunk-65GEI2FJ.js?v=b0d4693a:2301
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:2422
-      run_all @ chunk-65GEI2FJ.js?v=b0d4693a:43
-      run_micro_tasks @ chunk-65GEI2FJ.js?v=b0d4693a:669
-      (anonymous) @ chunk-65GEI2FJ.js?v=b0d4693a:675
-      chunk-65GEI2FJ.js?v=b0d4693a:321 Uncaught
-
----
-
-when i open datasource preview in datasources of datasource that is not in analysis
-
-INFO: 127.0.0.1:42020 - "POST /api/v1/logs/client HTTP/1.1" 200 OK
-2026-02-13 20:43:35,056 - modules.compute.manager - INFO - Spawning new engine for analysis **preview**45e135ce-0525-4316-8777-b0b963ebfb7b (5/10)
-2026-02-13 20:43:35,057 - modules.compute.engine - INFO - Engine started for analysis **preview**45e135ce-0525-4316-8777-b0b963ebfb7b (threads: 2, memory: 8192 MB, chunk_size: auto)
-2026-02-13 20:43:35,057 - modules.compute.manager - INFO - Engine spawned successfully for analysis **preview**45e135ce-0525-4316-8777-b0b963ebfb7b
-2026-02-13 20:43:35,085 - core.error_handlers - ERROR - Failed to list engine runs: 1 validation error for EngineRunResponseSchema
-progress
-Input should be a valid number [type=float_type, input_value=None, input_type=NoneType]
-For further information visit https://errors.pydantic.dev/2.12/v/float_type
-Traceback (most recent call last):
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/core/error_handlers.py", line 113, in sync_wrapper
-return func(\*args, \*\*kwargs)
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/modules/engine_runs/routes.py", line 23, in list_runs
-return service.list_engine_runs(
-
-```^
-session=session,
-^^^^^^^^^^^^^^^^
-...<5 lines>...
-offset=offset,
-^^^^^^^^^^^^^^
-)
-^
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/modules/engine_runs/service.py", line 101, in list_engine_runs
-response.append(EngineRunResponseSchema.model_validate(payload))
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/.venv/lib/python3.13/site-packages/pydantic/main.py", line 716, in model_validate
-return cls.**pydantic_validator**.validate_python(
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
-obj,
-^^^^
-...<5 lines>...
-by_name=by_name,
-^^^^^^^^^^^^^^^^
-)
-^
-pydantic_core.\_pydantic_core.ValidationError: 1 validation error for EngineRunResponseSchema
-progress
-Input should be a valid number [type=float_type, input_value=None, input_type=NoneType]
-For further information visit https://errors.pydantic.dev/2.12/v/float_type
-
----
-
-filter errors on anything i try:
-{
-"analysis_id": "8b2c65fe-ac7d-4faa-97e6-2f66844429d4",
-"datasource_id": "435fed8b-9c00-4666-87df-be2e2f4b6813",
-"pipeline_steps": [
-{
-"id": "id-c9ff8f4574994819c4d2cce45",
-"type": "sort",
-"config": {
-"columns": [
-"action"
-],
-"descending": [
-true
-]
-},
-"depends_on": [],
-"is_applied": true
-},
-{
-"id": "da58b622-545b-4bbf-881c-39ca08957083",
-"type": "filter",
-"config": {
-"conditions": [
-{
-"column": "page",
-"operator": "=",
-"value": "/datasources",
-"value_type": "string"
-}
-],
-"logic": "AND"
-},
-"depends_on": [
-"id-c9ff8f4574994819c4d2cce45"
-],
-"is_applied": true
-},
-{
-"id": "bbcc37d6-f558-451f-96c6-742302caa537",
-"type": "view",
-"config": {
-"rowLimit": 15
-},
-"depends_on": [
-"da58b622-545b-4bbf-881c-39ca08957083"
-],
-"is_applied": true
-}
-],
-"target_step_id": "bbcc37d6-f558-451f-96c6-742302caa537",
-"row_limit": 15,
-"page": 1,
-"resource_config": null,
-"datasource_config": {
-"time_travel_ui": {
-"open": false,
-"month": "2026-02",
-"day": ""
-}
-}
-}
-
-Job c282e902-01fa-4279-bcef-1b65db15dab2: Failed with error: Step config is invalid. Please check the configuration fields.
-2026-02-13 20:39:27,182 - core.error_handlers - ERROR - PipelineExecutionError: Preview failed: Step config is invalid. Please check the configuration fields.
-Traceback (most recent call last):
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/core/error_handlers.py", line 113, in sync_wrapper
-return func(\*args, \*\*kwargs)
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/modules/compute/routes.py", line 25, in preview_step
-return service.preview_step(
-~~~~~~~~~~~~~~~~~~~~^
-session=session,
-^^^^^^^^^^^^^^^^
-...<8 lines>...
-request_json=request.model_dump(mode='json'),
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-)
-^
-File "/home/kripso/workspace/polars-fastapi-svelte/backend/modules/compute/service.py", line 245, in preview_step
-raise PipelineExecutionError(
-...<2 lines>...
-)
-core.exceptions.PipelineExecutionError: Preview failed: Step config is invalid. Please check the configuration fields.
-```
+1. SMTP and Telegram settings are configured via environment variables and cannot be changed here. should be configurable inside the frontend.. but can be prepopulaated with env variables
+2. the lineage tab has broken physics and is ever expanding.
+    1. i would say it should take up most of the screen
+    2. i would like it to be that the schedules ui would be available as common component
+        1. in datasource config pannel
+        2. analysis/id/ in the datasource node as expanding view
+        3. in its own schedules page
+        4. in datalineage as panel
+    3. it also has the links graphicali in wrong place not even attached to the nodes
+3. when i create a derived analysis from a tab it say there are no nodes..
+    1. it shoulp populate the datasource node and export node straing away not wait for me to add some node so that the two fixed node can appear
+4. graph nodes are still not treated as only visualisation nodes for the incomings data
+    1. they should not affect the data comming in/out.. same way inline table does not affect data
+    2. it should only take input data and visualize it into the desired graph
+    3. use https://datavisualizationwithsvelte.com/
+    4. it takes data in, visualizes it, and lets the dag work as if its not there. same as inlinepreviewnode
+    5. i still cant put chart to any place i want
+    6. where are the prety graphs?? only thing i see when i add graphs is some string saying what should be actualy visualized
+    7. what i ment as leafs they act exactly like inline dataset previews they dont modify the DAG can be wherever..
+    8. they react to data
+    9. visualize it in inline node
+    10. maybe use some visualisation library for the diferent graphs standard one best for svelte that we could use even when hosting with fastapi..
+        1. d3 for example https://datavisualizationwithsvelte.com/
+    11. they can be wherever in thed dag
+5. i see that as soon as i ingest analysis/id tab as input for another tab
+    1. a new datasource is added.. i hope this is not used as the source for the second analysis tab and is only for other logic
+    2. in the second analysis tab i only want to rely on the lazyframe
+    3. but i understan that for the visualisation purposes, healthchecks and schedules it does need a representation elsewhere
+    4. so it may be correct as is but it need to be verified
+6. i see step execution timeline
+    1. i have no idea what these id's mean there
+    2. its just id and the execution time but the id tels me nothing realy.
+    3. therefore it needs improvements for this ui to be usefull
+7. schedule is doing god knows what
+    1. schedule is saing its executing analysis
+    2. i dont see the build logged in the ui of build nor the asociated datasets
+    3. added export of datasource from an analysis and a schedule but i dont see in timetravelui new snapshots so it means that actual build has not run
+    4. adding to chedule longer named analysis will make the chedule rows 2 line high. breaking the ui.. truncate the name.
+        1. make the rows expandable with editing of schedule possible
+    5. i see that builds says schedule was executed and data exported but thats no the case as timetravelui does not show it
+    6. also som analysis that first were no real datasource out and were scheduled seem to do nothing on schedule execution not even end up in builds
+    7. build detail ui should show if something was executed from schedule
+    8. also any analysis should be exacutable even if there is no output datasource... as they can be for notification purposes.. but im not sure why when i first scheduled a analysis without output it didnt execute at all even after i aded the exports.
+8. lets add option to directly download a datasource from the datasources ui
+9. let me rename analysis version title
+    1. basicaly allowing me to distinguis different versions
+10. builds ui should include the ouput of build as column also
+11. healthchecks tab should show how many healthcheks are active
+    1. their status past few exports
+12. lets add a global configuration for the notification base settings
+    1. these can be used as default in the notification node
+    2. should be a small button in line where we have engines/cache/theme/settings
+    3. it will have the base smtp and telegram settings i can configure/test
+    4. it can have the configuration on whether to hide/unhide indexdb cache button
+    5. it should be a popup in the middle of the screen
+13. lets allign on the ai handler.. it should be nothing more than wrapper to call llm chat apis with inputs from the row/columns on polars
+    1. basicaly its a udf with column input/inputs and then calling the ai endpoint with promt being either the input or literal
+    2. output from the ai is a result column
+    3. basicaly ai node is just custom predefined udf node with wiring to llm requests
+    4. also update the agents.md if there is mention of this.
+14. agents.md should reflect our general ideas and standards
+    1. if you fix something after yourself implemented it for the first time and its just mismatched proper usage of standards for example as using Map instead of sveltemap that should be used.. always update your findings in agents.md so that we dont have to fix things rather implement correctly from the get go..
+    2. also add this self evolving behaviour as a rule in agents.md

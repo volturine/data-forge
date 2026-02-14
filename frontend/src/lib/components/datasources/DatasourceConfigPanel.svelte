@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
 	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import { listHealthChecks } from '$lib/api/healthcheck';
 	import {
 		Save,
 		Loader,
@@ -65,6 +66,16 @@
 		},
 		enabled: !!datasource.id,
 		retry: false
+	}));
+
+	const healthChecksQuery = createQuery(() => ({
+		queryKey: ['datasource-healthchecks-count', datasource.id],
+		queryFn: async () => {
+			const result = await listHealthChecks(datasource.id);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		enabled: !!datasource.id
 	}));
 
 	const updateMutation = createMutation(() => ({
@@ -312,6 +323,8 @@
 		return label;
 	}
 
+	const healthChecks = $derived(healthChecksQuery.data ?? []);
+	const activeHealthChecks = $derived(healthChecks.filter((hc) => hc.enabled));
 	const ds = $derived(datasourceQuery.data ?? datasource);
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
@@ -402,6 +415,9 @@
 			onclick={() => (activeTab = 'health')}
 		>
 			Health Checks
+			{#if activeHealthChecks.length > 0}
+				<span class="ml-1 text-fg-tertiary">({activeHealthChecks.length})</span>
+			{/if}
 		</button>
 	</div>
 

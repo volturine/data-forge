@@ -4,9 +4,10 @@
 	import { resolve } from '$app/paths';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
-	import { Sun, Moon } from 'lucide-svelte';
+	import { Sun, Moon, Settings } from 'lucide-svelte';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
 	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
+	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
@@ -23,6 +24,7 @@
 		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
+	let settingsOpen = $state(false);
 	let currentPath = $derived(page.url.pathname);
 
 	$effect(() => {
@@ -100,6 +102,7 @@
 		{ href: '/', label: 'Analyses' },
 		{ href: '/datasources', label: 'Data Sources' },
 		{ href: '/builds', label: 'Builds' },
+		{ href: '/schedules', label: 'Schedules' },
 		{ href: '/lineage', label: 'Lineage' },
 		{ href: '/udfs', label: 'UDF Library' }
 	];
@@ -135,6 +138,7 @@
 								(currentPath.startsWith('/analysis') && item.href === '/') ||
 								(currentPath.startsWith('/udfs') && item.href === '/udfs') ||
 								(currentPath.startsWith('/builds') && item.href === '/builds') ||
+								(currentPath.startsWith('/schedules') && item.href === '/schedules') ||
 								(currentPath.startsWith('/lineage') && item.href === '/lineage')}
 						>
 							{item.label}
@@ -145,6 +149,14 @@
 				<div class="ml-auto flex items-center gap-2">
 					<EngineMonitor />
 					<IndexedDbButton />
+					<button
+						class="flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
+						onclick={() => (settingsOpen = true)}
+						title="Settings"
+						aria-label="Settings"
+					>
+						<Settings size={16} />
+					</button>
 					<button
 						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
 						onclick={toggleTheme}
@@ -165,4 +177,6 @@
 			{@render children()}
 		</main>
 	</div>
+
+	<SettingsPopup bind:open={settingsOpen} />
 </QueryClientProvider>

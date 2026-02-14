@@ -481,7 +481,7 @@ class PolarsComputeEngine:
             # Convert frontend format to backend format
             step_type = step.get('type') or ''
             try:
-                params = convert_config_to_params(step_type, step.get('config', {}))
+                convert_config_to_params(step_type, step.get('config', {}))
                 backend_step = convert_step_format(step)
             except Exception as e:
                 logger.error(f'Failed to convert step {idx}: {e}')
@@ -490,13 +490,6 @@ class PolarsComputeEngine:
                     step_id=str(step.get('id') or ''),
                     details={'operation': step.get('type')},
                 )
-            if step_type in {'filter', 'join', 'groupby'} and params == step.get('config'):
-                raise PipelineValidationError(
-                    'Step config is invalid. Please check the configuration fields.',
-                    step_id=str(step.get('id') or ''),
-                    details={'operation': step_type},
-                )
-
             progress = (idx + 1) / total_steps
             step_name = backend_step.get('name', f'Step {idx + 1}')
             logger.debug(f'Job {job_id}: Processing {step_name} ({progress:.0%})')

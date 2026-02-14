@@ -460,6 +460,26 @@ export class AnalysisStore {
 			const runKey = `${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${item.id}`;
 			this.setPreviewRun(runKey, true);
 		}
+		// Invalidate previews in dependent tabs that use this tab as input
+		const activeTabId = this.activeTab.id;
+		for (const tab of this.tabs) {
+			if (tab.id === activeTabId) continue;
+			const cfg = (tab.datasource_config ?? {}) as Record<string, unknown>;
+			if (String(cfg.analysis_tab_id ?? '') !== activeTabId) continue;
+			if (String(cfg.analysis_id ?? '') !== analysisId) continue;
+			const depDatasourceId = tab.datasource_id ?? null;
+			if (!depDatasourceId) continue;
+			const depConfig = (tab.datasource_config ?? {}) as Record<string, unknown>;
+			const depSnapshotId = (depConfig.snapshot_id as string | null | undefined) ?? null;
+			const depSnapshotMs = (depConfig.snapshot_timestamp_ms as number | null | undefined) ?? null;
+			const depSnapshotKey = `${depSnapshotId ?? 'latest'}:${depSnapshotMs ?? 0}`;
+			for (const item of tab.steps) {
+				if (item.type !== 'view') continue;
+				const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
+				const runKey = `${analysisId}:${depDatasourceId}:${depSnapshotKey}:${rowLimit}:${item.id}`;
+				this.setPreviewRun(runKey, true);
+			}
+		}
 	}
 
 	removeStep(id: string): void {

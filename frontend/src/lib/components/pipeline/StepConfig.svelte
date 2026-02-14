@@ -364,7 +364,10 @@
 					{configFlags}
 				/>
 			{:else if step.type === 'ai'}
-				<AIConfig bind:config={draftConfig as unknown as Record<string, unknown>} />
+				<AIConfig
+					schema={inputSchema}
+					bind:config={draftConfig as unknown as Record<string, unknown>}
+				/>
 			{:else}
 				<div class="bg-primary p-6 text-center">
 					<p class="m-0 mb-3 text-fg-tertiary">

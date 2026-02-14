@@ -10,7 +10,7 @@ router = APIRouter(prefix='/schedules', tags=['schedules'])
 
 @router.get('', response_model=list[schemas.ScheduleResponse])
 @handle_errors(operation='list schedules')
-def list_schedules(analysis_id: str, session: Session = Depends(get_db)):
+def list_schedules(analysis_id: str | None = None, session: Session = Depends(get_db)):
     return service.list_schedules(session, analysis_id)
 
 

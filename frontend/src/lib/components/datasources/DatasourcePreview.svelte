@@ -2,6 +2,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
+	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
@@ -16,6 +17,17 @@
 	let page = $state(1);
 	let rowLimit = $state(100);
 	let columnSearch = $state('');
+	let statsColumn = $state<string | null>(null);
+	let statsOpen = $state(false);
+
+	function handleColumnStats(columnName: string) {
+		statsColumn = columnName;
+		statsOpen = true;
+	}
+
+	function handleStatsClose() {
+		statsOpen = false;
+	}
 
 	$effect(() => {
 		// Reset pagination when datasource selection changes; requires effect to update state.
@@ -117,6 +129,13 @@
 				onNext: goNext
 			}}
 			showTypeBadges
+			onColumnStats={handleColumnStats}
 		/>
 	</div>
+	<ColumnStatsPanel
+		{datasourceId}
+		columnName={statsColumn}
+		open={statsOpen}
+		onClose={handleStatsClose}
+	/>
 </div>

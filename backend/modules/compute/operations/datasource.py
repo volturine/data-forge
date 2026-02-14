@@ -226,9 +226,8 @@ def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -
     merged = {**datasource_config, **overrides}
     analysis_id = pipeline.get('analysis_id')
     analysis_id = str(analysis_id) if analysis_id is not None else None
-    if analysis_id and merged.get('source_type') == 'analysis':
-        if str(merged.get('analysis_id')) == analysis_id:
-            merged = {**merged, 'analysis_pipeline': pipeline}
+    if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
+        merged = {**merged, 'analysis_pipeline': pipeline}
 
     additional = _collect_analysis_sources(steps, sources, pipeline)
     from modules.compute.engine import PolarsComputeEngine
@@ -264,9 +263,8 @@ def _collect_analysis_sources(steps: list[dict], sources: dict, pipeline: dict) 
             if not isinstance(raw, dict):
                 raise ValueError(f'Analysis pipeline missing datasource config for {source_id}')
             next_config = raw
-            if analysis_id and next_config.get('source_type') == 'analysis':
-                if str(next_config.get('analysis_id')) == analysis_id:
-                    next_config = {**next_config, 'analysis_pipeline': pipeline}
+            if analysis_id and next_config.get('source_type') == 'analysis' and str(next_config.get('analysis_id')) == analysis_id:
+                next_config = {**next_config, 'analysis_pipeline': pipeline}
             additional[str(source_id)] = next_config
 
     return additional

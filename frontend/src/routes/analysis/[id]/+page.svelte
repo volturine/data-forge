@@ -13,8 +13,7 @@
 		checkLockStatus,
 		hasLock
 	} from '$lib/stores/lockManager.svelte';
-	import { getAnalysis } from '$lib/api/analysis';
-	import { apiRequest } from '$lib/api/client';
+	import { getAnalysis, listAnalysisVersions, restoreAnalysisVersion } from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { spawnEngine } from '$lib/api/compute';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
@@ -30,16 +29,6 @@
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { ChevronDown, ChevronLeft, ChevronRight, Plus, X } from 'lucide-svelte';
-
-	type AnalysisVersion = {
-		id: string;
-		analysis_id: string;
-		version: number;
-		name: string;
-		description: string | null;
-		pipeline_definition: Record<string, unknown>;
-		created_at: string;
-	};
 
 	const analysisId = $derived($page.params.id ?? null);
 	let lastAnalysisId = $state<string | null>(null);
@@ -194,7 +183,7 @@
 		enabled: false,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
-			const result = await apiRequest<AnalysisVersion[]>(`/v1/analysis/${analysisId}/versions`);
+			const result = await listAnalysisVersions(analysisId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -605,34 +594,21 @@
 				);
 				return;
 			}
-			void fetch('/api/v1/datasource/connect', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					name,
-					source_type: 'analysis',
-					config: { analysis_id: analysisId, analysis_tab_id: analysisTabId }
-				})
-			})
-				.then((response) => {
-					if (!response.ok) {
-						throw new Error('Failed to add analysis source');
-					}
-					return response.json() as Promise<{ id: string; name: string }>;
-				})
-				.then((result) => {
-					handleAddAnalysisTab(result.id, analysisId ?? '', name, analysisTabId);
-				})
-				.catch((error: unknown) => {
-					const message = error instanceof Error ? error.message : 'Failed to add analysis source';
-					track({
-						event: 'datasource_error',
-						action: 'analysis_source',
-						target: datasourceId,
-						meta: { message }
-					});
-					alert(`Failed to add analysis source: ${message}`);
-				});
+			// Defer datasource creation to save — backend update_analysis
+			// auto-creates analysis datasources when datasource_id is null
+			const tab: AnalysisTab = {
+				id: `tab-analysis-${Date.now()}`,
+				name,
+				type: 'datasource',
+				parent_id: null,
+				datasource_id: null,
+				datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
+				steps: []
+			};
+			analysisStore.addTab(tab);
+			analysisStore.setActiveTab(tab.id);
+			showDatasourceModal = false;
+			markUnsaved();
 			return;
 		}
 		if (modalMode === 'change') {
@@ -696,14 +672,12 @@
 	async function handleRestoreVersion(version: number) {
 		if (!analysisId) return;
 		versionError = null;
-		const result = await apiRequest(`/v1/analysis/${analysisId}/versions/${version}/restore`, {
-			method: 'POST'
-		});
+		const result = await restoreAnalysisVersion(analysisId, version);
 		if (result.isErr()) {
 			versionError = result.error.message;
 			return;
 		}
-		analysisStore.applyAnalysis(result.value as import('$lib/types/analysis').Analysis);
+		analysisStore.applyAnalysis(result.value);
 		showVersionModal = false;
 		isDirty = false;
 	}

@@ -355,6 +355,10 @@ def _normalize_chart_config(step_type: str, config: dict) -> dict:
 
 
 def convert_ai_config(config: dict) -> dict:
+    raw_options = config.get('request_options') or config.get('requestOptions')
+    # Parse string JSON to dict if needed (frontend sends textarea value as string)
+    if isinstance(raw_options, str):
+        raw_options = raw_options.strip() or None
     return {
         'provider': config.get('provider', 'ollama'),
         'model': config.get('model', 'llama2'),
@@ -364,7 +368,7 @@ def convert_ai_config(config: dict) -> dict:
         'batch_size': config.get('batch_size', 10),
         'endpoint_url': config.get('endpoint_url') or config.get('endpointUrl'),
         'api_key': config.get('api_key') or config.get('apiKey'),
-        'request_options': config.get('request_options') or config.get('requestOptions'),
+        'request_options': raw_options,
     }
 
 

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from modules.ai import router as ai_router
 from modules.analysis import router as analysis_router
 from modules.analysis_versions import router as analysis_versions_router
 from modules.compute import router as compute_router
@@ -15,6 +16,7 @@ from modules.udf import router as udf_router
 
 router = APIRouter(prefix='/v1')
 
+router.include_router(ai_router)
 router.include_router(analysis_router)
 router.include_router(analysis_versions_router)
 router.include_router(compute_router)

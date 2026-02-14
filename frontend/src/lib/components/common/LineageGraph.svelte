@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { SvelteMap } from 'svelte/reactivity';
 	import type { LineageResponse } from '$lib/api/lineage';
 
 	interface Props {
@@ -17,10 +16,24 @@
 	const linkStrength = 0.05;
 	const damping = 0.85;
 	const maxVelocity = 8;
-	const layoutMap = new SvelteMap<string, { x: number; y: number; vx: number; vy: number }>();
+	const maxIterations = 240;
+	const minVelocity = 0.08;
+
+	// Plain Map for physics — NOT reactive. Mutations during simulation do not trigger Svelte updates.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- intentionally non-reactive for physics simulation
+	const physicsMap = new Map<string, { x: number; y: number; vx: number; vy: number }>();
+
+	// Reactive snapshot — only updated when simulation settles or drag ends.
+	let positionSnapshot = $state<Record<string, { x: number; y: number }>>({});
+
 	let dragId = $state<string | null>(null);
-	let dragOffset = $state<{ x: number; y: number } | null>(null);
+	let dragOffset: { x: number; y: number } | null = null;
 	let viewSize = $state({ width: 1200, height: 720 });
+
+	// Non-reactive simulation state — no need for Svelte tracking on raf/iteration/running.
+	let rafId: number | null = null;
+	let running = false;
+	let iteration = 0;
 
 	const layoutNodes = $derived.by(() => {
 		const next = [] as Array<{ id: string; label: string; meta: string | null; type: string }>;
@@ -37,19 +50,19 @@
 
 	function seedPositions() {
 		const ids = new Set(layoutNodes.map((node) => node.id));
-		for (const id of Array.from(layoutMap.keys())) {
-			if (!ids.has(id)) layoutMap.delete(id);
+		for (const id of Array.from(physicsMap.keys())) {
+			if (!ids.has(id)) physicsMap.delete(id);
 		}
 		let idx = 0;
 		for (const node of layoutNodes) {
-			const existing = layoutMap.get(node.id);
+			const existing = physicsMap.get(node.id);
 			if (existing) {
 				idx += 1;
 				continue;
 			}
 			const col = idx % 3;
 			const row = Math.floor(idx / 3);
-			layoutMap.set(node.id, {
+			physicsMap.set(node.id, {
 				x: 120 + col * baseSpacing,
 				y: 120 + row * baseSpacing * 0.6,
 				vx: 0,
@@ -68,7 +81,7 @@
 		seedPositions();
 		const positions = layoutNodes
 			.map((node) => {
-				const pos = layoutMap.get(node.id);
+				const pos = physicsMap.get(node.id);
 				if (!pos) return null;
 				return { id: node.id, ...pos };
 			})
@@ -103,8 +116,8 @@
 		}
 
 		for (const link of edgesList) {
-			const source = layoutMap.get(link.from);
-			const target = layoutMap.get(link.to);
+			const source = physicsMap.get(link.from);
+			const target = physicsMap.get(link.to);
 			if (!source || !target) continue;
 			const dx = target.x - source.x;
 			const dy = target.y - source.y;
@@ -129,21 +142,31 @@
 			pos.vy = clamp(pos.vy, -maxVelocity, maxVelocity);
 			pos.x += pos.vx;
 			pos.y += pos.vy;
-			layoutMap.set(pos.id, pos);
+			physicsMap.set(pos.id, pos);
 		}
 	}
 
-	let rafId = $state<number | null>(null);
-	let running = $state(false);
-	let iteration = $state(0);
-	const maxIterations = 240;
-	const minVelocity = 0.08;
+	function syncSnapshot() {
+		const next: Record<string, { x: number; y: number }> = {};
+		for (const node of layoutNodes) {
+			const pos = physicsMap.get(node.id);
+			if (!pos) continue;
+			next[node.id] = { x: pos.x, y: pos.y };
+		}
+		positionSnapshot = next;
+	}
 
 	function tick() {
 		applyForces();
 		iteration += 1;
+
+		// Sync to reactive state periodically (every 4 frames) during simulation for visual updates
+		if (iteration % 4 === 0) {
+			syncSnapshot();
+		}
+
 		const velocities = layoutNodes.map((node) => {
-			const pos = layoutMap.get(node.id);
+			const pos = physicsMap.get(node.id);
 			if (!pos) return 0;
 			return Math.abs(pos.vx) + Math.abs(pos.vy);
 		});
@@ -155,6 +178,8 @@
 		running = false;
 		if (rafId !== null) cancelAnimationFrame(rafId);
 		rafId = null;
+		// Final sync when simulation settles
+		syncSnapshot();
 	}
 
 	function startSimulation() {
@@ -172,8 +197,8 @@
 		running = false;
 	}
 
+	// $effect needed: must start/stop RAF-based force simulation when graph data changes — not expressible via $derived
 	$effect(() => {
-		// $effect used to trigger force simulation when graph changes.
 		void layoutNodes;
 		startSimulation();
 		return () => {
@@ -181,18 +206,8 @@
 		};
 	});
 
-	const positions = $derived.by(() => {
-		const next: Record<string, { x: number; y: number }> = {};
-		for (const node of layoutNodes) {
-			const pos = layoutMap.get(node.id);
-			if (!pos) continue;
-			next[node.id] = { x: pos.x, y: pos.y };
-		}
-		return next;
-	});
-
 	const viewBox = $derived.by(() => {
-		const coords = Object.values(positions);
+		const coords = Object.values(positionSnapshot);
 		if (!coords.length) return { width: viewSize.width, height: viewSize.height };
 		const xs = coords.map((c) => c.x);
 		const ys = coords.map((c) => c.y);
@@ -207,7 +222,7 @@
 	});
 
 	function startDrag(event: PointerEvent, id: string) {
-		const pos = layoutMap.get(id);
+		const pos = physicsMap.get(id);
 		if (!pos) return;
 		dragId = id;
 		dragOffset = { x: event.clientX - pos.x, y: event.clientY - pos.y };
@@ -223,7 +238,9 @@
 			vx: 0,
 			vy: 0
 		};
-		layoutMap.set(dragId, next);
+		physicsMap.set(dragId, next);
+		// Sync immediately during drag for responsive feedback
+		syncSnapshot();
 	}
 
 	function endDrag() {
@@ -288,8 +305,8 @@
 					</marker>
 				</defs>
 				{#each edges as edge (edge.from + edge.to)}
-					{@const from = positions[edge.from]}
-					{@const to = positions[edge.to]}
+					{@const from = positionSnapshot[edge.from]}
+					{@const to = positionSnapshot[edge.to]}
 					{#if from && to}
 						<path
 							d={`M ${from.x + nodeWidth / 2} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth} ${from.y + nodeHeight / 2} ${to.x - nodeWidth / 2} ${to.y + nodeHeight / 2} ${to.x} ${to.y + nodeHeight / 2}`}
@@ -303,7 +320,7 @@
 			</svg>
 			<div class="relative min-h-100" use:setSize={viewBox}>
 				{#each layoutNodes as node (node.id)}
-					{@const pos = positions[node.id]}
+					{@const pos = positionSnapshot[node.id]}
 					{#if pos}
 						<div
 							class="absolute flex flex-col gap-1 rounded-sm border px-4 py-3 shadow-sm lineage-node"

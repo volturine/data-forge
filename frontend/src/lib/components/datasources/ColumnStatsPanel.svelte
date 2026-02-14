@@ -85,10 +85,28 @@
 								<div class="text-sm font-semibold">{formatNumber(stats.mean)}</div>
 							</div>
 						{/if}
+						{#if stats.median !== null && stats.median !== undefined}
+							<div class="border border-tertiary bg-tertiary p-3">
+								<div class="text-xs text-fg-muted">Median</div>
+								<div class="text-sm font-semibold">{formatNumber(stats.median)}</div>
+							</div>
+						{/if}
 						{#if stats.std !== null && stats.std !== undefined}
 							<div class="border border-tertiary bg-tertiary p-3">
 								<div class="text-xs text-fg-muted">Std Dev</div>
 								<div class="text-sm font-semibold">{formatNumber(stats.std)}</div>
+							</div>
+						{/if}
+						{#if stats.q25 !== null && stats.q25 !== undefined}
+							<div class="border border-tertiary bg-tertiary p-3">
+								<div class="text-xs text-fg-muted">Q25</div>
+								<div class="text-sm font-semibold">{formatNumber(stats.q25)}</div>
+							</div>
+						{/if}
+						{#if stats.q75 !== null && stats.q75 !== undefined}
+							<div class="border border-tertiary bg-tertiary p-3">
+								<div class="text-xs text-fg-muted">Q75</div>
+								<div class="text-sm font-semibold">{formatNumber(stats.q75)}</div>
 							</div>
 						{/if}
 						{#if stats.min !== null && stats.min !== undefined}
