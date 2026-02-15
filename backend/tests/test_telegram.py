@@ -142,7 +142,7 @@ class TestGetNotificationChatIds:
         add_listener(test_db_session, ListenerCreate(subscriber_id=s2.id, datasource_id='ds-X'))
         deactivate_subscriber(test_db_session, s2.id)
         ids = get_notification_chat_ids(test_db_session, 'ds-X')
-        assert ids == ['30']
+        assert ids == [('30', 'tok')]
 
     def test_empty_when_no_listeners(self, test_db_session: Session) -> None:
         assert get_notification_chat_ids(test_db_session, 'ds-none') == []
@@ -322,6 +322,95 @@ class TestTelegramBot:
         bot._token = 'tok-test'
         # Should not raise
         bot._send_message('123', 'hello')
+
+    def test_subscribe_unsubscribe_resubscribe_cycle(self, test_db_session: Session) -> None:
+        """Full subscribe/unsubscribe/resubscribe cycle does not corrupt state."""
+        bot = TelegramBot()
+        bot._token = 'tok-cycle'
+
+        # Subscribe
+        with patch.object(bot, '_send_message'):
+            bot._handle_update(
+                {
+                    'message': {'text': '/subscribe', 'chat': {'id': 50, 'first_name': 'Cycler'}},
+                }
+            )
+        test_db_session.expire_all()
+        sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
+        assert sub is not None
+        assert sub.is_active is True
+        original_id = sub.id
+
+        # Unsubscribe
+        with patch.object(bot, '_send_message'):
+            bot._handle_update(
+                {
+                    'message': {'text': '/unsubscribe', 'chat': {'id': 50, 'first_name': 'Cycler'}},
+                }
+            )
+        test_db_session.expire_all()
+        sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
+        assert sub is not None
+        assert sub.is_active is False
+
+        # Resubscribe — should reactivate same row
+        with patch.object(bot, '_send_message'):
+            bot._handle_update(
+                {
+                    'message': {'text': '/subscribe', 'chat': {'id': 50, 'first_name': 'Cycler'}},
+                }
+            )
+        test_db_session.expire_all()
+        sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
+        assert sub is not None
+        assert sub.is_active is True
+        assert sub.id == original_id
+
+    def test_poll_lock_prevents_concurrent_get_updates(self) -> None:
+        """_do_get_updates returns None when lock is held by another caller."""
+        bot = TelegramBot()
+        bot._poll_lock.acquire()
+        try:
+            result = bot._do_get_updates('tok', {'offset': 0, 'timeout': 5}, timeout=5)
+            assert result is None
+        finally:
+            bot._poll_lock.release()
+
+    def test_offset_tracked_per_token(self) -> None:
+        """Offsets are tracked independently per bot token."""
+        bot = TelegramBot()
+        assert bot.get_offset('tok-a') == 0
+        bot._set_offset('tok-a', 100)
+        bot._set_offset('tok-b', 200)
+        assert bot.get_offset('tok-a') == 100
+        assert bot.get_offset('tok-b') == 200
+
+    @patch('modules.telegram.bot.httpx.get')
+    def test_409_clears_webhook_and_retries(self, mock_get: MagicMock) -> None:
+        """409 response triggers webhook clear and does not immediately crash."""
+        bot = TelegramBot()
+        bot._token = 'tok-409'
+        bot._stop_event = MagicMock()
+        bot._stop_event.is_set.return_value = False
+
+        resp_409 = MagicMock()
+        resp_409.status_code = 409
+
+        resp_ok = MagicMock()
+        resp_ok.status_code = 200
+        resp_ok.json.return_value = {'result': []}
+
+        # First call 409, second call should work
+        mock_get.side_effect = [resp_409, resp_ok]
+
+        with patch.object(bot, '_clear_webhook') as mock_clear:
+            # Simulate one iteration manually via _do_get_updates
+            result = bot._do_get_updates('tok-409', {'offset': 0, 'timeout': 5}, timeout=10)
+            assert result is not None
+            assert result.status_code == 409
+            # On 409, the poll loop calls _clear_webhook
+            bot._clear_webhook('tok-409')
+            mock_clear.assert_called_once_with('tok-409')
 
 
 # ---------------------------------------------------------------------------

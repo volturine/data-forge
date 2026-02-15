@@ -2,7 +2,17 @@
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
-	import { Plus, Trash2, Search, LoaderCircle, Download, Eye, EyeOff } from 'lucide-svelte';
+	import {
+		Plus,
+		Trash2,
+		Search,
+		LoaderCircle,
+		Download,
+		Eye,
+		EyeOff,
+		Upload,
+		GitBranch
+	} from 'lucide-svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
@@ -167,7 +177,7 @@
 						<!-- Row -->
 						<div class="flex items-center justify-between px-3 py-2.5">
 							<button
-								class="flex items-center min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
+								class="flex items-center gap-2 min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
 								onclick={() => selectDatasource(datasource.id)}
 							>
 								<span
@@ -176,6 +186,23 @@
 								>
 									{datasource.name}
 								</span>
+								{#if datasource.created_by === 'analysis'}
+									<span
+										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase font-medium text-accent-primary"
+										title="Created by analysis"
+									>
+										<GitBranch size={10} />
+										Analysis
+									</span>
+								{:else}
+									<span
+										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-tertiary px-1.5 py-0.5 text-[10px] uppercase font-medium text-fg-muted"
+										title="Imported datasource"
+									>
+										<Upload size={10} />
+										Import
+									</span>
+								{/if}
 							</button>
 							<div class="flex items-center shrink-0">
 								<button

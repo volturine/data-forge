@@ -60,7 +60,6 @@
 	import PlotConfig from '$lib/components/operations/PlotConfig.svelte';
 	import NotificationConfig from '$lib/components/operations/NotificationConfig.svelte';
 	import AIConfig from '$lib/components/operations/AIConfig.svelte';
-	import ExportConfig from '$lib/components/operations/ExportConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
 	import { Settings2, X } from 'lucide-svelte';
 
@@ -93,6 +92,10 @@
 	let fetchingPivotSchema = $state(false);
 	let draftStepId = $state<string | null>(null);
 	let draftConfig = $state<Record<string, unknown>>({});
+	// True when draftConfig has been synchronized with the current step.
+	// Prevents config components from rendering with stale/empty config before
+	// the $effect below runs (which fires after the first render frame).
+	const draftReady = $derived(step !== null && draftStepId === step.id);
 
 	let inputSchema = $derived(
 		step
@@ -242,7 +245,14 @@
 		</div>
 
 		<div class="config-body flex-1 overflow-y-auto bg-primary p-3">
-			{#if !schema && !isLoadingSchema}
+			{#if !draftReady}
+				<div
+					class="flex flex-col items-center justify-center gap-3 bg-primary p-6 text-center text-fg-tertiary"
+				>
+					<div class="spinner-md"></div>
+					<p class="m-0">Initializing config...</p>
+				</div>
+			{:else if !schema && !isLoadingSchema}
 				<div class="warning-message">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
 					<button onclick={() => onClose?.()} type="button">Close</button>
@@ -350,12 +360,6 @@
 				<UnionByNameConfig
 					schema={inputSchema}
 					bind:config={draftConfig as unknown as { sources: string[]; allow_missing: boolean }}
-				/>
-			{:else if step.type === 'export'}
-				<ExportConfig
-					bind:config={
-						draftConfig as unknown as { format?: string; filename?: string; destination?: string }
-					}
 				/>
 			{:else if step.type === 'chart'}
 				<PlotConfig

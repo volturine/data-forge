@@ -402,15 +402,25 @@ export interface ColumnStatsResponse {
 export function getColumnStats(
 	datasourceId: string,
 	columnName: string,
-	options?: { sample?: boolean }
+	options?: { sample?: boolean; datasource_config?: Record<string, unknown> }
 ): ResultAsync<ColumnStatsResponse, ApiError> {
 	const params = new URLSearchParams();
 	if (options?.sample === false) {
 		params.set('sample', 'false');
 	}
+	const payload = options?.datasource_config ?? null;
 	const suffix = params.toString() ? `?${params.toString()}` : '';
+	if (!payload) {
+		return apiRequest<ColumnStatsResponse>(
+			`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`
+		);
+	}
 	return apiRequest<ColumnStatsResponse>(
-		`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`
+		`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`,
+		{
+			method: 'POST',
+			body: JSON.stringify({ datasource_config: payload })
+		}
 	);
 }
 

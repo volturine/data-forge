@@ -82,9 +82,10 @@ class NotificationService:
         *,
         chat_id: str,
         message: str,
+        bot_token: str | None = None,
         attachments: list[NotificationAttachment] | None = None,
     ) -> None:
-        token = get_resolved_telegram_token()
+        token = bot_token or get_resolved_telegram_token()
         if not token:
             raise ValueError('Telegram bot token not configured')
         base = f'{_TELEGRAM_BASE_URL}/bot{token}'

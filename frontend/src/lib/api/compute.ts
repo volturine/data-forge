@@ -114,6 +114,7 @@ export interface ExportRequest {
 		table_name?: string;
 	};
 	datasource_config?: Record<string, unknown> | null;
+	output_datasource_id?: string | null;
 }
 
 export interface ExportResponse {
@@ -185,5 +186,28 @@ export function getStepSchema(
 	return apiRequest<StepSchemaResponse>('/v1/compute/schema', {
 		method: 'POST',
 		body: JSON.stringify(request)
+	});
+}
+
+export interface BuildTabResult {
+	tab_id: string;
+	tab_name: string;
+	status: string;
+	error?: string | null;
+}
+
+export interface BuildResponse {
+	analysis_id: string;
+	tabs_built: number;
+	results: BuildTabResult[];
+}
+
+export function buildAnalysis(
+	analysisId: string,
+	tabId?: string
+): ResultAsync<BuildResponse, ApiError> {
+	const params = tabId ? `?tab_id=${encodeURIComponent(tabId)}` : '';
+	return apiRequest<BuildResponse>(`/v1/compute/build/${analysisId}${params}`, {
+		method: 'POST'
 	});
 }

@@ -21,6 +21,7 @@ from core.exceptions import (
     JobTimeoutError,
     PipelineExecutionError,
     PipelineValidationError,
+    ScheduleValidationError,
     StepNotFoundError,
     UnsupportedExportFormatError,
 )
@@ -40,6 +41,7 @@ EXCEPTION_STATUS_MAP = {
     PipelineValidationError: 400,
     FileValidationError: 400,
     UnsupportedExportFormatError: 400,
+    ScheduleValidationError: 400,
     DataSourceSnapshotError: 409,
     # 408 - Timeout errors
     EngineTimeoutError: 408,

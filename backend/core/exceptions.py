@@ -240,3 +240,17 @@ class UnsupportedExportFormatError(ExportError):
             error_code='UNSUPPORTED_EXPORT_FORMAT',
             details={'format': format},
         )
+
+
+# Schedule Exceptions
+class ScheduleError(AppError):
+    """Base exception for schedule-related errors."""
+
+    pass
+
+
+class ScheduleValidationError(ScheduleError):
+    """Raised when schedule validation fails."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='SCHEDULE_VALIDATION_ERROR', details=details)

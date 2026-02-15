@@ -75,6 +75,10 @@
 			}
 		}
 
+		if (drag.type === 'chart' || drag.type?.startsWith('plot_')) {
+			return true;
+		}
+
 		const nextId = index < steps.length ? getNextId(index) : null;
 		if (!nextId) return true;
 
@@ -275,7 +279,7 @@
 				onChangeDatasource={_onChangeDatasource}
 				onRenameTab={_onRenameTab}
 			/>
-			{#if shouldShowInsert(0)}
+			{#if shouldShowInsert(0) && (steps.length > 0 || canDrop)}
 				<div
 					class="insert-zone flex w-full cursor-default flex-col items-center py-2"
 					class:ready={canDrop}
@@ -400,7 +404,7 @@
 					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
 				</div>
 			{/if}
-			<OutputNode {analysisId} {datasourceId} {activeTab} {datasource} />
+			<OutputNode {analysisId} {datasourceId} {activeTab} />
 		</div>
 	{/if}
 </div>

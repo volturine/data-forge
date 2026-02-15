@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlmodel import Session
 
@@ -75,6 +75,24 @@ def delete_iceberg_snapshot(
 ):
     """Delete an Iceberg snapshot by ID."""
     return service.delete_iceberg_snapshot(session, datasource_id, snapshot_id)
+
+
+@router.post('/build/{analysis_id}', response_model=schemas.BuildResponse)
+@handle_errors(operation='build analysis')
+def build_analysis(
+    analysis_id: str,
+    session: Session = Depends(get_db),
+    tab_id: str | None = Query(None, description='Build a specific tab only'),
+):
+    """Run a full build for an analysis — export all tabs (or a specific tab) to Iceberg.
+
+    Reads the saved pipeline_definition from the DB so the analysis must be saved
+    before triggering a build.
+    """
+    from modules.scheduler.service import run_analysis_build
+
+    result = run_analysis_build(session, analysis_id, datasource_id=None, triggered_by='manual', tab_id=tab_id)
+    return schemas.BuildResponse(**result)
 
 
 # Engine lifecycle endpoints
@@ -183,6 +201,7 @@ def export_data(
         datasource_config=request.datasource_config,
         analysis_id=request.analysis_id,
         request_json=request.model_dump(mode='json'),
+        output_datasource_id=request.output_datasource_id,
     )
 
     if request.destination == schemas.ExportDestination.DOWNLOAD:

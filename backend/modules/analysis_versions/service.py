@@ -96,6 +96,7 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
             source_type='analysis',
             config={'analysis_id': str(source_analysis_id)},
             created_by_analysis_id=str(source_analysis_id),
+            created_by='analysis',
             created_at=datetime.now(UTC),
         )
         session.add(datasource)

@@ -234,6 +234,30 @@ class TestDataSourceSchema:
         assert 'not found' in response.json()['detail']
 
 
+class TestColumnStats:
+    def test_column_stats_with_config_override(self, client, sample_datasource: DataSource, sample_csv_file: Path):
+        payload = {
+            'datasource_config': {
+                'file_path': str(sample_csv_file),
+                'file_type': 'csv',
+                'options': {},
+            }
+        }
+
+        response = client.post(
+            f'/api/v1/datasource/{sample_datasource.id}/column/age/stats',
+            params={'sample': 'false'},
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result['column'] == 'age'
+        assert result['count'] == 5
+        assert result['null_count'] == 0
+
+
 class TestDataSourceDelete:
     def test_delete_datasource_success(self, client, sample_datasource: DataSource, test_db_session):
         datasource_id = sample_datasource.id

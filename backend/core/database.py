@@ -87,6 +87,9 @@ def _run_migrations(db_engine) -> None:
             if 'is_hidden' not in ds_columns:
                 conn.execute(sa_text('ALTER TABLE datasources ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT 0'))
                 conn.commit()
+            if 'created_by' not in ds_columns:
+                conn.execute(sa_text("ALTER TABLE datasources ADD COLUMN created_by TEXT NOT NULL DEFAULT 'import'"))
+                conn.commit()
 
     # Schedules: add datasource_id column
     if inspector.has_table('schedules'):
@@ -97,6 +100,9 @@ def _run_migrations(db_engine) -> None:
                 conn.commit()
             if 'depends_on' not in sched_columns:
                 conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN depends_on TEXT'))
+                conn.commit()
+            if 'trigger_on_datasource_id' not in sched_columns:
+                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN trigger_on_datasource_id TEXT'))
                 conn.commit()
 
     # App settings: add telegram_bot_enabled column

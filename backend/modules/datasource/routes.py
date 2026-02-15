@@ -458,6 +458,22 @@ def get_datasource_schema(
         raise HTTPException(status_code=500, detail=f'Failed to get schema: {str(e)}')
 
 
+def _handle_column_stats(
+    datasource_id: str,
+    column_name: str,
+    sample: bool,
+    payload: schemas.ColumnStatsRequest | None,
+    session: Session,
+):
+    return service.get_column_stats(
+        session=session,
+        datasource_id=datasource_id,
+        column_name=column_name,
+        use_sample=sample,
+        datasource_config=payload.datasource_config if payload else None,
+    )
+
+
 @router.get('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse)
 def get_column_stats(
     datasource_id: str,
@@ -467,12 +483,24 @@ def get_column_stats(
 ):
     """Get stats for a single column in a datasource."""
     try:
-        return service.get_column_stats(
-            session=session,
-            datasource_id=datasource_id,
-            column_name=column_name,
-            use_sample=sample,
-        )
+        return _handle_column_stats(datasource_id, column_name, sample, None, session)
+    except (ValueError, DataSourceNotFoundError) as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Failed to get column stats: {str(e)}')
+
+
+@router.post('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse)
+def get_column_stats_with_config(
+    datasource_id: str,
+    column_name: str,
+    payload: schemas.ColumnStatsRequest,
+    sample: bool = True,
+    session: Session = Depends(get_db),
+):
+    """Get stats for a single column with datasource config override."""
+    try:
+        return _handle_column_stats(datasource_id, column_name, sample, payload, session)
     except (ValueError, DataSourceNotFoundError) as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

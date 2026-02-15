@@ -4,16 +4,10 @@
 	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
 	import ChartPreview from '$lib/components/viewers/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import {
-		previewStepData,
-		exportData,
-		downloadBlob,
-		type StepPreviewResponse,
-		type ExportRequest
-	} from '$lib/api/compute';
+	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import { Download, GripVertical } from 'lucide-svelte';
+	import { GripVertical } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
@@ -42,10 +36,6 @@
 		onToggleApply,
 		onTouchMove
 	}: Props = $props();
-
-	let isExporting = $state(false);
-	let exportError = $state<string | null>(null);
-	let exportSuccess = $state<string | null>(null);
 
 	const isChart = $derived(
 		step.type === 'chart' || step.type === 'plot' || step.type.startsWith('plot_')
@@ -201,62 +191,6 @@
 		isDragging = false;
 		cancelLongPress();
 	}
-
-	async function handleExport() {
-		if (!datasourceId || isExporting) return;
-
-		isExporting = true;
-		exportError = null;
-		exportSuccess = null;
-
-		const format = (step.config.format as string) || 'csv';
-		const filename = (step.config.filename as string) || 'export';
-		const datasourceConfig = buildDatasourceConfig({
-			analysisId: analysisId ?? null,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
-		const request = {
-			analysis_id: analysisId,
-			datasource_id: datasourceId,
-			pipeline_steps: allSteps.map((s) => ({
-				id: s.id,
-				type: s.type,
-				config: s.config,
-				depends_on: s.depends_on
-			})),
-			target_step_id: step.id,
-			format: format as ExportRequest['format'],
-			filename,
-			destination: 'download',
-			datasource_config: datasourceConfig
-		} as ExportRequest;
-
-		exportData(request).match(
-			(result) => {
-				if (result instanceof Blob) {
-					const ext =
-						format === 'csv'
-							? '.csv'
-							: format === 'parquet'
-								? '.parquet'
-								: format === 'ndjson'
-									? '.ndjson'
-									: format === 'duckdb'
-										? '.duckdb'
-										: '.json';
-					downloadBlob(result, `${filename}${ext}`);
-					exportSuccess = `Downloaded ${filename}${ext}`;
-				}
-				isExporting = false;
-			},
-			(err) => {
-				exportError = err.message;
-				isExporting = false;
-			}
-		);
-	}
 </script>
 
 <div
@@ -323,35 +257,6 @@
 				delete
 			</button>
 		</div>
-
-		{#if step.type === 'export' && datasourceId}
-			<div class="mt-3 border-t border-tertiary pt-3">
-				{#if exportError}
-					<div class="mb-2 border border-error bg-error p-2 text-xs text-error">
-						{exportError}
-					</div>
-				{/if}
-				{#if exportSuccess}
-					<div class="mb-2 border border-success bg-success-bg p-2 text-xs text-success-fg">
-						{exportSuccess}
-					</div>
-				{/if}
-				<button
-					class="export-btn flex w-full cursor-pointer items-center justify-center gap-2 border-none px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-bg-primary hover:opacity-90 hover:enabled:opacity-90"
-					onclick={handleExport}
-					disabled={isExporting}
-					type="button"
-				>
-					{#if isExporting}
-						<span class="spinner spinner-sm"></span>
-						Exporting...
-					{:else}
-						<Download size={14} />
-						Download
-					{/if}
-				</button>
-			</div>
-		{/if}
 
 		{#if step.type === 'view' && datasourceId && analysisId}
 			<div class="mt-3 border-t border-tertiary pt-3">

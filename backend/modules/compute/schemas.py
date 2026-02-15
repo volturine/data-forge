@@ -167,6 +167,15 @@ class ExportRequest(BaseModel):
     iceberg_options: IcebergExportOptions | None = None
     duckdb_options: DuckDBExportOptions | None = None
     datasource_config: dict | None = None
+    output_datasource_id: str | None = None
+
+    @field_validator('datasource_type')
+    @classmethod
+    def validate_datasource_type_for_output(cls, value: ExportDatasourceType, info):
+        destination = info.data.get('destination') if info.data else None
+        if destination == ExportDestination.DATASOURCE and value != ExportDatasourceType.ICEBERG:
+            raise ValueError('Output exports must use Iceberg datasources')
+        return value
 
 
 class ExportResponse(BaseModel):
@@ -223,3 +232,20 @@ class StepSchemaResponse(BaseModel):
     step_id: str
     columns: list[str]
     column_types: dict[str, str]
+
+
+class BuildTabResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tab_id: str
+    tab_name: str
+    status: str
+    error: str | None = None
+
+
+class BuildResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str
+    tabs_built: int
+    results: list[BuildTabResult]

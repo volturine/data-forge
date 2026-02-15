@@ -122,7 +122,6 @@
 		Scissors,
 		Trophy,
 		Type,
-		Upload,
 		Wrench,
 		ListChecks,
 		Trash2,
@@ -197,7 +196,7 @@
 			type: 'chart',
 			label: 'Chart',
 			icon: BarChart4,
-			description: 'Visualize data (leaf node)'
+			description: 'Visualize data inline'
 		},
 		{
 			type: 'notification',
@@ -212,8 +211,7 @@
 			label: 'Union By Name',
 			icon: LayoutGrid,
 			description: 'Union rows from multiple datasources'
-		},
-		{ type: 'export', label: 'Export', icon: Upload, description: 'Download data' }
+		}
 	];
 
 	// Quick insert selected type

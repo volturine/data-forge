@@ -107,16 +107,18 @@ def test_telegram(body: TestTelegramRequest) -> TestResult:
 @router.post('/detect-telegram-chat', response_model=DetectTelegramResponse)
 def detect_telegram_chat() -> DetectTelegramResponse:
     """Call Telegram getUpdates to detect chat IDs from recent messages."""
+    from modules.telegram.bot import telegram_bot
+
     token = get_resolved_telegram_token()
     if not token:
         return DetectTelegramResponse(success=False, message='Telegram bot token not configured')
 
+    was_running = telegram_bot.running
+    if was_running:
+        telegram_bot.pause()
     try:
-        resp = httpx.get(
-            f'https://api.telegram.org/bot{token}/getUpdates',
-            params={'limit': 10, 'timeout': 0},
-            timeout=10,
-        )
+        offset = telegram_bot.get_offset(token)
+        resp = telegram_bot.get_updates(token, params={'limit': 10, 'timeout': 0, 'offset': offset}, timeout=10)
         if resp.status_code != 200:
             return DetectTelegramResponse(success=False, message=f'Telegram API error: {resp.text}')
 
@@ -145,18 +147,27 @@ def detect_telegram_chat() -> DetectTelegramResponse:
         return DetectTelegramResponse(success=True, message=f'Found {len(chats)} chat(s)', chats=chats)
     except Exception as exc:
         return DetectTelegramResponse(success=False, message=str(exc))
+    finally:
+        if was_running:
+            telegram_bot.resume()
 
 
 @router.post('/detect-chat-custom', response_model=DetectTelegramResponse)
 def detect_custom_bot_chat(body: DetectCustomBotRequest) -> DetectTelegramResponse:
     """Detect chat_id from a custom bot token (for notification node config)."""
+    from modules.telegram.bot import telegram_bot
+
     if not body.bot_token:
         return DetectTelegramResponse(success=False, message='Bot token is required')
 
+    was_running = telegram_bot.running and telegram_bot.token == body.bot_token
+    if was_running:
+        telegram_bot.pause()
     try:
-        resp = httpx.get(
-            f'https://api.telegram.org/bot{body.bot_token}/getUpdates',
-            params={'limit': 10, 'timeout': 0},
+        offset = telegram_bot.get_offset(body.bot_token)
+        resp = telegram_bot.get_updates(
+            body.bot_token,
+            params={'limit': 10, 'timeout': 0, 'offset': offset},
             timeout=10,
         )
         if resp.status_code != 200:
@@ -187,3 +198,6 @@ def detect_custom_bot_chat(body: DetectCustomBotRequest) -> DetectTelegramRespon
         return DetectTelegramResponse(success=True, message=f'Found {len(chats)} chat(s)', chats=chats)
     except Exception as exc:
         return DetectTelegramResponse(success=False, message=str(exc))
+    finally:
+        if was_running:
+            telegram_bot.resume()

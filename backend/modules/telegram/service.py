@@ -59,6 +59,15 @@ def deactivate_subscriber(session: Session, subscriber_id: int) -> None:
     if not sub:
         return
     sub.is_active = False
+    listeners = (
+        session.execute(
+            select(TelegramListener).where(TelegramListener.subscriber_id == subscriber_id)  # type: ignore[arg-type]
+        )
+        .scalars()
+        .all()
+    )
+    for listener in listeners:
+        session.delete(listener)
     session.add(sub)
     session.commit()
 
@@ -137,8 +146,8 @@ def auto_populate_listeners(session: Session, datasource_id: str) -> list[Listen
     return results
 
 
-def get_notification_chat_ids(session: Session, datasource_id: str) -> list[str]:
-    """Get all chat_ids that should be notified for a datasource build."""
+def get_notification_chat_ids(session: Session, datasource_id: str) -> list[tuple[str, str]]:
+    """Get all (chat_id, bot_token) pairs that should be notified for a datasource build."""
     listeners = (
         session.execute(
             select(TelegramListener).where(TelegramListener.datasource_id == datasource_id)  # type: ignore[arg-type]
@@ -158,4 +167,4 @@ def get_notification_chat_ids(session: Session, datasource_id: str) -> list[str]
         .scalars()
         .all()
     )
-    return [s.chat_id for s in subs]
+    return [(s.chat_id, s.bot_token) for s in subs]

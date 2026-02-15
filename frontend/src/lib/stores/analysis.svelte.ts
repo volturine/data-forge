@@ -357,24 +357,31 @@ export class AnalysisStore {
 		const nextPipeline = [...this.activeTab.steps];
 		const normalizedParentId = parentId ?? null;
 		step.depends_on = normalizedParentId ? [normalizedParentId] : [];
+		const isChart = step.type === 'chart' || step.type.startsWith('plot_');
 
 		if (nextId) {
 			const nextStepIndex = nextPipeline.findIndex((item) => item.id === nextId);
 			if (nextStepIndex < 0) {
 				return false;
 			}
-			const nextStep = nextPipeline[nextStepIndex];
-			const nextDeps = nextStep.depends_on ?? [];
-			if (nextDeps.length > 1) {
-				return false;
+			if (isChart) {
+				// Charts are pass-through — do not rewire dependencies.
+				// The chart simply observes data at this point; downstream
+				// steps keep their existing parent link.
+			} else {
+				const nextStep = nextPipeline[nextStepIndex];
+				const nextDeps = nextStep.depends_on ?? [];
+				if (nextDeps.length > 1) {
+					return false;
+				}
+				if (normalizedParentId && nextDeps.length > 0 && nextDeps[0] !== normalizedParentId) {
+					return false;
+				}
+				if (!normalizedParentId && nextDeps.length > 0) {
+					return false;
+				}
+				nextPipeline[nextStepIndex] = { ...nextStep, depends_on: [step.id] };
 			}
-			if (normalizedParentId && nextDeps.length > 0 && nextDeps[0] !== normalizedParentId) {
-				return false;
-			}
-			if (!normalizedParentId && nextDeps.length > 0) {
-				return false;
-			}
-			nextPipeline[nextStepIndex] = { ...nextStep, depends_on: [step.id] };
 		}
 
 		nextPipeline.splice(index, 0, step);
@@ -553,9 +560,10 @@ export class AnalysisStore {
 		const movingStep = { ...steps[fromIndex] };
 		const oldDeps = movingStep.depends_on ?? [];
 		const oldParentId = oldDeps[0] ?? null;
+		const isChart = movingStep.type === 'chart' || movingStep.type.startsWith('plot_');
 
 		// Find the step that depended on the moving step (if any)
-		const dependentStep = steps.find((s) => s.depends_on?.includes(stepId));
+		const dependentStep = isChart ? null : steps.find((s) => s.depends_on?.includes(stepId));
 
 		// Remove from old position
 		steps.splice(fromIndex, 1);
@@ -581,7 +589,7 @@ export class AnalysisStore {
 		steps.splice(actualToIndex, 0, movingStep);
 
 		// Update the next step to depend on the moved step
-		if (newNextId) {
+		if (newNextId && !isChart) {
 			const nextIndex = steps.findIndex((s) => s.id === newNextId);
 			if (nextIndex >= 0) {
 				steps[nextIndex] = {

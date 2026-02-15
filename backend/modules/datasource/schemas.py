@@ -53,6 +53,10 @@ class ColumnStatsResponse(BaseModel):
     histogram: list[HistogramBin] | None = None
 
 
+class ColumnStatsRequest(BaseModel):
+    datasource_config: dict | None = None
+
+
 class ExcelPreflightResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -158,8 +162,10 @@ class DataSourceResponse(BaseModel):
     config: dict
     schema_cache: dict | None
     created_by_analysis_id: str | None = None
+    created_by: str = 'import'
     is_hidden: bool = False
     created_at: datetime
+    output_of_tab_id: str | None = None
 
 
 class DataSourceUpdate(BaseModel):

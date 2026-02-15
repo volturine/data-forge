@@ -317,11 +317,17 @@ export function normalizeConfig(stepType: string, config: Record<string, unknown
 	// infinite reactivity loops with TanStack Query keys.
 	if (normalizedType === 'ai') {
 		const ai = merged as Record<string, unknown>;
+		if (!Array.isArray(ai.input_columns)) {
+			ai.input_columns = [];
+		}
 		ai.endpoint_url = ai.endpoint_url ?? '';
 		ai.api_key = ai.api_key ?? '';
 	}
 	if (normalizedType === 'notification') {
 		const notif = merged as Record<string, unknown>;
+		if (!Array.isArray(notif.input_columns)) {
+			notif.input_columns = [];
+		}
 		notif.bot_token = notif.bot_token ?? '';
 		notif.recipient = notif.recipient ?? '';
 	}

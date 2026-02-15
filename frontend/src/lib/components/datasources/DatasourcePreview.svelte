@@ -30,8 +30,9 @@
 	}
 
 	$effect(() => {
-		// Reset pagination and close stats when datasource changes; requires effect to update state.
+		// Reset pagination and close stats when datasource or config changes; requires effect to update state.
 		if (!datasourceId) return;
+		void datasourceConfig;
 		page = 1;
 		statsOpen = false;
 		statsColumn = null;
@@ -138,6 +139,7 @@
 		{datasourceId}
 		columnName={statsColumn}
 		open={statsOpen}
+		{datasourceConfig}
 		onClose={handleStatsClose}
 	/>
 </div>

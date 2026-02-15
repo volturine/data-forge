@@ -351,9 +351,6 @@
 
 	function handleAddStep(type: string) {
 		if (!isEditingMode) return;
-		if (type === 'chart' && analysisStore.pipeline.some((step) => step.type === 'chart')) {
-			return;
-		}
 		const step = buildStep(type);
 		analysisStore.addStep(step);
 		selectedStepId = step.id;
@@ -362,12 +359,6 @@
 
 	function handleInsertStep(type: string, target: DropTarget) {
 		if (!isEditingMode) return;
-		if (type === 'chart' && analysisStore.pipeline.some((step) => step.type === 'chart')) {
-			return;
-		}
-		if (type === 'chart' && target.nextId) {
-			return;
-		}
 		const step = buildStep(type);
 		const inserted = analysisStore.insertStep(step, target.index, target.parentId, target.nextId);
 		if (inserted) {

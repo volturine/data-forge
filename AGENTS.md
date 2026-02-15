@@ -47,6 +47,7 @@ Use `vibe_check` after planning. Use `vibe_learn` to record discoveries.
 - **No silent behavior changes.** All behavior changes must be explicit, intentional, and documented in the response.
 - **Redesign over hotfix.** If the existing code is wrong, redesign it properly. Do not patch around broken architecture.
 - **Fix warnings, not just errors.** Treat warnings as bugs. If you touch a file with pre-existing warnings, fix them.
+- **Autonomous completion.** Do not ask for prioritization or pause for user input; continue until every requirement in `docs/bugs.md` is implemented, tested, and verified.
 
 ## Backend (Python/FastAPI)
 
@@ -293,6 +294,12 @@ import {
 - **Backend-generated fields should be optional in frontend types:** When the backend auto-creates/fills a field on save (e.g., `output_datasource_id`), make it optional (`?`) in the TypeScript interface. Frontend constructs objects without it; backend fills it in on response.
 - **Mypy `var-annotated` on dict literals:** When assigning a dict literal to a variable inside a branch, mypy requires an explicit type annotation (e.g., `file_config: dict[str, object] = {…}`). Use `object` as the value type for mixed-value dicts.
 - **`output_datasource_id` architecture:** `datasource_id` on a tab is the INPUT source only. `output_datasource_id` is a separate field pointing to the hidden output datasource auto-created by `update_analysis()`. `_upsert_output_datasource()` is the DRY helper for all export paths. The scheduler passes `output_datasource_id` through to `export_data()`.
+- **Config guards:** Config arrays like `input_columns` must be normalized before `.length` access to avoid UI crashes on initial render.
+- **SvelteSet/SvelteMap are already reactive:** Never wrap `new SvelteSet()` or `new SvelteMap()` in `$state()` — they are intrinsically reactive. Use `const selected = new SvelteSet<T>()` directly. eslint `svelte/no-unnecessary-state-wrap` catches this.
+- **Mypy `call-overload` vs `arg-type`:** When `int(val)` is called on an `object` type, mypy reports `call-overload` not `arg-type`. Use `# type: ignore[call-overload]`.
+- **`source_type` vs `created_by` semantics:** `source_type` = actual data format (`iceberg`, `csv`, `parquet`, etc.). `created_by` = origin (`analysis` for pipeline-built, `import` for file uploads). INPUT datasources referencing another analysis keep `source_type='analysis'` because the engine dispatches to `_load_analysis()` based on it. OUTPUT datasources use `source_type='iceberg'` from creation.
+- **Cross-session DB test isolation:** When testing handlers that use `run_db()` (separate session), call `test_db_session.expire_all()` before asserting state changed by the handler. Otherwise cached ORM objects won't reflect commits from the other session.
+- **FastAPI route ordering:** Parameterized routes like `/{run_id}` must come AFTER literal routes like `/compare` — otherwise FastAPI matches the literal path segment as the parameter.
 
 ## Agents
 

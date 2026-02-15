@@ -3,7 +3,25 @@
 	import { getLineage, type LineageNode, type LineageResponse } from '$lib/api/lineage';
 	import LineageGraph from '$lib/components/common/LineageGraph.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
-	import { Loader, X, Database, BarChart3 } from 'lucide-svelte';
+	import {
+		Loader,
+		X,
+		Database,
+		BarChart3,
+		ArrowRight,
+		ArrowDown,
+		LayoutGrid,
+		RotateCcw,
+		ZoomIn,
+		ZoomOut
+	} from 'lucide-svelte';
+
+	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
+	type LineageGraphApi = {
+		resetLineageView: () => void;
+		zoomInView: () => void;
+		zoomOutView: () => void;
+	};
 
 	const query = createQuery(() => ({
 		queryKey: ['lineage'],
@@ -18,27 +36,10 @@
 	const lineage = $derived(query.data ?? emptyLineage);
 
 	let selectedNode = $state<LineageNode | null>(null);
-	let pageEl = $state<HTMLDivElement | undefined>(undefined);
-
-	// Compute fixed position from the page element's bounding rect
-	// $effect needed: reads DOM bounding rect which $derived cannot access
-	let panelTop = $state(0);
-	let panelLeft = $state(0);
-	$effect(() => {
-		if (!pageEl || !selectedNode) return;
-		const rect = pageEl.getBoundingClientRect();
-		// Position below the header (header is ~49px: py-3 + text + border)
-		panelTop = rect.top + 49;
-		panelLeft = rect.left;
-	});
-
-	function handleNodeClick(node: LineageNode) {
-		if (selectedNode?.id === node.id) {
-			selectedNode = null;
-			return;
-		}
-		selectedNode = node;
-	}
+	const panelWidth = 384;
+	let layoutMode = $state<LayoutMode>('horizontal');
+	let zoomPercent = $state(100);
+	let graphRef = $state<LineageGraphApi | null>(null);
 
 	function closePanel() {
 		selectedNode = null;
@@ -49,89 +50,159 @@
 		selectedNode ? selectedNode.id.split(':').slice(1).join(':') : null
 	);
 	const selectedType = $derived(selectedNode?.type ?? null);
+
+	function setLayout(mode: LayoutMode) {
+		layoutMode = mode;
+	}
+
+	function zoomIn() {
+		graphRef?.zoomInView();
+	}
+
+	function zoomOut() {
+		graphRef?.zoomOutView();
+	}
+
+	function resetView() {
+		graphRef?.resetLineageView();
+	}
 </script>
 
-<div class="flex h-full flex-col" bind:this={pageEl}>
+<div class="flex h-full flex-col">
 	<header class="border-b border-tertiary bg-bg-primary px-6 py-3">
 		<h1 class="m-0 text-lg">Data Lineage</h1>
 	</header>
 
-	<div class="min-h-0 flex-1">
-		{#if query.isLoading}
-			<div class="flex h-full items-center justify-center gap-2 text-fg-tertiary">
-				<Loader size={16} class="spin" />
-				Loading lineage...
-			</div>
-		{:else if query.isError}
-			<div class="flex h-full items-center justify-center">
-				<p class="text-sm text-error-fg">Failed to load lineage.</p>
-			</div>
-		{:else}
-			<LineageGraph {lineage} onnodeclick={handleNodeClick} />
-		{/if}
-	</div>
-</div>
-
-<!-- Slide panel: rendered outside graph DOM to avoid transform stacking context conflicts -->
-{#if selectedNode}
-	<div
-		class="fixed z-[9999] flex w-96 flex-col border-r border-tertiary bg-bg-primary shadow-lg"
-		style="top: {panelTop}px; left: {panelLeft}px; bottom: 0;"
-	>
-		<div class="flex items-center gap-3 border-b border-tertiary px-4 py-3">
-			<div class="flex items-center gap-2 text-fg-muted">
-				{#if selectedType === 'datasource'}
-					<Database size={16} />
-				{:else}
-					<BarChart3 size={16} />
-				{/if}
-			</div>
-			<div class="min-w-0 flex-1">
-				<div class="text-xs uppercase tracking-wide text-fg-muted">
-					{selectedType === 'datasource' ? 'Datasource' : 'Analysis'}
-				</div>
-				<div class="truncate text-sm font-semibold text-fg-primary">
-					{selectedNode.name}
-				</div>
-			</div>
+	<div class="lineage-page">
+		<div class="lineage-toolbar-row">
+			<span class="mr-2 text-xs text-fg-muted">Layout</span>
 			<button
-				class="btn-ghost btn-sm p-1"
-				onclick={closePanel}
-				title="Close panel"
-				aria-label="Close panel"
+				class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"
+				onclick={() => setLayout('horizontal')}
+				title="Horizontal tree layout"
 			>
-				<X size={14} />
+				<ArrowRight size={14} />
+				<span class="text-xs">Horizontal</span>
 			</button>
+			<button
+				class="btn-sm {layoutMode === 'vertical' ? 'btn-primary' : 'btn-ghost'}"
+				onclick={() => setLayout('vertical')}
+				title="Vertical tree layout"
+			>
+				<ArrowDown size={14} />
+				<span class="text-xs">Vertical</span>
+			</button>
+			<button
+				class="btn-sm {layoutMode === 'grid' ? 'btn-primary' : 'btn-ghost'}"
+				onclick={() => setLayout('grid')}
+				title="Grid layout"
+			>
+				<LayoutGrid size={14} />
+				<span class="text-xs">Grid</span>
+			</button>
+
+			<div class="mx-2 h-4 w-px bg-border-primary"></div>
+
+			<button class="btn-sm btn-ghost" onclick={zoomIn} title="Zoom in">
+				<ZoomIn size={14} />
+			</button>
+			<button class="btn-sm btn-ghost" onclick={zoomOut} title="Zoom out">
+				<ZoomOut size={14} />
+			</button>
+			<button class="btn-sm btn-ghost" onclick={resetView} title="Reset view">
+				<RotateCcw size={14} />
+			</button>
+
+			<span class="ml-auto text-xs text-fg-muted">{zoomPercent}%</span>
 		</div>
 
-		<div class="flex-1 overflow-y-auto p-4">
-			<!-- Node details -->
-			<div class="mb-4 space-y-2">
-				{#if selectedNode.source_type}
-					<div class="flex items-center justify-between text-sm">
-						<span class="text-fg-muted">Source</span>
-						<span class="text-fg-primary">{selectedNode.source_type}</span>
+		<aside class="lineage-panel">
+			<div class="flex items-center gap-3 border-b border-tertiary px-4 py-3">
+				{#if selectedNode}
+					<div class="flex items-center gap-2 text-fg-muted">
+						{#if selectedType === 'datasource'}
+							<Database size={16} />
+						{:else}
+							<BarChart3 size={16} />
+						{/if}
 					</div>
 				{/if}
-				{#if selectedNode.status}
-					<div class="flex items-center justify-between text-sm">
-						<span class="text-fg-muted">Status</span>
-						<span class="text-fg-primary">{selectedNode.status}</span>
+				<div class="min-w-0 flex-1">
+					<div class="text-xs uppercase tracking-wide text-fg-muted">
+						{selectedNode ? (selectedType === 'datasource' ? 'Datasource' : 'Analysis') : 'Details'}
 					</div>
-				{/if}
-				<div class="flex items-center justify-between text-sm">
-					<span class="text-fg-muted">ID</span>
-					<span class="truncate pl-4 text-xs text-fg-tertiary">{selectedRawId}</span>
+					<div class="truncate text-sm font-semibold text-fg-primary">
+						{selectedNode ? selectedNode.name : 'Select a node'}
+					</div>
 				</div>
+				{#if selectedNode}
+					<button
+						class="btn-ghost btn-sm p-1"
+						onclick={closePanel}
+						title="Close panel"
+						aria-label="Close panel"
+					>
+						<X size={14} />
+					</button>
+				{/if}
 			</div>
 
-			<!-- Schedules for datasource nodes -->
-			{#if selectedType === 'datasource' && selectedRawId}
-				<div class="border-t border-tertiary pt-4">
-					<h3 class="mb-3 text-sm font-semibold text-fg-primary">Schedules</h3>
-					<ScheduleManager datasourceId={selectedRawId} compact />
+			<div class="flex-1 overflow-y-auto p-4">
+				{#if selectedNode}
+					<div class="mb-4 space-y-2">
+						{#if selectedNode.source_type}
+							<div class="flex items-center justify-between text-sm">
+								<span class="text-fg-muted">Source</span>
+								<span class="text-fg-primary">{selectedNode.source_type}</span>
+							</div>
+						{/if}
+						{#if selectedNode.status}
+							<div class="flex items-center justify-between text-sm">
+								<span class="text-fg-muted">Status</span>
+								<span class="text-fg-primary">{selectedNode.status}</span>
+							</div>
+						{/if}
+						<div class="flex items-center justify-between text-sm">
+							<span class="text-fg-muted">ID</span>
+							<span class="truncate pl-4 text-xs text-fg-tertiary">{selectedRawId}</span>
+						</div>
+					</div>
+
+					{#if selectedType === 'datasource' && selectedRawId}
+						<div class="border-t border-tertiary pt-4">
+							<h3 class="mb-3 text-sm font-semibold text-fg-primary">Schedules</h3>
+							<ScheduleManager datasourceId={selectedRawId} compact />
+						</div>
+					{/if}
+				{:else}
+					<p class="text-sm text-fg-tertiary">Click a node to view details and schedules.</p>
+				{/if}
+			</div>
+		</aside>
+
+		<div class="lineage-canvas">
+			{#if query.isLoading}
+				<div class="flex h-full items-center justify-center gap-2 text-fg-tertiary">
+					<Loader size={16} class="spin" />
+					Loading lineage...
 				</div>
+			{:else if query.isError}
+				<div class="flex h-full items-center justify-center">
+					<p class="text-sm text-error-fg">Failed to load lineage.</p>
+				</div>
+			{:else}
+				<LineageGraph
+					bind:this={graphRef}
+					{lineage}
+					showToolbar={false}
+					bind:layoutMode
+					bind:zoomPercent
+					onnodeclick={(node) => {
+						selectedNode = node;
+					}}
+					panelOffset={panelWidth}
+				/>
 			{/if}
 		</div>
 	</div>
-{/if}
+</div>

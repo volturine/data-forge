@@ -7,9 +7,20 @@
 	interface Props {
 		lineage: LineageResponse;
 		onnodeclick?: (node: LineageNode) => void;
+		panelOffset?: number;
+		showToolbar?: boolean;
+		layoutMode?: LayoutMode;
+		zoomPercent?: number;
 	}
 
-	let { lineage, onnodeclick }: Props = $props();
+	let {
+		lineage,
+		onnodeclick,
+		panelOffset = 0,
+		showToolbar = true,
+		layoutMode = $bindable<LayoutMode>('horizontal'),
+		zoomPercent = $bindable(100)
+	}: Props = $props();
 
 	const nodes = $derived(lineage.nodes);
 	const edges = $derived(lineage.edges);
@@ -29,7 +40,6 @@
 	let wasDrag = false;
 	let viewWidth = $state(1200);
 	let viewHeight = $state(720);
-	let layoutMode = $state<LayoutMode>('horizontal');
 
 	/* ---------- pan/zoom state ---------- */
 	let pan = $state({ x: 0, y: 0 });
@@ -132,6 +142,44 @@
 		syncSnapshot();
 	}
 
+	function getBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+		if (!layoutNodes.length) return null;
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+		for (const node of layoutNodes) {
+			const pos = physicsMap.get(node.id);
+			if (!pos) continue;
+			minX = Math.min(minX, pos.x);
+			minY = Math.min(minY, pos.y);
+			maxX = Math.max(maxX, pos.x + nodeWidth);
+			maxY = Math.max(maxY, pos.y + nodeHeight);
+		}
+		if (!Number.isFinite(minX)) return null;
+		return { minX, minY, maxX, maxY };
+	}
+
+	function resetViewToBounds(): void {
+		const bounds = getBounds();
+		if (!bounds) {
+			pan = { x: 0, y: 0 };
+			scale = 1;
+			return;
+		}
+		const padding = 80;
+		const contentWidth = bounds.maxX - bounds.minX + padding * 2;
+		const contentHeight = bounds.maxY - bounds.minY + padding * 2;
+		const usableWidth = Math.max(1, viewWidth - panelOffset);
+		const sx = usableWidth / contentWidth;
+		const sy = viewHeight / contentHeight;
+		scale = clamp(Math.min(sx, sy, 1), 0.2, 3);
+		pan = {
+			x: padding - bounds.minX + panelOffset + (usableWidth - contentWidth) / 2,
+			y: padding - bounds.minY + (viewHeight - contentHeight) / 2
+		};
+	}
+
 	function clamp(value: number, min: number, max: number) {
 		return Math.max(min, Math.min(max, value));
 	}
@@ -150,11 +198,20 @@
 	$effect(() => {
 		void layoutNodes;
 		applyDeterministicLayout(layoutMode);
+		resetViewToBounds();
 	});
 
 	/* ---------- canvas size (fixed, no expansion) ---------- */
-	const canvasWidth = $derived(viewWidth);
-	const canvasHeight = $derived(viewHeight);
+	const canvasWidth = $derived.by(() => {
+		const bounds = getBounds();
+		if (!bounds) return viewWidth;
+		return Math.max(viewWidth, bounds.maxX - bounds.minX + 160);
+	});
+	const canvasHeight = $derived.by(() => {
+		const bounds = getBounds();
+		if (!bounds) return viewHeight;
+		return Math.max(viewHeight, bounds.maxY - bounds.minY + 160);
+	});
 
 	/* ---------- node interaction ---------- */
 	function startDrag(event: PointerEvent, id: string) {
@@ -247,8 +304,11 @@
 	}
 
 	function resetView() {
-		pan = { x: 0, y: 0 };
-		scale = 1;
+		resetViewToBounds();
+	}
+
+	export function resetLineageView() {
+		resetView();
 	}
 
 	function zoomIn() {
@@ -262,6 +322,10 @@
 		scale = next;
 	}
 
+	export function zoomInView() {
+		zoomIn();
+	}
+
 	function zoomOut() {
 		const next = clamp(scale * 0.8, 0.2, 3);
 		const cx = viewWidth / 2;
@@ -273,11 +337,19 @@
 		scale = next;
 	}
 
+	export function zoomOutView() {
+		zoomOut();
+	}
+
 	function setLayout(mode: LayoutMode) {
 		layoutMode = mode;
 		resetView();
 		applyDeterministicLayout(mode);
 	}
+
+	$effect(() => {
+		zoomPercent = Math.round(scale * 100);
+	});
 
 	const transform = $derived(`translate(${pan.x}px, ${pan.y}px) scale(${scale})`);
 
@@ -299,48 +371,50 @@
 	</div>
 {:else}
 	<div class="flex h-full flex-col">
-		<!-- Toolbar -->
-		<div class="flex items-center gap-1 border-b border-tertiary bg-bg-primary px-3 py-1.5">
-			<span class="mr-2 text-xs text-fg-muted">Layout</span>
-			<button
-				class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"
-				onclick={() => setLayout('horizontal')}
-				title="Horizontal tree layout"
-			>
-				<ArrowRight size={14} />
-				<span class="text-xs">Horizontal</span>
-			</button>
-			<button
-				class="btn-sm {layoutMode === 'vertical' ? 'btn-primary' : 'btn-ghost'}"
-				onclick={() => setLayout('vertical')}
-				title="Vertical tree layout"
-			>
-				<ArrowDown size={14} />
-				<span class="text-xs">Vertical</span>
-			</button>
-			<button
-				class="btn-sm {layoutMode === 'grid' ? 'btn-primary' : 'btn-ghost'}"
-				onclick={() => setLayout('grid')}
-				title="Grid layout"
-			>
-				<LayoutGrid size={14} />
-				<span class="text-xs">Grid</span>
-			</button>
+		{#if showToolbar}
+			<!-- Toolbar -->
+			<div class="flex items-center gap-1 border-b border-tertiary bg-bg-primary px-3 py-1.5">
+				<span class="mr-2 text-xs text-fg-muted">Layout</span>
+				<button
+					class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"
+					onclick={() => setLayout('horizontal')}
+					title="Horizontal tree layout"
+				>
+					<ArrowRight size={14} />
+					<span class="text-xs">Horizontal</span>
+				</button>
+				<button
+					class="btn-sm {layoutMode === 'vertical' ? 'btn-primary' : 'btn-ghost'}"
+					onclick={() => setLayout('vertical')}
+					title="Vertical tree layout"
+				>
+					<ArrowDown size={14} />
+					<span class="text-xs">Vertical</span>
+				</button>
+				<button
+					class="btn-sm {layoutMode === 'grid' ? 'btn-primary' : 'btn-ghost'}"
+					onclick={() => setLayout('grid')}
+					title="Grid layout"
+				>
+					<LayoutGrid size={14} />
+					<span class="text-xs">Grid</span>
+				</button>
 
-			<div class="mx-2 h-4 w-px bg-border-primary"></div>
+				<div class="mx-2 h-4 w-px bg-border-primary"></div>
 
-			<button class="btn-sm btn-ghost" onclick={zoomIn} title="Zoom in">
-				<ZoomIn size={14} />
-			</button>
-			<button class="btn-sm btn-ghost" onclick={zoomOut} title="Zoom out">
-				<ZoomOut size={14} />
-			</button>
-			<button class="btn-sm btn-ghost" onclick={resetView} title="Reset view">
-				<RotateCcw size={14} />
-			</button>
+				<button class="btn-sm btn-ghost" onclick={zoomIn} title="Zoom in">
+					<ZoomIn size={14} />
+				</button>
+				<button class="btn-sm btn-ghost" onclick={zoomOut} title="Zoom out">
+					<ZoomOut size={14} />
+				</button>
+				<button class="btn-sm btn-ghost" onclick={resetView} title="Reset view">
+					<RotateCcw size={14} />
+				</button>
 
-			<span class="ml-auto text-xs text-fg-muted">{Math.round(scale * 100)}%</span>
-		</div>
+				<span class="ml-auto text-xs text-fg-muted">{zoomPercent}%</span>
+			</div>
+		{/if}
 
 		<!-- Canvas -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->

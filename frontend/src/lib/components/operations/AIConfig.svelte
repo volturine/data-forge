@@ -26,11 +26,15 @@
 		config.input_columns = columns;
 	}
 
+	const inputColumns = $derived.by(() =>
+		Array.isArray(config?.input_columns) ? config.input_columns : []
+	);
+
 	const placeholderHint = $derived.by(() => {
-		const cols = config.input_columns;
-		if (cols.length === 0) return 'Select column(s), then use {{column_name}} in prompt';
-		if (cols.length === 1) return `Use {{text}} or {{${cols[0]}}} to reference the column value`;
-		return `Use {{${cols.join('}}, {{')}}} in prompt template`;
+		if (inputColumns.length === 0) return 'Select column(s), then use {{column_name}} in prompt';
+		if (inputColumns.length === 1)
+			return `Use {{text}} or {{${inputColumns[0]}}} to reference the column value`;
+		return `Use {{${inputColumns.join('}}, {{')}}} in prompt template`;
 	});
 </script>
 
@@ -79,7 +83,7 @@
 		<label>Input Column(s)</label>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.input_columns}
+			value={inputColumns}
 			onChange={handleColumnsChange}
 			placeholder="Select column(s)..."
 			showSelectAll={false}

@@ -8,18 +8,22 @@
 		datasourceId: string;
 		columnName: string | null;
 		open: boolean;
+		datasourceConfig?: Record<string, unknown> | null;
 		onClose: () => void;
 	}
 
-	let { datasourceId, columnName, open, onClose }: Props = $props();
+	let { datasourceId, columnName, open, datasourceConfig = null, onClose }: Props = $props();
 
 	const query = createQuery(() => ({
-		queryKey: ['column-stats', datasourceId, columnName],
+		queryKey: ['column-stats', datasourceId, columnName, datasourceConfig ?? null],
 		queryFn: async () => {
 			if (!columnName) {
 				throw new Error('Column name required');
 			}
-			const result = await getColumnStats(datasourceId, columnName, { sample: true });
+			const result = await getColumnStats(datasourceId, columnName, {
+				sample: true,
+				datasource_config: datasourceConfig ?? undefined
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},

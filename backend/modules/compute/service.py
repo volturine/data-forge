@@ -92,23 +92,22 @@ def _send_pipeline_notifications(
     if datasource_id:
         try:
             from core.database import run_db
-            from modules.settings.service import get_resolved_telegram_token
             from modules.telegram.service import get_notification_chat_ids
 
-            chat_ids: list[str] = run_db(get_notification_chat_ids, datasource_id)
-            if chat_ids:
-                token = get_resolved_telegram_token()
-                if token:
-                    status = str(context.get('status', 'unknown'))
-                    analysis_name = str(context.get('analysis_name', ''))
-                    row_count = str(context.get('row_count', ''))
-                    duration = str(context.get('duration_ms', ''))
-                    msg = f'Build complete: {analysis_name}\nStatus: {status}\nRows: {row_count}\nDuration: {duration}ms'
-                    for cid in chat_ids:
-                        try:
-                            notification_service.send_telegram(chat_id=cid, message=msg)
-                        except Exception as e:
-                            logger.warning(f'Failed to notify subscriber {cid}: {e}')
+            pairs: list[tuple[str, str]] = run_db(get_notification_chat_ids, datasource_id)
+            if pairs:
+                status = str(context.get('status', 'unknown'))
+                analysis_name = str(context.get('analysis_name', ''))
+                row_count = str(context.get('row_count', ''))
+                duration = str(context.get('duration_ms', ''))
+                msg = f'Build complete: {analysis_name}\nStatus: {status}\nRows: {row_count}\nDuration: {duration}ms'
+                for cid, token in pairs:
+                    if not token:
+                        continue
+                    try:
+                        notification_service.send_telegram(chat_id=cid, message=msg, bot_token=token)
+                    except Exception as e:
+                        logger.warning(f'Failed to notify subscriber {cid}: {e}')
         except Exception as e:
             logger.warning(f'Failed to send subscriber notifications: {e}')
 
@@ -121,6 +120,7 @@ def _upsert_output_datasource(
     config: dict,
     schema_cache: dict,
     analysis_id: str | None,
+    is_hidden: bool | None = None,
 ) -> DataSource:
     """Create or update the output datasource for an export.
 
@@ -135,6 +135,9 @@ def _upsert_output_datasource(
             existing.config = config
             existing.schema_cache = schema_cache
             existing.created_by_analysis_id = analysis_id
+            existing.created_by = 'analysis'
+            if is_hidden is not None:
+                existing.is_hidden = is_hidden
             session.add(existing)
             session.commit()
             return existing
@@ -147,6 +150,8 @@ def _upsert_output_datasource(
         config=config,
         schema_cache=schema_cache,
         created_by_analysis_id=analysis_id,
+        created_by='analysis',
+        is_hidden=is_hidden if is_hidden is not None else True,
         created_at=datetime.now(UTC),
     )
     session.add(ds)
@@ -544,6 +549,9 @@ def export_data(
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
+    if destination == 'datasource' and output_datasource_id is None:
+        raise ValueError('Output exports require output_datasource_id')
+
     # Find steps up to target
     step_index = find_step_index(pipeline_steps, target_step_id)
     export_steps = pipeline_steps[: step_index + 1]
@@ -747,6 +755,8 @@ def export_data(
 
             # Datasource - create datasource entry based on type
             if destination == 'datasource':
+                if datasource_type != 'iceberg':
+                    raise ValueError('Output exports must use Iceberg datasources')
                 payload = engine_run_service.create_engine_run_payload(
                     analysis_id=run_analysis_id,
                     datasource_id=datasource_id,
@@ -763,101 +773,6 @@ def export_data(
                     triggered_by=triggered_by,
                 )
                 engine_run_service.create_engine_run(session, payload)
-                if datasource_type == 'file':
-                    file_name = f'{filename}.{result_format}'
-                    file_path = settings.exports_dir / file_name
-                    with open(output_path, 'rb') as f:
-                        file_bytes = f.read()
-                    with open(file_path, 'wb') as f:
-                        f.write(file_bytes)
-
-                    file_config: dict[str, object] = {
-                        'file_path': str(file_path.absolute()),
-                        'file_type': result_format,
-                        'options': {},
-                        'csv_options': None,
-                    }
-                    target_ds = _upsert_output_datasource(
-                        session=session,
-                        output_datasource_id=output_datasource_id,
-                        name=filename,
-                        source_type='file',
-                        config=file_config,
-                        schema_cache=data.get('schema', {}),
-                        analysis_id=run_analysis_id,
-                    )
-                    new_id = target_ds.id
-
-                    result_meta['datasource_id'] = new_id
-                    result_meta['datasource_name'] = filename
-                    payload = engine_run_service.create_engine_run_payload(
-                        analysis_id=run_analysis_id,
-                        datasource_id=new_id,
-                        kind='datasource_create',
-                        status='success',
-                        request_json=request_payload,
-                        result_json=result_meta,
-                        created_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=duration_ms,
-                        step_timings=step_timings,
-                        query_plan=query_plan,
-                        progress=1.0,
-                        triggered_by=triggered_by,
-                    )
-                    engine_run_service.create_engine_run(session, payload)
-
-                    return None, file_name, content_type, str(file_path.absolute()), new_id, result_meta
-
-                if datasource_type == 'duckdb':
-                    file_name = f'{filename}.duckdb'
-                    file_path = settings.exports_dir / file_name
-                    with open(output_path, 'rb') as f:
-                        file_bytes = f.read()
-                    with open(file_path, 'wb') as f:
-                        f.write(file_bytes)
-
-                    table_name = 'data'
-                    if duckdb_options:
-                        table_name = duckdb_options.get('table_name', 'data')
-
-                    duckdb_config = {
-                        'db_path': str(file_path.absolute()),
-                        'query': f'SELECT * FROM {table_name}',
-                        'read_only': True,
-                    }
-                    target_ds = _upsert_output_datasource(
-                        session=session,
-                        output_datasource_id=output_datasource_id,
-                        name=filename,
-                        source_type='duckdb',
-                        config=duckdb_config,
-                        schema_cache=data.get('schema', {}),
-                        analysis_id=run_analysis_id,
-                    )
-                    ds_id = target_ds.id
-
-                    result_meta['datasource_id'] = ds_id
-                    result_meta['datasource_name'] = filename
-                    payload = engine_run_service.create_engine_run_payload(
-                        analysis_id=run_analysis_id,
-                        datasource_id=ds_id,
-                        kind='datasource_create',
-                        status='success',
-                        request_json=request_payload,
-                        result_json=result_meta,
-                        created_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=duration_ms,
-                        step_timings=step_timings,
-                        query_plan=query_plan,
-                        progress=1.0,
-                        triggered_by=triggered_by,
-                    )
-                    engine_run_service.create_engine_run(session, payload)
-
-                    return None, file_name, content_type, str(file_path.absolute()), ds_id, result_meta
-
                 if datasource_type == 'iceberg':
                     iceberg_opts = iceberg_options or {}
                     table_name = iceberg_opts.get('table_name', 'exported_data')
@@ -903,6 +818,10 @@ def export_data(
                         'table': unique_table,
                         'metadata_path': table_dir,
                     }
+                    output_ds = session.get(DataSource, output_datasource_id)
+                    output_hidden = True
+                    if output_ds:
+                        output_hidden = output_ds.is_hidden
                     target_ds = _upsert_output_datasource(
                         session=session,
                         output_datasource_id=output_datasource_id,
@@ -911,6 +830,7 @@ def export_data(
                         config=iceberg_ds_config,
                         schema_cache=data.get('schema', {}),
                         analysis_id=run_analysis_id,
+                        is_hidden=output_hidden,
                     )
                     ds_id = target_ds.id
                     run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'

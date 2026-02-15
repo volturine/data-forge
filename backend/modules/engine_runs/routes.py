@@ -9,6 +9,16 @@ from modules.engine_runs.models import EngineRun
 router = APIRouter(prefix='/engine-runs', tags=['engine-runs'])
 
 
+@router.get('/compare', response_model=schemas.BuildComparisonResponse)
+@handle_errors(operation='compare engine runs')
+def compare_runs(
+    run_a: str,
+    run_b: str,
+    session: Session = Depends(get_db),
+):
+    return service.compare_engine_runs(session, run_a, run_b)
+
+
 @router.get('', response_model=list[schemas.EngineRunResponseSchema])
 @handle_errors(operation='list engine runs')
 def list_runs(

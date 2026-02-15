@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { listSchedules, createSchedule, updateSchedule, deleteSchedule } from '$lib/api/schedule';
-	import type { Schedule, ScheduleCreate } from '$lib/api/schedule';
-	import { listAnalyses } from '$lib/api/analysis';
+	import type { Schedule, ScheduleCreate, ScheduleUpdate } from '$lib/api/schedule';
 	import { listDatasources } from '$lib/api/datasource';
 	import type { DataSource } from '$lib/types/datasource';
 	import {
@@ -17,41 +16,44 @@
 		Check,
 		X,
 		Link,
-		Database
+		Database,
+		ArrowRight,
+		HelpCircle,
+		BarChart3
 	} from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {
-		analysisId?: string;
 		datasourceId?: string;
 		compact?: boolean;
 	}
 
-	let { analysisId, datasourceId, compact = false }: Props = $props();
+	let { datasourceId, compact = false }: Props = $props();
 
 	const queryClient = useQueryClient();
 
 	let creating = $state(false);
+	let triggerType = $state<'cron' | 'depends' | 'event'>('cron');
 	let newCron = $state('0 * * * *');
-	let newAnalysisId = $state('');
 	let newDatasourceId = $state('');
 	let newDependsOn = $state('');
+	let newTrigger = $state('');
+	let showHelp = $state(false);
 	let expandedId = $state<string | null>(null);
 	let editingCron = $state<string | null>(null);
 	let editCronValue = $state('');
 
 	const schedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', analysisId ?? 'all', datasourceId ?? 'all'],
+		queryKey: ['schedules', datasourceId ?? 'all'],
 		queryFn: async () => {
-			const result = await listSchedules(analysisId, datasourceId);
+			const result = await listSchedules(datasourceId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
 	}));
 
-	// Fetch all schedules for the dependency dropdown
 	const allSchedulesQuery = createQuery(() => ({
-		queryKey: ['schedules', 'all', 'all'],
+		queryKey: ['schedules', 'all'],
 		queryFn: async () => {
 			const result = await listSchedules();
 			if (result.isErr()) throw new Error(result.error.message);
@@ -60,35 +62,16 @@
 		staleTime: 30_000
 	}));
 
-	const analysesQuery = createQuery(() => ({
-		queryKey: ['analyses-lookup'],
-		queryFn: async () => {
-			const result = await listAnalyses();
-			if (result.isErr()) return [];
-			return result.value;
-		},
-		staleTime: 60_000,
-		enabled: !analysisId
-	}));
-
 	const datasourcesQuery = createQuery(() => ({
-		queryKey: ['datasources-lookup'],
+		queryKey: ['datasources-lookup', 'include-hidden'],
 		queryFn: async () => {
-			const result = await listDatasources();
+			const result = await listDatasources(true);
 			if (result.isErr()) return [] as DataSource[];
 			return result.value;
 		},
 		staleTime: 60_000,
 		enabled: !datasourceId
 	}));
-
-	const analysisNames = $derived.by(() => {
-		const map = new SvelteMap<string, string>();
-		for (const a of analysesQuery.data ?? []) {
-			map.set(a.id, a.name);
-		}
-		return map;
-	});
 
 	const datasourceMap = $derived.by(() => {
 		const map = new SvelteMap<string, DataSource>();
@@ -98,10 +81,73 @@
 		return map;
 	});
 
+	const analysisOutputs = $derived.by(() => {
+		return (datasourcesQuery.data ?? []).filter((ds) => ds.created_by === 'analysis');
+	});
+
+	const triggerables = $derived.by(() => {
+		return (datasourcesQuery.data ?? []).filter((ds) => ds.source_type === 'iceberg');
+	});
+
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
 
-	// Available dependency targets: all schedules except the one being created/edited
+	const currentTarget = $derived.by(() => {
+		if (!datasourceId) return null;
+		const ds = datasourceMap.get(datasourceId);
+		if (!ds) return null;
+		return {
+			datasourceName: ds.name,
+			analysisName: ds.created_by_analysis_id ? 'Analysis' : 'Unknown',
+			tabName: ds.output_of_tab_id ? 'Tab' : null
+		};
+	});
+
+	const selectedDatasource = $derived.by(() => {
+		if (!newDatasourceId) return null;
+		return datasourceMap.get(newDatasourceId) ?? null;
+	});
+
+	function getTriggerType(schedule: Schedule): 'cron' | 'depends' | 'event' {
+		if (schedule.trigger_on_datasource_id) return 'event';
+		if (schedule.depends_on) return 'depends';
+		return 'cron';
+	}
+
+	function getTriggerDescription(schedule: Schedule): string {
+		const type = getTriggerType(schedule);
+		if (type === 'event') {
+			const dsId = schedule.trigger_on_datasource_id;
+			const dsName = dsId ? (datasourceMap.get(dsId)?.name ?? dsId.slice(0, 8) + '...') : 'Unknown';
+			return `When ${dsName} updates`;
+		}
+		if (type === 'depends') {
+			const depId = schedule.depends_on;
+			const depSched = allSchedules.find((s) => s.id === depId);
+			const depName = depSched
+				? (depSched.analysis_name ?? depSched.analysis_id?.slice(0, 8) + '...')
+				: depId?.slice(0, 8) + '...';
+			return `After "${depName}" completes`;
+		}
+		return getCronDescription(schedule.cron_expression);
+	}
+
+	function getCronDescription(cron: string): string {
+		const patterns: Record<string, string> = {
+			'0 * * * *': 'Every hour',
+			'0 0 * * *': 'Daily at midnight',
+			'0 12 * * *': 'Daily at noon',
+			'0 0 * * 0': 'Weekly on Sunday',
+			'0 0 1 * *': 'Monthly on the 1st',
+			'*/5 * * * *': 'Every 5 minutes',
+			'*/15 * * * *': 'Every 15 minutes',
+			'*/30 * * * *': 'Every 30 minutes',
+			'0 9 * * 1': 'Weekly on Monday at 9am',
+			'0 17 * * 5': 'Weekly on Friday at 5pm'
+		};
+		return patterns[cron] ?? `Cron: ${cron}`;
+	}
+
 	function depOptions(exclude?: string): Schedule[] {
 		return allSchedules.filter((s) => s.id !== exclude);
 	}
@@ -109,15 +155,18 @@
 	function depLabel(id: string): string {
 		const sched = allSchedules.find((s) => s.id === id);
 		if (!sched) return id.slice(0, 8) + '...';
-		const name = resolveName(sched.analysis_id);
-		return `${name} (${sched.cron_expression})`;
+		const name =
+			sched.analysis_name ??
+			(sched.analysis_id ? sched.analysis_id.slice(0, 8) + '...' : 'Unknown');
+		const label = `${name} (${sched.cron_expression})`;
+		return label.length > 40 ? `${label.slice(0, 39)}…` : label;
 	}
 
 	function resolveDatasource(id: string | null): string {
 		if (!id) return '-';
 		const ds = datasourceMap.get(id);
 		if (!ds) return id.slice(0, 8) + '...';
-		return `${ds.name} (${ds.source_type})`;
+		return ds.name;
 	}
 
 	const createMut = createMutation(() => ({
@@ -129,10 +178,11 @@
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['schedules'] });
 			creating = false;
+			triggerType = 'cron';
 			newCron = '0 * * * *';
-			newAnalysisId = '';
 			newDatasourceId = '';
 			newDependsOn = '';
+			newTrigger = '';
 		}
 	}));
 
@@ -171,9 +221,12 @@
 		}
 	}));
 
-	const dsMut = createMutation(() => ({
-		mutationFn: async (args: { id: string; datasource_id: string | null }) => {
-			const result = await updateSchedule(args.id, { datasource_id: args.datasource_id });
+	const triggerMut = createMutation(() => ({
+		mutationFn: async (args: { id: string; trigger_on_datasource_id: string | null }) => {
+			const payload: ScheduleUpdate = {
+				trigger_on_datasource_id: args.trigger_on_datasource_id
+			};
+			const result = await updateSchedule(args.id, payload);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -194,12 +247,22 @@
 	}));
 
 	function handleCreate() {
-		const targetId = analysisId ?? newAnalysisId;
-		if (!targetId || !newCron) return;
-		const payload: ScheduleCreate = { analysis_id: targetId, cron_expression: newCron };
 		const targetDs = datasourceId ?? newDatasourceId;
-		if (targetDs) payload.datasource_id = targetDs;
-		if (newDependsOn) payload.depends_on = newDependsOn;
+		if (!targetDs) return;
+
+		const payload: ScheduleCreate = {
+			datasource_id: targetDs,
+			cron_expression: newCron
+		};
+
+		if (triggerType === 'depends' && newDependsOn) {
+			payload.depends_on = newDependsOn;
+		}
+
+		if (triggerType === 'event' && newTrigger) {
+			payload.trigger_on_datasource_id = newTrigger;
+		}
+
 		createMut.mutate(payload);
 	}
 
@@ -230,8 +293,8 @@
 		depMut.mutate({ id, depends_on: value || null });
 	}
 
-	function handleDsChange(id: string, value: string) {
-		dsMut.mutate({ id, datasource_id: value || null });
+	function handleTriggerChange(id: string, value: string) {
+		triggerMut.mutate({ id, trigger_on_datasource_id: value || null });
 	}
 
 	function toggleExpand(id: string) {
@@ -243,14 +306,21 @@
 		return new Date(iso).toLocaleString();
 	}
 
-	function resolveName(id: string): string {
-		return analysisNames.get(id) ?? id.slice(0, 8) + '...';
+	function getProvenanceDisplay(schedule: Schedule): string {
+		if (schedule.analysis_name && schedule.tab_name) {
+			return `${schedule.analysis_name} → ${schedule.tab_name}`;
+		}
+		if (schedule.analysis_name) {
+			return schedule.analysis_name;
+		}
+		if (schedule.analysis_id) {
+			return schedule.analysis_id.slice(0, 8) + '...';
+		}
+		return 'Unknown';
 	}
 
-	// Column count for expanded row colspan
 	const colCount = $derived.by(() => {
-		let count = 6; // expand + cron + status + last run + next run + actions
-		if (!analysisId) count += 1;
+		let count = 6;
 		if (!datasourceId) count += 1;
 		return count;
 	});
@@ -262,7 +332,10 @@
 			<div class="flex items-center justify-between">
 				<div>
 					<h1 class="m-0 mb-2 text-2xl">Schedules</h1>
-					<p class="m-0 text-fg-tertiary">Manage automated analysis builds via cron expressions</p>
+					<p class="m-0 text-fg-tertiary">
+						Manage automated dataset rebuilds via cron expressions, dependencies, or datasource
+						events
+					</p>
 				</div>
 				<button
 					class="inline-flex items-center gap-1.5 border border-tertiary bg-accent-bg px-3 py-1.5 text-sm text-accent-primary hover:bg-accent-bg/80"
@@ -281,91 +354,240 @@
 					<span class="text-fg-tertiary">({schedules.length})</span>
 				{/if}
 			</span>
-			<button
-				class="inline-flex items-center gap-1 border border-tertiary bg-accent-bg px-2 py-1 text-xs text-accent-primary hover:bg-accent-bg/80"
-				onclick={() => (creating = true)}
-			>
-				<Plus size={12} />
-				Add
-			</button>
+			<div class="flex items-center gap-1">
+				<button
+					class="inline-flex items-center gap-1 border border-tertiary bg-accent-bg px-2 py-1 text-xs text-accent-primary hover:bg-accent-bg/80"
+					onclick={() => (creating = true)}
+				>
+					<Plus size={12} />
+					Add
+				</button>
+				<button
+					class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+					onclick={() => (showHelp = !showHelp)}
+					title="Show help"
+				>
+					<HelpCircle size={14} />
+				</button>
+			</div>
 		</div>
+		{#if showHelp}
+			<div class="mb-3 rounded border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+				<p class="m-0 mb-1 font-medium">Schedule Triggers:</p>
+				<ul class="m-0 list-none space-y-1 p-0">
+					<li class="flex items-center gap-1">
+						<Clock size={10} class="text-fg-muted" /> <strong>On a Schedule</strong> — runs on a cron
+						interval
+					</li>
+					<li class="flex items-center gap-1">
+						<Link size={10} class="text-fg-muted" /> <strong>After Another Schedule</strong> — runs when
+						a dependency completes
+					</li>
+					<li class="flex items-center gap-1">
+						<Database size={10} class="text-fg-muted" /> <strong>When Dataset Updates</strong> — runs
+						on datasource change
+					</li>
+				</ul>
+			</div>
+		{/if}
 	{/if}
 
 	{#if creating}
-		<div class="mb-4 border border-tertiary bg-bg-primary p-3" class:mb-6={!compact}>
-			<h3 class="m-0 mb-2 text-xs font-medium">Create Schedule</h3>
-			<div class="flex flex-wrap items-end gap-2" class:gap-3={!compact}>
-				{#if !analysisId}
-					<div class="flex min-w-40 flex-1 flex-col gap-1">
-						<label for="schedule-analysis" class="text-xs text-fg-muted">Analysis</label>
-						<select
-							id="schedule-analysis"
-							class="border border-tertiary bg-transparent px-2 py-1 text-xs"
-							bind:value={newAnalysisId}
-						>
-							<option value="">Select analysis...</option>
-							{#each analysesQuery.data ?? [] as analysis (analysis.id)}
-								<option value={analysis.id}>{analysis.name}</option>
-							{/each}
-						</select>
+		<div class="mb-4 border border-tertiary bg-bg-primary p-4" class:mb-6={!compact}>
+			<h3 class="m-0 mb-4 text-sm font-medium">Create Schedule</h3>
+
+			<!-- Target Section -->
+			<div class="mb-5">
+				<div class="mb-3 flex items-center gap-2 border-b border-tertiary pb-2">
+					<Database size={14} class="text-accent-primary" />
+					<span class="text-xs font-medium">Target Dataset — What gets rebuilt</span>
+				</div>
+
+				{#if currentTarget}
+					<div class="rounded bg-bg-secondary p-3 text-sm">
+						<div class="flex items-center gap-2">
+							<BarChart3 size={14} class="text-accent-primary" />
+							<span class="font-medium">{currentTarget.datasourceName}</span>
+						</div>
+						<div class="mt-1 flex items-center gap-1 text-xs text-fg-muted">
+							<span>└─ Produced by:</span>
+							<span class="text-fg-secondary">{currentTarget.analysisName}</span>
+							{#if currentTarget.tabName}
+								<ArrowRight size={10} />
+								<span class="text-fg-secondary">Tab "{currentTarget.tabName}"</span>
+							{/if}
+						</div>
+					</div>
+				{:else}
+					<div class="flex flex-col gap-3">
+						<div class="flex min-w-64 flex-1 flex-col gap-1.5">
+							<label for="schedule-datasource" class="text-xs text-fg-muted">
+								Select output dataset
+							</label>
+							<select
+								id="schedule-datasource"
+								class="border border-tertiary bg-transparent px-2 py-1.5 text-xs"
+								bind:value={newDatasourceId}
+							>
+								<option value="">Select output dataset...</option>
+								{#each analysisOutputs as ds (ds.id)}
+									<option value={ds.id}>{ds.name}</option>
+								{/each}
+							</select>
+						</div>
+
+						{#if selectedDatasource}
+							<div class="rounded bg-bg-secondary p-3 text-sm">
+								<div class="flex items-center gap-2">
+									<BarChart3 size={14} class="text-accent-primary" />
+									<span class="font-medium">{selectedDatasource.name}</span>
+								</div>
+								<div class="mt-1 flex items-center gap-1 text-xs text-fg-muted">
+									<span>└─ Produced by:</span>
+									{#if selectedDatasource.created_by_analysis_id}
+										<span class="text-fg-secondary">Analysis</span>
+										{#if selectedDatasource.output_of_tab_id}
+											<ArrowRight size={10} />
+											<span class="text-fg-secondary">Tab</span>
+										{/if}
+									{:else}
+										<span class="text-fg-secondary">Unknown</span>
+									{/if}
+								</div>
+							</div>
+						{/if}
 					</div>
 				{/if}
-				{#if !datasourceId}
-					<div class="flex min-w-40 flex-1 flex-col gap-1">
-						<label for="schedule-datasource" class="text-xs text-fg-muted">Datasource</label>
-						<select
-							id="schedule-datasource"
-							class="border border-tertiary bg-transparent px-2 py-1 text-xs"
-							bind:value={newDatasourceId}
-						>
-							<option value="">All datasources</option>
-							{#each datasourcesQuery.data ?? [] as ds (ds.id)}
-								<option value={ds.id}>{ds.name} ({ds.source_type})</option>
-							{/each}
-						</select>
-					</div>
-				{/if}
-				<div class="flex min-w-32 flex-col gap-1">
-					<label for="schedule-cron" class="text-xs text-fg-muted">Cron Expression</label>
-					<input
-						id="schedule-cron"
-						type="text"
-						class="border border-tertiary bg-transparent px-2 py-1 font-mono text-xs"
-						bind:value={newCron}
-						placeholder="0 * * * *"
-					/>
+			</div>
+
+			<!-- Trigger Section -->
+			<div>
+				<div class="mb-3 flex items-center gap-2 border-b border-tertiary pb-2">
+					<Clock size={14} class="text-accent-primary" />
+					<span class="text-xs font-medium">When to Run — What triggers the build</span>
 				</div>
-				<div class="flex min-w-40 flex-col gap-1">
-					<label for="schedule-depends" class="text-xs text-fg-muted">Depends On</label>
-					<select
-						id="schedule-depends"
-						class="border border-tertiary bg-transparent px-2 py-1 text-xs"
-						bind:value={newDependsOn}
+
+				<div class="space-y-3">
+					<!-- Cron Option -->
+					<label
+						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
-						<option value="">None</option>
-						{#each depOptions() as dep (dep.id)}
-							<option value={dep.id}>{depLabel(dep.id)}</option>
-						{/each}
-					</select>
-				</div>
-				<div class="flex gap-2">
-					<button
-						class="border border-tertiary bg-accent-bg px-2 py-1 text-xs text-accent-primary hover:bg-accent-bg/80"
-						onclick={handleCreate}
-						disabled={(!analysisId && !newAnalysisId) || !newCron || createMut.isPending}
+						<input
+							type="radio"
+							name="triggerType"
+							value="cron"
+							bind:group={triggerType}
+							class="mt-0.5"
+						/>
+						<div class="flex-1">
+							<div class="mb-1 text-xs font-medium">On a Schedule</div>
+							<p class="m-0 text-xs text-fg-tertiary">Run on a recurring cron interval</p>
+							{#if triggerType === 'cron'}
+								<div class="mt-2 flex items-center gap-2">
+									<input
+										type="text"
+										class="w-32 border border-tertiary bg-transparent px-2 py-1 font-mono text-xs"
+										bind:value={newCron}
+										placeholder="0 * * * *"
+									/>
+									<span class="text-xs text-fg-muted">{getCronDescription(newCron)}</span>
+								</div>
+							{/if}
+						</div>
+					</label>
+
+					<!-- Depends Option -->
+					<label
+						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
-						{createMut.isPending ? 'Creating...' : 'Create'}
-					</button>
-					<button
-						class="border border-tertiary bg-transparent px-2 py-1 text-xs text-fg-tertiary hover:text-fg-primary"
-						onclick={() => (creating = false)}
+						<input
+							type="radio"
+							name="triggerType"
+							value="depends"
+							bind:group={triggerType}
+							class="mt-0.5"
+						/>
+						<div class="flex-1">
+							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
+								<Link size={12} class="text-fg-muted" />
+								After Another Schedule
+							</div>
+							<p class="m-0 text-xs text-fg-tertiary">
+								Run after another schedule completes successfully
+							</p>
+							{#if triggerType === 'depends'}
+								<div class="mt-2">
+									<select
+										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
+										bind:value={newDependsOn}
+									>
+										<option value="">Select a schedule...</option>
+										{#each depOptions() as dep (dep.id)}
+											<option value={dep.id}>{depLabel(dep.id)}</option>
+										{/each}
+									</select>
+								</div>
+							{/if}
+						</div>
+					</label>
+
+					<!-- Event Option -->
+					<label
+						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
-						Cancel
-					</button>
+						<input
+							type="radio"
+							name="triggerType"
+							value="event"
+							bind:group={triggerType}
+							class="mt-0.5"
+						/>
+						<div class="flex-1">
+							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
+								<Database size={12} class="text-fg-muted" />
+								When Dataset Updates
+							</div>
+							<p class="m-0 text-xs text-fg-tertiary">Run when a specific datasource is updated</p>
+							{#if triggerType === 'event'}
+								<div class="mt-2">
+									<select
+										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
+										bind:value={newTrigger}
+									>
+										<option value="">Select a datasource...</option>
+										{#each triggerables as ds (ds.id)}
+											<option value={ds.id}>{ds.name}</option>
+										{/each}
+									</select>
+								</div>
+							{/if}
+						</div>
+					</label>
 				</div>
 			</div>
+
+			<div class="mt-4 flex gap-2 border-t border-tertiary pt-4">
+				<button
+					class="border border-tertiary bg-accent-bg px-3 py-1.5 text-xs text-accent-primary hover:bg-accent-bg/80"
+					onclick={handleCreate}
+					disabled={(!datasourceId && !newDatasourceId) ||
+						(triggerType === 'cron' && !newCron) ||
+						(triggerType === 'depends' && !newDependsOn) ||
+						(triggerType === 'event' && !newTrigger) ||
+						createMut.isPending}
+				>
+					{createMut.isPending ? 'Creating...' : 'Create Schedule'}
+				</button>
+				<button
+					class="border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-tertiary hover:text-fg-primary"
+					onclick={() => (creating = false)}
+				>
+					Cancel
+				</button>
+			</div>
+
 			{#if createMut.isError}
-				<p class="mt-2 text-xs text-error-fg">
+				<p class="mt-3 text-xs text-error-fg">
 					{createMut.error instanceof Error ? createMut.error.message : 'Failed to create schedule'}
 				</p>
 			{/if}
@@ -388,7 +610,7 @@
 			<p class="text-sm text-fg-muted">No schedules configured.</p>
 			{#if !compact}
 				<p class="text-xs text-fg-tertiary">
-					Create a schedule to automatically build analyses on a cron-based interval.
+					Create a schedule to automatically rebuild datasets on a trigger.
 				</p>
 			{/if}
 		</div>
@@ -398,21 +620,21 @@
 				<thead>
 					<tr class="bg-bg-tertiary">
 						<th class="w-6 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
-						{#if !analysisId}
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Analysis</th>
-						{/if}
 						{#if !datasourceId}
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Datasource</th>
+							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Target</th>
 						{/if}
-						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Cron</th>
+						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Produced By</th>
+						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Trigger</th>
 						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Status</th>
-						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Last Run</th>
 						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Next Run</th>
 						<th class="w-16 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each schedules as schedule (schedule.id)}
+						{@const triggerTypeValue = getTriggerType(schedule)}
+						{@const triggerDesc = getTriggerDescription(schedule)}
+						{@const provenanceDisplay = getProvenanceDisplay(schedule)}
 						<tr
 							class="cursor-pointer hover:bg-bg-hover"
 							class:bg-bg-secondary={expandedId === schedule.id}
@@ -424,35 +646,35 @@
 									class="transition-transform {expandedId === schedule.id ? '' : '-rotate-90'}"
 								/>
 							</td>
-							{#if !analysisId}
-								<td class="border-b border-tertiary px-2 py-1.5">
-									<span
-										class="block max-w-40 truncate text-fg-secondary"
-										title={resolveName(schedule.analysis_id)}
-									>
-										{resolveName(schedule.analysis_id)}
-									</span>
-								</td>
-							{/if}
 							{#if !datasourceId}
 								<td class="border-b border-tertiary px-2 py-1.5">
 									<span
 										class="inline-flex max-w-40 items-center gap-1 truncate text-fg-secondary"
 										title={resolveDatasource(schedule.datasource_id)}
 									>
-										{#if schedule.datasource_id}
-											<Database size={10} class="shrink-0 text-fg-muted" />
-											{resolveDatasource(schedule.datasource_id)}
-										{:else}
-											<span class="text-fg-muted">All</span>
-										{/if}
+										<BarChart3 size={10} class="shrink-0 text-fg-muted" />
+										{resolveDatasource(schedule.datasource_id)}
 									</span>
 								</td>
 							{/if}
 							<td class="border-b border-tertiary px-2 py-1.5">
-								<code class="bg-bg-tertiary px-1 py-0.5 text-[10px]"
-									>{schedule.cron_expression}</code
-								>
+								<span class="block max-w-48 truncate text-fg-secondary" title={provenanceDisplay}>
+									{provenanceDisplay}
+								</span>
+							</td>
+							<td class="border-b border-tertiary px-2 py-1.5">
+								<div class="flex items-center gap-1.5">
+									{#if triggerTypeValue === 'cron'}
+										<Clock size={12} class="shrink-0 text-fg-muted" />
+									{:else if triggerTypeValue === 'depends'}
+										<Link size={12} class="shrink-0 text-fg-muted" />
+									{:else}
+										<Database size={12} class="shrink-0 text-fg-muted" />
+									{/if}
+									<span class="truncate" title={triggerDesc}>
+										{triggerDesc}
+									</span>
+								</div>
 							</td>
 							<td class="border-b border-tertiary px-2 py-1.5">
 								<button
@@ -472,12 +694,6 @@
 										<span class="text-fg-muted">Off</span>
 									{/if}
 								</button>
-							</td>
-							<td class="border-b border-tertiary px-2 py-1.5 text-fg-secondary">
-								<span class="inline-flex items-center gap-1">
-									<Clock size={10} class="text-fg-muted" />
-									{formatDate(schedule.last_run)}
-								</span>
 							</td>
 							<td class="border-b border-tertiary px-2 py-1.5 text-fg-secondary">
 								{formatDate(schedule.next_run)}
@@ -500,38 +716,20 @@
 							<tr>
 								<td colspan={colCount} class="border-b border-tertiary bg-bg-primary p-0">
 									<div class="flex flex-wrap items-start gap-4 px-4 py-3">
-										{#if !analysisId}
-											<div class="flex flex-col gap-1">
-												<span class="text-[10px] text-fg-muted">Analysis ID</span>
-												<span class="font-mono text-[10px] text-fg-secondary">
-													{schedule.analysis_id}
+										<div class="flex flex-col gap-1">
+											<span class="text-[10px] text-fg-muted">Target Datasource</span>
+											<div class="flex items-center gap-1">
+												<BarChart3 size={10} class="text-fg-muted" />
+												<span class="text-[10px] text-fg-secondary">
+													{resolveDatasource(schedule.datasource_id)}
 												</span>
 											</div>
-										{/if}
+										</div>
 										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Datasource</span>
-											<div class="flex items-center gap-1">
-												{#if !datasourceId}
-													<select
-														class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
-														value={schedule.datasource_id ?? ''}
-														onchange={(e) => handleDsChange(schedule.id, e.currentTarget.value)}
-														onclick={(e) => e.stopPropagation()}
-													>
-														<option value="">All</option>
-														{#each datasourcesQuery.data ?? [] as ds (ds.id)}
-															<option value={ds.id}>{ds.name} ({ds.source_type})</option>
-														{/each}
-													</select>
-													{#if schedule.datasource_id}
-														<Database size={10} class="text-fg-muted" />
-													{/if}
-												{:else}
-													<span class="text-[10px] text-fg-secondary">
-														{resolveDatasource(schedule.datasource_id)}
-													</span>
-												{/if}
-											</div>
+											<span class="text-[10px] text-fg-muted">Produced By</span>
+											<span class="text-[10px] text-fg-secondary">
+												{provenanceDisplay}
+											</span>
 										</div>
 										<div class="flex flex-col gap-1">
 											<span class="text-[10px] text-fg-muted">Cron Expression</span>
@@ -599,6 +797,25 @@
 												</select>
 												{#if schedule.depends_on}
 													<Link size={10} class="text-fg-muted" />
+												{/if}
+											</div>
+										</div>
+										<div class="flex flex-col gap-1">
+											<span class="text-[10px] text-fg-muted">On Datasource Update</span>
+											<div class="flex items-center gap-1">
+												<select
+													class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+													value={schedule.trigger_on_datasource_id ?? ''}
+													onchange={(e) => handleTriggerChange(schedule.id, e.currentTarget.value)}
+													onclick={(e) => e.stopPropagation()}
+												>
+													<option value="">None</option>
+													{#each triggerables as ds (ds.id)}
+														<option value={ds.id}>{ds.name}</option>
+													{/each}
+												</select>
+												{#if schedule.trigger_on_datasource_id}
+													<Database size={10} class="text-fg-muted" />
 												{/if}
 											</div>
 										</div>

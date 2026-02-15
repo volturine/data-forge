@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import delete, select
 from sqlmodel import Session
 
 from modules.analysis.models import Analysis, AnalysisDataSource
@@ -159,8 +159,25 @@ def update_analysis(
                         analysis_id=analysis_id,
                         analysis_tab_id=tab_id or None,
                         is_hidden=True,
+                        source_type='iceberg',
                     )
                     tab['output_datasource_id'] = output_ds.id
+                output_config = tab.get('datasource_config')
+                if not isinstance(output_config, dict):
+                    output_config = {}
+                if 'output' not in output_config:
+                    base_name = tab.get('name') or 'export'
+                    table_name = base_name.replace(' ', '_').lower() or 'export'
+                    output_config['output'] = {
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': base_name,
+                        'iceberg': {
+                            'namespace': 'exports',
+                            'table_name': table_name,
+                        },
+                    }
+                    tab['datasource_config'] = output_config
         datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
         if data.tabs is not None:
             datasource_ids = [tab.get('datasource_id') for tab in tabs_payload if tab.get('datasource_id')]
@@ -176,7 +193,9 @@ def update_analysis(
         analysis.pipeline_definition = pipeline_definition
 
         datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
-        session.execute(delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
+        session.execute(
+            delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)  # type: ignore[arg-type]
+        )  # type: ignore[arg-type]
         for datasource_id in datasource_ids:
             datasource = session.get(DataSource, datasource_id)
             if not datasource:
@@ -216,7 +235,9 @@ def delete_analysis(
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
 
-    session.execute(delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
+    session.execute(
+        delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)  # type: ignore[arg-type]
+    )  # type: ignore[arg-type]
 
     session.delete(analysis)
     session.commit()
@@ -241,11 +262,9 @@ def link_datasource(
 
     result = session.execute(
         select(AnalysisDataSource).where(
-            and_(
-                AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
-                AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
-            )
-        )
+            AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
+            AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
+        )  # type: ignore[arg-type]
     )  # type: ignore[arg-type]
     existing = result.scalar_one_or_none()
     if existing:
@@ -346,11 +365,9 @@ def unlink_datasource(
 
     session.execute(
         delete(AnalysisDataSource).where(
-            and_(
-                AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
-                AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
-            )
-        )
+            AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
+            AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
+        )  # type: ignore[arg-type]
     )  # type: ignore[arg-type]
 
     datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])

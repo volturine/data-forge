@@ -20,7 +20,6 @@
 		Sparkles,
 		Trophy,
 		Type,
-		Upload,
 		Wrench,
 		ListChecks,
 		Trash2,
@@ -53,8 +52,7 @@
 		chart: { label: 'Chart', icon: BarChart4 },
 		notification: { label: 'Notify', icon: Bell },
 		ai: { label: 'AI', icon: Sparkles },
-		view: { label: 'View', icon: Eye },
-		export: { label: 'Export', icon: Upload }
+		view: { label: 'View', icon: Eye }
 	};
 
 	// Derive reactive values from drag store

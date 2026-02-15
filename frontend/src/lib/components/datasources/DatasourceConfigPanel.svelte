@@ -12,7 +12,9 @@
 		Eye,
 		Download,
 		CircleCheck,
-		CircleX
+		CircleX,
+		Upload,
+		GitBranch
 	} from 'lucide-svelte';
 	import type {
 		DataSource,
@@ -359,8 +361,11 @@
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
 	const runs = $derived(runsQuery.data ?? []);
+	const isOutputDatasource = $derived(ds.created_by === 'analysis');
 	const scheduleAnalysisId = $derived(
-		ds.created_by_analysis_id ?? (ds.config?.analysis_id as string | undefined) ?? null
+		isOutputDatasource
+			? (ds.created_by_analysis_id ?? (ds.config?.analysis_id as string | undefined) ?? null)
+			: null
 	);
 
 	function formatDuration(ms: number | null): string {
@@ -519,6 +524,30 @@
 										Hidden
 									</span>
 								</div>
+							{/if}
+						</div>
+
+						<!-- Provenance -->
+						<div class="flex items-center gap-2">
+							<span class="uppercase tracking-wide text-fg-muted">Source</span>
+							{#if ds.created_by === 'analysis'}
+								<span class="inline-flex items-center gap-1 text-accent-primary">
+									<GitBranch size={12} />
+									<span class="font-medium">Analysis</span>
+								</span>
+								{#if ds.created_by_analysis_id}
+									<a
+										href={resolve(`/analysis/${ds.created_by_analysis_id}` as '/')}
+										class="text-accent-primary hover:underline font-mono text-[10px]"
+									>
+										Open Analysis
+									</a>
+								{/if}
+							{:else}
+								<span class="inline-flex items-center gap-1 text-fg-secondary">
+									<Upload size={12} />
+									<span class="font-medium">Imported</span>
+								</span>
 							{/if}
 						</div>
 
@@ -1039,8 +1068,8 @@
 			</div>
 		{:else if activeTab === 'health'}
 			<HealthChecksTab datasourceId={datasource.id} />
-		{:else if activeTab === 'schedules' && scheduleAnalysisId}
-			<ScheduleManager analysisId={scheduleAnalysisId} datasourceId={datasource.id} compact />
+		{:else if activeTab === 'schedules'}
+			<ScheduleManager datasourceId={datasource.id} compact />
 		{/if}
 	</div>
 </div>
@@ -1049,6 +1078,7 @@
 	datasourceId={datasource.id}
 	columnName={statsColumn}
 	open={statsOpen}
+	datasourceConfig={datasource.config as Record<string, unknown>}
 	onClose={() => {
 		statsOpen = false;
 		statsColumn = null;

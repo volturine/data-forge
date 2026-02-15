@@ -20,9 +20,13 @@ router = APIRouter(prefix='/telegram', tags=['telegram'])
 def bot_status(session: Session = Depends(get_db)) -> BotStatusResponse:
     subs = service.list_subscribers(session)
     active = sum(1 for s in subs if s.is_active)
+    from modules.settings.service import get_settings
+
+    settings = get_settings(session)
+    token_configured = bool(settings.telegram_bot_token)
     return BotStatusResponse(
         running=telegram_bot.running,
-        token_configured=bool(telegram_bot.token),
+        token_configured=token_configured,
         subscriber_count=active,
     )
 

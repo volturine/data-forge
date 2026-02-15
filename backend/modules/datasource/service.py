@@ -110,6 +110,7 @@ def create_analysis_datasource(
     analysis_id: str,
     analysis_tab_id: str | None = None,
     is_hidden: bool = False,
+    source_type: str = 'analysis',
 ) -> DataSourceResponse:
     from modules.analysis.models import Analysis
 
@@ -126,9 +127,10 @@ def create_analysis_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
-        source_type='analysis',
+        source_type=source_type,
         config=config,
         created_by_analysis_id=analysis_id,
+        created_by='analysis',
         is_hidden=is_hidden,
         created_at=datetime.now(UTC),
     )
@@ -137,7 +139,7 @@ def create_analysis_datasource(
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource_id, name, 'analysis', config)
+    _log_datasource_create(session, datasource_id, name, source_type, config)
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -736,7 +738,9 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
-    return DataSourceResponse.model_validate(datasource)
+    response = DataSourceResponse.model_validate(datasource)
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+    return response
 
 
 def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceResponse]:
@@ -750,7 +754,7 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
     # Populate schema_cache for datasources that don't have it
     for ds in datasources:
         if ds.schema_cache is None:
-            if ds.source_type == 'analysis':
+            if ds.source_type == 'analysis' or ds.created_by == 'analysis':
                 continue
             try:
                 schema_info = _extract_schema(ds)
@@ -760,7 +764,12 @@ def list_datasources(session: Session, include_hidden: bool = False) -> list[Dat
                 logger.warning(f'Failed to extract schema for datasource {ds.id}: {e}')
 
     session.commit()
-    return [DataSourceResponse.model_validate(ds) for ds in datasources]
+    results: list[DataSourceResponse] = []
+    for ds in datasources:
+        item = DataSourceResponse.model_validate(ds)
+        item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
+        results.append(item)
+    return results
 
 
 def update_datasource(
@@ -830,18 +839,23 @@ def update_datasource(
     session.commit()
     session.refresh(datasource)
 
-    run_payload = engine_run_service.create_engine_run_payload(
-        analysis_id=None,
-        datasource_id=datasource_id,
-        kind='datasource_update',
-        status='success',
-        request_json=update.model_dump(exclude_none=True),
-        result_json={'datasource_id': datasource_id, 'datasource_name': datasource.name},
-    )
-    engine_run_service.create_engine_run(session, run_payload)
+    # Only log engine run for non-metadata updates (is_hidden toggle is metadata-only)
+    has_config_or_name_update = update.name is not None or update.config is not None
+    if has_config_or_name_update:
+        run_payload = engine_run_service.create_engine_run_payload(
+            analysis_id=None,
+            datasource_id=datasource_id,
+            kind='datasource_update',
+            status='success',
+            request_json=update.model_dump(exclude_none=True),
+            result_json={'datasource_id': datasource_id, 'datasource_name': datasource.name},
+        )
+        engine_run_service.create_engine_run(session, run_payload)
 
     logger.info(f'Updated datasource {datasource_id}')
-    return DataSourceResponse.model_validate(datasource)
+    response = DataSourceResponse.model_validate(datasource)
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+    return response
 
 
 def _compute_histogram(series: pl.Series, bins: int = 20) -> list[dict[str, object]]:
@@ -871,6 +885,7 @@ def get_column_stats(
     column_name: str,
     use_sample: bool = True,
     sample_size: int = 10000,
+    datasource_config: dict | None = None,
 ) -> ColumnStatsResponse:
     datasource = session.get(DataSource, datasource_id)
 
@@ -881,6 +896,8 @@ def get_column_stats(
         'source_type': datasource.source_type,
         **datasource.config,
     }
+    if datasource_config:
+        config = {**config, **datasource_config}
     lazy = load_datasource(config)
 
     schema = lazy.collect_schema()

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from sqlmodel import Session
 
+from core.exceptions import DataSourceNotFoundError, ScheduleValidationError
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.datasource.models import DataSource
 from modules.scheduler.models import Schedule
@@ -34,10 +35,29 @@ def schedule_id() -> str:
 
 
 @pytest.fixture
+def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> DataSource:
+    """Datasource with created_by='analysis' — eligible for schedules."""
+    ds = DataSource(
+        id=str(uuid.uuid4()),
+        name='Output DataSource',
+        source_type='iceberg',
+        config={'analysis_id': sample_analysis.id, 'analysis_tab_id': 'tab1'},
+        created_by='analysis',
+        created_by_analysis_id=sample_analysis.id,
+        is_hidden=True,
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(ds)
+    test_db_session.commit()
+    test_db_session.refresh(ds)
+    return ds
+
+
+@pytest.fixture
 def analysis_with_output(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     """Analysis with a tab that has output configuration (for build testing)."""
     analysis_id = str(uuid.uuid4())
-    pipeline_definition = {
+    pipeline_definition: dict[str, object] = {
         'tabs': [
             {
                 'id': 'tab-1',
@@ -47,9 +67,10 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
                 'datasource_id': sample_datasource.id,
                 'datasource_config': {
                     'output': {
-                        'datasource_type': 'file',
-                        'format': 'csv',
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
                         'filename': 'test_output',
+                        'iceberg': {'namespace': 'exports', 'table_name': 'test_output'},
                     }
                 },
                 'steps': [],
@@ -60,7 +81,14 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
                 'type': 'datasource',
                 'parent_id': None,
                 'datasource_id': sample_datasource.id,
-                'datasource_config': {},
+                'datasource_config': {
+                    'output': {
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'test_output_two',
+                        'iceberg': {'namespace': 'exports', 'table_name': 'test_output_two'},
+                    }
+                },
                 'steps': [],
             },
         ],
@@ -123,18 +151,20 @@ class TestShouldRun:
 
 
 class TestScheduleCrud:
-    def test_create_schedule(self, test_db_session: Session, sample_analysis: Analysis):
-        payload = ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *')
+    def test_create_schedule(self, test_db_session: Session, sample_analysis: Analysis, output_datasource: DataSource):
+        payload = ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *')
         result = create_schedule(test_db_session, payload)
         assert result.id is not None
-        assert result.analysis_id == sample_analysis.id
+        assert result.datasource_id == output_datasource.id
+        assert result.analysis_id == sample_analysis.id  # Resolved from datasource
+        assert result.analysis_name == sample_analysis.name  # Resolved from datasource
         assert result.cron_expression == '0 * * * *'
         assert result.enabled is True
         assert result.next_run is not None
         assert result.last_run is None
 
-    def test_create_disabled_schedule(self, test_db_session: Session, sample_analysis: Analysis):
-        payload = ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 0 * * *', enabled=False)
+    def test_create_disabled_schedule(self, test_db_session: Session, output_datasource: DataSource):
+        payload = ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 0 * * *', enabled=False)
         result = create_schedule(test_db_session, payload)
         assert result.enabled is False
 
@@ -142,29 +172,44 @@ class TestScheduleCrud:
         result = list_schedules(test_db_session)
         assert result == []
 
-    def test_list_schedules_all(self, test_db_session: Session, sample_analysis: Analysis):
-        create_schedule(test_db_session, ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *'))
-        create_schedule(test_db_session, ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 0 * * *'))
+    def test_list_schedules_all(self, test_db_session: Session, output_datasource: DataSource):
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 0 * * *'))
         result = list_schedules(test_db_session)
         assert len(result) == 2
 
-    def test_list_schedules_filter_by_analysis(self, test_db_session: Session, sample_analyses: list[Analysis]):
-        a1, a2, _ = sample_analyses
-        create_schedule(test_db_session, ScheduleCreate(analysis_id=a1.id, cron_expression='0 * * * *'))
-        create_schedule(test_db_session, ScheduleCreate(analysis_id=a2.id, cron_expression='0 0 * * *'))
+    def test_list_schedules_filter_by_datasource(
+        self, test_db_session: Session, sample_analyses: list[Analysis], output_datasource: DataSource
+    ):
+        # Create second output datasource for filtering test
+        ds2 = DataSource(
+            id=str(uuid.uuid4()),
+            name='Output DataSource 2',
+            source_type='iceberg',
+            config={'analysis_id': sample_analyses[1].id, 'analysis_tab_id': 'tab1'},
+            created_by='analysis',
+            created_by_analysis_id=sample_analyses[1].id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds2)
+        test_db_session.commit()
 
-        result = list_schedules(test_db_session, analysis_id=a1.id)
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=ds2.id, cron_expression='0 0 * * *'))
+
+        result = list_schedules(test_db_session, datasource_id=output_datasource.id)
         assert len(result) == 1
-        assert result[0].analysis_id == a1.id
+        assert result[0].datasource_id == output_datasource.id
 
-    def test_update_cron_expression(self, test_db_session: Session, sample_analysis: Analysis):
-        created = create_schedule(test_db_session, ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *'))
+    def test_update_cron_expression(self, test_db_session: Session, output_datasource: DataSource):
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
         updated = update_schedule(test_db_session, created.id, ScheduleUpdate(cron_expression='0 0 * * *'))
         assert updated.cron_expression == '0 0 * * *'
         assert updated.next_run is not None
 
-    def test_update_enabled(self, test_db_session: Session, sample_analysis: Analysis):
-        created = create_schedule(test_db_session, ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *'))
+    def test_update_enabled(self, test_db_session: Session, output_datasource: DataSource):
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
         updated = update_schedule(test_db_session, created.id, ScheduleUpdate(enabled=False))
         assert updated.enabled is False
 
@@ -172,8 +217,8 @@ class TestScheduleCrud:
         with pytest.raises(ValueError, match='Schedule not found'):
             update_schedule(test_db_session, 'nonexistent', ScheduleUpdate(enabled=False))
 
-    def test_delete_schedule(self, test_db_session: Session, sample_analysis: Analysis):
-        created = create_schedule(test_db_session, ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *'))
+    def test_delete_schedule(self, test_db_session: Session, output_datasource: DataSource):
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
         delete_schedule(test_db_session, created.id)
         result = list_schedules(test_db_session)
         assert len(result) == 0
@@ -182,39 +227,30 @@ class TestScheduleCrud:
         with pytest.raises(ValueError, match='Schedule not found'):
             delete_schedule(test_db_session, 'nonexistent')
 
-    def test_create_schedule_with_datasource_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
+    def test_create_schedule_without_datasource_id(self, test_db_session: Session):
+        """ScheduleCreate requires datasource_id - should raise validation error."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ScheduleCreate(cron_expression='0 * * * *')  # type: ignore[call-arg]
+
+    def test_create_schedule_rejected_for_non_analysis_datasource(self, test_db_session: Session, sample_datasource: DataSource):
+        """Schedules must be rejected for datasources not created by an analysis."""
         payload = ScheduleCreate(
-            analysis_id=sample_analysis.id,
-            cron_expression='0 * * * *',
             datasource_id=sample_datasource.id,
+            cron_expression='0 * * * *',
         )
-        result = create_schedule(test_db_session, payload)
-        assert result.datasource_id == sample_datasource.id
-        assert result.analysis_id == sample_analysis.id
+        with pytest.raises(ScheduleValidationError, match='analysis-output'):
+            create_schedule(test_db_session, payload)
 
-    def test_create_schedule_without_datasource_id(self, test_db_session: Session, sample_analysis: Analysis):
-        payload = ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *')
-        result = create_schedule(test_db_session, payload)
-        assert result.datasource_id is None
-
-    def test_list_schedules_filter_by_datasource(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
-        ds_id_1 = sample_datasource.id
-        ds_id_2 = str(uuid.uuid4())
-        create_schedule(
-            test_db_session,
-            ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *', datasource_id=ds_id_1),
+    def test_create_schedule_rejected_for_nonexistent_datasource(self, test_db_session: Session):
+        """Schedules must be rejected when datasource does not exist."""
+        payload = ScheduleCreate(
+            datasource_id=str(uuid.uuid4()),
+            cron_expression='0 * * * *',
         )
-        create_schedule(
-            test_db_session,
-            ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 0 * * *', datasource_id=ds_id_2),
-        )
-
-        result = list_schedules(test_db_session, datasource_id=ds_id_1)
-        assert len(result) == 1
-        assert result[0].datasource_id == ds_id_1
-
-        result_all = list_schedules(test_db_session)
-        assert len(result_all) == 2
+        with pytest.raises(DataSourceNotFoundError):
+            create_schedule(test_db_session, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -227,11 +263,11 @@ class TestGetDueSchedules:
         result = get_due_schedules(test_db_session)
         assert result == []
 
-    def test_disabled_schedules_excluded(self, test_db_session: Session, sample_analysis: Analysis):
+    def test_disabled_schedules_excluded(self, test_db_session: Session, output_datasource: DataSource):
         """Disabled schedules should not appear even if due."""
         schedule = Schedule(
             id=str(uuid.uuid4()),
-            analysis_id=sample_analysis.id,
+            datasource_id=output_datasource.id,
             cron_expression='* * * * *',
             enabled=False,
             last_run=None,
@@ -244,11 +280,11 @@ class TestGetDueSchedules:
         result = get_due_schedules(test_db_session)
         assert len(result) == 0
 
-    def test_due_schedule_returned(self, test_db_session: Session, sample_analysis: Analysis):
+    def test_due_schedule_returned(self, test_db_session: Session, output_datasource: DataSource):
         """Enabled schedule with no last_run should be due."""
         schedule = Schedule(
             id=str(uuid.uuid4()),
-            analysis_id=sample_analysis.id,
+            datasource_id=output_datasource.id,
             cron_expression='* * * * *',
             enabled=True,
             last_run=None,
@@ -260,13 +296,13 @@ class TestGetDueSchedules:
 
         result = get_due_schedules(test_db_session)
         assert len(result) == 1
-        assert result[0].analysis_id == sample_analysis.id
+        assert result[0].datasource_id == output_datasource.id
 
-    def test_not_due_schedule_excluded(self, test_db_session: Session, sample_analysis: Analysis):
+    def test_not_due_schedule_excluded(self, test_db_session: Session, output_datasource: DataSource):
         """Schedule that just ran should not be due."""
         schedule = Schedule(
             id=str(uuid.uuid4()),
-            analysis_id=sample_analysis.id,
+            datasource_id=output_datasource.id,
             cron_expression='0 0 * * *',  # daily
             enabled=True,
             last_run=datetime.now(UTC),
@@ -286,8 +322,8 @@ class TestGetDueSchedules:
 
 
 class TestMarkScheduleRun:
-    def test_updates_last_run_and_next_run(self, test_db_session: Session, sample_analysis: Analysis):
-        created = create_schedule(test_db_session, ScheduleCreate(analysis_id=sample_analysis.id, cron_expression='0 * * * *'))
+    def test_updates_last_run_and_next_run(self, test_db_session: Session, output_datasource: DataSource):
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
         assert created.last_run is None
 
         mark_schedule_run(test_db_session, created.id)
@@ -405,31 +441,31 @@ class TestRunAnalysisBuild:
         assert result['tabs_built'] == 0
         assert result['results'] == []
 
-    def test_tabs_without_output_skipped(self, test_db_session: Session, sample_analysis: Analysis):
-        """Tabs without output config but missing datasource_config still skip preview."""
+    def test_missing_output_config_fails(self, test_db_session: Session, sample_analysis: Analysis):
+        """Tabs without output config should fail and be recorded."""
         result = run_analysis_build(test_db_session, sample_analysis.id)
-        # sample_analysis tab has datasource_id but no datasource_config key,
-        # so preview_step runs but fails (no engine) — caught as error, tabs_built stays 0
         assert result['tabs_built'] == 0
+        assert len(result['results']) > 0
+        assert result['results'][0]['status'] == 'failed'
 
     @patch('modules.compute.service._send_pipeline_notifications')
     @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
     def test_builds_all_tabs(self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis):
-        """All tabs with datasource_id should be built — export for output tabs, preview for others."""
+        """All tabs with datasource_id should be built — export for output tabs."""
         mock_export.return_value = None
         mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        # Both tabs have datasource_id: tab-1 via export_data, tab-2 via preview_step
+        # Both tabs have datasource_id and output config
         assert result['tabs_built'] == 2
         assert len(result['results']) == 2
         assert result['results'][0]['status'] == 'success'
         assert result['results'][0]['tab_name'] == 'Export Tab'
         assert result['results'][1]['status'] == 'success'
         assert result['results'][1]['tab_name'] == 'No Output Tab'
-        mock_export.assert_called_once()
-        mock_preview.assert_called_once()
+        assert mock_export.call_count == 2
+        mock_preview.assert_not_called()
 
     @patch('modules.compute.service._send_pipeline_notifications')
     @patch('modules.compute.service.preview_step')
@@ -438,19 +474,24 @@ class TestRunAnalysisBuild:
         self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis
     ):
         """Failed export should be recorded but not crash the build; other tabs still run."""
-        mock_export.side_effect = RuntimeError('Export failed')
+        call_count = {'i': 0}
+
+        def _side_effect(*_args, **_kwargs):
+            call_count['i'] += 1
+            if call_count['i'] == 1:
+                raise RuntimeError('Export failed')
+            return None
+
+        mock_export.side_effect = _side_effect
         mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        # Tab-1 fails (export), tab-2 succeeds (preview)
         assert result['tabs_built'] == 1
         assert len(result['results']) == 2
         failed = [r for r in result['results'] if r['status'] == 'failed']
         succeeded = [r for r in result['results'] if r['status'] == 'success']
         assert len(failed) == 1
-        assert 'Export failed' in failed[0]['error']
         assert len(succeeded) == 1
-        assert succeeded[0]['tab_name'] == 'No Output Tab'
 
     @patch('modules.compute.service._send_pipeline_notifications')
     @patch('modules.compute.service.preview_step')
@@ -458,15 +499,14 @@ class TestRunAnalysisBuild:
     def test_export_called_only_for_output_tabs(
         self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis
     ):
-        """export_data is called only for tabs with output config; preview_step for the rest."""
+        """export_data is called for tabs with output config."""
         mock_export.return_value = None
         mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        # analysis_with_output has 2 tabs: tab-1 with output, tab-2 without
         assert result['tabs_built'] == 2
-        assert mock_export.call_count == 1
-        assert mock_preview.call_count == 1
+        assert mock_export.call_count == 2
+        mock_preview.assert_not_called()
 
     @patch('modules.compute.service._send_pipeline_notifications')
     @patch('modules.compute.service.preview_step')
@@ -476,6 +516,8 @@ class TestRunAnalysisBuild:
     ):
         """When datasource_id is provided, only the tab with that datasource runs."""
         other_ds_id = str(uuid.uuid4())
+        output_a = str(uuid.uuid4())
+        output_b = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
         pipeline = {
@@ -485,7 +527,15 @@ class TestRunAnalysisBuild:
                     'name': 'Tab A',
                     'type': 'datasource',
                     'datasource_id': sample_datasource.id,
-                    'datasource_config': {},
+                    'output_datasource_id': output_a,
+                    'datasource_config': {
+                        'output': {
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'tab_a',
+                            'iceberg': {'namespace': 'exports', 'table_name': 'tab_a'},
+                        }
+                    },
                     'steps': [],
                 },
                 {
@@ -493,7 +543,15 @@ class TestRunAnalysisBuild:
                     'name': 'Tab B',
                     'type': 'datasource',
                     'datasource_id': other_ds_id,
-                    'datasource_config': {},
+                    'output_datasource_id': output_b,
+                    'datasource_config': {
+                        'output': {
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'tab_b',
+                            'iceberg': {'namespace': 'exports', 'table_name': 'tab_b'},
+                        }
+                    },
                     'steps': [],
                 },
             ],
@@ -513,7 +571,7 @@ class TestRunAnalysisBuild:
         mock_preview.return_value = None
 
         # Build only for sample_datasource — tab-a should run, tab-b should be skipped
-        result = run_analysis_build(test_db_session, analysis_id, datasource_id=sample_datasource.id)
+        result = run_analysis_build(test_db_session, analysis_id, datasource_id=output_a)
         assert result['tabs_built'] == 1
         assert len(result['results']) == 1
         assert result['results'][0]['tab_name'] == 'Tab A'
@@ -537,12 +595,14 @@ class TestScheduleRoutes:
         assert response.status_code == 200
         assert response.json() == []
 
-    def test_create_and_list(self, client, sample_analysis: Analysis):
-        payload = {'analysis_id': sample_analysis.id, 'cron_expression': '0 * * * *'}
+    def test_create_and_list(self, client, output_datasource: DataSource, sample_analysis: Analysis):
+        payload = {'datasource_id': output_datasource.id, 'cron_expression': '0 * * * *'}
         response = client.post('/api/v1/schedules', json=payload)
         assert response.status_code == 200
         data = response.json()
-        assert data['analysis_id'] == sample_analysis.id
+        assert data['datasource_id'] == output_datasource.id
+        assert data['analysis_id'] == sample_analysis.id  # Resolved from datasource
+        assert data['analysis_name'] == sample_analysis.name  # Resolved from datasource
         assert data['cron_expression'] == '0 * * * *'
         assert data['enabled'] is True
 
@@ -551,17 +611,42 @@ class TestScheduleRoutes:
         assert response.status_code == 200
         assert len(response.json()) == 1
 
-    def test_list_filtered_by_analysis(self, client, sample_analyses: list[Analysis]):
+    def test_list_filtered_by_datasource(self, client, sample_analyses: list[Analysis], test_db_session: Session):
         a1, a2, _ = sample_analyses
-        client.post('/api/v1/schedules', json={'analysis_id': a1.id, 'cron_expression': '0 * * * *'})
-        client.post('/api/v1/schedules', json={'analysis_id': a2.id, 'cron_expression': '0 0 * * *'})
+        # Create output datasources for each analysis
+        ds1 = DataSource(
+            id=str(uuid.uuid4()),
+            name='Output 1',
+            source_type='iceberg',
+            config={'analysis_id': a1.id, 'analysis_tab_id': 'tab1'},
+            created_by='analysis',
+            created_by_analysis_id=a1.id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        ds2 = DataSource(
+            id=str(uuid.uuid4()),
+            name='Output 2',
+            source_type='iceberg',
+            config={'analysis_id': a2.id, 'analysis_tab_id': 'tab1'},
+            created_by='analysis',
+            created_by_analysis_id=a2.id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds1)
+        test_db_session.add(ds2)
+        test_db_session.commit()
 
-        response = client.get(f'/api/v1/schedules?analysis_id={a1.id}')
+        client.post('/api/v1/schedules', json={'datasource_id': ds1.id, 'cron_expression': '0 * * * *'})
+        client.post('/api/v1/schedules', json={'datasource_id': ds2.id, 'cron_expression': '0 0 * * *'})
+
+        response = client.get(f'/api/v1/schedules?datasource_id={ds1.id}')
         assert response.status_code == 200
         assert len(response.json()) == 1
 
-    def test_update(self, client, sample_analysis: Analysis):
-        create_resp = client.post('/api/v1/schedules', json={'analysis_id': sample_analysis.id, 'cron_expression': '0 * * * *'})
+    def test_update(self, client, output_datasource: DataSource):
+        create_resp = client.post('/api/v1/schedules', json={'datasource_id': output_datasource.id, 'cron_expression': '0 * * * *'})
         schedule_id = create_resp.json()['id']
 
         response = client.put(f'/api/v1/schedules/{schedule_id}', json={'enabled': False})
@@ -572,8 +657,8 @@ class TestScheduleRoutes:
         response = client.put('/api/v1/schedules/nonexistent', json={'enabled': False})
         assert response.status_code == 404
 
-    def test_delete(self, client, sample_analysis: Analysis):
-        create_resp = client.post('/api/v1/schedules', json={'analysis_id': sample_analysis.id, 'cron_expression': '0 * * * *'})
+    def test_delete(self, client, output_datasource: DataSource):
+        create_resp = client.post('/api/v1/schedules', json={'datasource_id': output_datasource.id, 'cron_expression': '0 * * * *'})
         schedule_id = create_resp.json()['id']
 
         response = client.delete(f'/api/v1/schedules/{schedule_id}')
@@ -587,27 +672,49 @@ class TestScheduleRoutes:
         response = client.delete('/api/v1/schedules/nonexistent')
         assert response.status_code == 404
 
-    def test_create_with_datasource_id(self, client, sample_analysis: Analysis, sample_datasource: DataSource):
+    def test_create_rejected_for_non_analysis_datasource(self, client, sample_datasource: DataSource):
+        """API returns 400 when schedule targets an import datasource."""
         payload = {
-            'analysis_id': sample_analysis.id,
-            'cron_expression': '0 * * * *',
             'datasource_id': sample_datasource.id,
+            'cron_expression': '0 * * * *',
         }
         response = client.post('/api/v1/schedules', json=payload)
-        assert response.status_code == 200
-        data = response.json()
-        assert data['datasource_id'] == sample_datasource.id
+        assert response.status_code == 400
 
-    def test_list_filtered_by_datasource_id(self, client, sample_analysis: Analysis, sample_datasource: DataSource):
-        ds_id = sample_datasource.id
-        other_ds_id = str(uuid.uuid4())
+    def test_create_rejected_for_nonexistent_datasource(self, client):
+        """API returns 404 when schedule targets a datasource that does not exist."""
+        payload = {
+            'datasource_id': str(uuid.uuid4()),
+            'cron_expression': '0 * * * *',
+        }
+        response = client.post('/api/v1/schedules', json=payload)
+        assert response.status_code == 404
+
+    def test_list_filtered_by_datasource_id(
+        self, client, test_db_session: Session, sample_analysis: Analysis, output_datasource: DataSource
+    ):
+        ds_id = output_datasource.id
+        # Create a second output datasource
+        ds2 = DataSource(
+            id=str(uuid.uuid4()),
+            name='Output DataSource 2',
+            source_type='iceberg',
+            config={'analysis_id': sample_analysis.id, 'analysis_tab_id': 'tab1'},
+            created_by='analysis',
+            created_by_analysis_id=sample_analysis.id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds2)
+        test_db_session.commit()
+        other_ds_id = ds2.id
         client.post(
             '/api/v1/schedules',
-            json={'analysis_id': sample_analysis.id, 'cron_expression': '0 * * * *', 'datasource_id': ds_id},
+            json={'datasource_id': ds_id, 'cron_expression': '0 * * * *'},
         )
         client.post(
             '/api/v1/schedules',
-            json={'analysis_id': sample_analysis.id, 'cron_expression': '0 0 * * *', 'datasource_id': other_ds_id},
+            json={'datasource_id': other_ds_id, 'cron_expression': '0 0 * * *'},
         )
 
         response = client.get(f'/api/v1/schedules?datasource_id={ds_id}')

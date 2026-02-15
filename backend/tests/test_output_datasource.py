@@ -66,6 +66,7 @@ class TestCreateAnalysisDatasourceHidden:
         assert ds is not None
         assert ds.is_hidden is True
         assert ds.source_type == 'analysis'
+        assert ds.created_by == 'analysis'
         assert ds.created_by_analysis_id == sample_analysis.id
 
     def test_creates_visible_by_default(self, test_db_session: Session, sample_analysis: Analysis):
@@ -101,6 +102,8 @@ class TestUpsertOutputDatasource:
         assert ds.name == 'brand-new'
         assert ds.source_type == 'file'
         assert ds.created_by_analysis_id == 'a1'
+        assert ds.created_by == 'analysis'
+        assert ds.is_hidden is True
 
     def test_creates_new_when_id_not_found(self, test_db_session: Session):
         ds = _upsert_output_datasource(
@@ -115,6 +118,7 @@ class TestUpsertOutputDatasource:
         # Should create a new row with a different id
         assert ds.id != 'nonexistent-id'
         assert ds.name == 'fallback'
+        assert ds.is_hidden is True
 
     def test_updates_existing(self, test_db_session: Session):
         # Create an existing datasource
@@ -145,6 +149,7 @@ class TestUpsertOutputDatasource:
         assert ds.config == {'table': 't1'}
         assert ds.schema_cache == {'b': 'Utf8'}
         assert ds.created_by_analysis_id == 'a2'
+        assert ds.created_by == 'analysis'
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +185,8 @@ class TestUpdateAnalysisOutputDatasource:
         output_ds = test_db_session.get(DataSource, tab.output_datasource_id)
         assert output_ds is not None
         assert output_ds.is_hidden is True
-        assert output_ds.source_type == 'analysis'
+        assert output_ds.source_type == 'iceberg'
+        assert output_ds.created_by == 'analysis'
         assert output_ds.created_by_analysis_id == sample_analysis.id
 
     def test_reuses_existing_output_datasource(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
@@ -298,9 +304,10 @@ class TestRunAnalysisBuildOutputDatasource:
             call_kwargs = mock_export.call_args
             assert call_kwargs.kwargs.get('output_datasource_id') == output_ds_id
             assert call_kwargs.kwargs.get('triggered_by') == 'schedule'
+            mock_preview.assert_not_called()
 
-    def test_tab_without_output_config_uses_preview(self, test_db_session: Session, sample_datasource: DataSource):
-        """Tabs without output config should use preview_step, not export_data."""
+    def test_tab_without_output_config_fails(self, test_db_session: Session, sample_datasource: DataSource):
+        """Tabs without output config should fail."""
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
 
@@ -318,6 +325,7 @@ class TestRunAnalysisBuildOutputDatasource:
                         'type': 'datasource',
                         'datasource_id': sample_datasource.id,
                         'output_datasource_id': 'some-output-id',
+                        'datasource_config': {},
                         'steps': [],
                     }
                 ],
@@ -341,10 +349,10 @@ class TestRunAnalysisBuildOutputDatasource:
 
             result = run_analysis_build(test_db_session, analysis_id)
 
-            # No output config → should use preview
             mock_export.assert_not_called()
-            mock_preview.assert_called_once()
-            assert result['tabs_built'] == 1
+            mock_preview.assert_not_called()
+            assert result['tabs_built'] == 0
+            assert result['results'][0]['status'] == 'failed'
 
 
 # ---------------------------------------------------------------------------
@@ -400,3 +408,89 @@ class TestIsHiddenSemantics:
         test_db_session.commit()
         test_db_session.refresh(ds)
         assert ds.is_hidden is False
+        assert ds.created_by == 'import'
+
+
+# ---------------------------------------------------------------------------
+# source_type + created_by semantics
+# ---------------------------------------------------------------------------
+
+
+class TestSourceTypeCreatedBy:
+    """source_type reflects data format; created_by tracks origin."""
+
+    def test_input_analysis_datasource_keeps_source_type_analysis(self, test_db_session: Session, sample_analysis: Analysis):
+        """INPUT analysis datasources keep source_type='analysis' for engine dispatch."""
+        result = create_analysis_datasource(
+            session=test_db_session,
+            name='Input Ref',
+            analysis_id=sample_analysis.id,
+        )
+        ds = test_db_session.get(DataSource, result.id)
+        assert ds is not None
+        assert ds.source_type == 'analysis'
+        assert ds.created_by == 'analysis'
+
+    def test_output_datasource_uses_iceberg_source_type(self, test_db_session: Session, sample_analysis: Analysis):
+        """OUTPUT analysis datasources use source_type='iceberg'."""
+        result = create_analysis_datasource(
+            session=test_db_session,
+            name='Output',
+            analysis_id=sample_analysis.id,
+            analysis_tab_id='tab1',
+            is_hidden=True,
+            source_type='iceberg',
+        )
+        ds = test_db_session.get(DataSource, result.id)
+        assert ds is not None
+        assert ds.source_type == 'iceberg'
+        assert ds.created_by == 'analysis'
+        assert ds.is_hidden is True
+
+    def test_imported_file_datasource_created_by_import(self, test_db_session: Session):
+        """File datasources default to created_by='import'."""
+        ds = DataSource(
+            id=str(uuid.uuid4()),
+            name='uploaded',
+            source_type='file',
+            config={'file_path': '/tmp/data.csv', 'file_type': 'csv'},
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds)
+        test_db_session.commit()
+        test_db_session.refresh(ds)
+        assert ds.created_by == 'import'
+
+    def test_update_analysis_creates_output_with_iceberg_type(
+        self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
+    ):
+        """update_analysis creates output datasources with source_type='iceberg'."""
+        tabs = [
+            TabSchema(
+                id='tab1',
+                name='Source',
+                type='datasource',
+                datasource_id=sample_datasource.id,
+                steps=[],
+            ),
+        ]
+        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        result = update_analysis(test_db_session, sample_analysis.id, update)
+        output_ds = test_db_session.get(DataSource, result.tabs[0].output_datasource_id)
+        assert output_ds is not None
+        assert output_ds.source_type == 'iceberg'
+        assert output_ds.created_by == 'analysis'
+
+    def test_upsert_output_sets_created_by_analysis(self, test_db_session: Session):
+        """_upsert_output_datasource sets created_by='analysis'."""
+        ds = _upsert_output_datasource(
+            session=test_db_session,
+            output_datasource_id=None,
+            name='upserted',
+            source_type='iceberg',
+            config={'metadata_path': '/tmp/iceberg'},
+            schema_cache={},
+            analysis_id='a1',
+        )
+        assert ds.created_by == 'analysis'
+        assert ds.source_type == 'iceberg'

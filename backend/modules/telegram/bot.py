@@ -18,6 +18,9 @@ class TelegramBot:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._token: str = ''
+        self._poll_lock = threading.Lock()
+        self._offset_lock = threading.Lock()
+        self._offset_by_token: dict[str, int] = {}
 
     @property
     def running(self) -> bool:
@@ -30,6 +33,9 @@ class TelegramBot:
     def start(self, token: str) -> None:
         if self.running:
             self.stop()
+        if self.running:
+            logger.warning('Telegram bot stop in progress; start skipped')
+            return
         self._token = token
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True, name='telegram-bot')
@@ -39,24 +45,75 @@ class TelegramBot:
     def stop(self) -> None:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
+            # Use a short join timeout. The poll loop checks _stop_event
+            # and uses short poll timeouts when stopping, so it should
+            # exit within a few seconds.
+            self._thread.join(timeout=10)
+        if self._thread and self._thread.is_alive():
+            logger.warning('Telegram bot did not stop before timeout')
+            return
         self._thread = None
         logger.info('Telegram bot polling stopped')
 
+    def pause(self) -> None:
+        """Temporarily stop polling without clearing token.
+
+        Sets the stop event to signal the poll loop to exit, then waits
+        briefly. Does NOT block waiting for _poll_lock — the loop will
+        notice _stop_event and exit on its own.
+        """
+        if not self.running:
+            return
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        if self._thread and not self._thread.is_alive():
+            self._thread = None
+
+    def resume(self) -> None:
+        """Resume polling using the current token if configured."""
+        if not self._token:
+            return
+        if self.running:
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name='telegram-bot')
+        self._thread.start()
+
     def _poll_loop(self) -> None:
-        offset = 0
         consecutive_errors = 0
         max_consecutive_errors = 10
+        offset = self._get_offset(self._token)
         while not self._stop_event.is_set():
+            # Use a short poll timeout so the loop can exit quickly
+            # when _stop_event is set.
+            poll_timeout = 5 if self._stop_event.is_set() else 30
             try:
-                resp = httpx.get(
-                    f'{_TELEGRAM_BASE}/bot{self._token}/getUpdates',
-                    params={'offset': offset, 'timeout': 30},
-                    timeout=40,
+                resp = self._do_get_updates(
+                    self._token,
+                    params={'offset': offset, 'timeout': poll_timeout},
+                    timeout=poll_timeout + 10,
                 )
+                if resp is None:
+                    # Lock not acquired — another caller is using it
+                    time.sleep(1)
+                    continue
                 if resp.status_code == 401:
                     logger.error('Telegram bot token is invalid (401 Unauthorized) — stopping bot')
                     break
+                if resp.status_code == 409:
+                    consecutive_errors += 1
+                    logger.warning(
+                        'Telegram getUpdates conflict (409) — another poller or webhook is active (error %d/%d)',
+                        consecutive_errors,
+                        max_consecutive_errors,
+                    )
+                    self._clear_webhook(self._token)
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error('Telegram bot hit %d consecutive errors — stopping', max_consecutive_errors)
+                        break
+                    time.sleep(5)
+                    continue
                 if resp.status_code != 200:
                     consecutive_errors += 1
                     logger.warning(
@@ -71,6 +128,7 @@ class TelegramBot:
                 data = resp.json()
                 for update in data.get('result', []):
                     offset = update['update_id'] + 1
+                    self._set_offset(self._token, offset)
                     self._handle_update(update)
             except httpx.TimeoutException:
                 continue
@@ -81,6 +139,60 @@ class TelegramBot:
                     logger.error('Telegram bot hit %d consecutive errors — stopping', max_consecutive_errors)
                     break
                 time.sleep(5)
+
+    def _do_get_updates(
+        self,
+        token: str,
+        params: dict[str, int],
+        timeout: float,
+    ) -> httpx.Response | None:
+        """Try to acquire _poll_lock and call getUpdates.
+
+        Returns None if the lock could not be acquired within 2 seconds
+        (e.g. detect endpoint is using it), allowing the poll loop to
+        check _stop_event and retry.
+        """
+        acquired = self._poll_lock.acquire(timeout=2)
+        if not acquired:
+            return None
+        try:
+            return httpx.get(
+                f'{_TELEGRAM_BASE}/bot{token}/getUpdates',
+                params=params,
+                timeout=timeout,
+            )
+        finally:
+            self._poll_lock.release()
+
+    def get_updates(self, token: str, params: dict[str, int], timeout: float) -> httpx.Response:
+        """Public API for detect endpoints — acquires poll lock."""
+        with self._poll_lock:
+            return httpx.get(
+                f'{_TELEGRAM_BASE}/bot{token}/getUpdates',
+                params=params,
+                timeout=timeout,
+            )
+
+    def get_offset(self, token: str) -> int:
+        return self._get_offset(token)
+
+    def _clear_webhook(self, token: str) -> None:
+        try:
+            httpx.post(
+                f'{_TELEGRAM_BASE}/bot{token}/deleteWebhook',
+                json={'drop_pending_updates': False},
+                timeout=10,
+            )
+        except Exception:
+            logger.warning('Failed to clear Telegram webhook for token')
+
+    def _get_offset(self, token: str) -> int:
+        with self._offset_lock:
+            return self._offset_by_token.get(token, 0)
+
+    def _set_offset(self, token: str, offset: int) -> None:
+        with self._offset_lock:
+            self._offset_by_token[token] = offset
 
     def _handle_update(self, update: dict) -> None:
         msg = update.get('message')

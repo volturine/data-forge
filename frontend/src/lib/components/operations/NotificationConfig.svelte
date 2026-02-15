@@ -29,8 +29,12 @@
 
 	const canEmail = $derived(configFlags.smtpEnabled);
 	const canTelegram = $derived(configFlags.telegramEnabled);
+	const method = $derived(config?.method ?? 'email');
+	const inputColumns = $derived.by(() =>
+		Array.isArray(config?.input_columns) ? config.input_columns : []
+	);
 	const isReady = $derived(
-		(config.method === 'email' && canEmail) || (config.method === 'telegram' && canTelegram)
+		(method === 'email' && canEmail) || (method === 'telegram' && canTelegram)
 	);
 
 	function handleColumnsChange(columns: string[]) {
@@ -38,10 +42,10 @@
 	}
 
 	const placeholderHint = $derived.by(() => {
-		const cols = config.input_columns;
-		if (cols.length === 0) return 'Select column(s), then use {{column_name}} in template';
-		if (cols.length === 1) return `Use {{${cols[0]}}} to reference the column value`;
-		return `Use {{${cols.join('}}, {{')}}} in template`;
+		if (inputColumns.length === 0) return 'Select column(s), then use {{column_name}} in template';
+		if (inputColumns.length === 1)
+			return `Use {{${inputColumns[0]}}} to reference the column value`;
+		return `Use {{${inputColumns.join('}}, {{')}}} in template`;
 	});
 </script>
 
@@ -64,15 +68,15 @@
 
 	<div class="form-group mb-4">
 		<label for="notify-recipient">
-			{config.method === 'email' ? 'Email Address' : 'Chat ID(s)'}
+			{method === 'email' ? 'Email Address' : 'Chat ID(s)'}
 		</label>
 		<input
 			id="notify-recipient"
 			type="text"
 			bind:value={config.recipient}
-			placeholder={config.method === 'email' ? 'user@example.com' : '123456789, 987654321'}
+			placeholder={method === 'email' ? 'user@example.com' : '123456789, 987654321'}
 		/>
-		{#if config.method === 'telegram'}
+		{#if method === 'telegram'}
 			<span class="mt-1 block text-xs text-fg-muted">Comma-separated for multiple</span>
 		{/if}
 	</div>
@@ -82,7 +86,7 @@
 		<label>Input Column(s)</label>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.input_columns}
+			value={inputColumns}
 			onChange={handleColumnsChange}
 			placeholder="Select column(s)..."
 			showSelectAll={false}
