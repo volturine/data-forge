@@ -172,15 +172,18 @@
 							datasourceStore.datasources
 						)
 					: null;
+			if (!analysisPayload) {
+				throw new Error('Analysis pipeline payload required for execute');
+			}
 			const tabParam = analysisSourceTabId
 				? `?analysis_tab_id=${encodeURIComponent(analysisSourceTabId)}`
 				: '';
-			const body = analysisPayload ? JSON.stringify({ pipeline: analysisPayload }) : undefined;
+			const body = JSON.stringify({ pipeline: analysisPayload });
 			isLoadingRowCount = true;
 			await fetch(`/api/v1/analysis/${analysisSourceId}/execute${tabParam}`, {
 				method: 'POST',
 				body,
-				headers: body ? { 'Content-Type': 'application/json' } : undefined
+				headers: { 'Content-Type': 'application/json' }
 			})
 				.then((response) => {
 					if (!response.ok) {

@@ -88,10 +88,12 @@ export type AnalysisExecuteResponse = {
 
 export function executeAnalysis(
 	analysisId: string,
+	pipeline: Record<string, unknown>,
 	analysisTabId?: string | null
 ): ResultAsync<AnalysisExecuteResponse, ApiError> {
 	const params = analysisTabId ? `?analysis_tab_id=${encodeURIComponent(analysisTabId)}` : '';
 	return apiRequest<AnalysisExecuteResponse>(`/v1/analysis/${analysisId}/execute${params}`, {
-		method: 'POST'
+		method: 'POST',
+		body: JSON.stringify({ pipeline })
 	});
 }

@@ -13,19 +13,13 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from core.config import settings
-from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
+from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
 from modules.analysis.models import Analysis
 from modules.compute.core.exports import get_export_format
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.manager import get_manager
 from modules.compute.operations.datasource import resolve_iceberg_metadata_path
-from modules.compute.utils import (
-    apply_pipeline_steps,
-    await_engine_result,
-    build_datasource_config,
-    find_step_index,
-    resolve_applied_target,
-)
+from modules.compute.utils import apply_pipeline_steps, await_engine_result, find_step_index, resolve_applied_target
 from modules.datasource.models import DataSource
 from modules.engine_runs import service as engine_run_service
 from modules.healthcheck import service as healthcheck_service
@@ -230,20 +224,19 @@ def _build_export_result_metadata(
 def _get_additional_datasources(
     session: Session,
     pipeline_steps: list[dict],
-    analysis_pipeline: dict | None = None,
+    analysis_pipeline: dict,
 ) -> dict[str, dict]:
     """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins)."""
     pipeline_steps = apply_pipeline_steps(pipeline_steps)
     additional: dict[str, dict] = {}
     pipeline_sources: dict[str, dict] | None = None
     analysis_id: str | None = None
-    if isinstance(analysis_pipeline, dict):
-        sources = analysis_pipeline.get('sources')
-        if isinstance(sources, dict):
-            pipeline_sources = {str(key): value for key, value in sources.items() if isinstance(value, dict)}
-        pipeline_id = analysis_pipeline.get('analysis_id')
-        if pipeline_id is not None:
-            analysis_id = str(pipeline_id)
+    sources = analysis_pipeline.get('sources')
+    if isinstance(sources, dict):
+        pipeline_sources = {str(key): value for key, value in sources.items() if isinstance(value, dict)}
+    pipeline_id = analysis_pipeline.get('analysis_id')
+    if pipeline_id is not None:
+        analysis_id = str(pipeline_id)
 
     for step in pipeline_steps:
         config = step.get('config', {})
@@ -312,17 +305,95 @@ def _hydrate_udfs(session: Session, pipeline_steps: list[dict]) -> list[dict]:
     return next_steps
 
 
+def _resolve_pipeline_request(pipeline: dict, tab_id: str | None, target_step_id: str) -> dict:
+    tabs = pipeline.get('tabs', [])
+    if not isinstance(tabs, list) or not tabs:
+        raise ValueError('analysis_pipeline missing tabs')
+
+    selected = None
+    if tab_id:
+        selected = next((tab for tab in tabs if tab.get('id') == tab_id), None)
+    if not selected:
+        selected = next((tab for tab in tabs if tab.get('steps')), None)
+    if not selected:
+        selected = tabs[0]
+
+    datasource_id = selected.get('datasource_id')
+    if not datasource_id:
+        raise ValueError('analysis_pipeline tab missing datasource_id')
+
+    steps = selected.get('steps', [])
+    if not isinstance(steps, list):
+        raise ValueError('analysis_pipeline tab steps must be a list')
+
+    sources = pipeline.get('sources', {})
+    if not isinstance(sources, dict) or not sources:
+        raise ValueError('analysis_pipeline missing datasource configs')
+
+    datasource_config = sources.get(str(datasource_id))
+    if not isinstance(datasource_config, dict):
+        raise ValueError(f'analysis_pipeline missing datasource config for {datasource_id}')
+
+    overrides = selected.get('datasource_config') or {}
+    if overrides and not isinstance(overrides, dict):
+        raise ValueError('analysis_pipeline tab datasource_config must be a dict')
+
+    merged = {**datasource_config, **overrides}
+    analysis_id = pipeline.get('analysis_id')
+    analysis_id = str(analysis_id) if analysis_id is not None else None
+    if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
+        merged = {**merged, 'analysis_pipeline': pipeline}
+
+    resolved_target = resolve_applied_target(steps, target_step_id)
+
+    return {
+        'analysis_id': analysis_id,
+        'datasource_id': str(datasource_id),
+        'pipeline_steps': steps,
+        'target_step_id': resolved_target,
+        'datasource_config': merged,
+    }
+
+
+def build_analysis_pipeline_payload(session: Session, analysis: Analysis, datasource_id: str | None = None) -> dict:
+    pipeline = analysis.pipeline_definition
+    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
+    if not isinstance(tabs, list) or not tabs:
+        return {'analysis_id': str(analysis.id), 'tabs': [], 'sources': {}}
+
+    sources: dict[str, dict] = {}
+    for tab in tabs:
+        tab_datasource_id = tab.get('datasource_id')
+        if not tab_datasource_id:
+            continue
+        if datasource_id and str(datasource_id) != str(tab.get('output_datasource_id')) and str(datasource_id) != str(tab_datasource_id):
+            continue
+        datasource = session.get(DataSource, str(tab_datasource_id))
+        if not datasource:
+            continue
+        sources[str(tab_datasource_id)] = {
+            'source_type': datasource.source_type,
+            **datasource.config,
+        }
+
+    return {
+        'analysis_id': str(analysis.id),
+        'tabs': tabs,
+        'sources': sources,
+    }
+
+
 def preview_step(
     session: Session,
-    datasource_id: str,
-    pipeline_steps: list[dict],
     target_step_id: str,
+    analysis_pipeline: dict,
     row_limit: int = 1000,
     page: int = 1,
     timeout: int | None = None,
     analysis_id: str | None = None,
     resource_config: dict | None = None,
     datasource_config: dict | None = None,
+    tab_id: str | None = None,
     request_json: dict | None = None,
     triggered_by: str | None = None,
 ):
@@ -334,11 +405,22 @@ def preview_step(
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-    if not analysis_id:
-        # Create a temporary analysis_id for datasource preview
-        analysis_id = f'__preview__{datasource_id}'
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    datasource_id = resolved['datasource_id']
+    pipeline_steps = resolved['pipeline_steps']
+    target_step_id = resolved['target_step_id']
+    datasource_config = resolved['datasource_config']
+    analysis_id_value = resolved['analysis_id'] or analysis_id
 
-    run_analysis_id = analysis_id
+    if not isinstance(datasource_config, dict):
+        raise ValueError('Preview requires datasource_config')
+
+    if not analysis_id_value:
+        analysis_id_value = f'__preview__{datasource_id}'
+
+    config: dict = datasource_config
+
+    run_analysis_id = analysis_id_value
 
     request_payload = request_json or {
         'analysis_id': run_analysis_id,
@@ -348,18 +430,12 @@ def preview_step(
         'row_limit': row_limit,
         'page': page,
         'resource_config': resource_config,
+        'analysis_pipeline': analysis_pipeline,
+        'tab_id': tab_id,
     }
 
-    datasource = session.get(DataSource, datasource_id)
-
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
-
-    target_step_id = resolve_applied_target(pipeline_steps, target_step_id)
     pipeline_steps = apply_pipeline_steps(pipeline_steps)
 
-    # Find the step index by step_id
-    # Special case: previewing raw datasource (no pipeline steps, target is "source")
     if target_step_id == 'source':
         preview_steps = []
     else:
@@ -368,14 +444,7 @@ def preview_step(
         preview_steps = _hydrate_udfs(session, preview_steps)
 
     manager = get_manager()
-    # get_or_create_engine will restart the engine if resource_config changed
-    engine = manager.get_or_create_engine(analysis_id, resource_config=resource_config)
-
-    datasource_config = build_datasource_config(datasource, datasource_config)
-
-    analysis_pipeline = None
-    if isinstance(datasource_config, dict):
-        analysis_pipeline = datasource_config.get('analysis_pipeline')
+    engine = manager.get_or_create_engine(analysis_id_value, resource_config=resource_config)
 
     additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
 
@@ -384,7 +453,7 @@ def preview_step(
 
     # Use the new preview method that efficiently fetches only needed rows
     job_id = engine.preview(
-        datasource_config=datasource_config,
+        datasource_config=config,
         pipeline_steps=preview_steps,
         row_limit=row_limit,
         offset=offset,
@@ -467,12 +536,12 @@ def preview_step(
 
 def get_step_schema(
     session: Session,
-    datasource_id: str,
-    pipeline_steps: list[dict],
     target_step_id: str,
     analysis_id: str,
+    analysis_pipeline: dict,
     timeout: int | None = None,
     datasource_config: dict | None = None,
+    tab_id: str | None = None,
 ):
     """Get the output schema of a pipeline step without returning data."""
     from modules.compute.schemas import StepSchemaResponse
@@ -480,15 +549,22 @@ def get_step_schema(
     if timeout is None:
         timeout = settings.job_timeout
 
-    datasource = session.get(DataSource, datasource_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    datasource_id = resolved['datasource_id']
+    pipeline_steps = resolved['pipeline_steps']
+    target_step_id = resolved['target_step_id']
+    datasource_config = resolved['datasource_config']
+    analysis_id_value = resolved['analysis_id'] or analysis_id
 
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
+    if not isinstance(datasource_config, dict):
+        raise ValueError('Schema fetch requires datasource_config')
+    if not analysis_id_value:
+        raise ValueError('Schema fetch requires analysis_id')
 
-    target_step_id = resolve_applied_target(pipeline_steps, target_step_id)
+    config: dict = datasource_config
+
     pipeline_steps = apply_pipeline_steps(pipeline_steps)
 
-    # Find the step index by step_id
     if target_step_id == 'source':
         schema_steps = []
     else:
@@ -497,21 +573,15 @@ def get_step_schema(
         schema_steps = _hydrate_udfs(session, schema_steps)
 
     manager = get_manager()
-    engine = manager.get_engine(analysis_id)
+    engine = manager.get_engine(analysis_id_value)
     if not engine:
-        engine = manager.get_or_create_engine(analysis_id)
-
-    datasource_config = build_datasource_config(datasource, datasource_config)
-
-    analysis_pipeline = None
-    if isinstance(datasource_config, dict):
-        analysis_pipeline = datasource_config.get('analysis_pipeline')
+        engine = manager.get_or_create_engine(analysis_id_value)
 
     additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
 
     # Use the new schema command that doesn't collect full data
     job_id = engine.get_schema(
-        datasource_config=datasource_config,
+        datasource_config=config,
         pipeline_steps=schema_steps,
         additional_datasources=additional_datasources,
     )
@@ -535,9 +605,8 @@ def get_step_schema(
 
 def export_data(
     session: Session,
-    datasource_id: str,
-    pipeline_steps: list[dict],
     target_step_id: str,
+    analysis_pipeline: dict,
     export_format: str = 'csv',
     filename: str = 'export',
     destination: str = 'download',
@@ -547,22 +616,32 @@ def export_data(
     datasource_config: dict | None = None,
     timeout: int | None = None,
     analysis_id: str | None = None,
+    tab_id: str | None = None,
     request_json: dict | None = None,
     triggered_by: str | None = None,
     output_datasource_id: str | None = None,
 ) -> tuple[bytes | None, str | None, str | None, str | None, str | None, dict | None]:
-    """
-    Export pipeline result to file or datasource.
-
-    Returns tuple:
-    (file_bytes, filename_with_ext, content_type, file_path, datasource_id, result_meta)
-    """
     if timeout is None:
         timeout = settings.job_timeout
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-    run_analysis_id = analysis_id
+
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    datasource_id = resolved['datasource_id']
+    pipeline_steps = resolved['pipeline_steps']
+    target_step_id = resolved['target_step_id']
+    datasource_config = resolved['datasource_config']
+    analysis_id_value = resolved['analysis_id'] or analysis_id
+
+    if destination == 'datasource' and output_datasource_id is None:
+        raise ValueError('Output exports require output_datasource_id')
+
+    if not isinstance(datasource_config, dict):
+        raise ValueError('Export requires datasource_config')
+
+    config: dict = datasource_config
+    run_analysis_id = analysis_id_value
 
     request_payload = request_json or {
         'analysis_id': run_analysis_id,
@@ -576,20 +655,12 @@ def export_data(
         'iceberg_options': iceberg_options,
         'duckdb_options': duckdb_options,
         'datasource_config': datasource_config,
+        'analysis_pipeline': analysis_pipeline,
+        'tab_id': tab_id,
     }
 
-    datasource = session.get(DataSource, datasource_id)
-
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
-
-    if destination == 'datasource' and output_datasource_id is None:
-        raise ValueError('Output exports require output_datasource_id')
-
-    target_step_id = resolve_applied_target(pipeline_steps, target_step_id)
     pipeline_steps = apply_pipeline_steps(pipeline_steps)
 
-    # Find steps up to target
     if target_step_id == 'source':
         export_steps = []
     else:
@@ -599,22 +670,15 @@ def export_data(
 
     manager = get_manager()
 
-    # Use analysis engine if provided and exists, otherwise create temporary one
     temp_engine = False
     temp_engine_id = f'{datasource_id}_export'
-    if analysis_id:
-        engine = manager.get_engine(analysis_id)
+    if analysis_id_value:
+        engine = manager.get_engine(analysis_id_value)
         if not engine:
-            engine = manager.get_or_create_engine(analysis_id)
+            engine = manager.get_or_create_engine(analysis_id_value)
     else:
         engine = manager.get_or_create_engine(temp_engine_id)
         temp_engine = True
-
-    datasource_config = build_datasource_config(datasource, datasource_config)
-
-    analysis_pipeline = None
-    if isinstance(datasource_config, dict):
-        analysis_pipeline = datasource_config.get('analysis_pipeline')
 
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
 
@@ -649,7 +713,7 @@ def export_data(
     try:
         try:
             job_id = engine.export(
-                datasource_config=datasource_config,
+                datasource_config=config,
                 pipeline_steps=export_steps,
                 output_path=tmp_output,
                 export_format=actual_format,
@@ -705,7 +769,7 @@ def export_data(
                 checks = [check for check in checks if check.enabled]
                 if checks:
                     lf = PolarsComputeEngine.build_pipeline(
-                        datasource_config,
+                        config,
                         export_steps,
                         f'healthcheck-{datasource_id}',
                         additional_datasources,
@@ -918,52 +982,79 @@ def export_data(
             os.unlink(tmp_output)
 
 
-def build_analysis_lazyframe(
-    session: Session,
-    analysis_id: str,
-    analysis_tab_id: str | None = None,
-) -> pl.LazyFrame:
-    analysis_obj = session.get(Analysis, analysis_id)
-    if not analysis_obj:
-        raise AnalysisNotFoundError(analysis_id)
+def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> dict:
+    if not isinstance(pipeline, dict):
+        raise ValueError('analysis_pipeline is required')
 
-    datasource_id, pipeline_steps = _resolve_analysis_pipeline(analysis_obj, analysis_tab_id)
+    tabs = pipeline.get('tabs', [])
+    if not isinstance(tabs, list) or not tabs:
+        raise ValueError('analysis_pipeline missing tabs')
 
-    datasource = session.get(DataSource, datasource_id)
-    if not datasource:
-        raise DataSourceNotFoundError(datasource_id)
+    analysis_id = pipeline.get('analysis_id')
+    analysis_id = str(analysis_id) if analysis_id is not None else None
 
-    datasource_config = build_datasource_config(datasource, None)
-    additional_datasources = _get_additional_datasources(session, pipeline_steps)
-    job_id = f'analysis-{analysis_id}'
-    return PolarsComputeEngine.build_pipeline(
-        datasource_config,
-        pipeline_steps,
-        job_id,
-        additional_datasources,
-    )
+    results: list[dict] = []
+    tabs_built = 0
+    selected_tab_id = pipeline.get('tab_id')
 
+    for tab in tabs:
+        if selected_tab_id and tab.get('id') != selected_tab_id:
+            continue
+        tab_id = tab.get('id', 'unknown')
+        tab_name = tab.get('name', 'unnamed')
+        tab_datasource_id = tab.get('datasource_id')
+        steps = tab.get('steps', [])
+        datasource_config = tab.get('datasource_config')
 
-def _resolve_analysis_pipeline(analysis: Analysis, analysis_tab_id: str | None = None) -> tuple[str, list[dict]]:
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
-    if tabs:
-        selected = None
-        if analysis_tab_id:
-            selected = next((tab for tab in tabs if tab.get('id') == analysis_tab_id), None)
-        if not selected:
-            selected = next((tab for tab in tabs if tab.get('steps')), tabs[0])
-        datasource_id = selected.get('datasource_id')
-        steps = selected.get('steps', [])
-        if not datasource_id:
-            raise ValueError('Analysis tab missing datasource_id')
-        return str(datasource_id), steps
+        if not tab_datasource_id:
+            continue
 
-    datasource_ids = pipeline.get('datasource_ids', []) if isinstance(pipeline, dict) else []
-    if not datasource_ids:
-        raise ValueError('Analysis has no datasource')
-    steps = pipeline.get('steps', []) if isinstance(pipeline, dict) else []
-    return str(datasource_ids[0]), steps
+        output_config = None
+        if isinstance(datasource_config, dict):
+            output_config = datasource_config.get('output')
+
+        target_step_id = 'source'
+        if steps:
+            target_step_id = steps[-1].get('id', 'source')
+
+        try:
+            if output_config is not None:
+                datasource_type = 'iceberg'
+                export_format = 'parquet'
+                filename = output_config.get('filename', f'{tab_name}_out') if isinstance(output_config, dict) else f'{tab_name}_out'
+
+                iceberg_options = None
+                iceberg_cfg = output_config.get('iceberg') if isinstance(output_config, dict) else None
+                if iceberg_cfg and isinstance(iceberg_cfg, dict):
+                    iceberg_options = {
+                        'table_name': iceberg_cfg.get('table_name', 'exported_data'),
+                        'namespace': iceberg_cfg.get('namespace', 'exports'),
+                    }
+
+                export_data(
+                    session=session,
+                    target_step_id=target_step_id,
+                    analysis_pipeline=pipeline,
+                    export_format=export_format,
+                    filename=filename,
+                    destination='datasource',
+                    datasource_type=datasource_type,
+                    iceberg_options=iceberg_options,
+                    duckdb_options=None,
+                    datasource_config=datasource_config if isinstance(datasource_config, dict) else None,
+                    analysis_id=analysis_id,
+                    tab_id=str(tab_id) if tab_id else None,
+                    output_datasource_id=tab.get('output_datasource_id'),
+                )
+            else:
+                raise ValueError(f'Tab {tab_id} missing output configuration')
+
+            tabs_built += 1
+            results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'success'})
+        except Exception as e:
+            results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'failed', 'error': str(e)})
+
+    return {'analysis_id': analysis_id or '', 'tabs_built': tabs_built, 'results': results}
 
 
 def list_iceberg_snapshots(session: Session, datasource_id: str):

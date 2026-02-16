@@ -106,70 +106,44 @@ async def execute_analysis(
 
     analysis_id_value = parse_analysis_id(analysis_id)
 
-    if analysis_payload:
-        if not isinstance(analysis_payload, dict):
-            raise HTTPException(status_code=400, detail='pipeline payload must be a dict')
-        tabs = analysis_payload.get('tabs', [])
-        if not isinstance(tabs, list):
-            raise HTTPException(status_code=400, detail='pipeline tabs must be a list')
-        if analysis_tab_id:
-            selected = next((tab for tab in tabs if tab.get('id') == analysis_tab_id), None)
-        else:
-            selected = next((tab for tab in tabs if tab.get('steps')), None)
-        if not selected:
-            selected = tabs[0] if tabs else None
-        if not selected:
-            raise HTTPException(status_code=400, detail='pipeline payload missing tabs')
-        datasource_id = selected.get('datasource_id')
-        pipeline_steps = selected.get('steps', [])
-        if not datasource_id:
-            raise HTTPException(status_code=400, detail='Analysis tab missing datasource_id')
-        if not isinstance(pipeline_steps, list):
-            raise HTTPException(status_code=400, detail='Analysis tab steps must be a list')
-        config = selected.get('datasource_config') or {}
-        if config and not isinstance(config, dict):
-            raise HTTPException(status_code=400, detail='Analysis tab datasource_config must be a dict')
-        next_config = {**config}
-        payload_id = analysis_payload.get('analysis_id')
-        payload_id = str(payload_id) if payload_id is not None else None
-        if payload_id and payload_id == analysis_id_value:
-            next_config['analysis_pipeline'] = analysis_payload
-    else:
-        try:
-            analysis = service.get_analysis(session, analysis_id_value)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not isinstance(analysis_payload, dict):
+        raise HTTPException(status_code=400, detail='pipeline payload must be provided')
 
-        pipeline = analysis.pipeline_definition
-        tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
-        if tabs:
-            selected = None
-            if analysis_tab_id:
-                selected = next((tab for tab in tabs if tab.get('id') == analysis_tab_id), None)
-            if not selected:
-                selected = next((tab for tab in tabs if tab.get('steps')), tabs[0])
-            datasource_id = selected.get('datasource_id')
-            pipeline_steps = selected.get('steps', [])
-            if not datasource_id:
-                raise HTTPException(status_code=400, detail='Analysis tab missing datasource_id')
-            next_config = selected.get('datasource_config') or {}
-        else:
-            pipeline_steps = pipeline.get('steps', []) if isinstance(pipeline, dict) else []
-            datasource_ids = pipeline.get('datasource_ids', []) if isinstance(pipeline, dict) else []
-            if not datasource_ids:
-                raise HTTPException(status_code=400, detail='Analysis has no datasource')
-            datasource_id = datasource_ids[0]
-            next_config = {}
+    tabs = analysis_payload.get('tabs', [])
+    if not isinstance(tabs, list):
+        raise HTTPException(status_code=400, detail='pipeline tabs must be a list')
+    if analysis_tab_id:
+        selected = next((tab for tab in tabs if tab.get('id') == analysis_tab_id), None)
+    else:
+        selected = next((tab for tab in tabs if tab.get('steps')), None)
+    if not selected:
+        selected = tabs[0] if tabs else None
+    if not selected:
+        raise HTTPException(status_code=400, detail='pipeline payload missing tabs')
+    datasource_id = selected.get('datasource_id')
+    pipeline_steps = selected.get('steps', [])
+    if not datasource_id:
+        raise HTTPException(status_code=400, detail='Analysis tab missing datasource_id')
+    if not isinstance(pipeline_steps, list):
+        raise HTTPException(status_code=400, detail='Analysis tab steps must be a list')
+    config = selected.get('datasource_config') or {}
+    if config and not isinstance(config, dict):
+        raise HTTPException(status_code=400, detail='Analysis tab datasource_config must be a dict')
+    next_config = {**config}
+    payload_id = analysis_payload.get('analysis_id')
+    payload_id = str(payload_id) if payload_id is not None else None
+    if payload_id and payload_id == analysis_id_value:
+        next_config['analysis_pipeline'] = analysis_payload
 
     preview = compute_service.preview_step(
         session=session,
-        datasource_id=str(datasource_id),
-        pipeline_steps=pipeline_steps,
         target_step_id=pipeline_steps[-1]['id'] if pipeline_steps else 'source',
         row_limit=50,
         page=1,
         analysis_id=analysis_id_value,
         datasource_config=next_config,
+        analysis_pipeline=analysis_payload,
+        tab_id=analysis_tab_id,
     )
 
     return {

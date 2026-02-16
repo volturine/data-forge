@@ -359,9 +359,32 @@ class TestRunAnalysisBuildOutputDatasource:
             mock_resolve.return_value = str(Path('/tmp/iceberg/warehouse/ns').joinpath(output_ds_id, 'metadata', 'v1.metadata.json'))
             export_data(
                 session=test_db_session,
-                datasource_id=sample_datasource.id,
-                pipeline_steps=[],
                 target_step_id='source',
+                analysis_pipeline={
+                    'analysis_id': analysis_id,
+                    'tabs': [
+                        {
+                            'id': 'tab1',
+                            'datasource_id': sample_datasource.id,
+                            'output_datasource_id': output_ds_id,
+                            'datasource_config': {
+                                'output': {
+                                    'datasource_type': 'iceberg',
+                                    'format': 'parquet',
+                                    'filename': 'test_out',
+                                    'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                                }
+                            },
+                            'steps': [],
+                        }
+                    ],
+                    'sources': {
+                        sample_datasource.id: {
+                            'source_type': sample_datasource.source_type,
+                            **sample_datasource.config,
+                        }
+                    },
+                },
                 export_format='parquet',
                 filename='test_out',
                 destination='datasource',

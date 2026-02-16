@@ -1,12 +1,15 @@
 <script lang="ts">
 	import type { AnalysisTab } from '$lib/types/analysis';
 	import type { Subscriber } from '$lib/api/settings';
+	import type { BuildResponse } from '$lib/api/compute';
 	import { getSubscribers } from '$lib/api/settings';
 	import { getDatasource, updateDatasource } from '$lib/api/datasource';
-	import { buildAnalysis } from '$lib/api/compute';
+	import { buildAnalysisWithPayload } from '$lib/api/compute';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import { Database, Bell, ChevronDown, ChevronRight, EyeOff, Loader, Play } from 'lucide-svelte';
 
@@ -174,11 +177,25 @@
 			return;
 		}
 
-		const tabId = activeTab?.id;
-		const result = await buildAnalysis(analysisId, tabId ?? undefined);
+		const pipeline = buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+		if (!pipeline) {
+			error = 'Unable to build analysis payload.';
+			building = false;
+			return;
+		}
+		const result = await buildAnalysisWithPayload({
+			analysis_pipeline: pipeline,
+			tab_id: activeTab?.id ?? null
+		});
 		result.match(
-			(res) => {
-				const failed = res.results.find((r) => r.status === 'failed');
+			(res: BuildResponse) => {
+				const failed = res.results.find(
+					(r: BuildResponse['results'][number]) => r.status === 'failed'
+				);
 				if (failed?.error) {
 					error = failed.error;
 				}
@@ -187,7 +204,7 @@
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
 				building = false;
 			},
-			(err) => {
+			(err: { message: string }) => {
 				error = err.message;
 				building = false;
 			}

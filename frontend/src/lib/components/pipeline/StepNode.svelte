@@ -4,14 +4,21 @@
 	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
 	import ChartPreview from '$lib/components/viewers/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import {
+		previewStepData,
+		type StepPreviewRequest,
+		type StepPreviewResponse
+	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { GripVertical } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
-	import { buildDatasourceConfig } from '$lib/utils/analysis-pipeline';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourceConfig
+	} from '$lib/utils/analysis-pipeline';
 
 	interface Props {
 		step: PipelineStep;
@@ -57,6 +64,14 @@
 			{}
 		);
 	});
+	const analysisPipeline = $derived.by(() => {
+		if (!analysisId) return null;
+		return buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+	});
 
 	const chartQuery = createQuery(() => ({
 		queryKey: [
@@ -73,15 +88,14 @@
 				unknown
 			> | null;
 			const result = await previewStepData({
-				analysis_id: analysisId!,
-				datasource_id: datasourceId!,
-				pipeline_steps: chartPipeline,
+				analysis_pipeline: analysisPipeline,
+				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: step.id,
 				row_limit: 5000,
 				page: 1,
 				resource_config: resourceConfig,
 				datasource_config: chartDatasourceConfig
-			});
+			} as unknown as StepPreviewRequest);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},

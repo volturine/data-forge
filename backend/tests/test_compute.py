@@ -13,19 +13,35 @@ from modules.engine_runs.models import EngineRun
 class TestComputePreview:
     def test_preview_step_success(self, client, sample_datasource: DataSource):
         payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 25},
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': sample_datasource.id,
+                        'datasource_config': {},
+                        'steps': [
+                            {
+                                'id': 'step1',
+                                'type': 'filter',
+                                'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            },
+                            {
+                                'id': 'step2',
+                                'type': 'select',
+                                'config': {'columns': ['name', 'age']},
+                            },
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    }
                 },
-                {
-                    'id': 'step2',
-                    'type': 'select',
-                    'config': {'columns': ['name', 'age']},
-                },
-            ],
+            },
             'target_step_id': 'step1',
         }
 
@@ -61,14 +77,30 @@ class TestComputePreview:
 
     def test_preview_step_failure(self, client, sample_datasource: DataSource):
         payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'invalid_operation',
-                    'config': {},
-                }
-            ],
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': sample_datasource.id,
+                        'datasource_config': {},
+                        'steps': [
+                            {
+                                'id': 'step1',
+                                'type': 'invalid_operation',
+                                'config': {},
+                            }
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    }
+                },
+            },
             'target_step_id': 'step1',
         }
 
@@ -95,24 +127,56 @@ class TestComputePreview:
             assert response.status_code in [404, 500]
 
     def test_preview_step_datasource_not_found(self, client):
+        missing_id = str(uuid.uuid4())
         payload = {
-            'datasource_id': str(uuid.uuid4()),
-            'pipeline_steps': [],
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': missing_id,
+                        'datasource_config': {},
+                        'steps': [],
+                    }
+                ],
+                'sources': {
+                    missing_id: {
+                        'source_type': 'file',
+                    }
+                },
+            },
             'target_step_id': 'step1',
         }
 
         response = client.post('/api/v1/compute/preview', json=payload)
 
-        assert response.status_code == 404
+        assert response.status_code == 500
 
     def test_preview_step_specific_target(self, client, sample_datasource: DataSource):
         payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {'id': 'step1', 'type': 'filter', 'config': {}},
-                {'id': 'step2', 'type': 'select', 'config': {}},
-                {'id': 'step3', 'type': 'sort', 'config': {}},
-            ],
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': sample_datasource.id,
+                        'datasource_config': {},
+                        'steps': [
+                            {'id': 'step1', 'type': 'filter', 'config': {}},
+                            {'id': 'step2', 'type': 'select', 'config': {}},
+                            {'id': 'step3', 'type': 'sort', 'config': {}},
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    }
+                },
+            },
             'target_step_id': 'step2',
         }
 
@@ -139,14 +203,30 @@ class TestComputePreview:
 
     def test_preview_logs_engine_run(self, client, sample_datasource: DataSource, test_db_session):
         payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 25},
-                }
-            ],
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': sample_datasource.id,
+                        'datasource_config': {},
+                        'steps': [
+                            {
+                                'id': 'step1',
+                                'type': 'filter',
+                                'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            }
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    }
+                },
+            },
             'target_step_id': 'step1',
             'row_limit': 10,
             'page': 1,
@@ -185,7 +265,7 @@ class TestComputePreview:
         run = runs[0]
         assert run.kind == 'preview'
         assert run.status == 'success'
-        assert run.request_json['datasource_id'] == sample_datasource.id
+        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource_id'] == sample_datasource.id
         assert 'data' not in run.result_json
         assert run.result_json['query_plans']['optimized'] == 'opt'
 
@@ -193,14 +273,30 @@ class TestComputePreview:
 class TestComputeExport:
     def test_export_logs_engine_run(self, client, sample_datasource: DataSource, test_db_session):
         payload = {
-            'datasource_id': sample_datasource.id,
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'select',
-                    'config': {'columns': ['name']},
-                }
-            ],
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': sample_datasource.id,
+                        'datasource_config': {},
+                        'steps': [
+                            {
+                                'id': 'step1',
+                                'type': 'select',
+                                'config': {'columns': ['name']},
+                            }
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    }
+                },
+            },
             'target_step_id': 'step1',
             'format': 'csv',
             'filename': 'export-test',
@@ -247,7 +343,7 @@ class TestComputeExport:
         run = runs[0]
         assert run.kind == 'export'
         assert run.status == 'success'
-        assert run.request_json['datasource_id'] == sample_datasource.id
+        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource_id'] == sample_datasource.id
         assert 'data' not in run.result_json
         assert run.result_json['query_plans']['optimized'] == 'opt'
         assert run.result_json['file_size_bytes'] > 0

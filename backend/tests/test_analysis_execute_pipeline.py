@@ -52,5 +52,5 @@ def test_execute_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         assert payload['rows'] == [{'name': 'Alice'}]
         assert mock_preview.call_count == 1
         _, kwargs = mock_preview.call_args
-        assert kwargs['datasource_id'] == sample_datasource.id
+        assert kwargs['analysis_pipeline']['analysis_id'] == analysis_id
         assert kwargs['datasource_config']['snapshot_id'] == '123'

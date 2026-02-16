@@ -3,6 +3,7 @@
 ## Status:
 
 ### Critical
+
 - [x] 1. Compute engine job tracking race condition
 - [x] 2. Compute engine env var pollution
 - [x] 3. Analysis service missing transaction rollback
@@ -11,6 +12,7 @@
 - [x] 8. Upload storage quota enforcement
 
 ### High Priority
+
 - [x] 11. Non-atomic analysis version increment
 - [x] 12. Dirty reads during schema cache population
 - [x] 15. Silent schema extraction failures
@@ -37,8 +39,13 @@
 - [x] 59. Build query plan includes pre-eager steps annotation
 - [x] 60. AI/notification steps remain lazy (no internal collect)
 - [x] 61. Test DB isolation (prevent tests from touching production DB)
+- [ ] 62. Unified compute requests with full analysis payload
+- [x] 63. Backend compute preview/schema/export accept analysis_pipeline + tab_id
+- [x] 64. Build payload endpoint added and wired for OutputNode
+- [x] 65. Remove legacy compute endpoints and payload fallbacks
 
 ### Medium Priority
+
 - [x] 41. Remove hardcoded CORS IPs
 - [x] 42. Disable public IDB debug by default
 - [x] 43. Encrypt SMTP passwords at rest

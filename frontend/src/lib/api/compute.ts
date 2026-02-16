@@ -4,20 +4,16 @@ import type {
 	EngineResourceConfig,
 	EngineStatusResponse
 } from '$lib/types/compute';
+import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
 export interface StepPreviewRequest {
-	analysis_id: string;
-	datasource_id: string;
-	pipeline_steps: Array<{
-		id: string;
-		type: string;
-		config: Record<string, unknown>;
-		depends_on?: string[];
-	}>;
+	analysis_id?: string;
 	target_step_id: string;
+	analysis_pipeline: AnalysisPipelinePayload;
+	tab_id?: string | null;
 	row_limit?: number;
 	page?: number;
 	resource_config?: EngineResourceConfig | null;
@@ -94,14 +90,9 @@ export function getEngineDefaults(): ResultAsync<EngineDefaults, ApiError> {
 
 export interface ExportRequest {
 	analysis_id?: string;
-	datasource_id: string;
-	pipeline_steps: Array<{
-		id: string;
-		type: string;
-		config: Record<string, unknown>;
-		depends_on?: string[];
-	}>;
 	target_step_id: string;
+	analysis_pipeline: AnalysisPipelinePayload;
+	tab_id?: string | null;
 	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'duckdb';
 	filename?: string;
 	destination: 'download' | 'filesystem' | 'datasource';
@@ -162,15 +153,10 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export interface StepSchemaRequest {
-	analysis_id: string;
-	datasource_id: string;
-	pipeline_steps: Array<{
-		id: string;
-		type: string;
-		config: Record<string, unknown>;
-		depends_on?: string[];
-	}>;
+	analysis_id?: string;
 	target_step_id: string;
+	analysis_pipeline: AnalysisPipelinePayload;
+	tab_id?: string | null;
 	datasource_config?: Record<string, unknown> | null;
 }
 
@@ -202,12 +188,16 @@ export interface BuildResponse {
 	results: BuildTabResult[];
 }
 
-export function buildAnalysis(
-	analysisId: string,
-	tabId?: string
+export interface BuildRequest {
+	analysis_pipeline: AnalysisPipelinePayload;
+	tab_id?: string | null;
+}
+
+export function buildAnalysisWithPayload(
+	request: BuildRequest
 ): ResultAsync<BuildResponse, ApiError> {
-	const params = tabId ? `?tab_id=${encodeURIComponent(tabId)}` : '';
-	return apiRequest<BuildResponse>(`/v1/compute/build/${analysisId}${params}`, {
-		method: 'POST'
+	return apiRequest<BuildResponse>('/v1/compute/build', {
+		method: 'POST',
+		body: JSON.stringify(request)
 	});
 }

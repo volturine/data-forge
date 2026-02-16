@@ -57,6 +57,25 @@ class EngineDefaults(BaseModel):
     streaming_chunk_size: int  # 0 = auto
 
 
+class AnalysisPipelineTab(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str | None = None
+    datasource_id: str | None = None
+    output_datasource_id: str | None = None
+    datasource_config: dict | None = None
+    steps: list[dict]
+
+
+class AnalysisPipelinePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str
+    tabs: list[AnalysisPipelineTab]
+    sources: dict[str, dict]
+
+
 class EngineStatusSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -92,9 +111,9 @@ class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: str | None = None
-    datasource_id: str
-    pipeline_steps: list[dict]
     target_step_id: str
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None
     row_limit: int = 1000
     page: int = 1
     resource_config: EngineResourceConfig | None = None
@@ -157,9 +176,9 @@ class ExportRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: str | None = None
-    datasource_id: str
-    pipeline_steps: list[dict]
     target_step_id: str
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None
     format: ExportFormat = ExportFormat.CSV
     filename: str = 'export'
     destination: ExportDestination = ExportDestination.DOWNLOAD
@@ -194,10 +213,10 @@ class ExportResponse(BaseModel):
 class StepSchemaRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    analysis_id: str
-    datasource_id: str
-    pipeline_steps: list[dict]
+    analysis_id: str | None = None
     target_step_id: str
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None
     datasource_config: dict | None = None
 
 
@@ -249,3 +268,10 @@ class BuildResponse(BaseModel):
     analysis_id: str
     tabs_built: int
     results: list[BuildTabResult]
+
+
+class BuildRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None

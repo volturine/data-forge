@@ -4,7 +4,9 @@ import { applySteps } from '$lib/utils/pipeline';
 
 type PipelineTab = {
 	id: string;
+	name: string;
 	datasource_id: string | null;
+	output_datasource_id: string | null;
 	datasource_config: Record<string, unknown> | null;
 	steps: PipelineStep[];
 };
@@ -75,12 +77,38 @@ export function buildAnalysisPipelinePayload(
 
 	const pipelineTabs = tabs.map((tab) => ({
 		id: tab.id,
+		name: tab.name,
 		datasource_id: tab.datasource_id ?? null,
+		output_datasource_id: tab.output_datasource_id ?? null,
 		datasource_config: (tab.datasource_config as Record<string, unknown> | null) ?? null,
 		steps: getTabSteps(tab)
 	}));
 
 	return { analysis_id: analysisId, tabs: pipelineTabs, sources };
+}
+
+export function buildDatasourcePipelinePayload(args: {
+	datasource: DataSource;
+	datasourceConfig?: Record<string, unknown> | null;
+}): AnalysisPipelinePayload {
+	const datasource = args.datasource;
+	const tabs: PipelineTab[] = [
+		{
+			id: `datasource-${datasource.id}`,
+			name: datasource.name ?? 'Datasource',
+			datasource_id: datasource.id,
+			output_datasource_id: null,
+			datasource_config: args.datasourceConfig ?? null,
+			steps: []
+		}
+	];
+	return {
+		analysis_id: datasource.id,
+		tabs,
+		sources: {
+			[datasource.id]: { source_type: datasource.source_type, ...datasource.config }
+		}
+	};
 }
 
 export function buildDatasourceConfig(args: {

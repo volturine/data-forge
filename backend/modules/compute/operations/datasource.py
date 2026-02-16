@@ -168,14 +168,7 @@ class DatasourceHandler(OperationHandler):
                 pipeline_id = str(pipeline_id)
             if not pipeline_id or pipeline_id == analysis_id:
                 return _load_analysis_pipeline(pipeline, analysis_id, config.analysis_tab_id)
-        from core.database import run_db
-        from modules.compute import service as compute_service
-
-        return run_db(
-            compute_service.build_analysis_lazyframe,
-            config.analysis_id,
-            analysis_tab_id=config.analysis_tab_id,
-        )
+        raise ValueError('analysis_pipeline is required for analysis datasource loading')
 
 
 _ANALYSIS_STACK: list[tuple[str, str | None]] = []

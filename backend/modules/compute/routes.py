@@ -1,6 +1,6 @@
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlmodel import Session
 
@@ -25,16 +25,18 @@ def preview_step(
     if request.resource_config:
         resource_config = request.resource_config.model_dump()
 
+    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+
     return service.preview_step(
         session=session,
-        datasource_id=request.datasource_id,
-        pipeline_steps=request.pipeline_steps,
         target_step_id=request.target_step_id,
+        analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         row_limit=request.row_limit,
         page=request.page,
-        analysis_id=request.analysis_id,
+        analysis_id=analysis_id,
         resource_config=resource_config,
         datasource_config=request.datasource_config,
+        tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
     )
 
@@ -46,13 +48,15 @@ def get_step_schema(
     session: Session = Depends(get_db),
 ):
     """Get the output schema of a pipeline step (for pivot/unpivot dynamic columns)."""
+    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+
     return service.get_step_schema(
         session=session,
-        datasource_id=request.datasource_id,
-        pipeline_steps=request.pipeline_steps,
         target_step_id=request.target_step_id,
-        analysis_id=request.analysis_id,
+        analysis_id=analysis_id or '',
+        analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         datasource_config=request.datasource_config,
+        tab_id=request.tab_id,
     )
 
 
@@ -80,21 +84,16 @@ def delete_iceberg_snapshot(
     return service.delete_iceberg_snapshot(session, parse_datasource_id(datasource_id), str(snapshot_id))
 
 
-@router.post('/build/{analysis_id}', response_model=schemas.BuildResponse)
+@router.post('/build', response_model=schemas.BuildResponse)
 @handle_errors(operation='build analysis')
-def build_analysis(
-    analysis_id: AnalysisId,
+def build_analysis_from_payload(
+    request: schemas.BuildRequest,
     session: Session = Depends(get_db),
-    tab_id: str | None = Query(None, description='Build a specific tab only'),
 ):
-    """Run a full build for an analysis — export all tabs (or a specific tab) to Iceberg.
-
-    Reads the saved pipeline_definition from the DB so the analysis must be saved
-    before triggering a build.
-    """
-    from modules.scheduler.service import run_analysis_build
-
-    result = run_analysis_build(session, parse_analysis_id(analysis_id), datasource_id=None, triggered_by='manual', tab_id=tab_id)
+    pipeline = request.analysis_pipeline.model_dump(mode='json')
+    if isinstance(pipeline, dict):
+        pipeline = {**pipeline, 'tab_id': request.tab_id}
+    result = service.run_analysis_build_from_payload(session, pipeline)
     return schemas.BuildResponse(**result)
 
 
@@ -196,9 +195,8 @@ def export_data(
     """Export pipeline result to file (download, save to filesystem, or create datasource)."""
     file_bytes, filename, content_type, file_path, datasource_id, result_meta = service.export_data(
         session=session,
-        datasource_id=request.datasource_id,
-        pipeline_steps=request.pipeline_steps,
         target_step_id=request.target_step_id,
+        analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         export_format=request.format.value,
         filename=request.filename,
         destination=request.destination.value,
@@ -207,6 +205,7 @@ def export_data(
         duckdb_options=request.duckdb_options.model_dump() if request.duckdb_options else None,
         datasource_config=request.datasource_config,
         analysis_id=request.analysis_id,
+        tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
         output_datasource_id=request.output_datasource_id,
     )

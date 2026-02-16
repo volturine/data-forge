@@ -1,18 +1,26 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import {
+		previewStepData,
+		type StepPreviewRequest,
+		type StepPreviewResponse
+	} from '$lib/api/compute';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import type { DataSource } from '$lib/types/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourcePipelinePayload
+	} from '$lib/utils/analysis-pipeline';
 
 	interface Props {
 		datasourceId: string;
+		datasource?: DataSource | null;
 		datasourceConfig?: Record<string, unknown>;
 	}
 
-	let { datasourceId, datasourceConfig = {} }: Props = $props();
+	let { datasourceId, datasource, datasourceConfig = {} }: Props = $props();
 
 	let page = $state(1);
 	let rowLimit = $state(100);
@@ -44,11 +52,11 @@
 		page = 1;
 	});
 
-	const datasource = $derived.by(() => datasourceStore.getDatasource(datasourceId) ?? null);
+	const resolvedDatasource = $derived.by(() => datasource ?? null);
 	const analysisSourceId = $derived.by(() => {
 		return (
 			(datasourceConfig?.analysis_id as string | null | undefined) ??
-			((datasource?.config as Record<string, unknown> | null)?.analysis_id as
+			((resolvedDatasource?.config as Record<string, unknown> | null)?.analysis_id as
 				| string
 				| null
 				| undefined) ??
@@ -56,10 +64,19 @@
 		);
 	});
 	const analysisPipeline = $derived.by(() => {
-		if (!analysisSourceId) return null;
 		const activeId = analysisStore.current?.id ?? null;
-		if (!activeId || activeId !== analysisSourceId) return null;
-		return buildAnalysisPipelinePayload(activeId, analysisStore.tabs, datasourceStore.datasources);
+		if (analysisSourceId && activeId === analysisSourceId) {
+			return buildAnalysisPipelinePayload(
+				activeId,
+				analysisStore.tabs,
+				resolvedDatasource ? [resolvedDatasource] : []
+			);
+		}
+		if (!resolvedDatasource) return null;
+		return buildDatasourcePipelinePayload({
+			datasource: resolvedDatasource,
+			datasourceConfig: datasourceConfig ?? null
+		});
 	});
 
 	const query = createQuery(() => ({
@@ -75,15 +92,18 @@
 			const combinedConfig = analysisPipeline
 				? { ...(datasourceConfig ?? {}), analysis_pipeline: analysisPipeline }
 				: datasourceConfig;
-			const result = await previewStepData({
+			if (!analysisPipeline) {
+				throw new Error('Analysis pipeline payload required for preview');
+			}
+			const request = {
 				analysis_id: '',
-				datasource_id: datasourceId,
-				pipeline_steps: [],
 				target_step_id: 'source',
+				analysis_pipeline: analysisPipeline,
 				row_limit: rowLimit,
 				page,
 				datasource_config: combinedConfig
-			});
+			} satisfies StepPreviewRequest;
+			const result = await previewStepData(request);
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}

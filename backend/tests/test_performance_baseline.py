@@ -15,16 +15,31 @@ def _measure(func, *args, **kwargs):
 
 def test_performance_baseline(test_db_session, sample_datasource, sample_analysis):
     analysis_id = f'perf-{uuid.uuid4()}'
-    pipeline_steps: list[dict] = []
+    pipeline = {
+        'analysis_id': analysis_id,
+        'tabs': [
+            {
+                'id': 'tab1',
+                'datasource_id': sample_datasource.id,
+                'datasource_config': {},
+                'steps': [],
+            }
+        ],
+        'sources': {
+            sample_datasource.id: {
+                'source_type': sample_datasource.source_type,
+                **sample_datasource.config,
+            }
+        },
+    }
 
     manager = get_manager()
     try:
         preview_result, preview_ms = _measure(
             compute_service.preview_step,
             session=test_db_session,
-            datasource_id=sample_datasource.id,
-            pipeline_steps=pipeline_steps,
             target_step_id='source',
+            analysis_pipeline=pipeline,
             row_limit=100,
             page=1,
             analysis_id=analysis_id,
@@ -33,18 +48,16 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
         schema_result, schema_ms = _measure(
             compute_service.get_step_schema,
             session=test_db_session,
-            datasource_id=sample_datasource.id,
-            pipeline_steps=pipeline_steps,
             target_step_id='source',
             analysis_id=analysis_id,
+            analysis_pipeline=pipeline,
         )
 
         export_result, export_ms = _measure(
             compute_service.export_data,
             session=test_db_session,
-            datasource_id=sample_datasource.id,
-            pipeline_steps=pipeline_steps,
             target_step_id='source',
+            analysis_pipeline=pipeline,
             export_format='csv',
             destination='download',
             datasource_type='file',

@@ -281,12 +281,15 @@
 				: null;
 
 		if (analysisSourceId) {
+			if (!analysisPayload) {
+				throw new Error('Analysis pipeline payload required for execute');
+			}
 			const tabParam = analysisTabId ? `?analysis_tab_id=${encodeURIComponent(analysisTabId)}` : '';
-			const body = analysisPayload ? JSON.stringify({ pipeline: analysisPayload }) : undefined;
+			const body = JSON.stringify({ pipeline: analysisPayload });
 			void fetch(`/api/v1/analysis/${analysisSourceId}/execute${tabParam}`, {
 				method: 'POST',
 				body,
-				headers: body ? { 'Content-Type': 'application/json' } : undefined
+				headers: { 'Content-Type': 'application/json' }
 			})
 				.then((response) => {
 					if (!response.ok) {

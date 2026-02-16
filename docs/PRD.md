@@ -172,7 +172,7 @@ Row 4: [Schedules section (collapsible)]
 
 - No namespace field exposed in the output node (namespace is internal config).
 - `is_hidden` toggle: small button, always visible, top-right of header. Click toggles the flag via `updateDatasource` — must NOT trigger a build.
-- Build button: right side of row 2. Saves analysis first, then calls `buildAnalysis()`.
+- Build button: right side of row 2. Saves analysis first, then calls `buildAnalysisWithPayload()`.
 
 ### 6.8 Datasource Provenance Contract
 

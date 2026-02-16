@@ -379,11 +379,11 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
 
     logger.info(f'Schedule {schedule_id}: Building tab {tab_name} (lazyframe deps auto-resolved in query plan)')
 
+    pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
     compute_service.export_data(
         session=session,
-        datasource_id=tab_datasource_id,
-        pipeline_steps=steps,
         target_step_id=target_step_id,
+        analysis_pipeline=pipeline_payload,
         export_format=export_format,
         filename=filename,
         destination='datasource',
@@ -394,6 +394,7 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
         analysis_id=analysis_id,
         triggered_by=triggered_by,
         output_datasource_id=schedule.datasource_id,
+        tab_id=str(tab_id),
     )
 
     return {
@@ -459,6 +460,8 @@ def run_analysis_build(
     if not analysis:
         raise AnalysisNotFoundError(analysis_id)
 
+    pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=datasource_id)
+
     pipeline = analysis.pipeline_definition
     tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
     if not tabs:
@@ -516,9 +519,8 @@ def run_analysis_build(
 
                 compute_service.export_data(
                     session=session,
-                    datasource_id=tab_datasource_id,
-                    pipeline_steps=steps,
                     target_step_id=target_step_id,
+                    analysis_pipeline=pipeline_payload,
                     export_format=export_format,
                     filename=filename,
                     destination='datasource',
@@ -529,6 +531,7 @@ def run_analysis_build(
                     analysis_id=analysis_id,
                     triggered_by=triggered_by,
                     output_datasource_id=tab.get('output_datasource_id'),
+                    tab_id=str(current_tab_id),
                 )
             else:
                 raise ScheduleValidationError(f'Tab {current_tab_id} missing output configuration')

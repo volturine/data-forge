@@ -16,7 +16,6 @@
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
-	import { exportData } from '$lib/api/compute';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 
@@ -82,19 +81,11 @@
 		snapshotConfig = config;
 	}
 
-	async function handleDownload(format: 'csv' | 'parquet' | 'json') {
+	async function handleDownload(_format: 'csv' | 'parquet' | 'json') {
 		if (!selectedDatasource || downloading) return;
-		downloading = true;
-		await exportData({
-			datasource_id: selectedDatasource.id,
-			pipeline_steps: [],
-			target_step_id: 'source',
-			format,
-			filename: selectedDatasource.name,
-			destination: 'download',
-			datasource_config: snapshotConfig ?? selectedDatasource.config
-		});
-		downloading = false;
+		throw new Error(
+			'Datasource export requires an analysis pipeline payload; run exports from an analysis tab.'
+		);
 	}
 </script>
 
@@ -287,6 +278,7 @@
 				<div class="flex-1 min-h-0 overflow-hidden">
 					<DatasourcePreview
 						datasourceId={selectedDatasource.id}
+						datasource={selectedDatasource}
 						datasourceConfig={snapshotConfig ?? selectedDatasource.config}
 					/>
 				</div>

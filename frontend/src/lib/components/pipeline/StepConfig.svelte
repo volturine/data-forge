@@ -27,14 +27,17 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
+	import { getStepSchema, type StepSchemaRequest, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
 	import {
 		normalizeConfig,
 		type NotificationConfigData,
 		type AIConfigData
 	} from '$lib/utils/step-config-defaults';
-	import { buildDatasourceConfig } from '$lib/utils/analysis-pipeline';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourceConfig
+	} from '$lib/utils/analysis-pipeline';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -150,37 +153,25 @@
 
 		fetchingPivotSchema = true;
 
-		const pipelineSteps = analysisStore.pipeline.map((s) => {
-			if (s.id !== step.id) {
-				return {
-					id: s.id,
-					type: s.type,
-					config: s.config,
-					depends_on: s.depends_on
-				};
-			}
-			return {
-				id: s.id,
-				type: s.type,
-				config: draftConfig,
-				depends_on: s.depends_on
-			};
-		});
-
 		const datasourceConfig = buildDatasourceConfig({
 			analysisId: analysis.id,
 			tab: analysisStore.activeTab ?? null,
 			tabs: analysisStore.tabs,
 			datasources: datasourceStore.datasources
 		});
+		const analysisPipeline = buildAnalysisPipelinePayload(
+			analysis.id,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
 
 		getStepSchema({
 			analysis_id: analysis.id,
-			datasource_id: datasourceId,
-			pipeline_steps: pipelineSteps,
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
 			target_step_id: step.id,
 			datasource_config: datasourceConfig
-		})
+		} as unknown as StepSchemaRequest)
 			.map((response: StepSchemaResponse) => {
 				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);
 				fetchingPivotSchema = false;
