@@ -13,6 +13,7 @@ This document lists ALL environment variables supported by the application.
 | `PORT`                        | integer | 8000                                    | Port to bind (Docker only)                           |
 | **Database**                  |         |                                         |                                                      |
 | `DATABASE_URL`                | string  | sqlite+libsql:///./database/app.db      | Database connection URL                              |
+| `ENV_FILE`                    | string  | .env                                   | Path to env file (empty disables env-file loading)   |
 | **CORS**                      |         |                                         |                                                      |
 | `CORS_ORIGINS`                | string  | localhost:3000,...                      | Comma-separated allowed origins                      |
 | **File Storage**              |         |                                         |                                                      |
@@ -30,13 +31,13 @@ This document lists ALL environment variables supported by the application.
 | `WORKER_CONNECTIONS`          | integer | 1000                                    | Max connections per worker                           |
 | **Engine Lifecycle**          |         |                                         |                                                      |
 | `ENGINE_IDLE_TIMEOUT`         | integer | 300                                     | Idle timeout before cleanup (seconds, reset on save) |
-| `ENGINE_POOLING_INTERVAL`     | integer | 5                                       | Polling interval to check engine states (seconds)    |
+| `ENGINE_POOLING_INTERVAL`     | integer | 30                                      | Polling interval to check engine states (seconds)    |
 | **Job Management**            |         |                                         |                                                      |
 | `JOB_TIMEOUT`                 | integer | 300                                     | Max job execution time (seconds)                     |
 | **Logging**                   |         |                                         |                                                      |
 | `LOG_LEVEL`                   | string  | info                                    | Log level (debug/info/warning/error/critical)        |
 | `LOG_ICEBERG_PATH`            | path    | /app/data/logs/iceberg                  | Iceberg log storage path                             |
-| `LOG_ICEBERG_FLUSH_INTERVAL`  | integer | 300                                     | Log flush interval (seconds)                         |
+| `LOG_ICEBERG_FLUSH_INTERVAL_SECONDS` | integer | 300                               | Log flush interval (seconds)                         |
 | `LOG_QUEUE_MAX_SIZE`          | integer | 2000                                    | Max queued log batches                               |
 | `LOG_QUEUE_OVERFLOW`          | string  | block                                   | Queue overflow behavior (block/drop)                 |
 | `LOG_MAX_BODY_SIZE`           | integer | 1048576                                 | Max body size to log in bytes (0=unlimited)          |

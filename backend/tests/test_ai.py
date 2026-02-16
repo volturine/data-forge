@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from modules.ai.service import (
@@ -712,12 +711,6 @@ class TestConvertAIConfig:
 
 
 class TestAIRoutes:
-    @pytest.fixture()
-    def client(self):
-        from main import app
-
-        return TestClient(app)
-
     def test_list_models_ollama(self, client):
         mock_models = [{'name': 'llama2', 'size': 3800000000}]
         with patch('modules.ai.routes.get_ai_client') as mock_get:

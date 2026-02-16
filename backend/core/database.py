@@ -62,8 +62,9 @@ def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: 
 
 
 def init_db() -> None:
-    SQLModel.metadata.create_all(engine)
-    _run_migrations(engine)
+    engine_to_use = _engine_override or engine
+    SQLModel.metadata.create_all(engine_to_use)
+    _run_migrations(engine_to_use)
 
 
 def _run_migrations(db_engine) -> None:

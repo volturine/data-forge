@@ -4,10 +4,18 @@ from zoneinfo import available_timezones
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import DotEnvSettingsSource
 from sqlalchemy.engine.url import make_url
 
 # Root data directory (relative to project root, not backend/)
 DATA_DIR = Path(__file__).parent.parent.parent / 'data'
+
+
+def _get_env_file() -> str | None:
+    env_file = os.getenv('ENV_FILE', '.env')
+    if env_file:
+        return env_file
+    return None
 
 
 def _resolve_dir(value: Path | str) -> Path:
@@ -26,10 +34,29 @@ def _resolve_file_parent(value: Path | str) -> Path:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file='.env',
+        env_file=None,
         env_file_encoding='utf8',
         extra='ignore',
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        env_file = _get_env_file()
+        if env_file is None:
+            return (init_settings, env_settings, file_secret_settings)
+        return (
+            init_settings,
+            env_settings,
+            DotEnvSettingsSource(settings_cls, env_file=env_file, env_file_encoding='utf8'),
+            file_secret_settings,
+        )
 
     app_name: str = 'Polars-FastAPI-Svelte Analysis Platform'
     app_version: str = '1.0.0'
@@ -132,11 +159,6 @@ class Settings(BaseSettings):
     # Frontend debug panels
     public_idb_debug: bool = Field(default=False, alias='PUBLIC_IDB_DEBUG')
 
-    # SMTP configuration
-    smtp_host: str = Field(default='', alias='SMTP_HOST')
-    smtp_port: int = Field(default=587, alias='SMTP_PORT')
-    smtp_user: str = Field(default='', alias='SMTP_USER')
-    smtp_password: str = Field(default='', alias='SMTP_PASSWORD')
     settings_encryption_key: str = Field(default='', alias='SETTINGS_ENCRYPTION_KEY')
 
     # AI configuration

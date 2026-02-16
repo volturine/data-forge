@@ -36,6 +36,7 @@
 - [x] 37. Export datasets use uuid paths + schema evolution
 - [x] 59. Build query plan includes pre-eager steps annotation
 - [x] 60. AI/notification steps remain lazy (no internal collect)
+- [x] 61. Test DB isolation (prevent tests from touching production DB)
 
 ### Medium Priority
 - [x] 41. Remove hardcoded CORS IPs

@@ -406,6 +406,36 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
     }
 
 
+def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
+    """Find all tab IDs that the target tab depends on via lazyframe inputs (including itself)."""
+    output_to_tab: dict[str, str] = {}
+    tab_input: dict[str, str] = {}
+
+    for tab in tabs:
+        tid = tab.get('id')
+        output_id = tab.get('output_datasource_id')
+        input_id = tab.get('datasource_id')
+        if tid and output_id:
+            output_to_tab[output_id] = tid
+        if tid and input_id:
+            tab_input[tid] = input_id
+
+    required: set[str] = set()
+    queue = [target_tab_id]
+    while queue:
+        current = queue.pop(0)
+        if current in required:
+            continue
+        required.add(current)
+        input_ds = tab_input.get(current)
+        if input_ds and input_ds in output_to_tab:
+            upstream = output_to_tab[input_ds]
+            if upstream not in required:
+                queue.append(upstream)
+
+    return required
+
+
 def run_analysis_build(
     session: Session,
     analysis_id: str,
@@ -418,7 +448,8 @@ def run_analysis_build(
     Tabs with output config export data via export_data().
     Tabs without output config are skipped.
     Engine runs are tagged with ``triggered_by`` (default 'schedule').
-    If ``tab_id`` is provided, only that tab is built.
+    If ``tab_id`` is provided, that tab and its upstream lazyframe
+    dependencies are built.
 
     Returns a dict with build results per tab.
     """
@@ -434,6 +465,8 @@ def run_analysis_build(
         logger.warning(f'Scheduler: analysis {analysis_id} has no tabs, skipping build')
         return {'analysis_id': analysis_id, 'tabs_built': 0, 'results': []}
 
+    required_tabs = _resolve_upstream_tabs(tabs, tab_id) if tab_id else None
+
     results: list[dict] = []
     tabs_built = 0
 
@@ -445,15 +478,12 @@ def run_analysis_build(
         steps = tab.get('steps', [])
         datasource_config = tab.get('datasource_config')
 
-        # Tabs without a datasource cannot run at all
         if not tab_datasource_id:
             continue
 
-        # If a specific tab_id was requested, skip non-matching tabs
-        if tab_id and current_tab_id != tab_id:
+        if required_tabs and current_tab_id not in required_tabs:
             continue
 
-        # If a specific datasource_id was requested, skip non-matching tabs
         if datasource_id and tab_output_id != datasource_id:
             continue
 

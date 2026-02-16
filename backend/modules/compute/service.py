@@ -796,98 +796,97 @@ def export_data(
             if destination == 'datasource':
                 if datasource_type != 'iceberg':
                     raise ValueError('Output exports must use Iceberg datasources')
-                if datasource_type == 'iceberg':
-                    iceberg_opts = iceberg_options or {}
-                    namespace = iceberg_opts.get('namespace', 'exports')
-                    if not output_datasource_id:
-                        raise ValueError('Output datasource id is required for Iceberg exports')
-                    table_name = output_datasource_id
+                iceberg_opts = iceberg_options or {}
+                namespace = iceberg_opts.get('namespace', 'exports')
+                if not output_datasource_id:
+                    raise ValueError('Output datasource id is required for Iceberg exports')
+                table_name = output_datasource_id
 
-                    iceberg_base = settings.data_dir / 'iceberg'
-                    warehouse_path = iceberg_base / 'warehouse'
-                    catalog_path = iceberg_base / 'catalog.db'
+                iceberg_base = settings.data_dir / 'iceberg'
+                warehouse_path = iceberg_base / 'warehouse'
+                catalog_path = iceberg_base / 'catalog.db'
 
-                    warehouse_path.mkdir(parents=True, exist_ok=True)
-                    if not catalog_path.exists():
-                        catalog_path.touch()
+                warehouse_path.mkdir(parents=True, exist_ok=True)
+                if not catalog_path.exists():
+                    catalog_path.touch()
 
-                    catalog_config = {
-                        'type': 'sql',
-                        'uri': f'sqlite:///{catalog_path}',
-                        'warehouse': f'file://{warehouse_path}',
-                    }
+                catalog_config = {
+                    'type': 'sql',
+                    'uri': f'sqlite:///{catalog_path}',
+                    'warehouse': f'file://{warehouse_path}',
+                }
 
-                    catalog = load_catalog('local', **catalog_config)
-                    catalog.create_namespace_if_not_exists(namespace)
+                catalog = load_catalog('local', **catalog_config)
+                catalog.create_namespace_if_not_exists(namespace)
 
-                    identifier = f'{namespace}.{table_name}'
+                identifier = f'{namespace}.{table_name}'
 
-                    arrow_table = pl.read_parquet(output_path).to_arrow()
-                    if catalog.table_exists(identifier):
-                        iceberg_table = catalog.load_table(identifier)
+                arrow_table = pl.read_parquet(output_path).to_arrow()
+                if catalog.table_exists(identifier):
+                    iceberg_table = catalog.load_table(identifier)
+                    try:
+                        iceberg_table.overwrite(arrow_table)
+                    except Exception as exc:
+                        update = iceberg_table.update_schema()
+                        update.union_by_name(arrow_table.schema)
+                        update.commit()
                         try:
                             iceberg_table.overwrite(arrow_table)
-                        except Exception as exc:
-                            update = iceberg_table.update_schema()
-                            update.union_by_name(arrow_table.schema)
-                            update.commit()
-                            try:
-                                iceberg_table.overwrite(arrow_table)
-                            except Exception as retry_exc:
-                                raise ValueError(f'Failed to overwrite Iceberg table after schema update: {retry_exc}') from exc
-                    else:
-                        iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema)
-                        iceberg_table.append(arrow_table)
+                        except Exception as retry_exc:
+                            raise ValueError(f'Failed to overwrite Iceberg table after schema update: {retry_exc}') from exc
+                else:
+                    iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema)
+                    iceberg_table.append(arrow_table)
 
-                    metadata_path = str(iceberg_table.metadata_location)
-                    resolved_metadata = resolve_iceberg_metadata_path(metadata_path)
-                    table_dir = str(Path(resolved_metadata).parents[1])
+                metadata_path = str(iceberg_table.metadata_location)
+                resolved_metadata = resolve_iceberg_metadata_path(metadata_path)
+                table_dir = str(Path(resolved_metadata).parents[1])
 
-                    iceberg_ds_config = {
-                        'catalog_type': 'sql',
-                        'catalog_uri': f'sqlite:///{catalog_path}',
-                        'warehouse': f'file://{warehouse_path}',
-                        'namespace': namespace,
-                        'table': table_name,
-                        'metadata_path': table_dir,
-                    }
-                    output_ds = session.get(DataSource, output_datasource_id)
-                    output_hidden = True
-                    if output_ds:
-                        output_hidden = output_ds.is_hidden
-                    target_ds = _upsert_output_datasource(
-                        session=session,
-                        output_datasource_id=output_datasource_id,
-                        name=iceberg_opts.get('table_name', 'exported_data'),
-                        source_type='iceberg',
-                        config=iceberg_ds_config,
-                        schema_cache=data.get('schema', {}),
-                        analysis_id=run_analysis_id,
-                        is_hidden=output_hidden,
-                    )
-                    ds_id = target_ds.id
-                    run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'
+                iceberg_ds_config = {
+                    'catalog_type': 'sql',
+                    'catalog_uri': f'sqlite:///{catalog_path}',
+                    'warehouse': f'file://{warehouse_path}',
+                    'namespace': namespace,
+                    'table': table_name,
+                    'metadata_path': table_dir,
+                }
+                output_ds = session.get(DataSource, output_datasource_id)
+                output_hidden = True
+                if output_ds:
+                    output_hidden = output_ds.is_hidden
+                target_ds = _upsert_output_datasource(
+                    session=session,
+                    output_datasource_id=output_datasource_id,
+                    name=iceberg_opts.get('table_name', 'exported_data'),
+                    source_type='iceberg',
+                    config=iceberg_ds_config,
+                    schema_cache=data.get('schema', {}),
+                    analysis_id=run_analysis_id,
+                    is_hidden=output_hidden,
+                )
+                ds_id = target_ds.id
+                run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'
 
-                    result_meta['datasource_id'] = ds_id
-                    result_meta['datasource_name'] = iceberg_opts.get('table_name', 'exported_data')
-                    payload = engine_run_service.create_engine_run_payload(
-                        analysis_id=run_analysis_id,
-                        datasource_id=ds_id,
-                        kind=run_kind,
-                        status='success',
-                        request_json=request_payload,
-                        result_json=result_meta,
-                        created_at=started_at,
-                        completed_at=completed_at,
-                        duration_ms=duration_ms,
-                        step_timings=step_timings,
-                        query_plan=query_plan,
-                        progress=1.0,
-                        triggered_by=triggered_by,
-                    )
-                    engine_run_service.create_engine_run(session, payload)
+                result_meta['datasource_id'] = ds_id
+                result_meta['datasource_name'] = iceberg_opts.get('table_name', 'exported_data')
+                payload = engine_run_service.create_engine_run_payload(
+                    analysis_id=run_analysis_id,
+                    datasource_id=ds_id,
+                    kind=run_kind,
+                    status='success',
+                    request_json=request_payload,
+                    result_json=result_meta,
+                    created_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                    step_timings=step_timings,
+                    query_plan=query_plan,
+                    progress=1.0,
+                    triggered_by=triggered_by,
+                )
+                engine_run_service.create_engine_run(session, payload)
 
-                    return None, iceberg_opts.get('table_name', 'exported_data'), content_type, table_dir, ds_id, result_meta
+                return None, iceberg_opts.get('table_name', 'exported_data'), content_type, table_dir, ds_id, result_meta
 
             return None, None, None, None, None, result_meta
         except Exception as exc:

@@ -30,6 +30,8 @@ class TestSettings:
                 'WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv('ENV_FILE', raising=False)
+        monkeypatch.setenv('ENV_FILE', '')
         monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'false')
 
         settings = Settings()

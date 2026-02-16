@@ -6,7 +6,6 @@ from sqlmodel import Session
 from core.database import get_db
 from core.validation import DataSourceId, parse_datasource_id
 from modules.telegram import service
-from modules.telegram.bot import telegram_bot
 from modules.telegram.schemas import (
     BotStatusResponse,
     ListenerCreate,
@@ -26,7 +25,7 @@ def bot_status(session: Session = Depends(get_db)) -> BotStatusResponse:
     settings = get_settings(session)
     token_configured = bool(settings.telegram_bot_token)
     return BotStatusResponse(
-        running=telegram_bot.running,
+        running=token_configured,
         token_configured=token_configured,
         subscriber_count=active,
     )
