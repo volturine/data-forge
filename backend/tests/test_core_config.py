@@ -39,7 +39,7 @@ class TestSettings:
         assert 'uploads' in str(settings.upload_dir)
         assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.job_timeout == 300
-        assert settings.engine_idle_timeout == 120
+        assert settings.engine_idle_timeout == 300
         assert settings.engine_pooling_interval == 30
         assert settings.public_idb_debug is False
 

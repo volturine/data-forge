@@ -46,13 +46,15 @@
 	let smtpTestTo = $state('');
 	let feedback = $state<{ type: 'success' | 'error'; message: string } | null>(null);
 
-	// Load settings when popup opens — async fetch is a side-effect, $derived can't trigger it
+	// Async fetch is a side-effect, $derived can't trigger it
 	$effect(() => {
 		if (!open) return;
 		loading = true;
 		feedback = null;
+		let aborted = false;
 		getSettings().match(
 			(s) => {
+				if (aborted) return;
 				smtp_host = s.smtp_host;
 				smtp_port = s.smtp_port;
 				smtp_user = s.smtp_user;
@@ -63,9 +65,13 @@
 				loading = false;
 			},
 			() => {
+				if (aborted) return;
 				loading = false;
 			}
 		);
+		return () => {
+			aborted = true;
+		};
 	});
 
 	// Telegram bot status query
@@ -462,9 +468,7 @@
 
 				<!-- Footer with Save -->
 				<div class="flex items-center justify-between border-t p-4 border-tertiary">
-					<p class="m-0 text-xs text-fg-tertiary">
-						Settings are prepopulated from environment variables on first use.
-					</p>
+					<p class="m-0 text-xs text-fg-tertiary">Settings are stored in the database.</p>
 					<button
 						class="flex cursor-pointer items-center gap-1.5 border-none px-4 py-2 text-xs font-medium bg-accent text-bg-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 						onclick={save}

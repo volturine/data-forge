@@ -236,6 +236,10 @@ import {
 | **Playwright**          | Browser automation          |
 | **Vibe Check**          | Prevent tunnel vision       |
 | **Sequential Thinking** | Complex problem solving     |
+| **Memory**              | Knowledge graph management  |
+| **Fetch**               | Web content fetching        |
+| **Filesystem**          | File system operations      |
+| **Git**                 | Git repository operations   |
 
 ## Slash Commands
 

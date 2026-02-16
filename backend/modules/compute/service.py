@@ -796,26 +796,12 @@ def export_data(
             if destination == 'datasource':
                 if datasource_type != 'iceberg':
                     raise ValueError('Output exports must use Iceberg datasources')
-                payload = engine_run_service.create_engine_run_payload(
-                    analysis_id=run_analysis_id,
-                    datasource_id=datasource_id,
-                    kind='export',
-                    status='success',
-                    request_json=request_payload,
-                    result_json=result_meta,
-                    created_at=started_at,
-                    completed_at=completed_at,
-                    duration_ms=duration_ms,
-                    step_timings=step_timings,
-                    query_plan=query_plan,
-                    progress=1.0,
-                    triggered_by=triggered_by,
-                )
-                engine_run_service.create_engine_run(session, payload)
                 if datasource_type == 'iceberg':
                     iceberg_opts = iceberg_options or {}
-                    table_name = iceberg_opts.get('table_name', 'exported_data')
                     namespace = iceberg_opts.get('namespace', 'exports')
+                    if not output_datasource_id:
+                        raise ValueError('Output datasource id is required for Iceberg exports')
+                    table_name = output_datasource_id
 
                     iceberg_base = settings.data_dir / 'iceberg'
                     warehouse_path = iceberg_base / 'warehouse'
@@ -834,13 +820,21 @@ def export_data(
                     catalog = load_catalog('local', **catalog_config)
                     catalog.create_namespace_if_not_exists(namespace)
 
-                    unique_table = table_name
-                    identifier = f'{namespace}.{unique_table}'
+                    identifier = f'{namespace}.{table_name}'
 
                     arrow_table = pl.read_parquet(output_path).to_arrow()
                     if catalog.table_exists(identifier):
                         iceberg_table = catalog.load_table(identifier)
-                        iceberg_table.overwrite(arrow_table)
+                        try:
+                            iceberg_table.overwrite(arrow_table)
+                        except Exception as exc:
+                            update = iceberg_table.update_schema()
+                            update.union_by_name(arrow_table.schema)
+                            update.commit()
+                            try:
+                                iceberg_table.overwrite(arrow_table)
+                            except Exception as retry_exc:
+                                raise ValueError(f'Failed to overwrite Iceberg table after schema update: {retry_exc}') from exc
                     else:
                         iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema)
                         iceberg_table.append(arrow_table)
@@ -854,7 +848,7 @@ def export_data(
                         'catalog_uri': f'sqlite:///{catalog_path}',
                         'warehouse': f'file://{warehouse_path}',
                         'namespace': namespace,
-                        'table': unique_table,
+                        'table': table_name,
                         'metadata_path': table_dir,
                     }
                     output_ds = session.get(DataSource, output_datasource_id)
@@ -864,7 +858,7 @@ def export_data(
                     target_ds = _upsert_output_datasource(
                         session=session,
                         output_datasource_id=output_datasource_id,
-                        name=unique_table,
+                        name=iceberg_opts.get('table_name', 'exported_data'),
                         source_type='iceberg',
                         config=iceberg_ds_config,
                         schema_cache=data.get('schema', {}),
@@ -875,7 +869,7 @@ def export_data(
                     run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'
 
                     result_meta['datasource_id'] = ds_id
-                    result_meta['datasource_name'] = unique_table
+                    result_meta['datasource_name'] = iceberg_opts.get('table_name', 'exported_data')
                     payload = engine_run_service.create_engine_run_payload(
                         analysis_id=run_analysis_id,
                         datasource_id=ds_id,
@@ -893,7 +887,7 @@ def export_data(
                     )
                     engine_run_service.create_engine_run(session, payload)
 
-                    return None, unique_table, content_type, table_dir, ds_id, result_meta
+                    return None, iceberg_opts.get('table_name', 'exported_data'), content_type, table_dir, ds_id, result_meta
 
             return None, None, None, None, None, result_meta
         except Exception as exc:

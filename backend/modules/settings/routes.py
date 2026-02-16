@@ -1,5 +1,6 @@
 """Settings API routes — GET/PUT settings, test SMTP/Telegram."""
 
+import logging
 import smtplib
 from email.message import EmailMessage
 
@@ -26,6 +27,8 @@ from modules.settings.service import (
     update_settings,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix='/settings', tags=['settings'])
 
 
@@ -42,11 +45,13 @@ def write_settings(data: SettingsUpdate, session: Session = Depends(get_db)) -> 
 
     result = update_settings(session, data)
 
-    # Start, restart, or stop the Telegram bot based on enabled flag + token
-    if data.telegram_bot_enabled and data.telegram_bot_token:
-        telegram_bot.start(data.telegram_bot_token)
-    elif telegram_bot.running:
-        telegram_bot.stop()
+    try:
+        if data.telegram_bot_enabled and data.telegram_bot_token:
+            telegram_bot.start(data.telegram_bot_token)
+        elif telegram_bot.running:
+            telegram_bot.stop()
+    except Exception:
+        logger.warning('Failed to start/stop Telegram bot after settings save', exc_info=True)
 
     return result
 

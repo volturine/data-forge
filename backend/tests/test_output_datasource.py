@@ -7,6 +7,7 @@ and scheduler passes it through to export_data().
 
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sqlmodel import Session
@@ -14,7 +15,7 @@ from sqlmodel import Session
 from modules.analysis.models import Analysis
 from modules.analysis.schemas import AnalysisUpdateSchema, TabSchema
 from modules.analysis.service import update_analysis
-from modules.compute.service import _upsert_output_datasource
+from modules.compute.service import _upsert_output_datasource, export_data
 from modules.datasource.models import DataSource
 from modules.datasource.service import create_analysis_datasource
 
@@ -305,6 +306,72 @@ class TestRunAnalysisBuildOutputDatasource:
             assert call_kwargs.kwargs.get('output_datasource_id') == output_ds_id
             assert call_kwargs.kwargs.get('triggered_by') == 'schedule'
             mock_preview.assert_not_called()
+
+    def test_export_uses_output_datasource_id_for_table_name(self, test_db_session: Session, sample_datasource: DataSource):
+        output_ds_id = str(uuid.uuid4())
+        analysis_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+
+        analysis = Analysis(
+            id=analysis_id,
+            name='Output Test',
+            description='',
+            pipeline_definition={
+                'steps': [],
+                'datasource_ids': [sample_datasource.id],
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'name': 'Main',
+                        'type': 'datasource',
+                        'datasource_id': sample_datasource.id,
+                        'output_datasource_id': output_ds_id,
+                        'steps': [],
+                        'datasource_config': {
+                            'output': {
+                                'datasource_type': 'iceberg',
+                                'format': 'parquet',
+                                'filename': 'test_out',
+                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                            }
+                        },
+                    }
+                ],
+            },
+            status='draft',
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(analysis)
+        test_db_session.commit()
+
+        mock_catalog = MagicMock()
+        mock_table = MagicMock()
+        mock_catalog.table_exists.return_value = False
+        mock_catalog.create_table.return_value = mock_table
+
+        with (
+            patch('modules.compute.service.load_catalog', return_value=mock_catalog),
+            patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.resolve_iceberg_metadata_path') as mock_resolve,
+        ):
+            mock_read.return_value.to_arrow.return_value = MagicMock(schema=MagicMock())
+            mock_resolve.return_value = str(Path('/tmp/iceberg/warehouse/ns').joinpath(output_ds_id, 'metadata', 'v1.metadata.json'))
+            export_data(
+                session=test_db_session,
+                datasource_id=sample_datasource.id,
+                pipeline_steps=[],
+                target_step_id='source',
+                export_format='parquet',
+                filename='test_out',
+                destination='datasource',
+                datasource_type='iceberg',
+                iceberg_options={'namespace': 'ns', 'table_name': 'tbl'},
+                output_datasource_id=output_ds_id,
+            )
+
+        identifier = mock_catalog.create_table.call_args.args[0]
+        assert identifier == f'ns.{output_ds_id}'
 
     def test_tab_without_output_config_fails(self, test_db_session: Session, sample_datasource: DataSource):
         """Tabs without output config should fail."""

@@ -33,6 +33,7 @@
 - [x] 34. Frontend unit tests coverage
 - [x] 35. Performance tests baseline
 - [x] 36. Disabled steps passthrough + output notifications
+- [x] 37. Export datasets use uuid paths + schema evolution
 - [x] 59. Build query plan includes pre-eager steps annotation
 - [x] 60. AI/notification steps remain lazy (no internal collect)
 

@@ -1,0 +1,14 @@
+{
+  "folders": [
+    {
+      "path": "..",
+    },
+  ],
+  "settings": {
+    "svelte.enable-ts-plugin": true,
+    "typescript.tsdk": "frontend/node_modules/typescript/lib",
+    "files.associations": {
+      "*.svelte": "svelte",
+    },
+  },
+}

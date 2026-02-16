@@ -139,9 +139,6 @@ class Settings(BaseSettings):
     smtp_password: str = Field(default='', alias='SMTP_PASSWORD')
     settings_encryption_key: str = Field(default='', alias='SETTINGS_ENCRYPTION_KEY')
 
-    # Telegram configuration
-    telegram_bot_token: str = Field(default='', alias='TELEGRAM_BOT_TOKEN')
-
     # AI configuration
     ollama_base_url: str = Field(default='http://localhost:11434', alias='OLLAMA_BASE_URL')
     openai_api_key: str = Field(default='', alias='OPENAI_API_KEY')
