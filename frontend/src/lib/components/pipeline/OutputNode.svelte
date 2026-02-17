@@ -137,6 +137,7 @@
 			datasource_type: 'iceberg',
 			format: 'parquet',
 			filename: (output.filename as string) || tableName,
+			build_mode: (output.build_mode as string) || 'full',
 			iceberg: {
 				namespace: (icebergRaw.namespace as string) || 'exports',
 				table_name: tableName
@@ -189,6 +190,7 @@
 			datasource_type: 'iceberg',
 			format: 'parquet',
 			filename: tableName,
+			build_mode: 'full',
 			iceberg: { namespace: 'exports', table_name: tableName }
 		});
 	}
@@ -342,6 +344,36 @@
 					<span>Build</span>
 				{/if}
 			</button>
+		</div>
+
+		<!-- Row 3: Build Mode Selector -->
+		<div class="mt-3 flex items-center justify-between gap-2 border-t border-tertiary pt-3">
+			<div class="flex flex-col gap-1 w-full">
+				<div class="flex items-center gap-2">
+					<label
+						class="text-[10px] uppercase text-fg-muted"
+						for={`${idPrefix}-build-mode`}
+					>
+						Build Mode
+					</label>
+					<select
+						id={`${idPrefix}-build-mode`}
+						class="flex-1 border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
+						value={outputConfig.build_mode}
+						onchange={(e) => updateOutputConfig({ build_mode: e.currentTarget.value })}
+					>
+						<option value="full">Full</option>
+						<option value="incremental">Incremental</option>
+					</select>
+				</div>
+				<span class="text-[10px] text-fg-muted">
+					{#if outputConfig.build_mode === 'full'}
+						Replaces all data and syncs schema
+					{:else}
+						Appends new rows to existing data
+					{/if}
+				</span>
+			</div>
 		</div>
 
 		<div class="mt-3 flex flex-col gap-3">
