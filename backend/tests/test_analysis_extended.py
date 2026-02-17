@@ -49,7 +49,12 @@ class TestAnalysisValidation:
     def test_update_nonexistent_analysis(self, client):
         """Test updating analysis that doesn't exist."""
         fake_id = str(uuid.uuid4())
-        payload = {'name': 'Updated'}
+        payload = {
+            'name': 'Updated',
+            'tabs': [],
+            'client_id': str(uuid.uuid4()),
+            'lock_token': str(uuid.uuid4()),
+        }
 
         response = client.put(f'/api/v1/analysis/{fake_id}', json=payload)
 
@@ -181,7 +186,7 @@ class TestAnalysisDataSourceLinking:
 
         response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{new_datasource.id}')
 
-        assert response.status_code in [200, 201, 204]
+        assert response.status_code in [200, 201]
 
     def test_link_nonexistent_datasource(self, client, sample_analysis: Analysis):
         """Test linking non-existent datasource."""
@@ -205,7 +210,7 @@ class TestAnalysisDataSourceLinking:
 
         response = client.delete(f'/api/v1/analysis/{sample_analysis.id}/datasources/{datasource_id}')
 
-        assert response.status_code in [200, 204]
+        assert response.status_code == 204
 
     def test_unlink_nonexistent_datasource(self, client, sample_analysis: Analysis):
         """Test unlinking non-existent datasource."""
@@ -222,7 +227,7 @@ class TestAnalysisDataSourceLinking:
         response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{datasource_id}')
 
         # Should either succeed (idempotent) or fail with conflict
-        assert response.status_code in [200, 201, 204, 409]
+        assert response.status_code in [200, 201, 409]
 
 
 class TestAnalysisStatus:

@@ -29,6 +29,5 @@ class SampleHandler(OperationHandler):
         if validated.fraction <= 0 or validated.fraction > 1:
             raise ValueError('Sample fraction must be between 0 and 1')
         mod = int(1 / validated.fraction)
-        if validated.seed is not None:
-            return lf.with_row_index('_idx').filter(pl.col('_idx').hash(seed=validated.seed) % mod == 0).drop('_idx')
-        return lf.with_row_index('_idx').filter(pl.col('_idx').hash() % mod == 0).drop('_idx')
+        seed = validated.seed if validated.seed is not None else 0
+        return lf.with_row_index('_idx').filter(pl.col('_idx').hash(seed=seed) % mod == 0).drop('_idx')

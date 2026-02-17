@@ -1,43 +1,63 @@
-1. graphical nodes
-  1. all the basic plots
-  2. all the basic graphs
-2. add notification node
-   1. smtp
-   2. telegram
-3. AI API support node
-   1. ollama
-   2. openai
-4. add suport to directly ingest another analysis tab as source (should already be a lazyframe in the backend included with the export)
-5. add healthecks (send notification)
-   1. on successfull full builds
-   2. column rules
-   3. row count
-6. data lineage tab
-   1. used for visualisation of datasources
-   2. datsource lineage (if one is derived from another bacause it was generated with analysis)
-   3. graphical UI
-   4. used for scheduling.
-      1. cron schedules with DAGs for sequential builds of dependent datasets
-      2. should use the backed analysis to build the datasets with correct logic
-7. preview of running build
-   1. since some builds might take longer would be nice to see the execution time and such in graphical way..
-   2. spark has special ui for stages and such not sure what does polars have either way visualisating schedules and their builds is nice to have as we see what is building for how long and what will be built after
-8. builds UI improvements
-   1. as mentioned before some more graphics and relations
-   2. better filters
-9. column stats in datasources
-   1.  when clicking on column we should trigger a column stats compute..
-   2.  it should come from the bottom
-   3.  have all the related stats for column of type.
-   4.  think polars has some exact thing that will do it automaticaly
-   5.  this should be displayed in pretty manner
-10. the indexeddb popup 
-    1.  should have truncated rows to fixed size
-    2.  expand on click
-    3.  have a copy button
-11. we need an analysis version history
-    1.  with ui for selecting the version we want
-    2.  should be saved in backend with unlimited retentions
-    3.  each hit of save button should append a new analysis version that will be backed.
-    4.  the mode selet will have a third button and that is rollback which will show a full big popup in the middle of the screen with the past version to choose from
-    5.  reverting to version is just another append to the version history 
+# Task Tracker
+
+## Status:
+
+### Critical
+
+- [x] 1. Compute engine job tracking race condition
+- [x] 2. Compute engine env var pollution
+- [x] 3. Analysis service missing transaction rollback
+- [x] 4. Locks acquisition race condition
+- [x] 7. Deterministic sample without seed
+- [x] 8. Upload storage quota enforcement
+
+### High Priority
+
+- [x] 11. Non-atomic analysis version increment
+- [x] 12. Dirty reads during schema cache population
+- [x] 15. Silent schema extraction failures
+- [x] 16. Partial upload cleanup on failure
+- [x] 17. Preflight files TTL cleanup
+- [x] 18. Notification failures surfaced
+- [x] 1. UUID format validation on routes
+- [x] 2. API datasource URL validation
+- [x] 23. Unescaped filename in HTTP header
+- [x] 24. DuckDB temp cleanup on exception
+- [x] 25. Iceberg path symlink defense
+- [x] 26. File format validation via magic numbers
+- [x] 27. ETag/version headers for concurrency
+- [x] 28. Draft restore validation vs server
+- [x] 29. Join schema empty fallback handling
+- [x] 30. Schema refresh delay
+- [x] 31. Locks module tests
+- [X] 32. Engine runs module tests
+- [X] 33. Analysis versions tests
+- [x] 34. Frontend unit tests coverage
+- [x] 35. Performance tests baseline
+- [x] 36. Disabled steps passthrough + output notifications
+- [x] 37. Export datasets use uuid paths + schema evolution
+- [x] 59. Build query plan includes pre-eager steps annotation
+- [x] 60. AI/notification steps remain lazy (no internal collect)
+- [x] 61. Test DB isolation (prevent tests from touching production DB)
+- [x] 62. Unified compute requests with full analysis payload
+- [x] 63. Backend compute preview/schema/export accept analysis_pipeline + tab_id
+- [x] 64. Build payload endpoint added and wired for OutputNode
+- [x] 65. Remove legacy compute endpoints and payload fallbacks
+
+### Medium Priority
+
+- [x] 41. Remove hardcoded CORS IPs
+- [x] 42. Disable public IDB debug by default
+- [x] 43. Encrypt SMTP passwords at rest
+- [x] 44. Validate database URL
+- [x] 45. Normalize DELETE status codes
+- [x] 46. Telegram settings unified + notifications gating
+- [x] 47. Notification UDF recipient source selection
+- [x] 51. Remove bare except clauses
+- [x] 52. Preserve error context in exceptions
+- [x] 53. Standardize error handling patterns
+- [x] 54. User-friendly error messages
+- [x] 55. Timeout handling consistency
+- [x] 56. Process lifecycle gaps
+- [x] 57. Check-then-act cleanup races
+- [x] 58. Queue reuse after corruption timeout

@@ -366,7 +366,8 @@
 					throw new Error('Options must be an object');
 				}
 				options = parsed as Record<string, unknown>;
-			} catch {
+			} catch (err) {
+				void err;
 				error = 'Options must be valid JSON';
 				loading = false;
 				return;
@@ -474,7 +475,8 @@
 					throw new Error('Storage options must be an object');
 				}
 				storageOptions = parsed as Record<string, string>;
-			} catch {
+			} catch (err) {
+				void err;
 				error = 'Storage options must be valid JSON';
 				loading = false;
 				return;

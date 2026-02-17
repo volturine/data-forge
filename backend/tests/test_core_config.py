@@ -30,6 +30,8 @@ class TestSettings:
                 'WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv('ENV_FILE', raising=False)
+        monkeypatch.setenv('ENV_FILE', '')
         monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'false')
 
         settings = Settings()
@@ -39,7 +41,7 @@ class TestSettings:
         assert 'uploads' in str(settings.upload_dir)
         assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.job_timeout == 300
-        assert settings.engine_idle_timeout == 120
+        assert settings.engine_idle_timeout == 300
         assert settings.engine_pooling_interval == 30
         assert settings.public_idb_debug is False
 
@@ -91,9 +93,8 @@ class TestSettings:
     def test_invalid_database_url(self, monkeypatch):
         """Test validation of invalid database URL."""
         monkeypatch.setenv('DATABASE_URL', 'invalid-url')
-
-        settings = Settings()
-        assert settings.database_url == 'invalid-url'
+        with pytest.raises(ValidationError, match='database_url must be a valid SQLAlchemy URL'):
+            Settings()
 
     def test_negative_timeout_values(self, monkeypatch):
         """Test that negative timeout values are rejected."""

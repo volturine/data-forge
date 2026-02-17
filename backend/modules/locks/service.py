@@ -14,16 +14,12 @@ HEARTBEAT_INTERVAL_SECONDS = 10  # Heartbeat every 10 seconds
 
 def cleanup_expired_locks(session: Session) -> None:
     """Remove all expired locks."""
-    now = datetime.now(UTC)
-    # SQLite stores naive datetimes, so we need to compare carefully
-    # Fetch all locks and filter in Python to avoid timezone issues
+    now = datetime.now(UTC).replace(tzinfo=None)
     result = session.execute(select(Lock))
     locks = result.scalars().all()
 
     for lock in locks:
         expires_at = lock.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
         if expires_at < now:
             session.delete(lock)
 
@@ -41,46 +37,53 @@ def acquire_lock(
     Raises:
         ValueError: If resource is already locked by another client.
     """
-    # Clean up expired locks first
-    cleanup_expired_locks(session)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    expires_at = now + timedelta(seconds=LOCK_TTL_SECONDS)
+    lock = session.get(Lock, resource_id)
 
-    now = datetime.now(UTC)
-
-    # Check if resource is already locked
-    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        if existing.client_id != client_id:
-            raise ValueError(f'Resource is locked by another client until {existing.expires_at}')
-        # Same client - update the lock
-        existing.lock_token = str(uuid.uuid4())
-        existing.client_signature = client_signature
-        existing.acquired_at = now
-        existing.expires_at = now + timedelta(seconds=LOCK_TTL_SECONDS)
-        existing.last_heartbeat = now
-    else:
-        # Create new lock
+    if not lock:
         lock = Lock(
             resource_id=resource_id,
             client_id=client_id,
             client_signature=client_signature,
             lock_token=str(uuid.uuid4()),
             acquired_at=now,
-            expires_at=now + timedelta(seconds=LOCK_TTL_SECONDS),
+            expires_at=expires_at,
             last_heartbeat=now,
         )
         session.add(lock)
-        existing = lock
+        session.commit()
+        session.refresh(lock)
 
-    session.commit()
-    session.refresh(existing)
+    if lock:
+        if lock.expires_at < now:
+            lock.client_id = client_id
+            lock.client_signature = client_signature
+            lock.lock_token = str(uuid.uuid4())
+            lock.acquired_at = now
+            lock.expires_at = expires_at
+            lock.last_heartbeat = now
+            session.commit()
+            session.refresh(lock)
+        elif lock.client_id != client_id:
+            raise ValueError(f'Resource is locked by another client until {lock.expires_at}')
+        else:
+            lock.lock_token = str(uuid.uuid4())
+            lock.client_signature = client_signature
+            lock.acquired_at = now
+            lock.expires_at = expires_at
+            lock.last_heartbeat = now
+            session.commit()
+            session.refresh(lock)
+
+    if not lock:
+        raise ValueError('Failed to acquire lock')
 
     return LockResponse(
-        resource_id=existing.resource_id,
-        client_id=existing.client_id,
-        lock_token=existing.lock_token,
-        expires_at=existing.expires_at.isoformat(),
+        resource_id=lock.resource_id,
+        client_id=lock.client_id,
+        lock_token=lock.lock_token,
+        expires_at=lock.expires_at.isoformat(),
     )
 
 
@@ -95,7 +98,7 @@ def heartbeat(
     Raises:
         ValueError: If lock doesn't exist, expired, or token/client mismatch.
     """
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
     lock = result.scalar_one_or_none()
@@ -109,12 +112,7 @@ def heartbeat(
     if lock.client_id != client_id:
         raise ValueError('Lock held by another client')
 
-    # Handle timezone-aware vs naive datetime comparison
-    expires_at = lock.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-
-    if expires_at < now:
+    if lock.expires_at < now:
         # Lock expired - remove it
         session.delete(lock)
         session.commit()
@@ -214,11 +212,8 @@ def validate_lock(
     if lock.lock_token != lock_token:
         raise ValueError('Invalid lock token')
 
-    now = datetime.now(UTC)
-    expires_at = lock.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-    if expires_at < now:
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if lock.expires_at < now:
         session.delete(lock)
         session.commit()
         raise ValueError('Lock expired')

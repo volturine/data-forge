@@ -37,7 +37,8 @@ def listen_for_messages(msg_queue: mp.Queue) -> None:
         try:
             msg = msg_queue.get(timeout=1)
             print(f'[Listener] Received message: {msg}')
-        except Exception:
+        except Exception as exc:
+            print(f'[Listener] Error: {exc}')
             break
 
 

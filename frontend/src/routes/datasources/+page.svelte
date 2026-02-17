@@ -2,7 +2,17 @@
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
 	import { listDatasources, deleteDatasource } from '$lib/api/datasource';
-	import { Plus, Trash2, Search, LoaderCircle } from 'lucide-svelte';
+	import {
+		Plus,
+		Trash2,
+		Search,
+		LoaderCircle,
+		Download,
+		Eye,
+		EyeOff,
+		Upload,
+		GitBranch
+	} from 'lucide-svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
@@ -11,10 +21,12 @@
 
 	const queryClient = useQueryClient();
 
+	let showHidden = $state(false);
+
 	const query = createQuery(() => ({
-		queryKey: ['datasources'],
+		queryKey: ['datasources', showHidden],
 		queryFn: async () => {
-			const result = await listDatasources();
+			const result = await listDatasources(showHidden);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -46,6 +58,7 @@
 	);
 	const selectedDatasource = $derived(datasources.find((d) => d.id === selectedId) ?? null);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
+	let downloading = $state(false);
 
 	function selectDatasource(id: string | null) {
 		selectedId = id;
@@ -67,6 +80,13 @@
 	function handleSnapshotConfigChange(config: Record<string, unknown>) {
 		snapshotConfig = config;
 	}
+
+	async function handleDownload(_format: 'csv' | 'parquet' | 'json') {
+		if (!selectedDatasource || downloading) return;
+		throw new Error(
+			'Datasource export requires an analysis pipeline payload; run exports from an analysis tab.'
+		);
+	}
 </script>
 
 <div class="flex h-full">
@@ -78,14 +98,30 @@
 		<header class="flex flex-col gap-2 px-4 py-3 border-b border-tertiary h-25 box-border">
 			<div class="flex items-center justify-between">
 				<h1 class="text-sm font-semibold">Data Sources</h1>
-				<a
-					href={resolve('/datasources/new')}
+				<div class="flex items-center gap-1">
+					<button
+						class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary"
+						class:text-accent-primary={showHidden}
+						title={showHidden
+							? 'Hide auto-generated datasources'
+							: 'Show auto-generated datasources'}
+						onclick={() => (showHidden = !showHidden)}
+					>
+						{#if showHidden}
+							<Eye size={14} />
+						{:else}
+							<EyeOff size={14} />
+						{/if}
+					</button>
+					<a
+						href={resolve('/datasources/new')}
 						class="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 no-underline bg-accent text-bg-primary border border-accent-primary"
-					data-sveltekit-reload
-				>
-					<Plus size={14} />
-					Add
-				</a>
+						data-sveltekit-reload
+					>
+						<Plus size={14} />
+						Add
+					</a>
+				</div>
 			</div>
 			<div class="relative">
 				<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
@@ -113,7 +149,7 @@
 					<p class="text-sm text-fg-muted mb-4">No data sources yet.</p>
 					<a
 						href={resolve('/datasources/new')}
-					class="inline-flex items-center gap-1 text-sm font-medium px-3 py-2 no-underline bg-accent text-bg-primary border border-accent-primary"
+						class="inline-flex items-center gap-1 text-sm font-medium px-3 py-2 no-underline bg-accent text-bg-primary border border-accent-primary"
 						data-sveltekit-reload
 					>
 						Create your first data source
@@ -132,7 +168,7 @@
 						<!-- Row -->
 						<div class="flex items-center justify-between px-3 py-2.5">
 							<button
-								class="flex items-center min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
+								class="flex items-center gap-2 min-w-0 flex-1 text-left bg-transparent p-0 border-transparent"
 								onclick={() => selectDatasource(datasource.id)}
 							>
 								<span
@@ -141,6 +177,23 @@
 								>
 									{datasource.name}
 								</span>
+								{#if datasource.created_by === 'analysis'}
+									<span
+										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase font-medium text-accent-primary"
+										title="Created by analysis"
+									>
+										<GitBranch size={10} />
+										Analysis
+									</span>
+								{:else}
+									<span
+										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-tertiary px-1.5 py-0.5 text-[10px] uppercase font-medium text-fg-muted"
+										title="Imported datasource"
+									>
+										<Upload size={10} />
+										Import
+									</span>
+								{/if}
 							</button>
 							<div class="flex items-center shrink-0">
 								<button
@@ -172,24 +225,60 @@
 	<main class="flex-1 overflow-hidden">
 		{#if selectedDatasource}
 			<div class="h-full flex flex-col">
-				<div class="border-b border-tertiary bg-bg-secondary p-3">
-					{#if selectedDatasource.source_type === 'iceberg'}
-						<SnapshotPicker
-							datasourceId={selectedDatasource.id}
-							datasourceConfig={snapshotConfig ?? selectedDatasource.config}
-							label="Time Travel"
-							showDelete
-							onConfigChange={handleSnapshotConfigChange}
-						/>
-					{:else}
-						<div class="text-xs text-fg-tertiary">
-							Time travel is available for Iceberg datasources.
-						</div>
-					{/if}
+				<div
+					class="border-b border-tertiary bg-bg-secondary p-3 flex items-center justify-between gap-3"
+				>
+					<div class="flex-1 min-w-0">
+						{#if selectedDatasource.source_type === 'iceberg'}
+							<SnapshotPicker
+								datasourceId={selectedDatasource.id}
+								datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+								label="Time Travel"
+								showDelete
+								onConfigChange={handleSnapshotConfigChange}
+							/>
+						{:else}
+							<div class="text-xs text-fg-tertiary">
+								Time travel is available for Iceberg datasources.
+							</div>
+						{/if}
+					</div>
+					<div class="flex items-center gap-1 shrink-0">
+						<button
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
+							title="Download as CSV"
+							disabled={downloading}
+							onclick={() => handleDownload('csv')}
+						>
+							{#if downloading}
+								<LoaderCircle size={14} class="spinning" />
+							{:else}
+								<Download size={14} />
+							{/if}
+							CSV
+						</button>
+						<button
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
+							title="Download as Parquet"
+							disabled={downloading}
+							onclick={() => handleDownload('parquet')}
+						>
+							Parquet
+						</button>
+						<button
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
+							title="Download as JSON"
+							disabled={downloading}
+							onclick={() => handleDownload('json')}
+						>
+							JSON
+						</button>
+					</div>
 				</div>
 				<div class="flex-1 min-h-0 overflow-hidden">
 					<DatasourcePreview
 						datasourceId={selectedDatasource.id}
+						datasource={selectedDatasource}
 						datasourceConfig={snapshotConfig ?? selectedDatasource.config}
 					/>
 				</div>

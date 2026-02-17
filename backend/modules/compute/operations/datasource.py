@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -7,6 +8,7 @@ import polars as pl
 from openpyxl import load_workbook
 from pydantic import ConfigDict
 
+from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
 
 
@@ -14,6 +16,9 @@ class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
     source_type: str = 'file'
+    analysis_id: str | None = None
+    analysis_tab_id: str | None = None
+    analysis_pipeline: dict | None = None
     file_path: str | None = None
     file_type: str | None = None
     options: dict | None = None
@@ -58,6 +63,7 @@ class DatasourceHandler(OperationHandler):
             'database': self._load_database,
             'duckdb': self._load_duckdb,
             'iceberg': self._load_iceberg,
+            'analysis': self._load_analysis,
         }
         loader = loaders.get(validated.source_type)
         if not loader:
@@ -151,10 +157,127 @@ class DatasourceHandler(OperationHandler):
             storage_options=config.storage_options,
         )
 
+    def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
+        if not config.analysis_id:
+            raise ValueError('Datasource analysis loading requires analysis_id')
+        pipeline = config.analysis_pipeline
+        if isinstance(pipeline, dict):
+            analysis_id = str(config.analysis_id)
+            pipeline_id = pipeline.get('analysis_id')
+            if pipeline_id:
+                pipeline_id = str(pipeline_id)
+            if not pipeline_id or pipeline_id == analysis_id:
+                return _load_analysis_pipeline(pipeline, analysis_id, config.analysis_tab_id)
+        raise ValueError('analysis_pipeline is required for analysis datasource loading')
+
+
+_ANALYSIS_STACK: list[tuple[str, str | None]] = []
+
+
+def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
+    stack_key = (analysis_id, tab_id)
+    if stack_key in _ANALYSIS_STACK:
+        raise ValueError('Analysis pipeline contains a circular reference')
+    _ANALYSIS_STACK.append(stack_key)
+    try:
+        return _build_analysis_from_pipeline(pipeline, tab_id)
+    finally:
+        _ANALYSIS_STACK.pop()
+
+
+def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -> pl.LazyFrame:
+    tabs = pipeline.get('tabs', [])
+    if not isinstance(tabs, list) or not tabs:
+        raise ValueError('Analysis pipeline missing tabs')
+
+    selected = None
+    if analysis_tab_id:
+        selected = next((tab for tab in tabs if tab.get('id') == analysis_tab_id), None)
+    if not selected:
+        selected = next((tab for tab in tabs if tab.get('steps')), None)
+    if not selected:
+        selected = tabs[0]
+
+    datasource_id = selected.get('datasource_id')
+    if not datasource_id:
+        raise ValueError('Analysis tab missing datasource_id')
+
+    steps = selected.get('steps', [])
+    if not isinstance(steps, list):
+        raise ValueError('Analysis tab steps must be a list')
+
+    sources = pipeline.get('sources', {})
+    if not isinstance(sources, dict) or not sources:
+        raise ValueError('Analysis pipeline missing datasource configs')
+
+    datasource_config = sources.get(str(datasource_id))
+    if not isinstance(datasource_config, dict):
+        raise ValueError(f'Analysis pipeline missing datasource config for {datasource_id}')
+
+    overrides = selected.get('datasource_config') or {}
+    if overrides and not isinstance(overrides, dict):
+        raise ValueError('Analysis tab datasource_config must be a dict')
+
+    merged = {**datasource_config, **overrides}
+    analysis_id = pipeline.get('analysis_id')
+    analysis_id = str(analysis_id) if analysis_id is not None else None
+    if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
+        merged = {**merged, 'analysis_pipeline': pipeline}
+
+    from modules.compute.utils import apply_pipeline_steps
+
+    steps = apply_pipeline_steps(steps)
+    additional = _collect_analysis_sources(steps, sources, pipeline)
+    from modules.compute.engine import PolarsComputeEngine
+
+    job_id = f'analysis-{analysis_id or "local"}-{selected.get("id") or "tab"}'
+    return PolarsComputeEngine.build_pipeline(merged, steps, job_id, additional)
+
+
+def _collect_analysis_sources(steps: list[dict], sources: dict, pipeline: dict) -> dict[str, dict]:
+    additional: dict[str, dict] = {}
+    analysis_id = pipeline.get('analysis_id')
+    analysis_id = str(analysis_id) if analysis_id is not None else None
+    for step in steps:
+        config = step.get('config', {})
+        if not isinstance(config, dict):
+            continue
+        right_source_id = config.get('right_source') or config.get('rightDataSource')
+
+        union_sources = config.get('sources', [])
+        if isinstance(union_sources, str):
+            union_sources = [union_sources]
+
+        source_ids = []
+        if right_source_id:
+            source_ids.append(right_source_id)
+        if isinstance(union_sources, list):
+            source_ids.extend(union_sources)
+
+        for source_id in source_ids:
+            if not source_id:
+                continue
+            raw = sources.get(str(source_id))
+            if not isinstance(raw, dict):
+                raise ValueError(f'Analysis pipeline missing datasource config for {source_id}')
+            next_config = raw
+            if analysis_id and next_config.get('source_type') == 'analysis' and str(next_config.get('analysis_id')) == analysis_id:
+                next_config = {**next_config, 'analysis_pipeline': pipeline}
+            additional[str(source_id)] = next_config
+
+    return additional
+
 
 def resolve_iceberg_metadata_path(metadata_path: str) -> str:
     normalized = _strip_file_scheme(metadata_path)
     path = Path(normalized)
+    parts = [path, *path.parents]
+    if any(part.is_symlink() for part in parts):
+        raise ValueError('Iceberg metadata_path cannot be a symlink')
+    resolved = path.resolve()
+    data_root = Path(os.path.realpath(settings.data_dir.resolve()))
+    if data_root not in resolved.parents and data_root != resolved:
+        raise ValueError('Iceberg metadata_path must be inside data directory')
     if path.suffix == '.db':
         raise ValueError('Iceberg metadata_path must point to metadata.json, not catalog.db')
     if path.is_file():

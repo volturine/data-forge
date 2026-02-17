@@ -25,9 +25,19 @@
 	} from '$lib/types/operation-config';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
-	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
+	import { configStore } from '$lib/stores/config.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { getStepSchema, type StepSchemaRequest, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
-	import { normalizeConfig } from '$lib/utils/step-config-defaults';
+	import {
+		normalizeConfig,
+		type NotificationConfigData,
+		type AIConfigData
+	} from '$lib/utils/step-config-defaults';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourceConfig
+	} from '$lib/utils/analysis-pipeline';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -50,7 +60,9 @@
 	import NullCountConfig from '$lib/components/operations/NullCountConfig.svelte';
 	import ValueCountsConfig from '$lib/components/operations/ValueCountsConfig.svelte';
 	import UnpivotConfig from '$lib/components/operations/UnpivotConfig.svelte';
-	import ExportConfig from '$lib/components/operations/ExportConfig.svelte';
+	import PlotConfig from '$lib/components/operations/PlotConfig.svelte';
+	import NotificationConfig from '$lib/components/operations/NotificationConfig.svelte';
+	import AIConfig from '$lib/components/operations/AIConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
 	import { Settings2, X } from 'lucide-svelte';
 
@@ -83,12 +95,21 @@
 	let fetchingPivotSchema = $state(false);
 	let draftStepId = $state<string | null>(null);
 	let draftConfig = $state<Record<string, unknown>>({});
+	// True when draftConfig has been synchronized with the current step.
+	// Prevents config components from rendering with stale/empty config before
+	// the $effect below runs (which fires after the first render frame).
+	const draftReady = $derived(step !== null && draftStepId === step.id);
 
 	let inputSchema = $derived(
 		step
 			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
 			: { columns: [], row_count: null }
 	);
+
+	const configFlags = $derived({
+		smtpEnabled: configStore.smtpEnabled,
+		telegramEnabled: configStore.telegramEnabled
+	});
 
 	function cloneConfig(
 		config: Record<string, unknown> | null | undefined
@@ -132,29 +153,25 @@
 
 		fetchingPivotSchema = true;
 
-		const pipelineSteps = analysisStore.pipeline.map((s) => {
-			if (s.id !== step.id) {
-				return {
-					id: s.id,
-					type: s.type,
-					config: s.config,
-					depends_on: s.depends_on
-				};
-			}
-			return {
-				id: s.id,
-				type: s.type,
-				config: draftConfig,
-				depends_on: s.depends_on
-			};
+		const datasourceConfig = buildDatasourceConfig({
+			analysisId: analysis.id,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
 		});
+		const analysisPipeline = buildAnalysisPipelinePayload(
+			analysis.id,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
 
 		getStepSchema({
 			analysis_id: analysis.id,
-			datasource_id: datasourceId,
-			pipeline_steps: pipelineSteps,
-			target_step_id: step.id
-		})
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			target_step_id: step.id,
+			datasource_config: datasourceConfig
+		} as unknown as StepSchemaRequest)
 			.map((response: StepSchemaResponse) => {
 				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);
 				fetchingPivotSchema = false;
@@ -219,14 +236,21 @@
 		</div>
 
 		<div class="config-body flex-1 overflow-y-auto bg-primary p-3">
-			{#if !schema && !isLoadingSchema}
+			{#if !draftReady}
+				<div
+					class="flex flex-col items-center justify-center gap-3 bg-primary p-6 text-center text-fg-tertiary"
+				>
+					<div class="spinner-md"></div>
+					<p class="m-0">Initializing config...</p>
+				</div>
+			{:else if !schema && !isLoadingSchema}
 				<div class="warning-message">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
 					<button onclick={() => onClose?.()} type="button">Close</button>
 				</div>
 			{:else if isLoadingSchema}
 				<div
-				class="flex flex-col items-center justify-center gap-3 bg-primary p-6 text-center text-fg-tertiary"
+					class="flex flex-col items-center justify-center gap-3 bg-primary p-6 text-center text-fg-tertiary"
 				>
 					<div class="spinner-md"></div>
 					<p class="m-0">Loading schema...</p>
@@ -302,7 +326,7 @@
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={draftConfig as unknown as ViewConfigData} />
 			{:else if step.type === 'datasource'}
-			<div class="bg-primary p-6 text-center">
+				<div class="bg-primary p-6 text-center">
 					<p class="m-0 mb-3 text-fg-tertiary">Datasource options are set during upload.</p>
 				</div>
 			{:else if step.type === 'sample'}
@@ -328,14 +352,21 @@
 					schema={inputSchema}
 					bind:config={draftConfig as unknown as { sources: string[]; allow_missing: boolean }}
 				/>
-			{:else if step.type === 'export'}
-				<ExportConfig
-					bind:config={
-						draftConfig as unknown as { format?: string; filename?: string; destination?: string }
-					}
+			{:else if step.type === 'chart'}
+				<PlotConfig
+					schema={inputSchema}
+					bind:config={draftConfig as unknown as Record<string, unknown>}
 				/>
+			{:else if step.type === 'notification'}
+				<NotificationConfig
+					schema={inputSchema}
+					bind:config={draftConfig as unknown as NotificationConfigData}
+					{configFlags}
+				/>
+			{:else if step.type === 'ai'}
+				<AIConfig schema={inputSchema} bind:config={draftConfig as unknown as AIConfigData} />
 			{:else}
-			<div class="bg-primary p-6 text-center">
+				<div class="bg-primary p-6 text-center">
 					<p class="m-0 mb-3 text-fg-tertiary">
 						Configuration for {step.type} is not yet implemented
 					</p>

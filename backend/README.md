@@ -148,11 +148,13 @@ Configuration is managed through `core/config.py` using Pydantic settings.
 Key settings:
 - `DATABASE_URL` - Database connection string (default: `sqlite+libsql:///./database/app.db`)
 - `UPLOAD_DIR` - File upload directory (default: `./data/uploads`)
-- `RESULTS_DIR` - Results storage directory (default: `./data/results`)
+- `CLEAN_DIR` - Clean storage directory (default: `./data/clean`)
+- `EXPORTS_DIR` - Export storage directory (default: `./data/exports`)
 - `UPLOAD_CHUNK_SIZE` - Upload chunk size in bytes (default: 5MB)
-- `COMPUTE_TIMEOUT` - Computation timeout in seconds (default: 300)
+- `JOB_TIMEOUT` - Job execution timeout in seconds (default: 300)
+- `ENGINE_IDLE_TIMEOUT` - Idle engine timeout in seconds (default: 300)
 
-Override in `.env` file or environment variables.
+Override in `.env` file or environment variables. Use `ENV_FILE` to point to a specific env file (set to empty to disable env-file loading).
 
 ## Production Deployment
 

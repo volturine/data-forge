@@ -2,13 +2,21 @@
 	import type { DataSource } from '$lib/types/datasource';
 	import type { AnalysisTab } from '$lib/types/analysis';
 	import { getDatasourceSchema } from '$lib/api/datasource';
+	interface AnalysisExecuteResponse {
+		schema: Record<string, string>;
+		rows: Array<Record<string, unknown>>;
+		row_count?: number;
+	}
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { track } from '$lib/utils/audit-log';
+	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import {
 		FileText,
 		Database,
 		Globe,
+		Layers,
 		Snowflake,
 		PanelLeft,
 		Pencil,
@@ -22,6 +30,7 @@
 	import { drag } from '$lib/stores/drag.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
+	import type { SourceType } from '$lib/utils/fileTypes';
 
 	interface Props {
 		datasource: DataSource | null;
@@ -153,8 +162,53 @@
 	}
 
 	async function calculateRowCount() {
-		if (!datasource?.id || isLoadingRowCount) return;
+		if (isLoadingRowCount) return;
+		if (analysisSourceId) {
+			const analysisPayload =
+				analysisId && analysisSourceId === analysisId
+					? buildAnalysisPipelinePayload(
+							analysisId,
+							analysisStore.tabs,
+							datasourceStore.datasources
+						)
+					: null;
+			if (!analysisPayload) {
+				throw new Error('Analysis pipeline payload required for execute');
+			}
+			const tabParam = analysisSourceTabId
+				? `?analysis_tab_id=${encodeURIComponent(analysisSourceTabId)}`
+				: '';
+			const body = JSON.stringify({ pipeline: analysisPayload });
+			isLoadingRowCount = true;
+			await fetch(`/api/v1/analysis/${analysisSourceId}/execute${tabParam}`, {
+				method: 'POST',
+				body,
+				headers: { 'Content-Type': 'application/json' }
+			})
+				.then((response) => {
+					if (!response.ok) {
+						throw new Error('Failed to execute analysis');
+					}
+					return response.json() as Promise<AnalysisExecuteResponse>;
+				})
+				.then((payload) => {
+					rowCount = payload.row_count ?? payload.rows.length;
+					isLoadingRowCount = false;
+				})
+				.catch((error: unknown) => {
+					const message = error instanceof Error ? error.message : 'Failed to execute analysis';
+					track({
+						event: 'schema_error',
+						action: 'analysis_source_row_count',
+						target: analysisSourceId,
+						meta: { message }
+					});
+					isLoadingRowCount = false;
+				});
+			return;
+		}
 
+		if (!datasource?.id) return;
 		isLoadingRowCount = true;
 		getDatasourceSchema(datasource.id).match(
 			(schema) => {
@@ -175,7 +229,19 @@
 		);
 	}
 
-	let sourceType = $derived(datasource?.source_type ?? 'file');
+	let analysisSourceId = $derived(
+		(activeTab?.datasource_config?.analysis_id as string | null) ??
+			(datasource?.config?.analysis_id as string | null) ??
+			null
+	);
+	let analysisSourceTabId = $derived(
+		(activeTab?.datasource_config?.analysis_tab_id as string | null) ??
+			(datasource?.config?.analysis_tab_id as string | null) ??
+			null
+	);
+	let sourceType = $derived(
+		(analysisSourceId ? 'analysis' : (datasource?.source_type ?? 'file')) as string
+	);
 	let isDragActive = $derived(drag.active);
 </script>
 
@@ -193,6 +259,8 @@
 						<Globe size={14} />
 					{:else if sourceType === 'iceberg'}
 						<Snowflake size={14} />
+					{:else if sourceType === 'analysis'}
+						<Layers size={14} />
 					{:else}
 						<FileText size={14} />
 					{/if}
@@ -226,7 +294,7 @@
 							aria-label="Edit tab name"
 						/>
 						<button
-						class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
+							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
 							onclick={commitEdit}
 							type="button"
 							aria-label="Save"
@@ -277,6 +345,9 @@
 									size="sm"
 									showIcon={true}
 								/>
+							{:else if datasource.source_type === 'analysis'}
+								{@const badgeSource = sourceType as SourceType}
+								<FileTypeBadge sourceType={badgeSource} size="sm" showIcon={true} />
 							{:else}
 								<FileTypeBadge
 									sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
@@ -347,7 +418,7 @@
 							<label for="threads-input" class="min-w-15 text-xs text-fg-secondary">Threads</label>
 							<input
 								id="threads-input"
-						class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
+								class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
 								type="number"
 								min="1"
 								max="64"
@@ -362,7 +433,7 @@
 							<label for="memory-select" class="min-w-15 text-xs text-fg-secondary">Memory</label>
 							<select
 								id="memory-select"
-						class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
+								class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
 								value={effectiveMemoryGb}
 								onchange={(e) => setMemoryGb(parseInt(e.currentTarget.value) || 0)}
 							>
@@ -396,7 +467,7 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-		class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
+				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
 				onclick={onChangeDatasource}
 				type="button"
 			>

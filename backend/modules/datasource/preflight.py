@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -11,9 +12,11 @@ class ExcelPreflight:
     sheets: list[str]
     tables: dict[str, list[str]]
     named_ranges: list[str]
+    created_at: datetime
 
 
 _PREFLIGHTS: dict[str, ExcelPreflight] = {}
+_PREFLIGHT_TTL = timedelta(minutes=30)
 
 
 def create_preflight(file_path: Path) -> tuple[str, ExcelPreflight]:
@@ -28,12 +31,19 @@ def create_preflight(file_path: Path) -> tuple[str, ExcelPreflight]:
     named_ranges = [name for name in workbook.defined_names]
 
     preflight_id = str(uuid.uuid4())
-    preflight = ExcelPreflight(temp_path=file_path, sheets=sheets, tables=tables, named_ranges=named_ranges)
+    preflight = ExcelPreflight(
+        temp_path=file_path,
+        sheets=sheets,
+        tables=tables,
+        named_ranges=named_ranges,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
     _PREFLIGHTS[preflight_id] = preflight
     return preflight_id, preflight
 
 
 def get_preflight(preflight_id: str) -> ExcelPreflight | None:
+    _cleanup_expired()
     return _PREFLIGHTS.get(preflight_id)
 
 
@@ -43,3 +53,13 @@ def clear_preflight(preflight_id: str, *, delete_file: bool = True) -> None:
         return
     if delete_file and preflight.temp_path.exists():
         preflight.temp_path.unlink()
+
+
+def _cleanup_expired() -> None:
+    now = datetime.now(UTC).replace(tzinfo=None)
+    expired: list[str] = []
+    for preflight_id, preflight in _PREFLIGHTS.items():
+        if now - preflight.created_at > _PREFLIGHT_TTL:
+            expired.append(preflight_id)
+    for preflight_id in expired:
+        clear_preflight(preflight_id)

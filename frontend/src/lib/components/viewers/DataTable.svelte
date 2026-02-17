@@ -22,6 +22,7 @@
 		Play
 	} from 'lucide-svelte';
 	import { onClickOutside } from 'runed';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
@@ -49,6 +50,7 @@
 			loading?: boolean;
 		};
 		onPreview?: () => void;
+		onColumnStats?: (columnName: string) => void;
 		density?: 'default' | 'compact';
 		enableResize?: boolean;
 		enableCopy?: boolean;
@@ -72,6 +74,7 @@
 		showPagination = false,
 		pagination,
 		onPreview,
+		onColumnStats,
 		density = 'default',
 		enableResize = true,
 		enableCopy = true,
@@ -96,7 +99,6 @@
 	let columnPinning = $state<ColumnPinningState>({ left: [], right: [] });
 	let columnMenuRef = $state<HTMLElement>();
 	let activeColumn = $state<string | null>(null);
-	let sizingReady = $state(false);
 	let dragColumn = $state<string | null>(null);
 	let dragOver = $state<string | null>(null);
 	let dragPointerX = $state<number | null>(null);
@@ -106,8 +108,8 @@
 	let scrollRef = $state<HTMLDivElement>();
 
 	// Non-reactive copy state to avoid table re-renders
-	let copiedCells = new Set<string>();
-	let copyTimers = new Map<string, number>();
+	let copiedCells = new SvelteSet<string>();
+	let copyTimers = new SvelteMap<string, number>();
 
 	// Non-reactive tooltip state to avoid table re-renders
 	let tipState = {
@@ -121,7 +123,7 @@
 
 	let lastTooltipUpdate = { text: '', x: 0, y: 0, visible: false };
 
-	function updateTooltip() {
+	$effect(() => {
 		if (!tipRef) return;
 		if (
 			tipState.text === lastTooltipUpdate.text &&
@@ -138,9 +140,6 @@
 			visible: tipState.visible
 		};
 		if (tipState.visible) {
-			if (tipRef.textContent !== tipState.text) {
-				tipRef.textContent = tipState.text;
-			}
 			tipRef.style.setProperty('--tip-left', `${tipState.x}px`);
 			tipRef.style.setProperty('--tip-top', `${tipState.y}px`);
 			tipRef.style.opacity = '1';
@@ -149,7 +148,7 @@
 			tipRef.style.opacity = '0';
 			tipRef.style.visibility = 'hidden';
 		}
-	}
+	});
 
 	function setWidth(node: HTMLElement, size: number) {
 		node.style.width = `${size}px`;
@@ -164,11 +163,6 @@
 	const defaultColumnWidthPx = 150;
 	const columnHoverDelayMs = 1000;
 	let panelWidth = $state(0);
-	const softMin = $derived(
-		columns.length
-			? Math.max(defaultColumnWidthPx, Math.floor(panelWidth / columns.length))
-			: defaultColumnWidthPx
-	);
 
 	let initialSize = $state(defaultColumnWidthPx);
 
@@ -221,17 +215,13 @@
 					// During resize - update non-reactive offset only
 					resizeOffset.delta = next.deltaOffset ?? 0;
 					resizeOffset.start = next.startOffset ?? 0;
-					// Update all resizer indicators via DOM
 					document.documentElement.style.setProperty('--resize-delta', `${resizeOffset.delta}px`);
 				} else {
 					// Resize start/end - update reactive state
 					columnSizingInfo = next;
 					resizeOffset.delta = next.deltaOffset ?? 0;
 					resizeOffset.start = next.startOffset ?? 0;
-					if (isResizing) {
-						document.body.classList.add('touch-dragging');
-					} else {
-						document.body.classList.remove('touch-dragging');
+					if (!isResizing) {
 						document.documentElement.style.removeProperty('--resize-delta');
 					}
 				}
@@ -249,7 +239,6 @@
 	const rows = $derived<Row<RowData>[]>(table ? table.getRowModel().rows : []);
 	const compact = $derived(density === 'compact');
 	const resizing = $derived(columnSizingInfo.isResizingColumn !== false);
-	const columnsKey = $derived(columns.join('|'));
 	const effectiveVisibility = $derived(
 		columns.reduce(
 			(acc, col) => {
@@ -313,7 +302,6 @@
 
 		const target = event.currentTarget as HTMLElement;
 		target.setPointerCapture(event.pointerId);
-		document.body.classList.add('touch-dragging');
 	}
 
 	function handleColumnPointerMove(event: PointerEvent) {
@@ -353,7 +341,6 @@
 		dragPointerX = null;
 		dragPointerY = null;
 		dragLabel = null;
-		document.body.classList.remove('touch-dragging');
 	}
 
 	function setSort(columnId: string, direction: 'asc' | 'desc' | 'none') {
@@ -365,23 +352,6 @@
 		if (onSort) {
 			onSort(columnId, direction);
 		}
-	}
-
-	function ensureSizingReady() {
-		if (sizingReady) return;
-		const total = columns.length * initialSize;
-		if (total >= panelWidth) {
-			sizingReady = true;
-			return;
-		}
-		const extra = panelWidth - total;
-		const add = Math.floor(extra / columns.length);
-		const seeded = columns.reduce((acc, col) => {
-			acc[col] = initialSize + add;
-			return acc;
-		}, {} as ColumnSizingState);
-		columnSizing = seeded;
-		sizingReady = true;
 	}
 
 	function handlePreview() {
@@ -486,7 +456,6 @@
 			tipState.timer = null;
 		}
 		tipState.visible = false;
-		updateTooltip();
 	}
 
 	function tipShow(event: MouseEvent, id: string, value: string) {
@@ -503,7 +472,6 @@
 		}
 		if (!overflow) {
 			tipState.visible = false;
-			updateTooltip();
 			return;
 		}
 		const rect = valueEl.getBoundingClientRect();
@@ -514,7 +482,6 @@
 		tipState.timer = window.setTimeout(() => {
 			if (tipState.hoverId !== hoverId) return;
 			tipState.visible = true;
-			updateTooltip();
 		}, columnHoverDelayMs);
 	}
 </script>
@@ -602,7 +569,10 @@
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
-								{@const headerLabel = typeof header.column.columnDef.header === 'string' ? header.column.columnDef.header : header.id}
+								{@const headerLabel =
+									typeof header.column.columnDef.header === 'string'
+										? header.column.columnDef.header
+										: header.id}
 								<th
 									class="dataset-table__th p-0 text-left font-semibold border-b border-tertiary"
 									class:dataset-table__th--drag={dragOver === header.id}
@@ -621,7 +591,8 @@
 													{:else}
 														<button
 															class="dataset-table__drag"
-															onpointerdown={(event) => handleColumnPointerDown(event, header.id, headerLabel)}
+															onpointerdown={(event) =>
+																handleColumnPointerDown(event, header.id, headerLabel)}
 															onpointermove={handleColumnPointerMove}
 															onpointerup={handleColumnPointerUp}
 															onpointercancel={handleColumnPointerUp}
@@ -704,6 +675,17 @@
 											>
 												{(columnVisibility[header.id] ?? true) ? 'Hide column' : 'Show column'}
 											</button>
+											{#if onColumnStats}
+												<button
+													class="dataset-table__menu-btn"
+													onclick={() => {
+														onColumnStats(header.id);
+														activeColumn = null;
+													}}
+												>
+													Column stats
+												</button>
+											{/if}
 										</div>
 									{/if}
 								</th>

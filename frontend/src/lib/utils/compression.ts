@@ -36,7 +36,8 @@ export async function compress(data: unknown): Promise<string | null> {
 
 		// Convert to base64
 		return arrayBufferToBase64(result);
-	} catch {
+	} catch (err) {
+		void err;
 		return null;
 	}
 }
@@ -76,7 +77,8 @@ export async function decompress<T>(compressed: string): Promise<T | null> {
 		const decoder = new TextDecoder();
 		const jsonString = decoder.decode(result);
 		return JSON.parse(jsonString) as T;
-	} catch {
+	} catch (err) {
+		void err;
 		return null;
 	}
 }

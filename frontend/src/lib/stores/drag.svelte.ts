@@ -107,8 +107,8 @@ export class DragState {
 		if (this.capturedElement && this.pointerId !== null) {
 			try {
 				this.capturedElement.releasePointerCapture(this.pointerId);
-			} catch {
-				// Already released or element removed from DOM
+			} catch (err) {
+				void err;
 			}
 		}
 		this.capturedElement = null;

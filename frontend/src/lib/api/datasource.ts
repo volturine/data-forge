@@ -292,6 +292,20 @@ export function connectIceberg(
 	});
 }
 
+export function connectAnalysisDatasource(
+	name: string,
+	analysisId: string
+): ResultAsync<DataSource, ApiError> {
+	return apiRequest<DataSource>('/v1/datasource/connect', {
+		method: 'POST',
+		body: JSON.stringify({
+			name,
+			source_type: 'analysis',
+			config: { analysis_id: analysisId }
+		})
+	});
+}
+
 export function resolveIcebergMetadata(
 	metadataPath: string
 ): ResultAsync<{ metadata_path: string }, ApiError> {
@@ -323,8 +337,13 @@ export function listIcebergSnapshots(
 	return apiRequest<IcebergSnapshotsResponse>(`/v1/compute/iceberg/${datasourceId}/snapshots`);
 }
 
-export function listDatasources(): ResultAsync<DataSource[], ApiError> {
-	return apiRequest<DataSource[]>('/v1/datasource');
+export function listDatasources(includeHidden?: boolean): ResultAsync<DataSource[], ApiError> {
+	const params = new URLSearchParams();
+	if (includeHidden) {
+		params.set('include_hidden', 'true');
+	}
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<DataSource[]>(`/v1/datasource${suffix}`);
 }
 
 export function getDatasource(id: string): ResultAsync<DataSource, ApiError> {
@@ -351,6 +370,60 @@ export function getDatasourceSchema(
 	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/schema${suffix}`);
 }
 
+export interface HistogramBin {
+	start: number;
+	end: number;
+	count: number;
+}
+
+export interface ColumnStatsResponse {
+	column: string;
+	dtype: string;
+	count: number;
+	null_count: number;
+	null_percentage: number;
+	unique?: number | null;
+	mean?: number | null;
+	std?: number | null;
+	min?: number | string | null;
+	max?: number | string | null;
+	median?: number | null;
+	q25?: number | null;
+	q75?: number | null;
+	true_count?: number | null;
+	false_count?: number | null;
+	min_length?: number | null;
+	max_length?: number | null;
+	avg_length?: number | null;
+	top_values?: Array<Record<string, unknown>> | null;
+	histogram?: HistogramBin[] | null;
+}
+
+export function getColumnStats(
+	datasourceId: string,
+	columnName: string,
+	options?: { sample?: boolean; datasource_config?: Record<string, unknown> }
+): ResultAsync<ColumnStatsResponse, ApiError> {
+	const params = new URLSearchParams();
+	if (options?.sample === false) {
+		params.set('sample', 'false');
+	}
+	const payload = options?.datasource_config ?? null;
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	if (!payload) {
+		return apiRequest<ColumnStatsResponse>(
+			`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`
+		);
+	}
+	return apiRequest<ColumnStatsResponse>(
+		`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`,
+		{
+			method: 'POST',
+			body: JSON.stringify({ datasource_config: payload })
+		}
+	);
+}
+
 export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
 	return apiRequest<void>(`/v1/datasource/${id}`, {
 		method: 'DELETE'
@@ -360,6 +433,7 @@ export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
 export interface DataSourceUpdate {
 	name?: string;
 	config?: Record<string, unknown>;
+	is_hidden?: boolean;
 }
 
 export function updateDatasource(

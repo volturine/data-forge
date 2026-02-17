@@ -1,9 +1,18 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
+	import {
+		previewStepData,
+		type StepPreviewRequest,
+		type StepPreviewResponse
+	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourceConfig
+	} from '$lib/utils/analysis-pipeline';
 	import DataTable from '$lib/components/viewers/DataTable.svelte';
 
 	interface Props {
@@ -26,7 +35,15 @@
 	let activePipeline = $derived(applySteps(pipeline));
 	let isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
 	const pipelineKey = $derived.by(() => hashPipeline(activePipeline));
-	const datasourceConfig = $derived(analysisStore.activeTab?.datasource_config ?? {});
+	const datasourceConfig = $derived.by(() => {
+		const config = buildDatasourceConfig({
+			analysisId,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
+		});
+		return config ?? analysisStore.activeTab?.datasource_config ?? {};
+	});
 	const datasourceKey = $derived.by(() => {
 		const config = datasourceConfig as Record<string, unknown>;
 		const {
@@ -51,6 +68,15 @@
 	const runKey = $derived(`${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${stepId}`);
 	const hasRun = $derived(analysisStore.previewRuns.get(runKey) ?? false);
 
+	const analysisPipeline = $derived.by(() => {
+		if (!analysisId) return null;
+		return buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+	});
+
 	const query = createQuery(() => ({
 		queryKey: [
 			'step-preview',
@@ -68,15 +94,14 @@
 				unknown
 			> | null;
 			const result = await previewStepData({
-				analysis_id: analysisId,
-				datasource_id: datasourceId,
-				pipeline_steps: activePipeline,
+				analysis_pipeline: analysisPipeline,
+				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage,
 				resource_config: resourceConfig,
-				datasource_config: analysisStore.activeTab?.datasource_config ?? null
-			});
+				datasource_config: datasourceConfig
+			} as unknown as StepPreviewRequest);
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}

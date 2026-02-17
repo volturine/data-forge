@@ -94,14 +94,14 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Invalid Analysis',
             'description': 'Test',
-            'datasource_ids': ['non-existent-id'],
+            'datasource_ids': [str(uuid.uuid4())],
             'pipeline_steps': [],
             'tabs': [],
         }
 
         response = client.post('/api/v1/analysis', json=payload)
 
-        assert response.status_code == 400
+        assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
     def test_create_analysis_without_description(self, client, sample_datasource: DataSource):
@@ -188,7 +188,8 @@ class TestAnalysisGet:
         assert result['status'] == sample_analysis.status
 
     def test_get_analysis_not_found(self, client):
-        response = client.get('/api/v1/analysis/non-existent-id')
+        missing_id = str(uuid.uuid4())
+        response = client.get(f'/api/v1/analysis/{missing_id}')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
@@ -345,8 +346,9 @@ class TestAnalysisUpdate:
             'client_id': str(uuid.uuid4()),
             'lock_token': str(uuid.uuid4()),
         }
+        missing_id = str(uuid.uuid4())
 
-        response = client.put('/api/v1/analysis/non-existent-id', json=payload)
+        response = client.put(f'/api/v1/analysis/{missing_id}', json=payload)
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
@@ -374,14 +376,14 @@ class TestAnalysisDelete:
 
         response = client.delete(f'/api/v1/analysis/{analysis_id}')
 
-        assert response.status_code == 200
-        assert 'deleted successfully' in response.json()['message']
+        assert response.status_code == 204
 
         get_response = client.get(f'/api/v1/analysis/{analysis_id}')
         assert get_response.status_code == 404
 
     def test_delete_analysis_not_found(self, client):
-        response = client.delete('/api/v1/analysis/non-existent-id')
+        missing_id = str(uuid.uuid4())
+        response = client.delete(f'/api/v1/analysis/{missing_id}')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
@@ -394,7 +396,7 @@ class TestAnalysisDelete:
         assert len(links_before) > 0
 
         response = client.delete(f'/api/v1/analysis/{analysis_id}')
-        assert response.status_code == 200
+        assert response.status_code == 204
 
         result = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
         links_after = result.scalars().all()
@@ -427,13 +429,15 @@ class TestAnalysisDataSourceLink:
         assert datasource_count == 1
 
     def test_link_datasource_analysis_not_found(self, client, sample_datasource: DataSource):
-        response = client.post(f'/api/v1/analysis/non-existent-id/datasource/{sample_datasource.id}')
+        missing_id = str(uuid.uuid4())
+        response = client.post(f'/api/v1/analysis/{missing_id}/datasource/{sample_datasource.id}')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
     def test_link_datasource_datasource_not_found(self, client, sample_analysis: Analysis):
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/non-existent-id')
+        missing_id = str(uuid.uuid4())
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{missing_id}')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']

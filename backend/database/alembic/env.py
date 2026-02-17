@@ -6,9 +6,13 @@ from sqlmodel import SQLModel
 
 # Import the Base and settings
 from core.config import settings
+from modules.analysis_versions import models as analysis_versions_models
+from modules.datasource import models as datasource_models
 from modules.engine_runs import models as engine_runs_models
 
-_ = engine_runs_models.EngineRun
+_eng: type = engine_runs_models.EngineRun
+_ana: type = analysis_versions_models.AnalysisVersion
+_dsrc: type = datasource_models.DataSource
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

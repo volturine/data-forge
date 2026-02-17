@@ -161,6 +161,42 @@ export interface UnionByNameConfigData {
 	allow_missing: boolean;
 }
 
+export interface PlotConfigData {
+	chart_type: 'bar' | 'histogram' | 'scatter' | 'line' | 'pie' | 'boxplot';
+	x_column: string;
+	y_column: string;
+	bins: number;
+	aggregation: 'sum' | 'mean' | 'count' | 'min' | 'max';
+	group_column: string | null;
+}
+
+export interface NotificationConfigData {
+	method: 'email' | 'telegram';
+	recipient: string;
+	subscriber_ids: string[];
+	bot_token: string;
+	recipient_source: 'manual' | 'column';
+	recipient_column: string;
+	input_columns: string[];
+	output_column: string;
+	message_template: string;
+	subject_template: string;
+	batch_size: number;
+	timeout_seconds: number;
+}
+
+export interface AIConfigData {
+	provider: 'ollama' | 'openai';
+	model: string;
+	input_columns: string[];
+	output_column: string;
+	prompt_template: string;
+	batch_size: number;
+	endpoint_url: string;
+	api_key: string;
+	request_options?: Record<string, unknown> | null;
+}
+
 // Union type for all possible config types
 export type OperationConfig =
 	| FilterConfigData
@@ -185,4 +221,7 @@ export type OperationConfig =
 	| NullCountConfigData
 	| ValueCountsConfigData
 	| UnpivotConfigData
-	| UnionByNameConfigData;
+	| UnionByNameConfigData
+	| PlotConfigData
+	| NotificationConfigData
+	| AIConfigData;

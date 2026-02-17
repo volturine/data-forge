@@ -188,6 +188,20 @@ class AnalysisValidationError(AnalysisError):
         super().__init__(message=message, error_code='ANALYSIS_VALIDATION_ERROR', details=details)
 
 
+class AnalysisVersionNotFoundError(AnalysisError):
+    def __init__(self, analysis_id: str, version: int):
+        super().__init__(
+            message=f'Analysis version {version} not found for analysis {analysis_id}',
+            error_code='ANALYSIS_VERSION_NOT_FOUND',
+            details={'analysis_id': analysis_id, 'version': version},
+        )
+
+
+class AnalysisCycleError(AnalysisError):
+    def __init__(self, message: str):
+        super().__init__(message=message, error_code='ANALYSIS_CYCLE_ERROR', details={})
+
+
 # File Exceptions
 class FileError(AppError):
     """Base exception for file-related errors."""
@@ -239,4 +253,27 @@ class UnsupportedExportFormatError(ExportError):
             message=f'Unsupported export format: {format}',
             error_code='UNSUPPORTED_EXPORT_FORMAT',
             details={'format': format},
+        )
+
+
+# Schedule Exceptions
+class ScheduleError(AppError):
+    """Base exception for schedule-related errors."""
+
+    pass
+
+
+class ScheduleValidationError(ScheduleError):
+    """Raised when schedule validation fails."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='SCHEDULE_VALIDATION_ERROR', details=details)
+
+
+class ScheduleNotFoundError(ScheduleError):
+    def __init__(self, schedule_id: str):
+        super().__init__(
+            message=f'Schedule {schedule_id} not found',
+            error_code='SCHEDULE_NOT_FOUND',
+            details={'schedule_id': schedule_id},
         )

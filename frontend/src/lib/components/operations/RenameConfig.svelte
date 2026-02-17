@@ -96,7 +96,7 @@
 	{#if mappings.length > 0}
 		<div
 			id="rename-mappings-list"
-		class="flex flex-col gap-2 p-3 mb-4 bg-tertiary border border-tertiary"
+			class="flex flex-col gap-2 p-3 mb-4 bg-tertiary border border-tertiary"
 			role="list"
 			aria-label="Configured renames"
 		>

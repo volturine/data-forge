@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Database, LoaderCircle, X } from 'lucide-svelte';
+	import { Check, Copy, Database, LoaderCircle, X } from 'lucide-svelte';
 	import { onClickOutside } from 'runed';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
@@ -8,14 +8,36 @@
 	let entries = $state<Array<{ key: string; value: unknown }>>([]);
 	let loading = $state(false);
 	let dropdownRef = $state<HTMLElement>();
+	let expandedKey = $state<string | null>(null);
+	let copiedKey = $state<string | null>(null);
+	const truncateLimit = 120;
 
 	function formatValue(value: unknown): string {
 		if (typeof value === 'string') return value;
 		try {
 			return JSON.stringify(value);
-		} catch {
+		} catch (err) {
+			void err;
 			return String(value);
 		}
+	}
+
+	function truncateValue(value: string): string {
+		if (value.length <= truncateLimit) return value;
+		return `${value.slice(0, truncateLimit)}...`;
+	}
+
+	function toggleExpand(key: string) {
+		expandedKey = expandedKey === key ? null : key;
+	}
+
+	async function copyValue(key: string, value: unknown) {
+		const formatted = formatValue(value);
+		await navigator.clipboard.writeText(formatted);
+		copiedKey = key;
+		window.setTimeout(() => {
+			copiedKey = null;
+		}, 1500);
 	}
 
 	async function refresh() {
@@ -38,6 +60,9 @@
 		open = !open;
 		if (open) {
 			void refresh();
+		}
+		if (!open) {
+			expandedKey = null;
 		}
 	}
 
@@ -109,20 +134,47 @@
 					{:else}
 						<ul class="m-0 list-none p-0">
 							{#each entries as entry (entry.key)}
-								<li class="flex items-start gap-3 border-b p-3 last:border-b-0 border-tertiary">
-									<div class="min-w-0 flex-1">
-										<div class="font-mono text-xs text-fg-primary">{entry.key}</div>
-										<div class="mt-1 text-xs text-fg-muted break-words">
-											{formatValue(entry.value)}
+								<li class="border-b p-3 last:border-b-0 border-tertiary">
+									<div class="flex items-start gap-3">
+										<div class="min-w-0 flex-1">
+											<div class="flex items-center justify-between gap-2">
+												<span class="font-mono text-xs text-fg-primary">{entry.key}</span>
+												<button
+													class="flex items-center gap-1 border border-tertiary bg-transparent px-2 py-0.5 text-[11px] text-fg-secondary hover:bg-hover"
+													onclick={() => copyValue(entry.key, entry.value)}
+													type="button"
+												>
+													{#if copiedKey === entry.key}
+														<Check size={12} />
+														Copied
+													{:else}
+														<Copy size={12} />
+														Copy
+													{/if}
+												</button>
+											</div>
+											<button
+												class="mt-1 w-full text-left text-xs text-fg-muted break-words"
+												onclick={() => toggleExpand(entry.key)}
+												type="button"
+											>
+												{#if expandedKey === entry.key}
+													<pre class="whitespace-pre-wrap text-xs text-fg-primary">{formatValue(
+															entry.value
+														)}</pre>
+												{:else}
+													{truncateValue(formatValue(entry.value))}
+												{/if}
+											</button>
 										</div>
+										<button
+											class="flex cursor-pointer items-center justify-center border border-error bg-transparent px-2 py-1 text-xs text-error-fg hover:bg-error"
+											onclick={() => removeKey(entry.key)}
+											type="button"
+										>
+											Delete
+										</button>
 									</div>
-									<button
-										class="flex cursor-pointer items-center justify-center border border-error bg-transparent px-2 py-1 text-xs text-error-fg hover:bg-error"
-										onclick={() => removeKey(entry.key)}
-										type="button"
-									>
-										Delete
-									</button>
 								</li>
 							{/each}
 						</ul>

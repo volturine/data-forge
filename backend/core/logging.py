@@ -165,9 +165,11 @@ class IcebergLogWriter:
             try:
                 self._queue.put_nowait((kind, rows))
             except queue.Full:
-                self._dropped_count += len(rows)
-                if self._dropped_count % 100 == 1:
-                    _logger.warning(f'Log queue full, dropped {self._dropped_count} rows total')
+                with self._lock:
+                    self._dropped_count += len(rows)
+                    dropped = self._dropped_count
+                if dropped % 100 == 1:
+                    _logger.warning(f'Log queue full, dropped {dropped} rows total')
         else:
             self._queue.put((kind, rows))
 
@@ -206,7 +208,7 @@ class IcebergLogWriter:
             table = self._get_table(kind, day)
             table.append(pa.Table.from_pylist(rows, schema=self._arrow_map[kind]))
         except Exception as e:
-            _logger.error(f'Failed to append {len(rows)} rows to {kind}/{day}: {e}')
+            _logger.error(f'Failed to append {len(rows)} rows to {kind}/{day}: {e}', exc_info=True)
 
     def _get_table(self, kind: str, day: date):
         name = _daily_table_name(kind, day)
@@ -241,7 +243,8 @@ class IcebergLogHandler(logging.Handler):
                 'extra_json': record.__dict__.get('extra_json') or extras,
             }
             self.writer.write_app_log(payload)
-        except Exception:
+        except Exception as exc:
+            _logger.error('Iceberg log handler failed: %s', exc, exc_info=True)
             self.handleError(record)
 
 
@@ -409,6 +412,7 @@ def configure_logging() -> IcebergLogWriter:
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     )
+    logging.getLogger('httpx').setLevel(logging.WARNING)
 
     _writer = IcebergLogWriter(
         base_path=str(settings.log_iceberg_path),

@@ -3,22 +3,37 @@
 	import { X } from 'lucide-svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import type { SourceType } from '$lib/utils/fileTypes';
 
 	interface Props {
 		show: boolean;
 		datasources: DataSource[];
 		isLoading?: boolean;
 		mode?: 'add' | 'change';
-		onSelect: (id: string, name: string) => void;
+		sourceType?: 'datasource' | 'analysis';
+		analysisTabs?: Array<{ id: string; name: string }>;
+		excludeTabId?: string | null;
+		onSelect: (id: string, name: string, sourceType: 'datasource' | 'analysis') => void;
 		onClose: () => void;
 	}
 
-	let { show, datasources, isLoading = false, mode = 'add', onSelect, onClose }: Props = $props();
+	let {
+		show,
+		datasources,
+		isLoading = false,
+		mode = 'add',
+		sourceType = 'datasource',
+		analysisTabs = [],
+		excludeTabId = null,
+		onSelect,
+		onClose
+	}: Props = $props();
 
 	let searchQuery = $state('');
 	let debouncedSearch = new Debounced(() => searchQuery, 200);
 	let modalRef = $state<HTMLElement>();
 	let searchInput = $state<HTMLInputElement>();
+	let activeSource = $state<'datasource' | 'analysis'>('datasource');
 
 	onClickOutside(
 		() => modalRef,
@@ -33,6 +48,14 @@
 			return ds.name.toLowerCase().includes(query);
 		})
 	);
+	let filteredTabs = $derived(
+		analysisTabs.filter((tab) => {
+			if (mode === 'change' && excludeTabId && tab.id === excludeTabId) return false;
+			const query = debouncedSearch.current.toLowerCase().trim();
+			if (!query) return true;
+			return tab.name.toLowerCase().includes(query);
+		})
+	);
 
 	function handleClose() {
 		onClose();
@@ -40,7 +63,12 @@
 	}
 
 	function handleSelect(datasourceId: string, name: string) {
-		onSelect(datasourceId, name);
+		onSelect(datasourceId, name, activeSource);
+		handleClose();
+	}
+
+	function handleAnalysisTabSelect(entry: { id: string; name: string }) {
+		onSelect(entry.id, entry.name, 'analysis');
 		handleClose();
 	}
 
@@ -73,6 +101,11 @@
 		if (show && searchInput) {
 			searchInput.focus();
 		}
+	});
+
+	$effect(() => {
+		if (!show) return;
+		activeSource = sourceType;
 	});
 </script>
 
@@ -110,20 +143,60 @@
 				</button>
 			</div>
 			<div class="flex flex-col gap-4 overflow-y-auto p-4">
+				{#if mode === 'add'}
+					<div class="flex items-center gap-1 rounded-sm border border-tertiary bg-tertiary p-1">
+						<button
+							class="flex-1 border-none bg-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em]"
+							class:text-fg-primary={activeSource === 'datasource'}
+							class:text-fg-muted={activeSource !== 'datasource'}
+							class:bg-panel={activeSource === 'datasource'}
+							onclick={() => (activeSource = 'datasource')}
+							type="button"
+						>
+							Datasources
+						</button>
+						<button
+							class="flex-1 border-none bg-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em]"
+							class:text-fg-primary={activeSource === 'analysis'}
+							class:text-fg-muted={activeSource !== 'analysis'}
+							class:bg-panel={activeSource === 'analysis'}
+							onclick={() => (activeSource = 'analysis')}
+							type="button"
+						>
+							Analyses
+						</button>
+					</div>
+				{/if}
 				<input
-				class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-accent-primary"
+					class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-accent-primary"
 					type="text"
 					bind:this={searchInput}
 					bind:value={searchQuery}
-					placeholder="Search datasources..."
+					placeholder={activeSource === 'analysis' ? 'Search analyses...' : 'Search datasources...'}
 				/>
 				<div class="flex max-h-75 flex-col gap-1 overflow-y-auto">
 					{#if isLoading}
 						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">Loading...</div>
-					{:else if filteredDatasources.length === 0}
+					{:else if activeSource === 'analysis' && filteredTabs.length === 0}
+						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
+							{searchQuery ? 'No matching analysis tabs' : 'No analysis tabs available'}
+						</div>
+					{:else if activeSource === 'datasource' && filteredDatasources.length === 0}
 						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
 							{searchQuery ? 'No matching datasources' : 'No datasources available'}
 						</div>
+					{:else if activeSource === 'analysis'}
+						{#each filteredTabs as entry (entry.id)}
+							<button
+								class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left hover:bg-hover hover:border-tertiary"
+								onclick={() => handleAnalysisTabSelect(entry)}
+							>
+								<span class="text-sm font-medium text-fg-primary">
+									{entry.name}
+								</span>
+								<span class="text-xs text-fg-muted">analysis tab</span>
+							</button>
+						{/each}
 					{:else}
 						{#each filteredDatasources as ds (ds.id)}
 							<button
@@ -136,7 +209,7 @@
 										<FileTypeBadge path={ds.config.file_path as string} size="sm" showIcon={true} />
 									{:else}
 										<FileTypeBadge
-											sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+											sourceType={ds.source_type as SourceType}
 											size="sm"
 											showIcon={true}
 										/>

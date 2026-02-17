@@ -2,7 +2,10 @@
 	import { X } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { DataSource } from '$lib/types/datasource';
+	import type { AnalysisGalleryItem } from '$lib/types/analysis';
+	import { listAnalyses } from '$lib/api/analysis';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import type { SourceType } from '$lib/utils/fileTypes';
 
 	interface Props {
 		datasources: DataSource[];
@@ -16,6 +19,7 @@
 		excludeIds?: string[];
 		highlightId?: string;
 		searchFields?: ('name' | 'source_type' | 'file_type')[];
+		modeSource?: 'datasource' | 'analysis';
 		onSelect?: (id: string, name: string) => void;
 		onDeselect?: (id: string) => void;
 	}
@@ -32,6 +36,7 @@
 		excludeIds = [],
 		highlightId,
 		searchFields = ['name', 'source_type'],
+		modeSource = 'datasource',
 		onSelect,
 		onDeselect
 	}: Props = $props();
@@ -52,6 +57,11 @@
 	const availableOptions = $derived(datasources.filter((ds) => !excludedSet.has(ds.id)));
 
 	const filteredOptions = $derived(() => {
+		if (modeSource === 'analysis') {
+			if (!search.trim()) return analyses;
+			const query = search.toLowerCase();
+			return analyses.filter((analysis) => analysis.name.toLowerCase().includes(query));
+		}
 		if (!search.trim()) return availableOptions;
 
 		const query = search.toLowerCase();
@@ -67,6 +77,7 @@
 	});
 
 	const selectedDatasources = $derived(() => {
+		if (modeSource !== 'datasource') return [];
 		if (mode === 'single') {
 			const s = selected as string | undefined;
 			return s ? datasources.filter((ds) => ds.id === s) : [];
@@ -75,6 +86,23 @@
 		if (!arr?.length) return [];
 		const set = new SvelteSet(arr);
 		return datasources.filter((ds) => set.has(ds.id));
+	});
+
+	let analyses = $state<AnalysisGalleryItem[]>([]);
+	let analysesLoaded = $state(false);
+
+	$effect(() => {
+		if (modeSource !== 'analysis') return;
+		if (analysesLoaded) return;
+		listAnalyses()
+			.map((value) => {
+				analyses = value;
+				analysesLoaded = true;
+			})
+			.mapErr(() => {
+				analyses = [];
+				analysesLoaded = true;
+			});
 	});
 
 	function handleFocus() {
@@ -112,7 +140,7 @@
 	}
 
 	function selectAll() {
-		if (mode !== 'multi') return;
+		if (mode !== 'multi' || modeSource !== 'datasource') return;
 		const filtered = filteredOptions();
 		const filteredIds = filtered.map((ds) => ds.id);
 		const current = new SvelteSet((selected as string[]) ?? []);
@@ -126,7 +154,7 @@
 	}
 
 	function deselectAll() {
-		if (mode !== 'multi') return;
+		if (mode !== 'multi' || modeSource !== 'datasource') return;
 		const current = (selected as string[]) ?? [];
 		current.forEach((id) => onDeselect?.(id));
 		selected = [];
@@ -173,36 +201,41 @@
 			{#if filteredOptions().length === 0}
 				<div class="p-4 text-center text-sm text-fg-muted">No datasources found</div>
 			{:else}
-				{#each filteredOptions() as ds (ds.id)}
+				{#each filteredOptions() as item (item.id)}
 					<button
 						class="picker-option flex w-full cursor-pointer items-center justify-between border-b border-tertiary bg-transparent px-3 py-2 font-mono text-left text-sm text-fg-primary last:border-b-0 hover:bg-bg-hover"
-						class:selected={isSelected(ds.id)}
-						class:highlighted={ds.id === highlightId}
+						class:selected={isSelected(item.id)}
+						class:highlighted={item.id === highlightId}
 						onmousedown={(e) => {
 							e.preventDefault();
-							toggle(ds.id, ds.name);
+							toggle(item.id, item.name);
 						}}
 						role="option"
-						aria-selected={isSelected(ds.id)}
+						aria-selected={isSelected(item.id)}
 						type="button"
 					>
-						<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{ds.name}</span>
-						{#if ds.id === highlightId}
-						<span class="ml-2 border border-accent-primary bg-accent-bg px-2 py-1 text-xs text-accent-primary"
-							>current</span
-						>
-						{:else if ds.source_type === 'file'}
-							<FileTypeBadge
-								path={(ds.config?.file_path as string) ?? ''}
-								size="sm"
-								showIcon={false}
-							/>
+						<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
+						{#if modeSource === 'datasource'}
+							{@const ds = item as DataSource}
+							{#if ds.id === highlightId}
+								<span
+									class="ml-2 border border-accent-primary bg-accent-bg px-2 py-1 text-xs text-accent-primary"
+									>current</span
+								>
+							{:else if ds.source_type === 'file'}
+								<FileTypeBadge
+									path={(ds.config?.file_path as string) ?? ''}
+									size="sm"
+									showIcon={false}
+								/>
+							{:else}
+								{@const badgeSource = ds.source_type as SourceType}
+								<FileTypeBadge sourceType={badgeSource} size="sm" showIcon={false} />
+							{/if}
 						{:else}
-							<FileTypeBadge
-								sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-								size="sm"
-								showIcon={false}
-							/>
+							<span class="ml-2 border border-tertiary bg-tertiary px-2 py-1 text-xs text-fg-muted"
+								>analysis</span
+							>
 						{/if}
 					</button>
 				{/each}
@@ -210,7 +243,7 @@
 		</div>
 	{/if}
 
-	{#if mode === 'multi' && showChips && selectedDatasources().length > 0}
+	{#if mode === 'multi' && modeSource === 'datasource' && showChips && selectedDatasources().length > 0}
 		<div class="mt-2 flex flex-wrap gap-2">
 			{#each selectedDatasources() as ds (ds.id)}
 				<span
@@ -231,7 +264,7 @@
 		</div>
 	{/if}
 
-	{#if mode === 'multi' && showBulkActions && filteredOptions().length > 0}
+	{#if mode === 'multi' && modeSource === 'datasource' && showBulkActions && filteredOptions().length > 0}
 		<div class="mt-2 flex gap-2">
 			<button class="btn-secondary btn-sm" onclick={selectAll} type="button">Select All</button>
 			<button class="btn-secondary btn-sm" onclick={deselectAll} type="button">Deselect All</button>

@@ -69,7 +69,8 @@
 		let payload: UdfExport | null = null;
 		try {
 			payload = JSON.parse(importText) as UdfExport;
-		} catch {
+		} catch (err) {
+			void err;
 			importError = 'Invalid JSON payload';
 			return;
 		}

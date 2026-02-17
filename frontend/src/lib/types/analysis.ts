@@ -18,6 +18,7 @@ export interface AnalysisTab {
 	type: AnalysisTabType;
 	parent_id: string | null;
 	datasource_id: string | null;
+	output_datasource_id?: string | null;
 	datasource_config?: Record<string, unknown> | null;
 	steps: PipelineStep[];
 }
@@ -51,6 +52,7 @@ export interface Analysis {
 	result_path: string | null;
 	thumbnail: string | null;
 	tabs: AnalysisTab[];
+	version?: string | null;
 }
 
 export interface AnalysisGalleryItem {

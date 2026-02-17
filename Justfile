@@ -22,6 +22,24 @@ format:
     @echo "Formatting frontend..."
     cd frontend && npm run format
 
+# Lint backend (ruff + mypy)
+lint-backend:
+    cd backend && uv run ruff format --check . && uv run ruff check . && uv run mypy .
+
+# Lint frontend (svelte-check + prettier + eslint)
+lint-frontend:
+    cd frontend && npx svelte-check --threshold warning && npm run lint
+
+# Run all linters and type checks
+check: lint-backend lint-frontend
+
+# Run backend tests
+test:
+    cd backend && uv run pytest --tb=short -q
+
+# Full verification gate — must pass before any task is declared done
+verify: format test check
+
 # Build for production
 prod:
     @echo "Building frontend..."

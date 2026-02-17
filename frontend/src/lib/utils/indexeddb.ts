@@ -48,7 +48,8 @@ export async function idbGet<T>(key: string, config: DbConfig = defaultConfig): 
 	try {
 		const result = await withStore<T | undefined>(config, 'readonly', (store) => store.get(key));
 		return result ?? null;
-	} catch {
+	} catch (err) {
+		void err;
 		return null;
 	}
 }
@@ -60,7 +61,8 @@ export async function idbSet<T>(
 ): Promise<void> {
 	try {
 		await withStore(config, 'readwrite', (store) => store.put(value, key));
-	} catch {
+	} catch (err) {
+		void err;
 		// Ignore write failures
 	}
 }
@@ -68,7 +70,8 @@ export async function idbSet<T>(
 export async function idbDelete(key: string, config: DbConfig = defaultConfig): Promise<void> {
 	try {
 		await withStore(config, 'readwrite', (store) => store.delete(key));
-	} catch {
+	} catch (err) {
+		void err;
 		// Ignore delete failures
 	}
 }
@@ -76,7 +79,8 @@ export async function idbDelete(key: string, config: DbConfig = defaultConfig): 
 export async function idbClear(config: DbConfig = defaultConfig): Promise<void> {
 	try {
 		await withStore(config, 'readwrite', (store) => store.clear());
-	} catch {
+	} catch (err) {
+		void err;
 		// Ignore clear failures
 	}
 }
@@ -104,7 +108,8 @@ export async function idbEntries<T>(
 			transaction.oncomplete = () => db.close();
 			transaction.onerror = () => db.close();
 		});
-	} catch {
+	} catch (err) {
+		void err;
 		return [];
 	}
 }

@@ -8,10 +8,15 @@ from typing import Any
 from fastapi import HTTPException
 
 from core.exceptions import (
+    AnalysisCycleError,
     AnalysisNotFoundError,
+    AnalysisValidationError,
+    AnalysisVersionNotFoundError,
     AppError,
+    DataSourceConnectionError,
     DataSourceNotFoundError,
     DataSourceSnapshotError,
+    DataSourceValidationError,
     EngineNotFoundError,
     EngineTimeoutError,
     FileNotFoundError,
@@ -21,6 +26,8 @@ from core.exceptions import (
     JobTimeoutError,
     PipelineExecutionError,
     PipelineValidationError,
+    ScheduleNotFoundError,
+    ScheduleValidationError,
     StepNotFoundError,
     UnsupportedExportFormatError,
 )
@@ -33,13 +40,20 @@ EXCEPTION_STATUS_MAP = {
     DataSourceNotFoundError: 404,
     JobNotFoundError: 404,
     AnalysisNotFoundError: 404,
+    AnalysisVersionNotFoundError: 404,
     EngineNotFoundError: 404,
     FileNotFoundError: 404,
     StepNotFoundError: 404,
+    ScheduleNotFoundError: 404,
     # 400 - Bad Request errors
     PipelineValidationError: 400,
     FileValidationError: 400,
     UnsupportedExportFormatError: 400,
+    ScheduleValidationError: 400,
+    DataSourceValidationError: 400,
+    AnalysisValidationError: 400,
+    AnalysisCycleError: 404,
+    DataSourceConnectionError: 502,
     DataSourceSnapshotError: 409,
     # 408 - Timeout errors
     EngineTimeoutError: 408,
@@ -58,39 +72,19 @@ def convert_exception_to_http(exc: Exception) -> HTTPException:
         return exc
 
     if isinstance(exc, AppError):
-        # Custom application error
         status_code = EXCEPTION_STATUS_MAP.get(type(exc), 500)
-        detail = {
-            'message': exc.message,
-            'error_code': exc.error_code,
-            'details': exc.details,
-        }
         logger.error(
             f'{type(exc).__name__}: {exc.message}',
             extra={'error_code': exc.error_code, 'details': exc.details},
             exc_info=True,
         )
-        return HTTPException(status_code=status_code, detail=detail)
+        return HTTPException(status_code=status_code, detail=exc.message)
 
-    # Generic exception - log with full traceback
     logger.error(f'Unhandled exception: {str(exc)}', exc_info=True)
     return HTTPException(status_code=500, detail='An internal error occurred')
 
 
-def handle_errors(operation: str = 'operation') -> Callable:
-    """
-    Decorator to handle exceptions in FastAPI route handlers.
-
-    Args:
-        operation: Description of the operation for error messages
-
-    Usage:
-        @router.get('/items/{item_id}')
-        @handle_errors(operation='get item')
-        async def get_item(item_id: str):
-            return await service.get_item(item_id)
-    """
-
+def handle_errors(operation: str = 'operation', value_error_status: int | None = None) -> Callable:
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -102,10 +96,13 @@ def handle_errors(operation: str = 'operation') -> Callable:
             except AppError as e:
                 # Convert custom app errors to HTTP exceptions
                 raise convert_exception_to_http(e)
+            except ValueError as e:
+                status_code = value_error_status or 400
+                raise HTTPException(status_code=status_code, detail=str(e)) from e
             except Exception as e:
                 # Convert generic exceptions
                 logger.error(f'Failed to {operation}: {str(e)}', exc_info=True)
-                raise HTTPException(status_code=500, detail=f'Failed to {operation}')
+                raise HTTPException(status_code=500, detail=f'Failed to {operation}: {str(e)}') from e
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -117,10 +114,13 @@ def handle_errors(operation: str = 'operation') -> Callable:
             except AppError as e:
                 # Convert custom app errors to HTTP exceptions
                 raise convert_exception_to_http(e)
+            except ValueError as e:
+                status_code = value_error_status or 400
+                raise HTTPException(status_code=status_code, detail=str(e)) from e
             except Exception as e:
                 # Convert generic exceptions
                 logger.error(f'Failed to {operation}: {str(e)}', exc_info=True)
-                raise HTTPException(status_code=500, detail=f'Failed to {operation}')
+                raise HTTPException(status_code=500, detail=f'Failed to {operation}: {str(e)}') from e
 
         # Return the appropriate wrapper based on whether the function is async
         import inspect

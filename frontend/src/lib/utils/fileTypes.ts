@@ -46,7 +46,7 @@ export type FileType =
 /**
  * Supported datasource types (non-file sources)
  */
-export type SourceType = 'database' | 'api' | 'iceberg' | 'file' | 'duckdb';
+export type SourceType = 'database' | 'api' | 'iceberg' | 'file' | 'duckdb' | 'analysis';
 
 /**
  * Color scheme for a file type (CSS-in-JS format)
@@ -281,6 +281,18 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		},
 		icon: Database,
 		description: 'DuckDB database'
+	},
+	analysis: {
+		type: 'unknown',
+		label: 'Analysis',
+		extensions: [],
+		colors: {
+			color: 'var(--source-analysis-fg)',
+			borderColor: 'var(--source-analysis-border)',
+			backgroundColor: 'var(--source-analysis-bg)'
+		},
+		icon: Layers,
+		description: 'Derived analysis output'
 	}
 };
 

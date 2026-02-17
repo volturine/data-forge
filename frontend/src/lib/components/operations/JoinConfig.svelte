@@ -43,7 +43,23 @@
 	});
 
 	async function loadRightSchema(datasourceId: string) {
-		const schemaInfo = await datasourceStore.getSchema(datasourceId);
+		const target = datasourceStore.getDatasource(datasourceId);
+		if (target?.source_type === 'analysis') {
+			rightSchema = null;
+			return;
+		}
+		let schemaInfo: Awaited<ReturnType<typeof datasourceStore.getSchema>> | null = null;
+		try {
+			schemaInfo = await datasourceStore.getSchema(datasourceId);
+		} catch (err) {
+			void err;
+			schemaInfo = null;
+		}
+		if (!schemaInfo) {
+			rightSchema = null;
+			schemaStore.removeJoinDatasource(datasourceId);
+			return;
+		}
 		const joinSchema: Schema = {
 			columns: schemaInfo.columns.map((c) => ({
 				name: c.name,
@@ -79,7 +95,9 @@
 	];
 
 	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource_id);
-	const datasourceOptions = $derived.by(() => datasourceStore.datasources);
+	const datasourceOptions = $derived.by(() =>
+		datasourceStore.datasources.filter((ds) => ds.source_type !== 'analysis')
+	);
 </script>
 
 <div class="config-panel" role="region" aria-label="Join configuration">
@@ -134,7 +152,7 @@
 					id="join-btn-add-column"
 					data-testid="join-add-column-button"
 					type="button"
-						class="btn-add py-1 px-3 border-none cursor-pointer text-sm bg-accent text-bg-primary hover:bg-accent-primary"
+					class="btn-add py-1 px-3 border-none cursor-pointer text-sm bg-accent text-bg-primary hover:bg-accent-primary"
 					onclick={addJoinColumn}
 					aria-label="Add join column pair"
 				>

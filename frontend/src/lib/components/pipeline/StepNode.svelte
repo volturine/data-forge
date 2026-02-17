@@ -2,10 +2,23 @@
 	import type { PipelineStep } from '$lib/types/analysis';
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
 	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
-	import { Download, GripVertical } from 'lucide-svelte';
-	import { exportData, downloadBlob, type ExportRequest } from '$lib/api/compute';
+	import ChartPreview from '$lib/components/viewers/ChartPreview.svelte';
+	import { createQuery } from '@tanstack/svelte-query';
+	import {
+		previewStepData,
+		type StepPreviewRequest,
+		type StepPreviewResponse
+	} from '$lib/api/compute';
+	import { applySteps } from '$lib/utils/pipeline';
+	import { hashPipeline } from '$lib/utils/hash';
+	import { GripVertical } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
+	import {
+		buildAnalysisPipelinePayload,
+		buildDatasourceConfig
+	} from '$lib/utils/analysis-pipeline';
 
 	interface Props {
 		step: PipelineStep;
@@ -31,9 +44,66 @@
 		onTouchMove
 	}: Props = $props();
 
-	let isExporting = $state(false);
-	let exportError = $state<string | null>(null);
-	let exportSuccess = $state<string | null>(null);
+	const isChart = $derived(
+		step.type === 'chart' || step.type === 'plot' || step.type.startsWith('plot_')
+	);
+
+	// Chart preview query (only for chart/plot steps) — auto-runs like view nodes
+	const chartPipeline = $derived(applySteps(allSteps));
+	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
+	const chartDatasourceConfig = $derived.by(() => {
+		if (!isChart) return {};
+		return (
+			buildDatasourceConfig({
+				analysisId: analysisId ?? null,
+				tab: analysisStore.activeTab ?? null,
+				tabs: analysisStore.tabs,
+				datasources: datasourceStore.datasources
+			}) ??
+			analysisStore.activeTab?.datasource_config ??
+			{}
+		);
+	});
+	const analysisPipeline = $derived.by(() => {
+		if (!analysisId) return null;
+		return buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+	});
+
+	const chartQuery = createQuery(() => ({
+		queryKey: [
+			'chart-preview',
+			analysisId,
+			datasourceId,
+			step.id,
+			chartPipelineKey,
+			JSON.stringify(chartDatasourceConfig)
+		],
+		queryFn: async (): Promise<StepPreviewResponse> => {
+			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
+				string,
+				unknown
+			> | null;
+			const result = await previewStepData({
+				analysis_pipeline: analysisPipeline,
+				tab_id: analysisStore.activeTab?.id ?? null,
+				target_step_id: step.id,
+				row_limit: 5000,
+				page: 1,
+				resource_config: resourceConfig,
+				datasource_config: chartDatasourceConfig
+			} as unknown as StepPreviewRequest);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		staleTime: Infinity,
+		gcTime: Infinity,
+		refetchOnMount: false,
+		enabled: isChart && !!datasourceId && !!analysisId
+	}));
 
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
@@ -47,7 +117,7 @@
 	// Derived values from declarative config
 	let stepConfig = $derived(getStepTypeConfig(step.type));
 	let Icon = $derived(stepConfig.icon);
-	let label = $derived(stepConfig.typeLabel);
+	let label = $derived(stepConfig.label);
 	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
 	let isApplied = $derived((step as PipelineStep & { is_applied?: boolean }).is_applied !== false);
 
@@ -135,56 +205,6 @@
 		isDragging = false;
 		cancelLongPress();
 	}
-
-	async function handleExport() {
-		if (!datasourceId || isExporting) return;
-
-		isExporting = true;
-		exportError = null;
-		exportSuccess = null;
-
-		const format = (step.config.format as string) || 'csv';
-		const filename = (step.config.filename as string) || 'export';
-		const request = {
-			analysis_id: analysisId,
-			datasource_id: datasourceId,
-			pipeline_steps: allSteps.map((s) => ({
-				id: s.id,
-				type: s.type,
-				config: s.config,
-				depends_on: s.depends_on
-			})),
-			target_step_id: step.id,
-			format: format as ExportRequest['format'],
-			filename,
-			destination: 'download',
-			datasource_config: analysisStore.activeTab?.datasource_config ?? null
-		} as ExportRequest;
-
-		exportData(request).match(
-			(result) => {
-				if (result instanceof Blob) {
-					const ext =
-						format === 'csv'
-							? '.csv'
-							: format === 'parquet'
-								? '.parquet'
-								: format === 'ndjson'
-									? '.ndjson'
-									: format === 'duckdb'
-										? '.duckdb'
-										: '.json';
-					downloadBlob(result, `${filename}${ext}`);
-					exportSuccess = `Downloaded ${filename}${ext}`;
-				}
-				isExporting = false;
-			},
-			(err) => {
-				exportError = err.message;
-				isExporting = false;
-			}
-		);
-	}
 </script>
 
 <div
@@ -252,35 +272,6 @@
 			</button>
 		</div>
 
-		{#if step.type === 'export' && datasourceId}
-			<div class="mt-3 border-t border-tertiary pt-3">
-				{#if exportError}
-					<div class="mb-2 border border-error bg-error p-2 text-xs text-error">
-						{exportError}
-					</div>
-				{/if}
-				{#if exportSuccess}
-					<div class="mb-2 border border-success bg-success-bg p-2 text-xs text-success-fg">
-						{exportSuccess}
-					</div>
-				{/if}
-				<button
-					class="export-btn flex w-full cursor-pointer items-center justify-center gap-2 border-none px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-bg-primary hover:opacity-90 hover:enabled:opacity-90"
-					onclick={handleExport}
-					disabled={isExporting}
-					type="button"
-				>
-					{#if isExporting}
-						<span class="spinner spinner-sm"></span>
-						Exporting...
-					{:else}
-						<Download size={14} />
-						Download
-					{/if}
-				</button>
-			</div>
-		{/if}
-
 		{#if step.type === 'view' && datasourceId && analysisId}
 			<div class="mt-3 border-t border-tertiary pt-3">
 				<InlineDataTable
@@ -290,6 +281,33 @@
 					stepId={step.id}
 					rowLimit={typeof step.config?.rowLimit === 'number' ? step.config.rowLimit : 100}
 				/>
+			</div>
+		{/if}
+
+		{#if isChart && datasourceId && analysisId}
+			<div class="mt-3 border-t border-tertiary pt-3">
+				{#if chartQuery.isFetching}
+					<div class="flex items-center justify-center gap-2 py-4 text-xs text-fg-muted">
+						<span class="spinner spinner-sm"></span>
+						Loading chart...
+					</div>
+				{:else if chartQuery.error}
+					<div class="border border-error bg-error p-2 text-xs text-error">
+						{chartQuery.error.message}
+					</div>
+				{:else if chartQuery.data}
+					<ChartPreview
+						data={chartQuery.data.data}
+						chartType={(step.config.chart_type as
+							| 'bar'
+							| 'line'
+							| 'pie'
+							| 'histogram'
+							| 'scatter'
+							| 'boxplot') ?? 'bar'}
+						config={step.config}
+					/>
+				{/if}
 			</div>
 		{/if}
 	</div>

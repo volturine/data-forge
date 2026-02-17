@@ -29,7 +29,9 @@
 
 	const canProceedStep1 = $derived(name.trim().length > 0);
 	const canProceedStep2 = $derived(selectedDatasourceIds.length > 0);
-	const datasourceOptions = $derived.by(() => datasourcesQuery.data ?? []);
+	const datasourceOptions = $derived.by(() =>
+		(datasourcesQuery.data ?? []).filter((ds) => ds.source_type !== 'analysis')
+	);
 
 	async function handleCreate() {
 		if (!canProceedStep1 || !canProceedStep2) return;
@@ -138,7 +140,7 @@
 						type="text"
 						bind:value={name}
 						placeholder="My Data Analysis"
-					class="w-full border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
+						class="w-full border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
 					/>
 				</div>
 				<div class="mb-5 flex flex-col gap-2">
@@ -150,7 +152,7 @@
 						bind:value={description}
 						placeholder="Describe what this analysis does..."
 						rows="4"
-					class="min-h-25 w-full resize-y border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
+						class="min-h-25 w-full resize-y border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
 					></textarea>
 				</div>
 			</div>

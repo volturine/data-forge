@@ -2,7 +2,7 @@ import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/t
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 import type { Schema } from '$lib/types/schema';
-import { getAnalysis, updateAnalysis } from '$lib/api/analysis';
+import { getAnalysisWithHeaders, updateAnalysis } from '$lib/api/analysis';
 import { normalizeDtype } from '$lib/utils/transform';
 import { normalizeConfig } from '$lib/utils/step-config-defaults';
 import { track } from '$lib/utils/audit-log';
@@ -138,10 +138,10 @@ export class AnalysisStore {
 		this.loading = true;
 		this.error = null;
 
-		return getAnalysis(id)
-			.andThen((analysis) => {
+		return getAnalysisWithHeaders(id)
+			.andThen(({ analysis, version }) => {
 				if (this.loadId !== token) return ok(undefined);
-				this.current = analysis;
+				this.current = { ...analysis, version };
 				this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
 
 				const definition = analysis.pipeline_definition as {
@@ -284,6 +284,7 @@ export class AnalysisStore {
 
 		const normalized = steps.map((step, index) => {
 			const isApplied = step.is_applied !== false;
+			const normalizedType = step.type.startsWith('plot_') ? 'chart' : step.type;
 			// Normalize config to ensure proper shape (handles backward compatibility)
 			const normalizedConfig = normalizeConfig(step.type, step.config as Record<string, unknown>);
 
@@ -292,6 +293,7 @@ export class AnalysisStore {
 				if (index === 0) {
 					return {
 						...step,
+						type: normalizedType,
 						config: normalizedConfig as Record<string, unknown>,
 						depends_on: [],
 						is_applied: isApplied
@@ -300,6 +302,7 @@ export class AnalysisStore {
 				const parentId = steps[index - 1]?.id ?? null;
 				return {
 					...step,
+					type: normalizedType,
 					config: normalizedConfig as Record<string, unknown>,
 					depends_on: parentId ? [parentId] : [],
 					is_applied: isApplied
@@ -308,6 +311,7 @@ export class AnalysisStore {
 
 			return {
 				...step,
+				type: normalizedType,
 				config: normalizedConfig as Record<string, unknown>,
 				is_applied: isApplied
 			};
@@ -353,24 +357,31 @@ export class AnalysisStore {
 		const nextPipeline = [...this.activeTab.steps];
 		const normalizedParentId = parentId ?? null;
 		step.depends_on = normalizedParentId ? [normalizedParentId] : [];
+		const isChart = step.type === 'chart' || step.type.startsWith('plot_');
 
 		if (nextId) {
 			const nextStepIndex = nextPipeline.findIndex((item) => item.id === nextId);
 			if (nextStepIndex < 0) {
 				return false;
 			}
-			const nextStep = nextPipeline[nextStepIndex];
-			const nextDeps = nextStep.depends_on ?? [];
-			if (nextDeps.length > 1) {
-				return false;
+			if (isChart) {
+				// Charts are pass-through — do not rewire dependencies.
+				// The chart simply observes data at this point; downstream
+				// steps keep their existing parent link.
+			} else {
+				const nextStep = nextPipeline[nextStepIndex];
+				const nextDeps = nextStep.depends_on ?? [];
+				if (nextDeps.length > 1) {
+					return false;
+				}
+				if (normalizedParentId && nextDeps.length > 0 && nextDeps[0] !== normalizedParentId) {
+					return false;
+				}
+				if (!normalizedParentId && nextDeps.length > 0) {
+					return false;
+				}
+				nextPipeline[nextStepIndex] = { ...nextStep, depends_on: [step.id] };
 			}
-			if (normalizedParentId && nextDeps.length > 0 && nextDeps[0] !== normalizedParentId) {
-				return false;
-			}
-			if (!normalizedParentId && nextDeps.length > 0) {
-				return false;
-			}
-			nextPipeline[nextStepIndex] = { ...nextStep, depends_on: [step.id] };
 		}
 
 		nextPipeline.splice(index, 0, step);
@@ -421,6 +432,61 @@ export class AnalysisStore {
 		if (!step) return;
 		const keys = Object.keys(safeConfig);
 		this.logStep('update', step, { keys, count: keys.length });
+		const analysisId = this.current?.id ?? null;
+		const datasourceId = this.activeTab.datasource_id ?? null;
+		if (!analysisId || !datasourceId) return;
+		const configSnapshot = (this.activeTab.datasource_config ?? {}) as Record<string, unknown>;
+		const snapshotId = (configSnapshot.snapshot_id as string | null | undefined) ?? null;
+		const snapshotMs = (configSnapshot.snapshot_timestamp_ms as number | null | undefined) ?? null;
+		const snapshotKey = `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
+		const edges: Record<string, string[]> = {};
+		for (const item of nextPipeline) {
+			const deps = item.depends_on ?? [];
+			for (const dep of deps) {
+				const next = edges[dep] ?? [];
+				next.push(item.id);
+				edges[dep] = next;
+			}
+		}
+		const reachable: Record<string, true> = {};
+		const stack = [id];
+		while (stack.length) {
+			const current = stack.pop();
+			if (!current) continue;
+			if (reachable[current]) continue;
+			reachable[current] = true;
+			const next = edges[current] ?? [];
+			for (const child of next) {
+				if (!reachable[child]) stack.push(child);
+			}
+		}
+		for (const item of nextPipeline) {
+			if (item.type !== 'view') continue;
+			if (!reachable[item.id]) continue;
+			const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
+			const runKey = `${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${item.id}`;
+			this.setPreviewRun(runKey, true);
+		}
+		// Invalidate previews in dependent tabs that use this tab as input
+		const activeTabId = this.activeTab.id;
+		for (const tab of this.tabs) {
+			if (tab.id === activeTabId) continue;
+			const cfg = (tab.datasource_config ?? {}) as Record<string, unknown>;
+			if (String(cfg.analysis_tab_id ?? '') !== activeTabId) continue;
+			if (String(cfg.analysis_id ?? '') !== analysisId) continue;
+			const depDatasourceId = tab.datasource_id ?? null;
+			if (!depDatasourceId) continue;
+			const depConfig = (tab.datasource_config ?? {}) as Record<string, unknown>;
+			const depSnapshotId = (depConfig.snapshot_id as string | null | undefined) ?? null;
+			const depSnapshotMs = (depConfig.snapshot_timestamp_ms as number | null | undefined) ?? null;
+			const depSnapshotKey = `${depSnapshotId ?? 'latest'}:${depSnapshotMs ?? 0}`;
+			for (const item of tab.steps) {
+				if (item.type !== 'view') continue;
+				const rowLimit = typeof item.config?.rowLimit === 'number' ? item.config.rowLimit : 100;
+				const runKey = `${analysisId}:${depDatasourceId}:${depSnapshotKey}:${rowLimit}:${item.id}`;
+				this.setPreviewRun(runKey, true);
+			}
+		}
 	}
 
 	removeStep(id: string): void {
@@ -494,9 +560,10 @@ export class AnalysisStore {
 		const movingStep = { ...steps[fromIndex] };
 		const oldDeps = movingStep.depends_on ?? [];
 		const oldParentId = oldDeps[0] ?? null;
+		const isChart = movingStep.type === 'chart' || movingStep.type.startsWith('plot_');
 
 		// Find the step that depended on the moving step (if any)
-		const dependentStep = steps.find((s) => s.depends_on?.includes(stepId));
+		const dependentStep = isChart ? null : steps.find((s) => s.depends_on?.includes(stepId));
 
 		// Remove from old position
 		steps.splice(fromIndex, 1);
@@ -522,7 +589,7 @@ export class AnalysisStore {
 		steps.splice(actualToIndex, 0, movingStep);
 
 		// Update the next step to depend on the moved step
-		if (newNextId) {
+		if (newNextId && !isChart) {
 			const nextIndex = steps.findIndex((s) => s.id === newNextId);
 			if (nextIndex >= 0) {
 				steps[nextIndex] = {
@@ -573,7 +640,8 @@ export class AnalysisStore {
 
 		return updateAnalysis(this.current.id, update)
 			.andThen((updated) => {
-				this.current = updated;
+				const version = this.current?.version ?? null;
+				this.current = { ...updated, version };
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
 				const tabs = updated.tabs ?? [];
 				if (tabs.length) {

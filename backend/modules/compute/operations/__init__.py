@@ -1,4 +1,5 @@
 from modules.compute.core.base import OperationHandler, OperationParams
+from modules.compute.operations.ai import AIHandler
 from modules.compute.operations.datasource import DatasourceHandler
 from modules.compute.operations.deduplicate import DeduplicateHandler
 from modules.compute.operations.drop import DropHandler
@@ -10,8 +11,10 @@ from modules.compute.operations.filter import FilterHandler
 from modules.compute.operations.groupby import GroupByHandler
 from modules.compute.operations.join import JoinHandler
 from modules.compute.operations.limit import LimitHandler
+from modules.compute.operations.notification import NotificationHandler
 from modules.compute.operations.null_count import NullCountHandler
 from modules.compute.operations.pivot import PivotHandler
+from modules.compute.operations.plot import ChartHandler
 from modules.compute.operations.rename import RenameHandler
 from modules.compute.operations.sample import SampleHandler
 from modules.compute.operations.select import SelectHandler
@@ -31,6 +34,7 @@ __all__ = [
     'OperationParams',
     # Handlers
     'DatasourceHandler',
+    'AIHandler',
     'DeduplicateHandler',
     'DropHandler',
     'ExplodeHandler',
@@ -41,6 +45,7 @@ __all__ = [
     'JoinHandler',
     'LimitHandler',
     'NullCountHandler',
+    'NotificationHandler',
     'PivotHandler',
     'RenameHandler',
     'SampleHandler',
@@ -55,6 +60,7 @@ __all__ = [
     'ViewHandler',
     'WithColumnsHandler',
     'ExpressionHandler',
+    'ChartHandler',
     # Registry
     'register_operation',
     'get_operation_handlers',
@@ -77,6 +83,7 @@ def get_operation_handlers() -> dict[str, OperationHandler]:
 
 def _register_defaults() -> None:
     register_operation('datasource', DatasourceHandler())
+    register_operation('ai', AIHandler())
     register_operation('deduplicate', DeduplicateHandler())
     register_operation('drop', DropHandler())
     register_operation('explode', ExplodeHandler())
@@ -87,6 +94,7 @@ def _register_defaults() -> None:
     register_operation('join', JoinHandler())
     register_operation('limit', LimitHandler())
     register_operation('null_count', NullCountHandler())
+    register_operation('notification', NotificationHandler())
     register_operation('pivot', PivotHandler())
     register_operation('rename', RenameHandler())
     register_operation('sample', SampleHandler())
@@ -101,3 +109,4 @@ def _register_defaults() -> None:
     register_operation('view', ViewHandler())
     register_operation('with_columns', WithColumnsHandler())
     register_operation('expression', ExpressionHandler())
+    register_operation('chart', ChartHandler())

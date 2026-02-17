@@ -41,7 +41,5 @@ Provide a structured plan with:
 
 ---
 
-**Do NOT write code yet. Wait for approval of the plan.**
-
 Request:
 $ARGUMENTS

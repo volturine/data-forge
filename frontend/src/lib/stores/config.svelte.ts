@@ -76,6 +76,14 @@ export class ConfigStore {
 	get publicIdbDebug(): boolean {
 		return this.config?.public_idb_debug ?? false;
 	}
+
+	get smtpEnabled(): boolean {
+		return this.config?.smtp_enabled ?? false;
+	}
+
+	get telegramEnabled(): boolean {
+		return this.config?.telegram_enabled ?? false;
+	}
 }
 
 export const configStore = new ConfigStore();

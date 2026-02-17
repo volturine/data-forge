@@ -66,7 +66,7 @@
 		{value}
 		onchange={handleChange}
 		{disabled}
-	class="cursor-pointer border disabled:cursor-not-allowed disabled:opacity-60 hover:not-disabled:border-tertiary hover:not-disabled:bg-primary focus:outline-2 focus:outline-offset-2 focus:outline-accent-primary focus:border-accent-primary max-[480px]:w-full {size ===
+		class="cursor-pointer border disabled:cursor-not-allowed disabled:opacity-60 hover:not-disabled:border-tertiary hover:not-disabled:bg-primary focus:outline-2 focus:outline-offset-2 focus:outline-accent-primary focus:border-accent-primary max-[480px]:w-full {size ===
 		'sm'
 			? 'px-2 py-1 text-xs select-width-sm'
 			: size === 'lg'

@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -152,7 +153,7 @@ class TestDataSourceConnect:
 
         response = client.post('/api/v1/datasource/connect', json=payload)
 
-        assert response.status_code == 500
+        assert response.status_code == 400
 
 
 class TestDataSourceList:
@@ -190,7 +191,8 @@ class TestDataSourceGet:
         assert result['source_type'] == sample_datasource.source_type
 
     def test_get_datasource_not_found(self, client):
-        response = client.get('/api/v1/datasource/non-existent-id')
+        missing_id = str(uuid.uuid4())
+        response = client.get(f'/api/v1/datasource/{missing_id}')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
@@ -228,10 +230,35 @@ class TestDataSourceSchema:
         assert response1.json() == response2.json()
 
     def test_get_schema_not_found(self, client):
-        response = client.get('/api/v1/datasource/non-existent-id/schema')
+        missing_id = str(uuid.uuid4())
+        response = client.get(f'/api/v1/datasource/{missing_id}/schema')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
+
+
+class TestColumnStats:
+    def test_column_stats_with_config_override(self, client, sample_datasource: DataSource, sample_csv_file: Path):
+        payload = {
+            'datasource_config': {
+                'file_path': str(sample_csv_file),
+                'file_type': 'csv',
+                'options': {},
+            }
+        }
+
+        response = client.post(
+            f'/api/v1/datasource/{sample_datasource.id}/column/age/stats',
+            params={'sample': 'false'},
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result['column'] == 'age'
+        assert result['count'] == 5
+        assert result['null_count'] == 0
 
 
 class TestDataSourceDelete:
@@ -243,8 +270,7 @@ class TestDataSourceDelete:
 
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
-        assert response.status_code == 200
-        assert 'deleted successfully' in response.json()['message']
+        assert response.status_code == 204
 
         assert not file_path.exists()
 
@@ -252,7 +278,8 @@ class TestDataSourceDelete:
         assert get_response.status_code == 404
 
     def test_delete_datasource_not_found(self, client):
-        response = client.delete('/api/v1/datasource/non-existent-id')
+        missing_id = str(uuid.uuid4())
+        response = client.delete(f'/api/v1/datasource/{missing_id}')
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
@@ -280,5 +307,4 @@ class TestDataSourceDelete:
 
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
-        assert response.status_code == 200
-        assert 'deleted successfully' in response.json()['message']
+        assert response.status_code == 204

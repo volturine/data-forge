@@ -99,6 +99,9 @@ class ProcessManager:
             logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
             engine = PolarsComputeEngine(analysis_id, resource_config=normalized_config)
             engine.start()
+            if not engine.is_process_alive():
+                engine.shutdown()
+                raise RuntimeError(f'Failed to start engine for analysis {analysis_id}')
             info = EngineInfo(engine)
             self._engines[analysis_id] = info
             logger.info(f'Engine spawned successfully for analysis {analysis_id}')
@@ -251,45 +254,35 @@ class ProcessManager:
         from core.config import settings  # Import here to avoid circular import
 
         cleaned = []
+        shutdown_targets: list[tuple[str, PolarsComputeEngine]] = []
         with self._engines_lock:
-            analysis_ids = list(self._engines.keys())
-
-        for analysis_id in analysis_ids:
-            with self._engines_lock:
-                info = self._engines.get(analysis_id)
-                if not info:
-                    continue
-
-                # Check health first - reset state if process died
+            for analysis_id, info in list(self._engines.items()):
                 info.engine.check_health()
 
-                # Skip engines with running jobs (only if process is actually alive)
                 if info.engine.current_job_id and info.engine.is_process_alive():
                     continue
 
-                should_cleanup = info.is_idle_for(settings.engine_idle_timeout)
+                if not info.is_idle_for(settings.engine_idle_timeout):
+                    continue
 
-            if should_cleanup:
-                self.shutdown_engine(analysis_id)
+                shutdown_targets.append((analysis_id, info.engine))
+                del self._engines[analysis_id]
                 cleaned.append(analysis_id)
+
+        for analysis_id, engine in shutdown_targets:
+            logger.info(f'Shutting down engine for analysis {analysis_id}')
+            engine.shutdown()
         return cleaned
 
     def cleanup_dead_engines(self) -> list[str]:
         """Clean up engines whose processes have died. Returns list of cleaned up analysis_ids."""
         cleaned = []
         with self._engines_lock:
-            analysis_ids = list(self._engines.keys())
-
-        for analysis_id in analysis_ids:
-            with self._engines_lock:
-                info = self._engines.get(analysis_id)
-                if not info:
-                    continue
-
-                # Check if process died
+            for analysis_id, info in list(self._engines.items()):
                 if info.engine.is_running and not info.engine.is_process_alive():
                     logger.info(f'Cleaning up dead engine for analysis {analysis_id}')
                     info.engine._reset_state()
+                    del self._engines[analysis_id]
                     cleaned.append(analysis_id)
 
         return cleaned

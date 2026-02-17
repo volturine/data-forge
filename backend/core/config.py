@@ -4,9 +4,18 @@ from zoneinfo import available_timezones
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import DotEnvSettingsSource
+from sqlalchemy.engine.url import make_url
 
 # Root data directory (relative to project root, not backend/)
 DATA_DIR = Path(__file__).parent.parent.parent / 'data'
+
+
+def _get_env_file() -> str | None:
+    env_file = os.getenv('ENV_FILE', '.env')
+    if env_file:
+        return env_file
+    return None
 
 
 def _resolve_dir(value: Path | str) -> Path:
@@ -25,10 +34,29 @@ def _resolve_file_parent(value: Path | str) -> Path:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file='.env',
+        env_file=None,
         env_file_encoding='utf8',
         extra='ignore',
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        env_file = _get_env_file()
+        if env_file is None:
+            return (init_settings, env_settings, file_secret_settings)
+        return (
+            init_settings,
+            env_settings,
+            DotEnvSettingsSource(settings_cls, env_file=env_file, env_file_encoding='utf8'),
+            file_secret_settings,
+        )
 
     app_name: str = 'Polars-FastAPI-Svelte Analysis Platform'
     app_version: str = '1.0.0'
@@ -37,9 +65,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # CORS origins - comma-separated list of allowed origins
-    cors_origins: str = (
-        'http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,http://192.168.1.140:3000,http://100.68.183.19:3000'
-    )
+    cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
 
     database_url: str = 'sqlite+libsql:///./database/app.db'
 
@@ -54,6 +80,7 @@ class Settings(BaseSettings):
     exports_dir: Path = Field(default=DATA_DIR / 'exports', alias='EXPORTS_DIR')
 
     upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
+    upload_max_file_size_bytes: int = Field(default=2 * 1024 * 1024 * 1024, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
 
     # Engine idle timeout in seconds (default 5 minutes)
     # Engines will be terminated after this duration of inactivity (reset on save)
@@ -62,6 +89,10 @@ class Settings(BaseSettings):
     # Engine pooling interval in seconds (default 5 seconds)
     # How often to check engine states and cleanup idle engines
     engine_pooling_interval: int = Field(default=30, alias='ENGINE_POOLING_INTERVAL')
+
+    # Scheduler check interval in seconds (default 60 seconds)
+    # How often to check for schedules that need to run
+    scheduler_check_interval: int = Field(default=60, alias='SCHEDULER_CHECK_INTERVAL')
 
     # Job execution timeout in seconds (default 5 minutes)
     # Jobs that exceed this duration will be terminated
@@ -126,7 +157,13 @@ class Settings(BaseSettings):
     log_max_body_size: int = Field(default=1 * 1024 * 1024, alias='LOG_MAX_BODY_SIZE')
 
     # Frontend debug panels
-    public_idb_debug: bool = Field(default=True, alias='PUBLIC_IDB_DEBUG')
+    public_idb_debug: bool = Field(default=False, alias='PUBLIC_IDB_DEBUG')
+
+    settings_encryption_key: str = Field(default='', alias='SETTINGS_ENCRYPTION_KEY')
+
+    # AI configuration
+    ollama_base_url: str = Field(default='http://localhost:11434', alias='OLLAMA_BASE_URL')
+    openai_api_key: str = Field(default='', alias='OPENAI_API_KEY')
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -148,7 +185,7 @@ class Settings(BaseSettings):
             raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
         return _resolve_dir(path_value)
 
-    @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval')
+    @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval', 'scheduler_check_interval')
     @classmethod
     def _validate_positive_timeout(cls, value: int, info) -> int:
         """Ensure timeout values are positive."""
@@ -171,6 +208,13 @@ class Settings(BaseSettings):
             raise ValueError(f'upload_chunk_size must be at least 1024 bytes, got {value}')
         if value > 100 * 1024 * 1024:
             raise ValueError(f'upload_chunk_size must be at most 100MB, got {value}')
+        return value
+
+    @field_validator('upload_max_file_size_bytes')
+    @classmethod
+    def _validate_upload_max_file_size_bytes(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(f'upload_max_file_size_bytes must be non-negative, got {value}')
         return value
 
     @field_validator('polars_max_threads', 'polars_max_memory_mb', 'polars_streaming_chunk_size')
@@ -209,6 +253,15 @@ class Settings(BaseSettings):
         if value.lower() not in valid_levels:
             raise ValueError(f'log_level must be one of {valid_levels}, got {value}')
         return value.lower()
+
+    @field_validator('database_url')
+    @classmethod
+    def _validate_database_url(cls, value: str) -> str:
+        try:
+            make_url(value)
+        except Exception as exc:
+            raise ValueError(f'database_url must be a valid SQLAlchemy URL, got {value}') from exc
+        return value
 
     @field_validator('timezone')
     @classmethod

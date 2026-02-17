@@ -1,6 +1,7 @@
 import {
 	ArrowUpDown,
 	BarChart3,
+	BarChart4,
 	Bomb,
 	Brush,
 	Calculator,
@@ -16,12 +17,14 @@ import {
 	Repeat2,
 	Scissors,
 	Settings2,
+	Sparkles,
 	Trophy,
 	Type,
 	Upload,
 	Wrench,
 	ListChecks,
-	Trash2
+	Trash2,
+	Bell
 } from 'lucide-svelte';
 
 function truncate(items: string[], max = 3, len = 20): string {
@@ -300,6 +303,41 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			return extras.length ? `${col} (${extras.join(', ')})` : col;
 		}
 	},
+	chart: {
+		label: 'Chart',
+		icon: BarChart4,
+		typeLabel: 'chart',
+		summary: (c) => {
+			const chartType = (c.chart_type as string) || 'chart';
+			const x = c.x_column as string;
+			const y = c.y_column as string;
+			if (!x) return chartType;
+			if (chartType === 'histogram') return `${chartType}: ${x}`;
+			if (!y) return `${chartType}: ${x}`;
+			if (chartType === 'line') return `${chartType}: ${y} over ${x}`;
+			return `${chartType}: ${y} by ${x}`;
+		}
+	},
+	notification: {
+		label: 'Notify',
+		icon: Bell,
+		typeLabel: 'notification',
+		summary: (c) => {
+			const method = (c.method as string) || 'email';
+			return `via ${method}`;
+		}
+	},
+	ai: {
+		label: 'AI',
+		icon: Sparkles,
+		typeLabel: 'ai',
+		summary: (c) => {
+			const cols = c.input_columns as string[] | undefined;
+			const output = c.output_column as string;
+			if (!cols?.length || !output) return 'not configured';
+			return `${cols.join(', ')} → ${output}`;
+		}
+	},
 	view: {
 		label: 'View',
 		icon: Eye,
@@ -343,6 +381,9 @@ const defaultStepType: StepTypeConfig = {
 };
 
 function getStepTypeConfig(type: string): StepTypeConfig {
+	if (type.startsWith('plot_')) {
+		return stepTypes.chart ?? defaultStepType;
+	}
 	return stepTypes[type] ?? defaultStepType;
 }
 

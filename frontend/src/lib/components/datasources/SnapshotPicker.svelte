@@ -389,7 +389,7 @@
 				</span>
 			{:else}
 				<span
-						class="rounded-sm border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
+					class="rounded-sm border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
 				>
 					Latest
 				</span>

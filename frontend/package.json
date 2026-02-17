@@ -53,7 +53,9 @@
 		"@codemirror/lang-python": "^6.2.1",
 		"@tanstack/svelte-query": "^6.0.17",
 		"@tanstack/table-core": "^8.21.3",
+		"@types/d3": "^7.4.3",
 		"codemirror": "^6.0.1",
+		"d3": "^7.9.0",
 		"lucide-svelte": "^0.563.0",
 		"neverthrow": "^8.2.0",
 		"runed": "^0.37.1"

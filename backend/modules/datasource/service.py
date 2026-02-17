@@ -4,20 +4,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
 from pyiceberg.catalog import load_catalog
-from sqlalchemy import select
-from sqlmodel import Session
+from sqlalchemy import select, update
+from sqlmodel import Session, col
 
 from core.config import settings
-from core.exceptions import DataSourceNotFoundError, DataSourceValidationError, FileError
+from core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError, FileError
 from modules.compute.operations.datasource import load_datasource, resolve_iceberg_metadata_path
 from modules.datasource.models import DataSource
 from modules.datasource.schemas import (
     ColumnSchema,
+    ColumnStatsResponse,
     CSVOptions,
     DataSourceResponse,
     DataSourceUpdate,
@@ -80,7 +82,7 @@ def create_file_datasource(
         name=name,
         source_type='file',
         config=config,
-        created_at=datetime.now(UTC),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(datasource)
@@ -97,9 +99,52 @@ def create_file_datasource(
         session.refresh(datasource)
         logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
     except Exception as e:
-        logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
+        session.rollback()
+        raise DataSourceValidationError(
+            f'Failed to extract schema for datasource {datasource_id}: {e}',
+            details={'datasource_id': datasource_id},
+        ) from e
 
     logger.info(f'Created file datasource {datasource_id} ({name}) with file {file_path}')
+    return DataSourceResponse.model_validate(datasource)
+
+
+def create_analysis_datasource(
+    session: Session,
+    name: str,
+    analysis_id: str,
+    analysis_tab_id: str | None = None,
+    is_hidden: bool = False,
+    source_type: str = 'analysis',
+) -> DataSourceResponse:
+    from modules.analysis.models import Analysis
+
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise ValueError(f'Analysis {analysis_id} not found')
+    datasource_id = str(uuid.uuid4())
+    config = {
+        'analysis_id': analysis_id,
+    }
+    if analysis_tab_id:
+        config['analysis_tab_id'] = analysis_tab_id
+
+    datasource = DataSource(
+        id=datasource_id,
+        name=name,
+        source_type=source_type,
+        config=config,
+        created_by_analysis_id=analysis_id,
+        created_by='analysis',
+        is_hidden=is_hidden,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    session.add(datasource)
+    session.commit()
+    session.refresh(datasource)
+
+    _log_datasource_create(session, datasource_id, name, source_type, config)
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -283,7 +328,7 @@ def create_database_datasource(
         name=name,
         source_type='database',
         config=config,
-        created_at=datetime.now(UTC),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(datasource)
@@ -316,7 +361,7 @@ def create_api_datasource(
         name=name,
         source_type='api',
         config=config,
-        created_at=datetime.now(UTC),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(datasource)
@@ -348,7 +393,7 @@ def create_duckdb_datasource(
         name=name,
         source_type='duckdb',
         config=config,
-        created_at=datetime.now(UTC),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(datasource)
@@ -435,7 +480,7 @@ def create_iceberg_datasource(
         name=name,
         source_type='iceberg',
         config=config,
-        created_at=datetime.now(UTC),
+        created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
     session.add(datasource)
@@ -451,7 +496,11 @@ def create_iceberg_datasource(
         session.refresh(datasource)
         logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
     except Exception as e:
-        logger.warning(f'Failed to extract schema for datasource {datasource_id}: {e}')
+        session.rollback()
+        raise DataSourceValidationError(
+            f'Failed to extract schema for datasource {datasource_id}: {e}',
+            details={'datasource_id': datasource_id},
+        ) from e
 
     logger.info(f'Created Iceberg datasource {datasource_id} ({name})')
     return DataSourceResponse.model_validate(datasource)
@@ -491,10 +540,6 @@ def get_datasource_schema(
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
-    if refresh and sheet_name is None:
-        datasource.schema_cache = None
-        session.commit()
-
     # Check if we have cached schema with row_count and sample_value
     if datasource.schema_cache and sheet_name is None and not refresh:
         cached = SchemaInfo.model_validate(datasource.schema_cache)
@@ -508,8 +553,14 @@ def get_datasource_schema(
     schema_info = _extract_schema(datasource, sheet_name=sheet_name)
 
     if sheet_name is None:
-        datasource.schema_cache = schema_info.model_dump()
+        schema_cache = schema_info.model_dump()
+        session.execute(
+            update(DataSource)
+            .where(DataSource.id == datasource_id)  # type: ignore[arg-type]
+            .values(schema_cache=schema_cache)
+        )
         session.commit()
+        datasource.schema_cache = schema_cache
 
     logger.info(f'Schema extracted and cached for datasource {datasource_id}: {len(schema_info.columns)} columns')
     return schema_info
@@ -542,49 +593,33 @@ def _get_first_non_null_samples_eager(frame: pl.DataFrame, max_rows: int = 1000)
     # Limit to max_rows for performance
     subset = frame.head(max_rows)
 
-    for col in columns:
-        non_null = subset[col].drop_nulls()
+    for name in columns:
+        non_null = subset[name].drop_nulls()
         if non_null.len() > 0:
-            sample_values[col] = str(non_null[0])
+            sample_values[name] = str(non_null[0])
         else:
-            sample_values[col] = None
+            sample_values[name] = None
 
     return sample_values
 
 
 def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
-    if datasource.source_type == 'file':
-        config = {
-            'source_type': datasource.source_type,
-            **datasource.config,
-        }
-        if sheet_name:
-            config = {**config, 'sheet_name': sheet_name}
-        lazy = load_datasource(config)
-        schema = lazy.collect_schema()
-        row_count = lazy.select(pl.len()).collect().item()
-        sheet_names = None
-
-        # Get first non-null value for each column
-        sample_values = _get_first_non_null_samples(lazy)
-
-        columns = [
-            ColumnSchema(
-                name=name,
-                dtype=str(dtype),
-                nullable=True,
-                sample_value=sample_values.get(name),
-            )
-            for name, dtype in schema.items()
-        ]
-
-        return SchemaInfo(columns=columns, row_count=row_count, sheet_names=sheet_names)
+    if datasource.source_type == 'analysis':
+        raise DataSourceValidationError(
+            'Schema extraction not supported for analysis datasources',
+            details={'datasource_id': datasource.id},
+        )
 
     if datasource.source_type == 'database':
         connection_string = datasource.config['connection_string']
         query = datasource.config['query']
-
-        frame = pl.read_database(query, connection_string)
+        try:
+            frame = pl.read_database(query, connection_string)
+        except Exception as e:
+            raise DataSourceConnectionError(
+                'Failed to query database datasource',
+                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+            ) from e
         schema = frame.schema
         row_count = frame.height
 
@@ -603,56 +638,65 @@ def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> Sc
 
         return SchemaInfo(columns=columns, row_count=row_count)
 
+    if datasource.source_type == 'file':
+        config = {
+            'source_type': datasource.source_type,
+            **datasource.config,
+        }
+        if sheet_name:
+            config = {**config, 'sheet_name': sheet_name}
+        try:
+            lazy = load_datasource(config)
+        except Exception as e:
+            raise DataSourceConnectionError(
+                'Failed to load file datasource',
+                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+            ) from e
+
     if datasource.source_type == 'duckdb':
         config = {
             'source_type': datasource.source_type,
             **datasource.config,
         }
-        lazy = load_datasource(config)
-        schema = lazy.collect_schema()
-        row_count = lazy.select(pl.len()).collect().item()
-
-        # Get first non-null value for each column
-        sample_values = _get_first_non_null_samples(lazy)
-
-        columns = [
-            ColumnSchema(
-                name=name,
-                dtype=str(dtype),
-                nullable=True,
-                sample_value=sample_values.get(name),
-            )
-            for name, dtype in schema.items()
-        ]
-
-        return SchemaInfo(columns=columns, row_count=row_count)
+        try:
+            lazy = load_datasource(config)
+        except Exception as e:
+            raise DataSourceConnectionError(
+                'Failed to load DuckDB datasource',
+                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+            ) from e
 
     if datasource.source_type == 'iceberg':
         config = {
             'source_type': datasource.source_type,
             **datasource.config,
         }
-        lazy = load_datasource(config)
-        schema = lazy.collect_schema()
-        row_count = lazy.select(pl.len()).collect().item()
+        try:
+            lazy = load_datasource(config)
+        except Exception as e:
+            raise DataSourceConnectionError(
+                'Failed to load Iceberg datasource',
+                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+            ) from e
 
-        sample_values = _get_first_non_null_samples(lazy)
+    schema = lazy.collect_schema()
+    row_count = lazy.select(pl.len()).collect().item()
+    sheet_names = None
 
-        columns = [
-            ColumnSchema(
-                name=name,
-                dtype=str(dtype),
-                nullable=True,
-                sample_value=sample_values.get(name),
-            )
-            for name, dtype in schema.items()
-        ]
-        return SchemaInfo(columns=columns, row_count=row_count)
+    # Get first non-null value for each column
+    sample_values = _get_first_non_null_samples(lazy)
 
-    raise DataSourceValidationError(
-        f'Schema extraction not supported for type: {datasource.source_type}',
-        details={'source_type': datasource.source_type},
-    )
+    columns = [
+        ColumnSchema(
+            name=name,
+            dtype=str(dtype),
+            nullable=True,
+            sample_value=sample_values.get(name),
+        )
+        for name, dtype in schema.items()
+    ]
+
+    return SchemaInfo(columns=columns, row_count=row_count, sheet_names=sheet_names)
 
 
 def list_data_files(path: str | None) -> FileListResponse:
@@ -681,9 +725,15 @@ def _normalize_iceberg_path(metadata_path: str) -> str:
     path = Path(metadata_path)
     if path.suffix == '.db':
         raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not catalog.db')
-    if path.name.endswith('.metadata.json'):
-        return str(path)
-    return str(path)
+    normalized = path if path.name.endswith('.metadata.json') else path
+    parts = [normalized, *normalized.parents]
+    if any(part.is_symlink() for part in parts):
+        raise DataSourceValidationError('Iceberg metadata_path cannot be a symlink')
+    resolved = normalized.resolve()
+    data_root = Path(os.path.realpath(settings.data_dir.resolve()))
+    if data_root not in resolved.parents and data_root != resolved:
+        raise DataSourceValidationError('Iceberg metadata_path must be inside data directory')
+    return str(resolved)
 
 
 def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
@@ -692,25 +742,45 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
-    return DataSourceResponse.model_validate(datasource)
+    response = DataSourceResponse.model_validate(datasource)
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+    return response
 
 
-def list_datasources(session: Session) -> list[DataSourceResponse]:
-    result = session.execute(select(DataSource))
+def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceResponse]:
+    query = select(DataSource)
+    if not include_hidden:
+        # SQLModel field typed as bool; == creates SA expression at runtime
+        query = query.where(col(DataSource.is_hidden) == False)  # type: ignore[arg-type]  # noqa: E712
+    result = session.execute(query)
     datasources = result.scalars().all()
 
     # Populate schema_cache for datasources that don't have it
     for ds in datasources:
-        if ds.schema_cache is None:
-            try:
-                schema_info = _extract_schema(ds)
-                ds.schema_cache = schema_info.model_dump()
-                logger.info(f'Populated schema cache for datasource {ds.id}')
-            except Exception as e:
-                logger.warning(f'Failed to extract schema for datasource {ds.id}: {e}')
-
-    session.commit()
-    return [DataSourceResponse.model_validate(ds) for ds in datasources]
+        if ds.schema_cache is not None:
+            continue
+        if ds.source_type == 'analysis' or ds.created_by == 'analysis':
+            continue
+        try:
+            schema_info = _extract_schema(ds)
+            schema_cache = schema_info.model_dump()
+        except Exception as e:
+            logger.warning(f'Failed to extract schema for datasource {ds.id}: {e}')
+            continue
+        session.execute(
+            update(DataSource)
+            .where(DataSource.id == ds.id)  # type: ignore[arg-type]
+            .values(schema_cache=schema_cache)
+        )
+        session.commit()
+        ds.schema_cache = schema_cache
+        logger.info(f'Populated schema cache for datasource {ds.id}')
+    results: list[DataSourceResponse] = []
+    for ds in datasources:
+        item = DataSourceResponse.model_validate(ds)
+        item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
+        results.append(item)
+    return results
 
 
 def update_datasource(
@@ -727,6 +797,10 @@ def update_datasource(
     # Update name if provided
     if update.name is not None:
         datasource.name = update.name
+
+    # Update is_hidden if provided
+    if update.is_hidden is not None:
+        datasource.is_hidden = update.is_hidden
 
     # Update config if provided
     if update.config is not None:
@@ -776,18 +850,156 @@ def update_datasource(
     session.commit()
     session.refresh(datasource)
 
-    run_payload = engine_run_service.create_engine_run_payload(
-        analysis_id=None,
-        datasource_id=datasource_id,
-        kind='datasource_update',
-        status='success',
-        request_json=update.model_dump(exclude_none=True),
-        result_json={'datasource_id': datasource_id, 'datasource_name': datasource.name},
-    )
-    engine_run_service.create_engine_run(session, run_payload)
+    # Only log engine run for non-metadata updates (is_hidden toggle is metadata-only)
+    has_config_or_name_update = update.name is not None or update.config is not None
+    if has_config_or_name_update:
+        run_payload = engine_run_service.create_engine_run_payload(
+            analysis_id=None,
+            datasource_id=datasource_id,
+            kind='datasource_update',
+            status='success',
+            request_json=update.model_dump(exclude_none=True),
+            result_json={'datasource_id': datasource_id, 'datasource_name': datasource.name},
+        )
+        engine_run_service.create_engine_run(session, run_payload)
 
     logger.info(f'Updated datasource {datasource_id}')
-    return DataSourceResponse.model_validate(datasource)
+    response = DataSourceResponse.model_validate(datasource)
+    response.output_of_tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+    return response
+
+
+def _compute_histogram(series: pl.Series, bins: int = 20) -> list[dict[str, object]]:
+    """Compute histogram bins for a numeric series."""
+    if series.is_empty():
+        return []
+    stats = series.drop_nulls()
+    if stats.is_empty():
+        return []
+    stats = stats.cast(pl.Float64, strict=False)
+    min_raw: Any = stats.min()
+    max_raw: Any = stats.max()
+    if min_raw is None or max_raw is None:
+        return []
+    min_val = float(min_raw)
+    max_val = float(max_raw)
+    if min_val == max_val:
+        return [{'start': min_val, 'end': max_val, 'count': stats.len()}]
+    width = (max_val - min_val) / bins
+    result: list[dict[str, object]] = []
+    for i in range(bins):
+        start = min_val + i * width
+        end = min_val + (i + 1) * width
+        if i == bins - 1:
+            bin_count = series.filter((series >= start) & (series <= end)).len()
+        else:
+            bin_count = series.filter((series >= start) & (series < end)).len()
+        result.append({'start': round(start, 4), 'end': round(end, 4), 'count': bin_count})
+    return result
+
+
+def get_column_stats(
+    session: Session,
+    datasource_id: str,
+    column_name: str,
+    use_sample: bool = True,
+    sample_size: int = 10000,
+    datasource_config: dict | None = None,
+) -> ColumnStatsResponse:
+    datasource = session.get(DataSource, datasource_id)
+
+    if not datasource:
+        raise DataSourceNotFoundError(datasource_id)
+
+    config = {
+        'source_type': datasource.source_type,
+        **datasource.config,
+    }
+    if datasource_config:
+        config = {**config, **datasource_config}
+    lazy = load_datasource(config)
+
+    schema = lazy.collect_schema()
+    if column_name not in schema:
+        raise ValueError(f'Column not found: {column_name}')
+
+    if use_sample:
+        lazy = lazy.head(sample_size)  # type: ignore[attr-defined]
+
+    frame = lazy.select([pl.col(column_name)]).collect()
+    series = frame[column_name]
+    dtype = schema[column_name]
+
+    count = series.len()
+    null_count = series.null_count()
+    null_percentage = (null_count / count * 100.0) if count > 0 else 0.0
+
+    stats: dict[str, object] = {
+        'column': column_name,
+        'dtype': str(dtype),
+        'count': count,
+        'null_count': null_count,
+        'null_percentage': null_percentage,
+    }
+
+    if isinstance(dtype, (pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64, pl.Float32, pl.Float64)):
+        non_null = series.drop_nulls()
+        stats.update(
+            {
+                'mean': series.mean(),
+                'std': series.std(),
+                'min': series.min(),
+                'max': series.max(),
+                'median': series.median(),
+                'q25': series.quantile(0.25),
+                'q75': series.quantile(0.75),
+                'histogram': _compute_histogram(non_null),
+            }
+        )
+        return ColumnStatsResponse.model_validate(stats)
+
+    if isinstance(dtype, pl.Utf8):
+        length_series = series.str.len_chars()  # type: ignore[attr-defined]
+        stats.update(
+            {
+                'unique': series.n_unique(),
+                'min_length': length_series.min(),
+                'max_length': length_series.max(),
+                'avg_length': length_series.mean(),
+                'top_values': (series.value_counts().sort('count', descending=True).head(5).to_dicts()),
+            }
+        )
+        return ColumnStatsResponse.model_validate(stats)
+
+    if isinstance(dtype, pl.Datetime):
+        stats.update(
+            {
+                'min': series.min(),
+                'max': series.max(),
+            }
+        )
+        return ColumnStatsResponse.model_validate(stats)
+
+    if isinstance(dtype, pl.Boolean):
+        value_counts = series.value_counts().to_dicts()
+        true_count = 0
+        false_count = 0
+        for item in value_counts:
+            value = item.get(column_name)
+            if value is True:
+                true_count = int(item.get('count', 0))
+            if value is False:
+                false_count = int(item.get('count', 0))
+        stats.update(
+            {
+                'true_count': true_count,
+                'false_count': false_count,
+            }
+        )
+        return ColumnStatsResponse.model_validate(stats)
+
+    stats.update({'unique': series.n_unique()})
+    return ColumnStatsResponse.model_validate(stats)
 
 
 def delete_datasource(session: Session, datasource_id: str) -> None:

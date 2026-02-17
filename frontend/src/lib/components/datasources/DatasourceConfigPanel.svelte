@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
 	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
 		Save,
 		Loader,
@@ -11,7 +12,9 @@
 		Eye,
 		Download,
 		CircleCheck,
-		CircleX
+		CircleX,
+		Upload,
+		GitBranch
 	} from 'lucide-svelte';
 	import type {
 		DataSource,
@@ -22,6 +25,9 @@
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
+	import HealthChecksTab from '$lib/components/datasources/HealthChecksTab.svelte';
+	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
 
@@ -51,13 +57,34 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !!datasource.id
+		enabled: !!datasource.id && datasource.source_type !== 'analysis'
 	}));
 
 	const runsQuery = createQuery(() => ({
 		queryKey: ['datasource-runs', datasource.id],
 		queryFn: async () => {
 			const result = await listEngineRuns({ datasource_id: datasource.id, limit: 50 });
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		enabled: !!datasource.id,
+		retry: false
+	}));
+
+	const healthChecksQuery = createQuery(() => ({
+		queryKey: ['datasource-healthchecks-count', datasource.id],
+		queryFn: async () => {
+			const result = await listHealthChecks(datasource.id);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		enabled: !!datasource.id
+	}));
+
+	const healthResultsQuery = createQuery(() => ({
+		queryKey: ['healthcheck-results', datasource.id],
+		queryFn: async () => {
+			const result = await listHealthCheckResults(datasource.id, 50);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -85,9 +112,13 @@
 	let refreshError = $state<string | null>(null);
 	let schemaChanged = $state(false);
 	let schemaDiff = $state<{ added: string[]; removed: string[]; types: string[] } | null>(null);
-	let activeTab = $state<'general' | 'schema' | 'csv' | 'excel' | 'runs'>('general');
+	let activeTab = $state<'general' | 'schema' | 'csv' | 'excel' | 'runs' | 'health' | 'schedules'>(
+		'general'
+	);
+	let statsOpen = $state(false);
+	let statsColumn = $state<string | null>(null);
 
-	// Reset state when datasource changes
+	// Reset state when datasource changes — DOM-dependent state reset, $derived insufficient
 	$effect(() => {
 		const ds = datasource;
 		if (!ds) return;
@@ -101,6 +132,8 @@
 		schemaChanged = false;
 		schemaDiff = null;
 		activeTab = 'general';
+		statsOpen = false;
+		statsColumn = null;
 
 		// Initialize type-specific config
 		const config = ds.config as unknown as FileDataSourceConfig;
@@ -259,6 +292,11 @@
 		isRefreshing = true;
 		const previousColumns = new Map(columns.map((col) => [col.name, col.dtype]));
 
+		if (datasource.source_type === 'analysis') {
+			refreshError = 'Schema refresh is unavailable for analysis datasources';
+			isRefreshing = false;
+			return;
+		}
 		try {
 			const result = await getDatasourceSchema(datasource.id, { refresh: true });
 			if (result.isErr()) {
@@ -302,10 +340,33 @@
 		return label;
 	}
 
+	const healthChecks = $derived(healthChecksQuery.data ?? []);
+	const activeHealthChecks = $derived(healthChecks.filter((hc) => hc.enabled));
+	const healthStatus = $derived.by(() => {
+		const results = healthResultsQuery.data ?? [];
+		if (activeHealthChecks.length === 0 || results.length === 0) return 'none';
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Map for computation, not reactive state
+		const latestPerCheck = new Map<string, boolean>();
+		for (const r of results) {
+			if (!latestPerCheck.has(r.healthcheck_id)) {
+				latestPerCheck.set(r.healthcheck_id, r.passed);
+			}
+		}
+		for (const passed of latestPerCheck.values()) {
+			if (!passed) return 'failing';
+		}
+		return 'passing';
+	});
 	const ds = $derived(datasourceQuery.data ?? datasource);
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
 	const runs = $derived(runsQuery.data ?? []);
+	const isOutputDatasource = $derived(ds.created_by === 'analysis');
+	const scheduleAnalysisId = $derived(
+		isOutputDatasource
+			? (ds.created_by_analysis_id ?? (ds.config?.analysis_id as string | undefined) ?? null)
+			: null
+	);
 
 	function formatDuration(ms: number | null): string {
 		if (ms === null) return '-';
@@ -386,6 +447,39 @@
 				<span class="ml-1 text-fg-tertiary">({runs.length})</span>
 			{/if}
 		</button>
+		<button
+			class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted hover:text-fg-secondary"
+			class:active={activeTab === 'health'}
+			onclick={() => (activeTab = 'health')}
+		>
+			Health Checks
+			{#if activeHealthChecks.length > 0}
+				<span class="ml-1 text-fg-tertiary">({activeHealthChecks.length})</span>
+				{#if healthStatus === 'passing'}
+					<span
+						class="ml-1 inline-block h-2 w-2 rounded-full bg-success-fg"
+						title="All checks passing"
+					></span>
+				{:else if healthStatus === 'failing'}
+					<span
+						class="ml-1 inline-block h-2 w-2 rounded-full bg-error-fg"
+						title="Some checks failing"
+					></span>
+				{:else}
+					<span class="ml-1 inline-block h-2 w-2 rounded-full bg-fg-muted" title="No results yet"
+					></span>
+				{/if}
+			{/if}
+		</button>
+		{#if scheduleAnalysisId}
+			<button
+				class="tab -mb-px bg-transparent border-b-2 border-transparent px-3 py-1.5 text-xs font-medium text-fg-muted hover:text-fg-secondary"
+				class:active={activeTab === 'schedules'}
+				onclick={() => (activeTab = 'schedules')}
+			>
+				Schedules
+			</button>
+		{/if}
 	</div>
 
 	<div class="p-4">
@@ -422,6 +516,39 @@
 									/>
 								{/if}
 							</div>
+							{#if ds.is_hidden}
+								<div class="flex items-center gap-1.5">
+									<span
+										class="rounded-sm bg-warning-bg border border-warning-fg/20 px-1.5 py-0.5 text-[10px] uppercase font-medium text-warning-fg"
+									>
+										Hidden
+									</span>
+								</div>
+							{/if}
+						</div>
+
+						<!-- Provenance -->
+						<div class="flex items-center gap-2">
+							<span class="uppercase tracking-wide text-fg-muted">Source</span>
+							{#if ds.created_by === 'analysis'}
+								<span class="inline-flex items-center gap-1 text-accent-primary">
+									<GitBranch size={12} />
+									<span class="font-medium">Analysis</span>
+								</span>
+								{#if ds.created_by_analysis_id}
+									<a
+										href={resolve(`/analysis/${ds.created_by_analysis_id}` as '/')}
+										class="text-accent-primary hover:underline font-mono text-[10px]"
+									>
+										Open Analysis
+									</a>
+								{/if}
+							{:else}
+								<span class="inline-flex items-center gap-1 text-fg-secondary">
+									<Upload size={12} />
+									<span class="font-medium">Imported</span>
+								</span>
+							{/if}
 						</div>
 
 						<div class="flex flex-col gap-1">
@@ -575,9 +702,21 @@
 						</div>
 						{#each columns as column, index (index)}
 							<div
-								class="grid grid-cols-[24px_1fr_140px] items-center gap-x-2 px-3 py-1.5"
+								class="grid grid-cols-[24px_1fr_140px] items-center gap-x-2 px-3 py-1.5 hover:bg-hover cursor-pointer"
 								class:border-t={index > 0}
 								class:border-tertiary={index > 0}
+								role="button"
+								tabindex="0"
+								onclick={() => {
+									statsColumn = column.name;
+									statsOpen = true;
+								}}
+								onkeydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										statsColumn = column.name;
+										statsOpen = true;
+									}
+								}}
 							>
 								<span class="text-xs text-fg-faint">{index + 1}</span>
 								<span class="text-xs text-fg-primary">{column.name}</span>
@@ -832,6 +971,16 @@
 						<Loader size={24} class="spin" />
 						<p class="text-sm">Loading runs...</p>
 					</div>
+				{:else if runsQuery.isError}
+					<div class="error-box flex items-start gap-3">
+						<CircleAlert size={20} />
+						<div class="flex flex-col gap-1">
+							<p class="m-0 font-semibold">Failed to load runs</p>
+							<p class="m-0 text-sm opacity-80">
+								{runsQuery.error instanceof Error ? runsQuery.error.message : 'Unknown error'}
+							</p>
+						</div>
+					</div>
 				{:else if runs.length === 0}
 					<div class="py-6 text-center text-fg-muted text-sm">
 						<p class="m-0">No engine runs associated with this datasource.</p>
@@ -917,6 +1066,21 @@
 					{/if}
 				{/if}
 			</div>
+		{:else if activeTab === 'health'}
+			<HealthChecksTab datasourceId={datasource.id} />
+		{:else if activeTab === 'schedules'}
+			<ScheduleManager datasourceId={datasource.id} compact />
 		{/if}
 	</div>
 </div>
+
+<ColumnStatsPanel
+	datasourceId={datasource.id}
+	columnName={statsColumn}
+	open={statsOpen}
+	datasourceConfig={datasource.config as Record<string, unknown>}
+	onClose={() => {
+		statsOpen = false;
+		statsColumn = null;
+	}}
+/>

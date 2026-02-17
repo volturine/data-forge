@@ -14,6 +14,48 @@ export interface EngineRun {
 	created_at: string;
 	completed_at: string | null;
 	duration_ms: number | null;
+	step_timings: Record<string, number>;
+	query_plan: string | null;
+	progress: number;
+	current_step: string | null;
+	triggered_by: string | null;
+}
+
+export interface ColumnDiff {
+	column: string;
+	status: 'added' | 'removed' | 'type_changed';
+	type_a: string | null;
+	type_b: string | null;
+}
+
+export interface TimingDiff {
+	step: string;
+	ms_a: number | null;
+	ms_b: number | null;
+	delta_ms: number | null;
+	delta_pct: number | null;
+}
+
+export interface RunSummary {
+	id: string;
+	kind: string;
+	status: string;
+	created_at: string;
+	duration_ms: number | null;
+	row_count: number | null;
+	schema_columns: number;
+	triggered_by: string | null;
+}
+
+export interface BuildComparison {
+	run_a: RunSummary;
+	run_b: RunSummary;
+	row_count_a: number | null;
+	row_count_b: number | null;
+	row_count_delta: number | null;
+	schema_diff: ColumnDiff[];
+	timing_diff: TimingDiff[];
+	total_duration_delta_ms: number | null;
 }
 
 export interface ListEngineRunsParams {
@@ -35,4 +77,15 @@ export function listEngineRuns(params?: ListEngineRunsParams): ResultAsync<Engin
 	if (params?.offset !== undefined) query.set('offset', String(params.offset));
 	const suffix = query.toString() ? `?${query.toString()}` : '';
 	return apiRequest<EngineRun[]>(`/v1/engine-runs${suffix}`);
+}
+
+export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {
+	return apiRequest<EngineRun>(`/v1/engine-runs/${id}`);
+}
+
+export function compareEngineRuns(
+	idA: string,
+	idB: string
+): ResultAsync<BuildComparison, ApiError> {
+	return apiRequest<BuildComparison>(`/v1/engine-runs/compare?run_a=${idA}&run_b=${idB}`);
 }

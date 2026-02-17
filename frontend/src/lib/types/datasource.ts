@@ -60,6 +60,11 @@ export interface IcebergDataSourceConfig {
 	reader?: string | null;
 }
 
+export interface AnalysisDataSourceConfig {
+	analysis_id: string;
+	analysis_tab_id?: string | null;
+}
+
 export interface DataSourceCreate {
 	name: string;
 	source_type: string;
@@ -72,5 +77,9 @@ export interface DataSource {
 	source_type: string;
 	config: Record<string, unknown>;
 	schema_cache: Record<string, unknown> | null;
+	created_by_analysis_id?: string | null;
+	created_by: string;
+	is_hidden: boolean;
 	created_at: string;
+	output_of_tab_id?: string | null;
 }
