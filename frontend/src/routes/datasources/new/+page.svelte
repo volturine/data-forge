@@ -13,7 +13,6 @@
 		connectFilePath
 	} from '$lib/api/datasource';
 	import { preflightExcel, previewExcel, confirmExcel } from '$lib/api/excel';
-	import type { ExcelPreflightResponse, ExcelPreviewResponse } from '$lib/api/excel';
 	import type { BulkUploadResult } from '$lib/api/datasource';
 	import FileBrowser from '$lib/components/common/FileBrowser.svelte';
 	import { detectFileType } from '$lib/utils/fileTypes';
@@ -39,9 +38,14 @@
 	let selectedSheet = $state<string>('');
 	let selectedTable = $state<string>('');
 	let selectedRange = $state<string>('');
+	let cellRange = $state('');
+	let cellRangeInput = $state('');
 	let startRow = $state(0);
 	let startCol = $state(0);
 	let endCol = $state(0);
+	let endRow = $state<number | null>(null);
+	let endRowInput = $state('');
+	let endRowManual = $state(false);
 	let detectedEndRow = $state<number | null>(null);
 	let excelHeader = $state(true);
 	let previewLoading = $state(false);
@@ -93,9 +97,14 @@
 		selectedSheet = '';
 		selectedTable = '';
 		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
 		startRow = 0;
 		startCol = 0;
 		endCol = 0;
+		endRow = null;
+		endRowInput = '';
+		endRowManual = false;
 		detectedEndRow = null;
 	}
 
@@ -185,16 +194,22 @@
 	async function runPreflight(): Promise<void> {
 		if (!file) return;
 		previewLoading = true;
-		const result = await preflightExcel(file, {
+		const params: Record<string, unknown> = {
+			sheet_name: selectedSheet || undefined,
 			start_row: startRow,
 			start_col: startCol,
 			end_col: endCol,
 			has_header: excelHeader,
 			table_name: selectedTable || undefined,
-			named_range: selectedRange || undefined
-		});
+			named_range: selectedRange || undefined,
+			cell_range: cellRangeInput.trim() || undefined
+		};
+		if (endRowManual && endRow !== null) {
+			params.end_row = endRow;
+		}
+		const result = await preflightExcel(file, params as Parameters<typeof preflightExcel>[1]);
 		result.match(
-			(data: ExcelPreflightResponse) => {
+			(data) => {
 				preflightId = data.preflight_id;
 				sheetNames = data.sheet_names;
 				tableMap = data.tables;
@@ -204,7 +219,13 @@
 				startRow = data.start_row;
 				startCol = data.start_col;
 				endCol = data.end_col;
+				cellRange = cellRangeInput.trim();
+				cellRangeInput = cellRange;
 				detectedEndRow = data.detected_end_row;
+				if (!endRowManual) {
+					endRow = data.detected_end_row;
+					endRowInput = data.detected_end_row !== null ? String(data.detected_end_row + 1) : '';
+				}
 				previewLoading = false;
 			},
 			(err) => {
@@ -217,22 +238,33 @@
 	async function refreshPreview(): Promise<void> {
 		if (!preflightId || !selectedSheet) return;
 		previewLoading = true;
-		const result = await previewExcel(preflightId, {
+		const params: Record<string, unknown> = {
 			sheet_name: selectedSheet,
 			start_row: startRow,
 			start_col: startCol,
 			end_col: endCol,
 			has_header: excelHeader,
 			table_name: selectedTable || undefined,
-			named_range: selectedRange || undefined
-		});
+			named_range: selectedRange || undefined,
+			cell_range: cellRangeInput.trim() || undefined
+		};
+		if (endRowManual && endRow !== null) {
+			params.end_row = endRow;
+		}
+		const result = await previewExcel(preflightId, params as Parameters<typeof previewExcel>[1]);
 		result.match(
-			(data: ExcelPreviewResponse) => {
+			(data) => {
 				previewGrid = data.preview;
 				startRow = data.start_row;
 				startCol = data.start_col;
 				endCol = data.end_col;
+				cellRange = cellRangeInput.trim();
+				cellRangeInput = cellRange;
 				detectedEndRow = data.detected_end_row;
+				if (!endRowManual) {
+					endRow = data.detected_end_row;
+					endRowInput = data.detected_end_row !== null ? String(data.detected_end_row + 1) : '';
+				}
 				previewLoading = false;
 			},
 			(err) => {
@@ -249,24 +281,107 @@
 		endCol = 0;
 		selectedTable = '';
 		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
+		endRow = null;
+		endRowInput = '';
+		endRowManual = false;
 		refreshPreview();
 	}
 
 	function applyTable(table: string) {
 		selectedTable = table;
 		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
 		startRow = 0;
 		startCol = 0;
 		endCol = 0;
+		endRow = null;
+		endRowInput = '';
+		endRowManual = false;
 		refreshPreview();
 	}
 
 	function applyNamedRange(range: string) {
 		selectedRange = range;
 		selectedTable = '';
+		cellRange = '';
+		cellRangeInput = '';
 		startRow = 0;
 		startCol = 0;
 		endCol = 0;
+		endRow = null;
+		endRowInput = '';
+		endRowManual = false;
+		refreshPreview();
+	}
+
+	function applyCellRange(range: string) {
+		cellRange = range;
+		cellRangeInput = range;
+		selectedTable = '';
+		selectedRange = '';
+		startRow = 0;
+		startCol = 0;
+		endCol = 0;
+		endRow = null;
+		endRowInput = '';
+		endRowManual = false;
+		refreshPreview();
+	}
+
+	function handleCellRangeInput(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		cellRangeInput = target.value;
+		selectedTable = '';
+		selectedRange = '';
+		endRowManual = false;
+		endRow = null;
+		endRowInput = '';
+	}
+
+	function handleCellRangeBlur() {
+		const trimmed = cellRangeInput.trim();
+		if (!trimmed) {
+			cellRange = '';
+			return;
+		}
+		applyCellRange(trimmed);
+	}
+
+	function applyManualRange() {
+		const trimmed = cellRangeInput.trim();
+		if (!trimmed) return;
+		applyCellRange(trimmed);
+	}
+
+	function handleEndRowInput(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		endRowInput = target.value;
+	}
+
+	function handleEndRowBlur() {
+		const trimmed = endRowInput.trim();
+		if (!trimmed) {
+			endRow = null;
+			endRowManual = false;
+			cellRange = '';
+			cellRangeInput = '';
+			refreshPreview();
+			return;
+		}
+		const parsed = Number.parseInt(trimmed, 10);
+		if (Number.isNaN(parsed) || parsed <= 0) {
+			endRowInput = endRow !== null ? String(endRow + 1) : '';
+			return;
+		}
+		endRow = parsed - 1;
+		endRowManual = true;
+		selectedTable = '';
+		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
 		refreshPreview();
 	}
 
@@ -274,6 +389,8 @@
 		startRow = row;
 		selectedTable = '';
 		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
 		refreshPreview();
 	}
 
@@ -281,6 +398,8 @@
 		startCol = col;
 		selectedTable = '';
 		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
 		refreshPreview();
 	}
 
@@ -288,6 +407,19 @@
 		endCol = col;
 		selectedTable = '';
 		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
+		refreshPreview();
+	}
+
+	function handleEndRowSelect(row: number) {
+		endRow = row;
+		endRowInput = String(row + 1);
+		endRowManual = true;
+		selectedTable = '';
+		selectedRange = '';
+		cellRange = '';
+		cellRangeInput = '';
 		refreshPreview();
 	}
 
@@ -307,15 +439,24 @@
 					loading = false;
 					return;
 				}
-				const result = await confirmExcel(preflightId, fileName, {
+				const params: Record<string, unknown> = {
 					sheet_name: selectedSheet,
 					start_row: startRow,
 					start_col: startCol,
 					end_col: endCol,
 					has_header: excelHeader,
 					table_name: selectedTable || undefined,
-					named_range: selectedRange || undefined
-				});
+					named_range: selectedRange || undefined,
+					cell_range: cellRangeInput.trim() || undefined
+				};
+				if (endRowManual && endRow !== null) {
+					params.end_row = endRow;
+				}
+				const result = await confirmExcel(
+					preflightId,
+					fileName,
+					params as Parameters<typeof confirmExcel>[2]
+				);
 				if (result.isErr()) {
 					error = result.error.message || 'Upload failed';
 					loading = false;
@@ -850,9 +991,29 @@
 									{/each}
 								</select>
 							</div>
+							<div class="flex flex-col gap-2">
+								<label for="excel-cell-range" class="text-sm font-medium text-fg-secondary"
+									>Manual Range</label
+								>
+								<input
+									id="excel-cell-range"
+									type="text"
+									value={cellRangeInput}
+									oninput={handleCellRangeInput}
+									onblur={handleCellRangeBlur}
+									onkeydown={(event) => {
+										if (event.key !== 'Enter') return;
+										applyManualRange();
+									}}
+									disabled={loading || previewLoading}
+									placeholder="A1:D50"
+									class="rounded-sm border px-3 py-2 text-sm input-base"
+								/>
+								<p class="m-0 text-xs text-fg-muted">Optional A1 range (use Sheet1!A1:D50).</p>
+							</div>
 						</div>
 
-						<div class="flex items-center gap-4">
+						<div class="flex flex-wrap items-center gap-4">
 							<div class="flex items-center gap-2">
 								<input
 									id="excel-header"
@@ -866,11 +1027,30 @@
 									>First row is header</label
 								>
 							</div>
+							<div class="flex items-center gap-2">
+								<label for="excel-end-row" class="m-0 text-sm font-medium text-fg-secondary"
+									>End row</label
+								>
+								<input
+									id="excel-end-row"
+									type="text"
+									value={endRowInput}
+									oninput={handleEndRowInput}
+									onblur={handleEndRowBlur}
+									onkeydown={(event) => {
+										if (event.key !== 'Enter') return;
+										handleEndRowBlur();
+									}}
+									disabled={loading || previewLoading}
+									placeholder={detectedEndRow !== null ? String(detectedEndRow + 1) : 'Auto'}
+									class="rounded-sm border px-3 py-2 text-sm input-base"
+								/>
+							</div>
 							<button
 								type="button"
 								class="btn-secondary"
 								onclick={runPreflight}
-								disabled={loading || previewLoading}
+								disabled={loading || previewLoading || !selectedSheet}
 							>
 								{previewLoading ? 'Loading preview...' : 'Run preflight'}
 							</button>
@@ -882,6 +1062,9 @@
 									<span>Start row: {startRow + 1}</span>
 									<span>Start col: {cellLabel(startCol)}</span>
 									<span>End col: {cellLabel(endCol)}</span>
+									{#if endRow !== null}
+										<span>End row: {endRow + 1}</span>
+									{/if}
 									{#if detectedEndRow !== null}
 										<span>Detected end row: {detectedEndRow + 1}</span>
 									{/if}
@@ -902,12 +1085,20 @@
 									</div>
 									{#each previewGrid as row, rowIndex (rowIndex)}
 										<div class="preview-row grid grid-flow-col auto-cols-[minmax(120px,1fr)]">
-											<button
-												class="cell cursor-pointer border-b border-r border-tertiary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary"
-												onclick={() => handleStartRow(startRow + rowIndex)}
-											>
-												{startRow + rowIndex + 1}
-											</button>
+											<div class="cell flex flex-col border-b border-r border-tertiary bg-tertiary">
+												<button
+													class="cell cursor-pointer border-b border-tertiary bg-tertiary p-2 text-left text-xs font-semibold text-fg-primary"
+													onclick={() => handleStartRow(startRow + rowIndex)}
+												>
+													{startRow + rowIndex + 1}
+												</button>
+												<button
+													class="cell cursor-pointer bg-tertiary p-1 text-left text-[10px] font-medium text-fg-muted"
+													onclick={() => handleEndRowSelect(startRow + rowIndex)}
+												>
+													End
+												</button>
+											</div>
 											{#each row as cell, colIndex (colIndex)}
 												<button
 													class="cell cursor-pointer border-b border-r border-tertiary bg-transparent p-2 text-left text-xs text-fg-secondary"

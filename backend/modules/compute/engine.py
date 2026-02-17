@@ -699,6 +699,7 @@ class PolarsComputeEngine:
         # Collect full dataset and write to file
         df = lf.collect()
         row_count = len(df)
+        schema = {col: str(dtype) for col, dtype in df.schema.items()}
 
         fmt = get_export_format(export_format)
         fmt.writer(df, output_path)
@@ -707,6 +708,7 @@ class PolarsComputeEngine:
             'output_path': output_path,
             'export_format': export_format,
             'row_count': row_count,
+            'schema': schema,
             'query_plan': query_plan,
             'query_plans': query_plans,
             'step_timings': step_timings,

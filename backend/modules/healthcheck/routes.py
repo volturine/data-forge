@@ -37,7 +37,8 @@ def update_healthcheck(
     try:
         return service.update_healthcheck(session, parse_healthcheck_id(healthcheck_id), payload)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        status = 404 if str(exc) == 'Healthcheck not found' else 400
+        raise HTTPException(status_code=status, detail=str(exc))
 
 
 @router.delete('/{healthcheck_id}', status_code=204)

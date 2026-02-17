@@ -153,7 +153,7 @@ class TestDataSourceConnect:
 
         response = client.post('/api/v1/datasource/connect', json=payload)
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
 
 class TestDataSourceList:

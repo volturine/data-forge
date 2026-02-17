@@ -38,6 +38,7 @@ about requirements or conflicts, not for information you can discover through ex
    - **explorer** — when you need to find code, understand structure, search for
      patterns, or discover what exists in the project
    - **implementer** — when code needs to be written, edited, or deleted
+   - **senior** — when complex code changes require expertise or faster implementation is needed
    - **reviewer** — when changes need review, testing, or validation
 5. **Integrate** — combine subagent outputs, resolve conflicts, and present a
    unified result to the user

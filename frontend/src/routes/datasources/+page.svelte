@@ -7,7 +7,6 @@
 		Trash2,
 		Search,
 		LoaderCircle,
-		Download,
 		Eye,
 		EyeOff,
 		Upload,
@@ -16,6 +15,7 @@
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
+	import BuildComparisonPanel from '$lib/components/datasources/BuildComparisonPanel.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 
@@ -58,12 +58,13 @@
 	);
 	const selectedDatasource = $derived(datasources.find((d) => d.id === selectedId) ?? null);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
-	let downloading = $state(false);
+	let detailTab = $state<'preview' | 'compare'>('preview');
 
 	function selectDatasource(id: string | null) {
 		selectedId = id;
 		showConfig = id;
 		snapshotConfig = null;
+		detailTab = 'preview';
 		const url = id ? `/datasources?id=${id}` : '/datasources';
 		goto(resolve(url as '/'), { replaceState: true });
 	}
@@ -79,13 +80,6 @@
 
 	function handleSnapshotConfigChange(config: Record<string, unknown>) {
 		snapshotConfig = config;
-	}
-
-	async function handleDownload(_format: 'csv' | 'parquet' | 'json') {
-		if (!selectedDatasource || downloading) return;
-		throw new Error(
-			'Datasource export requires an analysis pipeline payload; run exports from an analysis tab.'
-		);
 	}
 </script>
 
@@ -246,41 +240,32 @@
 					<div class="flex items-center gap-1 shrink-0">
 						<button
 							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
-							title="Download as CSV"
-							disabled={downloading}
-							onclick={() => handleDownload('csv')}
+							class:text-accent-primary={detailTab === 'preview'}
+							onclick={() => (detailTab = 'preview')}
 						>
-							{#if downloading}
-								<LoaderCircle size={14} class="spinning" />
-							{:else}
-								<Download size={14} />
-							{/if}
-							CSV
+							Preview
 						</button>
 						<button
 							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
-							title="Download as Parquet"
-							disabled={downloading}
-							onclick={() => handleDownload('parquet')}
+							class:text-accent-primary={detailTab === 'compare'}
+							onclick={() => (detailTab = 'compare')}
 						>
-							Parquet
-						</button>
-						<button
-							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
-							title="Download as JSON"
-							disabled={downloading}
-							onclick={() => handleDownload('json')}
-						>
-							JSON
+							Compare builds
 						</button>
 					</div>
 				</div>
 				<div class="flex-1 min-h-0 overflow-hidden">
-					<DatasourcePreview
-						datasourceId={selectedDatasource.id}
-						datasource={selectedDatasource}
-						datasourceConfig={snapshotConfig ?? selectedDatasource.config}
-					/>
+					{#if detailTab === 'preview'}
+						<DatasourcePreview
+							datasourceId={selectedDatasource.id}
+							datasource={selectedDatasource}
+							datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+						/>
+					{:else}
+						<div class="h-full overflow-auto datasource-comparison-panel">
+							<BuildComparisonPanel datasource={selectedDatasource} />
+						</div>
+					{/if}
 				</div>
 			</div>
 		{:else}

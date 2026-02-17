@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
+from fastapi import HTTPException as FastAPIHTTPException
 from sqlalchemy import desc, select
 from sqlmodel import Session
 
@@ -116,15 +117,18 @@ def compare_engine_runs(
     session: Session,
     run_a_id: str,
     run_b_id: str,
+    datasource_id: str | None = None,
 ) -> BuildComparisonResponse:
     """Compare two engine runs side-by-side: schema diff, row count delta, timing delta."""
     run_a = session.get(EngineRun, run_a_id)
     run_b = session.get(EngineRun, run_b_id)
     if not run_a or not run_b:
-        from fastapi import HTTPException
-
         missing = run_a_id if not run_a else run_b_id
-        raise HTTPException(status_code=404, detail=f'Engine run {missing} not found')
+        raise FastAPIHTTPException(status_code=404, detail=f'Engine run {missing} not found')
+    if run_a.datasource_id != run_b.datasource_id:
+        raise FastAPIHTTPException(status_code=400, detail='Engine runs must belong to the same datasource')
+    if datasource_id and (run_a.datasource_id != datasource_id or run_b.datasource_id != datasource_id):
+        raise FastAPIHTTPException(status_code=400, detail='Engine runs do not match datasource')
 
     result_a = run_a.result_json or {}
     result_b = run_b.result_json or {}

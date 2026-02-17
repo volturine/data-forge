@@ -15,6 +15,7 @@ from modules.analysis.schemas import (
 )
 from modules.analysis_versions import service as version_service
 from modules.datasource.models import DataSource
+from modules.datasource.source_types import DataSourceType
 from modules.locks import service as lock_service
 
 
@@ -159,7 +160,7 @@ def update_analysis(
                         analysis_id=analysis_id,
                         analysis_tab_id=tab_id or None,
                         is_hidden=True,
-                        source_type='iceberg',
+                        source_type=DataSourceType.ICEBERG,
                     )
                     tab['output_datasource_id'] = output_ds.id
                 output_config = tab.get('datasource_config')

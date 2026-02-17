@@ -32,6 +32,7 @@ export interface FileDataSourceConfig {
 	has_header?: boolean | null;
 	table_name?: string | null;
 	named_range?: string | null;
+	cell_range?: string | null;
 }
 
 export interface DatabaseDataSourceConfig {
@@ -65,16 +66,18 @@ export interface AnalysisDataSourceConfig {
 	analysis_tab_id?: string | null;
 }
 
+export type SourceType = 'file' | 'database' | 'api' | 'duckdb' | 'iceberg' | 'analysis';
+
 export interface DataSourceCreate {
 	name: string;
-	source_type: string;
+	source_type: SourceType;
 	config: Record<string, unknown>;
 }
 
 export interface DataSource {
 	id: string;
 	name: string;
-	source_type: string;
+	source_type: SourceType;
 	config: Record<string, unknown>;
 	schema_cache: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;

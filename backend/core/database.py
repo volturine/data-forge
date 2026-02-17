@@ -116,3 +116,10 @@ def _run_migrations(db_engine) -> None:
             if 'smtp_password_encrypted' not in settings_columns:
                 conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''"))
                 conn.commit()
+
+    if inspector.has_table('healthchecks'):
+        hc_columns = {col['name'] for col in inspector.get_columns('healthchecks')}
+        with db_engine.connect() as conn:
+            if 'critical' not in hc_columns:
+                conn.execute(sa_text('ALTER TABLE healthchecks ADD COLUMN critical BOOLEAN NOT NULL DEFAULT 0'))
+                conn.commit()

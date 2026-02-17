@@ -13,6 +13,7 @@ class HealthCheck(SQLModel, table=True):  # type: ignore[call-arg]
     check_type: str = Field(sa_column=Column(String, nullable=False))
     config: dict = Field(sa_column=Column(JSON, nullable=False))
     enabled: bool = Field(default=True)
+    critical: bool = Field(default=False)
     created_at: dt.datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
 
 

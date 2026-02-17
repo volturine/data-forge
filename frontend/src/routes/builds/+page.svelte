@@ -1,12 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import {
-		listEngineRuns,
-		compareEngineRuns,
-		type EngineRun,
-		type ListEngineRunsParams,
-		type BuildComparison
-	} from '$lib/api/engine-runs';
+	import { listEngineRuns, type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
 	import { listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
 	import { page as pageState } from '$app/state';
@@ -22,14 +16,8 @@
 		ArrowUp,
 		ArrowDown,
 		Timer,
-		CalendarClock,
-		GitCompareArrows,
-		X,
-		Plus,
-		Minus,
-		RefreshCw
+		CalendarClock
 	} from 'lucide-svelte';
-	import { SvelteSet } from 'svelte/reactivity';
 
 	let search = $state('');
 	let kindFilter = $state<string>('');
@@ -42,12 +30,6 @@
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	const limit = 50;
-
-	// Comparison state
-	const selected = new SvelteSet<string>();
-	let comparison = $state<BuildComparison | null>(null);
-	let comparing = $state(false);
-	let compareError = $state<string | null>(null);
 
 	const params = $derived({
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
@@ -254,63 +236,6 @@
 		if (typeof name === 'string') return name;
 		return null;
 	}
-
-	function toggleSelect(id: string, event: MouseEvent) {
-		event.stopPropagation();
-		if (selected.has(id)) {
-			selected.delete(id);
-		} else if (selected.size < 2) {
-			selected.add(id);
-		}
-	}
-
-	function isSelected(id: string): boolean {
-		return selected.has(id);
-	}
-
-	const canCompare = $derived(selected.size === 2);
-
-	async function runComparison() {
-		const ids = [...selected];
-		if (ids.length !== 2) return;
-		comparing = true;
-		compareError = null;
-		const result = await compareEngineRuns(ids[0], ids[1]);
-		if (result.isOk()) {
-			comparison = result.value;
-		} else {
-			compareError = result.error.message;
-		}
-		comparing = false;
-	}
-
-	function closeComparison() {
-		comparison = null;
-		compareError = null;
-		selected.clear();
-	}
-
-	function formatDelta(val: number | null): string {
-		if (val === null) return '-';
-		const sign = val > 0 ? '+' : '';
-		return `${sign}${val}`;
-	}
-
-	function formatDeltaPct(val: number | null): string {
-		if (val === null) return '';
-		const sign = val > 0 ? '+' : '';
-		return `(${sign}${val}%)`;
-	}
-
-	function deltaClass(val: number | null): string {
-		if (val === null || val === 0) return 'text-fg-muted';
-		return val > 0 ? 'text-error-fg' : 'text-success-fg';
-	}
-
-	function rowDeltaClass(val: number | null): string {
-		if (val === null || val === 0) return 'text-fg-muted';
-		return val > 0 ? 'text-success-fg' : 'text-error-fg';
-	}
 </script>
 
 <div class="builds-page mx-auto max-w-300 px-6 py-7">
@@ -361,253 +286,6 @@
 		</div>
 	</div>
 
-	{#if selected.size > 0}
-		<div class="mb-4 flex items-center gap-3 border border-info bg-accent-bg px-4 py-2 text-sm">
-			<GitCompareArrows size={16} class="text-accent-primary" />
-			<span class="text-fg-secondary">{selected.size}/2 builds selected for comparison</span>
-			<button
-				class="btn-primary btn-sm ml-auto"
-				disabled={!canCompare || comparing}
-				onclick={runComparison}
-			>
-				{#if comparing}
-					<RefreshCw size={13} class="animate-spin" />
-				{/if}
-				Compare
-			</button>
-			<button class="btn-ghost btn-sm" onclick={closeComparison}>
-				<X size={13} />
-				Clear
-			</button>
-		</div>
-	{/if}
-
-	{#if compareError}
-		<div class="error-box mb-4">{compareError}</div>
-	{/if}
-
-	{#if comparison}
-		<div class="mb-6 border border-tertiary">
-			<div
-				class="flex items-center justify-between border-b border-tertiary bg-bg-tertiary px-4 py-3"
-			>
-				<h3 class="m-0 flex items-center gap-2 text-sm font-medium">
-					<GitCompareArrows size={16} class="text-accent-primary" />
-					Build Comparison
-				</h3>
-				<button class="btn-ghost btn-sm" onclick={closeComparison}>
-					<X size={14} />
-				</button>
-			</div>
-
-			<div class="p-4">
-				<!-- Run summaries -->
-				<div class="mb-4 grid grid-cols-2 gap-4">
-					<div class="border border-tertiary p-3">
-						<div class="mb-2 text-xs font-medium text-fg-muted">Run A</div>
-						<div class="space-y-1 text-sm">
-							<div>
-								<span class="text-fg-muted">ID:</span>
-								<span class="font-mono text-xs">{comparison.run_a.id.slice(0, 8)}...</span>
-							</div>
-							<div><span class="text-fg-muted">Type:</span> {comparison.run_a.kind}</div>
-							<div><span class="text-fg-muted">Status:</span> {comparison.run_a.status}</div>
-							<div>
-								<span class="text-fg-muted">Duration:</span>
-								{formatDuration(comparison.run_a.duration_ms)}
-							</div>
-							<div><span class="text-fg-muted">Rows:</span> {comparison.row_count_a ?? '-'}</div>
-							<div>
-								<span class="text-fg-muted">Created:</span>
-								{formatDate(comparison.run_a.created_at)}
-							</div>
-						</div>
-					</div>
-					<div class="border border-tertiary p-3">
-						<div class="mb-2 text-xs font-medium text-fg-muted">Run B</div>
-						<div class="space-y-1 text-sm">
-							<div>
-								<span class="text-fg-muted">ID:</span>
-								<span class="font-mono text-xs">{comparison.run_b.id.slice(0, 8)}...</span>
-							</div>
-							<div><span class="text-fg-muted">Type:</span> {comparison.run_b.kind}</div>
-							<div><span class="text-fg-muted">Status:</span> {comparison.run_b.status}</div>
-							<div>
-								<span class="text-fg-muted">Duration:</span>
-								{formatDuration(comparison.run_b.duration_ms)}
-							</div>
-							<div><span class="text-fg-muted">Rows:</span> {comparison.row_count_b ?? '-'}</div>
-							<div>
-								<span class="text-fg-muted">Created:</span>
-								{formatDate(comparison.run_b.created_at)}
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Deltas summary -->
-				<div class="mb-4 grid grid-cols-3 gap-4">
-					<div class="border border-tertiary p-3 text-center">
-						<div class="text-xs text-fg-muted">Row Count Delta</div>
-						<div class="mt-1 font-mono text-lg {rowDeltaClass(comparison.row_count_delta)}">
-							{formatDelta(comparison.row_count_delta)}
-						</div>
-					</div>
-					<div class="border border-tertiary p-3 text-center">
-						<div class="text-xs text-fg-muted">Duration Delta</div>
-						<div class="mt-1 font-mono text-lg {deltaClass(comparison.total_duration_delta_ms)}">
-							{comparison.total_duration_delta_ms !== null
-								? formatDuration(Math.abs(comparison.total_duration_delta_ms))
-								: '-'}
-							{#if comparison.total_duration_delta_ms !== null}
-								<span class="text-xs"
-									>{comparison.total_duration_delta_ms > 0 ? 'slower' : 'faster'}</span
-								>
-							{/if}
-						</div>
-					</div>
-					<div class="border border-tertiary p-3 text-center">
-						<div class="text-xs text-fg-muted">Schema Changes</div>
-						<div
-							class="mt-1 font-mono text-lg {comparison.schema_diff.length > 0
-								? 'text-warning-fg'
-								: 'text-fg-muted'}"
-						>
-							{comparison.schema_diff.length}
-						</div>
-					</div>
-				</div>
-
-				<!-- Schema diff -->
-				{#if comparison.schema_diff.length > 0}
-					<div class="mb-4">
-						<h4 class="mb-2 text-sm font-medium text-fg-secondary">Schema Changes</h4>
-						<div class="border border-tertiary">
-							<table class="w-full border-collapse text-sm">
-								<thead>
-									<tr class="bg-bg-tertiary">
-										<th class="border-b border-tertiary px-3 py-1.5 text-left font-medium"
-											>Column</th
-										>
-										<th class="border-b border-tertiary px-3 py-1.5 text-left font-medium"
-											>Change</th
-										>
-										<th class="border-b border-tertiary px-3 py-1.5 text-left font-medium"
-											>Type A</th
-										>
-										<th class="border-b border-tertiary px-3 py-1.5 text-left font-medium"
-											>Type B</th
-										>
-									</tr>
-								</thead>
-								<tbody>
-									{#each comparison.schema_diff as diff (diff.column)}
-										<tr>
-											<td class="border-b border-tertiary px-3 py-1.5 font-mono text-xs"
-												>{diff.column}</td
-											>
-											<td class="border-b border-tertiary px-3 py-1.5">
-												{#if diff.status === 'added'}
-													<span class="inline-flex items-center gap-1 text-xs text-success-fg"
-														><Plus size={12} /> Added</span
-													>
-												{:else if diff.status === 'removed'}
-													<span class="inline-flex items-center gap-1 text-xs text-error-fg"
-														><Minus size={12} /> Removed</span
-													>
-												{:else}
-													<span class="inline-flex items-center gap-1 text-xs text-warning-fg"
-														><RefreshCw size={12} /> Changed</span
-													>
-												{/if}
-											</td>
-											<td
-												class="border-b border-tertiary px-3 py-1.5 font-mono text-xs text-fg-muted"
-												>{diff.type_a ?? '-'}</td
-											>
-											<td
-												class="border-b border-tertiary px-3 py-1.5 font-mono text-xs text-fg-muted"
-												>{diff.type_b ?? '-'}</td
-											>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					</div>
-				{/if}
-
-				<!-- Timing diff -->
-				{#if comparison.timing_diff.length > 0}
-					<div>
-						<h4 class="mb-2 text-sm font-medium text-fg-secondary">Step Timing Comparison</h4>
-						<div class="border border-tertiary">
-							<table class="w-full border-collapse text-sm">
-								<thead>
-									<tr class="bg-bg-tertiary">
-										<th class="border-b border-tertiary px-3 py-1.5 text-left font-medium">Step</th>
-										<th class="border-b border-tertiary px-3 py-1.5 text-right font-medium"
-											>Run A</th
-										>
-										<th class="border-b border-tertiary px-3 py-1.5 text-right font-medium"
-											>Run B</th
-										>
-										<th class="border-b border-tertiary px-3 py-1.5 text-right font-medium"
-											>Delta</th
-										>
-									</tr>
-								</thead>
-								<tbody>
-									{#each comparison.timing_diff as diff (diff.step)}
-										<tr>
-											<td
-												class="border-b border-tertiary px-3 py-1.5 font-mono text-xs"
-												title={diff.step}
-											>
-												{diff.step.length > 30 ? diff.step.slice(0, 30) + '...' : diff.step}
-											</td>
-											<td
-												class="border-b border-tertiary px-3 py-1.5 text-right font-mono text-xs text-fg-muted"
-											>
-												{diff.ms_a !== null ? formatDuration(diff.ms_a) : '-'}
-											</td>
-											<td
-												class="border-b border-tertiary px-3 py-1.5 text-right font-mono text-xs text-fg-muted"
-											>
-												{diff.ms_b !== null ? formatDuration(diff.ms_b) : '-'}
-											</td>
-											<td
-												class="border-b border-tertiary px-3 py-1.5 text-right font-mono text-xs {deltaClass(
-													diff.delta_ms
-												)}"
-											>
-												{diff.delta_ms !== null ? formatDuration(Math.abs(diff.delta_ms)) : '-'}
-												{#if diff.delta_ms !== null}
-													<span class="text-fg-muted"
-														>{diff.delta_ms > 0 ? 'slower' : 'faster'}</span
-													>
-												{/if}
-												{#if diff.delta_pct !== null}
-													<span class="ml-1 text-fg-muted">{formatDeltaPct(diff.delta_pct)}</span>
-												{/if}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					</div>
-				{/if}
-
-				{#if comparison.schema_diff.length === 0 && comparison.timing_diff.length === 0}
-					<p class="text-center text-sm text-fg-muted">
-						No schema or timing differences detected between these runs.
-					</p>
-				{/if}
-			</div>
-		</div>
-	{/if}
-
 	{#if query.isLoading}
 		<div class="flex h-full items-center justify-center">
 			<div class="spinner"></div>
@@ -620,7 +298,8 @@
 		<div class="rounded-sm border border-dashed border-tertiary p-8 text-center">
 			<p class="text-fg-muted">No engine runs yet.</p>
 			<p class="text-sm text-fg-tertiary">
-				Runs will appear here when you preview or export data in analyses.
+				Runs will appear here when you preview or export data in analyses. Compare builds from the
+				Datasources tab.
 			</p>
 		</div>
 	{:else}
@@ -628,9 +307,6 @@
 			<table class="w-full border-collapse text-sm">
 				<thead>
 					<tr class="bg-bg-tertiary">
-						<th class="w-8 border-b border-tertiary px-2 py-2 text-center font-medium">
-							<GitCompareArrows size={13} class="mx-auto text-fg-muted" />
-						</th>
 						<th class="w-8 border-b border-tertiary px-3 py-2 text-left font-medium"></th>
 						{#each [{ key: 'kind', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'datasource', label: 'Datasource' }, { key: 'analysis', label: 'Analysis' }, { key: 'output', label: 'Output' }, { key: 'duration_ms', label: 'Duration' }, { key: 'created_at', label: 'Created' }] as col (col.key)}
 							<th
@@ -658,15 +334,6 @@
 							class:bg-bg-secondary={expandedId === run.id}
 							onclick={() => toggleExpand(run.id)}
 						>
-							<td class="border-b border-tertiary px-2 py-2 text-center">
-								<input
-									type="checkbox"
-									checked={isSelected(run.id)}
-									disabled={!isSelected(run.id) && selected.size >= 2}
-									onclick={(e) => toggleSelect(run.id, e)}
-									class="cursor-pointer accent-accent-primary"
-								/>
-							</td>
 							<td class="border-b border-tertiary px-3 py-2">
 								<ChevronDown size={14} class={expandedId === run.id ? '' : '-rotate-90'} />
 							</td>
@@ -732,7 +399,7 @@
 						</tr>
 						{#if expandedId === run.id}
 							<tr>
-								<td colspan="9" class="border-b border-tertiary bg-bg-primary p-0">
+								<td colspan="8" class="border-b border-tertiary bg-bg-primary p-0">
 									<div class="p-4">
 										<!-- Tab buttons -->
 										<div class="mb-4 flex gap-1 border-b border-tertiary">

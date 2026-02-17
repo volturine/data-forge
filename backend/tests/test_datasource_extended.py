@@ -6,6 +6,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from openpyxl import Workbook
 
 from modules.analysis.models import Analysis
 from modules.datasource.models import DataSource
@@ -166,6 +167,134 @@ class TestDataSourceValidation:
         response = client.post('/api/v1/datasource/preflight', files=files)
 
         assert response.status_code == 400
+
+    def test_preflight_excel_cell_range(self, client, temp_upload_dir: Path):
+        """Test Excel preflight supports A1 range selection."""
+        excel_path = temp_upload_dir / 'range.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        assert sheet is not None
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('range.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        data = {'cell_range': 'A1:B3', 'has_header': 'true'}
+
+        response = client.post('/api/v1/datasource/preflight', files=files, data=data)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['sheet_name'] == 'Sheet1'
+        assert payload['start_row'] == 0
+        assert payload['start_col'] == 0
+        assert payload['end_col'] == 1
+        assert payload['detected_end_row'] == 2
+        assert len(payload['preview']) == 3
+
+    def test_preflight_excel_invalid_cell_range(self, client, temp_upload_dir: Path):
+        """Test Excel preflight rejects invalid cell ranges."""
+        excel_path = temp_upload_dir / 'invalid.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('invalid.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        data = {'cell_range': 'NotARange', 'has_header': 'true'}
+
+        response = client.post('/api/v1/datasource/preflight', files=files, data=data)
+
+        assert response.status_code == 400
+
+    def test_confirm_excel_end_row(self, client, temp_upload_dir: Path):
+        """Test Excel confirm stores manual end row selection."""
+        excel_path = temp_upload_dir / 'bounds.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        assert sheet is not None
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        sheet.append([3, 'C'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('bounds.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+
+        preflight = client.post(
+            '/api/v1/datasource/preflight',
+            files=files,
+            data={'start_row': '0', 'start_col': '0', 'end_col': '1'},
+        )
+        assert preflight.status_code == 200
+        preflight_id = preflight.json()['preflight_id']
+
+        confirm_data = {
+            'preflight_id': preflight_id,
+            'name': 'Excel End Row',
+            'sheet_name': 'Sheet1',
+            'start_row': '0',
+            'start_col': '0',
+            'end_col': '1',
+            'end_row': '1',
+            'has_header': 'true',
+        }
+        confirm = client.post('/api/v1/datasource/confirm', data=confirm_data)
+
+        assert confirm.status_code == 200
+        config = confirm.json()['config']
+        assert config['end_row'] == 1
+
+    def test_confirm_excel_cell_range_stores_bounds(self, client, temp_upload_dir: Path):
+        """Test Excel confirm stores manual cell range selection."""
+        excel_path = temp_upload_dir / 'cell-range.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('cell-range.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+
+        preflight = client.post('/api/v1/datasource/preflight', files=files)
+        assert preflight.status_code == 200
+        preflight_id = preflight.json()['preflight_id']
+
+        confirm_data = {
+            'preflight_id': preflight_id,
+            'name': 'Excel Range',
+            'cell_range': 'Sheet1!A1:B3',
+            'has_header': 'true',
+        }
+        confirm = client.post('/api/v1/datasource/confirm', data=confirm_data)
+
+        assert confirm.status_code == 200
+        config = confirm.json()['config']
+        assert config['cell_range'] == 'Sheet1!A1:B3'
+        assert config['sheet_name'] == 'Sheet1'
+        assert config['start_row'] == 0
+        assert config['start_col'] == 0
+        assert config['end_col'] == 1
+        assert config['end_row'] == 2
 
 
 class TestDataSourceSchema:

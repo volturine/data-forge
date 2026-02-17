@@ -15,6 +15,7 @@ from core.exceptions import (
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.analysis_versions.models import AnalysisVersion
 from modules.datasource.models import DataSource
+from modules.datasource.source_types import DataSourceType
 
 
 def create_version(session: Session, analysis: Analysis, *, commit: bool = True) -> AnalysisVersion:
@@ -100,7 +101,7 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
         datasource = DataSource(
             id=datasource_id,
             name=tab.get('name') or 'Analysis Source',
-            source_type='analysis',
+            source_type=DataSourceType.ANALYSIS,
             config={'analysis_id': str(source_analysis_id)},
             created_by_analysis_id=str(source_analysis_id),
             created_by='analysis',

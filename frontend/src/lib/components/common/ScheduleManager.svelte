@@ -31,10 +31,11 @@
 	let { datasourceId, compact = false }: Props = $props();
 
 	const queryClient = useQueryClient();
+	const defaultCron = '0 * * * *';
 
 	let creating = $state(false);
 	let triggerType = $state<'cron' | 'depends' | 'event'>('cron');
-	let newCron = $state('0 * * * *');
+	let newCron = $state(defaultCron);
 	let newDatasourceId = $state('');
 	let newDependsOn = $state('');
 	let newTrigger = $state('');
@@ -69,8 +70,7 @@
 			if (result.isErr()) return [] as DataSource[];
 			return result.value;
 		},
-		staleTime: 60_000,
-		enabled: !datasourceId
+		staleTime: 60_000
 	}));
 
 	const datasourceMap = $derived.by(() => {
@@ -92,9 +92,25 @@
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
 
-	const currentTarget = $derived.by(() => {
+	const targetDatasource = $derived.by(() => {
 		if (!datasourceId) return null;
-		const ds = datasourceMap.get(datasourceId);
+		return datasourceMap.get(datasourceId) ?? null;
+	});
+
+	const scheduleBlocked = $derived.by(() => {
+		if (!datasourceId) return false;
+		if (!targetDatasource) return true;
+		return targetDatasource.created_by !== 'analysis';
+	});
+
+	const showBlockedMessage = $derived.by(() => {
+		if (!datasourceId) return false;
+		if (!targetDatasource) return false;
+		return targetDatasource.created_by !== 'analysis';
+	});
+
+	const currentTarget = $derived.by(() => {
+		const ds = targetDatasource;
 		if (!ds) return null;
 		return {
 			datasourceName: ds.name,
@@ -112,6 +128,12 @@
 		if (schedule.trigger_on_datasource_id) return 'event';
 		if (schedule.depends_on) return 'depends';
 		return 'cron';
+	}
+
+	function getTriggerLabel(type: 'cron' | 'depends' | 'event'): string {
+		if (type === 'cron') return 'Cron';
+		if (type === 'depends') return 'Depends';
+		return 'Event';
 	}
 
 	function getTriggerDescription(schedule: Schedule): string {
@@ -179,7 +201,7 @@
 			queryClient.invalidateQueries({ queryKey: ['schedules'] });
 			creating = false;
 			triggerType = 'cron';
-			newCron = '0 * * * *';
+			newCron = defaultCron;
 			newDatasourceId = '';
 			newDependsOn = '';
 			newTrigger = '';
@@ -199,7 +221,11 @@
 
 	const cronMut = createMutation(() => ({
 		mutationFn: async (args: { id: string; cron: string }) => {
-			const result = await updateSchedule(args.id, { cron_expression: args.cron });
+			const result = await updateSchedule(args.id, {
+				cron_expression: args.cron,
+				depends_on: null,
+				trigger_on_datasource_id: null
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -212,7 +238,10 @@
 
 	const depMut = createMutation(() => ({
 		mutationFn: async (args: { id: string; depends_on: string | null }) => {
-			const result = await updateSchedule(args.id, { depends_on: args.depends_on });
+			const result = await updateSchedule(args.id, {
+				depends_on: args.depends_on,
+				trigger_on_datasource_id: null
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -224,7 +253,8 @@
 	const triggerMut = createMutation(() => ({
 		mutationFn: async (args: { id: string; trigger_on_datasource_id: string | null }) => {
 			const payload: ScheduleUpdate = {
-				trigger_on_datasource_id: args.trigger_on_datasource_id
+				trigger_on_datasource_id: args.trigger_on_datasource_id,
+				depends_on: null
 			};
 			const result = await updateSchedule(args.id, payload);
 			if (result.isErr()) throw new Error(result.error.message);
@@ -247,6 +277,7 @@
 	}));
 
 	function handleCreate() {
+		if (scheduleBlocked) return;
 		const targetDs = datasourceId ?? newDatasourceId;
 		if (!targetDs) return;
 
@@ -267,6 +298,7 @@
 	}
 
 	function handleToggle(schedule: Schedule) {
+		if (scheduleBlocked) return;
 		toggleMut.mutate({ id: schedule.id, enabled: !schedule.enabled });
 	}
 
@@ -275,11 +307,13 @@
 	}
 
 	function startEditCron(schedule: Schedule) {
+		if (scheduleBlocked) return;
 		editingCron = schedule.id;
 		editCronValue = schedule.cron_expression;
 	}
 
 	function saveCron(id: string) {
+		if (scheduleBlocked) return;
 		if (!editCronValue.trim()) return;
 		cronMut.mutate({ id, cron: editCronValue.trim() });
 	}
@@ -290,11 +324,18 @@
 	}
 
 	function handleDepChange(id: string, value: string) {
+		if (scheduleBlocked) return;
 		depMut.mutate({ id, depends_on: value || null });
 	}
 
 	function handleTriggerChange(id: string, value: string) {
+		if (scheduleBlocked) return;
 		triggerMut.mutate({ id, trigger_on_datasource_id: value || null });
+	}
+
+	function openCreate() {
+		if (scheduleBlocked) return;
+		creating = true;
 	}
 
 	function toggleExpand(id: string) {
@@ -320,7 +361,7 @@
 	}
 
 	const colCount = $derived.by(() => {
-		let count = 6;
+		let count = 7;
 		if (!datasourceId) count += 1;
 		return count;
 	});
@@ -339,7 +380,8 @@
 				</div>
 				<button
 					class="inline-flex items-center gap-1.5 border border-tertiary bg-accent-bg px-3 py-1.5 text-sm text-accent-primary hover:bg-accent-bg/80"
-					onclick={() => (creating = true)}
+					onclick={openCreate}
+					disabled={scheduleBlocked}
 				>
 					<Plus size={14} />
 					New Schedule
@@ -357,7 +399,8 @@
 			<div class="flex items-center gap-1">
 				<button
 					class="inline-flex items-center gap-1 border border-tertiary bg-accent-bg px-2 py-1 text-xs text-accent-primary hover:bg-accent-bg/80"
-					onclick={() => (creating = true)}
+					onclick={openCreate}
+					disabled={scheduleBlocked}
 				>
 					<Plus size={12} />
 					Add
@@ -390,6 +433,13 @@
 				</ul>
 			</div>
 		{/if}
+	{/if}
+
+	{#if showBlockedMessage}
+		<div class="mb-3 rounded border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+			Scheduling is only available for analysis outputs. This datasource was created by
+			<span class="font-medium">{targetDatasource?.created_by}</span>.
+		</div>
 	{/if}
 
 	{#if creating}
@@ -428,6 +478,7 @@
 								id="schedule-datasource"
 								class="border border-tertiary bg-transparent px-2 py-1.5 text-xs"
 								bind:value={newDatasourceId}
+								disabled={scheduleBlocked}
 							>
 								<option value="">Select output dataset...</option>
 								{#each analysisOutputs as ds (ds.id)}
@@ -478,6 +529,7 @@
 							value="cron"
 							bind:group={triggerType}
 							class="mt-0.5"
+							disabled={scheduleBlocked}
 						/>
 						<div class="flex-1">
 							<div class="mb-1 text-xs font-medium">On a Schedule</div>
@@ -489,6 +541,7 @@
 										class="w-32 border border-tertiary bg-transparent px-2 py-1 font-mono text-xs"
 										bind:value={newCron}
 										placeholder="0 * * * *"
+										disabled={scheduleBlocked}
 									/>
 									<span class="text-xs text-fg-muted">{getCronDescription(newCron)}</span>
 								</div>
@@ -506,6 +559,7 @@
 							value="depends"
 							bind:group={triggerType}
 							class="mt-0.5"
+							disabled={scheduleBlocked}
 						/>
 						<div class="flex-1">
 							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
@@ -520,6 +574,7 @@
 									<select
 										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
 										bind:value={newDependsOn}
+										disabled={scheduleBlocked}
 									>
 										<option value="">Select a schedule...</option>
 										{#each depOptions() as dep (dep.id)}
@@ -541,6 +596,7 @@
 							value="event"
 							bind:group={triggerType}
 							class="mt-0.5"
+							disabled={scheduleBlocked}
 						/>
 						<div class="flex-1">
 							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
@@ -553,6 +609,7 @@
 									<select
 										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
 										bind:value={newTrigger}
+										disabled={scheduleBlocked}
 									>
 										<option value="">Select a datasource...</option>
 										{#each triggerables as ds (ds.id)}
@@ -574,7 +631,8 @@
 						(triggerType === 'cron' && !newCron) ||
 						(triggerType === 'depends' && !newDependsOn) ||
 						(triggerType === 'event' && !newTrigger) ||
-						createMut.isPending}
+						createMut.isPending ||
+						scheduleBlocked}
 				>
 					{createMut.isPending ? 'Creating...' : 'Create Schedule'}
 				</button>
@@ -624,6 +682,7 @@
 							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Target</th>
 						{/if}
 						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Produced By</th>
+						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Trigger Type</th>
 						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Trigger</th>
 						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Status</th>
 						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Next Run</th>
@@ -663,6 +722,9 @@
 								</span>
 							</td>
 							<td class="border-b border-tertiary px-2 py-1.5">
+								<span class="text-fg-secondary">{getTriggerLabel(triggerTypeValue)}</span>
+							</td>
+							<td class="border-b border-tertiary px-2 py-1.5">
 								<div class="flex items-center gap-1.5">
 									{#if triggerTypeValue === 'cron'}
 										<Clock size={12} class="shrink-0 text-fg-muted" />
@@ -683,7 +745,7 @@
 										e.stopPropagation();
 										handleToggle(schedule);
 									}}
-									disabled={toggleMut.isPending}
+									disabled={toggleMut.isPending || scheduleBlocked}
 									title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
 								>
 									{#if schedule.enabled}
@@ -731,93 +793,102 @@
 												{provenanceDisplay}
 											</span>
 										</div>
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Cron Expression</span>
-											{#if editingCron === schedule.id}
+										{#if triggerTypeValue === 'cron'}
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">Cron Expression</span>
+												{#if editingCron === schedule.id}
+													<div class="flex items-center gap-1">
+														<input
+															type="text"
+															class="w-32 border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+															bind:value={editCronValue}
+															onkeydown={(e) => {
+																if (e.key === 'Enter') saveCron(schedule.id);
+																if (e.key === 'Escape') cancelEditCron();
+															}}
+															disabled={scheduleBlocked}
+														/>
+														<button
+															class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-success-fg hover:text-success-fg/80"
+															onclick={() => saveCron(schedule.id)}
+															disabled={cronMut.isPending || scheduleBlocked}
+															title="Save"
+														>
+															<Check size={12} />
+														</button>
+														<button
+															class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+															onclick={cancelEditCron}
+															title="Cancel"
+														>
+															<X size={12} />
+														</button>
+													</div>
+												{:else}
+													<div class="flex items-center gap-1">
+														<code class="bg-bg-tertiary px-1 py-0.5 text-[10px]">
+															{schedule.cron_expression}
+														</code>
+														<button
+															class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+															onclick={() => startEditCron(schedule)}
+															title="Edit cron expression"
+															disabled={scheduleBlocked}
+														>
+															<Pencil size={10} />
+														</button>
+													</div>
+												{/if}
+											</div>
+										{:else if triggerTypeValue === 'depends'}
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">Depends On</span>
 												<div class="flex items-center gap-1">
-													<input
-														type="text"
-														class="w-32 border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
-														bind:value={editCronValue}
-														onkeydown={(e) => {
-															if (e.key === 'Enter') saveCron(schedule.id);
-															if (e.key === 'Escape') cancelEditCron();
-														}}
-													/>
-													<button
-														class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-success-fg hover:text-success-fg/80"
-														onclick={() => saveCron(schedule.id)}
-														disabled={cronMut.isPending}
-														title="Save"
+													<select
+														class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+														value={schedule.depends_on ?? ''}
+														onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
+														onclick={(e) => e.stopPropagation()}
+														disabled={scheduleBlocked}
 													>
-														<Check size={12} />
-													</button>
-													<button
-														class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
-														onclick={cancelEditCron}
-														title="Cancel"
-													>
-														<X size={12} />
-													</button>
+														<option value="">None</option>
+														{#each depOptions(schedule.id) as dep (dep.id)}
+															<option value={dep.id}>{depLabel(dep.id)}</option>
+														{/each}
+													</select>
+													{#if schedule.depends_on}
+														<Link size={10} class="text-fg-muted" />
+													{/if}
 												</div>
-											{:else}
+											</div>
+										{:else}
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">On Datasource Update</span>
 												<div class="flex items-center gap-1">
-													<code class="bg-bg-tertiary px-1 py-0.5 text-[10px]">
-														{schedule.cron_expression}
-													</code>
-													<button
-														class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
-														onclick={() => startEditCron(schedule)}
-														title="Edit cron expression"
+													<select
+														class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+														value={schedule.trigger_on_datasource_id ?? ''}
+														onchange={(e) =>
+															handleTriggerChange(schedule.id, e.currentTarget.value)}
+														onclick={(e) => e.stopPropagation()}
+														disabled={scheduleBlocked}
 													>
-														<Pencil size={10} />
-													</button>
+														<option value="">None</option>
+														{#each triggerables as ds (ds.id)}
+															<option value={ds.id}>{ds.name}</option>
+														{/each}
+													</select>
+													{#if schedule.trigger_on_datasource_id}
+														<Database size={10} class="text-fg-muted" />
+													{/if}
 												</div>
-											{/if}
-										</div>
+											</div>
+										{/if}
 										<div class="flex flex-col gap-1">
 											<span class="text-[10px] text-fg-muted">Created</span>
 											<span class="text-[10px] text-fg-secondary">
 												{formatDate(schedule.created_at)}
 											</span>
-										</div>
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Depends On</span>
-											<div class="flex items-center gap-1">
-												<select
-													class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
-													value={schedule.depends_on ?? ''}
-													onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
-													onclick={(e) => e.stopPropagation()}
-												>
-													<option value="">None</option>
-													{#each depOptions(schedule.id) as dep (dep.id)}
-														<option value={dep.id}>{depLabel(dep.id)}</option>
-													{/each}
-												</select>
-												{#if schedule.depends_on}
-													<Link size={10} class="text-fg-muted" />
-												{/if}
-											</div>
-										</div>
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">On Datasource Update</span>
-											<div class="flex items-center gap-1">
-												<select
-													class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
-													value={schedule.trigger_on_datasource_id ?? ''}
-													onchange={(e) => handleTriggerChange(schedule.id, e.currentTarget.value)}
-													onclick={(e) => e.stopPropagation()}
-												>
-													<option value="">None</option>
-													{#each triggerables as ds (ds.id)}
-														<option value={ds.id}>{ds.name}</option>
-													{/each}
-												</select>
-												{#if schedule.trigger_on_datasource_id}
-													<Database size={10} class="text-fg-muted" />
-												{/if}
-											</div>
 										</div>
 										<div class="flex flex-col gap-1">
 											<span class="text-[10px] text-fg-muted">Schedule ID</span>

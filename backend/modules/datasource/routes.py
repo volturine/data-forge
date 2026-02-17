@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from shutil import copy2
 from urllib.parse import urlparse
@@ -15,6 +16,7 @@ from core.validation import DataSourceId, PreflightId, parse_datasource_id, pars
 from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
+from modules.datasource.source_types import DataSourceType
 
 router = APIRouter(prefix='/datasource', tags=['datasource'])
 
@@ -221,9 +223,11 @@ async def preflight_excel(
     start_row: int = Form(0),
     start_col: int = Form(0),
     end_col: int = Form(0),
+    end_row: int | None = Form(None),
     has_header: bool = Form(True),
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
+    cell_range: str | None = Form(None),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -268,13 +272,16 @@ async def preflight_excel(
         start_row=start_row,
         start_col=start_col,
         end_col=end_col,
+        end_row=end_row,
         has_header=has_header,
         table_name=table_name,
         named_range=named_range,
+        cell_range=cell_range,
     )
 
     return schemas.ExcelPreflightResponse(
         preflight_id=preflight_id,
+        sheet_name=preview_result.sheet_name,
         sheet_names=preflight.sheets,
         tables=preflight.tables,
         named_ranges=preflight.named_ranges,
@@ -294,9 +301,11 @@ async def preflight_preview(
     start_row: int = 0,
     start_col: int = 0,
     end_col: int = 0,
+    end_row: int | None = None,
     has_header: bool = True,
     table_name: str | None = None,
     named_range: str | None = None,
+    cell_range: str | None = None,
 ):
     preflight = get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
@@ -308,12 +317,15 @@ async def preflight_preview(
         start_row=start_row,
         start_col=start_col,
         end_col=end_col,
+        end_row=end_row,
         has_header=has_header,
         table_name=table_name,
         named_range=named_range,
+        cell_range=cell_range,
     )
     return schemas.ExcelPreflightPreviewResponse(
         preview=preview_result.preview,
+        sheet_name=preview_result.sheet_name,
         start_row=preview_result.start_row,
         start_col=preview_result.start_col,
         end_col=preview_result.end_col,
@@ -330,9 +342,11 @@ async def confirm_excel(
     start_row: int = Form(0),
     start_col: int = Form(0),
     end_col: int = Form(0),
+    end_row: int | None = Form(None),
     has_header: bool = Form(True),
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
+    cell_range: str | None = Form(None),
 ):
     preflight = get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
@@ -355,8 +369,10 @@ async def confirm_excel(
             start_row,
             start_col,
             end_col,
+            end_row,
             table_name,
             named_range,
+            cell_range,
         )
         datasource = await run_in_threadpool(
             run_db,
@@ -372,6 +388,7 @@ async def confirm_excel(
             has_header=has_header,
             table_name=table_name,
             named_range=named_range,
+            cell_range=cell_range,
         )
     except Exception as e:
         if target_path.exists():
@@ -389,83 +406,113 @@ def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: Session = Depends(get_db),
 ):
-    if datasource.source_type == 'database':
-        db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
-        return service.create_database_datasource(
-            session=session,
-            name=datasource.name,
-            connection_string=db_config.connection_string,
-            query=db_config.query,
+    handlers = _connect_handlers()
+    handler = handlers.get(datasource.source_type)
+    if not handler:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f'Unsupported source type: {datasource.source_type}. Use "file", "database", "api", "duckdb", "iceberg", or "analysis"'
+            ),
         )
-    if datasource.source_type == 'api':
-        api_config = schemas.APIDataSourceConfig.model_validate(datasource.config)
-        parsed = urlparse(api_config.url)
-        if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
-            raise HTTPException(status_code=400, detail='API URL must be http or https')
-        return service.create_api_datasource(
-            session=session,
-            name=datasource.name,
-            url=api_config.url,
-            method=api_config.method,
-            headers=api_config.headers,
-            auth=api_config.auth,
-        )
-    if datasource.source_type == 'file':
-        file_config = schemas.FileDataSourceConfig.model_validate(datasource.config)
-        return service.create_file_datasource(
-            session=session,
-            name=datasource.name,
-            file_path=file_config.file_path,
-            file_type=file_config.file_type,
-            csv_options=file_config.csv_options,
-            sheet_name=file_config.sheet_name,
-            start_row=file_config.start_row,
-            start_col=file_config.start_col,
-            end_col=file_config.end_col,
-            end_row=file_config.end_row,
-            has_header=file_config.has_header,
-            table_name=file_config.table_name,
-            named_range=file_config.named_range,
-        )
-    if datasource.source_type == 'duckdb':
-        duckdb_config = schemas.DuckDBDataSourceConfig.model_validate(datasource.config)
-        return service.create_duckdb_datasource(
-            session=session,
-            name=datasource.name,
-            db_path=duckdb_config.db_path,
-            query=duckdb_config.query,
-            read_only=duckdb_config.read_only,
-        )
-    if datasource.source_type == 'iceberg':
-        iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
-        return service.create_iceberg_datasource(
-            session=session,
-            name=datasource.name,
-            metadata_path=iceberg_config.metadata_path,
-            snapshot_id=iceberg_config.snapshot_id,
-            snapshot_timestamp_ms=iceberg_config.snapshot_timestamp_ms,
-            storage_options=iceberg_config.storage_options,
-            reader=iceberg_config.reader,
-            catalog_type=iceberg_config.catalog_type,
-            catalog_uri=iceberg_config.catalog_uri,
-            warehouse=iceberg_config.warehouse,
-            namespace=iceberg_config.namespace,
-            table=iceberg_config.table,
-        )
-    if datasource.source_type == 'analysis':
-        analysis_id = datasource.config.get('analysis_id')
-        analysis_tab_id = datasource.config.get('analysis_tab_id')
-        if not analysis_id:
-            raise HTTPException(status_code=400, detail='analysis_id required for analysis datasource')
-        return service.create_analysis_datasource(
-            session=session,
-            name=datasource.name,
-            analysis_id=str(analysis_id),
-            analysis_tab_id=str(analysis_tab_id) if analysis_tab_id else None,
-        )
-    raise HTTPException(
-        status_code=400,
-        detail=(f'Unsupported source type: {datasource.source_type}. Use "file", "database", "api", "duckdb", "iceberg", or "analysis"'),
+    return handler(datasource, session)
+
+
+def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCreate, Session], schemas.DataSourceResponse]]:
+    return {
+        DataSourceType.DATABASE: _connect_database,
+        DataSourceType.API: _connect_api,
+        DataSourceType.FILE: _connect_file,
+        DataSourceType.DUCKDB: _connect_duckdb,
+        DataSourceType.ICEBERG: _connect_iceberg,
+        DataSourceType.ANALYSIS: _connect_analysis,
+    }
+
+
+def _connect_database(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+    db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
+    return service.create_database_datasource(
+        session=session,
+        name=datasource.name,
+        connection_string=db_config.connection_string,
+        query=db_config.query,
+    )
+
+
+def _connect_api(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+    api_config = schemas.APIDataSourceConfig.model_validate(datasource.config)
+    parsed = urlparse(api_config.url)
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail='API URL must be http or https')
+    return service.create_api_datasource(
+        session=session,
+        name=datasource.name,
+        url=api_config.url,
+        method=api_config.method,
+        headers=api_config.headers,
+        auth=api_config.auth,
+    )
+
+
+def _connect_file(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+    file_config = schemas.FileDataSourceConfig.model_validate(datasource.config)
+    return service.create_file_datasource(
+        session=session,
+        name=datasource.name,
+        file_path=file_config.file_path,
+        file_type=file_config.file_type,
+        csv_options=file_config.csv_options,
+        sheet_name=file_config.sheet_name,
+        start_row=file_config.start_row,
+        start_col=file_config.start_col,
+        end_col=file_config.end_col,
+        end_row=file_config.end_row,
+        has_header=file_config.has_header,
+        table_name=file_config.table_name,
+        named_range=file_config.named_range,
+        cell_range=file_config.cell_range,
+    )
+
+
+def _connect_duckdb(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+    duckdb_config = schemas.DuckDBDataSourceConfig.model_validate(datasource.config)
+    return service.create_duckdb_datasource(
+        session=session,
+        name=datasource.name,
+        db_path=duckdb_config.db_path,
+        query=duckdb_config.query,
+        read_only=duckdb_config.read_only,
+    )
+
+
+def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+    iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
+    return service.create_iceberg_datasource(
+        session=session,
+        name=datasource.name,
+        metadata_path=iceberg_config.metadata_path,
+        snapshot_id=iceberg_config.snapshot_id,
+        snapshot_timestamp_ms=iceberg_config.snapshot_timestamp_ms,
+        storage_options=iceberg_config.storage_options,
+        reader=iceberg_config.reader,
+        catalog_type=iceberg_config.catalog_type,
+        catalog_uri=iceberg_config.catalog_uri,
+        warehouse=iceberg_config.warehouse,
+        namespace=iceberg_config.namespace,
+        table=iceberg_config.table,
+    )
+
+
+def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+    analysis_id = datasource.config.get('analysis_id')
+    analysis_tab_id = datasource.config.get('analysis_tab_id')
+    if not analysis_id:
+        raise HTTPException(status_code=400, detail='analysis_id required for analysis datasource')
+    return service.create_analysis_datasource(
+        session=session,
+        name=datasource.name,
+        analysis_id=str(analysis_id),
+        analysis_tab_id=str(analysis_tab_id) if analysis_tab_id else None,
     )
 
 

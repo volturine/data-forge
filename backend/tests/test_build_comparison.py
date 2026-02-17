@@ -18,6 +18,7 @@ from modules.engine_runs.service import (
 def _create_run(
     session: Session,
     *,
+    datasource_id: str | None = None,
     kind: str = 'export',
     status: str = 'success',
     result_json: dict | None = None,
@@ -27,7 +28,7 @@ def _create_run(
     run = EngineRun(
         id=str(uuid.uuid4()),
         analysis_id=str(uuid.uuid4()),
-        datasource_id=str(uuid.uuid4()),
+        datasource_id=datasource_id or str(uuid.uuid4()),
         kind=kind,
         status=status,
         request_json={},
@@ -145,8 +146,10 @@ class TestTimingDiff:
 
 class TestCompareEngineRuns:
     def test_compare_two_runs(self, test_db_session: Session) -> None:
+        datasource_id = str(uuid.uuid4())
         run_a = _create_run(
             test_db_session,
+            datasource_id=datasource_id,
             result_json={
                 'schema': {'col_a': 'Int64', 'col_b': 'Utf8'},
                 'row_count': 100,
@@ -156,6 +159,7 @@ class TestCompareEngineRuns:
         )
         run_b = _create_run(
             test_db_session,
+            datasource_id=datasource_id,
             result_json={
                 'schema': {'col_a': 'Int64', 'col_c': 'Float64'},
                 'row_count': 150,
@@ -163,6 +167,10 @@ class TestCompareEngineRuns:
             step_timings={'filter': 40, 'select': 35, 'sort': 10},
             duration_ms=85,
         )
+        run_b.datasource_id = run_a.datasource_id
+        test_db_session.add(run_b)
+        test_db_session.commit()
+        test_db_session.refresh(run_b)
 
         result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
 
@@ -191,15 +199,24 @@ class TestCompareEngineRuns:
         with pytest.raises(Exception, match='not found'):
             compare_engine_runs(test_db_session, run_a.id, missing_id)
 
+    def test_compare_requires_same_datasource(self, test_db_session: Session) -> None:
+        run_a = _create_run(test_db_session, result_json={'row_count': 1})
+        run_b = _create_run(test_db_session, result_json={'row_count': 2})
+        with pytest.raises(Exception, match='same datasource'):
+            compare_engine_runs(test_db_session, run_a.id, run_b.id)
+
     def test_compare_identical_runs(self, test_db_session: Session) -> None:
+        datasource_id = str(uuid.uuid4())
         run_a = _create_run(
             test_db_session,
+            datasource_id=datasource_id,
             result_json={'schema': {'col_a': 'Int64'}, 'row_count': 10},
             step_timings={'step1': 100},
             duration_ms=100,
         )
         run_b = _create_run(
             test_db_session,
+            datasource_id=datasource_id,
             result_json={'schema': {'col_a': 'Int64'}, 'row_count': 10},
             step_timings={'step1': 100},
             duration_ms=100,
@@ -213,8 +230,9 @@ class TestCompareEngineRuns:
         assert result.timing_diff[0].delta_ms == 0.0
 
     def test_compare_runs_without_result_json(self, test_db_session: Session) -> None:
-        run_a = _create_run(test_db_session, result_json=None)
-        run_b = _create_run(test_db_session, result_json=None)
+        datasource_id = str(uuid.uuid4())
+        run_a = _create_run(test_db_session, result_json=None, datasource_id=datasource_id)
+        run_b = _create_run(test_db_session, result_json=None, datasource_id=datasource_id)
 
         result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_a is None
@@ -225,8 +243,9 @@ class TestCompareEngineRuns:
 
     def test_compare_row_count_as_string(self, test_db_session: Session) -> None:
         """Row count stored as string (common from engine) should be parsed."""
-        run_a = _create_run(test_db_session, result_json={'row_count': '200'})
-        run_b = _create_run(test_db_session, result_json={'row_count': '300'})
+        datasource_id = str(uuid.uuid4())
+        run_a = _create_run(test_db_session, result_json={'row_count': '200'}, datasource_id=datasource_id)
+        run_b = _create_run(test_db_session, result_json={'row_count': '300'}, datasource_id=datasource_id)
 
         result = compare_engine_runs(test_db_session, run_a.id, run_b.id)
         assert result.row_count_a == 200
@@ -242,12 +261,22 @@ class TestCompareEndpoint:
             step_timings={'s1': 50},
             duration_ms=50,
         )
-        run_b = _create_run(
-            test_db_session,
+        run_b = EngineRun(
+            id=str(uuid.uuid4()),
+            analysis_id=run_a.analysis_id,
+            datasource_id=run_a.datasource_id,
+            kind='export',
+            status='success',
+            request_json={},
             result_json={'schema': {'x': 'Int64', 'y': 'Utf8'}, 'row_count': 20},
+            created_at=datetime.now(UTC).replace(tzinfo=None),
             step_timings={'s1': 60},
+            progress=1.0,
             duration_ms=60,
         )
+        test_db_session.add(run_b)
+        test_db_session.commit()
+        test_db_session.refresh(run_b)
 
         resp = client.get(
             '/api/v1/engine-runs/compare',
@@ -267,5 +296,18 @@ class TestCompareEndpoint:
         resp = client.get(
             '/api/v1/engine-runs/compare',
             params={'run_a': 'fake-a', 'run_b': 'fake-b'},
+        )
+        assert resp.status_code == 400
+
+    def test_compare_endpoint_datasource_mismatch(self, client, test_db_session: Session) -> None:
+        run_a = _create_run(test_db_session, result_json={'row_count': 10})
+        run_b = _create_run(test_db_session, result_json={'row_count': 20})
+        resp = client.get(
+            '/api/v1/engine-runs/compare',
+            params={
+                'run_a': run_a.id,
+                'run_b': run_b.id,
+                'datasource_id': run_a.datasource_id,
+            },
         )
         assert resp.status_code == 400

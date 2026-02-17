@@ -134,6 +134,7 @@
 		activeTab = 'general';
 		statsOpen = false;
 		statsColumn = null;
+		endRowInput = '';
 
 		// Initialize type-specific config
 		const config = ds.config as unknown as FileDataSourceConfig;
@@ -148,15 +149,28 @@
 			};
 		}
 		if (isExcel(ds)) {
+			const excelSource = ds.config as Record<string, unknown>;
+			const cellRangeValue = excelSource.cell_range;
+			const cellRange = typeof cellRangeValue === 'string' ? cellRangeValue : '';
+			const sheetValue = excelSource.sheet_name;
+			const sheetName = typeof sheetValue === 'string' ? sheetValue : '';
+			const tableValue = excelSource.table_name;
+			const tableName = typeof tableValue === 'string' ? tableValue : '';
+			const rangeValue = excelSource.named_range;
+			const namedRange = typeof rangeValue === 'string' ? rangeValue : '';
+			const endRowValue = config.end_row ?? null;
 			excelConfig = {
-				sheet_name: config.sheet_name ?? '',
-				table_name: config.table_name ?? '',
-				named_range: config.named_range ?? '',
+				sheet_name: sheetName,
+				table_name: tableName,
+				named_range: namedRange,
+				cell_range: cellRange,
 				start_row: config.start_row ?? 0,
 				start_col: config.start_col ?? 0,
 				end_col: config.end_col ?? 0,
+				end_row: endRowValue,
 				has_header: config.has_header ?? true
 			};
+			endRowInput = endRowValue !== null ? String(endRowValue) : '';
 		}
 	});
 
@@ -180,19 +194,24 @@
 		sheet_name: string;
 		table_name: string;
 		named_range: string;
+		cell_range: string;
 		start_row: number;
 		start_col: number;
 		end_col: number;
+		end_row: number | null;
 		has_header: boolean;
 	}>({
 		sheet_name: '',
 		table_name: '',
 		named_range: '',
+		cell_range: '',
 		start_row: 0,
 		start_col: 0,
 		end_col: 0,
+		end_row: null,
 		has_header: true
 	});
+	let endRowInput = $state('');
 
 	$effect(() => {
 		if (!schemaQuery.data) return;
@@ -220,7 +239,7 @@
 	function isExcel(ds: DataSource): boolean {
 		if (ds.source_type !== 'file') return false;
 		const config = ds.config as unknown as FileDataSourceConfig;
-		return config.file_type === 'xlsx';
+		return config.file_type === 'excel';
 	}
 
 	function isFile(ds: DataSource): boolean {
@@ -248,8 +267,47 @@
 		key: K,
 		value: (typeof excelConfig)[K]
 	) {
-		excelConfig = { ...excelConfig, [key]: value };
+		const next = { ...excelConfig, [key]: value };
+		if (key === 'sheet_name' && typeof value === 'string' && value.trim()) {
+			next.table_name = '';
+			next.named_range = '';
+			next.cell_range = '';
+		}
+		if (key === 'table_name' && typeof value === 'string' && value.trim()) {
+			next.named_range = '';
+			next.cell_range = '';
+		}
+		if (key === 'named_range' && typeof value === 'string' && value.trim()) {
+			next.table_name = '';
+			next.cell_range = '';
+		}
+		if (key === 'cell_range' && typeof value === 'string' && value.trim()) {
+			next.table_name = '';
+			next.named_range = '';
+		}
+		excelConfig = next;
 		hasChanges = true;
+	}
+
+	function handleEndRowInput(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		endRowInput = target.value;
+	}
+
+	function handleEndRowBlur() {
+		const trimmed = endRowInput.trim();
+		if (!trimmed) {
+			handleExcelConfigChange('end_row', null);
+			endRowInput = '';
+			return;
+		}
+		const parsed = Number.parseInt(trimmed, 10);
+		if (Number.isNaN(parsed) || parsed < 0) {
+			endRowInput = excelConfig.end_row !== null ? String(excelConfig.end_row) : '';
+			return;
+		}
+		handleExcelConfigChange('end_row', parsed);
+		endRowInput = String(parsed);
 	}
 
 	async function handleSave() {
@@ -274,9 +332,11 @@
 				sheet_name: excelConfig.sheet_name || null,
 				table_name: excelConfig.table_name || null,
 				named_range: excelConfig.named_range || null,
+				cell_range: excelConfig.cell_range || null,
 				start_row: excelConfig.start_row,
 				start_col: excelConfig.start_col,
 				end_col: excelConfig.end_col,
+				end_row: excelConfig.end_row,
 				has_header: excelConfig.has_header
 			};
 		} else if (isFile(datasourceQuery.data)) {
@@ -879,9 +939,25 @@
 					/>
 				</div>
 
+				<div class="flex flex-col gap-1.5">
+					<label
+						for="excel-cell-range-{datasource.id}"
+						class="text-xs font-medium text-fg-secondary">Manual Range</label
+					>
+					<input
+						id="excel-cell-range-{datasource.id}"
+						type="text"
+						value={excelConfig.cell_range}
+						oninput={(e) => handleExcelConfigChange('cell_range', e.currentTarget.value)}
+						placeholder="A1:D50"
+						class="input-base border px-3 py-2 text-sm"
+					/>
+					<span class="text-xs text-fg-muted">Optional A1 range (Sheet1!A1:D50).</span>
+				</div>
+
 				<div class="border border-tertiary bg-tertiary p-3">
 					<h4 class="m-0 mb-3 text-xs font-semibold text-fg-secondary">Table Bounds</h4>
-					<div class="grid grid-cols-3 gap-3">
+					<div class="grid grid-cols-4 gap-3">
 						<div class="flex flex-col gap-1.5">
 							<label
 								for="excel-start-row-{datasource.id}"
@@ -931,6 +1007,29 @@
 								class="input-base border px-3 py-2 text-sm"
 							/>
 							<span class="text-xs text-fg-muted">{cellLabel(excelConfig.end_col)}</span>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<label
+								for="excel-end-row-{datasource.id}"
+								class="text-xs font-medium text-fg-secondary">End Row</label
+							>
+							<input
+								id="excel-end-row-{datasource.id}"
+								type="number"
+								min="0"
+								value={endRowInput}
+								oninput={handleEndRowInput}
+								onblur={handleEndRowBlur}
+								onkeydown={(event) => {
+									if (event.key !== 'Enter') return;
+									handleEndRowBlur();
+								}}
+								class="input-base border px-3 py-2 text-sm"
+							/>
+							<span class="text-xs text-fg-muted">
+								Row {(excelConfig.end_row ?? 0) + 1}
+							</span>
 						</div>
 					</div>
 				</div>

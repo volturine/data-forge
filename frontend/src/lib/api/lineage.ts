@@ -1,12 +1,13 @@
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+import type { SourceType } from '$lib/types/datasource';
 
 export interface LineageNode {
 	id: string;
 	type: string;
 	name: string;
-	source_type?: string;
+	source_type?: SourceType;
 	status?: string;
 }
 

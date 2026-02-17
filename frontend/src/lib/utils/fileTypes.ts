@@ -48,6 +48,17 @@ export type FileType =
  */
 export type SourceType = 'database' | 'api' | 'iceberg' | 'file' | 'duckdb' | 'analysis';
 
+export type SourceCategory = 'file' | 'database' | 'api' | 'analysis';
+
+export const SOURCE_TYPE_CATEGORY: Record<SourceType, SourceCategory> = {
+	file: 'file',
+	duckdb: 'file',
+	iceberg: 'file',
+	database: 'database',
+	api: 'api',
+	analysis: 'analysis'
+};
+
 /**
  * Color scheme for a file type (CSS-in-JS format)
  */
@@ -423,6 +434,10 @@ export function getFileTypeLabel(fileType: FileType): string {
  */
 export function getSourceTypeConfig(sourceType: SourceType): FileTypeConfig {
 	return SOURCE_TYPE_REGISTRY[sourceType];
+}
+
+export function getSourceTypeCategory(sourceType: SourceType): SourceCategory {
+	return SOURCE_TYPE_CATEGORY[sourceType];
 }
 
 /**

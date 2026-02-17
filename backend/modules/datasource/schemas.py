@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from modules.datasource.source_types import DataSourceType
+
 
 class ColumnSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -61,6 +63,7 @@ class ExcelPreflightResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     preflight_id: str
+    sheet_name: str | None = None
     sheet_names: list[str]
     tables: dict[str, list[str]]
     named_ranges: list[str]
@@ -75,6 +78,7 @@ class ExcelPreflightPreviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     preview: list[list[str | None]]
+    sheet_name: str | None = None
     start_row: int
     start_col: int
     end_col: int
@@ -106,6 +110,7 @@ class FileDataSourceConfig(BaseModel):
     has_header: bool | None = None
     table_name: str | None = None
     named_range: str | None = None
+    cell_range: str | None = None
 
 
 class DatabaseDataSourceConfig(BaseModel):
@@ -149,7 +154,7 @@ class APIDataSourceConfig(BaseModel):
 
 class DataSourceCreate(BaseModel):
     name: str
-    source_type: str
+    source_type: DataSourceType
     config: dict
 
 
@@ -158,7 +163,7 @@ class DataSourceResponse(BaseModel):
 
     id: str
     name: str
-    source_type: str
+    source_type: DataSourceType
     config: dict
     schema_cache: dict | None
     created_by_analysis_id: str | None = None

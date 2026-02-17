@@ -1668,6 +1668,19 @@ button.btn-sm {
 	contain: content;
 }
 
+.datasource-comparison-panel {
+	contain: content;
+}
+
+.datasource-comparison-scroll {
+	contain: content;
+}
+
+.datasource-comparison-scroll .dataset-table__row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 36px;
+}
+
 /* Skip rendering off-screen step nodes in the pipeline canvas.
    The browser only renders steps visible in the scroll viewport. */
 .step-node {

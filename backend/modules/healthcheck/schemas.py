@@ -11,6 +11,7 @@ class HealthCheckCreate(BaseModel):
     check_type: str
     config: dict
     enabled: bool = True
+    critical: bool = False
 
 
 class HealthCheckUpdate(BaseModel):
@@ -20,6 +21,7 @@ class HealthCheckUpdate(BaseModel):
     check_type: str | None = None
     config: dict | None = None
     enabled: bool | None = None
+    critical: bool | None = None
 
 
 class HealthCheckResponse(BaseModel):
@@ -31,6 +33,7 @@ class HealthCheckResponse(BaseModel):
     check_type: str
     config: dict
     enabled: bool
+    critical: bool
     created_at: dt.datetime
 
 

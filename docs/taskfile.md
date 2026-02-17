@@ -13,6 +13,21 @@
 - [x] 4. Locks acquisition race condition
 - [x] 7. Deterministic sample without seed
 - [x] 8. Upload storage quota enforcement
+- [x] Scheduling UX/validation fixes (raw datasets, schedule types, table UX)
+- [x] Excel upload range selection (end-to-end)
+  - [x] Backend parse/validate cell ranges with sheet handling
+  - [x] Preflight/preview return sheet name + tests
+  - [x] Confirm stores cell ranges/end row
+  - [x] Frontend manual range input + end row in upload/config/preview
+  - [x] Run svelte-autofixer on updated Svelte files
+  - [x] just verify
+- [x] Datasource type registry/category (enum, handlers, unsupported type guard)
+- [x] Build comparison moves to datasources + dataset diff/mapping
+  - [x] Move comparison UI into datasources tab
+  - [x] Add metadata + dataset side-by-side diff with column mapping
+  - [x] Trim builds page after move
+- [x] Healthcheck criticals + new checks + row_count uniqueness
+- [x] Verification steps (pre-write critical checks)
 
 ### High Priority
 

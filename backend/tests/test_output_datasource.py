@@ -18,6 +18,7 @@ from modules.analysis.service import update_analysis
 from modules.compute.service import _upsert_output_datasource, export_data
 from modules.datasource.models import DataSource
 from modules.datasource.service import create_analysis_datasource
+from modules.datasource.source_types import DataSourceType
 
 # ---------------------------------------------------------------------------
 # TabSchema
@@ -518,7 +519,7 @@ class TestSourceTypeCreatedBy:
         )
         ds = test_db_session.get(DataSource, result.id)
         assert ds is not None
-        assert ds.source_type == 'analysis'
+        assert ds.source_type == DataSourceType.ANALYSIS
         assert ds.created_by == 'analysis'
 
     def test_output_datasource_uses_iceberg_source_type(self, test_db_session: Session, sample_analysis: Analysis):
@@ -529,11 +530,11 @@ class TestSourceTypeCreatedBy:
             analysis_id=sample_analysis.id,
             analysis_tab_id='tab1',
             is_hidden=True,
-            source_type='iceberg',
+            source_type=DataSourceType.ICEBERG,
         )
         ds = test_db_session.get(DataSource, result.id)
         assert ds is not None
-        assert ds.source_type == 'iceberg'
+        assert ds.source_type == DataSourceType.ICEBERG
         assert ds.created_by == 'analysis'
         assert ds.is_hidden is True
 

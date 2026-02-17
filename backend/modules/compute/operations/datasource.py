@@ -15,7 +15,7 @@ from modules.compute.core.base import OperationHandler, OperationParams
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
-    source_type: str = 'file'
+    source_type: Literal['file', 'database', 'duckdb', 'iceberg', 'analysis', 'api'] = 'file'
     analysis_id: str | None = None
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
@@ -31,6 +31,7 @@ class DatasourceParams(OperationParams):
     has_header: bool | None = None
     table_name: str | None = None
     named_range: str | None = None
+    cell_range: str | None = None
     connection_string: str | None = None
     query: str | None = None
     db_path: str | None = None
@@ -44,6 +45,7 @@ class DatasourceParams(OperationParams):
 
 class DatasourceHandler(OperationHandler):
     FILE_LOADERS: dict[str, Callable[[str, dict], pl.LazyFrame]] = {}
+    SOURCE_LOADERS: dict[str, Callable[['DatasourceHandler', DatasourceParams], pl.LazyFrame]] = {}
 
     @property
     def name(self) -> str:
@@ -58,17 +60,11 @@ class DatasourceHandler(OperationHandler):
         right_sources: dict[str, pl.LazyFrame] | None = None,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
-        loaders = {
-            'file': self._load_file,
-            'database': self._load_database,
-            'duckdb': self._load_duckdb,
-            'iceberg': self._load_iceberg,
-            'analysis': self._load_analysis,
-        }
-        loader = loaders.get(validated.source_type)
+        loader = self.SOURCE_LOADERS.get(validated.source_type)
         if not loader:
-            raise ValueError(f'Unsupported source type: {validated.source_type}')
-        return loader(validated)
+            allowed = ', '.join(sorted(self.SOURCE_LOADERS))
+            raise ValueError(f'Unsupported source type: {validated.source_type}. Allowed: {allowed}')
+        return loader(self, validated)
 
     @staticmethod
     def _csv_opts(opts: dict | None) -> dict:
@@ -169,6 +165,9 @@ class DatasourceHandler(OperationHandler):
             if not pipeline_id or pipeline_id == analysis_id:
                 return _load_analysis_pipeline(pipeline, analysis_id, config.analysis_tab_id)
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
+
+    def _load_api(self, _config: DatasourceParams) -> pl.LazyFrame:
+        raise ValueError('API datasources are not supported in pipeline execution')
 
 
 _ANALYSIS_STACK: list[tuple[str, str | None]] = []
@@ -318,6 +317,8 @@ def _merge_excel_opts(config: DatasourceParams, opts: dict) -> dict:
         next_opts = {**next_opts, 'table_name': config.table_name}
     if config.named_range:
         next_opts = {**next_opts, 'named_range': config.named_range}
+    if config.cell_range:
+        next_opts = {**next_opts, 'cell_range': config.cell_range}
     if config.has_header is not None:
         next_opts = {**next_opts, 'has_header': config.has_header}
     return next_opts
@@ -357,7 +358,7 @@ def _read_excel_bounds(config: DatasourceParams) -> pl.LazyFrame:
     else:
         columns = [f'column_{index + 1}' for index in range(len(rows[0]))]
         data_rows = rows
-    frame = pl.DataFrame(data_rows, schema=columns)
+    frame = pl.DataFrame(data_rows, schema=columns, orient='row')
     return frame.lazy()
 
 
@@ -367,6 +368,15 @@ DatasourceHandler.FILE_LOADERS = {
     'json': lambda path, _: pl.read_json(path).lazy(),
     'ndjson': lambda path, _: pl.scan_ndjson(path),
     'excel': lambda path, opts: _read_excel(path, opts),
+}
+
+DatasourceHandler.SOURCE_LOADERS = {
+    'file': DatasourceHandler._load_file,
+    'database': DatasourceHandler._load_database,
+    'duckdb': DatasourceHandler._load_duckdb,
+    'iceberg': DatasourceHandler._load_iceberg,
+    'analysis': DatasourceHandler._load_analysis,
+    'api': DatasourceHandler._load_api,
 }
 
 

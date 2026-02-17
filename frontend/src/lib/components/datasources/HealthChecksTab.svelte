@@ -6,6 +6,7 @@
 		listHealthCheckResults,
 		updateHealthCheck,
 		type HealthCheck,
+		type HealthCheckCreate,
 		type HealthCheckResult
 	} from '$lib/api/healthcheck';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -16,15 +17,20 @@
 		datasourceId: string;
 	}
 
+	type HealthCheckItem = HealthCheck & { critical: boolean };
+
 	let { datasourceId }: Props = $props();
 	const queryClient = useQueryClient();
 
 	const listQuery = createQuery(() => ({
 		queryKey: ['healthchecks', datasourceId],
-		queryFn: async () => {
+		queryFn: async (): Promise<HealthCheckItem[]> => {
 			const result = await listHealthChecks(datasourceId);
 			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
+			return result.value.map((check) => ({
+				...check,
+				critical: !!(check as { critical?: boolean }).critical
+			}));
 		},
 		enabled: !!datasourceId
 	}));
@@ -51,7 +57,7 @@
 	});
 
 	const createCheckMutation = createMutation(() => ({
-		mutationFn: async (payload: Omit<HealthCheck, 'id' | 'created_at'>) => {
+		mutationFn: async (payload: HealthCheckCreate) => {
 			const result = await createHealthCheck(payload);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
@@ -88,33 +94,61 @@
 
 	const checkTypes = [
 		{ value: 'row_count', label: 'Row Count' },
-		{ value: 'column_null', label: 'Null Percentage' },
+		{ value: 'column_count', label: 'Column Count' },
+		{ value: 'null_percentage', label: 'Null Percentage (All Columns)' },
+		{ value: 'duplicate_percentage', label: 'Duplicate Percentage' },
+		{ value: 'column_null', label: 'Null Percentage (Column)' },
 		{ value: 'column_unique', label: 'Unique Values' },
 		{ value: 'column_range', label: 'Value Range' }
 	];
 
+	const checks = $derived(listQuery.data ?? []);
+	const rowCountExists = $derived(checks.some((check) => check.check_type === 'row_count'));
+
 	let name = $state('');
 	let checkType = $state('row_count');
 	let config = $state<Record<string, unknown>>({});
+	let critical = $state(false);
+	let duplicateColumns = $state('');
 
 	function resetForm(): void {
 		name = '';
 		checkType = 'row_count';
 		config = {};
+		critical = false;
+		duplicateColumns = '';
 	}
 
 	function updateConfig(key: string, value: unknown): void {
 		config = { ...config, [key]: value };
 	}
 
+	function updateDuplicateColumns(value: string): void {
+		duplicateColumns = value;
+		const items = value
+			.split(',')
+			.map((item) => item.trim())
+			.filter((item) => item.length > 0);
+		updateConfig('columns', items);
+	}
+
+	function getTypeLabel(value: string): string {
+		const match = checkTypes.find((type) => type.value === value);
+		if (match) return match.label;
+		return value;
+	}
+
 	function addHealthCheck(): void {
-		createCheckMutation.mutate({
+		if (checkType === 'row_count' && rowCountExists) return;
+		const payload = {
 			datasource_id: datasourceId,
 			name,
 			check_type: checkType,
 			config,
-			enabled: true
-		});
+			enabled: true,
+			critical
+		};
+		createCheckMutation.mutate(payload);
 		resetForm();
 	}
 </script>
@@ -129,11 +163,25 @@
 			</div>
 			<div class="flex flex-col gap-1">
 				<label for="hc-type" class="text-xs font-medium text-fg-secondary">Type</label>
-				<select id="hc-type" bind:value={checkType}>
+				<select
+					id="hc-type"
+					bind:value={checkType}
+					onchange={() => {
+						config = {};
+						duplicateColumns = '';
+					}}
+				>
 					{#each checkTypes as type (type.value)}
-						<option value={type.value}>{type.label}</option>
+						<option value={type.value} disabled={rowCountExists && type.value === 'row_count'}>
+							{type.label}
+						</option>
 					{/each}
 				</select>
+				{#if rowCountExists}
+					<p class="mt-1 text-xs text-fg-muted">
+						Row count check already exists for this datasource.
+					</p>
+				{/if}
 			</div>
 		</div>
 
@@ -153,6 +201,63 @@
 						id="hc-max-rows"
 						type="number"
 						oninput={(e) => updateConfig('max_rows', parseInt(e.currentTarget.value) || 0)}
+					/>
+				</div>
+			</div>
+		{:else if checkType === 'column_count'}
+			<div class="mt-3 grid grid-cols-2 gap-3">
+				<div class="flex flex-col gap-1">
+					<label for="hc-min-cols" class="text-xs font-medium text-fg-secondary">Min Columns</label>
+					<input
+						id="hc-min-cols"
+						type="number"
+						oninput={(e) => updateConfig('min_columns', parseInt(e.currentTarget.value) || 0)}
+					/>
+				</div>
+				<div class="flex flex-col gap-1">
+					<label for="hc-max-cols" class="text-xs font-medium text-fg-secondary">Max Columns</label>
+					<input
+						id="hc-max-cols"
+						type="number"
+						oninput={(e) => updateConfig('max_columns', parseInt(e.currentTarget.value) || 0)}
+					/>
+				</div>
+			</div>
+		{:else if checkType === 'null_percentage'}
+			<div class="mt-3 grid grid-cols-2 gap-3">
+				<div class="flex flex-col gap-1">
+					<label for="hc-null-threshold" class="text-xs font-medium text-fg-secondary"
+						>Threshold (%)</label
+					>
+					<input
+						id="hc-null-threshold"
+						type="number"
+						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
+					/>
+				</div>
+			</div>
+		{:else if checkType === 'duplicate_percentage'}
+			<div class="mt-3 grid grid-cols-2 gap-3">
+				<div class="flex flex-col gap-1">
+					<label for="hc-dup-threshold" class="text-xs font-medium text-fg-secondary"
+						>Threshold (%)</label
+					>
+					<input
+						id="hc-dup-threshold"
+						type="number"
+						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
+					/>
+				</div>
+				<div class="flex flex-col gap-1">
+					<label for="hc-dup-cols" class="text-xs font-medium text-fg-secondary"
+						>Columns (optional)</label
+					>
+					<input
+						id="hc-dup-cols"
+						type="text"
+						value={duplicateColumns}
+						placeholder="col_a, col_b"
+						oninput={(e) => updateDuplicateColumns(e.currentTarget.value)}
 					/>
 				</div>
 			</div>
@@ -227,9 +332,20 @@
 			</div>
 		{/if}
 
+		<label class="mt-3 flex items-center gap-2 text-xs text-fg-secondary">
+			<input
+				type="checkbox"
+				checked={critical}
+				onchange={(e) => (critical = e.currentTarget.checked)}
+			/>
+			<span>Critical (fail build if this check fails)</span>
+		</label>
+
 		<button
 			class="btn btn-primary mt-4"
-			disabled={!name || createCheckMutation.isPending}
+			disabled={!name ||
+				createCheckMutation.isPending ||
+				(checkType === 'row_count' && rowCountExists)}
 			onclick={addHealthCheck}
 		>
 			{#if createCheckMutation.isPending}
@@ -254,7 +370,7 @@
 			<p class="text-sm text-fg-tertiary">No health checks configured.</p>
 		{:else}
 			<div class="flex flex-col gap-2">
-				{#each listQuery.data ?? [] as check (check.id)}
+				{#each checks as check (check.id)}
 					{@const latest = latestResults.get(check.id)}
 					<div class="flex items-center justify-between border border-tertiary bg-bg-secondary p-3">
 						<div class="flex items-center gap-2">
@@ -269,7 +385,16 @@
 							{/if}
 							<div class="flex flex-col gap-1">
 								<span class="text-sm font-semibold text-fg-primary">{check.name}</span>
-								<span class="text-xs text-fg-tertiary">{check.check_type}</span>
+								<div class="flex flex-wrap items-center gap-2 text-xs text-fg-tertiary">
+									<span>{getTypeLabel(check.check_type)}</span>
+									{#if check.critical}
+										<span
+											class="rounded-sm border border-info bg-accent-bg px-2 py-0.5 text-[10px] font-semibold uppercase text-accent-primary"
+										>
+											Critical
+										</span>
+									{/if}
+								</div>
 								{#if latest}
 									<span class="text-xs text-fg-muted">{latest.message}</span>
 								{/if}
@@ -287,6 +412,18 @@
 										})}
 								/>
 								<span>Enabled</span>
+							</label>
+							<label class="flex items-center gap-2 text-xs text-fg-secondary">
+								<input
+									type="checkbox"
+									checked={check.critical}
+									onchange={(e) =>
+										updateMutation.mutate({
+											id: check.id,
+											update: { critical: e.currentTarget.checked }
+										})}
+								/>
+								<span>Critical</span>
 							</label>
 							<button
 								class="btn-ghost btn-sm"

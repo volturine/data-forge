@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from modules.datasource.schemas import (
     FileListResponse,
     SchemaInfo,
 )
+from modules.datasource.source_types import FILE_BASED_CATEGORIES, SOURCE_TYPE_CATEGORY, DataSourceType
 from modules.engine_runs import service as engine_run_service
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ def create_file_datasource(
     has_header: bool | None = None,
     table_name: str | None = None,
     named_range: str | None = None,
+    cell_range: str | None = None,
 ) -> DataSourceResponse:
     """Create a file-based datasource."""
     datasource_id = str(uuid.uuid4())
@@ -75,12 +78,13 @@ def create_file_datasource(
         'has_header': has_header,
         'table_name': table_name,
         'named_range': named_range,
+        'cell_range': cell_range,
     }
 
     datasource = DataSource(
         id=datasource_id,
         name=name,
-        source_type='file',
+        source_type=DataSourceType.FILE,
         config=config,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
@@ -89,7 +93,7 @@ def create_file_datasource(
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource_id, name, 'file', config)
+    _log_datasource_create(session, datasource_id, name, DataSourceType.FILE, config)
 
     # Extract and cache schema immediately
     try:
@@ -115,7 +119,7 @@ def create_analysis_datasource(
     analysis_id: str,
     analysis_tab_id: str | None = None,
     is_hidden: bool = False,
-    source_type: str = 'analysis',
+    source_type: DataSourceType = DataSourceType.ANALYSIS,
 ) -> DataSourceResponse:
     from modules.analysis.models import Analysis
 
@@ -156,6 +160,7 @@ class ExcelPreviewResult:
     start_row: int
     start_col: int
     end_col: int
+    end_row: int
 
 
 def build_excel_preview(
@@ -164,9 +169,11 @@ def build_excel_preview(
     start_row: int,
     start_col: int,
     end_col: int,
+    end_row: int | None,
     has_header: bool,
     table_name: str | None = None,
     named_range: str | None = None,
+    cell_range: str | None = None,
     preview_rows: int = 100,
 ) -> ExcelPreviewResult:
     workbook = load_workbook(file_path, read_only=False, data_only=True)
@@ -176,51 +183,63 @@ def build_excel_preview(
         start_row,
         start_col,
         end_col,
+        end_row,
         table_name,
         named_range,
+        cell_range,
     )
     sheet = workbook[resolved.sheet_name]
 
-    detected_end_row = resolved.end_row
-    if detected_end_row is None:
-        detected_end_row = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+    end_row_value = resolved.end_row
+    if end_row_value is None:
+        end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+    _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
 
-    preview_end_row = min(resolved.start_row + preview_rows - 1, detected_end_row)
+    preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
     rows = _collect_preview_rows(sheet, resolved.start_row, resolved.start_col, resolved.end_col, preview_end_row)
     return ExcelPreviewResult(
         preview=rows,
-        detected_end_row=detected_end_row,
+        detected_end_row=end_row_value,
         sheet_name=resolved.sheet_name,
         start_row=resolved.start_row,
         start_col=resolved.start_col,
         end_col=resolved.end_col,
+        end_row=end_row_value,
     )
 
 
 def resolve_excel_selection(
     file_path: Path,
-    sheet_name: str,
+    sheet_name: str | None,
     start_row: int,
     start_col: int,
     end_col: int,
+    end_row: int | None,
     table_name: str | None = None,
     named_range: str | None = None,
+    cell_range: str | None = None,
 ) -> tuple[str, int, int, int, int]:
     workbook = load_workbook(file_path, read_only=False, data_only=True)
+    target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
+    if not target_sheet:
+        raise ValueError('No sheets found in file')
     resolved = _resolve_excel_bounds(
         workbook,
-        sheet_name,
+        target_sheet,
         start_row,
         start_col,
         end_col,
+        end_row,
         table_name,
         named_range,
+        cell_range,
     )
     sheet = workbook[resolved.sheet_name]
-    end_row = resolved.end_row
-    if end_row is None:
-        end_row = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-    return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row
+    end_row_value = resolved.end_row
+    if end_row_value is None:
+        end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+    _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
+    return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
 
 
 @dataclass
@@ -238,8 +257,10 @@ def _resolve_excel_bounds(
     start_row: int,
     start_col: int,
     end_col: int,
+    end_row: int | None,
     table_name: str | None,
     named_range: str | None,
+    cell_range: str | None,
 ) -> _ExcelBounds:
     if table_name:
         sheet = workbook[sheet_name]
@@ -275,7 +296,53 @@ def _resolve_excel_bounds(
         max_row = int(max_row)
         return _ExcelBounds(dest_sheet, min_row - 1, min_col - 1, max_col - 1, max_row - 1)
 
-    return _ExcelBounds(sheet_name, max(start_row, 0), max(start_col, 0), max(end_col, start_col), None)
+    if cell_range:
+        return _parse_cell_range(workbook, cell_range, sheet_name)
+
+    end_row_value = end_row
+    if end_row_value is not None:
+        end_row_value = max(end_row_value, start_row)
+    return _ExcelBounds(sheet_name, max(start_row, 0), max(start_col, 0), max(end_col, start_col), end_row_value)
+
+
+def _parse_cell_range(workbook, cell_range: str, default_sheet: str | None) -> _ExcelBounds:
+    raw = cell_range.strip()
+    if not raw:
+        raise ValueError('Cell range cannot be empty')
+    target_sheet = default_sheet
+    coord = raw
+    if '!' in raw:
+        sheet_part, coord_part = raw.split('!', maxsplit=1)
+        sheet_part = sheet_part.strip()
+        if sheet_part.startswith("'") and sheet_part.endswith("'"):
+            sheet_part = sheet_part[1:-1]
+        if not sheet_part:
+            raise ValueError(f'Invalid cell range sheet: {cell_range}')
+        target_sheet = sheet_part
+        coord = coord_part.strip()
+    if not target_sheet:
+        target_sheet = workbook.sheetnames[0] if workbook.sheetnames else None
+    if not target_sheet or target_sheet not in workbook.sheetnames:
+        raise ValueError(f'Sheet not found for cell range: {target_sheet}')
+    min_col, min_row, max_col, max_row = range_boundaries(coord)
+    if min_col is None or min_row is None or max_col is None or max_row is None:
+        raise ValueError(f'Invalid cell range: {cell_range}')
+    return _ExcelBounds(target_sheet, int(min_row) - 1, int(min_col) - 1, int(max_col) - 1, int(max_row) - 1)
+
+
+def _validate_excel_bounds(sheet, start_row: int, start_col: int, end_col: int, end_row: int) -> None:
+    if start_row < 0 or start_col < 0:
+        raise ValueError('Excel bounds must be non-negative')
+    if end_row < start_row or end_col < start_col:
+        raise ValueError('Excel bounds are invalid')
+    max_row = sheet.max_row or 0
+    max_col = sheet.max_column or 0
+    if max_row <= 0 or max_col <= 0:
+        raise ValueError('Excel sheet has no data')
+    if start_row >= max_row or end_row >= max_row:
+        raise ValueError('Excel row bounds exceed sheet size')
+    if start_col >= max_col or end_col >= max_col:
+        raise ValueError('Excel column bounds exceed sheet size')
 
 
 def _detect_end_row(sheet, start_row: int, start_col: int, end_col: int) -> int:
@@ -326,7 +393,7 @@ def create_database_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
-        source_type='database',
+        source_type=DataSourceType.DATABASE,
         config=config,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
@@ -335,7 +402,7 @@ def create_database_datasource(
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource_id, name, 'database', config)
+    _log_datasource_create(session, datasource_id, name, DataSourceType.DATABASE, config)
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -359,7 +426,7 @@ def create_api_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
-        source_type='api',
+        source_type=DataSourceType.API,
         config=config,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
@@ -368,7 +435,7 @@ def create_api_datasource(
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource_id, name, 'api', config)
+    _log_datasource_create(session, datasource_id, name, DataSourceType.API, config)
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -391,7 +458,7 @@ def create_duckdb_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
-        source_type='duckdb',
+        source_type=DataSourceType.DUCKDB,
         config=config,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
@@ -401,7 +468,7 @@ def create_duckdb_datasource(
     session.refresh(datasource)
 
     logger.info(f'Created DuckDB datasource {datasource_id} ({name})')
-    _log_datasource_create(session, datasource_id, name, 'duckdb', config)
+    _log_datasource_create(session, datasource_id, name, DataSourceType.DUCKDB, config)
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -478,7 +545,7 @@ def create_iceberg_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
-        source_type='iceberg',
+        source_type=DataSourceType.ICEBERG,
         config=config,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
@@ -487,7 +554,7 @@ def create_iceberg_datasource(
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource_id, name, 'iceberg', config)
+    _log_datasource_create(session, datasource_id, name, DataSourceType.ICEBERG, config)
 
     try:
         schema_info = _extract_schema(datasource)
@@ -510,7 +577,7 @@ def _log_datasource_create(
     session: Session,
     datasource_id: str,
     name: str,
-    source_type: str,
+    source_type: DataSourceType,
     config: dict,
 ) -> None:
     payload = engine_run_service.create_engine_run_payload(
@@ -520,7 +587,7 @@ def _log_datasource_create(
         status='success',
         request_json={
             'name': name,
-            'source_type': source_type,
+            'source_type': source_type.value,
             'config': config,
         },
         result_json={'datasource_id': datasource_id, 'datasource_name': name},
@@ -604,86 +671,93 @@ def _get_first_non_null_samples_eager(frame: pl.DataFrame, max_rows: int = 1000)
 
 
 def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
-    if datasource.source_type == 'analysis':
-        raise DataSourceValidationError(
-            'Schema extraction not supported for analysis datasources',
-            details={'datasource_id': datasource.id},
+    try:
+        source_type = DataSourceType(datasource.source_type)
+    except ValueError as exc:
+        raise DataSourceConnectionError(
+            'Unsupported datasource type for schema extraction',
+            details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+        ) from exc
+    handlers = _schema_handlers()
+    handler = handlers.get(source_type)
+    if not handler:
+        raise DataSourceConnectionError(
+            'Unsupported datasource type for schema extraction',
+            details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
         )
+    return handler(datasource, sheet_name)
 
-    if datasource.source_type == 'database':
-        connection_string = datasource.config['connection_string']
-        query = datasource.config['query']
-        try:
-            frame = pl.read_database(query, connection_string)
-        except Exception as e:
-            raise DataSourceConnectionError(
-                'Failed to query database datasource',
-                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
-            ) from e
-        schema = frame.schema
-        row_count = frame.height
 
-        # Get first non-null value for each column
-        sample_values = _get_first_non_null_samples_eager(frame)
+def _schema_handlers() -> dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]]:
+    handlers: dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]] = {
+        DataSourceType.ANALYSIS: _schema_from_analysis,
+        DataSourceType.DATABASE: _schema_from_database,
+    }
+    file_handler = _schema_from_file
+    for source_type in SOURCE_TYPE_CATEGORY:
+        if source_type in handlers:
+            continue
+        if SOURCE_TYPE_CATEGORY[source_type] in FILE_BASED_CATEGORIES:
+            handlers[source_type] = file_handler
+    return handlers
 
-        columns = [
-            ColumnSchema(
-                name=name,
-                dtype=str(dtype),
-                nullable=True,
-                sample_value=sample_values.get(name),
-            )
-            for name, dtype in schema.items()
-        ]
 
-        return SchemaInfo(columns=columns, row_count=row_count)
+def _schema_from_analysis(datasource: DataSource, sheet_name: str | None) -> SchemaInfo:
+    raise DataSourceValidationError(
+        'Schema extraction not supported for analysis datasources',
+        details={'datasource_id': datasource.id},
+    )
 
-    if datasource.source_type == 'file':
-        config = {
-            'source_type': datasource.source_type,
-            **datasource.config,
-        }
-        if sheet_name:
-            config = {**config, 'sheet_name': sheet_name}
-        try:
-            lazy = load_datasource(config)
-        except Exception as e:
-            raise DataSourceConnectionError(
-                'Failed to load file datasource',
-                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
-            ) from e
 
-    if datasource.source_type == 'duckdb':
-        config = {
-            'source_type': datasource.source_type,
-            **datasource.config,
-        }
-        try:
-            lazy = load_datasource(config)
-        except Exception as e:
-            raise DataSourceConnectionError(
-                'Failed to load DuckDB datasource',
-                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
-            ) from e
+def _schema_from_database(datasource: DataSource, sheet_name: str | None) -> SchemaInfo:
+    connection_string = datasource.config['connection_string']
+    query = datasource.config['query']
+    try:
+        frame = pl.read_database(query, connection_string)
+    except Exception as e:
+        raise DataSourceConnectionError(
+            'Failed to query database datasource',
+            details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+        ) from e
+    schema = frame.schema
+    row_count = frame.height
 
-    if datasource.source_type == 'iceberg':
-        config = {
-            'source_type': datasource.source_type,
-            **datasource.config,
-        }
-        try:
-            lazy = load_datasource(config)
-        except Exception as e:
-            raise DataSourceConnectionError(
-                'Failed to load Iceberg datasource',
-                details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
-            ) from e
+    sample_values = _get_first_non_null_samples_eager(frame)
+
+    columns = [
+        ColumnSchema(
+            name=name,
+            dtype=str(dtype),
+            nullable=True,
+            sample_value=sample_values.get(name),
+        )
+        for name, dtype in schema.items()
+    ]
+
+    return SchemaInfo(columns=columns, row_count=row_count)
+
+
+def _schema_from_file(datasource: DataSource, sheet_name: str | None) -> SchemaInfo:
+    config = {
+        'source_type': datasource.source_type,
+        **datasource.config,
+    }
+    if sheet_name:
+        config = {**config, 'sheet_name': sheet_name}
+    try:
+        lazy = load_datasource(config)
+    except Exception as e:
+        category = SOURCE_TYPE_CATEGORY.get(DataSourceType(datasource.source_type))
+        label = category.value if category else 'datasource'
+        raise DataSourceConnectionError(
+            f'Failed to load {label} datasource',
+            details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
+        ) from e
 
     schema = lazy.collect_schema()
     row_count = lazy.select(pl.len()).collect().item()
     sheet_names = None
 
-    # Get first non-null value for each column
     sample_values = _get_first_non_null_samples(lazy)
 
     columns = [
@@ -838,12 +912,71 @@ def update_datasource(
             )
 
         # Check if parsing options changed (requires schema re-extraction)
-        parsing_changed = any(
-            key in update.config for key in ['csv_options', 'sheet_name', 'start_row', 'start_col', 'end_col', 'has_header', 'skip_rows']
+        parsing_keys = [
+            'csv_options',
+            'sheet_name',
+            'start_row',
+            'start_col',
+            'end_col',
+            'end_row',
+            'has_header',
+            'skip_rows',
+            'table_name',
+            'named_range',
+            'cell_range',
+        ]
+        parsing_changed = any(key in update.config for key in parsing_keys)
+
+        next_config = {**datasource.config, **update.config}
+        has_excel_bounds = any(
+            key in update.config
+            for key in ['sheet_name', 'start_row', 'start_col', 'end_col', 'end_row', 'table_name', 'named_range', 'cell_range']
         )
+        is_excel_file = next_config.get('file_type') == 'excel'
+        if datasource.source_type == 'file' and is_excel_file and has_excel_bounds:
+            file_path = next_config.get('file_path')
+            if not file_path:
+                raise DataSourceValidationError(
+                    'Excel datasource requires file_path',
+                    details={'datasource_id': datasource_id},
+                )
+            start_row = next_config.get('start_row')
+            if start_row is None:
+                start_row = 0
+            start_col = next_config.get('start_col')
+            if start_col is None:
+                start_col = 0
+            end_col = next_config.get('end_col')
+            if end_col is None:
+                end_col = 0
+            try:
+                resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = resolve_excel_selection(
+                    Path(file_path),
+                    next_config.get('sheet_name'),
+                    int(start_row),
+                    int(start_col),
+                    int(end_col),
+                    next_config.get('end_row'),
+                    next_config.get('table_name'),
+                    next_config.get('named_range'),
+                    next_config.get('cell_range'),
+                )
+            except Exception as exc:
+                raise DataSourceValidationError(
+                    str(exc),
+                    details={'datasource_id': datasource_id},
+                ) from exc
+            next_config = {
+                **next_config,
+                'sheet_name': resolved_sheet,
+                'start_row': resolved_start_row,
+                'start_col': resolved_start_col,
+                'end_col': resolved_end_col,
+                'end_row': resolved_end_row,
+            }
 
         # Merge new config with existing config
-        datasource.config = {**datasource.config, **update.config}
+        datasource.config = next_config
         if parsing_changed:
             datasource.schema_cache = None
 
@@ -890,10 +1023,11 @@ def _compute_histogram(series: pl.Series, bins: int = 20) -> list[dict[str, obje
     for i in range(bins):
         start = min_val + i * width
         end = min_val + (i + 1) * width
-        if i == bins - 1:
-            bin_count = series.filter((series >= start) & (series <= end)).len()
-        else:
-            bin_count = series.filter((series >= start) & (series < end)).len()
+        bin_count = (
+            series.filter((series >= start) & (series <= end)).len()
+            if i == bins - 1
+            else series.filter((series >= start) & (series < end)).len()
+        )
         result.append({'start': round(start, 4), 'end': round(end, 4), 'count': bin_count})
     return result
 

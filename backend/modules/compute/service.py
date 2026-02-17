@@ -20,6 +20,7 @@ from modules.compute.manager import get_manager
 from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.compute.utils import apply_pipeline_steps, await_engine_result, find_step_index, resolve_applied_target
 from modules.datasource.models import DataSource
+from modules.datasource.source_types import DataSourceType
 from modules.engine_runs import service as engine_run_service
 from modules.healthcheck import service as healthcheck_service
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
@@ -41,6 +42,9 @@ def _resolve_build_status(
         name_map = {c.id: c.name for c in checks}
 
     total = len(hc_results)
+    critical_map: dict[str, bool] = {}
+    if checks:
+        critical_map = {c.id: c.critical for c in checks}
     failed = [r for r in hc_results if not r.passed]
 
     if not failed:
@@ -51,6 +55,7 @@ def _resolve_build_status(
             'name': name_map.get(r.healthcheck_id, r.healthcheck_id),
             'passed': r.passed,
             'message': r.message,
+            'critical': critical_map.get(r.healthcheck_id, False),
         }
         for r in hc_results
     ]
@@ -853,15 +858,37 @@ def export_data(
                 hc_checks = [c for c in db_result.scalars().all() if c.enabled]
                 logger.info(f'Health checks: found {len(hc_checks)} enabled for datasource {hc_datasource_id}')
                 if hc_checks:
+                    hc_lf = _load_healthcheck_lazy(tmp_output, actual_format)
+                    if hc_lf is None:
+                        raise ValueError(f'Unsupported healthcheck export format: {actual_format}')
                     try:
-                        hc_lf = _load_healthcheck_lazy(tmp_output, actual_format)
-                        if hc_lf is None:
-                            raise ValueError(f'Unsupported healthcheck export format: {actual_format}')
                         hc_results = healthcheck_service.run_healthchecks(session, hc_checks, hc_lf)
+                    except Exception as exc:
+                        if any(check.critical for check in hc_checks):
+                            raise PipelineExecutionError(
+                                'Critical health checks failed to run',
+                                details={'datasource_id': hc_datasource_id, 'error': str(exc)},
+                            ) from exc
+                        logger.exception('Health check evaluation failed')
+                    else:
+                        critical_ids = {check.id for check in hc_checks if check.critical}
+                        critical_failed = [result for result in hc_results if not result.passed and result.healthcheck_id in critical_ids]
+                        if critical_failed:
+                            raise PipelineExecutionError(
+                                'Critical health checks failed',
+                                details={
+                                    'datasource_id': hc_datasource_id,
+                                    'failed': [
+                                        {
+                                            'healthcheck_id': result.healthcheck_id,
+                                            'message': result.message,
+                                        }
+                                        for result in critical_failed
+                                    ],
+                                },
+                            )
                         failed_count = sum(1 for r in hc_results if not r.passed)
                         logger.info(f'Health checks: {len(hc_results)} evaluated, {failed_count} failed')
-                    except Exception:
-                        logger.exception('Health check evaluation failed')
 
             status, hc_summary, hc_details = _resolve_build_status(hc_results, hc_checks)
 
@@ -1010,7 +1037,7 @@ def export_data(
                     session=session,
                     output_datasource_id=output_datasource_id,
                     name=iceberg_opts.get('table_name', 'exported_data'),
-                    source_type='iceberg',
+                    source_type=DataSourceType.ICEBERG,
                     config=iceberg_ds_config,
                     schema_cache=data.get('schema', {}),
                     analysis_id=run_analysis_id,
