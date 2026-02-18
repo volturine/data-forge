@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
-from sqlmodel import Session
+from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError
 from modules.analysis.models import Analysis, AnalysisDataSource
@@ -15,7 +15,6 @@ from modules.analysis.schemas import (
 )
 from modules.analysis_versions import service as version_service
 from modules.datasource.models import DataSource
-from modules.datasource.source_types import DataSourceType
 from modules.locks import service as lock_service
 
 
@@ -26,7 +25,7 @@ def create_analysis(
     analysis_id = str(uuid.uuid4())
 
     for datasource_id in data.datasource_ids:
-        result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
+        result = session.execute(select(DataSource).where(col(DataSource.id) == datasource_id))  # type: ignore[arg-type]
         datasource = result.scalar_one_or_none()
         if not datasource:
             raise DataSourceNotFoundError(datasource_id)
@@ -115,54 +114,38 @@ def update_analysis(
     if data.pipeline_steps is not None or data.tabs is not None:
         tabs_payload = [tab.model_dump() for tab in data.tabs] if data.tabs is not None else analysis.pipeline_definition.get('tabs', [])
         if data.tabs is not None:
-            from modules.datasource import service as datasource_service
+            output_map: dict[str, str] = {}
+            for tab in tabs_payload:
+                output_id = tab.get('output_datasource_id')
+                if not output_id:
+                    output_id = str(uuid.uuid4())
+                    tab['output_datasource_id'] = output_id
+                tab_id = tab.get('id')
+                if tab_id:
+                    output_map[str(tab_id)] = str(output_id)
 
             for tab in tabs_payload:
                 config = tab.get('datasource_config') or {}
                 source_analysis_id = config.get('analysis_id')
+                datasource_id = tab.get('datasource_id')
 
-                # Cross-analysis source tabs: validate and auto-create analysis datasource
                 if source_analysis_id:
                     if str(source_analysis_id) == analysis_id and not config.get('analysis_tab_id'):
                         raise ValueError('Analysis cannot use itself as a datasource')
-                    datasource_id = tab.get('datasource_id')
-                    if not (datasource_id and session.get(DataSource, datasource_id)):
-                        created = datasource_service.create_analysis_datasource(
-                            session=session,
-                            name=tab.get('name') or 'Analysis Source',
-                            analysis_id=str(source_analysis_id),
-                            analysis_tab_id=(str(config.get('analysis_tab_id')) if config.get('analysis_tab_id') else None),
-                        )
-                        tab['datasource_id'] = created.id
+                    source_tab_id = config.get('analysis_tab_id')
+                    if str(source_analysis_id) == analysis_id and source_tab_id:
+                        output_id = output_map.get(str(source_tab_id))
+                        if output_id:
+                            tab['datasource_id'] = output_id
+                            datasource_id = output_id
+                    if not datasource_id:
+                        raise ValueError('Cross-analysis tab requires datasource_id')
                 else:
-                    # All other tabs: ensure they have an input datasource_id.
-                    # Derived tabs without a datasource get a hidden analysis datasource.
-                    datasource_id = tab.get('datasource_id')
-                    if not (datasource_id and session.get(DataSource, datasource_id)):
-                        tab_id = tab.get('id', '')
-                        created = datasource_service.create_analysis_datasource(
-                            session=session,
-                            name=tab.get('name') or f'Tab {tab_id}',
-                            analysis_id=analysis_id,
-                            analysis_tab_id=tab_id or None,
-                            is_hidden=True,
-                        )
-                        tab['datasource_id'] = created.id
+                    if not datasource_id:
+                        raise ValueError('Analysis tab missing datasource_id')
+                    if not session.get(DataSource, datasource_id):
+                        raise DataSourceNotFoundError(str(datasource_id))
 
-                # Every tab always gets an output datasource for builds,
-                # timetravel, healthchecks, and scheduling.
-                output_ds_id = tab.get('output_datasource_id')
-                if not (output_ds_id and session.get(DataSource, output_ds_id)):
-                    tab_id = tab.get('id', '')
-                    output_ds = datasource_service.create_analysis_datasource(
-                        session=session,
-                        name=f'{tab.get("name") or "Tab"} Output',
-                        analysis_id=analysis_id,
-                        analysis_tab_id=tab_id or None,
-                        is_hidden=True,
-                        source_type=DataSourceType.ICEBERG,
-                    )
-                    tab['output_datasource_id'] = output_ds.id
                 output_config = tab.get('datasource_config')
                 if not isinstance(output_config, dict):
                     output_config = {}
@@ -181,7 +164,13 @@ def update_analysis(
                     tab['datasource_config'] = output_config
         datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
         if data.tabs is not None:
-            datasource_ids = [tab.get('datasource_id') for tab in tabs_payload if tab.get('datasource_id')]
+            datasource_ids = []
+            for tab in tabs_payload:
+                ds_id = tab.get('datasource_id')
+                if not ds_id:
+                    continue
+                if session.get(DataSource, ds_id):
+                    datasource_ids.append(ds_id)
         pipeline_definition = {
             'steps': (
                 [step.model_dump() for step in data.pipeline_steps]
@@ -194,9 +183,7 @@ def update_analysis(
         analysis.pipeline_definition = pipeline_definition
 
         datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
-        session.execute(
-            delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)  # type: ignore[arg-type]
-        )
+        session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
         for datasource_id in datasource_ids:
             datasource = session.get(DataSource, datasource_id)
             if not datasource:
@@ -235,9 +222,7 @@ def delete_analysis(
     if not analysis:
         raise AnalysisNotFoundError(analysis_id)
 
-    session.execute(
-        delete(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)  # type: ignore[arg-type]
-    )
+    session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))  # type: ignore[arg-type]
 
     session.delete(analysis)
     session.commit()
@@ -254,16 +239,16 @@ def link_datasource(
     if not analysis:
         raise AnalysisNotFoundError(analysis_id)
 
-    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
+    result = session.execute(select(DataSource).where(col(DataSource.id) == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
     result = session.execute(
-        select(AnalysisDataSource).where(
-            AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
-            AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
-        )  # type: ignore[arg-type]
+        select(AnalysisDataSource).where(  # type: ignore[arg-type]
+            col(AnalysisDataSource.analysis_id) == analysis_id,
+            col(AnalysisDataSource.datasource_id) == datasource_id,
+        )
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -326,7 +311,7 @@ def _detect_cycle(session: Session, analysis_id: str, source_analysis_id: str) -
         visited.add(target_id)
         links = (
             session.execute(
-                select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == target_id)  # type: ignore[arg-type]
+                select(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == target_id)  # type: ignore[arg-type]
             )
             .scalars()
             .all()
@@ -352,21 +337,21 @@ def unlink_datasource(
     analysis_id: str,
     datasource_id: str,
 ) -> None:
-    result = session.execute(select(Analysis).where(Analysis.id == analysis_id))  # type: ignore[arg-type]
+    result = session.execute(select(Analysis).where(col(Analysis.id) == analysis_id))  # type: ignore[arg-type]
     analysis = result.scalar_one_or_none()
     if not analysis:
         raise AnalysisNotFoundError(analysis_id)
 
-    result = session.execute(select(DataSource).where(DataSource.id == datasource_id))  # type: ignore[arg-type]
+    result = session.execute(select(DataSource).where(col(DataSource.id) == datasource_id))  # type: ignore[arg-type]
     datasource = result.scalar_one_or_none()
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
     session.execute(
-        delete(AnalysisDataSource).where(
-            AnalysisDataSource.analysis_id == analysis_id,  # type: ignore[arg-type]
-            AnalysisDataSource.datasource_id == datasource_id,  # type: ignore[arg-type]
-        )  # type: ignore[arg-type]
+        delete(AnalysisDataSource).where(  # type: ignore[arg-type]
+            col(AnalysisDataSource.analysis_id) == analysis_id,
+            col(AnalysisDataSource.datasource_id) == datasource_id,
+        )
     )
 
     datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])

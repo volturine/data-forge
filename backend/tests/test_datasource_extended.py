@@ -600,16 +600,4 @@ class TestIsHidden:
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)
-        assert response.status_code == 200
-
-        data = response.json()
-        tabs = data['pipeline_definition']['tabs']
-        matched = [t for t in tabs if t['id'] == new_tab_id]
-        assert len(matched) == 1
-        auto_ds_id = matched[0]['datasource_id']
-        assert auto_ds_id is not None
-
-        # The auto-created datasource must be hidden
-        ds = test_db_session.get(DataSource, auto_ds_id)
-        assert ds is not None
-        assert ds.is_hidden is True
+        assert response.status_code == 409

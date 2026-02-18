@@ -68,7 +68,7 @@
 		}
 		draftLoaded = false;
 		schemaRefreshTimer = window.setTimeout(() => {
-			void datasourceStore.loadDatasources();
+			void datasourceStore.loadDatasources(true);
 		}, 1500);
 	});
 
@@ -229,7 +229,7 @@
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
 		queryFn: async () => {
-			const result = await listDatasources();
+			const result = await listDatasources(false);
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
@@ -258,9 +258,22 @@
 		);
 	});
 
+	const datasourceId = $derived.by(() => {
+		const tab = analysisStore.activeTab;
+		if (!tab) return undefined;
+		if (tab.datasource_id) return tab.datasource_id;
+		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
+		const cfgAnalysisId = config.analysis_id as string | null | undefined;
+		const cfgTabId = config.analysis_tab_id as string | null | undefined;
+		if (!cfgAnalysisId || !cfgTabId || !analysisId) return undefined;
+		if (String(cfgAnalysisId) !== String(analysisId)) return undefined;
+		return `output:${analysisId}:${String(cfgTabId)}`;
+	});
+
 	$effect(() => {
 		const datasourceIdValue = datasourceId;
 		if (!datasourceIdValue) return;
+		if (!datasourcesQuery.data) return;
 
 		const existingSchema = analysisStore.sourceSchemas.get(datasourceIdValue);
 		if (existingSchema) return;
@@ -282,7 +295,8 @@
 
 		if (analysisSourceId) {
 			if (!analysisPayload) {
-				throw new Error('Analysis pipeline payload required for execute');
+				isLoadingSchema = false;
+				return;
 			}
 			const tabParam = analysisTabId ? `?analysis_tab_id=${encodeURIComponent(analysisTabId)}` : '';
 			const body = JSON.stringify({ pipeline: analysisPayload });
@@ -343,8 +357,6 @@
 		);
 	});
 
-	const datasourceId = $derived(analysisStore.activeTab?.datasource_id ?? undefined);
-
 	const currentDatasource = $derived.by(() => {
 		if (!datasourceId) return null;
 		const data = datasourcesQuery.data;
@@ -366,6 +378,13 @@
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
+		const isChart = type === 'chart' || type.startsWith('plot_');
+		if (type === 'view') {
+			return { ...base, is_applied: true } as PipelineStep & { is_applied: boolean };
+		}
+		if (isChart) {
+			return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
+		}
 		return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
 	}
 
@@ -432,7 +451,7 @@
 				isDirty = false;
 				selectedStepId = null;
 				isSaving = false;
-				void analysisStore.loadAnalysis(analysisId ?? '');
+				void datasourcesQuery.refetch();
 
 				if (storageKey) {
 					void idbDelete(storageKey);

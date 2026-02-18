@@ -1692,6 +1692,11 @@ button.btn-sm {
 	contain-intrinsic-size: auto 500px;
 }
 
+.chart-placeholder {
+	border: 1px dashed var(--border-primary);
+	background-color: var(--bg-primary);
+}
+
 /* Isolate StepLibrary scroll from PipelineCanvas compositing layer.
    Without this, scrolling the step list can trigger repaints in the
    adjacent PipelineCanvas. */

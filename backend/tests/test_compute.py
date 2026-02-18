@@ -21,6 +21,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -39,7 +40,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -85,6 +91,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -98,7 +105,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -137,13 +149,19 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': missing_id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [],
                     }
                 ],
                 'sources': {
                     missing_id: {
                         'source_type': 'file',
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -163,6 +181,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {'id': 'step1', 'type': 'filter', 'config': {}},
                             {'id': 'step2', 'type': 'select', 'config': {}},
@@ -174,7 +193,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step2',
@@ -211,6 +235,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -224,7 +249,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -281,6 +311,7 @@ class TestComputeExport:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -294,7 +325,12 @@ class TestComputeExport:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',

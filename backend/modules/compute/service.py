@@ -417,7 +417,11 @@ def _hydrate_udfs(session: Session, pipeline_steps: list[dict]) -> list[dict]:
     return next_steps
 
 
-def _resolve_pipeline_request(pipeline: dict, tab_id: str | None, target_step_id: str) -> dict:
+def _resolve_pipeline_request(
+    pipeline: dict,
+    tab_id: str | None,
+    target_step_id: str,
+) -> dict:
     tabs = pipeline.get('tabs', [])
     if not isinstance(tabs, list) or not tabs:
         raise ValueError('analysis_pipeline missing tabs')
@@ -1138,6 +1142,36 @@ def export_data(
             os.unlink(tmp_output)
 
 
+def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
+    """Find all tab IDs that the target tab depends on via lazyframe inputs (including itself)."""
+    output_to_tab: dict[str, str] = {}
+    tab_input: dict[str, str] = {}
+
+    for tab in tabs:
+        tid = tab.get('id')
+        output_id = tab.get('output_datasource_id')
+        input_id = tab.get('datasource_id')
+        if tid and output_id:
+            output_to_tab[str(output_id)] = str(tid)
+        if tid and input_id:
+            tab_input[str(tid)] = str(input_id)
+
+    required: set[str] = set()
+    queue = [target_tab_id]
+    while queue:
+        current = queue.pop(0)
+        if current in required:
+            continue
+        required.add(current)
+        input_ds = tab_input.get(current)
+        if input_ds and input_ds in output_to_tab:
+            upstream = output_to_tab[input_ds]
+            if upstream not in required:
+                queue.append(upstream)
+
+    return required
+
+
 def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> dict:
     if not isinstance(pipeline, dict):
         raise ValueError('analysis_pipeline is required')
@@ -1152,9 +1186,12 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
     results: list[dict] = []
     tabs_built = 0
     selected_tab_id = pipeline.get('tab_id')
+    required_tabs: set[str] | None = None
+    if selected_tab_id:
+        required_tabs = _resolve_upstream_tabs(tabs, str(selected_tab_id))
 
     for tab in tabs:
-        if selected_tab_id and tab.get('id') != selected_tab_id:
+        if required_tabs and tab.get('id') not in required_tabs:
             continue
         tab_id = tab.get('id', 'unknown')
         tab_name = tab.get('name', 'unnamed')
@@ -1206,6 +1243,10 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
                     build_mode=tab_build_mode,
                 )
             else:
+                if required_tabs and str(tab_id) != str(selected_tab_id):
+                    tabs_built += 1
+                    results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'success'})
+                    continue
                 raise ValueError(f'Tab {tab_id} missing output configuration')
 
             tabs_built += 1

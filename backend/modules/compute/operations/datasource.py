@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +13,7 @@ from pydantic import ConfigDict
 from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.iceberg_reader import scan_iceberg_snapshot
+from modules.compute.step_converter import convert_step_format
 
 
 class DatasourceParams(OperationParams):
@@ -168,6 +171,9 @@ class DatasourceHandler(OperationHandler):
 
 
 _ANALYSIS_STACK: list[tuple[str, str | None]] = []
+_ANALYSIS_CACHE: dict[str, pl.LazyFrame] = {}
+_ANALYSIS_CACHE_KEYS: list[str] = []
+_ANALYSIS_CACHE_MAX = 20
 
 
 def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
@@ -176,16 +182,40 @@ def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None
         raise ValueError('Analysis pipeline contains a circular reference')
     _ANALYSIS_STACK.append(stack_key)
     try:
-        return _build_analysis_from_pipeline(pipeline, tab_id)
+        cache_key = _analysis_cache_key(pipeline, tab_id)
+        cached = _ANALYSIS_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        frame = _build_analysis_from_pipeline(pipeline, tab_id)
+        _store_analysis_cache(cache_key, frame)
+        return frame
     finally:
         _ANALYSIS_STACK.pop()
 
 
-def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -> pl.LazyFrame:
-    tabs = pipeline.get('tabs', [])
-    if not isinstance(tabs, list) or not tabs:
-        raise ValueError('Analysis pipeline missing tabs')
+def _analysis_cache_key(pipeline: dict, tab_id: str | None) -> str:
+    payload = {
+        'analysis_id': pipeline.get('analysis_id'),
+        'tab_id': tab_id,
+        'tabs': pipeline.get('tabs', []),
+        'sources': pipeline.get('sources', {}),
+    }
+    data = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
+
+def _store_analysis_cache(key: str, frame: pl.LazyFrame) -> None:
+    if key in _ANALYSIS_CACHE:
+        return
+    _ANALYSIS_CACHE[key] = frame
+    _ANALYSIS_CACHE_KEYS.append(key)
+    if len(_ANALYSIS_CACHE_KEYS) <= _ANALYSIS_CACHE_MAX:
+        return
+    oldest = _ANALYSIS_CACHE_KEYS.pop(0)
+    _ANALYSIS_CACHE.pop(oldest, None)
+
+
+def _resolve_analysis_tab(tabs: list[dict], analysis_tab_id: str | None) -> dict:
     selected = None
     if analysis_tab_id:
         selected = next((tab for tab in tabs if tab.get('id') == analysis_tab_id), None)
@@ -193,45 +223,135 @@ def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -
         selected = next((tab for tab in tabs if tab.get('steps')), None)
     if not selected:
         selected = tabs[0]
+    return selected
 
-    datasource_id = selected.get('datasource_id')
+
+def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
+    output_to_tab: dict[str, dict] = {}
+    tab_input: dict[str, str] = {}
+    for tab in tabs:
+        tid = tab.get('id')
+        output_id = tab.get('output_datasource_id')
+        input_id = tab.get('datasource_id')
+        if tid and output_id:
+            output_to_tab[str(output_id)] = tab
+        if tid and input_id:
+            tab_input[str(tid)] = str(input_id)
+
+    ordered: list[dict] = []
+    seen: set[str] = set()
+    current_id = target_tab_id
+    while current_id:
+        if current_id in seen:
+            break
+        seen.add(current_id)
+        current_tab = next((tab for tab in tabs if tab.get('id') == current_id), None)
+        if not current_tab:
+            break
+        ordered.append(current_tab)
+        input_ds = tab_input.get(current_id)
+        if input_ds and input_ds in output_to_tab:
+            upstream_tab = output_to_tab[input_ds]
+            current_id = str(upstream_tab.get('id')) if upstream_tab.get('id') else ''
+            continue
+        break
+    ordered.reverse()
+    return ordered
+
+
+def _build_tab_pipeline(
+    tab: dict,
+    sources: dict,
+    pipeline: dict,
+    cache: dict[str, pl.LazyFrame],
+) -> pl.LazyFrame:
+    datasource_id = tab.get('datasource_id')
     if not datasource_id:
         raise ValueError('Analysis tab missing datasource_id')
 
-    steps = selected.get('steps', [])
+    if datasource_id in cache:
+        base_frame = cache[datasource_id]
+    else:
+        datasource_config = sources.get(str(datasource_id))
+        if not isinstance(datasource_config, dict):
+            raise ValueError(f'Analysis pipeline missing datasource config for {datasource_id}')
+
+        overrides = tab.get('datasource_config') or {}
+        if overrides and not isinstance(overrides, dict):
+            raise ValueError('Analysis tab datasource_config must be a dict')
+
+        merged = {**datasource_config, **overrides}
+        analysis_id = pipeline.get('analysis_id')
+        analysis_id = str(analysis_id) if analysis_id is not None else None
+        if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
+            merged = {**merged, 'analysis_pipeline': pipeline}
+
+        base_frame = load_datasource(merged)
+
+    steps = tab.get('steps', [])
     if not isinstance(steps, list):
         raise ValueError('Analysis tab steps must be a list')
-
-    sources = pipeline.get('sources', {})
-    if not isinstance(sources, dict) or not sources:
-        raise ValueError('Analysis pipeline missing datasource configs')
-
-    datasource_config = sources.get(str(datasource_id))
-    if not isinstance(datasource_config, dict):
-        raise ValueError(f'Analysis pipeline missing datasource config for {datasource_id}')
-
-    overrides = selected.get('datasource_config') or {}
-    if overrides and not isinstance(overrides, dict):
-        raise ValueError('Analysis tab datasource_config must be a dict')
-
-    merged = {**datasource_config, **overrides}
-    analysis_id = pipeline.get('analysis_id')
-    analysis_id = str(analysis_id) if analysis_id is not None else None
-    if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
-        merged = {**merged, 'analysis_pipeline': pipeline}
 
     from modules.compute.utils import apply_pipeline_steps
 
     steps = apply_pipeline_steps(steps)
-    additional = _collect_analysis_sources(steps, sources, pipeline)
+    additional = _collect_analysis_sources(steps, sources, pipeline, cache)
+
     from modules.compute.engine import PolarsComputeEngine
 
-    job_id = f'analysis-{analysis_id or "local"}-{selected.get("id") or "tab"}'
-    return PolarsComputeEngine.build_pipeline(merged, steps, job_id, additional)
+    for step in steps:
+        step_id = step.get('id') or 'step'
+        backend_step = convert_step_format(step)
+        right_source_id = backend_step.get('params', {}).get('right_source')
+        right_lf = cache.get(right_source_id) if right_source_id else None
+        base_frame = PolarsComputeEngine._apply_step(
+            base_frame,
+            backend_step,
+            right_sources=additional,
+            right_lf=right_lf,
+        )
+        cache[step_id] = base_frame
+
+    output_id = tab.get('output_datasource_id')
+    if output_id:
+        cache[str(output_id)] = base_frame
+
+    return base_frame
 
 
-def _collect_analysis_sources(steps: list[dict], sources: dict, pipeline: dict) -> dict[str, dict]:
-    additional: dict[str, dict] = {}
+def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -> pl.LazyFrame:
+    tabs = pipeline.get('tabs', [])
+    if not isinstance(tabs, list) or not tabs:
+        raise ValueError('Analysis pipeline missing tabs')
+
+    selected = _resolve_analysis_tab(tabs, analysis_tab_id)
+    target_id = selected.get('id') if selected else None
+    if not target_id:
+        raise ValueError('Analysis pipeline missing tab id')
+
+    chain = _resolve_tab_chain(tabs, str(target_id))
+    sources = pipeline.get('sources', {})
+    if not isinstance(sources, dict) or not sources:
+        raise ValueError('Analysis pipeline missing datasource configs')
+
+    cache: dict[str, pl.LazyFrame] = {}
+    last_frame: pl.LazyFrame | None = None
+    for tab in chain:
+        last_frame = _build_tab_pipeline(tab, sources, pipeline, cache)
+
+    if last_frame is None:
+        raise ValueError('Analysis pipeline did not produce a LazyFrame')
+
+    return last_frame
+
+
+def _collect_analysis_sources(
+    steps: list[dict],
+    sources: dict,
+    pipeline: dict,
+    cache: dict[str, pl.LazyFrame],
+) -> dict[str, pl.LazyFrame]:
+    additional: dict[str, pl.LazyFrame] = {}
     analysis_id = pipeline.get('analysis_id')
     analysis_id = str(analysis_id) if analysis_id is not None else None
     for step in steps:
@@ -253,13 +373,16 @@ def _collect_analysis_sources(steps: list[dict], sources: dict, pipeline: dict) 
         for source_id in source_ids:
             if not source_id:
                 continue
+            if str(source_id) in cache:
+                additional[str(source_id)] = cache[str(source_id)]
+                continue
             raw = sources.get(str(source_id))
             if not isinstance(raw, dict):
                 raise ValueError(f'Analysis pipeline missing datasource config for {source_id}')
             next_config = raw
             if analysis_id and next_config.get('source_type') == 'analysis' and str(next_config.get('analysis_id')) == analysis_id:
                 next_config = {**next_config, 'analysis_pipeline': pipeline}
-            additional[str(source_id)] = next_config
+            additional[str(source_id)] = load_datasource(next_config)
 
     return additional
 

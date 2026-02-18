@@ -1,10 +1,3 @@
-"""Tests for is_hidden / output_datasource_id architecture.
-
-Phase 14: Every analysis tab gets an output_datasource_id pointing to a hidden
-analysis datasource.  The output datasource is reused across saves (upsert),
-and scheduler passes it through to export_data().
-"""
-
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -161,12 +154,11 @@ class TestUpsertOutputDatasource:
 
 
 class TestUpdateAnalysisOutputDatasource:
-    """update_analysis auto-creates output_datasource_id for every tab."""
+    """update_analysis only allocates output_datasource_id values, no datasource rows."""
 
-    def test_auto_creates_output_datasource_on_save(
+    def test_allocates_output_id_without_creating_datasource(
         self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
     ):
-        """Saving an analysis with tabs should auto-create output datasources."""
         tabs = [
             TabSchema(
                 id='tab1',
@@ -184,16 +176,10 @@ class TestUpdateAnalysisOutputDatasource:
         assert len(result.tabs) == 1
         tab = result.tabs[0]
         assert tab.output_datasource_id is not None
-        # The output datasource should exist and be hidden
         output_ds = test_db_session.get(DataSource, tab.output_datasource_id)
-        assert output_ds is not None
-        assert output_ds.is_hidden is True
-        assert output_ds.source_type == 'iceberg'
-        assert output_ds.created_by == 'analysis'
-        assert output_ds.created_by_analysis_id == sample_analysis.id
+        assert output_ds is None
 
-    def test_reuses_existing_output_datasource(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
-        """Saving twice should reuse the same output datasource, not create a new one."""
+    def test_reuses_existing_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
         tabs = [
             TabSchema(
                 id='tab1',
@@ -205,12 +191,10 @@ class TestUpdateAnalysisOutputDatasource:
         ]
         update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
 
-        # First save
         result1 = update_analysis(test_db_session, sample_analysis.id, update)
         output_id_1 = result1.tabs[0].output_datasource_id
         assert output_id_1 is not None
 
-        # Second save — pass back the output_datasource_id
         tabs2 = [
             TabSchema(
                 id='tab1',
@@ -225,13 +209,22 @@ class TestUpdateAnalysisOutputDatasource:
         result2 = update_analysis(test_db_session, sample_analysis.id, update2)
         output_id_2 = result2.tabs[0].output_datasource_id
 
-        assert output_id_2 == output_id_1  # Same datasource reused
+        assert output_id_2 == output_id_1
 
-    def test_multiple_tabs_each_get_output(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
-        """Each tab gets its own unique output datasource."""
+    def test_multiple_tabs_each_get_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
         tabs = [
             TabSchema(id='tab-a', name='Tab A', type='datasource', datasource_id=sample_datasource.id, steps=[]),
-            TabSchema(id='tab-b', name='Tab B', type='derived', parent_id='tab-a', steps=[]),
+            TabSchema(
+                id='tab-b',
+                name='Tab B',
+                type='derived',
+                parent_id='tab-a',
+                datasource_config={
+                    'analysis_id': sample_analysis.id,
+                    'analysis_tab_id': 'tab-a',
+                },
+                steps=[],
+            ),
         ]
         update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
         result = update_analysis(test_db_session, sample_analysis.id, update)
@@ -239,7 +232,8 @@ class TestUpdateAnalysisOutputDatasource:
         assert len(result.tabs) == 2
         ids = [t.output_datasource_id for t in result.tabs]
         assert all(i is not None for i in ids)
-        assert ids[0] != ids[1]  # Different output datasources
+        assert ids[0] != ids[1]
+        assert result.tabs[1].datasource_id == ids[0]
 
 
 # ---------------------------------------------------------------------------
@@ -463,34 +457,6 @@ class TestIsHiddenSemantics:
         """The input/source datasource should NOT be is_hidden."""
         assert sample_datasource.is_hidden is False
 
-    def test_output_datasource_is_hidden_by_default(
-        self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
-    ):
-        """Auto-created output datasources are is_hidden=True."""
-        tabs = [
-            TabSchema(
-                id='tab1',
-                name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
-                steps=[],
-            ),
-        ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
-        result = update_analysis(test_db_session, sample_analysis.id, update)
-
-        output_ds_id = result.tabs[0].output_datasource_id
-        assert output_ds_id is not None
-
-        output_ds = test_db_session.get(DataSource, output_ds_id)
-        assert output_ds is not None
-        assert output_ds.is_hidden is True
-
-        # Input datasource should still not be hidden
-        input_ds = test_db_session.get(DataSource, result.tabs[0].datasource_id)
-        assert input_ds is not None
-        assert input_ds.is_hidden is False
-
     def test_datasource_model_is_hidden_default(self, test_db_session: Session):
         """DataSource.is_hidden defaults to False."""
         ds = DataSource(
@@ -557,10 +523,10 @@ class TestSourceTypeCreatedBy:
         test_db_session.refresh(ds)
         assert ds.created_by == 'import'
 
-    def test_update_analysis_creates_output_with_iceberg_type(
+    def test_update_analysis_does_not_create_output_datasource(
         self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
     ):
-        """update_analysis creates output datasources with source_type='iceberg'."""
+        """update_analysis does not create output datasources."""
         tabs = [
             TabSchema(
                 id='tab1',
@@ -573,9 +539,7 @@ class TestSourceTypeCreatedBy:
         update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
         result = update_analysis(test_db_session, sample_analysis.id, update)
         output_ds = test_db_session.get(DataSource, result.tabs[0].output_datasource_id)
-        assert output_ds is not None
-        assert output_ds.source_type == 'iceberg'
-        assert output_ds.created_by == 'analysis'
+        assert output_ds is None
 
     def test_upsert_output_sets_created_by_analysis(self, test_db_session: Session):
         """_upsert_output_datasource sets created_by='analysis'."""

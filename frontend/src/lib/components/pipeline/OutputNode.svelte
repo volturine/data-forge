@@ -45,6 +45,10 @@
 	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
 
 	const outputDatasourceId = $derived(activeTab?.output_datasource_id ?? null);
+	const outputDatasource = $derived(
+		outputDatasourceId ? (datasourceStore.getDatasource(outputDatasourceId) ?? null) : null
+	);
+	const canQueryOutput = $derived(!!outputDatasourceId && !!outputDatasource);
 
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['healthchecks', outputDatasourceId],
@@ -54,7 +58,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: !!outputDatasourceId
+		enabled: canQueryOutput
 	}));
 
 	const healthResultsQuery = createQuery(() => ({
@@ -65,7 +69,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: !!outputDatasourceId
+		enabled: canQueryOutput
 	}));
 
 	const healthCount = $derived(healthChecksQuery.data?.length ?? 0);
@@ -92,7 +96,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: !!outputDatasourceId
+		enabled: canQueryOutput
 	}));
 
 	const scheduleCount = $derived(schedulesQuery.data?.length ?? 0);
@@ -106,7 +110,7 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !!outputDatasourceId
+		enabled: canQueryOutput
 	}));
 	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
 
@@ -217,9 +221,9 @@
 	}
 
 	async function toggleHidden() {
-		if (!outputDatasourceId || toggling) return;
+		if (!canQueryOutput || toggling) return;
 		toggling = true;
-		const result = await updateDatasource(outputDatasourceId, { is_hidden: !hidden });
+		const result = await updateDatasource(outputDatasourceId!, { is_hidden: !hidden });
 		result.match(
 			() => {
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
@@ -272,6 +276,7 @@
 				queryClient.invalidateQueries({ queryKey: ['engine-runs', analysisId] });
 				queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
+				void datasourceStore.loadDatasources();
 				building = false;
 			},
 			(err: { message: string }) => {
@@ -291,7 +296,7 @@
 			>
 				Output Node
 			</span>
-			{#if outputDatasourceId}
+			{#if canQueryOutput}
 				<button
 					type="button"
 					class="flex items-center gap-1 rounded-sm border border-tertiary px-1.5 py-0.5 text-[10px] transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
@@ -510,9 +515,9 @@
 					</button>
 
 					{#if healthOpen}
-						{#if outputDatasourceId}
+						{#if canQueryOutput}
 							<div class="mt-2 border border-tertiary bg-primary p-2">
-								<HealthChecksManager datasourceId={outputDatasourceId} compact />
+								<HealthChecksManager datasourceId={outputDatasourceId ?? undefined} compact />
 							</div>
 						{:else}
 							<div
@@ -547,9 +552,9 @@
 						{/if}
 					</button>
 
-					{#if scheduleOpen && outputDatasourceId}
+					{#if scheduleOpen && canQueryOutput}
 						<div class="mt-2 border border-tertiary bg-primary p-2">
-							<ScheduleManager datasourceId={outputDatasourceId} compact />
+							<ScheduleManager datasourceId={outputDatasourceId ?? undefined} compact />
 						</div>
 					{/if}
 				</div>

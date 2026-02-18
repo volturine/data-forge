@@ -32,7 +32,8 @@ describe('analysis-pipeline', () => {
 	it('buildAnalysisPipelinePayload returns sources and steps', () => {
 		const tabs = [
 			makeTab({
-				steps: [{ id: 'step-1', type: 'select', config: { columns: ['name'] }, depends_on: [] }]
+				steps: [{ id: 'step-1', type: 'select', config: { columns: ['name'] }, depends_on: [] }],
+				output_datasource_id: 'out-1'
 			})
 		];
 		const datasources = [makeDatasource()];
@@ -40,7 +41,12 @@ describe('analysis-pipeline', () => {
 
 		expect(payload?.analysis_id).toBe('analysis-1');
 		expect(payload?.tabs[0].steps).toHaveLength(1);
-		expect(Object.keys(payload?.sources ?? {})).toEqual(['ds-1']);
+		expect(Object.keys(payload?.sources ?? {})).toEqual(['out-1', 'ds-1']);
+		expect(payload?.sources['out-1']).toEqual({
+			source_type: 'analysis',
+			analysis_id: 'analysis-1',
+			analysis_tab_id: 'tab-1'
+		});
 	});
 
 	it('buildDatasourceConfig injects analysis pipeline for self-references', () => {

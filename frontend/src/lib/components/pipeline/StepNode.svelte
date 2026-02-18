@@ -48,7 +48,14 @@
 		step.type === 'chart' || step.type === 'plot' || step.type.startsWith('plot_')
 	);
 
-	// Chart preview query (only for chart/plot steps) — auto-runs like view nodes
+	// Derived values from declarative config
+	let stepConfig = $derived(getStepTypeConfig(step.type));
+	let Icon = $derived(stepConfig.icon);
+	let label = $derived(stepConfig.label);
+	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
+	let isApplied = $derived((step as PipelineStep & { is_applied?: boolean }).is_applied !== false);
+
+	// Chart preview query (only for chart/plot steps) — run after apply
 	const chartPipeline = $derived(applySteps(allSteps));
 	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
 	const chartDatasourceConfig = $derived.by(() => {
@@ -102,7 +109,13 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
-		enabled: isChart && !!datasourceId && !!analysisId
+		enabled:
+			isChart &&
+			isApplied &&
+			!!datasourceId &&
+			!!analysisId &&
+			!!analysisPipeline &&
+			((step.config?.x_column as string | undefined) ?? '') !== ''
 	}));
 
 	let dragging = $state(false);
@@ -113,13 +126,6 @@
 
 	const longPressDelay = 180;
 	const dragThreshold = 8;
-
-	// Derived values from declarative config
-	let stepConfig = $derived(getStepTypeConfig(step.type));
-	let Icon = $derived(stepConfig.icon);
-	let label = $derived(stepConfig.label);
-	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
-	let isApplied = $derived((step as PipelineStep & { is_applied?: boolean }).is_applied !== false);
 
 	// Is this node being dragged?
 	let isDragging = $state(false);
@@ -286,7 +292,18 @@
 
 		{#if isChart && datasourceId && analysisId}
 			<div class="mt-3 border-t border-tertiary pt-3">
-				{#if chartQuery.isFetching}
+				{#if !isApplied}
+					<div
+						class="chart-placeholder flex h-[200px] items-center justify-center text-xs text-fg-muted"
+					>
+						<Icon size={16} class="mr-2" />
+						{#if ((step.config?.x_column as string | undefined) ?? '') === ''}
+							<span>Configure chart to preview</span>
+						{:else}
+							<span>Apply to preview</span>
+						{/if}
+					</div>
+				{:else if chartQuery.isFetching}
 					<div class="flex items-center justify-center gap-2 py-4 text-xs text-fg-muted">
 						<span class="spinner spinner-sm"></span>
 						Loading chart...

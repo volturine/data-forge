@@ -28,7 +28,7 @@
 		rowLimit?: number;
 	}
 
-	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 1000 }: Props = $props();
+	let { analysisId, datasourceId, pipeline, stepId, rowLimit = 100 }: Props = $props();
 	let currentPage = $state(1);
 	let columnSearch = $state('');
 
@@ -110,7 +110,7 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
-		enabled: hasRun && isActiveStep
+		enabled: hasRun && isActiveStep && !!analysisPipeline
 	}));
 
 	const data = $derived(isActiveStep && hasRun ? query.data : null);
@@ -126,6 +126,12 @@
 	$effect(() => {
 		void resetKey;
 		currentPage = 1;
+	});
+
+	$effect(() => {
+		if (!isActiveStep || hasRun) return;
+		// $effect needed: persist preview run state for auto-preview
+		analysisStore.setPreviewRun(runKey, true);
 	});
 
 	function runPreview() {

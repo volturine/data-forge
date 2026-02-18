@@ -537,6 +537,10 @@ def run_analysis_build(
                     tab_id=str(current_tab_id),
                 )
             else:
+                if required_tabs and current_tab_id != tab_id:
+                    tabs_built += 1
+                    results.append({'tab_id': current_tab_id, 'tab_name': tab_name, 'status': 'success'})
+                    continue
                 raise ScheduleValidationError(f'Tab {current_tab_id} missing output configuration')
 
             tabs_built += 1

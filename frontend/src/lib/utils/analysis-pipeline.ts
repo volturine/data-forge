@@ -66,23 +66,47 @@ export function buildAnalysisPipelinePayload(
 	const sourceIds = collectSourceIds(tabs);
 	const datasourceMap = new Map(datasources.map((ds) => [ds.id, ds]));
 	const sources: Record<string, Record<string, unknown>> = {};
+	const missing: string[] = [];
+	const outputByTabId = new Map<string, string>();
+	for (const tab of tabs) {
+		if (!tab.id) continue;
+		const outputId = tab.output_datasource_id ?? `output:${analysisId}:${tab.id}`;
+		outputByTabId.set(tab.id, outputId);
+		sources[outputId] = {
+			source_type: 'analysis',
+			analysis_id: analysisId,
+			analysis_tab_id: tab.id
+		};
+	}
 	for (const id of sourceIds) {
+		if (sources[id]) continue;
 		const ds = datasourceMap.get(id);
 		if (!ds) {
+			missing.push(id);
 			continue;
 		}
 		sources[id] = { source_type: ds.source_type, ...ds.config };
 	}
-	if (sourceIds.size && Object.keys(sources).length === 0) return null;
+	if (missing.length) {
+		return null;
+	}
 
-	const pipelineTabs = tabs.map((tab) => ({
-		id: tab.id,
-		name: tab.name,
-		datasource_id: tab.datasource_id ?? null,
-		output_datasource_id: tab.output_datasource_id ?? null,
-		datasource_config: (tab.datasource_config as Record<string, unknown> | null) ?? null,
-		steps: getTabSteps(tab)
-	}));
+	const pipelineTabs = tabs.map((tab) => {
+		const outputId = outputByTabId.get(tab.id) ?? tab.output_datasource_id ?? null;
+		const config = (tab.datasource_config as Record<string, unknown> | null) ?? null;
+		let datasourceId = tab.datasource_id ?? null;
+		if (config?.analysis_id === analysisId && config?.analysis_tab_id) {
+			datasourceId = outputByTabId.get(String(config.analysis_tab_id)) ?? datasourceId;
+		}
+		return {
+			id: tab.id,
+			name: tab.name,
+			datasource_id: datasourceId,
+			output_datasource_id: outputId,
+			datasource_config: config,
+			steps: getTabSteps(tab)
+		};
+	});
 
 	return { analysis_id: analysisId, tabs: pipelineTabs, sources };
 }

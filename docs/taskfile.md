@@ -2,6 +2,8 @@
 
 ## Status:
 
+- [x] Adjust analysis node behavior: auto-apply inline view steps at 100 rows, chart nodes require apply with placeholder
+- [x] Fix analysis save refresh + derived tab previews before save
 - [x] Document OpenCode subagents and skills lists in AGENTS.md
 - [x] Follow-up: tweak OpenCode subagents note, fix Docs agent label, trim slash commands
 - [x] Fix snapshot compare unique_count to ignore nulls
@@ -80,6 +82,11 @@
 - [x] Iceberg output metadata_path uses latest metadata.json after recreate
 - [x] Iceberg snapshot preview uses pyiceberg reader to avoid schema mismatch panic
 - [x] Iceberg snapshot preview inserts missing columns to avoid failures
+- [x] Ensure analysis pipeline always includes all tab datasource configs (lazyframe reuse)
+- [x] Lazyframe upstream tab build ordering for payload builds
+- [x] Analysis save should not create datasource rows (outputs created on build)
+- [x] Update output datasource tests for new allocation behavior
+- [x] Output node avoids querying virtual output datasources before build
 
 - [x] 41. Remove hardcoded CORS IPs
 - [x] 42. Disable public IDB debug by default

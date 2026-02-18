@@ -164,6 +164,10 @@
 			analysisStore.tabs,
 			datasourceStore.datasources
 		);
+		if (!analysisPipeline) {
+			fetchingPivotSchema = false;
+			return;
+		}
 
 		getStepSchema({
 			analysis_id: analysis.id,
