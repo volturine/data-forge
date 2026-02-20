@@ -4,44 +4,44 @@ This document lists ALL environment variables supported by the application.
 
 ## Quick Reference
 
-| Variable                      | Type    | Default                                 | Description                                          |
-| ----------------------------- | ------- | --------------------------------------- | ---------------------------------------------------- |
-| **Application**               |         |                                         |                                                      |
-| `APP_NAME`                    | string  | Polars-FastAPI-Svelte Analysis Platform | Application name                                     |
-| `APP_VERSION`                 | string  | 1.0.0                                   | Application version                                  |
-| `DEBUG`                       | boolean | false                                   | Enable debug mode (verbose logging, SQL echo)        |
-| `PORT`                        | integer | 8000                                    | Port to bind (Docker only)                           |
-| **Database**                  |         |                                         |                                                      |
-| `DATABASE_URL`                | string  | sqlite+libsql:///./database/app.db      | Database connection URL                              |
-| `ENV_FILE`                    | string  | .env                                   | Path to env file (empty disables env-file loading)   |
-| **CORS**                      |         |                                         |                                                      |
-| `CORS_ORIGINS`                | string  | localhost:3000,...                      | Comma-separated allowed origins                      |
-| **File Storage**              |         |                                         |                                                      |
-| `UPLOAD_DIR`                  | path    | /app/data/uploads                       | Upload directory path                                |
-| `CLEAN_DIR`                   | path    | /app/data/clean                         | Results directory path                               |
-| `EXPORTS_DIR`                 | path    | /app/data/exports                       | Exports directory path                               |
-| `UPLOAD_CHUNK_SIZE`           | integer | 5242880                                 | Upload chunk size in bytes (5MB)                     |
-| **Polars Engine**             |         |                                         |                                                      |
-| `POLARS_MAX_THREADS`          | integer | 0                                       | Max threads per engine (0=auto)                      |
-| `POLARS_MAX_MEMORY_MB`        | integer | 0                                       | Memory limit per engine MB (0=unlimited)             |
-| `POLARS_STREAMING_CHUNK_SIZE` | integer | 0                                       | Streaming chunk size (0=auto)                        |
-| `MAX_CONCURRENT_ENGINES`      | integer | 10                                      | Max simultaneous engines (1-100)                     |
-| **Workers**                   |         |                                         |                                                      |
-| `WORKERS`                     | integer | 1                                       | Gunicorn/Uvicorn workers (0=auto: 2\*cores+1)        |
-| `WORKER_CONNECTIONS`          | integer | 1000                                    | Max connections per worker                           |
-| **Engine Lifecycle**          |         |                                         |                                                      |
-| `ENGINE_IDLE_TIMEOUT`         | integer | 300                                     | Idle timeout before cleanup (seconds, reset on save) |
-| `ENGINE_POOLING_INTERVAL`     | integer | 30                                      | Polling interval to check engine states (seconds)    |
-| **Job Management**            |         |                                         |                                                      |
-| `JOB_TIMEOUT`                 | integer | 300                                     | Max job execution time (seconds)                     |
-| **Logging**                   |         |                                         |                                                      |
-| `LOG_LEVEL`                   | string  | info                                    | Log level (debug/info/warning/error/critical)        |
-| `LOG_ICEBERG_PATH`            | path    | /app/data/logs/iceberg                  | Iceberg log storage path                             |
-| `LOG_ICEBERG_FLUSH_INTERVAL_SECONDS` | integer | 300                               | Log flush interval (seconds)                         |
-| `LOG_QUEUE_MAX_SIZE`          | integer | 2000                                    | Max queued log batches                               |
-| `LOG_QUEUE_OVERFLOW`          | string  | block                                   | Queue overflow behavior (block/drop)                 |
-| `LOG_MAX_BODY_SIZE`           | integer | 1048576                                 | Max body size to log in bytes (0=unlimited)          |
-| `SETTINGS_ENCRYPTION_KEY`     | string  |                                         | Encrypt SMTP passwords at rest                       |
+| Variable                             | Type    | Default                             | Description                                          |
+| ------------------------------------ | ------- | ----------------------------------- | ---------------------------------------------------- |
+| **Application**                      |         |                                     |                                                      |
+| `APP_NAME`                           | string  | Data-Forge Analysis Platform        | Application name                                     |
+| `APP_VERSION`                        | string  | 1.0.0                               | Application version                                  |
+| `DEBUG`                              | boolean | false                               | Enable debug mode (verbose logging, SQL echo)        |
+| `PORT`                               | integer | 8000                                | Port to bind (Docker only)                           |
+| **Database**                         |         |                                     |                                                      |
+| `DATABASE_URL`                       | string  | sqlite+libsql:///${DATA_DIR}/app.db | Database connection URL                              |
+| `DATA_DIR`                           | path    | /app/data                           | Base data directory (namespaced below)               |
+| `DEFAULT_NAMESPACE`                  | string  | default                             | Default namespace for data directories               |
+| `ENV_FILE`                           | string  | .env                                | Path to env file (empty disables env-file loading)   |
+| **CORS**                             |         |                                     |                                                      |
+| `CORS_ORIGINS`                       | string  | localhost:3000,...                  | Comma-separated allowed origins                      |
+| **File Storage**                     |         |                                     |                                                      |
+| `UPLOAD_CHUNK_SIZE`                  | integer | 5242880                             | Upload chunk size in bytes (5MB)                     |
+| **Polars Engine**                    |         |                                     |                                                      |
+| `POLARS_MAX_THREADS`                 | integer | 0                                   | Max threads per engine (0=auto)                      |
+| `POLARS_MAX_MEMORY_MB`               | integer | 0                                   | Memory limit per engine MB (0=unlimited)             |
+| `POLARS_STREAMING_CHUNK_SIZE`        | integer | 0                                   | Streaming chunk size (0=auto)                        |
+| `MAX_CONCURRENT_ENGINES`             | integer | 10                                  | Max simultaneous engines (1-100)                     |
+| **Workers**                          |         |                                     |                                                      |
+| `WORKERS`                            | integer | 1                                   | Gunicorn/Uvicorn workers (0=auto: 2\*cores+1)        |
+| `WORKER_CONNECTIONS`                 | integer | 1000                                | Max connections per worker                           |
+| **Engine Lifecycle**                 |         |                                     |                                                      |
+| `ENGINE_IDLE_TIMEOUT`                | integer | 300                                 | Idle timeout before cleanup (seconds, reset on save) |
+| `ENGINE_POOLING_INTERVAL`            | integer | 30                                  | Polling interval to check engine states (seconds)    |
+| `SCHEDULER_CHECK_INTERVAL`           | integer | 60                                  | Schedule polling interval (seconds)                  |
+| **Job Management**                   |         |                                     |                                                      |
+| `JOB_TIMEOUT`                        | integer | 300                                 | Max job execution time (seconds)                     |
+| **Logging**                          |         |                                     |                                                      |
+| `LOG_LEVEL`                          | string  | info                                | Log level (debug/info/warning/error/critical)        |
+| `LOG_ICEBERG_PATH`                   | path    | /app/data/logs/iceberg              | Iceberg log storage path                             |
+| `LOG_ICEBERG_FLUSH_INTERVAL_SECONDS` | integer | 300                                 | Log flush interval (seconds)                         |
+| `LOG_QUEUE_MAX_SIZE`                 | integer | 2000                                | Max queued log batches                               |
+| `LOG_QUEUE_OVERFLOW`                 | string  | block                               | Queue overflow behavior (block/drop)                 |
+| `LOG_MAX_BODY_SIZE`                  | integer | 1048576                             | Max body size to log in bytes (0=unlimited)          |
+| `SETTINGS_ENCRYPTION_KEY`            | string  |                                     | Encrypt SMTP passwords at rest                       |
 
 ## Validation Rules
 
@@ -78,9 +78,8 @@ LOG_LEVEL=debug
 WORKERS=1
 POLARS_MAX_THREADS=4
 MAX_CONCURRENT_ENGINES=3
-UPLOAD_DIR=./data/uploads
-CLEAN_DIR=./data/results
-EXPORTS_DIR=./data/exports
+DATA_DIR=./data
+DEFAULT_NAMESPACE=default
 ```
 
 ### Development (Docker)
@@ -91,9 +90,8 @@ LOG_LEVEL=debug
 WORKERS=1
 POLARS_MAX_THREADS=4
 MAX_CONCURRENT_ENGINES=3
-UPLOAD_DIR=/app/data/uploads
-CLEAN_DIR=/app/data/clean
-EXPORTS_DIR=/app/data/exports
+DATA_DIR=/app/data
+DEFAULT_NAMESPACE=default
 ```
 
 ### Production (Small Server - 2 cores, 4GB)
@@ -106,9 +104,8 @@ WORKER_CONNECTIONS=1000
 POLARS_MAX_THREADS=1
 POLARS_MAX_MEMORY_MB=1024
 MAX_CONCURRENT_ENGINES=3
-UPLOAD_DIR=/app/data/uploads
-CLEAN_DIR=/app/data/clean
-EXPORTS_DIR=/app/data/exports
+DATA_DIR=/app/data
+DEFAULT_NAMESPACE=default
 ```
 
 ### Production (Medium Server - 4 cores, 8GB)
@@ -121,9 +118,8 @@ WORKER_CONNECTIONS=1000
 POLARS_MAX_THREADS=2
 POLARS_MAX_MEMORY_MB=2048
 MAX_CONCURRENT_ENGINES=5
-UPLOAD_DIR=/app/data/uploads
-CLEAN_DIR=/app/data/clean
-EXPORTS_DIR=/app/data/exports
+DATA_DIR=/app/data
+DEFAULT_NAMESPACE=default
 ```
 
 ### Production (Large Server - 8+ cores, 16+ GB)
@@ -136,9 +132,8 @@ WORKER_CONNECTIONS=1000
 POLARS_MAX_THREADS=4
 POLARS_MAX_MEMORY_MB=4096
 MAX_CONCURRENT_ENGINES=10
-UPLOAD_DIR=/app/data/uploads
-CLEAN_DIR=/app/data/clean
-EXPORTS_DIR=/app/data/exports
+DATA_DIR=/app/data
+DEFAULT_NAMESPACE=default
 ```
 
 ## Database Configuration Examples
@@ -146,7 +141,7 @@ EXPORTS_DIR=/app/data/exports
 ### SQLite (Default)
 
 ```bash
-DATABASE_URL="sqlite+libsql:///./database/app.db"
+DATABASE_URL="sqlite+libsql:///${DATA_DIR}/app.db"
 ```
 
 ### PostgreSQL
@@ -178,7 +173,7 @@ CORS_ORIGINS="https://yourdomain.com,https://www.yourdomain.com"
 
 ### Allow All (NOT RECOMMENDED for production)
 
-```bash
+````bash
 CORS_ORIGINS="*"
 
 ## Settings Encryption
@@ -187,7 +182,8 @@ Set a secret key to encrypt SMTP passwords stored in the database:
 
 ```bash
 SETTINGS_ENCRYPTION_KEY="your-strong-random-key"
-```
+````
+
 ```
 
 ## Resource Planning Formulas
@@ -195,7 +191,9 @@ SETTINGS_ENCRYPTION_KEY="your-strong-random-key"
 ### CPU Calculation
 
 ```
+
 Total CPU Cores Needed = WORKERS + (MAX_CONCURRENT_ENGINES × POLARS_MAX_THREADS)
+
 ```
 
 **Example**: 8-core server
@@ -208,7 +206,9 @@ Total CPU Cores Needed = WORKERS + (MAX_CONCURRENT_ENGINES × POLARS_MAX_THREADS
 ### Memory Calculation
 
 ```
+
 Total Memory = System (2GB) + Workers (500MB × WORKERS) + (MAX_CONCURRENT_ENGINES × POLARS_MAX_MEMORY_MB)
+
 ```
 
 **Example**: 16GB server
@@ -222,10 +222,30 @@ Total Memory = System (2GB) + Workers (500MB × WORKERS) + (MAX_CONCURRENT_ENGIN
 
 ### Directory Paths
 
-- **Local Development**: Use relative paths like `./data/uploads`
-- **Docker**: Use absolute container paths like `/app/data/uploads`
+- **Local Development**: Use `DATA_DIR=./data` and `DEFAULT_NAMESPACE=default`
+- **Docker**: Use `DATA_DIR=/app/data` and `DEFAULT_NAMESPACE=default`
 - Directories are automatically created if they don't exist
 - Must be writable by the application user
+
+#### Namespaced Storage Layout
+
+The application derives all data paths from `DATA_DIR` and the active namespace:
+
+```
+
+DATA_DIR/
+app.db
+namespaces/
+<namespace>/
+uploads/
+clean/
+exports/
+namespace.db
+
+````
+
+`app.db` stores global settings. Each namespace has its own `namespace.db` for datasources,
+analyses, schedules, builds, and health checks.
 
 ### Worker Auto-Configuration
 
@@ -233,7 +253,7 @@ When `WORKERS=0`:
 
 ```python
 workers = (2 * cpu_cores) + 1
-```
+````
 
 Example on 4-core machine: `workers = (2 * 4) + 1 = 9`
 

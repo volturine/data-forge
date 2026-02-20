@@ -634,6 +634,7 @@ button.btn-sm {
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
+	min-width: 160px;
 }
 
 .column-trigger {
@@ -674,7 +675,7 @@ button.btn-sm {
 
 .column-menu {
 	position: absolute;
-	z-index: 10;
+	z-index: var(--z-dropdown);
 	top: calc(100% + 6px);
 	left: 0;
 	min-width: 100%;
@@ -688,6 +689,14 @@ button.btn-sm {
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
+}
+
+.branch-picker__menu {
+	left: var(--popover-left);
+	top: var(--popover-top);
+	width: var(--popover-width);
+	min-width: var(--popover-width);
+	max-width: var(--popover-width);
 }
 
 .column-search {
@@ -1742,6 +1751,10 @@ body.touch-dragging .pipeline-canvas {
 	left: var(--popover-left);
 	top: var(--popover-top);
 	width: var(--popover-width);
+}
+
+.z-popover {
+	z-index: var(--z-popover);
 }
 
 .step-summary.inactive {

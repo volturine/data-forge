@@ -9,6 +9,7 @@ export interface LineageNode {
 	name: string;
 	source_type?: SourceType;
 	status?: string;
+	branch?: string | null;
 }
 
 export interface LineageEdge {
@@ -22,6 +23,13 @@ export interface LineageResponse {
 	edges: LineageEdge[];
 }
 
-export function getLineage(): ResultAsync<LineageResponse, ApiError> {
-	return apiRequest<LineageResponse>('/v1/datasource/lineage');
+export function getLineage(
+	targetDatasourceId?: string | null,
+	branch?: string | null
+): ResultAsync<LineageResponse, ApiError> {
+	const params = new URLSearchParams();
+	if (targetDatasourceId) params.set('target_datasource_id', targetDatasourceId);
+	if (branch) params.set('branch', branch);
+	const suffix = params.toString() ? `?${params.toString()}` : '';
+	return apiRequest<LineageResponse>(`/v1/datasource/lineage${suffix}`);
 }

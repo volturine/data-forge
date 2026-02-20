@@ -3,6 +3,7 @@ description: Produces plans, milestones, and clarifying questions — no edits
 mode: subagent
 model: github-copilot/gpt-5.2-codex
 variant: xhigh
+name: planner
 tools:
   edit: false
   write: false

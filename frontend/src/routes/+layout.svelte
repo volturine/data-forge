@@ -8,7 +8,9 @@
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
 	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
 	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
+	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
+	import { initNamespace, setNamespace, useNamespace } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import { untrack } from 'svelte';
@@ -42,6 +44,11 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		untrack(() => configStore.fetch());
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		void initNamespace();
 	});
 
 	$effect(() => {
@@ -87,6 +94,21 @@
 		theme = theme === 'light' ? 'dark' : 'light';
 	}
 
+	const namespaceState = useNamespace();
+	let namespaceOpen = $state(false);
+	let namespaceTrigger = $state<HTMLButtonElement>();
+	const namespaceDraft = $derived(namespaceState.value);
+
+	async function handleNamespaceSelect(value: string) {
+		await setNamespace(value);
+		window.location.reload();
+		namespaceOpen = false;
+	}
+
+	function openNamespace() {
+		namespaceOpen = true;
+	}
+
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
@@ -122,11 +144,19 @@
 	<div class="flex h-screen flex-col">
 		<header class="sticky top-0 z-header bg-panel">
 			<div class="mx-auto flex max-w-300 items-center gap-6 px-6 py-3">
-				<a href={resolve('/')} class="flex items-center gap-1 text-base font-semibold no-underline">
-					<span class="text-fg-primary">polars</span>
-					<span class="text-fg-muted">/</span>
-					<span class="text-fg-tertiary">analysis</span>
-				</a>
+				<div class="flex items-center gap-2">
+					<button
+						class="flex items-center gap-1 text-base font-semibold no-underline bg-transparent border-none p-0"
+						onclick={openNamespace}
+						type="button"
+						aria-label="Select namespace"
+						bind:this={namespaceTrigger}
+					>
+						<span class="text-fg-primary">analysis</span>
+						<span class="text-fg-muted">/</span>
+						<span class="text-fg-tertiary">{namespaceDraft}</span>
+					</button>
+				</div>
 
 				<nav class="flex items-center gap-1">
 					{#each navItems as item (item.href)}
@@ -177,4 +207,11 @@
 	</div>
 
 	<SettingsPopup bind:open={settingsOpen} />
+	<NamespacePickerModal
+		open={namespaceOpen}
+		selected={namespaceDraft}
+		onSelect={handleNamespaceSelect}
+		onClose={() => (namespaceOpen = false)}
+		anchor={namespaceTrigger}
+	/>
 </QueryClientProvider>

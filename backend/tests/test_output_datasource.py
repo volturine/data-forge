@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from sqlmodel import Session
 
-from core.config import settings
+from core.namespace import namespace_paths
 from modules.analysis.models import Analysis
 from modules.analysis.schemas import AnalysisUpdateSchema, TabSchema
 from modules.analysis.service import update_analysis
@@ -386,13 +386,13 @@ class TestRunAnalysisBuildOutputDatasource:
             )
 
         identifier = mock_catalog.create_table.call_args.args[0]
-        assert identifier == f'ns.{output_ds_id}'
+        assert identifier == f'ns.{output_ds_id}_master'
 
         output_ds = test_db_session.get(DataSource, created_ds_id)
         assert output_ds is not None
-        expected_path = str(settings.exports_dir / output_ds_id)
+        expected_path = str(namespace_paths().exports_dir / output_ds_id)
         assert output_ds.config['metadata_path'] == expected_path
-        assert output_ds.config['branch'] == 'master'
+        assert output_ds.config['table'] == f'{output_ds_id}_master'
 
     def test_tab_without_output_config_fails(self, test_db_session: Session, sample_datasource: DataSource):
         """Tabs without output config should fail."""

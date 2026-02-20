@@ -1,4 +1,4 @@
-# Polars-FastAPI-Svelte Analysis Platform
+# Data-Forge Analysis Platform
 
 A local-first, no-code data analysis tool for building data pipelines visually.
 
@@ -65,13 +65,13 @@ cp .env.example .env
 
 ### Key Configuration Options
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEBUG` | `false` | Enable debug logging and SQL echo |
-| `ENGINE_IDLE_TIMEOUT` | `300` | Seconds before idle engines are cleaned up (reset on save) |
-| `ENGINE_POOLING_INTERVAL` | `5` | Seconds between engine state checks |
-| `JOB_TIMEOUT` | `300` | Maximum job execution time in seconds |
-| `UPLOAD_CHUNK_SIZE` | `5242880` | Upload chunk size in bytes (5MB) |
+| Variable                  | Default   | Description                                                |
+| ------------------------- | --------- | ---------------------------------------------------------- |
+| `DEBUG`                   | `false`   | Enable debug logging and SQL echo                          |
+| `ENGINE_IDLE_TIMEOUT`     | `300`     | Seconds before idle engines are cleaned up (reset on save) |
+| `ENGINE_POOLING_INTERVAL` | `5`       | Seconds between engine state checks                        |
+| `JOB_TIMEOUT`             | `300`     | Maximum job execution time in seconds                      |
+| `UPLOAD_CHUNK_SIZE`       | `5242880` | Upload chunk size in bytes (5MB)                           |
 
 See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for complete reference of all environment variables.
 
@@ -135,6 +135,7 @@ WORKERS=2
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
+
 - Resource planning
 - Scaling strategies
 - Monitoring and health checks
@@ -144,12 +145,14 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
 ## Documentation
 
 ### Deployment & Configuration
+
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — Complete deployment guide with Docker
 - **[ENV_VARIABLES.md](ENV_VARIABLES.md)** — Complete environment variable reference (26 variables)
 - **[DOCKERIZATION_SUMMARY.md](DOCKERIZATION_SUMMARY.md)** — Dockerization implementation details
 - **[DOCKERIZATION_PLAN.md](DOCKERIZATION_PLAN.md)** — Technical architecture plan
 
 ### Development
+
 - **[IMPROVEMENTS.md](IMPROVEMENTS.md)** — Code quality improvements summary
 - [PRD](docs/PRD.md) — Feature specs and architecture
 - [AGENTS.md](AGENTS.md) — Developer guidelines

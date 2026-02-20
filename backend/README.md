@@ -146,10 +146,9 @@ Once the server is running, visit:
 Configuration is managed through `core/config.py` using Pydantic settings.
 
 Key settings:
-- `DATABASE_URL` - Database connection string (default: `sqlite+libsql:///./database/app.db`)
-- `UPLOAD_DIR` - File upload directory (default: `./data/uploads`)
-- `CLEAN_DIR` - Clean storage directory (default: `./data/clean`)
-- `EXPORTS_DIR` - Export storage directory (default: `./data/exports`)
+- `DATABASE_URL` - Database connection string (default: `sqlite+libsql:///${DATA_DIR}/app.db`)
+- `DATA_DIR` - Base data directory (default: `./data`)
+- `DEFAULT_NAMESPACE` - Default namespace for data directories (default: `default`)
 - `UPLOAD_CHUNK_SIZE` - Upload chunk size in bytes (default: 5MB)
 - `JOB_TIMEOUT` - Job execution timeout in seconds (default: 300)
 - `ENGINE_IDLE_TIMEOUT` - Idle engine timeout in seconds (default: 300)
@@ -160,7 +159,7 @@ Override in `.env` file or environment variables. Use `ENV_FILE` to point to a s
 
 1. Set environment variables:
    ```bash
-   export DATABASE_URL="sqlite+libsql:///./database/app.db"
+export DATABASE_URL="sqlite+libsql:///${DATA_DIR}/app.db"
    # ... other settings
    ```
 

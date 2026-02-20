@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -16,6 +17,7 @@ from sqlmodel import Session
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
+from core.namespace import get_namespace, namespace_paths
 from modules.analysis.models import Analysis
 from modules.compute.core.exports import get_export_format
 from modules.compute.manager import get_manager
@@ -1027,7 +1029,7 @@ def export_data(
                 )
                 engine_run_service.create_engine_run(session, payload)
                 file_name = f'{filename}.{result_format}'
-                file_path = settings.exports_dir / file_name
+                file_path = namespace_paths().exports_dir / file_name
                 with open(output_path, 'rb') as f:
                     file_bytes = f.read()
                 with open(file_path, 'wb') as f:
@@ -1039,15 +1041,15 @@ def export_data(
                 if datasource_type != 'iceberg':
                     raise ValueError('Output exports must use Iceberg datasources')
                 iceberg_opts = iceberg_options or {}
-                namespace = iceberg_opts.get('namespace', 'exports')
+                namespace = iceberg_opts.get('namespace', 'outputs')
+                branch_name = iceberg_opts.get('branch') or 'master'
                 if not output_datasource_id:
                     raise ValueError('Output datasource id is required for Iceberg exports')
-                table_name = output_datasource_id
-
-                branch_name = 'master'
-                export_base = settings.exports_dir / str(output_datasource_id)
+                safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', str(branch_name)).strip('_') or 'master'
+                table_name = f'{output_datasource_id}_{safe_branch}'
+                export_base = namespace_paths().exports_dir / str(output_datasource_id)
                 table_path = export_base / branch_name
-                warehouse_path = settings.exports_dir
+                warehouse_path = namespace_paths().exports_dir
                 catalog_path = export_base / 'catalog.db'
 
                 export_base.mkdir(parents=True, exist_ok=True)
@@ -1095,8 +1097,10 @@ def export_data(
                     'warehouse': f'file://{warehouse_path}',
                     'namespace': namespace,
                     'table': table_name,
+                    'table_name': iceberg_opts.get('table_name', 'exported_data'),
                     'metadata_path': str(export_base),
                     'branch': branch_name,
+                    'namespace_name': get_namespace(),
                 }
                 output_ds = session.get(DataSource, output_datasource_id)
                 output_hidden = True
@@ -1251,7 +1255,8 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
                 if iceberg_cfg and isinstance(iceberg_cfg, dict):
                     iceberg_options = {
                         'table_name': iceberg_cfg.get('table_name', 'exported_data'),
-                        'namespace': iceberg_cfg.get('namespace', 'exports'),
+                        'namespace': iceberg_cfg.get('namespace', 'outputs'),
+                        'branch': iceberg_cfg.get('branch'),
                     }
 
                 tab_build_mode = output_config.get('build_mode', 'full') if isinstance(output_config, dict) else 'full'
@@ -1287,7 +1292,7 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
     return {'analysis_id': analysis_id or '', 'tabs_built': tabs_built, 'results': results}
 
 
-def list_iceberg_snapshots(session: Session, datasource_id: str):
+def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | None = None):
     from modules.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
     datasource = session.get(DataSource, datasource_id)
@@ -1300,7 +1305,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str):
     metadata_path = datasource.config.get('metadata_path')
     if not metadata_path:
         raise ValueError('Iceberg datasource missing metadata_path')
-    branch_name = datasource.config.get('branch')
+    branch_name = branch or datasource.config.get('branch')
 
     catalog_type = datasource.config.get('catalog_type')
     catalog_uri = datasource.config.get('catalog_uri')

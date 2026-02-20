@@ -7,6 +7,7 @@ import polars as pl
 from sqlalchemy import select
 from sqlmodel import Session
 
+from modules.datasource.models import DataSource
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
 from modules.healthcheck.schemas import HealthCheckCreate, HealthCheckResponse, HealthCheckResultResponse, HealthCheckUpdate
 
@@ -15,6 +16,9 @@ HealthcheckEvaluator: TypeAlias = Callable[[HealthCheck, pl.DataFrame], tuple[bo
 
 
 def list_healthchecks(session: Session, datasource_id: str) -> list[HealthCheckResponse]:
+    datasource = session.get(DataSource, datasource_id)
+    if not datasource:
+        return []
     result = session.execute(
         select(HealthCheck).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type]
     )
@@ -70,6 +74,9 @@ def delete_healthcheck(session: Session, healthcheck_id: str) -> None:
 
 def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[HealthCheckResultResponse]:
     """Get recent healthcheck results for all checks on a datasource."""
+    datasource = session.get(DataSource, datasource_id)
+    if not datasource:
+        return []
     checks = session.execute(
         select(HealthCheck.id).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type, call-overload]
     )
@@ -87,6 +94,9 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
 
 def list_results_for_check(session: Session, healthcheck_id: str, limit: int = 10) -> list[HealthCheckResultResponse]:
     """Get recent results for a single healthcheck."""
+    check = session.get(HealthCheck, healthcheck_id)
+    if not check:
+        return []
     results = session.execute(
         select(HealthCheckResult)
         .where(HealthCheckResult.healthcheck_id == healthcheck_id)  # type: ignore[arg-type]

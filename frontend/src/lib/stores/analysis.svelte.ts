@@ -31,6 +31,7 @@ export class AnalysisStore {
 	tabs = $state<AnalysisTab[]>([]);
 	savedTabs = $state<AnalysisTab[]>([]);
 	activeTabId = $state<string | null>(null);
+	outputBranch = $state<string | null>(null);
 	sourceSchemas = $state(new SvelteMap<string, SchemaInfo>());
 	resourceConfig = $state<EngineResourceConfig | null>(null);
 	engineDefaults = $state<EngineDefaults | null>(null);
@@ -97,6 +98,8 @@ export class AnalysisStore {
 		const previousId = this.current?.id ?? null;
 		this.current = analysis;
 		this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
+		this.outputBranch =
+			(analysis.pipeline_definition?.output_branch as string | null | undefined) ?? null;
 		if (previousId !== analysis.id) {
 			this.activeTabId = null;
 			this.sourceSchemas.clear();
@@ -106,7 +109,9 @@ export class AnalysisStore {
 			steps?: PipelineStep[];
 			tabs?: AnalysisTab[];
 			datasource_ids?: string[];
+			output_branch?: string | null;
 		};
+		this.outputBranch = definition?.output_branch ?? this.outputBranch;
 
 		const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
 		if (tabs && tabs.length && tabs[0].steps !== undefined) {
@@ -158,7 +163,9 @@ export class AnalysisStore {
 					steps?: PipelineStep[];
 					tabs?: AnalysisTab[];
 					datasource_ids?: string[];
+					output_branch?: string | null;
 				};
+				this.outputBranch = definition?.output_branch ?? this.outputBranch;
 
 				const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
 				if (tabs && tabs.length && tabs[0].steps !== undefined) {
@@ -332,6 +339,39 @@ export class AnalysisStore {
 
 	setActiveTab(id: string): void {
 		this.activeTabId = id;
+	}
+
+	setOutputBranch(branch: string | null): void {
+		this.outputBranch = branch;
+		if (this.current) {
+			const pipeline = {
+				...(this.current.pipeline_definition ?? {}),
+				output_branch: branch
+			} as Record<string, unknown>;
+			this.current = { ...this.current, pipeline_definition: pipeline };
+		}
+		const next = this.tabs.map((tab) => {
+			const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
+			const output = config.output as Record<string, unknown> | undefined;
+			if (!output || typeof output !== 'object' || Array.isArray(output)) {
+				return tab;
+			}
+			const iceberg = output.iceberg as Record<string, unknown> | undefined;
+			const branchValue = branch ?? 'master';
+			const tableName = tab.name ? tab.name.trim().replace(/\s+/g, '_').toLowerCase() : 'export';
+			const nextOutput = iceberg
+				? { ...output, iceberg: { ...iceberg, branch: branchValue } }
+				: {
+						...output,
+						iceberg: {
+							namespace: 'outputs',
+							table_name: tableName,
+							branch: branchValue
+						}
+					};
+			return { ...tab, datasource_config: { ...config, output: nextOutput } };
+		});
+		this.tabs = next;
 	}
 
 	addTab(tab: AnalysisTab): void {
@@ -645,7 +685,8 @@ export class AnalysisStore {
 			tabs: this.tabs,
 			pipeline_steps: pipelineSteps,
 			client_id: lockPayload.clientId,
-			lock_token: lockPayload.lockToken
+			lock_token: lockPayload.lockToken,
+			output_branch: this.outputBranch
 		};
 
 		return updateAnalysis(this.current.id, update)
@@ -705,6 +746,7 @@ export class AnalysisStore {
 		this.resourceConfig = null;
 		this.engineDefaults = null;
 		this.lastSaved = null;
+		this.outputBranch = null;
 		this.loading = false;
 		this.error = null;
 	}
@@ -726,6 +768,7 @@ export type AnalysisStoreApi = {
 	engineDefaults: EngineDefaults | null;
 	setResourceConfig: (config: EngineResourceConfig | null) => void;
 	setEngineDefaults: (defaults: EngineDefaults | null) => void;
+	setOutputBranch: (branch: string | null) => void;
 	insertStep: (
 		step: PipelineStep,
 		index: number,

@@ -64,10 +64,11 @@ def get_step_schema(
 @handle_errors(operation='list iceberg snapshots')
 def list_iceberg_snapshots(
     datasource_id: DataSourceId,
+    branch: str | None = None,
     session: Session = Depends(get_db),
 ):
     """List snapshots for an Iceberg datasource (for time travel selection)."""
-    return service.list_iceberg_snapshots(session, parse_datasource_id(datasource_id))
+    return service.list_iceberg_snapshots(session, parse_datasource_id(datasource_id), branch=branch)
 
 
 @router.delete(

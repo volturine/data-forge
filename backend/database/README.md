@@ -85,13 +85,13 @@ uv run alembic -c database/alembic.ini heads
 The database URL is configured in `core/config.py`:
 
 ```python
-database_url: str = 'sqlite+libsql:///./database/app.db'
+database_url: str = 'sqlite+libsql:///${DATA_DIR}/app.db'
 ```
 
 You can override this in `.env`:
 
 ```env
-DATABASE_URL=sqlite+libsql:///./database/app.db
+DATABASE_URL=sqlite+libsql:///${DATA_DIR}/app.db
 ```
 
 ### Adding New Models

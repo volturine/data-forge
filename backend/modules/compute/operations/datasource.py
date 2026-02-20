@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -10,7 +11,7 @@ import polars as pl
 from openpyxl import load_workbook
 from pydantic import ConfigDict
 
-from core.config import settings
+from core.namespace import namespace_paths
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.iceberg_reader import scan_iceberg_snapshot
 from modules.compute.step_converter import convert_step_format
@@ -19,7 +20,7 @@ from modules.compute.step_converter import convert_step_format
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
-    source_type: Literal['file', 'database', 'duckdb', 'iceberg', 'analysis', 'api'] = 'file'
+    source_type: Literal['file', 'database', 'duckdb', 'iceberg', 'analysis'] = 'file'
     analysis_id: str | None = None
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
@@ -98,7 +99,19 @@ class DatasourceHandler(OperationHandler):
     def _load_database(self, config: DatasourceParams) -> pl.LazyFrame:
         if not config.connection_string or not config.query:
             raise ValueError('Datasource database loading requires connection_string and query')
-        return pl.read_database(config.query, config.connection_string).lazy()
+        if config.connection_string.startswith('sqlite:'):
+            parsed = urlparse(config.connection_string)
+            if not parsed.path:
+                raise ValueError('SQLite connection string must include a database path')
+            connection = sqlite3.connect(parsed.path)
+            try:
+                frame = pl.read_database(config.query, connection)
+            except Exception as exc:
+                raise ValueError('Failed to query database datasource') from exc
+            finally:
+                connection.close()
+            return frame.lazy()
+        return pl.read_database_uri(config.query, config.connection_string).lazy()
 
     def _load_duckdb(self, config: DatasourceParams) -> pl.LazyFrame:
         import duckdb
@@ -166,9 +179,6 @@ class DatasourceHandler(OperationHandler):
             if not pipeline_id or pipeline_id == analysis_id:
                 return _load_analysis_pipeline(pipeline, analysis_id, config.analysis_tab_id)
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
-
-    def _load_api(self, _config: DatasourceParams) -> pl.LazyFrame:
-        raise ValueError('API datasources are not supported in pipeline execution')
 
 
 _ANALYSIS_STACK: list[tuple[str, str | None]] = []
@@ -395,7 +405,7 @@ def resolve_iceberg_metadata_path(metadata_path: str) -> str:
     if any(part.is_symlink() for part in parts):
         raise ValueError('Iceberg metadata_path cannot be a symlink')
     resolved = path.resolve()
-    data_root = Path(os.path.realpath(settings.data_dir.resolve()))
+    data_root = Path(os.path.realpath(namespace_paths().base_dir.resolve()))
     if data_root not in resolved.parents and data_root != resolved:
         raise ValueError('Iceberg metadata_path must be inside data directory')
     if path.suffix == '.db':
@@ -516,7 +526,6 @@ DatasourceHandler.SOURCE_LOADERS = {
     'duckdb': DatasourceHandler._load_duckdb,
     'iceberg': DatasourceHandler._load_iceberg,
     'analysis': DatasourceHandler._load_analysis,
-    'api': DatasourceHandler._load_api,
 }
 
 

@@ -19,7 +19,8 @@
 		Timer,
 		CalendarClock
 	} from 'lucide-svelte';
-	import { SvelteMap } from 'svelte/reactivity';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	interface Props {
 		compact?: boolean;
@@ -36,6 +37,7 @@
 	let dateFrom = $state('');
 	let dateTo = $state('');
 	let page = $state(1);
+	let branchFilter = $state('master');
 	let expandedId = $state<string | null>(null);
 	let activeTab = $state<'request' | 'result' | 'plans' | 'timings'>('request');
 	let sortColumn = $state<string>('created_at');
@@ -129,7 +131,28 @@
 			result = result.filter((r) => new Date(r.created_at) <= to);
 		}
 
+		if (branchFilter) {
+			result = result.filter((run) => {
+				const payload = run.request_json as Record<string, unknown>;
+				const opts = payload.iceberg_options as Record<string, unknown> | undefined;
+				const runBranch = opts?.branch as string | undefined;
+				return runBranch === branchFilter;
+			});
+		}
+
 		return sortRuns(result);
+	});
+
+	const branchOptions = $derived.by(() => {
+		const set = new SvelteSet<string>();
+		set.add('master');
+		for (const run of runs) {
+			const payload = run.request_json as Record<string, unknown>;
+			const opts = payload.iceberg_options as Record<string, unknown> | undefined;
+			const runBranch = opts?.branch as string | undefined;
+			if (runBranch) set.add(runBranch);
+		}
+		return Array.from(set).sort((a, b) => a.localeCompare(b));
 	});
 
 	function sortRuns(list: EngineRun[]): EngineRun[] {
@@ -307,6 +330,8 @@
 				<option value="">All types</option>
 				<option value="preview">Preview</option>
 				<option value="export">Export</option>
+				<option value="datasource_create">Datasource Create</option>
+				<option value="datasource_update">Datasource Update</option>
 			</select>
 			<select
 				class="border border-tertiary bg-transparent px-3 py-1.5 text-sm"
@@ -316,6 +341,12 @@
 				<option value="success">Success</option>
 				<option value="failed">Failed</option>
 			</select>
+			<BranchPicker
+				branches={branchOptions}
+				value={branchFilter || 'master'}
+				placeholder="Branch"
+				onChange={(value: string) => (branchFilter = value)}
+			/>
 			<div class="flex items-center gap-1.5 text-sm">
 				<span class="text-fg-muted">From</span>
 				<input

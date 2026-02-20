@@ -1,10 +1,12 @@
 ---
 description: Code review, testing, and debugging — limited edit permissions
 mode: subagent
-model: github-copilot/claude-sonnet-4.5
+model: opencode/minimax-m2.5-free
+name: reviewer
 tools:
-  edit: false
   write: false
+  edit: false
+  bash: false
 permission:
   edit: deny
   bash: deny

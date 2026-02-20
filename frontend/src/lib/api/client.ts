@@ -1,5 +1,6 @@
 import { err, ResultAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
+import { getNamespace } from '$lib/stores/namespace.svelte';
 import { track } from '$lib/utils/audit-log';
 
 // Always use relative paths - works in both dev (via proxy) and prod
@@ -32,11 +33,15 @@ export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAs
 	const isFormData = options?.body instanceof FormData;
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
+	const namespace = getNamespace();
 	if (identity.clientId && !headers.has('X-Client-Id')) {
 		headers.set('X-Client-Id', identity.clientId);
 	}
 	if (identity.clientSignature && !headers.has('X-Client-Signature')) {
 		headers.set('X-Client-Signature', identity.clientSignature);
+	}
+	if (namespace && !headers.has('X-Namespace')) {
+		headers.set('X-Namespace', namespace);
 	}
 
 	if (!isFormData && !headers.has('Content-Type')) {
@@ -103,11 +108,15 @@ export function apiRequestWithHeaders<T>(
 	const isFormData = options?.body instanceof FormData;
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
+	const namespace = getNamespace();
 	if (identity.clientId && !headers.has('X-Client-Id')) {
 		headers.set('X-Client-Id', identity.clientId);
 	}
 	if (identity.clientSignature && !headers.has('X-Client-Signature')) {
 		headers.set('X-Client-Signature', identity.clientSignature);
+	}
+	if (namespace && !headers.has('X-Namespace')) {
+		headers.set('X-Namespace', namespace);
 	}
 
 	if (!isFormData && !headers.has('Content-Type')) {
@@ -173,11 +182,15 @@ export function apiBlobRequest(
 ): ResultAsync<Blob, ApiError> {
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
+	const namespace = getNamespace();
 	if (identity.clientId && !headers.has('X-Client-Id')) {
 		headers.set('X-Client-Id', identity.clientId);
 	}
 	if (identity.clientSignature && !headers.has('X-Client-Signature')) {
 		headers.set('X-Client-Signature', identity.clientSignature);
+	}
+	if (namespace && !headers.has('X-Namespace')) {
+		headers.set('X-Namespace', namespace);
 	}
 	if (!headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');

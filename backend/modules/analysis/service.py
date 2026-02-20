@@ -43,6 +43,8 @@ def create_analysis(
         'datasource_ids': data.datasource_ids,
         'tabs': tabs_payload,
     }
+    if data.output_branch is not None:
+        pipeline_definition['output_branch'] = data.output_branch
 
     now = datetime.now(UTC).replace(tzinfo=None)
     analysis = Analysis(
@@ -166,8 +168,11 @@ def update_analysis(
                         'format': 'parquet',
                         'filename': base_name,
                         'iceberg': {
-                            'namespace': 'exports',
+                            'namespace': 'outputs',
                             'table_name': table_name,
+                            'branch': analysis.pipeline_definition.get('output_branch')
+                            if isinstance(analysis.pipeline_definition, dict)
+                            else None,
                         },
                     }
                     tab['datasource_config'] = output_config
@@ -221,6 +226,13 @@ def update_analysis(
 
     if data.status is not None:
         analysis.status = data.status
+
+    if data.output_branch is not None:
+        pipeline = analysis.pipeline_definition
+        if not isinstance(pipeline, dict):
+            pipeline = {}
+        pipeline['output_branch'] = data.output_branch
+        analysis.pipeline_definition = pipeline
 
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
 

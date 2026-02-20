@@ -32,7 +32,7 @@ Nothing is complete until `just verify` passes with **zero errors and zero warni
 2. **Plan** — Update `docs/taskfile.md`
 3. **Code** — Implement. Use parallel agents when possible
 4. **Verify** — Run `just verify`. Fix everything. No exceptions
-5. **Review** — Use this subagent before completing any task
+5. **Reviewer** — Use this subagent before completing any task
 6. **Commit** — Well-formed commit. Update `docs/taskfile.md`
 
 **Do not ask for confirmation on implementation details.** Make decisions, implement, verify. Stop and ask only on genuine ambiguity about requirements or conflicts with these rules.
@@ -49,6 +49,7 @@ Nothing is complete until `just verify` passes with **zero errors and zero warni
 - **Redesign over hotfix.** If existing code is wrong, redesign properly
 - **Fix warnings, not just errors.** Treat warnings as bugs
 - **Autonomous completion.** Continue until every requirement in `docs/bugs.md` is implemented, tested, and verified
+- **No legacy support.** New features/redesigns must not preserve legacy paths or backward compatibility
 
 ## Backend (Python / FastAPI)
 

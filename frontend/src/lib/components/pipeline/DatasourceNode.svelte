@@ -8,7 +8,6 @@
 	import {
 		FileText,
 		Database,
-		Globe,
 		Layers,
 		Snowflake,
 		PanelLeft,
@@ -22,6 +21,7 @@
 	} from 'lucide-svelte';
 	import { drag } from '$lib/stores/drag.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
 
@@ -108,6 +108,10 @@
 	});
 
 	const isIceberg = $derived(datasource?.source_type === 'iceberg');
+	const isOutputSource = $derived(
+		activeTab?.datasource_id === activeTab?.output_datasource_id &&
+			!!activeTab?.output_datasource_id
+	);
 	function updateTimeTravelUi(updates: { open?: boolean; month?: string; day?: string }) {
 		const active = activeTab;
 		if (!active) return;
@@ -196,6 +200,26 @@
 		(analysisSourceId ? 'analysis' : (datasource?.source_type ?? 'file')) as string
 	);
 	let isDragActive = $derived(drag.active);
+	const branchValue = $derived.by(() => {
+		const next = (activeTab?.datasource_config as Record<string, unknown> | null)?.branch;
+		if (typeof next === 'string' && next.trim().length > 0) {
+			return next;
+		}
+		return 'master';
+	});
+
+	function applyBranchValue(next: string) {
+		const active = activeTab;
+		if (!active) return;
+		const config = { ...(active.datasource_config ?? {}) } as Record<string, unknown>;
+		if (next) {
+			config.branch = next;
+		} else {
+			delete config.branch;
+		}
+		analysisStore.updateTab(active.id, { datasource_config: config });
+		analysisStore.setActiveTab(active.id);
+	}
 </script>
 
 <div class="datasource-node relative w-[65%]" class:drag-active={isDragActive}>
@@ -208,8 +232,6 @@
 						<FileText size={14} />
 					{:else if sourceType === 'database'}
 						<Database size={14} />
-					{:else if sourceType === 'api'}
-						<Globe size={14} />
 					{:else if sourceType === 'iceberg'}
 						<Snowflake size={14} />
 					{:else if sourceType === 'analysis'}
@@ -306,7 +328,7 @@
 									<FileTypeBadge sourceType={badgeSource} size="sm" showIcon={true} />
 								{:else}
 									<FileTypeBadge
-										sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+										sourceType={datasource.source_type as 'database' | 'iceberg'}
 										size="sm"
 										showIcon={true}
 									/>
@@ -412,12 +434,30 @@
 
 		{#if isIceberg && datasource}
 			<div class="mb-3">
+				<div class="mb-2 flex items-center gap-2">
+					<label
+						class="text-[10px] uppercase text-fg-muted"
+						for="branch-input-{activeTab?.id ?? 'tab'}"
+					>
+						Input branch
+					</label>
+					<BranchPicker
+						branches={(datasource?.config?.branches as string[] | undefined) ?? []}
+						value={branchValue}
+						placeholder="master"
+						onChange={applyBranchValue}
+					/>
+				</div>
 				<SnapshotPicker
 					datasourceId={datasource.id}
 					datasourceConfig={activeTab?.datasource_config ?? {}}
 					label="Time Travel"
 					persistOpen
-					showBuildPreviews
+					branch={(activeTab?.datasource_config as Record<string, unknown> | null)?.branch as
+						| string
+						| null
+						| undefined}
+					showBuildPreviews={!isOutputSource}
 					onConfigChange={updateSnapshotConfig}
 					onUiChange={updateTimeTravelUi}
 					onSelect={handleSnapshotSelect}

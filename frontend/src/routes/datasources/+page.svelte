@@ -12,6 +12,7 @@
 		Upload,
 		GitBranch
 	} from 'lucide-svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
@@ -64,8 +65,11 @@
 	function selectDatasource(id: string | null) {
 		selectedId = id;
 		showConfig = id;
-		snapshotConfig = null;
-		selectedBranch = null;
+		const nextDatasource = id ? (datasources.find((d) => d.id === id) ?? null) : null;
+		const nextConfig = (nextDatasource?.config ?? {}) as Record<string, unknown>;
+		const nextBranch = 'master';
+		snapshotConfig = id ? { ...nextConfig, branch: nextBranch } : null;
+		selectedBranch = id ? nextBranch : null;
 		showComparison = false;
 		const url = id ? `/datasources?id=${id}` : '/datasources';
 		goto(resolve(url as '/'), { replaceState: true });
@@ -84,32 +88,18 @@
 		snapshotConfig = config;
 	}
 
-	function handleBranchChange(event: Event) {
-		const target = event.target as HTMLSelectElement;
-		selectedBranch = target.value || null;
-		if (!selectedBranch) {
-			snapshotConfig = null;
-			return;
-		}
-		const next = { ...(snapshotConfig ?? selectedDatasource?.config ?? {}) } as Record<
-			string,
-			unknown
-		>;
-		next.branch = selectedBranch;
-		snapshotConfig = next;
-	}
-
 	const branchOptions = $derived.by(() => {
 		const config = (selectedDatasource?.config ?? {}) as Record<string, unknown>;
-		const branches = config.branches as string[] | undefined;
-		if (!branches || branches.length === 0) return ['master'];
-		return branches;
+		const branches = (config.branches as string[] | undefined) ?? [];
+		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
+		if (!cleaned.includes('master')) {
+			cleaned.unshift('master');
+		}
+		return cleaned;
 	});
-	const activeBranch = $derived(() => {
+	const activeBranch = $derived.by(() => {
 		if (snapshotConfig && snapshotConfig.branch) return String(snapshotConfig.branch);
-		const config = (selectedDatasource?.config ?? {}) as Record<string, unknown>;
-		const branch = config.branch as string | undefined | null;
-		return branch ?? 'master';
+		return 'master';
 	});
 </script>
 
@@ -260,6 +250,7 @@
 										datasourceId={selectedDatasource.id}
 										datasourceConfig={snapshotConfig ?? selectedDatasource.config}
 										label="Time Travel"
+										branch={selectedBranch}
 										showDelete
 										showBuildPreviews
 										onConfigChange={handleSnapshotConfigChange}
@@ -267,15 +258,19 @@
 								</div>
 								<div class="flex items-center gap-2">
 									<GitBranch size={14} class="text-fg-tertiary" />
-									<select
-										class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+									<BranchPicker
+										branches={branchOptions}
 										value={activeBranch}
-										onchange={handleBranchChange}
-									>
-										{#each branchOptions as branch (branch)}
-											<option value={branch}>{branch}</option>
-										{/each}
-									</select>
+										placeholder="Select branch"
+										onChange={(value: string) => {
+											selectedBranch = value;
+											const next = {
+												...(snapshotConfig ?? selectedDatasource?.config ?? {})
+											} as Record<string, unknown>;
+											next.branch = value;
+											snapshotConfig = next;
+										}}
+									/>
 								</div>
 								<button
 									class="btn-ghost btn-sm border border-tertiary text-xs"

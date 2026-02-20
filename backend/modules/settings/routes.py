@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
-from core.database import get_db
+from core.database import get_settings_db
 from core.error_handlers import handle_errors
 from modules.settings.schemas import (
     DetectCustomBotRequest,
@@ -34,13 +34,13 @@ router = APIRouter(prefix='/settings', tags=['settings'])
 
 @router.get('', response_model=SettingsResponse)
 @handle_errors(operation='get settings')
-def read_settings(session: Session = Depends(get_db)) -> SettingsResponse:
+def read_settings(session: Session = Depends(get_settings_db)) -> SettingsResponse:
     return get_settings(session)
 
 
 @router.put('', response_model=SettingsResponse)
 @handle_errors(operation='update settings')
-def write_settings(data: SettingsUpdate, session: Session = Depends(get_db)) -> SettingsResponse:
+def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings_db)) -> SettingsResponse:
     from modules.telegram.bot import telegram_bot
 
     result = update_settings(session, data)

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { getLineage, type LineageNode, type LineageResponse } from '$lib/api/lineage';
+	import { listDatasources } from '$lib/api/datasource';
 	import LineageGraph from '$lib/components/common/LineageGraph.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import {
@@ -23,10 +24,44 @@
 		zoomOutView: () => void;
 	};
 
-	const query = createQuery(() => ({
-		queryKey: ['lineage'],
+	let selectedDatasourceId = $state<string>('');
+	let selectedBranch = $state<string>('');
+
+	const datasourcesQuery = createQuery(() => ({
+		queryKey: ['datasources'],
 		queryFn: async () => {
-			const result = await getLineage();
+			const result = await listDatasources(true);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		}
+	}));
+
+	const outputDatasources = $derived.by(() =>
+		(datasourcesQuery.data ?? []).filter((ds) => ds.created_by === 'analysis')
+	);
+
+	const branchOptions = $derived.by(() => {
+		const selected = outputDatasources.find((ds) => ds.id === selectedDatasourceId);
+		const config = (selected?.config ?? {}) as Record<string, unknown>;
+		const branches = config.branches as string[] | undefined;
+		if (!branches || branches.length === 0) return ['master'];
+		return branches;
+	});
+
+	$effect(() => {
+		if (!selectedDatasourceId) {
+			selectedBranch = '';
+			return;
+		}
+		if (!selectedBranch && branchOptions.length > 0) {
+			selectedBranch = branchOptions[0] ?? '';
+		}
+	});
+
+	const query = createQuery(() => ({
+		queryKey: ['lineage', selectedDatasourceId, selectedBranch],
+		queryFn: async () => {
+			const result = await getLineage(selectedDatasourceId || null, selectedBranch || null);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -66,6 +101,17 @@
 	function resetView() {
 		graphRef?.resetLineageView();
 	}
+
+	function handleDatasourceChange(event: Event) {
+		const target = event.currentTarget as HTMLSelectElement;
+		selectedDatasourceId = target.value;
+		selectedBranch = '';
+	}
+
+	function handleBranchChange(event: Event) {
+		const target = event.currentTarget as HTMLSelectElement;
+		selectedBranch = target.value;
+	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -75,6 +121,32 @@
 
 	<div class="lineage-page">
 		<div class="lineage-toolbar-row">
+			<div class="flex items-center gap-2">
+				<select
+					class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+					value={selectedDatasourceId}
+					onchange={handleDatasourceChange}
+				>
+					<option value="">Select output datasource</option>
+					{#each outputDatasources as ds (ds.id)}
+						<option value={ds.id}>{ds.name}</option>
+					{/each}
+				</select>
+				<select
+					class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+					value={selectedBranch}
+					onchange={handleBranchChange}
+					disabled={!selectedDatasourceId}
+				>
+					{#if !selectedDatasourceId}
+						<option value="">Select branch</option>
+					{:else}
+						{#each branchOptions as branch (branch)}
+							<option value={branch}>{branch}</option>
+						{/each}
+					{/if}
+				</select>
+			</div>
 			<span class="mr-2 text-xs text-fg-muted">Layout</span>
 			<button
 				class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"

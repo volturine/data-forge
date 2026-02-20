@@ -796,11 +796,9 @@
 		<p class="m-0">
 			{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}
 		</p>
-		<button
-			class="btn-primary mt-4"
-			onclick={() => goto(resolve('/'), { invalidateAll: true })}
-			type="button">Back to Gallery</button
-		>
+		<button class="btn-primary mt-4" onclick={() => goto(resolve('/analysis/new'))} type="button">
+			Create analysis
+		</button>
 	</div>
 {:else if analysisQuery.data}
 	<div class="analysis-page flex h-full flex-col bg-secondary">

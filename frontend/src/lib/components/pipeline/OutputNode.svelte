@@ -12,6 +12,7 @@
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import {
 		Bell,
 		CalendarClock,
@@ -42,6 +43,24 @@
 	let notifyOpen = $state(false);
 	let scheduleOpen = $state(false);
 	let healthOpen = $state(false);
+	const defaultBranch = $derived.by(() => {
+		const current = analysisStore.current?.pipeline_definition ?? {};
+		const branch = (current as Record<string, unknown>).output_branch as string | undefined;
+		const next = branch ?? '';
+		return next.trim().length > 0 ? next : 'master';
+	});
+	const branchValue = $derived.by(() => {
+		const next = outputConfig.iceberg.branch ?? defaultBranch;
+		return next.trim().length > 0 ? next : defaultBranch;
+	});
+	const branchOptions = $derived.by(() => {
+		const branches = (outputDatasourceQuery.data?.config?.branches as string[] | undefined) ?? [];
+		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
+		const current = branchValue.trim();
+		if (!current) return cleaned;
+		if (cleaned.includes(current)) return cleaned;
+		return [current, ...cleaned];
+	});
 	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
 
 	const outputDatasourceId = $derived(activeTab?.output_datasource_id ?? null);
@@ -137,14 +156,19 @@
 			(icebergRaw.table_name as string) ||
 			defaultName.replace(/\s+/g, '_').toLowerCase() ||
 			'export';
+		const branch =
+			typeof icebergRaw.branch === 'string' && icebergRaw.branch.trim().length > 0
+				? icebergRaw.branch.trim()
+				: defaultBranch;
 		return {
 			datasource_type: 'iceberg',
 			format: 'parquet',
 			filename: (output.filename as string) || tableName,
 			build_mode: (output.build_mode as string) || 'full',
 			iceberg: {
-				namespace: (icebergRaw.namespace as string) || 'exports',
-				table_name: tableName
+				namespace: (icebergRaw.namespace as string) || 'outputs',
+				table_name: tableName,
+				branch
 			},
 			notification: (output.notification as Record<string, unknown> | undefined) ?? null
 		};
@@ -195,8 +219,25 @@
 			format: 'parquet',
 			filename: tableName,
 			build_mode: 'full',
-			iceberg: { namespace: 'exports', table_name: tableName }
+			iceberg: {
+				namespace: 'outputs',
+				table_name: tableName,
+				branch: defaultBranch
+			}
 		});
+	}
+
+	function applyGlobalBranchValue(next: string) {
+		ensureOutputConfig();
+		const tab = activeTab;
+		if (!tab) return;
+		const base = (tab.datasource_config ?? {}) as Record<string, unknown>;
+		const output = (base.output as Record<string, unknown> | undefined) ?? {};
+		const iceberg = (output.iceberg as Record<string, unknown> | undefined) ?? {};
+		const trimmed = next.trim();
+		const branch = trimmed.length > 0 ? trimmed : defaultBranch;
+		analysisStore.setOutputBranch(branch);
+		updateOutputConfig({ iceberg: { ...iceberg, branch } });
 	}
 
 	function toggleNotification() {
@@ -289,8 +330,7 @@
 
 <div class="step-node relative w-[65%]">
 	<div class="node-content border border-tertiary bg-primary p-3 shadow-sm">
-		<!-- Row 1: Output Node badge + is_hidden toggle (far right) -->
-		<div class="flex items-center justify-between gap-2">
+		<div class="flex items-center gap-2">
 			<span
 				class="rounded-sm border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
 			>
@@ -317,12 +357,18 @@
 					{/if}
 				</button>
 			{/if}
-		</div>
-
-		<!-- Row 2: table_name input + Build button -->
-		<div class="mt-3 flex items-center gap-2 border-t border-tertiary pt-3">
+			<div class="flex-1"></div>
+			<div class="min-w-[140px]">
+				<BranchPicker
+					branches={branchOptions}
+					value={branchValue}
+					placeholder="Output branch"
+					allowCreate={true}
+					onChange={applyGlobalBranchValue}
+				/>
+			</div>
 			<input
-				class="resource-input flex-1 border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
+				class="resource-input w-40 border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
 				id={`${idPrefix}-iceberg-table`}
 				value={outputConfig.iceberg.table_name}
 				placeholder="Table name"
@@ -476,7 +522,8 @@
 												})}
 										></textarea>
 										<span class="text-[10px] text-fg-muted">
-											{'{{analysis_name}}'}, {'{{status}}'}, {'{{duration_ms}}'}, {'{{row_count}}'}
+											&#123;&#123;analysis_name&#125;&#125;, &#123;&#123;status&#125;&#125;,
+											&#123;&#123;duration_ms&#125;&#125;, &#123;&#123;row_count&#125;&#125;
 										</span>
 									</div>
 								</div>

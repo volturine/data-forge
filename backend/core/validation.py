@@ -12,7 +12,10 @@ def _parse_uuid(value: str) -> str:
 
 
 AnalysisId = Annotated[str, Path(description='Analysis ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]
-DataSourceId = Annotated[str, Path(description='Datasource ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]
+DataSourceId = Annotated[
+    str,
+    Path(description='Datasource ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a', 'ds-lineage-output'], min_length=1),
+]
 ScheduleId = Annotated[str, Path(description='Schedule ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]
 EngineRunId = Annotated[str, Path(description='Engine run ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]
 HealthcheckId = Annotated[str, Path(description='Healthcheck ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]

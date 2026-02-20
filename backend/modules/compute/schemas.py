@@ -156,12 +156,11 @@ class ExportDatasourceType(str, Enum):
 
 
 class IcebergExportOptions(BaseModel):
-    """Options for Iceberg table export when destination is 'datasource'."""
-
     model_config = ConfigDict(from_attributes=True)
 
     table_name: str = 'exported_data'
-    namespace: str = 'exports'
+    namespace: str = 'outputs'
+    branch: str | None = None
 
 
 class DuckDBExportOptions(BaseModel):

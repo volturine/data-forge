@@ -1,5 +1,3 @@
-"""Extended tests for datasource module."""
-
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,10 +12,7 @@ from modules.datasource.service import _compute_histogram, create_analysis_datas
 
 
 class TestDataSourceValidation:
-    """Test datasource validation logic."""
-
     def test_upload_empty_file(self, client, temp_upload_dir: Path):
-        """Test uploading an empty file."""
         files = {'file': ('empty.csv', b'', 'text/csv')}
 
         response = client.post('/api/v1/datasource/upload', files=files)
@@ -26,7 +21,6 @@ class TestDataSourceValidation:
         assert response.status_code in [400, 422]
 
     def test_upload_file_too_large(self, client, monkeypatch):
-        """Test uploading a file that exceeds size limit."""
         # Create a large file (> 100MB)
         large_content = b'a' * (101 * 1024 * 1024)
         files = {'file': ('large.csv', large_content, 'text/csv')}
@@ -37,7 +31,6 @@ class TestDataSourceValidation:
         assert response.status_code in [400, 413, 422]
 
     def test_upload_unsupported_format(self, client):
-        """Test uploading unsupported file format."""
         files = {'file': ('test.xyz', b'random data', 'application/octet-stream')}
         data = {'name': 'Unsupported Format Test'}
 
@@ -47,7 +40,6 @@ class TestDataSourceValidation:
         assert response.status_code in [400, 422]
 
     def test_upload_corrupted_csv(self, client):
-        """Test uploading a corrupted CSV file."""
         corrupted_csv = b'id,name,age\n1,Alice\n2,Bob,30,extra\n'
         files = {'file': ('corrupted.csv', corrupted_csv, 'text/csv')}
         data = {'name': 'Corrupted CSV Test'}
@@ -60,7 +52,6 @@ class TestDataSourceValidation:
             assert 'id' in json_data
 
     def test_upload_csv_with_special_characters(self, client):
-        """Test uploading CSV with special characters."""
         csv_content = b'id,name,description\n1,"O\'Brien","Quote: \\"test\\""\n2,Smith,"Newline:\ntest"\n'
         files = {'file': ('special.csv', csv_content, 'text/csv')}
         data = {'name': 'Special Characters Test'}
@@ -70,7 +61,6 @@ class TestDataSourceValidation:
         assert response.status_code == 200
 
     def test_upload_csv_with_unicode(self, client):
-        """Test uploading CSV with Unicode characters."""
         csv_content = 'id,name,city\n1,José,São Paulo\n2,François,Zürich\n'.encode()
         files = {'file': ('unicode.csv', csv_content, 'text/csv')}
         data = {'name': 'Unicode Test'}
@@ -82,35 +72,30 @@ class TestDataSourceValidation:
         assert 'id' in json_data
 
     def test_upload_with_missing_file(self, client):
-        """Test upload endpoint without providing a file."""
         data = {'name': 'Missing File Test'}
         response = client.post('/api/v1/datasource/upload', data=data)
 
         assert response.status_code == 422
 
     def test_get_nonexistent_datasource(self, client):
-        """Test getting a datasource that doesn't exist."""
         fake_id = str(uuid.uuid4())
         response = client.get(f'/api/v1/datasource/{fake_id}')
 
         assert response.status_code == 404
 
     def test_delete_nonexistent_datasource(self, client):
-        """Test deleting a datasource that doesn't exist."""
         fake_id = str(uuid.uuid4())
         response = client.delete(f'/api/v1/datasource/{fake_id}')
 
         assert response.status_code == 404
 
     def test_get_schema_nonexistent_datasource(self, client):
-        """Test getting schema for non-existent datasource."""
         fake_id = str(uuid.uuid4())
         response = client.get(f'/api/v1/datasource/{fake_id}/schema')
 
         assert response.status_code == 404
 
     def test_upload_csv_with_different_delimiters(self, client):
-        """Test uploading CSV with different delimiters."""
         # Tab-separated
         tsv_content = b'id\tname\tage\n1\tAlice\t25\n2\tBob\t30\n'
         files = {'file': ('test.tsv', tsv_content, 'text/tab-separated-values')}

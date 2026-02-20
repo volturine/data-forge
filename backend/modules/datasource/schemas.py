@@ -130,8 +130,6 @@ class ExcelPreflightPreviewResponse(BaseModel):
 
 
 class CSVOptions(BaseModel):
-    """CSV-specific parsing options."""
-
     delimiter: str = ','
     quote_char: str = '"'
     has_header: bool = True
@@ -160,21 +158,10 @@ class FileDataSourceConfig(BaseModel):
 class DatabaseDataSourceConfig(BaseModel):
     connection_string: str
     query: str
-
-
-class DuckDBDataSourceConfig(BaseModel):
-    """DuckDB-specific datasource configuration."""
-
-    db_path: str | None = None
-    query: str
-    read_only: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
+    branch: str | None = None
 
 
 class IcebergDataSourceConfig(BaseModel):
-    """Iceberg-specific datasource configuration."""
-
     metadata_path: str
     branch: str | None = None
     snapshot_id: str | None = None
@@ -186,15 +173,10 @@ class IcebergDataSourceConfig(BaseModel):
     warehouse: str | None = None
     namespace: str | None = None
     table: str | None = None
+    source: dict | None = None
+    refresh: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class APIDataSourceConfig(BaseModel):
-    url: str
-    method: str = 'GET'
-    headers: dict | None = None
-    auth: dict | None = None
 
 
 class DataSourceCreate(BaseModel):
@@ -219,8 +201,6 @@ class DataSourceResponse(BaseModel):
 
 
 class DataSourceUpdate(BaseModel):
-    """Update a datasource configuration (schema is read-only)."""
-
     model_config = ConfigDict(from_attributes=True)
 
     name: str | None = None

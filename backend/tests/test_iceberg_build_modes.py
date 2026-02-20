@@ -6,6 +6,7 @@ from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 from sqlmodel import Session
 
+from core.namespace import namespace_paths
 from modules.compute.service import _sync_iceberg_schema, export_data
 from modules.datasource.models import DataSource
 
@@ -140,7 +141,7 @@ class TestBuildModeWiring:
         mock_catalog.load_table.return_value = mock_table
         mock_catalog.create_table.return_value = mock_table
         mock_table.current_snapshot.return_value = MagicMock(snapshot_id=123, timestamp_ms=1000)
-        mock_table.metadata_location = '/tmp/exports/ns/tbl/metadata/v1.metadata.json'
+        mock_table.metadata_location = str(namespace_paths().exports_dir / 'ns' / 'tbl' / 'metadata' / 'v1.metadata.json')
         mock_arrow = MagicMock(schema=pa.schema([pa.field('id', pa.int64())]))
         return mock_catalog, mock_table, mock_arrow
 
@@ -250,7 +251,7 @@ class TestBuildModeWiring:
                 build_mode='recreate',
             )
 
-        mock_catalog.drop_table.assert_called_once_with(f'ns.{output_ds_id}')
+        mock_catalog.drop_table.assert_called_once_with(f'ns.{output_ds_id}_master')
         mock_catalog.create_table.assert_called_once()
         mock_table.append.assert_called_once_with(mock_arrow)
         mock_table.overwrite.assert_not_called()

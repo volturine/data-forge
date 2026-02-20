@@ -38,19 +38,7 @@ export interface FileDataSourceConfig {
 export interface DatabaseDataSourceConfig {
 	connection_string: string;
 	query: string;
-}
-
-export interface APIDataSourceConfig {
-	url: string;
-	method?: string;
-	headers?: Record<string, string> | null;
-	auth?: Record<string, unknown> | null;
-}
-
-export interface DuckDBDataSourceConfig {
-	db_path: string | null;
-	query: string;
-	read_only?: boolean;
+	branch?: string | null;
 }
 
 export interface IcebergDataSourceConfig {
@@ -61,6 +49,13 @@ export interface IcebergDataSourceConfig {
 	snapshot_timestamp_ms?: number | null;
 	storage_options?: Record<string, string> | null;
 	reader?: string | null;
+	catalog_type?: string | null;
+	catalog_uri?: string | null;
+	warehouse?: string | null;
+	namespace?: string | null;
+	table?: string | null;
+	source?: Record<string, unknown> | null;
+	refresh?: Record<string, unknown> | null;
 }
 
 export interface AnalysisDataSourceConfig {
@@ -68,7 +63,7 @@ export interface AnalysisDataSourceConfig {
 	analysis_tab_id?: string | null;
 }
 
-export type SourceType = 'file' | 'database' | 'api' | 'duckdb' | 'iceberg' | 'analysis';
+export type SourceType = 'file' | 'database' | 'iceberg' | 'analysis';
 
 export interface DataSourceCreate {
 	name: string;

@@ -8,6 +8,7 @@
 	interface Props {
 		datasourceId: string;
 		datasourceConfig: Record<string, unknown>;
+		branch?: string | null;
 		label?: string;
 		persistOpen?: boolean;
 		onConfigChange?: (config: Record<string, unknown>) => void;
@@ -26,7 +27,8 @@
 		onUiChange,
 		onSelect,
 		showDelete = false,
-		showBuildPreviews = false
+		showBuildPreviews = false,
+		branch = null
 	}: Props = $props();
 
 	let snapshotsOpen = $state(false);
@@ -276,11 +278,17 @@
 		if (!datasourceId) return;
 		listEngineRuns({ datasource_id: datasourceId, limit: 50 }).match(
 			(result) => {
-				buildRuns = result.filter(
-					(run) =>
-						(run.kind === 'datasource_update' || run.kind === 'datasource_create') &&
-						run.status === 'success'
-				);
+				const branchValue =
+					branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
+				buildRuns = result.filter((run) => {
+					if (!(run.kind === 'datasource_update' || run.kind === 'datasource_create')) return false;
+					if (run.status !== 'success') return false;
+					if (!branchValue) return true;
+					const payload = run.request_json as Record<string, unknown>;
+					const opts = payload.iceberg_options as Record<string, unknown> | undefined;
+					const runBranch = opts?.branch as string | undefined;
+					return runBranch === branchValue;
+				});
 			},
 			() => {
 				buildRuns = [];
@@ -289,6 +297,8 @@
 	}
 
 	function getIcebergSnapshots(nextId: string) {
+		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
+		const suffix = branchValue ? `?branch=${encodeURIComponent(branchValue)}` : '';
 		return apiRequest<{
 			snapshots: Array<{
 				snapshot_id: string;
@@ -296,7 +306,7 @@
 				operation?: string | null;
 				is_current?: boolean | null;
 			}>;
-		}>(`/v1/compute/iceberg/${nextId}/snapshots`);
+		}>(`/v1/compute/iceberg/${nextId}/snapshots${suffix}`);
 	}
 
 	function setSnapshot(snapshotId: string | null, timestampMs?: number) {

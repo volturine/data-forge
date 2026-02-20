@@ -2,7 +2,6 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from shutil import copy2
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlmodel import Session
@@ -12,6 +11,7 @@ from core.config import settings
 from core.database import get_db, run_db
 from core.error_handlers import handle_errors
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
+from core.namespace import namespace_paths
 from core.validation import DataSourceId, PreflightId, parse_datasource_id, parse_preflight_id
 from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
@@ -29,8 +29,20 @@ def _list_export_branches(metadata_path: str) -> list[str]:
     metadata_dir = path / 'metadata'
     if metadata_dir.is_dir():
         return []
-    entries = [entry.name for entry in path.iterdir() if entry.is_dir()]
-    return sorted(entries)
+    entries = []
+    for entry in path.iterdir():
+        if not entry.is_dir():
+            continue
+        if (entry / 'metadata').is_dir():
+            entries.append(entry.name)
+            continue
+        if list(entry.glob('*.metadata.json')):
+            entries.append(entry.name)
+            continue
+    branches = sorted(entries)
+    if 'master' not in branches:
+        branches.insert(0, 'master')
+    return branches
 
 
 def _matches_magic_number(file_extension: str, upload: UploadFile) -> bool:
@@ -77,7 +89,7 @@ async def upload_file(
         raise HTTPException(status_code=400, detail='File content does not match extension')
     file_type = file_type_mapping[file_extension]
     unique_filename = f'{uuid.uuid4()}{file_extension}'
-    file_path = settings.upload_dir / unique_filename
+    file_path = namespace_paths().upload_dir / unique_filename
 
     max_bytes = settings.upload_max_file_size_bytes
     total = 0
@@ -155,6 +167,12 @@ async def upload_bulk(
         encoding=encoding,
     )
 
+    selected_extensions = [Path(file.filename).suffix.lower() for file in files if file.filename]
+    if selected_extensions:
+        unique_extensions = {ext for ext in selected_extensions if ext}
+        if len(unique_extensions) > 1:
+            raise HTTPException(status_code=400, detail='Bulk upload must use a single file type per batch')
+
     results: list[schemas.BulkUploadResult] = []
 
     for file in files:
@@ -179,7 +197,7 @@ async def upload_bulk(
             continue
         file_type = file_type_mapping[file_extension]
         unique_filename = f'{uuid.uuid4()}{file_extension}'
-        file_path = settings.upload_dir / unique_filename
+        file_path = namespace_paths().upload_dir / unique_filename
         name = Path(file.filename).stem
 
         max_bytes = settings.upload_max_file_size_bytes
@@ -250,7 +268,7 @@ async def preflight_excel(
         raise HTTPException(status_code=400, detail='File content does not match extension')
 
     unique_filename = f'{uuid.uuid4()}{file_extension}'
-    file_path = settings.upload_dir / unique_filename
+    file_path = namespace_paths().upload_dir / unique_filename
     max_bytes = settings.upload_max_file_size_bytes
     total = 0
     try:
@@ -371,7 +389,7 @@ async def confirm_excel(
 
     file_extension = preflight.temp_path.suffix.lower()
     target_filename = f'{uuid.uuid4()}{file_extension}'
-    target_path = settings.upload_dir / target_filename
+    target_path = namespace_paths().upload_dir / target_filename
 
     try:
         copy2(preflight.temp_path, target_path)
@@ -386,6 +404,15 @@ async def confirm_excel(
             named_range,
             cell_range,
         )
+        resolved_cell_range = cell_range
+        if not resolved_cell_range and (table_name or named_range or cell_range):
+            resolved_cell_range = service.format_excel_cell_range(
+                resolved_sheet,
+                resolved_start_row,
+                resolved_start_col,
+                resolved_end_row,
+                resolved_end_col,
+            )
         datasource = await run_in_threadpool(
             run_db,
             service.create_file_datasource,
@@ -400,7 +427,7 @@ async def confirm_excel(
             has_header=has_header,
             table_name=table_name,
             named_range=named_range,
-            cell_range=cell_range,
+            cell_range=resolved_cell_range,
         )
     except Exception as e:
         if target_path.exists():
@@ -418,14 +445,24 @@ def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: Session = Depends(get_db),
 ):
+    if datasource.source_type == DataSourceType.FILE:
+        raise HTTPException(
+            status_code=400,
+            detail='File datasource creation must use upload or existing Iceberg path',
+        )
+    if datasource.source_type == 'duckdb':
+        raise HTTPException(
+            status_code=400,
+            detail='DuckDB datasource creation is no longer supported',
+        )
+    if datasource.source_type == 'api':
+        raise HTTPException(status_code=400, detail='API datasources are not supported')
     handlers = _connect_handlers()
     handler = handlers.get(datasource.source_type)
     if not handler:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f'Unsupported source type: {datasource.source_type}. Use "file", "database", "api", "duckdb", "iceberg", or "analysis"'
-            ),
+            detail=(f'Unsupported source type: {datasource.source_type}. Use "file", "database", "iceberg", or "analysis"'),
         )
     return handler(datasource, session)
 
@@ -433,9 +470,6 @@ def connect_datasource(
 def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCreate, Session], schemas.DataSourceResponse]]:
     return {
         DataSourceType.DATABASE: _connect_database,
-        DataSourceType.API: _connect_api,
-        DataSourceType.FILE: _connect_file,
-        DataSourceType.DUCKDB: _connect_duckdb,
         DataSourceType.ICEBERG: _connect_iceberg,
         DataSourceType.ANALYSIS: _connect_analysis,
     }
@@ -451,58 +485,13 @@ def _connect_database(datasource: schemas.DataSourceCreate, session: Session) ->
     )
 
 
-def _connect_api(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
-    api_config = schemas.APIDataSourceConfig.model_validate(datasource.config)
-    parsed = urlparse(api_config.url)
-    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
-        raise HTTPException(status_code=400, detail='API URL must be http or https')
-    return service.create_api_datasource(
-        session=session,
-        name=datasource.name,
-        url=api_config.url,
-        method=api_config.method,
-        headers=api_config.headers,
-        auth=api_config.auth,
-    )
-
-
-def _connect_file(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
-    file_config = schemas.FileDataSourceConfig.model_validate(datasource.config)
-    return service.create_file_datasource(
-        session=session,
-        name=datasource.name,
-        file_path=file_config.file_path,
-        file_type=file_config.file_type,
-        csv_options=file_config.csv_options,
-        sheet_name=file_config.sheet_name,
-        start_row=file_config.start_row,
-        start_col=file_config.start_col,
-        end_col=file_config.end_col,
-        end_row=file_config.end_row,
-        has_header=file_config.has_header,
-        table_name=file_config.table_name,
-        named_range=file_config.named_range,
-        cell_range=file_config.cell_range,
-    )
-
-
-def _connect_duckdb(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
-    duckdb_config = schemas.DuckDBDataSourceConfig.model_validate(datasource.config)
-    return service.create_duckdb_datasource(
-        session=session,
-        name=datasource.name,
-        db_path=duckdb_config.db_path,
-        query=duckdb_config.query,
-        read_only=duckdb_config.read_only,
-    )
-
-
 def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
     iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
+    metadata_path = iceberg_config.metadata_path
     return service.create_iceberg_datasource(
         session=session,
         name=datasource.name,
-        metadata_path=iceberg_config.metadata_path,
+        metadata_path=metadata_path,
         snapshot_id=iceberg_config.snapshot_id,
         snapshot_timestamp_ms=iceberg_config.snapshot_timestamp_ms,
         storage_options=iceberg_config.storage_options,
@@ -537,10 +526,24 @@ def list_datasources(include_hidden: bool = False, session: Session = Depends(ge
 
 @router.get('/lineage')
 @handle_errors(operation='get lineage')
-def get_lineage(session: Session = Depends(get_db)):
+def get_lineage(
+    target_datasource_id: DataSourceId | None = None,
+    branch: str | None = None,
+    session: Session = Depends(get_db),
+):
     from modules.datasource.service_lineage import build_lineage
 
-    return build_lineage(session)
+    datasource_id = None
+    if target_datasource_id:
+        try:
+            datasource_id = parse_datasource_id(target_datasource_id)
+        except HTTPException:
+            datasource_id = target_datasource_id
+    if branch is not None:
+        branch = branch.strip()
+        if not branch:
+            branch = None
+    return build_lineage(session, target_datasource_id=datasource_id, branch=branch)
 
 
 @router.get('/{datasource_id}', response_model=schemas.DataSourceResponse)
@@ -670,6 +673,20 @@ def update_datasource(
 ):
     try:
         return service.update_datasource(session, parse_datasource_id(datasource_id), update)
+    except DataSourceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DataSourceValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post('/{datasource_id}/refresh', response_model=schemas.DataSourceResponse)
+@handle_errors(operation='refresh datasource')
+def refresh_datasource(
+    datasource_id: DataSourceId,
+    session: Session = Depends(get_db),
+):
+    try:
+        return service.refresh_external_datasource(session, parse_datasource_id(datasource_id))
     except DataSourceNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DataSourceValidationError as exc:

@@ -1,7 +1,8 @@
 ---
 description: Fast repo search and code exploration — no edits
 mode: subagent
-model: github-copilot/claude-sonnet-4.5
+model: opencode/minimax-m2.5-free
+name: explorer
 tools:
   edit: false
   write: false

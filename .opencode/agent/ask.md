@@ -1,6 +1,6 @@
 ---
 description: Ask clarifying questions before implementation begins
-model: github-copilot/claude-haiku-4.5
+model: opencode/minimax-m2.5-free
 tools:
   write: false
   edit: false

@@ -50,10 +50,16 @@
 	const layoutNodes = $derived.by(() => {
 		const next = [] as Array<{ id: string; label: string; meta: string | null; type: string }>;
 		for (const node of nodes) {
+			const meta =
+				node.type === 'datasource'
+					? node.branch
+						? `${node.source_type ?? ''} • ${node.branch}`
+						: (node.source_type ?? null)
+					: (node.status ?? null);
 			next.push({
 				id: node.id,
 				label: node.name,
-				meta: node.type === 'datasource' ? (node.source_type ?? null) : (node.status ?? null),
+				meta,
 				type: node.type
 			});
 		}

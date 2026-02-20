@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
-	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
+	import {
+		getDatasource,
+		getDatasourceSchema,
+		refreshDatasource,
+		updateDatasource
+	} from '$lib/api/datasource';
 	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
 	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
@@ -347,6 +352,25 @@
 
 		updateMutation.mutate(update);
 		hasChanges = false;
+
+		if (update.config && ds.source_type === 'iceberg') {
+			const source = (ds.config as Record<string, unknown>)?.source as
+				| Record<string, unknown>
+				| undefined;
+			const sourceType = source?.source_type as string | undefined;
+			if (sourceType === 'database' || sourceType === 'file') {
+				const refreshResult = await refreshDatasource(ds.id);
+				if (refreshResult.isErr()) {
+					refreshError = refreshResult.error.message || 'Failed to re-ingest datasource';
+					return;
+				}
+				queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
+				queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
+				queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
+				queryClient.invalidateQueries({ queryKey: ['datasources'] });
+				queryClient.invalidateQueries({ queryKey: ['datasource-runs', ds.id] });
+			}
+		}
 	}
 
 	async function handleRefresh() {
@@ -360,6 +384,14 @@
 			return;
 		}
 		try {
+			const config = datasource.config as Record<string, unknown> | null;
+			const source = config?.source as Record<string, unknown> | undefined;
+			if (datasource.source_type === 'iceberg' && source?.source_type === 'database') {
+				const refreshResult = await refreshDatasource(datasource.id);
+				if (refreshResult.isErr()) {
+					throw new Error(refreshResult.error.message);
+				}
+			}
 			const result = await getDatasourceSchema(datasource.id, { refresh: true });
 			if (result.isErr()) {
 				throw new Error(result.error.message);
@@ -576,10 +608,7 @@
 									{@const config = ds.config as unknown as FileDataSourceConfig}
 									<FileTypeBadge path={config.file_path} size="sm" />
 								{:else}
-									<FileTypeBadge
-										sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-										size="sm"
-									/>
+									<FileTypeBadge sourceType={ds.source_type} size="sm" />
 								{/if}
 							</div>
 							{#if ds.is_hidden}
@@ -643,26 +672,6 @@
 							{/if}
 						{/if}
 
-						{#if ds.source_type === 'api'}
-							{@const config = ds.config as unknown as { url?: string }}
-							{#if config.url}
-								<div class="flex flex-col gap-1">
-									<span class="uppercase tracking-wide text-fg-muted">Location</span>
-									<span class="break-all text-fg-secondary font-mono">{config.url}</span>
-								</div>
-							{/if}
-						{/if}
-
-						{#if ds.source_type === 'duckdb'}
-							{@const config = ds.config as unknown as { db_path?: string | null }}
-							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">Location</span>
-								<span class="break-all text-fg-secondary font-mono"
-									>{config.db_path ?? 'In-memory'}</span
-								>
-							</div>
-						{/if}
-
 						<!-- Metadata Path for Iceberg -->
 						{#if isIceberg(ds)}
 							{@const config = ds.config as unknown as IcebergDataSourceConfig}
@@ -675,6 +684,7 @@
 								<span class="break-all text-fg-secondary font-mono"
 									>{config.branch ?? 'master'}</span
 								>
+								<span class="text-[10px] text-fg-tertiary">Input branch for this datasource</span>
 							</div>
 						{/if}
 

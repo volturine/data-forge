@@ -1,6 +1,5 @@
 """Tests for the settings module — GET/PUT settings, test SMTP/Telegram."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -19,8 +18,8 @@ class TestGetSettings:
         assert 'telegram_bot_token' in data
         assert 'public_idb_debug' in data
 
-    def test_returns_saved_values(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_returns_saved_values(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         # First save some values
         client.put(
             '/api/v1/settings',
@@ -48,8 +47,8 @@ class TestGetSettings:
 class TestUpdateSettings:
     """PUT /v1/settings — upserts the singleton row."""
 
-    def test_update_smtp(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_update_smtp(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         resp = client.put(
             '/api/v1/settings',
             json={
@@ -68,8 +67,8 @@ class TestUpdateSettings:
         assert data['smtp_user'] == 'test@test.com'
         assert data['smtp_password'] == 'pw'
 
-    def test_update_telegram(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_update_telegram(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         resp = client.put(
             '/api/v1/settings',
             json={
@@ -85,8 +84,8 @@ class TestUpdateSettings:
         assert resp.status_code == 200
         assert resp.json()['telegram_bot_token'] == 'bot999:xyz'
 
-    def test_update_idb_debug(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_update_idb_debug(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         resp = client.put(
             '/api/v1/settings',
             json={
@@ -106,8 +105,8 @@ class TestUpdateSettings:
 class TestTestSmtp:
     """POST /v1/settings/test-smtp — test email sending."""
 
-    def test_not_configured(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_not_configured(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         # Ensure SMTP is cleared
         client.put(
             '/api/v1/settings',
@@ -128,8 +127,8 @@ class TestTestSmtp:
         assert 'not configured' in data['message'].lower()
 
     @patch('modules.settings.routes.smtplib.SMTP')
-    def test_success(self, mock_smtp_cls: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_success(self, mock_smtp_cls: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_server = MagicMock()
         mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
         mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -154,8 +153,8 @@ class TestTestSmtp:
         assert data['success'] is True
 
     @patch('modules.settings.routes.smtplib.SMTP')
-    def test_failure(self, mock_smtp_cls: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_failure(self, mock_smtp_cls: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_smtp_cls.side_effect = ConnectionRefusedError('Connection refused')
 
         client.put(
@@ -180,8 +179,8 @@ class TestTestSmtp:
 class TestTestTelegram:
     """POST /v1/settings/test-telegram — test Telegram sending."""
 
-    def test_not_configured(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_not_configured(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         client.put(
             '/api/v1/settings',
             json={
@@ -201,8 +200,8 @@ class TestTestTelegram:
         assert 'not configured' in data['message'].lower()
 
     @patch('modules.settings.routes.httpx.post')
-    def test_success(self, mock_post: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_success(self, mock_post: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_post.return_value = mock_resp
@@ -226,8 +225,8 @@ class TestTestTelegram:
         assert data['success'] is True
 
     @patch('modules.settings.routes.httpx.post')
-    def test_api_error(self, mock_post: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_api_error(self, mock_post: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 400
         mock_resp.json.return_value = {'description': 'Bad Request: chat not found'}
@@ -253,8 +252,8 @@ class TestTestTelegram:
         assert 'chat not found' in data['message'].lower()
 
     @patch('modules.settings.routes.httpx.post')
-    def test_transport_failure(self, mock_post: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_transport_failure(self, mock_post: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_post.side_effect = httpx.ConnectError('Connection refused')
 
         client.put(
@@ -279,8 +278,8 @@ class TestTestTelegram:
 class TestConfigEndpointWithDbSettings:
     """GET /v1/config — should reflect DB settings for smtp/telegram enabled."""
 
-    def test_config_reflects_db_settings(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_config_reflects_db_settings(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         # Save SMTP settings
         client.put(
             '/api/v1/settings',
@@ -302,8 +301,8 @@ class TestConfigEndpointWithDbSettings:
         assert data['telegram_enabled'] is False
         assert data['public_idb_debug'] is True
 
-    def test_config_reflects_empty_settings(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_config_reflects_empty_settings(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         client.put(
             '/api/v1/settings',
             json={
@@ -328,8 +327,8 @@ class TestConfigEndpointWithDbSettings:
 class TestDetectTelegramChat:
     """POST /v1/settings/detect-telegram-chat — detect chat IDs via getUpdates."""
 
-    def test_not_configured(self, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_not_configured(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         client.put(
             '/api/v1/settings',
             json={
@@ -350,8 +349,8 @@ class TestDetectTelegramChat:
         assert data['chats'] == []
 
     @patch('modules.settings.routes.httpx.get')
-    def test_success_with_chats(self, mock_get: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_success_with_chats(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -396,8 +395,8 @@ class TestDetectTelegramChat:
         assert ids == {'123', '456'}
 
     @patch('modules.settings.routes.httpx.get')
-    def test_no_updates(self, mock_get: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_no_updates(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {'ok': True, 'result': []}
@@ -422,8 +421,8 @@ class TestDetectTelegramChat:
         assert len(data['chats']) == 0
 
     @patch('modules.settings.routes.httpx.get')
-    def test_deduplicates_chats(self, mock_get: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_deduplicates_chats(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -467,8 +466,8 @@ class TestDetectTelegramChat:
         assert data['chats'][0]['chat_id'] == '123'
 
     @patch('modules.settings.routes.httpx.get')
-    def test_channel_post(self, mock_get: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_channel_post(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -505,8 +504,8 @@ class TestDetectTelegramChat:
         assert data['chats'][0]['title'] == 'My Channel'
 
     @patch('modules.settings.routes.httpx.get')
-    def test_api_error(self, mock_get: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_api_error(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_resp.text = 'Unauthorized'
@@ -532,8 +531,8 @@ class TestDetectTelegramChat:
         assert data['chats'] == []
 
     @patch('modules.settings.routes.httpx.get')
-    def test_transport_failure(self, mock_get: MagicMock, client: TestClient) -> None:
-        os.environ['SETTINGS_ENCRYPTION_KEY'] = 'test-key'
+    def test_transport_failure(self, mock_get: MagicMock, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         mock_get.side_effect = httpx.ConnectError('Connection refused')
 
         client.put(

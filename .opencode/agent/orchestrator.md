@@ -2,6 +2,7 @@
 description: Primary agent — breaks goals into tasks, delegates to subagents, integrates results
 model: github-copilot/gpt-5.2-codex
 variant: medium
+name: orchestrator
 tools:
   edit: true
   write: true

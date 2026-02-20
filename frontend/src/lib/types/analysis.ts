@@ -29,6 +29,7 @@ export interface AnalysisCreate {
 	datasource_ids: string[];
 	pipeline_steps: PipelineStep[];
 	tabs: AnalysisTab[];
+	output_branch?: string | null;
 }
 
 export interface AnalysisUpdate {
@@ -39,6 +40,7 @@ export interface AnalysisUpdate {
 	tabs?: AnalysisTab[] | null;
 	client_id?: string | null;
 	lock_token?: string | null;
+	output_branch?: string | null;
 }
 
 export interface Analysis {
@@ -53,6 +55,7 @@ export interface Analysis {
 	thumbnail: string | null;
 	tabs: AnalysisTab[];
 	version?: string | null;
+	output_branch?: string | null;
 }
 
 export interface AnalysisGalleryItem {

@@ -6,6 +6,7 @@
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { AnalysisCreate, PipelineStep } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
@@ -16,6 +17,7 @@
 	let selectedDatasourceIds = $state<string[]>([]);
 	let error = $state('');
 	let creating = $state(false);
+	let outputBranch = $state('master');
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -63,6 +65,7 @@
 			description: description.trim() || null,
 			datasource_ids: selectedDatasourceIds,
 			pipeline_steps: [],
+			output_branch: outputBranch.trim() || 'master',
 			tabs: selectedDatasourceIds.map((datasourceId, index) => ({
 				id: makeId(),
 				output_datasource_id: makeId(),
@@ -175,6 +178,19 @@
 						class="min-h-25 w-full resize-y border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
 					></textarea>
 				</div>
+				<div class="mb-5 flex flex-col gap-2">
+					<label for="output-branch" class="block text-sm font-medium text-fg-secondary">
+						Output branch (optional)
+					</label>
+					<BranchPicker
+						branches={['master']}
+						value={outputBranch}
+						placeholder="master"
+						allowCreate={true}
+						onChange={(value: string) => (outputBranch = value)}
+					/>
+					<p class="m-0 text-xs text-fg-muted">Sets the default output branch for all exports.</p>
+				</div>
 			</div>
 		{:else if step === 2}
 			<div class="card">
@@ -250,7 +266,7 @@
 											/>
 										{:else}
 											<FileTypeBadge
-												sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+												sourceType={ds.source_type as 'database' | 'iceberg'}
 												size="sm"
 												showIcon={true}
 											/>

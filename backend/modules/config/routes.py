@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from core.config import settings
-from core.database import get_db
+from core.database import get_settings_db
 from modules.settings.service import get_settings
 
 router = APIRouter(prefix='/config', tags=['config'])
@@ -27,10 +27,11 @@ class FrontendConfig(BaseModel):
     public_idb_debug: bool
     smtp_enabled: bool
     telegram_enabled: bool
+    default_namespace: str
 
 
 @router.get('', response_model=FrontendConfig)
-def get_config(session: Session = Depends(get_db)) -> FrontendConfig:
+def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
     """Get configuration values for frontend."""
     db_settings = get_settings(session)
     return FrontendConfig(
@@ -47,4 +48,5 @@ def get_config(session: Session = Depends(get_db)) -> FrontendConfig:
         public_idb_debug=db_settings.public_idb_debug,
         smtp_enabled=bool(db_settings.smtp_host and db_settings.smtp_user),
         telegram_enabled=bool(db_settings.telegram_bot_enabled and db_settings.telegram_bot_token),
+        default_namespace=settings.default_namespace,
     )
