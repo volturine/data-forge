@@ -14,7 +14,8 @@
   - [x] Build logs show datasource create/update kinds
   - [x] Restore output hidden toggle and compact first row layout
   - [x] Datasources page defaults to master branch and branch list includes master
-  - [ ] Re-ingest uploads on CSV/Excel config change
+  - [x] Re-ingest uploads on CSV/Excel config change
+  - [x] Fix Iceberg snapshot fallback (stale snapshot_id no longer crashes)
 - [x] Adjust analysis node behavior: auto-apply inline view steps at 100 rows, chart nodes require apply with placeholder
 - [x] Fix analysis save refresh + derived tab previews before save
 - [x] Unify analysis DAG across tabs and restore default view nodes on new analysis

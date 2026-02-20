@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import polars as pl
 from pyiceberg.table import StaticTable
+
+logger = logging.getLogger(__name__)
 
 
 def scan_iceberg_snapshot(
@@ -14,7 +17,11 @@ def scan_iceberg_snapshot(
     table = StaticTable.from_metadata(metadata_path)
     snapshot = table.snapshot_by_id(snapshot_id)
     if snapshot is None:
-        raise ValueError(f'Iceberg snapshot ID not found: {snapshot_id}')
+        logger.warning('Iceberg snapshot ID %s not found, falling back to latest snapshot', snapshot_id)
+        snapshot = table.current_snapshot()
+        if snapshot is None:
+            raise ValueError(f'Iceberg table has no snapshots (requested snapshot_id: {snapshot_id})')
+        snapshot_id = snapshot.snapshot_id
 
     schema_id = snapshot.schema_id
     schema = table.schema() if schema_id is None else table.metadata.schema_by_id(schema_id) or table.schema()

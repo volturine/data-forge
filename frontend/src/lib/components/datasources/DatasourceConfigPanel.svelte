@@ -144,9 +144,9 @@
 		endRowInput = '';
 
 		// Initialize type-specific config
-		const config = ds.config as unknown as FileDataSourceConfig;
-		if (isCsv(ds)) {
-			const opts = config.csv_options;
+		const fileSource = getFileSource(ds);
+		if (isCsv(ds) && fileSource) {
+			const opts = fileSource.csv_options;
 			csvConfig = {
 				delimiter: opts?.delimiter ?? ',',
 				quote_char: opts?.quote_char ?? '"',
@@ -155,8 +155,8 @@
 				encoding: opts?.encoding ?? 'utf8'
 			};
 		}
-		if (isExcel(ds)) {
-			const excelSource = ds.config as Record<string, unknown>;
+		if (isExcel(ds) && fileSource) {
+			const excelSource = fileSource as unknown as Record<string, unknown>;
 			const cellRangeValue = excelSource.cell_range;
 			const cellRange = typeof cellRangeValue === 'string' ? cellRangeValue : '';
 			const sheetValue = excelSource.sheet_name;
@@ -165,17 +165,17 @@
 			const tableName = typeof tableValue === 'string' ? tableValue : '';
 			const rangeValue = excelSource.named_range;
 			const namedRange = typeof rangeValue === 'string' ? rangeValue : '';
-			const endRowValue = config.end_row ?? null;
+			const endRowValue = fileSource.end_row ?? null;
 			excelConfig = {
 				sheet_name: sheetName,
 				table_name: tableName,
 				named_range: namedRange,
 				cell_range: cellRange,
-				start_row: config.start_row ?? 0,
-				start_col: config.start_col ?? 0,
-				end_col: config.end_col ?? 0,
+				start_row: fileSource.start_row ?? 0,
+				start_col: fileSource.start_col ?? 0,
+				end_col: fileSource.end_col ?? 0,
 				end_row: endRowValue,
-				has_header: config.has_header ?? true
+				has_header: fileSource.has_header ?? true
 			};
 			endRowInput = endRowValue !== null ? String(endRowValue) : '';
 		}
@@ -237,16 +237,27 @@
 		}));
 	}
 
+	function getFileSource(ds: DataSource): FileDataSourceConfig | null {
+		if (ds.source_type === 'file') {
+			return ds.config as unknown as FileDataSourceConfig;
+		}
+		if (ds.source_type === 'iceberg') {
+			const source = (ds.config as Record<string, unknown>)?.source as
+				| Record<string, unknown>
+				| undefined;
+			if (source?.source_type === 'file') {
+				return source as unknown as FileDataSourceConfig;
+			}
+		}
+		return null;
+	}
+
 	function isCsv(ds: DataSource): boolean {
-		if (ds.source_type !== 'file') return false;
-		const config = ds.config as unknown as FileDataSourceConfig;
-		return config.file_type === 'csv';
+		return getFileSource(ds)?.file_type === 'csv';
 	}
 
 	function isExcel(ds: DataSource): boolean {
-		if (ds.source_type !== 'file') return false;
-		const config = ds.config as unknown as FileDataSourceConfig;
-		return config.file_type === 'excel';
+		return getFileSource(ds)?.file_type === 'excel';
 	}
 
 	function isFile(ds: DataSource): boolean {
@@ -323,19 +334,29 @@
 		const update: { name: string; config: Record<string, unknown> } = { name, config: {} };
 
 		if (isCsv(datasourceQuery.data)) {
-			update.config = {
-				...datasourceQuery.data.config,
-				csv_options: {
-					delimiter: csvConfig.delimiter,
-					quote_char: csvConfig.quote_char,
-					has_header: csvConfig.has_header,
-					skip_rows: csvConfig.skip_rows,
-					encoding: csvConfig.encoding
-				}
+			const csvOptions = {
+				delimiter: csvConfig.delimiter,
+				quote_char: csvConfig.quote_char,
+				has_header: csvConfig.has_header,
+				skip_rows: csvConfig.skip_rows,
+				encoding: csvConfig.encoding
 			};
+			if (datasourceQuery.data.source_type === 'iceberg') {
+				const existingSource = (datasourceQuery.data.config as Record<string, unknown>)?.source as
+					| Record<string, unknown>
+					| undefined;
+				update.config = {
+					...datasourceQuery.data.config,
+					source: { ...existingSource, csv_options: csvOptions }
+				};
+			} else {
+				update.config = {
+					...datasourceQuery.data.config,
+					csv_options: csvOptions
+				};
+			}
 		} else if (isExcel(datasourceQuery.data)) {
-			update.config = {
-				...datasourceQuery.data.config,
+			const excelOptions = {
 				sheet_name: excelConfig.sheet_name || null,
 				table_name: excelConfig.table_name || null,
 				named_range: excelConfig.named_range || null,
@@ -346,6 +367,20 @@
 				end_row: excelConfig.end_row,
 				has_header: excelConfig.has_header
 			};
+			if (datasourceQuery.data.source_type === 'iceberg') {
+				const existingSource = (datasourceQuery.data.config as Record<string, unknown>)?.source as
+					| Record<string, unknown>
+					| undefined;
+				update.config = {
+					...datasourceQuery.data.config,
+					source: { ...existingSource, ...excelOptions }
+				};
+			} else {
+				update.config = {
+					...datasourceQuery.data.config,
+					...excelOptions
+				};
+			}
 		} else if (isFile(datasourceQuery.data)) {
 			update.config = { ...datasourceQuery.data.config };
 		}
@@ -686,6 +721,29 @@
 								>
 								<span class="text-[10px] text-fg-tertiary">Input branch for this datasource</span>
 							</div>
+							{#if config.source}
+								{@const fileSource = config.source as Record<string, unknown>}
+								<div class="border-t border-tertiary pt-2 mt-1 flex flex-col gap-2">
+									<span class="text-[10px] uppercase tracking-wider text-fg-muted font-semibold"
+										>Original Source</span
+									>
+									<div class="flex items-center gap-2">
+										<span class="uppercase tracking-wide text-fg-muted">Type</span>
+										<FileTypeBadge
+											path={typeof fileSource.file_path === 'string' ? fileSource.file_path : ''}
+											size="sm"
+										/>
+									</div>
+									{#if typeof fileSource.file_path === 'string'}
+										<div class="flex flex-col gap-1">
+											<span class="uppercase tracking-wide text-fg-muted">File</span>
+											<span class="break-all text-fg-secondary font-mono"
+												>{fileSource.file_path}</span
+											>
+										</div>
+									{/if}
+								</div>
+							{/if}
 						{/if}
 
 						<div class="flex items-center gap-4">
