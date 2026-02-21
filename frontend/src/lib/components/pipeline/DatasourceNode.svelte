@@ -339,8 +339,8 @@
 							{/if}
 						</div>
 					</div>
-					<!-- Row count section -->
-					<div class="flex items-center border-t border-tertiary pt-2">
+					<!-- Row count + Branch section -->
+					<div class="flex items-center justify-between border-t border-tertiary pt-2">
 						{#if rowCount !== null}
 							<span class="flex items-center gap-1 text-xs text-fg-muted">
 								<Hash size={10} />
@@ -362,6 +362,16 @@
 									<span>count rows</span>
 								{/if}
 							</button>
+						{/if}
+						{#if isIceberg && datasource}
+							<div class="min-w-32">
+								<BranchPicker
+									branches={(datasource?.config?.branches as string[] | undefined) ?? []}
+									value={branchValue}
+									placeholder="master"
+									onChange={applyBranchValue}
+								/>
+							</div>
 						{/if}
 					</div>
 				</div>
@@ -434,20 +444,6 @@
 
 		{#if isIceberg && datasource}
 			<div class="mb-3">
-				<div class="mb-2 flex items-center gap-2">
-					<label
-						class="text-[10px] uppercase text-fg-muted"
-						for="branch-input-{activeTab?.id ?? 'tab'}"
-					>
-						Input branch
-					</label>
-					<BranchPicker
-						branches={(datasource?.config?.branches as string[] | undefined) ?? []}
-						value={branchValue}
-						placeholder="master"
-						onChange={applyBranchValue}
-					/>
-				</div>
 				<SnapshotPicker
 					datasourceId={datasource.id}
 					datasourceConfig={activeTab?.datasource_config ?? {}}

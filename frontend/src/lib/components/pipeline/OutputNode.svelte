@@ -48,7 +48,7 @@
 	let healthOpen = $state(false);
 	let editingName = $state(false);
 	let draftName = $state('');
-	let showBuildMode = $state(false);
+
 	const defaultBranch = $derived.by(() => {
 		const current = analysisStore.current?.pipeline_definition ?? {};
 		const branch = (current as Record<string, unknown>).output_branch as string | undefined;
@@ -357,317 +357,320 @@
 </script>
 
 <div class="step-node relative w-[65%]">
-	<div class="node-content border border-tertiary bg-primary p-3 shadow-sm">
-		<div class="flex items-center justify-between gap-2">
-			<span
-				class="rounded-sm border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
-			>
-				Output Node
-			</span>
-		</div>
-
-		<!-- Export Name Field (inline edit style) -->
-		<div class="mt-3 flex items-center gap-2 border-t border-tertiary pt-3">
-			{#if editingName}
-				<input
-					class="min-w-25 flex-1 border border-tertiary bg-primary px-2 py-0.5 text-sm outline-none"
-					bind:value={draftName}
-					onkeydown={(e) => {
-						if (e.key === 'Enter') commitNameEdit();
-						if (e.key === 'Escape') cancelNameEdit();
-					}}
-					aria-label="Edit export name"
-				/>
-				<button
-					class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
-					onclick={commitNameEdit}
-					type="button"
-					aria-label="Save"
-				>
-					<Check size={12} class="shrink-0" />
-				</button>
-				<button
-					class="icon-btn cancel inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-error text-error bg-primary p-0 leading-none hover:bg-error hover:text-fg-primary"
-					onclick={cancelNameEdit}
-					type="button"
-					aria-label="Cancel"
-				>
-					<X size={12} class="shrink-0" />
-				</button>
-			{:else}
-				<span class="flex-1 truncate text-sm font-medium">{outputConfig.iceberg.table_name}</span>
-				<button
-					class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
-					onclick={startNameEdit}
-					type="button"
-					aria-label="Edit export name"
-				>
-					<Pencil size={12} class="shrink-0" />
-				</button>
-			{/if}
-		</div>
-
-		<!-- Row 3: is_hidden, branch picker, build (all same size) -->
-		<div class="mt-3 grid grid-cols-3 gap-2 border-t border-tertiary pt-3">
-			{#if outputDatasourceId}
-				<button
-					type="button"
-					class="flex items-center justify-center gap-1.5 border border-tertiary bg-secondary px-2 py-2 text-xs transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
-					class:text-fg-muted={hidden}
-					class:text-success-fg={!hidden}
-					onclick={toggleHidden}
-					disabled={toggling}
-					title={hidden
-						? 'Hidden from other analyses — click to make visible'
-						: 'Visible to other analyses — click to hide'}
-				>
-					{#if hidden}
-						<EyeOff size={12} />
-						<span>hidden</span>
-					{:else}
-						<Database size={12} />
-						<span>visible</span>
-					{/if}
-				</button>
-			{:else}
-				<div
-					class="flex items-center justify-center border border-tertiary bg-secondary px-2 py-2 text-xs text-fg-muted"
-				>
-					<EyeOff size={12} />
-					<span>hidden</span>
+	<div class="node-content border border-tertiary bg-primary p-4">
+		<!-- Header: icon + label + badge (mirrors DatasourceNode) -->
+		<div class="mb-4 flex items-center justify-between border-b border-tertiary pb-3">
+			<div class="flex items-center gap-2">
+				<div class="flex h-6 w-6 items-center justify-center bg-accent text-bg-primary">
+					<Database size={14} />
 				</div>
-			{/if}
-			<BranchPicker
-				branches={branchOptions}
-				value={branchValue}
-				placeholder="Branch"
-				allowCreate={true}
-				onChange={applyGlobalBranchValue}
-			/>
+				<span class="text-sm font-semibold">output</span>
+			</div>
+			<span
+				class="rounded-sm border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-muted"
+				>sink</span
+			>
+		</div>
+
+		<!-- Export Name (same info-row pattern as DatasourceNode tab name) -->
+		<div
+			class="mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
+		>
+			<div class="info-label flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
+				<Pencil size={12} class="opacity-60" />
+				<span>Table name</span>
+			</div>
+			<div class="flex items-center gap-2">
+				{#if editingName}
+					<div class="flex items-center gap-1">
+						<input
+							class="min-w-25 border border-tertiary bg-primary px-2 py-0.5 text-sm outline-none"
+							bind:value={draftName}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') commitNameEdit();
+								if (e.key === 'Escape') cancelNameEdit();
+							}}
+							aria-label="Edit export name"
+						/>
+						<button
+							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
+							onclick={commitNameEdit}
+							type="button"
+							aria-label="Save"
+						>
+							<Check size={12} class="shrink-0" />
+						</button>
+						<button
+							class="icon-btn cancel inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-error text-error bg-primary p-0 leading-none hover:bg-error hover:text-fg-primary"
+							onclick={cancelNameEdit}
+							type="button"
+							aria-label="Cancel"
+						>
+							<X size={12} class="shrink-0" />
+						</button>
+					</div>
+				{:else}
+					<span class="text-sm font-medium">{outputConfig.iceberg.table_name}</span>
+					<button
+						class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
+						onclick={startNameEdit}
+						type="button"
+						aria-label="Edit export name"
+					>
+						<Pencil size={12} class="shrink-0" />
+					</button>
+				{/if}
+			</div>
+		</div>
+
+		<!-- Output Details (mirrors DatasourceNode dataset card) -->
+		<div class="mb-3">
+			<div
+				class="info-label mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted"
+			>
+				<Database size={12} class="opacity-60" />
+				<span>Output</span>
+			</div>
+			<div class="flex flex-col gap-2 border border-tertiary bg-tertiary p-3">
+				<div class="flex items-center justify-between">
+					<span class="text-sm font-semibold">{outputConfig.iceberg.table_name}</span>
+					<button
+						type="button"
+						class="flex items-center gap-1 border border-tertiary bg-secondary px-2 py-0.5 text-[10px] hover:text-fg-primary"
+						class:text-fg-muted={hidden}
+						class:text-success-fg={!hidden}
+						onclick={toggleHidden}
+						disabled={toggling}
+						title={hidden
+							? 'Hidden from other analyses — click to make visible'
+							: 'Visible to other analyses — click to hide'}
+					>
+						{#if hidden}
+							<EyeOff size={10} />
+							<span>hidden</span>
+						{:else}
+							<Database size={10} />
+							<span>visible</span>
+						{/if}
+					</button>
+				</div>
+				<div class="grid grid-cols-2 gap-2 border-t border-tertiary pt-2">
+					<select
+						id={`${idPrefix}-build-mode`}
+						class="border border-tertiary bg-secondary py-2 px-3 text-sm text-fg-primary"
+						value={outputConfig.build_mode}
+						onchange={(e) => updateOutputConfig({ build_mode: e.currentTarget.value })}
+					>
+						<option value="full">Full</option>
+						<option value="incremental">Incremental</option>
+						<option value="recreate">Recreate</option>
+					</select>
+					<BranchPicker
+						branches={branchOptions}
+						value={branchValue}
+						placeholder="Branch"
+						allowCreate={true}
+						onChange={applyGlobalBranchValue}
+					/>
+				</div>
+			</div>
+		</div>
+
+		<!-- Build Action -->
+		<div class="mb-3">
 			<button
-				class="flex items-center justify-center gap-1.5 border border-tertiary bg-secondary px-3 py-2 text-sm text-fg-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+				class="flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary p-2 px-3 text-xs font-medium text-fg-secondary hover:border-accent-primary hover:bg-tertiary hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-50 [&:hover_svg]:opacity-100"
 				onclick={handleManualBuild}
 				disabled={!analysisId || building}
 				title="Run analysis build"
 				type="button"
 			>
 				{#if building}
-					<Loader size={12} class="spin" />
-					<span>Building...</span>
+					<Loader size={14} class="spin opacity-70" />
+					<span>building...</span>
 				{:else}
-					<Play size={12} />
-					<span>Build</span>
+					<Play size={14} class="opacity-70" />
+					<span>build</span>
 				{/if}
 			</button>
 		</div>
 
-		<!-- Build Mode Selector (one row, show on hover) -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="group mt-2 flex items-center justify-between gap-2 border-t border-tertiary pt-2 opacity-60 transition-opacity hover:opacity-100"
-			onmouseenter={() => (showBuildMode = true)}
-			onmouseleave={() => (showBuildMode = false)}
-		>
-			<label class="text-[10px] uppercase text-fg-muted" for={`${idPrefix}-build-mode`}>
-				Build: {outputConfig.build_mode}
-			</label>
-			{#if showBuildMode}
-				<select
-					id={`${idPrefix}-build-mode`}
-					class="border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
-					value={outputConfig.build_mode}
-					onchange={(e) => updateOutputConfig({ build_mode: e.currentTarget.value })}
+		<!-- Collapsible Sections -->
+		<div class="flex flex-col gap-3 border-t border-tertiary pt-3">
+			<!-- Build Notification Section -->
+			<div>
+				<button
+					type="button"
+					class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+					onclick={() => (notifyOpen = !notifyOpen)}
 				>
-					<option value="full">Full</option>
-					<option value="incremental">Incremental</option>
-					<option value="recreate">Recreate</option>
-				</select>
-			{/if}
-		</div>
-
-		<div class="mt-3 flex flex-col gap-3">
-			<div class="flex flex-col gap-3 border-t border-tertiary pt-3">
-				<!-- Build Notification Section -->
-				<div>
-					<button
-						type="button"
-						class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
-						onclick={() => (notifyOpen = !notifyOpen)}
-					>
-						<span class="flex items-center gap-2">
-							{#if notifyOpen}
-								<ChevronDown size={12} />
-							{:else}
-								<ChevronRight size={12} />
-							{/if}
-							<Bell size={12} />
-							<span>Build Notification</span>
-						</span>
-						{#if notifyConfig.enabled}
-							<span class="rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
-								{selectedCount}/{activeSubscribers.length}
-							</span>
+					<span class="flex items-center gap-2">
+						{#if notifyOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
 						{/if}
-					</button>
+						<Bell size={12} />
+						<span>Build Notification</span>
+					</span>
+					{#if notifyConfig.enabled}
+						<span class="rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
+							{selectedCount}/{activeSubscribers.length}
+						</span>
+					{/if}
+				</button>
 
-					{#if notifyOpen}
-						<div class="mt-2 flex flex-col gap-2 pl-5">
-							<label class="flex cursor-pointer items-center gap-2 text-xs">
-								<input
-									type="checkbox"
-									checked={notifyConfig.enabled}
-									onchange={toggleNotification}
-								/>
-								<span>Notify subscribers on build</span>
-							</label>
+				{#if notifyOpen}
+					<div class="mt-2 flex flex-col gap-2 pl-5">
+						<label class="flex cursor-pointer items-center gap-2 text-xs">
+							<input type="checkbox" checked={notifyConfig.enabled} onchange={toggleNotification} />
+							<span>Notify subscribers on build</span>
+						</label>
 
-							{#if notifyConfig.enabled}
-								<div class="flex flex-col gap-2">
-									{#if !canTelegram}
-										<div
-											class="border border-warning bg-warning-bg p-2 text-[10px] text-warning-fg"
-										>
-											Telegram not enabled. Enable bot in global settings.
-										</div>
-									{:else}
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] uppercase text-fg-muted">Recipients</span>
-											<div class="max-h-32 overflow-y-auto border border-tertiary bg-secondary">
-												{#if subscribersQuery.isPending}
-													<div class="p-2 text-center text-[10px] text-fg-muted">Loading...</div>
-												{:else if subscribersQuery.isError}
-													<div class="p-2 text-center text-[10px] text-error">
-														Failed to load subscribers
-													</div>
-												{:else if activeSubscribers.length === 0}
-													<div class="p-2 text-center text-[10px] text-fg-muted">
-														No subscribers. Users can subscribe via /subscribe in Telegram.
-													</div>
-												{:else}
-													{#each activeSubscribers as sub (sub.id)}
-														<div
-															class="flex items-center gap-2 border-b border-tertiary px-2 py-1.5 last:border-b-0"
-														>
-															<span class="truncate text-xs text-fg-primary">{sub.title}</span>
-															<span class="ml-auto shrink-0 text-[10px] text-fg-muted">
-																{sub.chat_id}
-															</span>
-														</div>
-													{/each}
-												{/if}
-											</div>
-											<span class="text-[10px] text-fg-muted">
-												All active subscribers receive build notifications.
-											</span>
-										</div>
-									{/if}
-
+						{#if notifyConfig.enabled}
+							<div class="flex flex-col gap-2">
+								{#if !canTelegram}
+									<div class="border border-warning bg-warning-bg p-2 text-[10px] text-warning-fg">
+										Telegram not enabled. Enable bot in global settings.
+									</div>
+								{:else}
 									<div class="flex flex-col gap-1">
-										<label
-											class="text-[10px] uppercase text-fg-muted"
-											for={`${idPrefix}-notify-body`}
-										>
-											Message Template
-										</label>
-										<textarea
-											class="resource-input border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
-											id={`${idPrefix}-notify-body`}
-											rows="3"
-											value={notifyConfig.body_template}
-											oninput={(e) =>
-												updateNotification({
-													body_template: e.currentTarget.value
-												})}
-										></textarea>
+										<span class="text-[10px] uppercase text-fg-muted">Recipients</span>
+										<div class="max-h-32 overflow-y-auto border border-tertiary bg-secondary">
+											{#if subscribersQuery.isPending}
+												<div class="p-2 text-center text-[10px] text-fg-muted">Loading...</div>
+											{:else if subscribersQuery.isError}
+												<div class="p-2 text-center text-[10px] text-error">
+													Failed to load subscribers
+												</div>
+											{:else if activeSubscribers.length === 0}
+												<div class="p-2 text-center text-[10px] text-fg-muted">
+													No subscribers. Users can subscribe via /subscribe in Telegram.
+												</div>
+											{:else}
+												{#each activeSubscribers as sub (sub.id)}
+													<div
+														class="flex items-center gap-2 border-b border-tertiary px-2 py-1.5 last:border-b-0"
+													>
+														<span class="truncate text-xs text-fg-primary">{sub.title}</span>
+														<span class="ml-auto shrink-0 text-[10px] text-fg-muted">
+															{sub.chat_id}
+														</span>
+													</div>
+												{/each}
+											{/if}
+										</div>
 										<span class="text-[10px] text-fg-muted">
-											&#123;&#123;analysis_name&#125;&#125;, &#123;&#123;status&#125;&#125;,
-											&#123;&#123;duration_ms&#125;&#125;, &#123;&#123;row_count&#125;&#125;
+											All active subscribers receive build notifications.
 										</span>
 									</div>
+								{/if}
+
+								<div class="flex flex-col gap-1">
+									<label
+										class="text-[10px] uppercase text-fg-muted"
+										for={`${idPrefix}-notify-body`}
+									>
+										Message Template
+									</label>
+									<textarea
+										class="resource-input border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
+										id={`${idPrefix}-notify-body`}
+										rows="3"
+										value={notifyConfig.body_template}
+										oninput={(e) =>
+											updateNotification({
+												body_template: e.currentTarget.value
+											})}
+									></textarea>
+									<span class="text-[10px] text-fg-muted">
+										&#123;&#123;analysis_name&#125;&#125;, &#123;&#123;status&#125;&#125;,
+										&#123;&#123;duration_ms&#125;&#125;, &#123;&#123;row_count&#125;&#125;
+									</span>
 								</div>
-							{/if}
-						</div>
-					{/if}
-				</div>
-
-				<!-- Health Checks Section -->
-				<div>
-					<button
-						type="button"
-						class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
-						onclick={() => (healthOpen = !healthOpen)}
-					>
-						<span class="flex items-center gap-2">
-							{#if healthOpen}
-								<ChevronDown size={12} />
-							{:else}
-								<ChevronRight size={12} />
-							{/if}
-							<HeartPulse size={12} />
-							<span>Health Checks</span>
-						</span>
-						{#if healthCount > 0}
-							<span
-								class="rounded-sm px-1.5 py-0.5 text-[10px] {healthPassed === true
-									? 'bg-success-bg text-success-fg'
-									: healthPassed === false
-										? 'bg-error-bg text-error-fg'
-										: 'bg-accent-bg text-accent-primary'}"
-							>
-								{healthCount}
-							</span>
-						{/if}
-					</button>
-
-					{#if healthOpen}
-						{#if canQueryOutput}
-							<div class="mt-2 border border-tertiary bg-primary p-2">
-								<HealthChecksManager datasourceId={outputDatasourceId ?? undefined} compact />
-							</div>
-						{:else}
-							<div
-								class="mt-2 rounded-sm border border-dashed border-tertiary p-3 text-center text-xs text-fg-tertiary"
-							>
-								Save this analysis to create an output datasource before adding health checks.
 							</div>
 						{/if}
-					{/if}
-				</div>
-
-				<!-- Schedule Section -->
-				<div>
-					<button
-						type="button"
-						class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
-						onclick={() => (scheduleOpen = !scheduleOpen)}
-					>
-						<span class="flex items-center gap-2">
-							{#if scheduleOpen}
-								<ChevronDown size={12} />
-							{:else}
-								<ChevronRight size={12} />
-							{/if}
-							<CalendarClock size={12} />
-							<span>Schedules</span>
-						</span>
-						{#if scheduleCount > 0}
-							<span class="rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
-								{enabledSchedules}/{scheduleCount}
-							</span>
-						{/if}
-					</button>
-
-					{#if scheduleOpen && canQueryOutput}
-						<div class="mt-2 border border-tertiary bg-primary p-2">
-							<ScheduleManager datasourceId={outputDatasourceId ?? undefined} compact />
-						</div>
-					{/if}
-				</div>
+					</div>
+				{/if}
 			</div>
 
-			{#if error}
-				<div class="mt-2 border border-error bg-error p-2 text-xs text-error">{error}</div>
-			{/if}
+			<!-- Health Checks Section -->
+			<div>
+				<button
+					type="button"
+					class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+					onclick={() => (healthOpen = !healthOpen)}
+				>
+					<span class="flex items-center gap-2">
+						{#if healthOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
+						{/if}
+						<HeartPulse size={12} />
+						<span>Health Checks</span>
+					</span>
+					{#if healthCount > 0}
+						<span
+							class="rounded-sm px-1.5 py-0.5 text-[10px] {healthPassed === true
+								? 'bg-success-bg text-success-fg'
+								: healthPassed === false
+									? 'bg-error-bg text-error-fg'
+									: 'bg-accent-bg text-accent-primary'}"
+						>
+							{healthCount}
+						</span>
+					{/if}
+				</button>
+
+				{#if healthOpen}
+					{#if canQueryOutput}
+						<div class="mt-2 border border-tertiary bg-primary p-2">
+							<HealthChecksManager datasourceId={outputDatasourceId ?? undefined} compact />
+						</div>
+					{:else}
+						<div
+							class="mt-2 rounded-sm border border-dashed border-tertiary p-3 text-center text-xs text-fg-tertiary"
+						>
+							Save this analysis to create an output datasource before adding health checks.
+						</div>
+					{/if}
+				{/if}
+			</div>
+
+			<!-- Schedule Section -->
+			<div>
+				<button
+					type="button"
+					class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+					onclick={() => (scheduleOpen = !scheduleOpen)}
+				>
+					<span class="flex items-center gap-2">
+						{#if scheduleOpen}
+							<ChevronDown size={12} />
+						{:else}
+							<ChevronRight size={12} />
+						{/if}
+						<CalendarClock size={12} />
+						<span>Schedules</span>
+					</span>
+					{#if scheduleCount > 0}
+						<span class="rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
+							{enabledSchedules}/{scheduleCount}
+						</span>
+					{/if}
+				</button>
+
+				{#if scheduleOpen && canQueryOutput}
+					<div class="mt-2 border border-tertiary bg-primary p-2">
+						<ScheduleManager datasourceId={outputDatasourceId ?? undefined} compact />
+					</div>
+				{/if}
+			</div>
 		</div>
+
+		{#if error}
+			<div class="mt-3 border border-error bg-error p-2 text-xs text-error">{error}</div>
+		{/if}
 	</div>
 </div>
