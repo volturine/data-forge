@@ -845,7 +845,10 @@
 		</button>
 	</div>
 {:else if analysisQuery.data}
-	<div class="analysis-page flex h-full flex-col bg-secondary" class:resizing={isResizingBottomPane}>
+	<div
+		class="analysis-page flex h-full flex-col bg-secondary"
+		class:resizing={isResizingBottomPane}
+	>
 		<header
 			class="analysis-header flex items-stretch sticky top-0 h-12 bg-panel border-y border-tertiary"
 		>
@@ -884,13 +887,11 @@
 			</div>
 			<div class="flex-1 min-w-0 overflow-hidden flex items-center justify-center gap-0">
 				<button
-					class="collapse-arrow collapse-arrow-left w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-r border-tertiary hover:text-fg-primary hover:bg-hover"
+					class="collapse-arrow collapse-arrow-left h-full flex items-center justify-center bg-panel border-none text-lg cursor-pointer shrink-0 text-fg-muted hover:text-fg-primary hover:bg-hover"
 					class:collapsed={leftPaneCollapsed}
-					class:hidden={!isEditingMode}
 					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
 					type="button"
 					title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
-					disabled={!isEditingMode}
 				>
 					{#if leftPaneCollapsed}
 						<ChevronRight size={14} />
@@ -940,8 +941,7 @@
 				</div>
 			</div>
 			<button
-				class="config-position-toggle shrink-0 w-8 h-full flex items-center justify-center bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary hover:bg-hover"
-				class:hidden={!isEditingMode}
+				class="config-position-toggle shrink-0 h-full flex items-center justify-center bg-panel border-none cursor-pointer text-fg-muted hover:text-fg-primary hover:bg-hover"
 				onclick={toggleConfigPosition}
 				type="button"
 				title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
@@ -953,13 +953,11 @@
 				{/if}
 			</button>
 			<button
-				class="collapse-arrow collapse-arrow-right shrink-0 w-8 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer text-fg-muted border-l border-tertiary hover:text-fg-primary hover:bg-hover"
+				class="collapse-arrow collapse-arrow-right shrink-0 h-full flex items-center justify-center bg-panel border-none text-lg cursor-pointer text-fg-muted hover:text-fg-primary hover:bg-hover"
 				class:collapsed={rightPaneCollapsed}
-				class:hidden={!isEditingMode}
 				onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
 				type="button"
 				title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
-				disabled={!isEditingMode}
 			>
 				{#if configPosition === 'bottom'}
 					{#if rightPaneCollapsed}
@@ -967,12 +965,10 @@
 					{:else}
 						<ChevronDown size={14} />
 					{/if}
+				{:else if rightPaneCollapsed}
+					<ChevronLeft size={14} />
 				{:else}
-					{#if rightPaneCollapsed}
-						<ChevronLeft size={14} />
-					{:else}
-						<ChevronRight size={14} />
-					{/if}
+					<ChevronRight size={14} />
 				{/if}
 			</button>
 			<div
