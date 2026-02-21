@@ -6,12 +6,14 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
+		getStepRowCount,
 		type StepPreviewRequest,
-		type StepPreviewResponse
+		type StepPreviewResponse,
+		type StepRowCountRequest
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import { GripVertical } from 'lucide-svelte';
+	import { GripVertical, Hash, RefreshCw } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
@@ -19,6 +21,7 @@
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {
 		step: PipelineStep;
@@ -117,6 +120,57 @@
 			!!analysisPipeline &&
 			((step.config?.x_column as string | undefined) ?? '') !== ''
 	}));
+
+	const rowCounts = new SvelteMap<string, number>();
+	const rowCountLoads = new SvelteMap<string, boolean>();
+	const rowCountErrors = new SvelteMap<string, string>();
+
+	const rowCountPipeline = $derived.by(() => applySteps(allSteps));
+	const rowCountPipelineKey = $derived.by(() => hashPipeline(rowCountPipeline));
+	const rowCountDatasourceConfig = $derived.by(() => {
+		return (
+			buildDatasourceConfig({
+				analysisId: analysisId ?? null,
+				tab: analysisStore.activeTab ?? null,
+				tabs: analysisStore.tabs,
+				datasources: datasourceStore.datasources
+			}) ??
+			analysisStore.activeTab?.datasource_config ??
+			{}
+		);
+	});
+	const rowCountKey = $derived.by(() => {
+		const configKey = JSON.stringify(rowCountDatasourceConfig ?? {});
+		return `${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${rowCountPipelineKey}:${configKey}`;
+	});
+	const rowCount = $derived.by(() => rowCounts.get(rowCountKey) ?? null);
+	const isLoadingRowCount = $derived.by(() => rowCountLoads.get(rowCountKey) ?? false);
+	const rowCountError = $derived.by(() => rowCountErrors.get(rowCountKey) ?? null);
+	const rowCountLabel = $derived.by(() => {
+		if (rowCount === null) return '';
+		return `${rowCount.toLocaleString()} rows`;
+	});
+
+	async function calculateRowCount() {
+		if (!analysisId || !datasourceId) return;
+		if (!analysisPipeline) return;
+		if (isLoadingRowCount) return;
+		rowCountLoads.set(rowCountKey, true);
+		rowCountErrors.delete(rowCountKey);
+		const result = await getStepRowCount({
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			target_step_id: step.id,
+			datasource_config: rowCountDatasourceConfig
+		} as StepRowCountRequest);
+		rowCountLoads.set(rowCountKey, false);
+		if (result.isErr()) {
+			rowCountErrors.set(rowCountKey, result.error.message);
+			return;
+		}
+		rowCounts.set(rowCountKey, result.value.row_count);
+		rowCountErrors.delete(rowCountKey);
+	}
 
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
@@ -294,7 +348,7 @@
 			<div class="mt-3 border-t border-tertiary pt-3">
 				{#if !isApplied}
 					<div
-						class="chart-placeholder flex h-[200px] items-center justify-center text-xs text-fg-muted"
+						class="chart-placeholder flex h-50 items-center justify-center text-xs text-fg-muted"
 					>
 						<Icon size={16} class="mr-2" />
 						{#if ((step.config?.x_column as string | undefined) ?? '') === ''}
@@ -325,6 +379,38 @@
 						config={step.config}
 					/>
 				{/if}
+			</div>
+		{/if}
+
+		<div class="mt-3 border-t border-tertiary pt-3">
+			{#if rowCount !== null}
+				{#key `${rowCountKey}:${rowCount}`}
+					<span class="flex items-center gap-1 text-xs text-fg-muted">
+						<Hash size={10} />
+						{rowCountLabel}
+					</span>
+				{/key}
+			{:else}
+				<button
+					class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-tertiary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] disabled:cursor-not-allowed disabled:opacity-70 hover:border-tertiary hover:text-fg-primary"
+					onclick={calculateRowCount}
+					disabled={isLoadingRowCount}
+					type="button"
+					aria-label="Calculate row count"
+				>
+					{#if isLoadingRowCount}
+						<RefreshCw size={10} class="spinning" />
+						<span>counting...</span>
+					{:else}
+						<Hash size={10} />
+						<span>count rows</span>
+					{/if}
+				</button>
+			{/if}
+		</div>
+		{#if rowCountError}
+			<div class="mt-2 border border-error bg-error p-2 text-xs text-error">
+				{rowCountError}
 			</div>
 		{/if}
 	</div>

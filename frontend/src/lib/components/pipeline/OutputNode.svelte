@@ -455,16 +455,22 @@
 					</button>
 				</div>
 				<div class="grid grid-cols-2 gap-2 border-t border-tertiary pt-2">
-					<select
-						id={`${idPrefix}-build-mode`}
-						class="border border-tertiary bg-secondary py-2 px-3 text-sm text-fg-primary"
-						value={outputConfig.build_mode}
-						onchange={(e) => updateOutputConfig({ build_mode: e.currentTarget.value })}
-					>
-						<option value="full">Full</option>
-						<option value="incremental">Incremental</option>
-						<option value="recreate">Recreate</option>
-					</select>
+					<div class="relative">
+						<select
+							id={`${idPrefix}-build-mode`}
+							class="w-full appearance-none border border-tertiary bg-secondary py-2 pl-3 pr-8 text-sm text-fg-primary focus:border-accent-primary focus:outline-none"
+							value={outputConfig.build_mode}
+							onchange={(e) => updateOutputConfig({ build_mode: e.currentTarget.value })}
+						>
+							<option value="full">Full</option>
+							<option value="incremental">Incremental</option>
+							<option value="recreate">Recreate</option>
+						</select>
+						<ChevronDown
+							size={12}
+							class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-fg-tertiary"
+						/>
+					</div>
 					<BranchPicker
 						branches={branchOptions}
 						value={branchValue}

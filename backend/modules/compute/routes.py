@@ -60,6 +60,26 @@ def get_step_schema(
     )
 
 
+@router.post('/row-count', response_model=schemas.StepRowCountResponse)
+@handle_errors(operation='get step row count')
+def get_step_row_count(
+    request: schemas.StepRowCountRequest,
+    session: Session = Depends(get_db),
+):
+    """Get the row count of a pipeline step."""
+    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+
+    return service.get_step_row_count(
+        session=session,
+        target_step_id=request.target_step_id,
+        analysis_id=analysis_id or '',
+        analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
+        datasource_config=request.datasource_config,
+        tab_id=request.tab_id,
+        request_json=request.model_dump(mode='json'),
+    )
+
+
 @router.get('/iceberg/{datasource_id}/snapshots', response_model=schemas.IcebergSnapshotsResponse)
 @handle_errors(operation='list iceberg snapshots')
 def list_iceberg_snapshots(

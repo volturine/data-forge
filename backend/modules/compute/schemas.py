@@ -219,6 +219,16 @@ class StepSchemaRequest(BaseModel):
     datasource_config: dict | None = None
 
 
+class StepRowCountRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str | None = None
+    target_step_id: str
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None
+    datasource_config: dict | None = None
+
+
 class IcebergSnapshotInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -250,6 +260,13 @@ class StepSchemaResponse(BaseModel):
     step_id: str
     columns: list[str]
     column_types: dict[str, str]
+
+
+class StepRowCountResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    step_id: str
+    row_count: int
 
 
 class BuildTabResult(BaseModel):

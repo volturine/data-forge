@@ -255,6 +255,32 @@ class PolarsComputeEngine:
         self.command_queue.put(command)
         return job_id
 
+    def get_row_count(
+        self,
+        datasource_config: dict,
+        pipeline_steps: list[dict],
+        additional_datasources: dict[str, dict] | None = None,
+    ) -> str:
+        """Get row count of pipeline result without collecting full data."""
+        job_id = str(uuid.uuid4())
+        self.current_job_id = job_id
+
+        # Check health and restart if needed
+        self.check_health()
+        if not self.is_running:
+            self.start()
+
+        command = {
+            'type': 'row_count',
+            'job_id': job_id,
+            'datasource_config': datasource_config,
+            'pipeline_steps': pipeline_steps,
+            'additional_datasources': additional_datasources or {},
+        }
+
+        self.command_queue.put(command)
+        return job_id
+
     def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> dict | None:
         """Get result from result queue (non-blocking)."""
         # Check if process died while we were waiting for a result
@@ -376,6 +402,13 @@ class PolarsComputeEngine:
                         )
                     elif command['type'] == 'schema':
                         result_data = PolarsComputeEngine._execute_schema(
+                            datasource_config,
+                            pipeline_steps,
+                            job_id,
+                            additional_datasources,
+                        )
+                    elif command['type'] == 'row_count':
+                        result_data = PolarsComputeEngine._execute_row_count(
                             datasource_config,
                             pipeline_steps,
                             job_id,
@@ -740,6 +773,34 @@ class PolarsComputeEngine:
         return {
             'schema': schema,
             'columns': list(schema.keys()),
+            'step_timings': step_timings,
+            'query_plan': query_plan,
+            'query_plans': query_plans,
+        }
+
+    @staticmethod
+    def _execute_row_count(
+        datasource_config: dict,
+        pipeline_steps: list[dict],
+        job_id: str,
+        additional_datasources: dict[str, dict] | None = None,
+    ) -> dict:
+        """Execute pipeline and return row count without collecting full data."""
+        lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
+            datasource_config,
+            pipeline_steps,
+            job_id,
+            additional_datasources,
+        )
+
+        plan_segments = [PolarsComputeEngine._get_query_plans(frame) for frame in list(plan_frames)]
+        query_plans = PolarsComputeEngine._merge_query_plans(plan_segments)
+        query_plan = query_plans.get('optimized') if query_plans else None
+
+        row_count = lf.select(pl.len()).collect().item()
+
+        return {
+            'row_count': int(row_count),
             'step_timings': step_timings,
             'query_plan': query_plan,
             'query_plans': query_plans,

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { DataSource } from '$lib/types/datasource';
 	import type { AnalysisTab } from '$lib/types/analysis';
-	import { getDatasourceSchema } from '$lib/api/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { track } from '$lib/utils/audit-log';
@@ -13,7 +12,6 @@
 		PanelLeft,
 		Pencil,
 		RefreshCw,
-		Hash,
 		Check,
 		X,
 		Cpu,
@@ -47,8 +45,6 @@
 
 	let isEditing = $state(false);
 	let draftName = $state('');
-	let rowCount = $state<number | null>(null);
-	let isLoadingRowCount = $state(false);
 
 	// Engine config - simple state bound to store
 	let engineExpanded = $state(false);
@@ -97,13 +93,6 @@
 	$effect(() => {
 		if (!isEditing) {
 			draftName = tabName ?? datasourceLabel ?? datasource?.name ?? '';
-		}
-	});
-
-	// Reset row count when datasource changes
-	$effect(() => {
-		if (datasource?.id) {
-			rowCount = null;
 		}
 	});
 
@@ -164,31 +153,6 @@
 		}
 		onRenameTab(next);
 		isEditing = false;
-	}
-
-	async function calculateRowCount() {
-		if (isLoadingRowCount) return;
-		if (analysisSourceId) return;
-
-		if (!datasource?.id) return;
-		isLoadingRowCount = true;
-		getDatasourceSchema(datasource.id).match(
-			(schema) => {
-				if (schema.row_count !== null && schema.row_count !== undefined) {
-					rowCount = schema.row_count;
-				}
-				isLoadingRowCount = false;
-			},
-			(error) => {
-				track({
-					event: 'schema_error',
-					action: 'row_count',
-					target: datasource.id,
-					meta: { message: error.message }
-				});
-				isLoadingRowCount = false;
-			}
-		);
 	}
 
 	let analysisSourceId = $derived(
@@ -339,32 +303,23 @@
 							{/if}
 						</div>
 					</div>
-					<!-- Row count + Branch section -->
-					<div class="flex items-center justify-between border-t border-tertiary pt-2">
-						{#if rowCount !== null}
-							<span class="flex items-center gap-1 text-xs text-fg-muted">
-								<Hash size={10} />
-								{rowCount.toLocaleString()} rows
-							</span>
-						{:else}
-							<button
-								class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-tertiary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] disabled:cursor-not-allowed disabled:opacity-70 hover:border-tertiary hover:text-fg-primary"
-								onclick={calculateRowCount}
-								disabled={isLoadingRowCount}
-								type="button"
-								aria-label="Calculate row count"
-							>
-								{#if isLoadingRowCount}
-									<RefreshCw size={10} class="spinning" />
-									<span>counting...</span>
-								{:else}
-									<Hash size={10} />
-									<span>count rows</span>
-								{/if}
-							</button>
-						{/if}
-						{#if isIceberg && datasource}
-							<div class="min-w-32">
+					{#if isIceberg && datasource}
+						<div class="flex items-start gap-2 border-t border-tertiary pt-2">
+							<div class="min-w-0 flex-1">
+								<SnapshotPicker
+									datasourceId={datasource.id}
+									datasourceConfig={activeTab?.datasource_config ?? {}}
+									label="Time Travel"
+									persistOpen
+									branch={(activeTab?.datasource_config as Record<string, unknown> | null)
+										?.branch as string | null | undefined}
+									showBuildPreviews={!isOutputSource}
+									onConfigChange={updateSnapshotConfig}
+									onUiChange={updateTimeTravelUi}
+									onSelect={handleSnapshotSelect}
+								/>
+							</div>
+							<div class="min-w-32 shrink-0">
 								<BranchPicker
 									branches={(datasource?.config?.branches as string[] | undefined) ?? []}
 									value={branchValue}
@@ -372,8 +327,8 @@
 									onChange={applyBranchValue}
 								/>
 							</div>
-						{/if}
-					</div>
+						</div>
+					{/if}
 				</div>
 			{:else}
 				<div class="rounded-sm border border-dashed border-tertiary p-3 text-center">
@@ -439,25 +394,6 @@
 						</div>
 					</div>
 				{/if}
-			</div>
-		{/if}
-
-		{#if isIceberg && datasource}
-			<div class="mb-3">
-				<SnapshotPicker
-					datasourceId={datasource.id}
-					datasourceConfig={activeTab?.datasource_config ?? {}}
-					label="Time Travel"
-					persistOpen
-					branch={(activeTab?.datasource_config as Record<string, unknown> | null)?.branch as
-						| string
-						| null
-						| undefined}
-					showBuildPreviews={!isOutputSource}
-					onConfigChange={updateSnapshotConfig}
-					onUiChange={updateTimeTravelUi}
-					onSelect={handleSnapshotSelect}
-				/>
 			</div>
 		{/if}
 

@@ -2,6 +2,7 @@
 
 ## Status:
 
+- [x] Reapply DatasourceNode snapshot/branch layout + OutputNode build mode select styling
 - [x] Fix analysis output branch defaults + branch creation in OutputNode
 - [x] Fix OutputNode hidden toggle to refresh datasource lists immediately
 - [x] OutputNode layout update: compact header + row2 table/branch/build
@@ -43,6 +44,7 @@
 - [x] Test isolation for exports directory
 - [x] Branch-aware metadata path resolution and UI selection
 - [x] Namespace picker modal + branch pickers (searchable, no free-text)
+- [x] Add per-step row count endpoint + engine command + StepNode wiring
 
 ### Critical
 

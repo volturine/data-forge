@@ -749,6 +749,131 @@ def get_step_schema(
     )
 
 
+def get_step_row_count(
+    session: Session,
+    target_step_id: str,
+    analysis_id: str,
+    analysis_pipeline: dict,
+    timeout: int | None = None,
+    datasource_config: dict | None = None,
+    tab_id: str | None = None,
+    request_json: dict | None = None,
+    triggered_by: str | None = None,
+):
+    """Get the row count of a pipeline step without collecting full data."""
+    from modules.compute.schemas import StepRowCountResponse
+
+    if timeout is None:
+        timeout = settings.job_timeout
+
+    started_at = datetime.now(UTC)
+    started_perf = time.perf_counter()
+
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    datasource_id = resolved['datasource_id']
+    pipeline_steps = resolved['pipeline_steps']
+    target_step_id = resolved['target_step_id']
+    datasource_config = resolved['datasource_config']
+    analysis_id_value = resolved['analysis_id'] or analysis_id
+
+    if not isinstance(datasource_config, dict):
+        raise ValueError('Row count requires datasource_config')
+    if not analysis_id_value:
+        analysis_id_value = f'__row_count__{datasource_id}'
+
+    config: dict = datasource_config
+
+    request_payload = request_json or {
+        'analysis_id': analysis_id_value,
+        'datasource_id': datasource_id,
+        'pipeline_steps': pipeline_steps,
+        'target_step_id': target_step_id,
+        'analysis_pipeline': analysis_pipeline,
+        'tab_id': tab_id,
+    }
+
+    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+
+    if target_step_id == 'source':
+        count_steps = []
+    else:
+        step_index = find_step_index(pipeline_steps, target_step_id)
+        count_steps = pipeline_steps[: step_index + 1]
+        count_steps = _hydrate_udfs(session, count_steps)
+
+    manager = get_manager()
+    engine = manager.get_engine(analysis_id_value)
+    if not engine:
+        engine = manager.get_or_create_engine(analysis_id_value)
+
+    additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
+
+    job_id = engine.get_row_count(
+        datasource_config=config,
+        pipeline_steps=count_steps,
+        additional_datasources=additional_datasources,
+    )
+
+    step_timings: dict = {}
+    current_step_id: str | None = None
+    query_plan: str | None = None
+    try:
+        result_data = await_engine_result(engine, timeout, job_id=job_id)
+        step_timings = result_data.get('step_timings', {}) if isinstance(result_data, dict) else {}
+        query_plan = result_data.get('query_plan') if isinstance(result_data, dict) else None
+        error = result_data.get('error')
+        if error:
+            raise PipelineExecutionError(
+                f'Row count failed: {error}',
+                details={'operation': 'row_count', 'datasource_id': datasource_id},
+            )
+
+        data = result_data.get('data', {})
+        row_count = data.get('row_count', 0)
+
+        completed_at = datetime.now(UTC)
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        payload = engine_run_service.create_engine_run_payload(
+            analysis_id=analysis_id_value,
+            datasource_id=datasource_id,
+            kind='row_count',
+            status='success',
+            request_json=request_payload,
+            result_json={'row_count': row_count},
+            created_at=started_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
+            query_plan=query_plan,
+            progress=1.0,
+            current_step=current_step_id,
+            triggered_by=triggered_by,
+        )
+        engine_run_service.create_engine_run(session, payload)
+
+        return StepRowCountResponse(step_id=target_step_id, row_count=row_count)
+    except Exception as exc:
+        completed_at = datetime.now(UTC)
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        payload = engine_run_service.create_engine_run_payload(
+            analysis_id=analysis_id_value,
+            datasource_id=datasource_id,
+            kind='row_count',
+            status='failed',
+            request_json=request_payload,
+            error_message=str(exc),
+            created_at=started_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
+            progress=0.0,
+            current_step=current_step_id,
+            triggered_by=triggered_by,
+        )
+        engine_run_service.create_engine_run(session, payload)
+        raise
+
+
 def export_data(
     session: Session,
     target_step_id: str,
