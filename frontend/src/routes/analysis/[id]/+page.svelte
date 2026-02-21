@@ -938,43 +938,43 @@
 						</div>
 					</div>
 				</div>
-				<button
-					class="w-6 h-full flex items-center justify-center bg-transparent border-none cursor-pointer shrink-0 text-fg-muted hover:text-fg-primary hover:bg-hover"
-					class:hidden={!isEditingMode}
-					onclick={toggleConfigPosition}
-					type="button"
-					title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
-				>
-					{#if configPosition === 'right'}
-						<PanelBottom size={14} />
-					{:else}
-						<PanelRight size={14} />
-					{/if}
-				</button>
-				<button
-					class="collapse-arrow collapse-arrow-right w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-l border-tertiary hover:text-fg-primary hover:bg-hover"
-					class:collapsed={rightPaneCollapsed}
-					class:hidden={!isEditingMode}
-					onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
-					type="button"
-					title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
-					disabled={!isEditingMode}
-				>
-					{#if configPosition === 'bottom'}
-						{#if rightPaneCollapsed}
-							<ChevronUp size={14} />
-						{:else}
-							<ChevronDown size={14} />
-						{/if}
-					{:else}
-						{#if rightPaneCollapsed}
-							<ChevronLeft size={14} />
-						{:else}
-							<ChevronRight size={14} />
-						{/if}
-					{/if}
-				</button>
 			</div>
+			<button
+				class="config-position-toggle shrink-0 w-8 h-full flex items-center justify-center bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary hover:bg-hover"
+				class:hidden={!isEditingMode}
+				onclick={toggleConfigPosition}
+				type="button"
+				title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
+			>
+				{#if configPosition === 'right'}
+					<PanelBottom size={14} />
+				{:else}
+					<PanelRight size={14} />
+				{/if}
+			</button>
+			<button
+				class="collapse-arrow collapse-arrow-right shrink-0 w-8 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer text-fg-muted border-l border-tertiary hover:text-fg-primary hover:bg-hover"
+				class:collapsed={rightPaneCollapsed}
+				class:hidden={!isEditingMode}
+				onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
+				type="button"
+				title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
+				disabled={!isEditingMode}
+			>
+				{#if configPosition === 'bottom'}
+					{#if rightPaneCollapsed}
+						<ChevronUp size={14} />
+					{:else}
+						<ChevronDown size={14} />
+					{/if}
+				{:else}
+					{#if rightPaneCollapsed}
+						<ChevronLeft size={14} />
+					{:else}
+						<ChevronRight size={14} />
+					{/if}
+				{/if}
+			</button>
 			<div
 				class="header-right flex items-center justify-end h-full box-border border-l border-tertiary"
 				class:panel-width={configPosition === 'right'}

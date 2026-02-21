@@ -2422,7 +2422,8 @@ tbody tr:last-child .dataset-table__td {
 	transform: rotate(180deg);
 }
 
-.collapse-arrow.hidden {
+.collapse-arrow.hidden,
+.config-position-toggle.hidden {
 	visibility: hidden;
 	pointer-events: none;
 }
@@ -2517,7 +2518,8 @@ tbody tr:last-child .dataset-table__td {
 	background-color: var(--bg-secondary);
 }
 
-.collapse-arrow.hidden {
+.collapse-arrow.hidden,
+.config-position-toggle.hidden {
 	visibility: hidden;
 	pointer-events: none;
 }
