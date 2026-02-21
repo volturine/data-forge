@@ -33,7 +33,17 @@
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, X } from 'lucide-svelte';
+	import {
+		ChevronDown,
+		ChevronLeft,
+		ChevronRight,
+		ChevronUp,
+		PanelRight,
+		PanelBottom,
+		Pencil,
+		Plus,
+		X
+	} from 'lucide-svelte';
 
 	const analysisId = $derived($page.params.id ?? null);
 	let lastAnalysisId = $state<string | null>(null);
@@ -105,6 +115,8 @@
 				selectedStepId: string | null;
 				leftPaneCollapsed: boolean;
 				rightPaneCollapsed: boolean;
+				configPosition?: 'right' | 'bottom';
+				bottomPaneHeight?: number;
 			};
 			if (parsed.analysisId !== analysisId) {
 				draftLoaded = true;
@@ -122,6 +134,8 @@
 			selectedStepId = parsed.selectedStepId;
 			leftPaneCollapsed = parsed.leftPaneCollapsed;
 			rightPaneCollapsed = parsed.rightPaneCollapsed;
+			if (parsed.configPosition) configPosition = parsed.configPosition;
+			if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
 			isDirty = true;
 			draftLoaded = true;
 		});
@@ -140,7 +154,9 @@
 			engineDefaults: analysisStore.engineDefaults,
 			selectedStepId,
 			leftPaneCollapsed,
-			rightPaneCollapsed
+			rightPaneCollapsed,
+			configPosition,
+			bottomPaneHeight
 		};
 		if (draftTimer) window.clearTimeout(draftTimer);
 		draftTimer = window.setTimeout(() => {
@@ -160,6 +176,9 @@
 	let modalSource = $state<'datasource' | 'analysis'>('datasource');
 	let leftPaneCollapsed = $state(false);
 	let rightPaneCollapsed = $state(false);
+	let configPosition = $state<'right' | 'bottom'>('right');
+	let bottomPaneHeight = $state(300);
+	let isResizingBottomPane = $state(false);
 	let isEditingMode = $state(false);
 	let showModeDropdown = $state(false);
 	let showVersionModal = $state(false);
@@ -560,6 +579,31 @@
 		checkLockStatus(analysisId);
 	});
 
+	function toggleConfigPosition() {
+		configPosition = configPosition === 'right' ? 'bottom' : 'right';
+	}
+
+	function handleBottomPaneResizeStart(e: PointerEvent) {
+		e.preventDefault();
+		isResizingBottomPane = true;
+		const startY = e.clientY;
+		const startHeight = bottomPaneHeight;
+
+		function onMove(ev: PointerEvent) {
+			const delta = startY - ev.clientY;
+			bottomPaneHeight = Math.max(150, Math.min(startHeight + delta, window.innerHeight - 200));
+		}
+
+		function onUp() {
+			isResizingBottomPane = false;
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+		}
+
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp);
+	}
+
 	function handleCloseConfig() {
 		selectedStepId = null;
 	}
@@ -801,7 +845,7 @@
 		</button>
 	</div>
 {:else if analysisQuery.data}
-	<div class="analysis-page flex h-full flex-col bg-secondary">
+	<div class="analysis-page flex h-full flex-col bg-secondary" class:resizing={isResizingBottomPane}>
 		<header
 			class="analysis-header flex items-stretch sticky top-0 h-12 bg-panel border-y border-tertiary"
 		>
@@ -895,6 +939,19 @@
 					</div>
 				</div>
 				<button
+					class="w-6 h-full flex items-center justify-center bg-transparent border-none cursor-pointer shrink-0 text-fg-muted hover:text-fg-primary hover:bg-hover"
+					class:hidden={!isEditingMode}
+					onclick={toggleConfigPosition}
+					type="button"
+					title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
+				>
+					{#if configPosition === 'right'}
+						<PanelBottom size={14} />
+					{:else}
+						<PanelRight size={14} />
+					{/if}
+				</button>
+				<button
 					class="collapse-arrow collapse-arrow-right w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-l border-tertiary hover:text-fg-primary hover:bg-hover"
 					class:collapsed={rightPaneCollapsed}
 					class:hidden={!isEditingMode}
@@ -903,15 +960,24 @@
 					title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
 					disabled={!isEditingMode}
 				>
-					{#if rightPaneCollapsed}
-						<ChevronLeft size={14} />
+					{#if configPosition === 'bottom'}
+						{#if rightPaneCollapsed}
+							<ChevronUp size={14} />
+						{:else}
+							<ChevronDown size={14} />
+						{/if}
 					{:else}
-						<ChevronRight size={14} />
+						{#if rightPaneCollapsed}
+							<ChevronLeft size={14} />
+						{:else}
+							<ChevronRight size={14} />
+						{/if}
 					{/if}
 				</button>
 			</div>
 			<div
-				class="header-right flex items-center justify-end h-full box-border border-l border-tertiary panel-width"
+				class="header-right flex items-center justify-end h-full box-border border-l border-tertiary"
+				class:panel-width={configPosition === 'right'}
 			>
 				<div class="mode-toggle-container relative items-center px-1">
 					<button
@@ -996,30 +1062,53 @@
 				</div>
 			{/if}
 
-			<div
-				class="center-pane flex-1 min-w-50 flex bg-secondary"
-				class:readonly={!isEditingMode}
-				class:expanded={!isEditingMode}
-			>
-				<PipelineCanvas
-					steps={analysisStore.pipeline}
-					analysisId={analysisId ?? undefined}
-					datasourceId={previewDatasourceId}
-					datasource={currentDatasource}
-					{datasourceLabel}
-					tabName={analysisStore.activeTab?.name}
-					activeTab={analysisStore.activeTab}
-					onStepClick={handleSelectStep}
-					onStepDelete={handleDeleteStep}
-					onStepToggle={handleToggleStep}
-					onInsertStep={handleInsertStep}
-					onMoveStep={handleMoveStep}
-					onChangeDatasource={() => openDatasourceModal('change')}
-					onRenameTab={handleRenameSourceTab}
-				/>
+			<div class="flex flex-1 min-w-0 flex-col overflow-hidden">
+				<div
+					class="center-pane flex-1 min-w-50 min-h-0 flex bg-secondary"
+					class:readonly={!isEditingMode}
+					class:expanded={!isEditingMode}
+				>
+					<PipelineCanvas
+						steps={analysisStore.pipeline}
+						analysisId={analysisId ?? undefined}
+						datasourceId={previewDatasourceId}
+						datasource={currentDatasource}
+						{datasourceLabel}
+						tabName={analysisStore.activeTab?.name}
+						activeTab={analysisStore.activeTab}
+						onStepClick={handleSelectStep}
+						onStepDelete={handleDeleteStep}
+						onStepToggle={handleToggleStep}
+						onInsertStep={handleInsertStep}
+						onMoveStep={handleMoveStep}
+						onChangeDatasource={() => openDatasourceModal('change')}
+						onRenameTab={handleRenameSourceTab}
+					/>
+				</div>
+
+				{#if isEditingMode && configPosition === 'bottom'}
+					<div
+						class="bottom-pane shrink-0 overflow-hidden flex box-border bg-panel border-t border-tertiary"
+						class:collapsed={rightPaneCollapsed}
+						style="height: {rightPaneCollapsed ? 0 : bottomPaneHeight}px;"
+					>
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="bottom-pane-resize-handle"
+							onpointerdown={handleBottomPaneResizeStart}
+						></div>
+						<StepConfig
+							bind:step={selectedStepState}
+							schema={analysisStore.calculatedSchema}
+							{isLoadingSchema}
+							onClose={handleCloseConfig}
+							onConfigApply={markUnsaved}
+						/>
+					</div>
+				{/if}
 			</div>
 
-			{#if isEditingMode}
+			{#if isEditingMode && configPosition === 'right'}
 				<div
 					class="right-pane shrink-0 overflow-hidden flex h-full box-border bg-panel border-l border-tertiary panel-width"
 					class:collapsed={rightPaneCollapsed}

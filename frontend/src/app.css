@@ -1961,6 +1961,47 @@ body.touch-dragging .pipeline-canvas {
 	flex: 1;
 }
 
+/* Bottom pane (footer config panel) */
+.analysis-page .bottom-pane {
+	width: 100%;
+	position: relative;
+	transition:
+		height var(--transition),
+		visibility var(--transition);
+}
+
+.analysis-page .bottom-pane.collapsed {
+	height: 0 !important;
+	border: none;
+}
+
+.analysis-page .bottom-pane > .step-config {
+	width: 100%;
+	flex: 1;
+	min-height: 0;
+}
+
+.bottom-pane-resize-handle {
+	position: absolute;
+	top: -3px;
+	left: 0;
+	right: 0;
+	height: 6px;
+	cursor: ns-resize;
+	z-index: 5;
+}
+
+.bottom-pane-resize-handle:hover,
+.bottom-pane-resize-handle:active {
+	background: var(--accent-primary);
+	opacity: 0.4;
+}
+
+.analysis-page.resizing {
+	user-select: none;
+	cursor: ns-resize;
+}
+
 .analysis-page .readonly {
 	opacity: 0.7;
 }
