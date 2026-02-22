@@ -47,7 +47,7 @@
 		<div class="flex items-center gap-2">
 			Destination
 			<span
-				class="rounded-sm border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
+				class="border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
 			>
 				Browser download
 			</span>

@@ -88,7 +88,7 @@
 		<span class="font-semibold text-fg-primary">{info.label}</span>
 		{#if isReorder}
 			<span
-				class="rounded-sm px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide bg-warning-fg text-warning-contrast"
+				class="px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide bg-warning-fg text-warning-contrast"
 				>Move</span
 			>
 		{/if}

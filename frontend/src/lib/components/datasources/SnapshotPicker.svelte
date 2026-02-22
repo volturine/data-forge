@@ -463,13 +463,13 @@
 		<div class="flex items-center gap-2">
 			{#if selectedSnapshotId}
 				<span
-					class="rounded-sm border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-muted"
+					class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-muted"
 				>
 					{selectedSnapshotId}
 				</span>
 			{:else}
 				<span
-					class="rounded-sm border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
+					class="border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
 				>
 					Latest
 				</span>
@@ -569,7 +569,7 @@
 										<span>{day.day}</span>
 										{#if day.count > 0}
 											<span
-												class="absolute right-1 top-1 rounded-sm bg-accent-bg px-1 text-[9px] text-accent-primary"
+												class="absolute right-1 top-1 bg-accent-bg px-1 text-[9px] text-accent-primary"
 											>
 												{day.count}
 											</span>

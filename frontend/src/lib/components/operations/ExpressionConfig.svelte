@@ -22,8 +22,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Expression configuration">
-	<h3>Expression Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="expr-expression-heading">
 		<h4 id="expr-expression-heading">Expression</h4>
 		<label for="expr-textarea-expression" class="sr-only">Polars expression</label>

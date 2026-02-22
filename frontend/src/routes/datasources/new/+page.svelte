@@ -376,7 +376,7 @@
 						accept=".csv,.xlsx"
 						onchange={handleFileChange}
 						disabled={loading}
-						class="rounded-sm border border-input p-2"
+						class="border border-input p-2"
 					/>
 					<p class="m-0 text-xs leading-relaxed text-fg-muted">
 						Select one or more CSV or Excel files (one type per batch). Names are derived from
@@ -573,7 +573,7 @@
 						bind:value={dbName}
 						placeholder="My Database"
 						disabled={loading}
-						class="rounded-sm border px-3 py-2 text-sm input-base"
+						class="border px-3 py-2 text-sm input-base"
 					/>
 				</div>
 
@@ -587,7 +587,7 @@
 						bind:value={connectionString}
 						placeholder="postgresql://user:pass@localhost/db"
 						disabled={loading}
-						class="rounded-sm border px-3 py-2 text-sm input-base"
+						class="border px-3 py-2 text-sm input-base"
 					/>
 					<p class="m-0 text-xs text-fg-muted">Example: postgresql://user:pass@localhost/dbname</p>
 				</div>
@@ -618,7 +618,7 @@
 						bind:value={pathName}
 						placeholder="Existing Iceberg"
 						disabled={loading}
-						class="rounded-sm border px-3 py-2 text-sm input-base"
+						class="border px-3 py-2 text-sm input-base"
 					/>
 				</div>
 				<div class="flex flex-col gap-2">
@@ -631,7 +631,7 @@
 						bind:value={pathValue}
 						placeholder="/data/<namespace>/clean/<uuid>"
 						disabled={loading}
-						class="rounded-sm border px-3 py-2 text-sm input-base"
+						class="border px-3 py-2 text-sm input-base"
 					/>
 					<div class="flex items-center gap-2">
 						<button class="btn-secondary" type="button" onclick={openPicker} disabled={loading}>

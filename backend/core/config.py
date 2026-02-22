@@ -130,12 +130,11 @@ class Settings(BaseSettings):
     # Cooldown in milliseconds before logging repeated flush failures
     log_client_flush_cooldown_ms: int = Field(default=3000, alias='LOG_CLIENT_FLUSH_COOLDOWN_MS')
 
-    # Server-side log directory for Iceberg logs and metadata
-    # Iceberg log base path (catalog + warehouse)
-    log_iceberg_path: Path = Field(default=Path('.'), alias='LOG_ICEBERG_PATH')
+    # Server-side log directory for SQLite logs
+    log_sqlite_path: Path = Field(default=Path('.'), alias='LOG_SQLITE_PATH')
 
-    # Iceberg log flush interval in seconds
-    log_iceberg_flush_interval_seconds: int = Field(default=300, alias='LOG_ICEBERG_FLUSH_INTERVAL_SECONDS')
+    # SQLite log flush interval in seconds
+    log_sqlite_flush_interval_seconds: int = Field(default=5, alias='LOG_SQLITE_FLUSH_INTERVAL_SECONDS')
 
     # Max queued log batches before dropping
     log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
@@ -165,17 +164,17 @@ class Settings(BaseSettings):
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
 
-    @field_validator('log_iceberg_path', mode='before')
+    @field_validator('log_sqlite_path', mode='before')
     @classmethod
-    def _ensure_log_iceberg_path(cls, value: Path | str, info) -> Path:
+    def _ensure_log_sqlite_path(cls, value: Path | str, info) -> Path:
         data_dir = info.data.get('data_dir')
         if str(value) in {'.', ''} and data_dir:
             value = Path(data_dir) / 'logs'
         path_value = Path(value)
         if path_value.suffix in {'.db', '.json'}:
-            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+            raise ValueError('LOG_SQLITE_PATH must be a directory, not a file')
         if path_value.exists() and path_value.is_file():
-            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+            raise ValueError('LOG_SQLITE_PATH must be a directory, not a file')
         return _resolve_dir(path_value)
 
     @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval', 'scheduler_check_interval')

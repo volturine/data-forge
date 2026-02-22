@@ -20,8 +20,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Top K configuration">
-	<h3>Top K Configuration</h3>
-
 	<div class="form-group mb-4">
 		<div class="form-label">Column to sort by</div>
 		<ColumnDropdown

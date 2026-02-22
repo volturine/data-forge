@@ -125,10 +125,10 @@ class TestSettings:
 
         assert settings.log_level == 'info'
 
-    def test_default_log_iceberg_paths(self):
+    def test_default_log_sqlite_paths(self):
         settings = Settings()
 
-        assert 'logs' in str(settings.log_iceberg_path)
+        assert 'logs' in str(settings.log_sqlite_path)
 
     def test_worker_settings(self, monkeypatch):
         monkeypatch.setenv('WORKERS', '4')

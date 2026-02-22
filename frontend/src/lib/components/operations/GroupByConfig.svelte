@@ -72,8 +72,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Group by configuration">
-	<h3>Group By Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="{uid}-columns-heading">
 		<h4 id="{uid}-columns-heading">Group By Columns</h4>
 		<MultiSelectColumnDropdown

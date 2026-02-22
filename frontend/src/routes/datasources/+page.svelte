@@ -193,7 +193,7 @@
 								</span>
 								{#if datasource.created_by === 'analysis'}
 									<span
-										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase font-medium text-accent-primary"
+										class="inline-flex items-center gap-0.5 shrink-0 bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase font-medium text-accent-primary"
 										title="Created by analysis"
 									>
 										<GitBranch size={10} />
@@ -201,7 +201,7 @@
 									</span>
 								{:else}
 									<span
-										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-tertiary px-1.5 py-0.5 text-[10px] uppercase font-medium text-fg-muted"
+										class="inline-flex items-center gap-0.5 shrink-0 bg-tertiary px-1.5 py-0.5 text-[10px] uppercase font-medium text-fg-muted"
 										title="Imported datasource"
 									>
 										<Upload size={10} />

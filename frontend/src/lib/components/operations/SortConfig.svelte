@@ -51,8 +51,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Sort configuration">
-	<h3>Sort Configuration</h3>
-
 	<div class="flex gap-2 items-center mb-6 flex-wrap" role="group" aria-label="Add sort rule form">
 		<div class="flex-2 min-w-50">
 			<span class="sr-only">Select column to sort</span>

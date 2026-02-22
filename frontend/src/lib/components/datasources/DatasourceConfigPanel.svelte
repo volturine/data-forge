@@ -535,18 +535,11 @@
 			{#if activeHealthChecks.length > 0}
 				<span class="ml-1 text-fg-tertiary">({activeHealthChecks.length})</span>
 				{#if healthStatus === 'passing'}
-					<span
-						class="ml-1 inline-block h-2 w-2 rounded-full bg-success-fg"
-						title="All checks passing"
-					></span>
+					<span class="ml-1 inline-block h-2 w-2 bg-success-fg" title="All checks passing"></span>
 				{:else if healthStatus === 'failing'}
-					<span
-						class="ml-1 inline-block h-2 w-2 rounded-full bg-error-fg"
-						title="Some checks failing"
-					></span>
+					<span class="ml-1 inline-block h-2 w-2 bg-error-fg" title="Some checks failing"></span>
 				{:else}
-					<span class="ml-1 inline-block h-2 w-2 rounded-full bg-fg-muted" title="No results yet"
-					></span>
+					<span class="ml-1 inline-block h-2 w-2 bg-fg-muted" title="No results yet"></span>
 				{/if}
 			{/if}
 		</button>
@@ -595,7 +588,7 @@
 							{#if ds.is_hidden}
 								<div class="flex items-center gap-1.5">
 									<span
-										class="rounded-sm bg-warning-bg border border-warning-fg/20 px-1.5 py-0.5 text-[10px] uppercase font-medium text-warning-fg"
+										class="bg-warning-bg border border-warning-fg/20 px-1.5 py-0.5 text-[10px] uppercase font-medium text-warning-fg"
 									>
 										Hidden
 									</span>
@@ -1018,14 +1011,14 @@
 									{/if}
 									{#if dsTag === 'created'}
 										<span
-											class="text-[10px] px-1.5 py-0.5 bg-accent-bg text-accent-primary rounded"
+											class="text-[10px] px-1.5 py-0.5 bg-accent-bg text-accent-primary"
 											title="This datasource was created from this export"
 										>
 											CREATED
 										</span>
 									{:else if dsTag === 'updated'}
 										<span
-											class="text-[10px] px-1.5 py-0.5 bg-warning-bg text-warning-fg rounded"
+											class="text-[10px] px-1.5 py-0.5 bg-warning-bg text-warning-fg"
 											title="This datasource was updated in this run"
 										>
 											UPDATED

@@ -39,8 +39,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="AI configuration">
-	<h3>AI (UDF)</h3>
-
 	<div class="form-group mb-4">
 		<label for="ai-provider">Provider</label>
 		<select id="ai-provider" bind:value={config.provider}>

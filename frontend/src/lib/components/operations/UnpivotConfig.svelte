@@ -15,7 +15,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Unpivot configuration">
-	<h3>Unpivot Configuration</h3>
 	<p class="description">Transform wide data to long format (melt operation).</p>
 
 	<div class="form-group mb-4">

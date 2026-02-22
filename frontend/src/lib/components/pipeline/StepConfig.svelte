@@ -64,6 +64,7 @@
 	import NotificationConfig from '$lib/components/operations/NotificationConfig.svelte';
 	import AIConfig from '$lib/components/operations/AIConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
+	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
 	import { Settings2, X } from 'lucide-svelte';
 
 	type WithColumnsConfigShape = {
@@ -92,6 +93,7 @@
 		onClose,
 		onConfigApply
 	}: Props = $props();
+	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
 	let fetchingPivotSchema = $state(false);
 	let draftStepId = $state<string | null>(null);
 	let draftConfig = $state<Record<string, unknown>>({});
@@ -227,7 +229,7 @@
 			class="config-header relative flex items-center justify-between border-b border-tertiary bg-primary px-4 p-2"
 		>
 			<h3 class="m-0 text-sm font-semibold uppercase tracking-widest text-fg-primary">
-				Configure Step
+				{stepLabel}
 			</h3>
 			<button
 				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted hover:bg-bg-hover hover:text-fg-primary"

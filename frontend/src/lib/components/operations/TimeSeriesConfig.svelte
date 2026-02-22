@@ -66,8 +66,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Time series configuration">
-	<h3>Time Series Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="ts-source-column-heading">
 		<h4 id="ts-source-column-heading">Source Column</h4>
 		<ColumnDropdown

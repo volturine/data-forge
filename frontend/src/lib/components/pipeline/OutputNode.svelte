@@ -385,7 +385,7 @@
 				<span class="text-sm font-semibold">output</span>
 			</div>
 			<span
-				class="rounded-sm border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-muted"
+				class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-muted"
 				>sink</span
 			>
 		</div>
@@ -555,7 +555,7 @@
 						<span>Build Notification</span>
 					</span>
 					{#if notifyConfig.enabled}
-						<span class="rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
+						<span class="bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
 							{selectedCount}/{activeSubscribers.length}
 						</span>
 					{/if}
@@ -653,7 +653,7 @@
 					</span>
 					{#if healthCount > 0}
 						<span
-							class="rounded-sm px-1.5 py-0.5 text-[10px] {healthPassed === true
+							class="px-1.5 py-0.5 text-[10px] {healthPassed === true
 								? 'bg-success-bg text-success-fg'
 								: healthPassed === false
 									? 'bg-error-bg text-error-fg'
@@ -671,7 +671,7 @@
 						</div>
 					{:else}
 						<div
-							class="mt-2 rounded-sm border border-dashed border-tertiary p-3 text-center text-xs text-fg-tertiary"
+							class="mt-2 border border-dashed border-tertiary p-3 text-center text-xs text-fg-tertiary"
 						>
 							Save this analysis to create an output datasource before adding health checks.
 						</div>
@@ -696,7 +696,7 @@
 						<span>Schedules</span>
 					</span>
 					{#if scheduleCount > 0}
-						<span class="rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
+						<span class="bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
 							{enabledSchedules}/{scheduleCount}
 						</span>
 					{/if}

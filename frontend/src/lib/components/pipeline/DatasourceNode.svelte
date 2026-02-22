@@ -207,7 +207,7 @@
 				<span class="text-sm font-semibold">source</span>
 			</div>
 			<span
-				class="rounded-sm border border-tertiary bg-tertiary text-fg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+				class="border border-tertiary bg-tertiary text-fg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
 				>root</span
 			>
 		</div>
@@ -331,7 +331,7 @@
 					{/if}
 				</div>
 			{:else}
-				<div class="rounded-sm border border-dashed border-tertiary p-3 text-center">
+				<div class="border border-dashed border-tertiary p-3 text-center">
 					<span class="text-xs text-fg-muted">No datasource connected</span>
 				</div>
 			{/if}

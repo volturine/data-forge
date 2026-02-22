@@ -206,9 +206,7 @@
 						Error loading data sources: {datasourcesQuery.error.message}
 					</div>
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
-					<div
-						class="rounded-sm border border-dashed border-tertiary p-8 text-center text-fg-tertiary"
-					>
+					<div class="border border-dashed border-tertiary p-8 text-center text-fg-tertiary">
 						<p>No data sources available.</p>
 						<a href={resolve('/datasources/new')} class="btn btn-secondary" data-sveltekit-reload
 							>Create Data Source</a

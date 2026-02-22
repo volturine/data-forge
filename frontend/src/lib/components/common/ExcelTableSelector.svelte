@@ -554,7 +554,7 @@
 				value={selectedSheet}
 				onchange={(event) => applySheet(event.currentTarget.value)}
 				disabled={disabled || previewLoading || !sheetNames.length}
-				class="rounded-sm border px-3 py-2 text-sm input-base"
+				class="border px-3 py-2 text-sm input-base"
 			>
 				<option value="">Select sheet</option>
 				{#each sheetNames as sheet (sheet)}
@@ -569,7 +569,7 @@
 				value={selectedTable}
 				onchange={(event) => applyTable(event.currentTarget.value)}
 				disabled={disabled || previewLoading || !selectedSheet}
-				class="rounded-sm border px-3 py-2 text-sm input-base"
+				class="border px-3 py-2 text-sm input-base"
 			>
 				<option value="">Manual selection</option>
 				{#each tableMap[selectedSheet] ?? [] as table (table)}
@@ -584,7 +584,7 @@
 				value={selectedRange}
 				onchange={(event) => applyNamedRange(event.currentTarget.value)}
 				disabled={disabled || previewLoading}
-				class="rounded-sm border px-3 py-2 text-sm input-base"
+				class="border px-3 py-2 text-sm input-base"
 			>
 				<option value="">None</option>
 				{#each namedRanges as range (range)}
@@ -608,7 +608,7 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder="A1:D50"
-				class="rounded-sm border px-3 py-2 text-sm input-base"
+				class="border px-3 py-2 text-sm input-base"
 			/>
 			<p class="m-0 text-xs text-fg-muted">Optional A1 range (use Sheet1!A1:D50).</p>
 		</div>
@@ -644,7 +644,7 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder="1"
-				class="w-20 rounded-sm border px-3 py-2 text-sm input-base"
+				class="w-20 border px-3 py-2 text-sm input-base"
 			/>
 			<label for="excel-start-col" class="m-0 text-sm font-medium text-fg-secondary"
 				>Start col</label
@@ -661,7 +661,7 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder="A"
-				class="w-20 rounded-sm border px-3 py-2 text-sm input-base"
+				class="w-20 border px-3 py-2 text-sm input-base"
 			/>
 			<label for="excel-end-col" class="m-0 text-sm font-medium text-fg-secondary">End col</label>
 			<input
@@ -676,7 +676,7 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder="D"
-				class="w-20 rounded-sm border px-3 py-2 text-sm input-base"
+				class="w-20 border px-3 py-2 text-sm input-base"
 			/>
 		</div>
 		<div class="flex items-center gap-2">
@@ -693,13 +693,13 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder={detectedEndRow !== null ? String(detectedEndRow + 1) : 'Auto'}
-				class="rounded-sm border px-3 py-2 text-sm input-base"
+				class="border px-3 py-2 text-sm input-base"
 			/>
 		</div>
 	</div>
 
 	{#if preflightId}
-		<div class="overflow-hidden rounded-sm border border-tertiary bg-primary">
+		<div class="overflow-hidden border border-tertiary bg-primary">
 			<div
 				class="flex flex-wrap gap-x-4 gap-y-1 px-3 py-1.5 text-[11px] font-medium bg-tertiary border-b border-tertiary text-fg-muted"
 			>

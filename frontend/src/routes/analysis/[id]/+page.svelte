@@ -424,6 +424,7 @@
 		const step = buildStep(type);
 		analysisStore.addStep(step);
 		selectedStepId = step.id;
+		rightPaneCollapsed = false;
 		markUnsaved();
 	}
 
@@ -433,6 +434,7 @@
 		const inserted = analysisStore.insertStep(step, target.index, target.parentId, target.nextId);
 		if (inserted) {
 			selectedStepId = step.id;
+			rightPaneCollapsed = false;
 			markUnsaved();
 		}
 	}
@@ -445,6 +447,7 @@
 
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
+		rightPaneCollapsed = false;
 	}
 
 	function handleDeleteStep(stepId: string) {
@@ -994,9 +997,9 @@
 								type="button"
 							>
 								{#if isEditingMode}
-									<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+									<div class="w-4 h-4 border-2 border-accent-primary"></div>
 								{:else}
-									<div class="w-4 h-4 rounded-full bg-accent-primary"></div>
+									<div class="w-4 h-4 bg-accent-primary"></div>
 								{/if}
 								<span>Viewing</span>
 							</button>
@@ -1006,9 +1009,9 @@
 								type="button"
 							>
 								{#if isEditingMode}
-									<div class="w-4 h-4 rounded-full bg-accent-primary"></div>
+									<div class="w-4 h-4 bg-accent-primary"></div>
 								{:else}
-									<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+									<div class="w-4 h-4 border-2 border-accent-primary"></div>
 								{/if}
 								<span>Editing</span>
 							</button>
@@ -1017,7 +1020,7 @@
 								onclick={openVersionModal}
 								type="button"
 							>
-								<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+								<div class="w-4 h-4 border-2 border-accent-primary"></div>
 								<span>Rollback</span>
 							</button>
 						</div>

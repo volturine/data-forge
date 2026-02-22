@@ -39,8 +39,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Pivot configuration">
-	<h3>Pivot Configuration</h3>
-
 	<div class="mb-4">
 		<label for="pivot-column"
 			>Pivot Column <span class="text-xs text-fg-muted">(values become new columns)</span></label
@@ -122,7 +120,7 @@
 			>
 				{#if isRefreshing}
 					<span
-						class="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"
+						class="h-3.5 w-3.5 border-2 border-current border-t-transparent animate-spin"
 						aria-hidden="true"
 					></span>
 					Refreshing...

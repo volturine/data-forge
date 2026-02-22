@@ -29,8 +29,6 @@
 </script>
 
 <div class="config-panel">
-	<h3>Explode Configuration</h3>
-
 	<div class="callout-info mb-4 border-l-[3px] p-3 text-sm">
 		Transform list/array columns into multiple rows. Each list element becomes a separate row,
 		duplicating all other column values.

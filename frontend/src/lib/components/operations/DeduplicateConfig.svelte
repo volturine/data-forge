@@ -22,8 +22,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Deduplicate configuration">
-	<h3>Deduplicate Configuration</h3>
-
 	<div class="form-section" role="radiogroup" aria-labelledby="keep-strategy-heading">
 		<h4 id="keep-strategy-heading">Keep Strategy</h4>
 		<div class="flex flex-col gap-3">

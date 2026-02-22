@@ -172,8 +172,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Filter configuration">
-	<h3>Filter Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="{uid}-conditions-heading">
 		<div class="mb-4 flex items-center justify-between">
 			<h4 id="{uid}-conditions-heading" class="mb-0">Conditions</h4>

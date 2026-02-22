@@ -375,7 +375,7 @@
 			{query.error instanceof Error ? query.error.message : 'Error loading runs.'}
 		</div>
 	{:else if runs.length === 0}
-		<div class="rounded-sm border border-dashed border-tertiary p-8 text-center">
+		<div class="border border-dashed border-tertiary p-8 text-center">
 			<p class="text-fg-muted">No engine runs yet.</p>
 			<p class="text-sm text-fg-tertiary">
 				Runs will appear here when you preview or export data in analyses. Compare builds from the
@@ -434,7 +434,7 @@
 									{/if}
 									{#if run.triggered_by === 'schedule'}
 										<span
-											class="ml-1 inline-flex items-center gap-0.5 rounded-sm bg-accent-bg px-1 py-0.5 text-xs text-accent-primary"
+											class="ml-1 inline-flex items-center gap-0.5 bg-accent-bg px-1 py-0.5 text-xs text-accent-primary"
 											title="Triggered by schedule"
 										>
 											<CalendarClock size={11} />

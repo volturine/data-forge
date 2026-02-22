@@ -15,8 +15,6 @@
 </script>
 
 <div class="config-panel">
-	<h3>Value Counts</h3>
-
 	<div class="form-group mb-4">
 		<div class="form-label">Column to count</div>
 		<ColumnDropdown

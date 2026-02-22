@@ -70,7 +70,6 @@
 </script>
 
 <div class="config-panel">
-	<h3>Union By Name</h3>
 	<p class="description">Combine rows from multiple datasources using matching column names.</p>
 
 	<div class="form-section">

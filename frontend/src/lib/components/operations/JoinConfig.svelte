@@ -101,8 +101,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Join configuration">
-	<h3>Join Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="right-datasource-heading">
 		<h4 id="right-datasource-heading">Right Datasource</h4>
 		<DatasourcePicker

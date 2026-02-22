@@ -337,7 +337,7 @@
 						</span>
 						{#if statusQuery.data}
 							<span
-								class="inline-block h-2 w-2 shrink-0 rounded-full"
+								class="inline-block h-2 w-2 shrink-0"
 								class:bg-success={botRunning}
 								class:bg-error={!botRunning}
 								title={botRunning ? 'Bot running' : 'Bot stopped'}
@@ -362,7 +362,7 @@
 							<span class="text-xs text-fg-tertiary">Start the Telegram bot listener on save</span>
 						</div>
 						<button
-							class="relative h-5 w-9 cursor-pointer rounded-full border-none transition-colors"
+							class="relative h-5 w-9 cursor-pointer border-none transition-colors"
 							class:bg-accent-primary={telegram_bot_enabled}
 							class:bg-tertiary={!telegram_bot_enabled}
 							onclick={() => (telegram_bot_enabled = !telegram_bot_enabled)}
@@ -372,7 +372,7 @@
 							aria-label="Toggle Telegram bot"
 						>
 							<span
-								class="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-fg-primary transition-transform"
+								class="absolute top-0.5 left-0.5 h-4 w-4 bg-fg-primary transition-transform"
 								class:translate-x-4={telegram_bot_enabled}
 							></span>
 						</button>
@@ -385,7 +385,7 @@
 						>
 							<span class="flex items-center gap-1.5">
 								<span
-									class="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+									class="inline-block h-1.5 w-1.5 shrink-0"
 									class:bg-success={botRunning}
 									class:bg-error={!botRunning}
 								></span>
@@ -409,7 +409,7 @@
 								>
 									<div class="flex items-center gap-2">
 										<span
-											class="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+											class="inline-block h-1.5 w-1.5 shrink-0"
 											class:bg-success={sub.is_active}
 											class:bg-tertiary={!sub.is_active}
 											title={sub.is_active ? 'Active' : 'Inactive'}
@@ -449,7 +449,7 @@
 							<span class="text-xs text-fg-tertiary">Show cache debug button in header</span>
 						</div>
 						<button
-							class="relative h-5 w-9 cursor-pointer rounded-full border-none transition-colors"
+							class="relative h-5 w-9 cursor-pointer border-none transition-colors"
 							class:bg-accent-primary={idb}
 							class:bg-tertiary={!idb}
 							onclick={() => (idb = !idb)}
@@ -459,7 +459,7 @@
 							aria-label="Toggle IndexedDB inspector"
 						>
 							<span
-								class="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-fg-primary transition-transform"
+								class="absolute top-0.5 left-0.5 h-4 w-4 bg-fg-primary transition-transform"
 								class:translate-x-4={idb}
 							></span>
 						</button>

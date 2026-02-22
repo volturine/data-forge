@@ -33,8 +33,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Fill null configuration">
-	<h3>Fill Null Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="fill-strategy-heading">
 		<h4 id="fill-strategy-heading">Fill Strategy</h4>
 		<label for="fill-select-strategy" class="sr-only">Select fill strategy</label>

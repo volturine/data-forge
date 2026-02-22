@@ -457,7 +457,7 @@
 			</div>
 		</div>
 		{#if showHelp}
-			<div class="mb-3 rounded border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+			<div class="mb-3 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
 				<p class="m-0 mb-1 font-medium">Schedule Triggers:</p>
 				<ul class="m-0 list-none space-y-1 p-0">
 					<li class="flex items-center gap-1">
@@ -478,7 +478,7 @@
 	{/if}
 
 	{#if showBlockedMessage}
-		<div class="mb-3 rounded border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+		<div class="mb-3 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
 			Scheduling is only available for analysis outputs. This datasource was created by
 			<span class="font-medium">{targetDatasource?.created_by}</span>.
 		</div>
@@ -496,7 +496,7 @@
 				</div>
 
 				{#if currentTarget}
-					<div class="rounded bg-bg-secondary p-3 text-sm">
+					<div class="bg-bg-secondary p-3 text-sm">
 						<div class="flex items-center gap-2">
 							<BarChart3 size={14} class="text-accent-primary" />
 							<span class="font-medium">{currentTarget.datasourceName}</span>
@@ -530,7 +530,7 @@
 						</div>
 
 						{#if selectedDatasource}
-							<div class="rounded bg-bg-secondary p-3 text-sm">
+							<div class="bg-bg-secondary p-3 text-sm">
 								<div class="flex items-center gap-2">
 									<BarChart3 size={14} class="text-accent-primary" />
 									<span class="font-medium">{selectedDatasource.name}</span>
@@ -563,7 +563,7 @@
 				<div class="space-y-3">
 					<!-- Cron Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
 						<input
 							type="radio"
@@ -593,7 +593,7 @@
 
 					<!-- Depends Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
 						<input
 							type="radio"
@@ -630,7 +630,7 @@
 
 					<!-- Event Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
 						<input
 							type="radio"
@@ -715,7 +715,7 @@
 			{/if}
 		</div>
 	{:else if visibleSchedules.length === 0 && hasSearch}
-		<div class="rounded-sm border border-dashed border-tertiary px-6 py-8 text-center">
+		<div class="border border-dashed border-tertiary px-6 py-8 text-center">
 			<p class="text-sm text-fg-tertiary">No schedules match your search.</p>
 		</div>
 	{:else if visibleSchedules.length > 0}
@@ -725,7 +725,7 @@
 				{#each visibleSchedules as schedule (schedule.id)}
 					{@const triggerTypeValue = getTriggerType(schedule)}
 					{@const triggerDesc = getTriggerDescription(schedule)}
-					<div class="group rounded border border-tertiary bg-bg-primary">
+					<div class="group border border-tertiary bg-bg-primary">
 						<div
 							class="flex cursor-pointer items-center gap-2 p-2 hover:bg-bg-secondary/50"
 							role="button"

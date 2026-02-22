@@ -154,7 +154,7 @@
 		</div>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="rounded-sm border border-dashed border-tertiary p-8 text-center">
+			<div class="border border-dashed border-tertiary p-8 text-center">
 				<p>No UDFs yet.</p>
 				<button class="btn-primary" onclick={openNew}>Create your first UDF</button>
 			</div>
@@ -186,9 +186,7 @@
 							{#if udf.tags?.length}
 								<div class="flex flex-wrap gap-2">
 									{#each udf.tags as tag (tag)}
-										<span class="rounded-sm bg-bg-tertiary px-1.5 py-0.5 text-xs text-fg-muted"
-											>{tag}</span
-										>
+										<span class="bg-bg-tertiary px-1.5 py-0.5 text-xs text-fg-muted">{tag}</span>
 									{/each}
 								</div>
 							{/if}

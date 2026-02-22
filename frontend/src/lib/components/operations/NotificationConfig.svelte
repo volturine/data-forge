@@ -140,10 +140,8 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Notification configuration">
-	<h3>Notification (UDF)</h3>
-
 	{#if !isReady}
-		<div class="rounded-sm border border-tertiary bg-bg-secondary p-3 text-sm text-fg-tertiary">
+		<div class="border border-tertiary bg-bg-secondary p-3 text-sm text-fg-tertiary">
 			Configure SMTP or Telegram in global settings first.
 		</div>
 	{/if}

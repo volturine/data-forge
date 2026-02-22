@@ -76,7 +76,7 @@ def isolate_data_dir(tmp_path: Path, monkeypatch):
     monkeypatch.setenv('ENV_FILE', '')
     monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
     monkeypatch.setattr(settings, 'database_url', f'sqlite:///{data_dir / "app.db"}', raising=False)
-    monkeypatch.setattr(settings, 'log_iceberg_path', log_dir, raising=False)
+    monkeypatch.setattr(settings, 'log_sqlite_path', log_dir, raising=False)
 
 
 @pytest.fixture(autouse=True, scope='function')

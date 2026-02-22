@@ -474,7 +474,7 @@
 					{@const pos = positionSnapshot[node.id]}
 					{#if pos}
 						<div
-							class="absolute flex flex-col gap-1 rounded-sm border px-4 py-3 shadow-sm lineage-node"
+							class="absolute flex flex-col gap-1 border px-4 py-3 shadow-sm lineage-node"
 							use:setPosition={pos}
 							onpointerdown={(event) => {
 								if (event.button === 0) startDrag(event, node.id);

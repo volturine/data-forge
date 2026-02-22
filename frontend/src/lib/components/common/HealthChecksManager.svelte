@@ -283,7 +283,7 @@
 </script>
 
 {#snippet createForm()}
-	<div class="mb-4 rounded border border-tertiary bg-bg-secondary p-3 shadow-sm transition-opacity">
+	<div class="mb-4 border border-tertiary bg-bg-secondary p-3 shadow-sm transition-opacity">
 		<div class="mb-3 flex items-center justify-between border-b border-tertiary pb-2">
 			<span class="text-xs font-semibold text-fg-primary">New Health Check</span>
 			<button
@@ -304,7 +304,7 @@
 				>
 				<select
 					id="hc-target"
-					class="w-full appearance-none rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+					class="w-full appearance-none border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 					bind:value={targetDatasourceId}
 				>
 					<option value="">Select datasource...</option>
@@ -329,7 +329,7 @@
 				<input
 					id="hc-name"
 					type="text"
-					class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary placeholder:text-fg-muted focus:border-info focus:outline-none"
+					class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary placeholder:text-fg-muted focus:border-info focus:outline-none"
 					bind:value={name}
 					placeholder="e.g. Row count guard"
 				/>
@@ -342,7 +342,7 @@
 				<div class="relative">
 					<select
 						id="hc-type"
-						class="w-full appearance-none rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+						class="w-full appearance-none border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 						bind:value={checkType}
 						onchange={() => {
 							config = {};
@@ -379,7 +379,7 @@
 						<input
 							id="hc-min-rows"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('min_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -390,7 +390,7 @@
 						<input
 							id="hc-max-rows"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('max_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -408,7 +408,7 @@
 						<input
 							id="hc-min-cols"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('min_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -419,7 +419,7 @@
 						<input
 							id="hc-max-cols"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('max_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -432,7 +432,7 @@
 					<input
 						id="hc-null-threshold"
 						type="number"
-						class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+						class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 					/>
 				</div>
@@ -450,7 +450,7 @@
 						<input
 							id="hc-dup-threshold"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -461,7 +461,7 @@
 						<input
 							id="hc-dup-cols"
 							type="text"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary placeholder:text-fg-muted focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary placeholder:text-fg-muted focus:border-info focus:outline-none"
 							value={duplicateColumns}
 							placeholder="col_a, col_b"
 							oninput={(e) => updateDuplicateColumns(e.currentTarget.value)}
@@ -481,7 +481,7 @@
 						<input
 							id="hc-column"
 							type="text"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -492,7 +492,7 @@
 						<input
 							id="hc-threshold"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -511,7 +511,7 @@
 						<input
 							id="hc-unique-column"
 							type="text"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -522,7 +522,7 @@
 						<input
 							id="hc-expected"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('expected_unique', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -540,7 +540,7 @@
 						<input
 							id="hc-range-column"
 							type="text"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -551,7 +551,7 @@
 						<input
 							id="hc-min"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('min', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -562,7 +562,7 @@
 						<input
 							id="hc-max"
 							type="number"
-							class="rounded border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
+							class="border border-tertiary bg-bg-primary px-2 py-1.5 text-xs text-fg-primary focus:border-info focus:outline-none"
 							oninput={(e) => updateConfig('max', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -574,7 +574,7 @@
 			<label class="flex items-center gap-2 text-xs text-fg-secondary cursor-pointer select-none">
 				<input
 					type="checkbox"
-					class="rounded border-tertiary text-accent-primary focus:ring-0"
+					class="border-tertiary text-accent-primary focus:ring-0"
 					checked={critical}
 					onchange={(e) => (critical = e.currentTarget.checked)}
 				/>
@@ -583,7 +583,7 @@
 
 			<div class="flex items-center gap-2">
 				<button
-					class="rounded border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-tertiary hover:bg-bg-tertiary transition-colors"
+					class="border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-tertiary hover:bg-bg-tertiary transition-colors"
 					onclick={() => {
 						creating = false;
 						resetForm();
@@ -592,7 +592,7 @@
 					Cancel
 				</button>
 				<button
-					class="rounded bg-accent-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					class="bg-accent-primary px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					disabled={!name ||
 						!effectiveDatasourceId ||
 						createCheckMutation.isPending ||
@@ -659,7 +659,7 @@
 			</div>
 			{#if !creating}
 				<button
-					class="inline-flex items-center gap-1 rounded border border-tertiary bg-accent-bg px-2 py-1 text-[10px] font-medium text-accent-primary hover:bg-accent-bg/80 transition-colors"
+					class="inline-flex items-center gap-1 border border-tertiary bg-accent-bg px-2 py-1 text-[10px] font-medium text-accent-primary hover:bg-accent-bg/80 transition-colors"
 					onclick={() => (creating = true)}
 				>
 					<Plus size={12} />
@@ -671,7 +671,7 @@
 
 	{#if !compact && creating}
 		{#if !datasourceId && !targetDatasourceId}
-			<div class="mb-4 rounded border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+			<div class="mb-4 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
 				Select a datasource to add a health check.
 			</div>
 		{/if}
@@ -684,14 +684,12 @@
 			<Loader size={20} class="animate-spin" />
 		</div>
 	{:else if listQuery.isError}
-		<div
-			class="rounded border border-error-border bg-error-bg/10 p-4 text-center text-sm text-error-fg"
-		>
+		<div class="border border-error-border bg-error-bg/10 p-4 text-center text-sm text-error-fg">
 			Failed to load health checks.
 		</div>
 	{:else if checks.length === 0 && !creating}
 		<div
-			class="flex flex-col items-center justify-center rounded border border-dashed border-tertiary bg-bg-secondary/50 py-8 text-center"
+			class="flex flex-col items-center justify-center border border-dashed border-tertiary bg-bg-secondary/50 py-8 text-center"
 			class:py-4={compact}
 		>
 			<HeartPulse class="mb-2 text-fg-muted" size={compact ? 16 : 24} />
@@ -703,7 +701,7 @@
 			{/if}
 		</div>
 	{:else if visibleChecks.length === 0 && hasSearch}
-		<div class="rounded-sm border border-dashed border-tertiary px-6 py-8 text-center">
+		<div class="border border-dashed border-tertiary px-6 py-8 text-center">
 			<p class="text-sm text-fg-tertiary">No health checks match your search.</p>
 		</div>
 	{:else if visibleChecks.length > 0}
@@ -747,22 +745,16 @@
 								<td class="border-b border-tertiary px-2 py-1.5">
 									{#if latest}
 										{#if latest.passed}
-											<div
-												class="flex h-5 w-5 items-center justify-center rounded-full bg-success-bg/20"
-											>
+											<div class="flex h-5 w-5 items-center justify-center bg-success-bg/20">
 												<Check size={12} class="text-success-fg" />
 											</div>
 										{:else}
-											<div
-												class="flex h-5 w-5 items-center justify-center rounded-full bg-error-bg/20"
-											>
+											<div class="flex h-5 w-5 items-center justify-center bg-error-bg/20">
 												<X size={12} class="text-error-fg" />
 											</div>
 										{/if}
 									{:else}
-										<div
-											class="flex h-5 w-5 items-center justify-center rounded-full bg-bg-tertiary"
-										>
+										<div class="flex h-5 w-5 items-center justify-center bg-bg-tertiary">
 											<AlertTriangle size={12} class="text-fg-muted" />
 										</div>
 									{/if}
@@ -787,7 +779,7 @@
 								<td class="border-b border-tertiary px-2 py-1.5">
 									{#if check.critical}
 										<span
-											class="inline-flex rounded border border-info bg-accent-bg px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-primary"
+											class="inline-flex border border-info bg-accent-bg px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-accent-primary"
 										>
 											Critical
 										</span>
@@ -894,18 +886,18 @@
 				{#each visibleChecks as check (check.id)}
 					{@const latest = latestResults.get(check.id)}
 					<div
-						class="group flex items-center gap-2 rounded border border-tertiary bg-bg-primary p-2 hover:border-fg-tertiary transition-colors"
+						class="group flex items-center gap-2 border border-tertiary bg-bg-primary p-2 hover:border-fg-tertiary transition-colors"
 					>
 						<!-- Status -->
 						<div class="shrink-0">
 							{#if latest}
 								{#if latest.passed}
-									<div class="h-2 w-2 rounded-full bg-success-fg"></div>
+									<div class="h-2 w-2 bg-success-fg"></div>
 								{:else}
-									<div class="h-2 w-2 rounded-full bg-error-fg"></div>
+									<div class="h-2 w-2 bg-error-fg"></div>
 								{/if}
 							{:else}
-								<div class="h-2 w-2 rounded-full bg-fg-muted"></div>
+								<div class="h-2 w-2 bg-fg-muted"></div>
 							{/if}
 						</div>
 
@@ -921,7 +913,7 @@
 							{/if}
 							{#if check.critical}
 								<span
-									class="shrink-0 rounded bg-accent-bg px-1 py-0.5 text-[9px] font-bold uppercase leading-none text-accent-primary"
+									class="shrink-0 bg-accent-bg px-1 py-0.5 text-[9px] font-bold uppercase leading-none text-accent-primary"
 								>
 									Crit
 								</span>
@@ -935,7 +927,7 @@
 							<label class="flex cursor-pointer items-center">
 								<input
 									type="checkbox"
-									class="h-3 w-3 rounded border-tertiary text-success-fg focus:ring-0"
+									class="h-3 w-3 border-tertiary text-success-fg focus:ring-0"
 									checked={check.enabled}
 									onchange={() => toggleEnabled(check)}
 								/>

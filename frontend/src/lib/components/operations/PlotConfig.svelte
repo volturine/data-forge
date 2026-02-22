@@ -57,8 +57,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Plot configuration">
-	<h3>Plot Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby={`${uid}-plot-type`}>
 		<h4 id={`${uid}-plot-type`}>Chart Type</h4>
 		<select bind:value={plotConfig.chart_type} class="select-mono">
