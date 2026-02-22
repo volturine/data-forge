@@ -15,7 +15,7 @@
 </script>
 
 <div class="config-panel">
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<div class="form-label">Column to count</div>
 		<ColumnDropdown
 			{schema}
@@ -25,15 +25,15 @@
 		/>
 	</div>
 
-	<div class="form-group mb-4">
-		<label class="flex cursor-pointer items-center gap-2">
+	<div class="form-group mb-5">
+		<label class="flex cursor-pointer items-center gap-3">
 			<input id="normalize" type="checkbox" bind:checked={config.normalize} />
 			<span>Normalize (show proportions instead of counts)</span>
 		</label>
 	</div>
 
 	<div class="form-group mb-0">
-		<label class="flex cursor-pointer items-center gap-2">
+		<label class="flex cursor-pointer items-center gap-3">
 			<input
 				id="sort"
 				type="checkbox"

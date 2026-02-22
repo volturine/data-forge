@@ -853,15 +853,15 @@
 		class:resizing={isResizingBottomPane}
 	>
 		<header
-			class="analysis-header flex items-stretch sticky top-0 h-12 bg-panel border-y border-tertiary"
+			class="analysis-header flex items-stretch sticky top-0 h-11 bg-panel border-b border-tertiary"
 		>
 			<div
 				class="header-left flex items-center h-full box-border border-r border-tertiary panel-width"
 			>
-				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-4">
+				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-5">
 					<h1
 						contenteditable={isEditingMode}
-						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none text-fg-primary tracking-[0.02em]"
+						class="editable-title m-0 text-xs font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none text-fg-primary tracking-[0.04em]"
 						class:cursor-text={isEditingMode}
 						class:cursor-default={!isEditingMode}
 						onblur={(e) => {
@@ -882,7 +882,7 @@
 					</h1>
 					{#if analysisQuery.data.description}
 						<span
-							class="text-xs whitespace-nowrap overflow-hidden text-ellipsis text-fg-muted tracking-[0.02em]"
+							class="text-[0.625rem] whitespace-nowrap overflow-hidden text-ellipsis text-fg-faint tracking-[0.02em]"
 							>{analysisQuery.data.description}</span
 						>
 					{/if}
@@ -890,23 +890,23 @@
 			</div>
 			<div class="flex-1 min-w-0 overflow-hidden flex items-center justify-center gap-0">
 				<button
-					class="collapse-arrow collapse-arrow-left h-full flex items-center justify-center bg-panel border-none text-lg cursor-pointer shrink-0 text-fg-muted hover:text-fg-primary hover:bg-hover"
+					class="collapse-arrow collapse-arrow-left h-full flex items-center justify-center px-2 bg-panel border-none cursor-pointer shrink-0 text-fg-faint hover:text-fg-primary hover:bg-hover"
 					class:collapsed={leftPaneCollapsed}
 					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
 					type="button"
 					title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
 				>
 					{#if leftPaneCollapsed}
-						<ChevronRight size={14} />
+						<ChevronRight size={12} />
 					{:else}
-						<ChevronLeft size={14} />
+						<ChevronLeft size={12} />
 					{/if}
 				</button>
 				<div class="flex-1 overflow-hidden flex items-center">
 					<div class="tabs flex items-center overflow-x-auto">
 						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
 							<div
-								class="tab inline-flex items-center bg-transparent border-none text-sm font-medium uppercase text-fg-muted"
+								class="tab inline-flex items-center bg-transparent border-none text-xs font-medium uppercase text-fg-muted tracking-wide"
 								class:active={analysisStore.activeTab?.id === tab.id}
 							>
 								<button
@@ -920,43 +920,43 @@
 								</button>
 								{#if analysisStore.tabs.length > 1}
 									<button
-										class="tab-remove text-base leading-none ml-1 opacity-50 hover:opacity-100 hover:text-error"
+										class="tab-remove text-base leading-none ml-1 opacity-40 hover:opacity-100 hover:text-error"
 										onclick={() => handleRemoveTab(tab.id)}
 										type="button"
 										aria-label="Remove tab"
 									>
-										<X size={12} />
+										<X size={10} />
 									</button>
 								{/if}
 							</div>
 						{/each}
 						<div class="flex items-center">
 							<button
-								class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-semibold uppercase text-fg-muted"
+								class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-xs uppercase text-fg-faint hover:text-fg-primary"
 								onclick={() => openDatasourceModal('add')}
 								type="button"
 								title="Add datasource tab"
 							>
-								<Plus size={14} />
+								<Plus size={12} />
 							</button>
 						</div>
 					</div>
 				</div>
 			</div>
 			<button
-				class="config-position-toggle shrink-0 h-full flex items-center justify-center bg-panel border-none cursor-pointer text-fg-muted hover:text-fg-primary hover:bg-hover"
+				class="config-position-toggle shrink-0 h-full flex items-center justify-center px-2 bg-panel border-none cursor-pointer text-fg-faint hover:text-fg-primary hover:bg-hover"
 				onclick={toggleConfigPosition}
 				type="button"
 				title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
 			>
 				{#if configPosition === 'right'}
-					<PanelBottom size={14} />
+					<PanelBottom size={13} />
 				{:else}
-					<PanelRight size={14} />
+					<PanelRight size={13} />
 				{/if}
 			</button>
 			<button
-				class="collapse-arrow collapse-arrow-right items-center bg-panel border-none text-fg-muted"
+				class="collapse-arrow collapse-arrow-right items-center px-2 bg-panel border-none text-fg-faint hover:text-fg-primary hover:bg-hover"
 				class:collapsed={rightPaneCollapsed}
 				onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
 				type="button"
@@ -964,27 +964,27 @@
 			>
 				{#if configPosition === 'bottom'}
 					{#if rightPaneCollapsed}
-						<ChevronUp size={14} />
+						<ChevronUp size={12} />
 					{:else}
-						<ChevronDown size={14} />
+						<ChevronDown size={12} />
 					{/if}
 				{:else if rightPaneCollapsed}
-					<ChevronLeft size={14} />
+					<ChevronLeft size={12} />
 				{:else}
-					<ChevronRight size={14} />
+					<ChevronRight size={12} />
 				{/if}
 			</button>
 			<div
 				class="panel-width header-right flex items-center justify-end h-full box-border border-l border-tertiary"
 			>
-				<div class="mode-toggle-container relative items-center px-1">
+				<div class="mode-toggle-container relative items-center px-2">
 					<button
-						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 hover:bg-hover hover:border-tertiary"
+						class="mode-toggle flex items-center cursor-pointer text-xs py-1.5 px-3 bg-tertiary border border-tertiary text-fg-secondary gap-2 hover:bg-hover hover:border-tertiary"
 						onclick={() => (showModeDropdown = !showModeDropdown)}
 						type="button"
 					>
 						{isEditingMode ? 'Editing' : 'Viewing'}
-						<ChevronDown size={12} class="text-fg-muted" />
+						<ChevronDown size={10} class="text-fg-faint" />
 					</button>
 
 					{#if showModeDropdown}
@@ -992,44 +992,44 @@
 							class="mode-dropdown absolute left-0 min-w-35 bg-panel border border-tertiary p-1 z-100"
 						>
 							<button
-								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-sm text-left text-fg-secondary hover:bg-hover"
+								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
 								onclick={() => setMode('viewing')}
 								type="button"
 							>
 								{#if isEditingMode}
-									<div class="w-4 h-4 border-2 border-accent-primary"></div>
+									<div class="w-3 h-3 border border-accent-primary"></div>
 								{:else}
-									<div class="w-4 h-4 bg-accent-primary"></div>
+									<div class="w-3 h-3 bg-accent-primary"></div>
 								{/if}
 								<span>Viewing</span>
 							</button>
 							<button
-								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-sm text-left text-fg-secondary hover:bg-hover"
+								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
 								onclick={() => setMode('editing')}
 								type="button"
 							>
 								{#if isEditingMode}
-									<div class="w-4 h-4 bg-accent-primary"></div>
+									<div class="w-3 h-3 bg-accent-primary"></div>
 								{:else}
-									<div class="w-4 h-4 border-2 border-accent-primary"></div>
+									<div class="w-3 h-3 border border-accent-primary"></div>
 								{/if}
 								<span>Editing</span>
 							</button>
 							<button
-								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-sm text-left text-fg-secondary hover:bg-hover"
+								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
 								onclick={openVersionModal}
 								type="button"
 							>
-								<div class="w-4 h-4 border-2 border-accent-primary"></div>
+								<div class="w-3 h-3 border border-accent-primary"></div>
 								<span>Rollback</span>
 							</button>
 						</div>
 					{/if}
 				</div>
 
-				<div class="flex h-full flex-1 p-1">
+				<div class="flex h-full flex-1 p-1 gap-1">
 					<button
-						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						class="cancel-button flex-1 h-full bg-tertiary border-none text-xs font-medium cursor-pointer text-fg-muted hover:bg-hover hover:text-fg-primary"
 						onclick={discardChanges}
 						disabled={!isEditingMode || !isDirty || isSaving || analysisStore.loading}
 						type="button"
@@ -1037,7 +1037,7 @@
 						Cancel
 					</button>
 					<button
-						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer"
+						class="save-button flex-1 h-full bg-transparent border-none text-xs font-medium cursor-pointer"
 						class:saved={!isDirty}
 						class:unsaved={isDirty}
 						onclick={handleSave}

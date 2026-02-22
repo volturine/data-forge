@@ -374,28 +374,28 @@
 	});
 </script>
 
-<div class="step-node relative w-[65%]">
-	<div class="node-content border border-tertiary bg-primary p-4">
+<div class="step-node relative w-[60%]">
+	<div class="node-content border border-tertiary bg-primary">
 		<!-- Header: icon + label + badge (mirrors DatasourceNode) -->
-		<div class="mb-4 flex items-center justify-between border-b border-tertiary pb-3">
+		<div class="flex items-center justify-between px-4 py-3 border-b border-tertiary">
 			<div class="flex items-center gap-2">
-				<div class="flex h-6 w-6 items-center justify-center bg-accent text-bg-primary">
-					<Database size={14} />
+				<div class="flex h-5 w-5 items-center justify-center bg-accent text-bg-primary">
+					<Database size={12} />
 				</div>
-				<span class="text-sm font-semibold">output</span>
+				<span class="text-xs font-semibold uppercase tracking-wide">output</span>
 			</div>
 			<span
-				class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-muted"
+				class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-widest text-fg-faint"
 				>sink</span
 			>
 		</div>
 
 		<!-- Export Name (same info-row pattern as DatasourceNode tab name) -->
 		<div
-			class="mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
+			class="mx-4 mt-4 mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
 		>
-			<div class="info-label flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
-				<Pencil size={12} class="opacity-60" />
+			<div class="info-label flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint">
+				<Pencil size={11} class="opacity-50" />
 				<span>Table name</span>
 			</div>
 			<div class="flex items-center gap-2">

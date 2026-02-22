@@ -39,7 +39,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="AI configuration">
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="ai-provider">Provider</label>
 		<select id="ai-provider" bind:value={config.provider}>
 			<option value="ollama">Ollama (Local)</option>
@@ -47,7 +47,7 @@
 		</select>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="ai-model">Model</label>
 		<input
 			id="ai-model"
@@ -57,7 +57,7 @@
 		/>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="ai-endpoint">Endpoint URL</label>
 		<input
 			id="ai-endpoint"
@@ -70,14 +70,14 @@
 	</div>
 
 	{#if config.provider === 'openai'}
-		<div class="form-group mb-4">
+		<div class="form-group mb-5">
 			<label for="ai-api-key">API Key</label>
 			<input id="ai-api-key" type="password" bind:value={config.api_key} placeholder="sk-..." />
 		</div>
 	{/if}
 
 	<!-- svelte-ignore a11y_label_has_associated_control -->
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label>Input Column(s)</label>
 		<MultiSelectColumnDropdown
 			{schema}
@@ -88,7 +88,7 @@
 		/>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="ai-output">Output Column</label>
 		<input id="ai-output" type="text" bind:value={config.output_column} placeholder="ai_result" />
 	</div>

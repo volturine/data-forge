@@ -40,7 +40,7 @@
 
 		<div
 			id="expr-syntax-help"
-			class="help-text help-box text-sm leading-relaxed p-3"
+			class="help-box leading-relaxed mt-3"
 			aria-label="Syntax help"
 		>
 			<strong>Polars Expression Syntax:</strong><br />
@@ -92,8 +92,8 @@
 			onChange={(val) => insertColumn(val)}
 			placeholder="Select column to insert..."
 		/>
-		<p class="text-sm mt-2 text-fg-tertiary">
+		<span class="mt-1 block text-xs text-fg-muted">
 			Select a column to insert it into the expression above.
-		</p>
+		</span>
 	</div>
 </div>

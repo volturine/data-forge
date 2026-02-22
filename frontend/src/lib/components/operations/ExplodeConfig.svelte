@@ -29,22 +29,16 @@
 </script>
 
 <div class="config-panel">
-	<div class="callout-info mb-4 border-l-[3px] p-3 text-sm">
-		Transform list/array columns into multiple rows. Each list element becomes a separate row,
-		duplicating all other column values.
-	</div>
+	<p class="description">
+		Transform list/array columns into multiple rows. Each list element becomes a separate row.
+	</p>
 
-	<div class="form-section">
+	<div class="mb-5">
 		<h4>Columns to Explode</h4>
-		<p class="mb-3 text-sm text-fg-tertiary">Select one or more list/array columns to explode</p>
 
 		{#if !hasListColumns}
 			<div class="warning-box">
-				<strong class="mb-2 block">No list/array columns detected</strong>
-				<p class="m-0 text-sm">
-					This operation requires columns with list or array types. Your current schema doesn't have
-					any.
-				</p>
+				No list/array columns detected. This operation requires columns with list or array types.
 			</div>
 		{:else}
 			<MultiSelectColumnDropdown
@@ -57,28 +51,17 @@
 			/>
 
 			{#if (config.columns ?? []).length > 0}
-				<div class="info-box">
-					Selected {(config.columns ?? []).length} column{(config.columns ?? []).length !== 1
+				<span class="mt-2 block text-xs text-fg-muted">
+					{(config.columns ?? []).length} column{(config.columns ?? []).length !== 1
 						? 's'
-						: ''}:
-					{(config.columns ?? []).join(', ')}
-				</div>
+						: ''} selected: {(config.columns ?? []).join(', ')}
+				</span>
 			{/if}
 		{/if}
 	</div>
 
-	<div class="success-box">
-		<strong>How it works:</strong>
-		<ul class="m-0 pl-6">
-			<li class="mb-1">Each list element becomes a new row</li>
-			<li class="mb-1">Other column values are duplicated for each new row</li>
-			<li class="mb-1">Null values in lists are preserved as null rows</li>
-			<li class="mb-1">Empty lists create no additional rows</li>
-		</ul>
-	</div>
-
-	<div class="callout-warning mb-4 border-l-[3px] p-3 text-sm">
-		<strong>Example:</strong> A row with tags=['python', 'data', 'ai'] becomes 3 rows, each with one tag
-		value.
+	<div class="text-xs text-fg-muted leading-relaxed">
+		Each list element becomes a new row. Other column values are duplicated.
+		Null values are preserved; empty lists create no rows.
 	</div>
 </div>

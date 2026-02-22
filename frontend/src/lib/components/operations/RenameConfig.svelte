@@ -47,7 +47,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Rename configuration">
-	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider text-fg-muted">Rename Configuration</h3>
+	<h3 class="m-0 mb-5 text-sm uppercase tracking-wider text-fg-muted">Rename Configuration</h3>
 
 	<div class="mb-5" role="group" aria-labelledby="rename-columns-heading">
 		<h4 id="rename-columns-heading" class="m-0 mb-3 text-xs uppercase tracking-wider text-fg-muted">
@@ -61,11 +61,11 @@
 			filter={(col) => !safeMapping[col.name]}
 		/>
 		{#if schema.columns.filter((col) => !safeMapping[col.name]).length === 0}
-			<p class="empty-dashed p-6 text-center mb-4">All columns have been renamed.</p>
+			<p class="empty-dashed p-6 text-center mb-5">All columns have been renamed.</p>
 		{/if}
 	</div>
 
-	<div class="grid gap-2 mb-5" role="group" aria-label="Add rename mapping form">
+	<div class="grid gap-3 mb-5" role="group" aria-label="Add rename mapping form">
 		<label for="rename-input-new" class="sr-only">New column name</label>
 		<input
 			id="rename-input-new"
@@ -96,14 +96,14 @@
 	{#if mappings.length > 0}
 		<div
 			id="rename-mappings-list"
-			class="flex flex-col gap-2 p-3 mb-4 bg-tertiary border border-tertiary"
+			class="flex flex-col"
 			role="list"
 			aria-label="Configured renames"
 		>
-			<h4 class="mt-0 mb-2 text-xs uppercase tracking-wider text-fg-muted">Renames</h4>
+			<h4 class="mt-0 mb-3">Renames</h4>
 			{#each mappings as mapping (mapping.oldName)}
-				<div class="flex justify-between items-center py-2 px-3 item-row" role="listitem">
-					<div class="flex items-center gap-2 min-w-0 text-sm font-mono">
+				<div class="flex justify-between items-center py-2 item-row" role="listitem">
+					<div class="flex items-center gap-3 min-w-0 text-sm font-mono">
 						<span
 							class="font-semibold max-w-40 overflow-hidden text-ellipsis whitespace-nowrap text-fg-primary"
 							title={mapping.oldName}>{mapping.oldName}</span
@@ -128,7 +128,7 @@
 			{/each}
 		</div>
 	{:else}
-		<p id="rename-empty-state" class="empty-dashed p-6 text-center mb-4" role="status">
+		<p id="rename-empty-state" class="py-8 text-center text-xs text-fg-muted" role="status">
 			No renames yet.
 		</p>
 	{/if}

@@ -215,10 +215,10 @@
 	<div
 		class="step-config box-border flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto bg-primary text-fg-primary"
 	>
-		<div class="flex flex-col items-center justify-center p-6 text-center text-fg-muted">
-			<div class="mb-4 opacity-50"><Settings2 size={32} /></div>
-			<h3 class="m-0 mb-2 text-lg text-fg-primary">No step selected</h3>
-			<p class="m-0 text-sm">Click on a pipeline step to configure it</p>
+		<div class="flex flex-col items-center justify-center p-10 text-center text-fg-muted">
+			<div class="mb-6 opacity-30"><Settings2 size={40} /></div>
+			<h3 class="m-0 mb-3 text-base text-fg-primary">No step selected</h3>
+			<p class="m-0 text-xs text-fg-muted">Click on a pipeline step to configure it</p>
 		</div>
 	</div>
 {:else}
@@ -226,28 +226,28 @@
 		class="step-config box-border flex h-full min-h-0 w-full flex-col overflow-y-auto bg-primary text-fg-primary"
 	>
 		<div
-			class="config-header relative flex items-center justify-between border-b border-tertiary bg-primary px-4 p-2"
+			class="config-header relative flex items-center justify-between border-b border-tertiary bg-primary px-5 py-3"
 		>
-			<h3 class="m-0 text-sm font-semibold uppercase tracking-widest text-fg-primary">
+			<h3 class="m-0 text-xs font-semibold uppercase tracking-widest text-fg-muted">
 				{stepLabel}
 			</h3>
 			<button
-				class="close-button flex h-8 w-8 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-2xl leading-none text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
+				class="close-button flex h-7 w-7 cursor-pointer items-center justify-center border-none bg-transparent p-0 leading-none text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
 				onclick={() => onClose?.()}
 				type="button"
 				title="Close"
 			>
-				<X size={16} />
+				<X size={14} />
 			</button>
 		</div>
 
-		<div class="config-body flex-1 overflow-y-auto bg-primary p-3">
+		<div class="config-body flex-1 overflow-y-auto bg-primary p-5">
 			{#if !draftReady}
 				<div
-					class="flex flex-col items-center justify-center gap-3 bg-primary p-6 text-center text-fg-tertiary"
+					class="flex flex-col items-center justify-center gap-4 bg-primary p-10 text-center text-fg-tertiary"
 				>
 					<div class="spinner-md"></div>
-					<p class="m-0">Initializing config...</p>
+					<p class="m-0 text-xs">Initializing config...</p>
 				</div>
 			{:else if !schema && !isLoadingSchema}
 				<div class="warning-message">
@@ -256,10 +256,10 @@
 				</div>
 			{:else if isLoadingSchema}
 				<div
-					class="flex flex-col items-center justify-center gap-3 bg-primary p-6 text-center text-fg-tertiary"
+					class="flex flex-col items-center justify-center gap-4 bg-primary p-10 text-center text-fg-tertiary"
 				>
 					<div class="spinner-md"></div>
-					<p class="m-0">Loading schema...</p>
+					<p class="m-0 text-xs">Loading schema...</p>
 				</div>
 			{:else if step.type === 'filter'}
 				<FilterConfig
@@ -332,8 +332,8 @@
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={draftConfig as unknown as ViewConfigData} />
 			{:else if step.type === 'datasource'}
-				<div class="bg-primary p-6 text-center">
-					<p class="m-0 mb-3 text-fg-tertiary">Datasource options are set during upload.</p>
+				<div class="bg-primary p-10 text-center">
+					<p class="m-0 text-xs text-fg-muted">Datasource options are set during upload.</p>
 				</div>
 			{:else if step.type === 'sample'}
 				<SampleConfig bind:config={draftConfig as unknown as SampleConfigData} />
@@ -372,21 +372,21 @@
 			{:else if step.type === 'ai'}
 				<AIConfig schema={inputSchema} bind:config={draftConfig as unknown as AIConfigData} />
 			{:else}
-				<div class="bg-primary p-6 text-center">
-					<p class="m-0 mb-3 text-fg-tertiary">
+				<div class="bg-primary p-10 text-center">
+					<p class="m-0 mb-4 text-xs text-fg-muted">
 						Configuration for {step.type} is not yet implemented
 					</p>
 					<button
-						class="cursor-pointer border-none bg-accent-bg px-5 py-2 font-mono text-accent-primary"
+						class="cursor-pointer border border-tertiary bg-transparent px-5 py-2 font-mono text-xs text-fg-secondary hover:bg-hover"
 						onclick={() => onClose?.()}
 						type="button">Close</button
 					>
 				</div>
 			{/if}
 		</div>
-		<div class="flex gap-2 border-t border-tertiary bg-primary p-3">
+		<div class="flex gap-3 border-t border-tertiary bg-primary px-5 py-4">
 			<button
-				class="action-button cancel flex-1 cursor-pointer border border-tertiary bg-transparent px-3 py-2 font-mono text-sm font-semibold text-fg-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class="action-button cancel flex-1 cursor-pointer border border-tertiary bg-transparent px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-fg-secondary hover:bg-hover hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
 				onclick={handleCancelConfig}
 				disabled={!hasChanges}
 				type="button"
@@ -394,12 +394,12 @@
 				Cancel
 			</button>
 			<button
-				class="action-button apply flex-1 cursor-pointer border border-tertiary bg-accent-bg px-3 py-2 font-mono text-sm font-semibold text-accent-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class="action-button apply flex-1 cursor-pointer border border-tertiary bg-accent-bg px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-accent-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
 				onclick={handleApplyConfig}
 				disabled={!hasChanges}
 				type="button"
 			>
-				Apply Changes
+				Apply
 			</button>
 		</div>
 	</div>

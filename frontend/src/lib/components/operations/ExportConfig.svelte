@@ -43,7 +43,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Export configuration">
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<div class="flex items-center gap-2">
 			Destination
 			<span
@@ -57,7 +57,7 @@
 		</span>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="export-input-filename">Filename</label>
 		<input
 			id="export-input-filename"
@@ -73,7 +73,7 @@
 	</div>
 
 	{#if showFormatOptions}
-		<div class="form-group mb-4">
+		<div class="form-group mb-5">
 			<label for="export-select-format" class="flex items-center gap-2">
 				Format
 				{#if selectedFileType === 'duckdb'}

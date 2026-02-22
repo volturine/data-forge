@@ -141,12 +141,12 @@
 
 <div class="config-panel" role="region" aria-label="Notification configuration">
 	{#if !isReady}
-		<div class="border border-tertiary bg-bg-secondary p-3 text-sm text-fg-tertiary">
+		<div class="warning-box mb-5">
 			Configure SMTP or Telegram in global settings first.
 		</div>
 	{/if}
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="notify-method">Method</label>
 		<select
 			id="notify-method"
@@ -158,7 +158,7 @@
 		</select>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		{#if method === 'email'}
 			<label for="notify-recipient">Email Address</label>
 			<input
@@ -168,8 +168,8 @@
 				placeholder="user@example.com"
 			/>
 		{:else}
-			<div class="flex flex-col gap-2">
-				<div class="flex items-center justify-between gap-2">
+			<div class="flex flex-col gap-3">
+				<div class="flex items-center justify-between gap-3">
 					<span class="text-[10px] uppercase text-fg-muted">Recipient Source</span>
 					<div class="flex" role="radiogroup" aria-label="Recipient source">
 						<button
@@ -234,7 +234,7 @@
 						{:else}
 							{#each filtered as sub (sub.id)}
 								<label
-									class="flex cursor-pointer items-center gap-2 border-b border-tertiary px-2 py-1.5 last:border-b-0 hover:bg-tertiary"
+									class="flex cursor-pointer items-center gap-3 border-b border-tertiary px-2 py-1.5 last:border-b-0 hover:bg-tertiary"
 								>
 									<input
 										type="checkbox"
@@ -255,7 +255,7 @@
 	</div>
 
 	<!-- svelte-ignore a11y_label_has_associated_control -->
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label>Input Column(s)</label>
 		<MultiSelectColumnDropdown
 			{schema}
@@ -266,7 +266,7 @@
 		/>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="notify-output">Output Column</label>
 		<input
 			id="notify-output"

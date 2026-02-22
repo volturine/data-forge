@@ -20,7 +20,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Top K configuration">
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<div class="form-label">Column to sort by</div>
 		<ColumnDropdown
 			{schema}
@@ -30,7 +30,7 @@
 		/>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="topk-input-k">Number of rows (k)</label>
 		<input
 			id="topk-input-k"
@@ -44,7 +44,7 @@
 	</div>
 
 	<div class="form-group mb-0">
-		<label class="flex cursor-pointer items-center gap-2">
+		<label class="flex cursor-pointer items-center gap-3">
 			<input
 				id="topk-checkbox-descending"
 				data-testid="topk-descending-checkbox"

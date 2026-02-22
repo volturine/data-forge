@@ -140,7 +140,7 @@
 	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
 		<div class="form-section" role="group" aria-labelledby="ts-period-heading">
 			<h4 id="ts-period-heading">Time Period</h4>
-			<div class="flex gap-2">
+			<div class="flex gap-3">
 				<div class="flex-1">
 					<label for="ts-input-value" class="block text-sm mb-1 text-fg-secondary">Value:</label>
 					<input

@@ -17,7 +17,7 @@
 <div class="config-panel" role="region" aria-label="Unpivot configuration">
 	<p class="description">Transform wide data to long format (melt operation).</p>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<div class="form-label">Index columns (identifiers)</div>
 		<MultiSelectColumnDropdown
 			{schema}
@@ -28,7 +28,7 @@
 		<span class="mt-1 block text-xs text-fg-tertiary">Columns to use as identifiers</span>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<div class="form-label">Columns to unpivot</div>
 		<MultiSelectColumnDropdown
 			{schema}
@@ -40,7 +40,7 @@
 		>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="unpivot-input-variable">Variable column name</label>
 		<input
 			id="unpivot-input-variable"

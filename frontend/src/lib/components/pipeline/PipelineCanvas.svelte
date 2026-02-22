@@ -235,14 +235,14 @@
 	});
 </script>
 
-<div class="pipeline-canvas flex-1 overflow-y-auto p-6 bg-secondary min-h-100">
+<div class="pipeline-canvas flex-1 overflow-y-auto p-8 bg-secondary min-h-100">
 	{#if steps.length === 0}
 		<div
 			class="empty-state flex min-h-100 h-full flex-col items-center justify-center text-center text-fg-muted"
 		>
-			<LayoutGrid size={32} strokeWidth={1.5} class="mb-4 text-fg-faint" />
-			<h3 class="m-0 mb-2 text-base font-semibold text-fg-secondary">No pipeline steps</h3>
-			<p class="m-0 text-sm text-fg-muted">Drag operations from the library and drop here</p>
+			<LayoutGrid size={28} strokeWidth={1.2} class="mb-5 text-fg-faint opacity-40" />
+			<h3 class="m-0 mb-2 text-sm font-semibold text-fg-secondary">No pipeline steps</h3>
+			<p class="m-0 text-xs text-fg-muted">Drag operations from the library and drop here</p>
 			<div
 				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2"
 				class:ready={canDrop}

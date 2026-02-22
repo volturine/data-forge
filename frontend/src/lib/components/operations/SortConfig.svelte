@@ -51,7 +51,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Sort configuration">
-	<div class="flex gap-2 items-center mb-6 flex-wrap" role="group" aria-label="Add sort rule form">
+	<div class="flex gap-2 items-center mb-8 flex-wrap" role="group" aria-label="Add sort rule form">
 		<div class="flex-2 min-w-50">
 			<span class="sr-only">Select column to sort</span>
 			<ColumnDropdown
@@ -109,14 +109,13 @@
 	{#if safeConfig.columns.length > 0}
 		<div
 			id="sort-rules-list"
-			class="p-4 mb-4 bg-tertiary border border-tertiary"
 			role="region"
 			aria-labelledby="sort-order-heading"
 		>
-			<h4 id="sort-order-heading" class="mt-0 mb-3 text-sm uppercase text-fg-muted">Sort Order</h4>
+			<h4 id="sort-order-heading" class="mt-0 mb-3">Sort Order</h4>
 			{#each safeConfig.columns as column, i (column)}
 				<div
-					class="flex justify-between items-center py-2 px-3 mb-2 last:mb-0 bg-panel border border-tertiary"
+					class="flex justify-between items-center py-2 border-b border-tertiary last:border-b-0"
 					role="group"
 					aria-label={`Sort rule ${i + 1}: ${column}`}
 				>
@@ -171,7 +170,7 @@
 	{:else}
 		<p
 			id="sort-empty-state"
-			class="py-8 text-center mb-4 text-fg-muted bg-tertiary border border-tertiary"
+			class="py-8 text-center text-xs text-fg-muted"
 			role="status"
 		>
 			No sort rules configured. Add a column to sort by.

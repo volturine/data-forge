@@ -24,10 +24,10 @@
 <div class="config-panel" role="region" aria-label="Deduplicate configuration">
 	<div class="form-section" role="radiogroup" aria-labelledby="keep-strategy-heading">
 		<h4 id="keep-strategy-heading">Keep Strategy</h4>
-		<div class="flex flex-col gap-3">
+		<div class="flex flex-col gap-1">
 			{#each keepStrategies as strategy (strategy.value)}
 				<label
-					class="flex cursor-pointer items-start gap-3 border p-3 bg-primary border-tertiary hover:border-accent-primary hover:bg-hover"
+					class="flex cursor-pointer items-center gap-3 py-2 hover:text-fg-primary"
 				>
 					<input
 						type="radio"

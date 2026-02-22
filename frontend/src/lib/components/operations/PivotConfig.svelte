@@ -39,7 +39,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Pivot configuration">
-	<div class="mb-4">
+	<div class="mb-5">
 		<label for="pivot-column"
 			>Pivot Column <span class="text-xs text-fg-muted">(values become new columns)</span></label
 		>
@@ -54,14 +54,14 @@
 		>
 	</div>
 
-	<div class="mb-4" role="group" aria-labelledby="index-columns-label">
+	<div class="mb-5" role="group" aria-labelledby="index-columns-label">
 		<span id="index-columns-label" class="group-label"
 			>Index Columns <span class="text-xs text-fg-muted">(rows)</span></span
 		>
-		<div class="chip-grid grid gap-2 p-2 max-h-37.5 overflow-y-auto">
+		<div class="chip-grid grid gap-3 p-2 max-h-37.5 overflow-y-auto">
 			{#each schema.columns as column (column.name)}
 				<label
-					class="checkbox-label flex items-center gap-2 px-2 py-1 cursor-pointer text-sm hover:bg-hover"
+					class="checkbox-label flex items-center gap-3 px-2 py-1 cursor-pointer text-sm hover:bg-hover"
 				>
 					<input
 						id={`pivot-checkbox-index-${column.name}`}
@@ -84,7 +84,7 @@
 		{/if}
 	</div>
 
-	<div class="mb-4">
+	<div class="mb-5">
 		<label for="pivot-select-values">Values Column</label>
 		<ColumnDropdown
 			{schema}
@@ -94,7 +94,7 @@
 		/>
 	</div>
 
-	<div class="mb-4">
+	<div class="mb-5">
 		<label for="pivot-select-agg">Aggregation</label>
 		<select
 			id="pivot-select-agg"
@@ -108,7 +108,7 @@
 	</div>
 
 	{#if onRefreshSchema}
-		<div class="mb-4">
+		<div class="mb-5">
 			<button
 				id="pivot-btn-refresh"
 				data-testid="pivot-refresh-button"

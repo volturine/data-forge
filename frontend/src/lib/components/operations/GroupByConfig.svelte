@@ -86,7 +86,7 @@
 	<div class="form-section" role="group" aria-labelledby="{uid}-agg-heading">
 		<h4 id="{uid}-agg-heading">Aggregations</h4>
 
-		<div class="flex flex-wrap gap-2 mb-4" role="group" aria-label="Add aggregation form">
+		<div class="flex flex-wrap gap-2 mb-5" role="group" aria-label="Add aggregation form">
 			<div class="flex-2 min-w-40">
 				<ColumnDropdown
 					{schema}
@@ -132,7 +132,7 @@
 		{#if safeAggregations.length > 0}
 			<div
 				id="aggregations-list"
-				class="flex flex-col gap-2"
+				class="flex flex-col gap-3"
 				role="list"
 				aria-label="Configured aggregations"
 			>

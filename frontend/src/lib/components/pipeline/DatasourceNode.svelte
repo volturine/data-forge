@@ -186,38 +186,38 @@
 	}
 </script>
 
-<div class="datasource-node relative w-[65%]" class:drag-active={isDragActive}>
-	<div class="node-content bg-primary border-tertiary border p-4 hover:border-tertiary">
+<div class="datasource-node relative w-[60%]" class:drag-active={isDragActive}>
+	<div class="node-content bg-primary border-tertiary border hover:border-tertiary">
 		<!-- Header with icon and badge -->
-		<div class="mb-4 flex items-center justify-between border-b border-tertiary pb-3">
+		<div class="flex items-center justify-between px-4 py-3 border-b border-tertiary">
 			<div class="flex items-center gap-2">
-				<div class="flex h-6 w-6 items-center justify-center bg-accent text-bg-primary">
+				<div class="flex h-5 w-5 items-center justify-center bg-accent text-bg-primary">
 					{#if sourceType === 'file'}
-						<FileText size={14} />
+						<FileText size={12} />
 					{:else if sourceType === 'database'}
-						<Database size={14} />
+						<Database size={12} />
 					{:else if sourceType === 'iceberg'}
-						<Snowflake size={14} />
+						<Snowflake size={12} />
 					{:else if sourceType === 'analysis'}
-						<Layers size={14} />
+						<Layers size={12} />
 					{:else}
-						<FileText size={14} />
+						<FileText size={12} />
 					{/if}
 				</div>
-				<span class="text-sm font-semibold">source</span>
+				<span class="text-xs font-semibold uppercase tracking-wide">source</span>
 			</div>
 			<span
-				class="border border-tertiary bg-tertiary text-fg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+				class="border border-tertiary bg-tertiary text-fg-faint px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-widest"
 				>root</span
 			>
 		</div>
 
 		<!-- Tab Section -->
 		<div
-			class="mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
+			class="mx-4 mt-4 mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
 		>
-			<div class="info-label flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
-				<PanelLeft size={12} class="opacity-60" />
+			<div class="info-label flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint">
+				<PanelLeft size={11} class="opacity-50" />
 				<span>Tab name</span>
 			</div>
 			<div class="flex items-center gap-2">
@@ -268,11 +268,11 @@
 		</div>
 
 		<!-- Dataset Section -->
-		<div class="mb-3">
+		<div class="mx-4 mb-3">
 			<div
-				class="info-label mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted"
+				class="info-label mb-2 flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint"
 			>
-				<Database size={12} class="opacity-60" />
+				<Database size={11} class="opacity-50" />
 				<span>Dataset</span>
 			</div>
 			{#if datasource || datasourceLabel}
@@ -339,7 +339,7 @@
 
 		<!-- Engine Resources Section -->
 		{#if analysisId}
-			<div class="mb-3 overflow-hidden border border-tertiary">
+			<div class="mx-4 mb-3 overflow-hidden border border-tertiary">
 				<button
 					class="engine-header flex w-full cursor-pointer items-center justify-between border-none bg-secondary p-2 px-3 hover:bg-tertiary"
 					onclick={() => (engineExpanded = !engineExpanded)}
@@ -400,7 +400,7 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
+				class="change-source-btn mx-4 mb-4 flex w-[calc(100%-2rem)] cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-muted p-2 px-3 text-[0.6875rem] font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
 				onclick={onChangeDatasource}
 				type="button"
 			>
