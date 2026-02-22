@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
@@ -18,7 +20,10 @@ def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
 @router.get('/results', response_model=list[schemas.HealthCheckResultResponse])
 @handle_errors(operation='list healthcheck results')
 def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
-    return service.list_results(session, parse_datasource_id(datasource_id), limit)
+    parsed_id = parse_datasource_id(datasource_id)
+    if parsed_id == datasource_id and datasource_id != str(uuid.UUID(datasource_id)):
+        raise HTTPException(status_code=400, detail='Invalid UUID')
+    return service.list_results(session, parsed_id, limit)
 
 
 @router.post('', response_model=schemas.HealthCheckResponse)
@@ -37,7 +42,8 @@ def update_healthcheck(
     try:
         return service.update_healthcheck(session, parse_healthcheck_id(healthcheck_id), payload)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        status = 404 if str(exc) == 'Healthcheck not found' else 400
+        raise HTTPException(status_code=status, detail=str(exc))
 
 
 @router.delete('/{healthcheck_id}', status_code=204)

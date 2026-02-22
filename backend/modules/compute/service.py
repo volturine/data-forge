@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -8,18 +9,25 @@ from pathlib import Path
 
 import duckdb
 import polars as pl
+import pyarrow as pa  # type: ignore[import-untyped]
 from pyiceberg.catalog import load_catalog
+from pyiceberg.table import Table as IcebergTable
 from sqlalchemy import select
 from sqlmodel import Session
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
+from core.namespace import get_namespace, namespace_paths
 from modules.analysis.models import Analysis
 from modules.compute.core.exports import get_export_format
 from modules.compute.manager import get_manager
-from modules.compute.operations.datasource import resolve_iceberg_metadata_path
+from modules.compute.operations.datasource import (
+    resolve_iceberg_branch_metadata_path,
+    resolve_iceberg_metadata_path,
+)
 from modules.compute.utils import apply_pipeline_steps, await_engine_result, find_step_index, resolve_applied_target
 from modules.datasource.models import DataSource
+from modules.datasource.source_types import DataSourceType
 from modules.engine_runs import service as engine_run_service
 from modules.healthcheck import service as healthcheck_service
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
@@ -41,6 +49,9 @@ def _resolve_build_status(
         name_map = {c.id: c.name for c in checks}
 
     total = len(hc_results)
+    critical_map: dict[str, bool] = {}
+    if checks:
+        critical_map = {c.id: c.critical for c in checks}
     failed = [r for r in hc_results if not r.passed]
 
     if not failed:
@@ -51,6 +62,7 @@ def _resolve_build_status(
             'name': name_map.get(r.healthcheck_id, r.healthcheck_id),
             'passed': r.passed,
             'message': r.message,
+            'critical': critical_map.get(r.healthcheck_id, False),
         }
         for r in hc_results
     ]
@@ -208,6 +220,31 @@ def _send_pipeline_notifications(
         )
 
 
+def _sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
+    """Sync Iceberg table schema to match new_schema exactly.
+
+    Drops removed columns, adds new columns via union_by_name.
+    Returns True if schema was modified.
+    """
+    current = table.schema()
+    current_names = {field.name for field in current.fields}
+    new_names = set(new_schema.names)
+
+    to_delete = current_names - new_names
+    has_additions = bool(new_names - current_names)
+
+    if not to_delete and not has_additions:
+        return False
+
+    update = table.update_schema()
+    for name in sorted(to_delete):
+        update.delete_column(name)
+    if has_additions:
+        update.union_by_name(new_schema)
+    update.commit()
+    return True
+
+
 def _upsert_output_datasource(
     session: Session,
     output_datasource_id: str | None,
@@ -217,6 +254,7 @@ def _upsert_output_datasource(
     schema_cache: dict,
     analysis_id: str | None,
     is_hidden: bool | None = None,
+    keep_schema_cache: bool = False,
 ) -> DataSource:
     """Create or update the output datasource for an export.
 
@@ -229,7 +267,8 @@ def _upsert_output_datasource(
             existing.name = name
             existing.source_type = source_type
             existing.config = config
-            existing.schema_cache = schema_cache
+            if not keep_schema_cache:
+                existing.schema_cache = schema_cache
             existing.created_by_analysis_id = analysis_id
             existing.created_by = 'analysis'
             if is_hidden is not None:
@@ -238,7 +277,7 @@ def _upsert_output_datasource(
             session.commit()
             return existing
 
-    new_id = str(uuid.uuid4())
+    new_id = str(output_datasource_id) if output_datasource_id else str(uuid.uuid4())
     ds = DataSource(
         id=new_id,
         name=name,
@@ -383,7 +422,11 @@ def _hydrate_udfs(session: Session, pipeline_steps: list[dict]) -> list[dict]:
     return next_steps
 
 
-def _resolve_pipeline_request(pipeline: dict, tab_id: str | None, target_step_id: str) -> dict:
+def _resolve_pipeline_request(
+    pipeline: dict,
+    tab_id: str | None,
+    target_step_id: str,
+) -> dict:
     tabs = pipeline.get('tabs', [])
     if not isinstance(tabs, list) or not tabs:
         raise ValueError('analysis_pipeline missing tabs')
@@ -440,23 +483,48 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
         return {'analysis_id': str(analysis.id), 'tabs': [], 'sources': {}}
 
     sources: dict[str, dict] = {}
+    output_map: dict[str, str] = {}
+    for tab in tabs:
+        tab_id = tab.get('id')
+        output_id = tab.get('output_datasource_id')
+        if not output_id and tab_id:
+            output_id = f'output:{analysis.id}:{tab_id}'
+        if output_id and tab_id:
+            output_map[str(tab_id)] = str(output_id)
+            sources[str(output_id)] = {
+                'source_type': 'analysis',
+                'analysis_id': str(analysis.id),
+                'analysis_tab_id': str(tab_id),
+            }
+
+    next_tabs: list[dict] = []
     for tab in tabs:
         tab_datasource_id = tab.get('datasource_id')
-        if not tab_datasource_id:
-            continue
-        if datasource_id and str(datasource_id) != str(tab.get('output_datasource_id')) and str(datasource_id) != str(tab_datasource_id):
-            continue
-        datasource = session.get(DataSource, str(tab_datasource_id))
-        if not datasource:
-            continue
-        sources[str(tab_datasource_id)] = {
-            'source_type': datasource.source_type,
-            **datasource.config,
-        }
+        config = tab.get('datasource_config') or {}
+        if isinstance(config, dict) and config.get('analysis_id') == str(analysis.id):
+            source_tab_id = config.get('analysis_tab_id')
+            if source_tab_id:
+                tab_datasource_id = output_map.get(str(source_tab_id))
+
+        if tab_datasource_id:
+            if (
+                datasource_id
+                and str(datasource_id) != str(tab.get('output_datasource_id'))
+                and str(datasource_id) != str(tab_datasource_id)
+            ):
+                next_tabs.append({**tab, 'datasource_id': tab_datasource_id})
+                continue
+            datasource = session.get(DataSource, str(tab_datasource_id))
+            if datasource:
+                sources[str(tab_datasource_id)] = {
+                    'source_type': datasource.source_type,
+                    **datasource.config,
+                }
+        next_tabs.append({**tab, 'datasource_id': tab_datasource_id})
 
     return {
         'analysis_id': str(analysis.id),
-        'tabs': tabs,
+        'tabs': next_tabs,
         'sources': sources,
     }
 
@@ -681,6 +749,131 @@ def get_step_schema(
     )
 
 
+def get_step_row_count(
+    session: Session,
+    target_step_id: str,
+    analysis_id: str,
+    analysis_pipeline: dict,
+    timeout: int | None = None,
+    datasource_config: dict | None = None,
+    tab_id: str | None = None,
+    request_json: dict | None = None,
+    triggered_by: str | None = None,
+):
+    """Get the row count of a pipeline step without collecting full data."""
+    from modules.compute.schemas import StepRowCountResponse
+
+    if timeout is None:
+        timeout = settings.job_timeout
+
+    started_at = datetime.now(UTC)
+    started_perf = time.perf_counter()
+
+    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    datasource_id = resolved['datasource_id']
+    pipeline_steps = resolved['pipeline_steps']
+    target_step_id = resolved['target_step_id']
+    datasource_config = resolved['datasource_config']
+    analysis_id_value = resolved['analysis_id'] or analysis_id
+
+    if not isinstance(datasource_config, dict):
+        raise ValueError('Row count requires datasource_config')
+    if not analysis_id_value:
+        analysis_id_value = f'__row_count__{datasource_id}'
+
+    config: dict = datasource_config
+
+    request_payload = request_json or {
+        'analysis_id': analysis_id_value,
+        'datasource_id': datasource_id,
+        'pipeline_steps': pipeline_steps,
+        'target_step_id': target_step_id,
+        'analysis_pipeline': analysis_pipeline,
+        'tab_id': tab_id,
+    }
+
+    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+
+    if target_step_id == 'source':
+        count_steps = []
+    else:
+        step_index = find_step_index(pipeline_steps, target_step_id)
+        count_steps = pipeline_steps[: step_index + 1]
+        count_steps = _hydrate_udfs(session, count_steps)
+
+    manager = get_manager()
+    engine = manager.get_engine(analysis_id_value)
+    if not engine:
+        engine = manager.get_or_create_engine(analysis_id_value)
+
+    additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
+
+    job_id = engine.get_row_count(
+        datasource_config=config,
+        pipeline_steps=count_steps,
+        additional_datasources=additional_datasources,
+    )
+
+    step_timings: dict = {}
+    current_step_id: str | None = None
+    query_plan: str | None = None
+    try:
+        result_data = await_engine_result(engine, timeout, job_id=job_id)
+        step_timings = result_data.get('step_timings', {}) if isinstance(result_data, dict) else {}
+        query_plan = result_data.get('query_plan') if isinstance(result_data, dict) else None
+        error = result_data.get('error')
+        if error:
+            raise PipelineExecutionError(
+                f'Row count failed: {error}',
+                details={'operation': 'row_count', 'datasource_id': datasource_id},
+            )
+
+        data = result_data.get('data', {})
+        row_count = data.get('row_count', 0)
+
+        completed_at = datetime.now(UTC)
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        payload = engine_run_service.create_engine_run_payload(
+            analysis_id=analysis_id_value,
+            datasource_id=datasource_id,
+            kind='row_count',
+            status='success',
+            request_json=request_payload,
+            result_json={'row_count': row_count},
+            created_at=started_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
+            query_plan=query_plan,
+            progress=1.0,
+            current_step=current_step_id,
+            triggered_by=triggered_by,
+        )
+        engine_run_service.create_engine_run(session, payload)
+
+        return StepRowCountResponse(step_id=target_step_id, row_count=row_count)
+    except Exception as exc:
+        completed_at = datetime.now(UTC)
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        payload = engine_run_service.create_engine_run_payload(
+            analysis_id=analysis_id_value,
+            datasource_id=datasource_id,
+            kind='row_count',
+            status='failed',
+            request_json=request_payload,
+            error_message=str(exc),
+            created_at=started_at,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
+            progress=0.0,
+            current_step=current_step_id,
+            triggered_by=triggered_by,
+        )
+        engine_run_service.create_engine_run(session, payload)
+        raise
+
+
 def export_data(
     session: Session,
     target_step_id: str,
@@ -698,6 +891,7 @@ def export_data(
     request_json: dict | None = None,
     triggered_by: str | None = None,
     output_datasource_id: str | None = None,
+    build_mode: str = 'full',
 ) -> tuple[bytes | None, str | None, str | None, str | None, str | None, dict | None]:
     if timeout is None:
         timeout = settings.job_timeout
@@ -735,6 +929,7 @@ def export_data(
         'datasource_config': datasource_config,
         'analysis_pipeline': analysis_pipeline,
         'tab_id': tab_id,
+        'build_mode': build_mode,
     }
 
     pipeline_steps = apply_pipeline_steps(pipeline_steps)
@@ -853,15 +1048,37 @@ def export_data(
                 hc_checks = [c for c in db_result.scalars().all() if c.enabled]
                 logger.info(f'Health checks: found {len(hc_checks)} enabled for datasource {hc_datasource_id}')
                 if hc_checks:
+                    hc_lf = _load_healthcheck_lazy(tmp_output, actual_format)
+                    if hc_lf is None:
+                        raise ValueError(f'Unsupported healthcheck export format: {actual_format}')
                     try:
-                        hc_lf = _load_healthcheck_lazy(tmp_output, actual_format)
-                        if hc_lf is None:
-                            raise ValueError(f'Unsupported healthcheck export format: {actual_format}')
                         hc_results = healthcheck_service.run_healthchecks(session, hc_checks, hc_lf)
+                    except Exception as exc:
+                        if any(check.critical for check in hc_checks):
+                            raise PipelineExecutionError(
+                                'Critical health checks failed to run',
+                                details={'datasource_id': hc_datasource_id, 'error': str(exc)},
+                            ) from exc
+                        logger.exception('Health check evaluation failed')
+                    else:
+                        critical_ids = {check.id for check in hc_checks if check.critical}
+                        critical_failed = [result for result in hc_results if not result.passed and result.healthcheck_id in critical_ids]
+                        if critical_failed:
+                            raise PipelineExecutionError(
+                                'Critical health checks failed',
+                                details={
+                                    'datasource_id': hc_datasource_id,
+                                    'failed': [
+                                        {
+                                            'healthcheck_id': result.healthcheck_id,
+                                            'message': result.message,
+                                        }
+                                        for result in critical_failed
+                                    ],
+                                },
+                            )
                         failed_count = sum(1 for r in hc_results if not r.passed)
                         logger.info(f'Health checks: {len(hc_results)} evaluated, {failed_count} failed')
-                    except Exception:
-                        logger.exception('Health check evaluation failed')
 
             status, hc_summary, hc_details = _resolve_build_status(hc_results, hc_checks)
 
@@ -937,7 +1154,7 @@ def export_data(
                 )
                 engine_run_service.create_engine_run(session, payload)
                 file_name = f'{filename}.{result_format}'
-                file_path = settings.exports_dir / file_name
+                file_path = namespace_paths().exports_dir / file_name
                 with open(output_path, 'rb') as f:
                     file_bytes = f.read()
                 with open(file_path, 'wb') as f:
@@ -949,15 +1166,19 @@ def export_data(
                 if datasource_type != 'iceberg':
                     raise ValueError('Output exports must use Iceberg datasources')
                 iceberg_opts = iceberg_options or {}
-                namespace = iceberg_opts.get('namespace', 'exports')
+                namespace = iceberg_opts.get('namespace', 'outputs')
+                branch_name = iceberg_opts.get('branch') or 'master'
                 if not output_datasource_id:
                     raise ValueError('Output datasource id is required for Iceberg exports')
-                table_name = output_datasource_id
+                safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', str(branch_name)).strip('_') or 'master'
+                table_name = f'{output_datasource_id}_{safe_branch}'
+                export_base = namespace_paths().exports_dir / str(output_datasource_id)
+                table_path = export_base / branch_name
+                warehouse_path = namespace_paths().exports_dir
+                catalog_path = export_base / 'catalog.db'
 
-                iceberg_base = settings.data_dir / 'iceberg'
-                warehouse_path = iceberg_base / 'warehouse'
-                catalog_path = iceberg_base / 'catalog.db'
-
+                export_base.mkdir(parents=True, exist_ok=True)
+                table_path.mkdir(parents=True, exist_ok=True)
                 warehouse_path.mkdir(parents=True, exist_ok=True)
                 if not catalog_path.exists():
                     catalog_path.touch()
@@ -974,25 +1195,26 @@ def export_data(
                 identifier = f'{namespace}.{table_name}'
 
                 arrow_table = pl.read_parquet(output_path).to_arrow()
+                if build_mode == 'recreate' and catalog.table_exists(identifier):
+                    catalog.drop_table(identifier)
+
                 if catalog.table_exists(identifier):
                     iceberg_table = catalog.load_table(identifier)
-                    try:
+                    if build_mode == 'incremental':
+                        iceberg_table.append(arrow_table)
+                    else:
+                        _sync_iceberg_schema(iceberg_table, arrow_table.schema)
                         iceberg_table.overwrite(arrow_table)
-                    except Exception as exc:
-                        update = iceberg_table.update_schema()
-                        update.union_by_name(arrow_table.schema)
-                        update.commit()
-                        try:
-                            iceberg_table.overwrite(arrow_table)
-                        except Exception as retry_exc:
-                            raise ValueError(f'Failed to overwrite Iceberg table after schema update: {retry_exc}') from exc
                 else:
-                    iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema)
+                    iceberg_table = catalog.create_table(identifier, schema=arrow_table.schema, location=str(table_path))
                     iceberg_table.append(arrow_table)
 
-                metadata_path = str(iceberg_table.metadata_location)
-                resolved_metadata = resolve_iceberg_metadata_path(metadata_path)
-                table_dir = str(Path(resolved_metadata).parents[1])
+                snapshot_id = None
+                snapshot_timestamp_ms = None
+                current_snapshot = iceberg_table.current_snapshot()
+                if current_snapshot:
+                    snapshot_id = str(current_snapshot.snapshot_id)
+                    snapshot_timestamp_ms = int(current_snapshot.timestamp_ms)
 
                 iceberg_ds_config = {
                     'catalog_type': 'sql',
@@ -1000,27 +1222,36 @@ def export_data(
                     'warehouse': f'file://{warehouse_path}',
                     'namespace': namespace,
                     'table': table_name,
-                    'metadata_path': table_dir,
+                    'table_name': iceberg_opts.get('table_name', 'exported_data'),
+                    'metadata_path': str(export_base),
+                    'branch': branch_name,
+                    'namespace_name': get_namespace(),
                 }
                 output_ds = session.get(DataSource, output_datasource_id)
                 output_hidden = True
                 if output_ds:
                     output_hidden = output_ds.is_hidden
+                schema_cache = data.get('schema', {})
                 target_ds = _upsert_output_datasource(
                     session=session,
                     output_datasource_id=output_datasource_id,
                     name=iceberg_opts.get('table_name', 'exported_data'),
-                    source_type='iceberg',
+                    source_type=DataSourceType.ICEBERG,
                     config=iceberg_ds_config,
-                    schema_cache=data.get('schema', {}),
+                    schema_cache=schema_cache,
                     analysis_id=run_analysis_id,
                     is_hidden=output_hidden,
+                    keep_schema_cache=build_mode == 'incremental',
                 )
                 ds_id = target_ds.id
                 run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'
 
                 result_meta['datasource_id'] = ds_id
                 result_meta['datasource_name'] = iceberg_opts.get('table_name', 'exported_data')
+                if snapshot_id:
+                    result_meta['snapshot_id'] = snapshot_id
+                if snapshot_timestamp_ms is not None:
+                    result_meta['snapshot_timestamp_ms'] = snapshot_timestamp_ms
                 payload = engine_run_service.create_engine_run_payload(
                     analysis_id=run_analysis_id,
                     datasource_id=ds_id,
@@ -1038,7 +1269,7 @@ def export_data(
                 )
                 engine_run_service.create_engine_run(session, payload)
 
-                return None, iceberg_opts.get('table_name', 'exported_data'), content_type, table_dir, ds_id, result_meta
+                return None, iceberg_opts.get('table_name', 'exported_data'), content_type, str(table_path), ds_id, result_meta
 
             return None, None, None, None, None, result_meta
         except Exception as exc:
@@ -1070,6 +1301,36 @@ def export_data(
             os.unlink(tmp_output)
 
 
+def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
+    """Find all tab IDs that the target tab depends on via lazyframe inputs (including itself)."""
+    output_to_tab: dict[str, str] = {}
+    tab_input: dict[str, str] = {}
+
+    for tab in tabs:
+        tid = tab.get('id')
+        output_id = tab.get('output_datasource_id')
+        input_id = tab.get('datasource_id')
+        if tid and output_id:
+            output_to_tab[str(output_id)] = str(tid)
+        if tid and input_id:
+            tab_input[str(tid)] = str(input_id)
+
+    required: set[str] = set()
+    queue = [target_tab_id]
+    while queue:
+        current = queue.pop(0)
+        if current in required:
+            continue
+        required.add(current)
+        input_ds = tab_input.get(current)
+        if input_ds and input_ds in output_to_tab:
+            upstream = output_to_tab[input_ds]
+            if upstream not in required:
+                queue.append(upstream)
+
+    return required
+
+
 def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> dict:
     if not isinstance(pipeline, dict):
         raise ValueError('analysis_pipeline is required')
@@ -1084,9 +1345,12 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
     results: list[dict] = []
     tabs_built = 0
     selected_tab_id = pipeline.get('tab_id')
+    required_tabs: set[str] | None = None
+    if selected_tab_id:
+        required_tabs = _resolve_upstream_tabs(tabs, str(selected_tab_id))
 
     for tab in tabs:
-        if selected_tab_id and tab.get('id') != selected_tab_id:
+        if required_tabs and tab.get('id') not in required_tabs:
             continue
         tab_id = tab.get('id', 'unknown')
         tab_name = tab.get('name', 'unnamed')
@@ -1116,8 +1380,11 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
                 if iceberg_cfg and isinstance(iceberg_cfg, dict):
                     iceberg_options = {
                         'table_name': iceberg_cfg.get('table_name', 'exported_data'),
-                        'namespace': iceberg_cfg.get('namespace', 'exports'),
+                        'namespace': iceberg_cfg.get('namespace', 'outputs'),
+                        'branch': iceberg_cfg.get('branch'),
                     }
+
+                tab_build_mode = output_config.get('build_mode', 'full') if isinstance(output_config, dict) else 'full'
 
                 export_data(
                     session=session,
@@ -1133,8 +1400,13 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
                     analysis_id=analysis_id,
                     tab_id=str(tab_id) if tab_id else None,
                     output_datasource_id=tab.get('output_datasource_id'),
+                    build_mode=tab_build_mode,
                 )
             else:
+                if required_tabs and str(tab_id) != str(selected_tab_id):
+                    tabs_built += 1
+                    results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'success'})
+                    continue
                 raise ValueError(f'Tab {tab_id} missing output configuration')
 
             tabs_built += 1
@@ -1145,7 +1417,7 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
     return {'analysis_id': analysis_id or '', 'tabs_built': tabs_built, 'results': results}
 
 
-def list_iceberg_snapshots(session: Session, datasource_id: str):
+def list_iceberg_snapshots(session: Session, datasource_id: str, branch: str | None = None):
     from modules.compute.schemas import IcebergSnapshotInfo, IcebergSnapshotsResponse
 
     datasource = session.get(DataSource, datasource_id)
@@ -1158,6 +1430,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str):
     metadata_path = datasource.config.get('metadata_path')
     if not metadata_path:
         raise ValueError('Iceberg datasource missing metadata_path')
+    branch_name = branch or datasource.config.get('branch')
 
     catalog_type = datasource.config.get('catalog_type')
     catalog_uri = datasource.config.get('catalog_uri')
@@ -1179,7 +1452,7 @@ def list_iceberg_snapshots(session: Session, datasource_id: str):
     else:
         from pyiceberg.table import StaticTable
 
-        resolved = resolve_iceberg_metadata_path(metadata_path)
+        resolved = resolve_iceberg_branch_metadata_path(metadata_path, branch_name)
         table = StaticTable.from_metadata(resolved)
 
     current_snapshot = table.current_snapshot()

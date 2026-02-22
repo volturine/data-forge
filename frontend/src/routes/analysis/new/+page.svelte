@@ -6,8 +6,10 @@
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
-	import type { AnalysisCreate } from '$lib/types/analysis';
+	import type { AnalysisCreate, PipelineStep } from '$lib/types/analysis';
+	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 
 	let step = $state(1);
 	let name = $state('');
@@ -15,6 +17,7 @@
 	let selectedDatasourceIds = $state<string[]>([]);
 	let error = $state('');
 	let creating = $state(false);
+	let outputBranch = $state('master');
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -33,6 +36,24 @@
 		(datasourcesQuery.data ?? []).filter((ds) => ds.source_type !== 'analysis')
 	);
 
+	function makeId() {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return 'id-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+	}
+
+	function buildInitialSteps(): PipelineStep[] {
+		const step: PipelineStep = {
+			id: makeId(),
+			type: 'view',
+			config: getDefaultConfig('view') as Record<string, unknown>,
+			depends_on: [],
+			is_applied: true
+		};
+		return [step];
+	}
+
 	async function handleCreate() {
 		if (!canProceedStep1 || !canProceedStep2) return;
 
@@ -44,13 +65,15 @@
 			description: description.trim() || null,
 			datasource_ids: selectedDatasourceIds,
 			pipeline_steps: [],
+			output_branch: outputBranch.trim() || 'master',
 			tabs: selectedDatasourceIds.map((datasourceId, index) => ({
-				id: `tab-${datasourceId}`,
+				id: makeId(),
+				output_datasource_id: makeId(),
 				name: `Source ${index + 1}`,
 				type: 'datasource' as const,
 				parent_id: null,
 				datasource_id: datasourceId,
-				steps: []
+				steps: buildInitialSteps()
 			}))
 		};
 
@@ -155,6 +178,19 @@
 						class="min-h-25 w-full resize-y border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
 					></textarea>
 				</div>
+				<div class="mb-5 flex flex-col gap-2">
+					<label for="output-branch" class="block text-sm font-medium text-fg-secondary">
+						Output branch (optional)
+					</label>
+					<BranchPicker
+						branches={['master']}
+						value={outputBranch}
+						placeholder="master"
+						allowCreate={true}
+						onChange={(value: string) => (outputBranch = value)}
+					/>
+					<p class="m-0 text-xs text-fg-muted">Sets the default output branch for all exports.</p>
+				</div>
 			</div>
 		{:else if step === 2}
 			<div class="card">
@@ -170,9 +206,7 @@
 						Error loading data sources: {datasourcesQuery.error.message}
 					</div>
 				{:else if datasourcesQuery.data && datasourcesQuery.data.length === 0}
-					<div
-						class="rounded-sm border border-dashed border-tertiary p-8 text-center text-fg-tertiary"
-					>
+					<div class="border border-dashed border-tertiary p-8 text-center text-fg-tertiary">
 						<p>No data sources available.</p>
 						<a href={resolve('/datasources/new')} class="btn btn-secondary" data-sveltekit-reload
 							>Create Data Source</a
@@ -230,7 +264,7 @@
 											/>
 										{:else}
 											<FileTypeBadge
-												sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
+												sourceType={ds.source_type as 'database' | 'iceberg'}
 												size="sm"
 												showIcon={true}
 											/>

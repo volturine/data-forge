@@ -17,8 +17,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Select columns configuration">
-	<h3>Select Columns</h3>
-
 	<div class="form-section">
 		<div class="form-label">Columns to keep</div>
 		<MultiSelectColumnDropdown

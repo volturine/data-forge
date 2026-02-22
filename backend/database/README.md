@@ -7,7 +7,7 @@ This directory contains Alembic migrations for the FastAPI backend database.
 The project uses:
 - **Alembic** for database migrations
 - **SQLAlchemy 2.0** with async support
-- **sqlalchemy-libsql** for libSQL support
+- **SQLite** via SQLAlchemy
 - **SQLite** database (configured in `core/config.py`)
 
 ## Directory Structure
@@ -85,13 +85,13 @@ uv run alembic -c database/alembic.ini heads
 The database URL is configured in `core/config.py`:
 
 ```python
-database_url: str = 'sqlite+libsql:///./database/app.db'
+database_url: str = 'sqlite:///${DATA_DIR}/app.db'
 ```
 
 You can override this in `.env`:
 
 ```env
-DATABASE_URL=sqlite+libsql:///./database/app.db
+DATABASE_URL=sqlite:///${DATA_DIR}/app.db
 ```
 
 ### Adding New Models
@@ -155,7 +155,7 @@ def lifespan(app: FastAPI):
 
 The Alembic configuration is set up for sync SQLAlchemy:
 - Uses `create_engine` in `env.py`
-- Compatible with `sqlalchemy-libsql` dialect
+- Uses SQLAlchemy's SQLite dialect
 
 ### SQLite Batch Mode
 

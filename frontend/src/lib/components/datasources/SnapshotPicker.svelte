@@ -1,17 +1,21 @@
 <script lang="ts">
 	import { apiRequest } from '$lib/api/client';
+	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {
 		datasourceId: string;
 		datasourceConfig: Record<string, unknown>;
+		branch?: string | null;
 		label?: string;
 		persistOpen?: boolean;
 		onConfigChange?: (config: Record<string, unknown>) => void;
 		onUiChange?: (updates: { open?: boolean; month?: string; day?: string }) => void;
 		onSelect?: (snapshotId: string | null, timestampMs?: number) => void;
 		showDelete?: boolean;
+		showBuildPreviews?: boolean;
 	}
 
 	let {
@@ -22,7 +26,9 @@
 		onConfigChange,
 		onUiChange,
 		onSelect,
-		showDelete = false
+		showDelete = false,
+		showBuildPreviews = false,
+		branch = null
 	}: Props = $props();
 
 	let snapshotsOpen = $state(false);
@@ -39,15 +45,29 @@
 	>([]);
 	let selectedSnapshotId = $state<string | null>(null);
 	let selectedSnapshotLabel = $state<string | null>(null);
+	let missingSnapshotId = $state<string | null>(null);
 	let calendarDays = $state<Array<{ key: string; day: number; count: number; inMonth: boolean }>>(
 		[]
 	);
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
+	let buildRuns = $state<EngineRun[]>([]);
+	const runSnapshotMap = $derived.by(() =>
+		buildSnapshotMap(buildRuns, toSnapshotRefs(snapshotList))
+	);
+	const filteredSnapshotList = $derived.by(() => {
+		if (!showBuildPreviews) return snapshotList;
+		const mapped = new SvelteMap<string, boolean>();
+		for (const snap of runSnapshotMap.values()) {
+			if (!snap) continue;
+			mapped.set(snap, true);
+		}
+		return snapshotList.filter((snap) => mapped.has(snap.id));
+	});
 	let filteredSnapshots = $derived(
 		selectedDay
-			? snapshotList.filter((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)
+			? filteredSnapshotList.filter((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)
 			: []
 	);
 
@@ -74,6 +94,7 @@
 		} else {
 			selectedSnapshotLabel = null;
 		}
+		missingSnapshotId = selectedSnapshotId;
 		if (snapshotsOpen && snapshotMonth) {
 			buildCalendar(snapshotMonth);
 		}
@@ -96,6 +117,7 @@
 		deleteConfirmId = null;
 		deleteLoading = false;
 		deleteError = null;
+		buildRuns = [];
 	});
 
 	function formatSnapshotKey(timestampMs: number) {
@@ -115,11 +137,6 @@
 		});
 	}
 
-	function formatOperation(operation?: string | null) {
-		if (!operation) return '';
-		return operation.replace(/^Operation\./, '');
-	}
-
 	function buildSnapshotIndex(
 		items: Array<{
 			snapshot_id: string;
@@ -137,8 +154,12 @@
 			}))
 			.sort((a, b) => b.timestamp - a.timestamp);
 		snapshotList = list;
+		if (selectedSnapshotId && list.some((snap) => snap.id === selectedSnapshotId)) {
+			missingSnapshotId = null;
+		}
+		const monthSource = showBuildPreviews ? filteredSnapshotList : list;
 		const monthOptions = Array.from(
-			new Set(list.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
+			new Set(monthSource.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
 		).sort((a, b) => (a > b ? -1 : 1));
 		const persistedMonth = (datasourceConfig.time_travel_ui as Record<string, unknown>)?.month as
 			| string
@@ -170,7 +191,7 @@
 		}
 
 		const counts = new SvelteMap<string, number>();
-		for (const snap of snapshotList) {
+		for (const snap of filteredSnapshotList) {
 			const key = formatSnapshotKey(snap.timestamp);
 			counts.set(key, (counts.get(key) ?? 0) + 1);
 		}
@@ -201,12 +222,35 @@
 
 	$effect(() => {
 		if (!snapshotsOpen) return;
-		if (!snapshotList.length) return;
+		if (!filteredSnapshotList.length) return;
 		if (!selectedDay) return;
-		const hasMatch = snapshotList.some((snap) => formatSnapshotKey(snap.timestamp) === selectedDay);
+		const hasMatch = filteredSnapshotList.some(
+			(snap) => formatSnapshotKey(snap.timestamp) === selectedDay
+		);
 		if (hasMatch) return;
 		selectedDay = '';
 		updateUi({ day: '' });
+	});
+
+	$effect(() => {
+		if (!snapshotsOpen) return;
+		if (!snapshotMonth) return;
+		buildCalendar(snapshotMonth);
+	});
+
+	$effect(() => {
+		if (!snapshotsOpen) return;
+		const source = showBuildPreviews ? filteredSnapshotList : snapshotList;
+		if (!source.length) {
+			calendarDays = [];
+			return;
+		}
+		const monthOptions = Array.from(
+			new Set(source.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
+		).sort((a, b) => (a > b ? -1 : 1));
+		if (!monthOptions.length) return;
+		if (snapshotMonth && monthOptions.includes(snapshotMonth)) return;
+		selectMonth(monthOptions[0]);
 	});
 
 	function loadSnapshots() {
@@ -225,9 +269,36 @@
 				snapshotList = [];
 			}
 		);
+		if (showBuildPreviews) {
+			loadBuildRuns();
+		}
+	}
+
+	function loadBuildRuns() {
+		if (!datasourceId) return;
+		listEngineRuns({ datasource_id: datasourceId, limit: 50 }).match(
+			(result) => {
+				const branchValue =
+					branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
+				buildRuns = result.filter((run) => {
+					if (!(run.kind === 'datasource_update' || run.kind === 'datasource_create')) return false;
+					if (run.status !== 'success') return false;
+					if (!branchValue) return true;
+					const payload = run.request_json as Record<string, unknown>;
+					const opts = payload.iceberg_options as Record<string, unknown> | undefined;
+					const runBranch = opts?.branch as string | undefined;
+					return runBranch === branchValue;
+				});
+			},
+			() => {
+				buildRuns = [];
+			}
+		);
 	}
 
 	function getIcebergSnapshots(nextId: string) {
+		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
+		const suffix = branchValue ? `?branch=${encodeURIComponent(branchValue)}` : '';
 		return apiRequest<{
 			snapshots: Array<{
 				snapshot_id: string;
@@ -235,7 +306,7 @@
 				operation?: string | null;
 				is_current?: boolean | null;
 			}>;
-		}>(`/v1/compute/iceberg/${nextId}/snapshots`);
+		}>(`/v1/compute/iceberg/${nextId}/snapshots${suffix}`);
 	}
 
 	function setSnapshot(snapshotId: string | null, timestampMs?: number) {
@@ -245,15 +316,21 @@
 			delete nextConfig.snapshot_id;
 			delete nextConfig.snapshot_timestamp_ms;
 			selectedSnapshotLabel = null;
+			missingSnapshotId = null;
 		} else {
 			nextConfig.snapshot_id = snapshotId;
 			if (timestampMs) {
 				nextConfig.snapshot_timestamp_ms = timestampMs;
 				selectedSnapshotLabel = formatSnapshotLabel(timestampMs);
 			}
+			missingSnapshotId = null;
 		}
 		onConfigChange?.(nextConfig);
 		onSelect?.(snapshotId, timestampMs);
+	}
+
+	function toSnapshotRefs(list: Array<{ id: string; timestamp: number }>) {
+		return list.map((snap) => ({ snapshot_id: snap.id, timestamp_ms: snap.timestamp }));
 	}
 
 	function updatePopoverPosition() {
@@ -303,6 +380,9 @@
 		}
 		if (snapshotMonth) {
 			buildCalendar(snapshotMonth);
+		}
+		if (showBuildPreviews && !buildRuns.length) {
+			loadBuildRuns();
 		}
 	}
 
@@ -383,13 +463,13 @@
 		<div class="flex items-center gap-2">
 			{#if selectedSnapshotId}
 				<span
-					class="rounded-sm border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-muted"
+					class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-muted"
 				>
 					{selectedSnapshotId}
 				</span>
 			{:else}
 				<span
-					class="rounded-sm border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
+					class="border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
 				>
 					Latest
 				</span>
@@ -427,6 +507,18 @@
 					</button>
 				{/if}
 			</div>
+			{#if missingSnapshotId}
+				<div class="border border-warning bg-warning-bg px-2 py-1 text-[10px] text-warning-fg">
+					Selected snapshot #{missingSnapshotId} no longer exists.
+					<button
+						class="ml-2 border border-warning px-1.5 py-0.5"
+						onclick={() => setSnapshot(null)}
+						type="button"
+					>
+						Switch to latest
+					</button>
+				</div>
+			{/if}
 
 			{#if deleteError}
 				<div class="text-xs text-error-fg">{deleteError}</div>
@@ -477,10 +569,10 @@
 										<span>{day.day}</span>
 										{#if day.count > 0}
 											<span
-												class="absolute right-1 top-1 rounded-sm bg-accent-bg px-1 text-[9px] text-accent-primary"
+												class="absolute right-1 top-1 bg-accent-bg px-1 text-[9px] text-accent-primary"
 											>
-												{day.count}</span
-											>
+												{day.count}
+											</span>
 										{/if}
 									</button>
 								{:else}
@@ -502,11 +594,6 @@
 										onclick={() => setSnapshot(snap.id, snap.timestamp)}
 										type="button"
 									>
-										{#if snap.operation}
-											<span class="text-[10px] uppercase text-fg-tertiary">
-												{formatOperation(snap.operation)}
-											</span>
-										{/if}
 										<span
 											class="font-mono"
 											class:text-fg-secondary={selectedSnapshotId !== snap.id}

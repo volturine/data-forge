@@ -19,22 +19,25 @@
 		Database,
 		ArrowRight,
 		HelpCircle,
-		BarChart3
+		BarChart3,
+		Search
 	} from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {
 		datasourceId?: string;
 		compact?: boolean;
+		searchQuery?: string;
 	}
 
-	let { datasourceId, compact = false }: Props = $props();
+	let { datasourceId, compact = false, searchQuery: externalSearch }: Props = $props();
 
 	const queryClient = useQueryClient();
+	const defaultCron = '0 * * * *';
 
 	let creating = $state(false);
 	let triggerType = $state<'cron' | 'depends' | 'event'>('cron');
-	let newCron = $state('0 * * * *');
+	let newCron = $state(defaultCron);
 	let newDatasourceId = $state('');
 	let newDependsOn = $state('');
 	let newTrigger = $state('');
@@ -42,6 +45,8 @@
 	let expandedId = $state<string | null>(null);
 	let editingCron = $state<string | null>(null);
 	let editCronValue = $state('');
+	let searchQuery = $state('');
+	const effectiveSearch = $derived(externalSearch ?? searchQuery);
 
 	const schedulesQuery = createQuery(() => ({
 		queryKey: ['schedules', datasourceId ?? 'all'],
@@ -69,8 +74,7 @@
 			if (result.isErr()) return [] as DataSource[];
 			return result.value;
 		},
-		staleTime: 60_000,
-		enabled: !datasourceId
+		staleTime: 60_000
 	}));
 
 	const datasourceMap = $derived.by(() => {
@@ -91,10 +95,51 @@
 
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
+	const hasSearch = $derived(effectiveSearch.trim().length > 0);
+	const visibleSchedules = $derived.by(() => {
+		const q = effectiveSearch.trim().toLowerCase();
+		if (!q) return schedules;
+		return schedules.filter((schedule) => {
+			const dsName = (datasourceMap.get(schedule.datasource_id)?.name ?? '').toLowerCase();
+			const triggerDs = schedule.trigger_on_datasource_id
+				? (datasourceMap.get(schedule.trigger_on_datasource_id)?.name ?? '')
+				: '';
+			const dep = schedule.depends_on
+				? (allSchedules.find((s) => s.id === schedule.depends_on)?.analysis_name ?? '')
+				: '';
+			return (
+				schedule.id.toLowerCase().includes(q) ||
+				schedule.datasource_id.toLowerCase().includes(q) ||
+				dsName.includes(q) ||
+				(schedule.analysis_id ?? '').toLowerCase().includes(q) ||
+				(schedule.analysis_name ?? '').toLowerCase().includes(q) ||
+				(schedule.tab_name ?? '').toLowerCase().includes(q) ||
+				triggerDs.toLowerCase().includes(q) ||
+				dep.toLowerCase().includes(q) ||
+				schedule.cron_expression.toLowerCase().includes(q)
+			);
+		});
+	});
+
+	const targetDatasource = $derived.by(() => {
+		if (!datasourceId) return null;
+		return datasourceMap.get(datasourceId) ?? null;
+	});
+
+	const scheduleBlocked = $derived.by(() => {
+		if (!datasourceId) return false;
+		if (!targetDatasource) return true;
+		return targetDatasource.created_by !== 'analysis';
+	});
+
+	const showBlockedMessage = $derived.by(() => {
+		if (!datasourceId) return false;
+		if (!targetDatasource) return false;
+		return targetDatasource.created_by !== 'analysis';
+	});
 
 	const currentTarget = $derived.by(() => {
-		if (!datasourceId) return null;
-		const ds = datasourceMap.get(datasourceId);
+		const ds = targetDatasource;
 		if (!ds) return null;
 		return {
 			datasourceName: ds.name,
@@ -112,6 +157,12 @@
 		if (schedule.trigger_on_datasource_id) return 'event';
 		if (schedule.depends_on) return 'depends';
 		return 'cron';
+	}
+
+	function getTriggerLabel(type: 'cron' | 'depends' | 'event'): string {
+		if (type === 'cron') return 'Cron';
+		if (type === 'depends') return 'Depends';
+		return 'Event';
 	}
 
 	function getTriggerDescription(schedule: Schedule): string {
@@ -179,7 +230,7 @@
 			queryClient.invalidateQueries({ queryKey: ['schedules'] });
 			creating = false;
 			triggerType = 'cron';
-			newCron = '0 * * * *';
+			newCron = defaultCron;
 			newDatasourceId = '';
 			newDependsOn = '';
 			newTrigger = '';
@@ -199,7 +250,11 @@
 
 	const cronMut = createMutation(() => ({
 		mutationFn: async (args: { id: string; cron: string }) => {
-			const result = await updateSchedule(args.id, { cron_expression: args.cron });
+			const result = await updateSchedule(args.id, {
+				cron_expression: args.cron,
+				depends_on: null,
+				trigger_on_datasource_id: null
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -212,7 +267,10 @@
 
 	const depMut = createMutation(() => ({
 		mutationFn: async (args: { id: string; depends_on: string | null }) => {
-			const result = await updateSchedule(args.id, { depends_on: args.depends_on });
+			const result = await updateSchedule(args.id, {
+				depends_on: args.depends_on,
+				trigger_on_datasource_id: null
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -224,7 +282,8 @@
 	const triggerMut = createMutation(() => ({
 		mutationFn: async (args: { id: string; trigger_on_datasource_id: string | null }) => {
 			const payload: ScheduleUpdate = {
-				trigger_on_datasource_id: args.trigger_on_datasource_id
+				trigger_on_datasource_id: args.trigger_on_datasource_id,
+				depends_on: null
 			};
 			const result = await updateSchedule(args.id, payload);
 			if (result.isErr()) throw new Error(result.error.message);
@@ -247,6 +306,7 @@
 	}));
 
 	function handleCreate() {
+		if (scheduleBlocked) return;
 		const targetDs = datasourceId ?? newDatasourceId;
 		if (!targetDs) return;
 
@@ -267,6 +327,7 @@
 	}
 
 	function handleToggle(schedule: Schedule) {
+		if (scheduleBlocked) return;
 		toggleMut.mutate({ id: schedule.id, enabled: !schedule.enabled });
 	}
 
@@ -275,11 +336,13 @@
 	}
 
 	function startEditCron(schedule: Schedule) {
+		if (scheduleBlocked) return;
 		editingCron = schedule.id;
 		editCronValue = schedule.cron_expression;
 	}
 
 	function saveCron(id: string) {
+		if (scheduleBlocked) return;
 		if (!editCronValue.trim()) return;
 		cronMut.mutate({ id, cron: editCronValue.trim() });
 	}
@@ -290,11 +353,18 @@
 	}
 
 	function handleDepChange(id: string, value: string) {
+		if (scheduleBlocked) return;
 		depMut.mutate({ id, depends_on: value || null });
 	}
 
 	function handleTriggerChange(id: string, value: string) {
+		if (scheduleBlocked) return;
 		triggerMut.mutate({ id, trigger_on_datasource_id: value || null });
+	}
+
+	function openCreate() {
+		if (scheduleBlocked) return;
+		creating = true;
 	}
 
 	function toggleExpand(id: string) {
@@ -320,13 +390,13 @@
 	}
 
 	const colCount = $derived.by(() => {
-		let count = 6;
+		let count = 7;
 		if (!datasourceId) count += 1;
 		return count;
 	});
 </script>
 
-<div class={compact ? '' : 'mx-auto max-w-300 px-6 py-7'}>
+<div class="flex flex-col h-full w-full">
 	{#if !compact}
 		<header class="mb-6 border-b border-tertiary pb-5">
 			<div class="flex items-center justify-between">
@@ -339,12 +409,26 @@
 				</div>
 				<button
 					class="inline-flex items-center gap-1.5 border border-tertiary bg-accent-bg px-3 py-1.5 text-sm text-accent-primary hover:bg-accent-bg/80"
-					onclick={() => (creating = true)}
+					onclick={openCreate}
+					disabled={scheduleBlocked}
 				>
 					<Plus size={14} />
 					New Schedule
 				</button>
 			</div>
+			{#if externalSearch === undefined}
+				<div class="mt-4 flex flex-wrap items-center gap-3">
+					<div class="relative min-w-60 max-w-100 flex-1">
+						<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+						<input
+							type="text"
+							placeholder="Search schedules, datasources, or IDs..."
+							class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
+							bind:value={searchQuery}
+						/>
+					</div>
+				</div>
+			{/if}
 		</header>
 	{:else}
 		<div class="mb-3 flex items-center justify-between">
@@ -357,7 +441,8 @@
 			<div class="flex items-center gap-1">
 				<button
 					class="inline-flex items-center gap-1 border border-tertiary bg-accent-bg px-2 py-1 text-xs text-accent-primary hover:bg-accent-bg/80"
-					onclick={() => (creating = true)}
+					onclick={openCreate}
+					disabled={scheduleBlocked}
 				>
 					<Plus size={12} />
 					Add
@@ -372,7 +457,7 @@
 			</div>
 		</div>
 		{#if showHelp}
-			<div class="mb-3 rounded border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+			<div class="mb-3 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
 				<p class="m-0 mb-1 font-medium">Schedule Triggers:</p>
 				<ul class="m-0 list-none space-y-1 p-0">
 					<li class="flex items-center gap-1">
@@ -392,6 +477,13 @@
 		{/if}
 	{/if}
 
+	{#if showBlockedMessage}
+		<div class="mb-3 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+			Scheduling is only available for analysis outputs. This datasource was created by
+			<span class="font-medium">{targetDatasource?.created_by}</span>.
+		</div>
+	{/if}
+
 	{#if creating}
 		<div class="mb-4 border border-tertiary bg-bg-primary p-4" class:mb-6={!compact}>
 			<h3 class="m-0 mb-4 text-sm font-medium">Create Schedule</h3>
@@ -404,7 +496,7 @@
 				</div>
 
 				{#if currentTarget}
-					<div class="rounded bg-bg-secondary p-3 text-sm">
+					<div class="bg-bg-secondary p-3 text-sm">
 						<div class="flex items-center gap-2">
 							<BarChart3 size={14} class="text-accent-primary" />
 							<span class="font-medium">{currentTarget.datasourceName}</span>
@@ -428,6 +520,7 @@
 								id="schedule-datasource"
 								class="border border-tertiary bg-transparent px-2 py-1.5 text-xs"
 								bind:value={newDatasourceId}
+								disabled={scheduleBlocked}
 							>
 								<option value="">Select output dataset...</option>
 								{#each analysisOutputs as ds (ds.id)}
@@ -437,7 +530,7 @@
 						</div>
 
 						{#if selectedDatasource}
-							<div class="rounded bg-bg-secondary p-3 text-sm">
+							<div class="bg-bg-secondary p-3 text-sm">
 								<div class="flex items-center gap-2">
 									<BarChart3 size={14} class="text-accent-primary" />
 									<span class="font-medium">{selectedDatasource.name}</span>
@@ -470,7 +563,7 @@
 				<div class="space-y-3">
 					<!-- Cron Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
 						<input
 							type="radio"
@@ -478,6 +571,7 @@
 							value="cron"
 							bind:group={triggerType}
 							class="mt-0.5"
+							disabled={scheduleBlocked}
 						/>
 						<div class="flex-1">
 							<div class="mb-1 text-xs font-medium">On a Schedule</div>
@@ -489,6 +583,7 @@
 										class="w-32 border border-tertiary bg-transparent px-2 py-1 font-mono text-xs"
 										bind:value={newCron}
 										placeholder="0 * * * *"
+										disabled={scheduleBlocked}
 									/>
 									<span class="text-xs text-fg-muted">{getCronDescription(newCron)}</span>
 								</div>
@@ -498,7 +593,7 @@
 
 					<!-- Depends Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
 						<input
 							type="radio"
@@ -506,6 +601,7 @@
 							value="depends"
 							bind:group={triggerType}
 							class="mt-0.5"
+							disabled={scheduleBlocked}
 						/>
 						<div class="flex-1">
 							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
@@ -520,6 +616,7 @@
 									<select
 										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
 										bind:value={newDependsOn}
+										disabled={scheduleBlocked}
 									>
 										<option value="">Select a schedule...</option>
 										{#each depOptions() as dep (dep.id)}
@@ -533,7 +630,7 @@
 
 					<!-- Event Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 rounded border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
 					>
 						<input
 							type="radio"
@@ -541,6 +638,7 @@
 							value="event"
 							bind:group={triggerType}
 							class="mt-0.5"
+							disabled={scheduleBlocked}
 						/>
 						<div class="flex-1">
 							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
@@ -553,6 +651,7 @@
 									<select
 										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
 										bind:value={newTrigger}
+										disabled={scheduleBlocked}
 									>
 										<option value="">Select a datasource...</option>
 										{#each triggerables as ds (ds.id)}
@@ -574,7 +673,8 @@
 						(triggerType === 'cron' && !newCron) ||
 						(triggerType === 'depends' && !newDependsOn) ||
 						(triggerType === 'event' && !newTrigger) ||
-						createMut.isPending}
+						createMut.isPending ||
+						scheduleBlocked}
 				>
 					{createMut.isPending ? 'Creating...' : 'Create Schedule'}
 				</button>
@@ -606,7 +706,7 @@
 		</div>
 	{:else if schedules.length === 0 && !creating}
 		<div class="border border-dashed border-tertiary p-6 text-center" class:p-8={!compact}>
-			<Calendar size={compact ? 20 : 32} class="mx-auto mb-2 text-fg-muted" />
+			<Calendar class="mx-auto mb-2 text-fg-muted" size={compact ? 20 : 32} />
 			<p class="text-sm text-fg-muted">No schedules configured.</p>
 			{#if !compact}
 				<p class="text-xs text-fg-tertiary">
@@ -614,146 +714,99 @@
 				</p>
 			{/if}
 		</div>
-	{:else if schedules.length > 0}
-		<div class="overflow-x-auto border border-tertiary">
-			<table class="w-full border-collapse text-xs">
-				<thead>
-					<tr class="bg-bg-tertiary">
-						<th class="w-6 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
-						{#if !datasourceId}
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Target</th>
-						{/if}
-						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Produced By</th>
-						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Trigger</th>
-						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Status</th>
-						<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Next Run</th>
-						<th class="w-16 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each schedules as schedule (schedule.id)}
-						{@const triggerTypeValue = getTriggerType(schedule)}
-						{@const triggerDesc = getTriggerDescription(schedule)}
-						{@const provenanceDisplay = getProvenanceDisplay(schedule)}
-						<tr
-							class="cursor-pointer hover:bg-bg-hover"
-							class:bg-bg-secondary={expandedId === schedule.id}
+	{:else if visibleSchedules.length === 0 && hasSearch}
+		<div class="border border-dashed border-tertiary px-6 py-8 text-center">
+			<p class="text-sm text-fg-tertiary">No schedules match your search.</p>
+		</div>
+	{:else if visibleSchedules.length > 0}
+		{#if compact}
+			<!-- Compact card list -->
+			<div class="flex flex-col gap-1">
+				{#each visibleSchedules as schedule (schedule.id)}
+					{@const triggerTypeValue = getTriggerType(schedule)}
+					{@const triggerDesc = getTriggerDescription(schedule)}
+					<div class="group border border-tertiary bg-bg-primary">
+						<div
+							class="flex cursor-pointer items-center gap-2 p-2 hover:bg-bg-secondary/50"
+							role="button"
+							tabindex="0"
 							onclick={() => toggleExpand(schedule.id)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									toggleExpand(schedule.id);
+								}
+							}}
 						>
-							<td class="border-b border-tertiary px-2 py-1.5">
-								<ChevronDown
-									size={12}
-									class="transition-transform {expandedId === schedule.id ? '' : '-rotate-90'}"
-								/>
-							</td>
-							{#if !datasourceId}
-								<td class="border-b border-tertiary px-2 py-1.5">
-									<span
-										class="inline-flex max-w-40 items-center gap-1 truncate text-fg-secondary"
-										title={resolveDatasource(schedule.datasource_id)}
-									>
-										<BarChart3 size={10} class="shrink-0 text-fg-muted" />
-										{resolveDatasource(schedule.datasource_id)}
-									</span>
-								</td>
+							<ChevronDown
+								size={10}
+								class="shrink-0 text-fg-muted {expandedId === schedule.id ? '' : '-rotate-90'}"
+							/>
+							{#if triggerTypeValue === 'cron'}
+								<Clock size={12} class="shrink-0 text-fg-muted" />
+							{:else if triggerTypeValue === 'depends'}
+								<Link size={12} class="shrink-0 text-fg-muted" />
+							{:else}
+								<Database size={12} class="shrink-0 text-fg-muted" />
 							{/if}
-							<td class="border-b border-tertiary px-2 py-1.5">
-								<span class="block max-w-48 truncate text-fg-secondary" title={provenanceDisplay}>
-									{provenanceDisplay}
-								</span>
-							</td>
-							<td class="border-b border-tertiary px-2 py-1.5">
-								<div class="flex items-center gap-1.5">
-									{#if triggerTypeValue === 'cron'}
-										<Clock size={12} class="shrink-0 text-fg-muted" />
-									{:else if triggerTypeValue === 'depends'}
-										<Link size={12} class="shrink-0 text-fg-muted" />
-									{:else}
-										<Database size={12} class="shrink-0 text-fg-muted" />
-									{/if}
-									<span class="truncate" title={triggerDesc}>
-										{triggerDesc}
-									</span>
-								</div>
-							</td>
-							<td class="border-b border-tertiary px-2 py-1.5">
-								<button
-									class="inline-flex items-center gap-1 border-none bg-transparent p-0 text-xs"
-									onclick={(e) => {
-										e.stopPropagation();
-										handleToggle(schedule);
-									}}
-									disabled={toggleMut.isPending}
-									title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
-								>
-									{#if schedule.enabled}
-										<Power size={12} class="text-success-fg" />
-										<span class="text-success-fg">On</span>
-									{:else}
-										<PowerOff size={12} class="text-fg-muted" />
-										<span class="text-fg-muted">Off</span>
-									{/if}
-								</button>
-							</td>
-							<td class="border-b border-tertiary px-2 py-1.5 text-fg-secondary">
-								{formatDate(schedule.next_run)}
-							</td>
-							<td class="border-b border-tertiary px-2 py-1.5">
-								<button
-									class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-error-fg"
-									onclick={(e) => {
-										e.stopPropagation();
-										handleDelete(schedule.id);
-									}}
-									disabled={deleteMut.isPending}
-									title="Delete schedule"
-								>
-									<Trash2 size={12} />
-								</button>
-							</td>
-						</tr>
+							<span class="min-w-0 flex-1 truncate text-xs text-fg-secondary" title={triggerDesc}>
+								{triggerDesc}
+							</span>
+							<button
+								class="inline-flex shrink-0 items-center gap-0.5 border-none bg-transparent p-0 text-[10px]"
+								onclick={(e) => {
+									e.stopPropagation();
+									handleToggle(schedule);
+								}}
+								disabled={toggleMut.isPending || scheduleBlocked}
+								title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
+							>
+								{#if schedule.enabled}
+									<Power size={10} class="text-success-fg" />
+								{:else}
+									<PowerOff size={10} class="text-fg-muted" />
+								{/if}
+							</button>
+							<button
+								class="shrink-0 border-none bg-transparent p-0 text-fg-tertiary opacity-0 group-hover:opacity-100 hover:text-error-fg"
+								onclick={(e) => {
+									e.stopPropagation();
+									handleDelete(schedule.id);
+								}}
+								disabled={deleteMut.isPending}
+								title="Delete schedule"
+							>
+								<Trash2 size={10} />
+							</button>
+						</div>
 						{#if expandedId === schedule.id}
-							<tr>
-								<td colspan={colCount} class="border-b border-tertiary bg-bg-primary p-0">
-									<div class="flex flex-wrap items-start gap-4 px-4 py-3">
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Target Datasource</span>
-											<div class="flex items-center gap-1">
-												<BarChart3 size={10} class="text-fg-muted" />
-												<span class="text-[10px] text-fg-secondary">
-													{resolveDatasource(schedule.datasource_id)}
-												</span>
-											</div>
-										</div>
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Produced By</span>
-											<span class="text-[10px] text-fg-secondary">
-												{provenanceDisplay}
-											</span>
-										</div>
+							<div class="border-t border-tertiary px-3 py-2">
+								<div class="flex flex-col gap-2">
+									{#if triggerTypeValue === 'cron'}
 										<div class="flex flex-col gap-1">
 											<span class="text-[10px] text-fg-muted">Cron Expression</span>
 											{#if editingCron === schedule.id}
 												<div class="flex items-center gap-1">
 													<input
 														type="text"
-														class="w-32 border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+														class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
 														bind:value={editCronValue}
 														onkeydown={(e) => {
 															if (e.key === 'Enter') saveCron(schedule.id);
 															if (e.key === 'Escape') cancelEditCron();
 														}}
+														disabled={scheduleBlocked}
 													/>
 													<button
-														class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-success-fg hover:text-success-fg/80"
+														class="shrink-0 border-none bg-transparent p-0.5 text-success-fg"
 														onclick={() => saveCron(schedule.id)}
-														disabled={cronMut.isPending}
+														disabled={cronMut.isPending || scheduleBlocked}
 														title="Save"
 													>
 														<Check size={12} />
 													</button>
 													<button
-														class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+														class="shrink-0 border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
 														onclick={cancelEditCron}
 														title="Cancel"
 													>
@@ -766,72 +819,296 @@
 														{schedule.cron_expression}
 													</code>
 													<button
-														class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+														class="border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
 														onclick={() => startEditCron(schedule)}
-														title="Edit cron expression"
+														title="Edit"
+														disabled={scheduleBlocked}
 													>
 														<Pencil size={10} />
 													</button>
 												</div>
 											{/if}
 										</div>
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Created</span>
-											<span class="text-[10px] text-fg-secondary">
-												{formatDate(schedule.created_at)}
-											</span>
-										</div>
+									{:else if triggerTypeValue === 'depends'}
 										<div class="flex flex-col gap-1">
 											<span class="text-[10px] text-fg-muted">Depends On</span>
-											<div class="flex items-center gap-1">
-												<select
-													class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
-													value={schedule.depends_on ?? ''}
-													onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
-													onclick={(e) => e.stopPropagation()}
-												>
-													<option value="">None</option>
-													{#each depOptions(schedule.id) as dep (dep.id)}
-														<option value={dep.id}>{depLabel(dep.id)}</option>
-													{/each}
-												</select>
-												{#if schedule.depends_on}
-													<Link size={10} class="text-fg-muted" />
-												{/if}
-											</div>
+											<select
+												class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+												value={schedule.depends_on ?? ''}
+												onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
+												onclick={(e) => e.stopPropagation()}
+												disabled={scheduleBlocked}
+											>
+												<option value="">None</option>
+												{#each depOptions(schedule.id) as dep (dep.id)}
+													<option value={dep.id}>{depLabel(dep.id)}</option>
+												{/each}
+											</select>
 										</div>
+									{:else}
 										<div class="flex flex-col gap-1">
 											<span class="text-[10px] text-fg-muted">On Datasource Update</span>
-											<div class="flex items-center gap-1">
-												<select
-													class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
-													value={schedule.trigger_on_datasource_id ?? ''}
-													onchange={(e) => handleTriggerChange(schedule.id, e.currentTarget.value)}
-													onclick={(e) => e.stopPropagation()}
-												>
-													<option value="">None</option>
-													{#each triggerables as ds (ds.id)}
-														<option value={ds.id}>{ds.name}</option>
-													{/each}
-												</select>
-												{#if schedule.trigger_on_datasource_id}
-													<Database size={10} class="text-fg-muted" />
-												{/if}
-											</div>
+											<select
+												class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+												value={schedule.trigger_on_datasource_id ?? ''}
+												onchange={(e) => handleTriggerChange(schedule.id, e.currentTarget.value)}
+												onclick={(e) => e.stopPropagation()}
+												disabled={scheduleBlocked}
+											>
+												<option value="">None</option>
+												{#each triggerables as ds (ds.id)}
+													<option value={ds.id}>{ds.name}</option>
+												{/each}
+											</select>
 										</div>
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Schedule ID</span>
-											<span class="font-mono text-[10px] text-fg-secondary">
-												{schedule.id}
-											</span>
+									{/if}
+									{#if schedule.next_run}
+										<div class="text-[10px] text-fg-muted">
+											Next: {formatDate(schedule.next_run)}
 										</div>
+									{/if}
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{:else}
+			<!-- Full table view -->
+			<div class="overflow-x-auto border border-tertiary">
+				<table class="w-full border-collapse text-xs">
+					<thead>
+						<tr class="bg-bg-tertiary">
+							<th class="w-6 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
+							{#if !datasourceId}
+								<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Target</th>
+							{/if}
+							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Produced By</th
+							>
+							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium"
+								>Trigger Type</th
+							>
+							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Trigger</th>
+							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Status</th>
+							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Next Run</th>
+							<th class="w-16 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each visibleSchedules as schedule (schedule.id)}
+							{@const triggerTypeValue = getTriggerType(schedule)}
+							{@const triggerDesc = getTriggerDescription(schedule)}
+							{@const provenanceDisplay = getProvenanceDisplay(schedule)}
+							<tr
+								class="cursor-pointer hover:bg-bg-hover"
+								class:bg-bg-secondary={expandedId === schedule.id}
+								onclick={() => toggleExpand(schedule.id)}
+							>
+								<td class="border-b border-tertiary px-2 py-1.5">
+									<ChevronDown
+										size={12}
+										class="transition-transform {expandedId === schedule.id ? '' : '-rotate-90'}"
+									/>
+								</td>
+								{#if !datasourceId}
+									<td class="border-b border-tertiary px-2 py-1.5">
+										<span
+											class="inline-flex max-w-40 items-center gap-1 truncate text-fg-secondary"
+											title={resolveDatasource(schedule.datasource_id)}
+										>
+											<BarChart3 size={10} class="shrink-0 text-fg-muted" />
+											{resolveDatasource(schedule.datasource_id)}
+										</span>
+									</td>
+								{/if}
+								<td class="border-b border-tertiary px-2 py-1.5">
+									<span class="block max-w-48 truncate text-fg-secondary" title={provenanceDisplay}>
+										{provenanceDisplay}
+									</span>
+								</td>
+								<td class="border-b border-tertiary px-2 py-1.5">
+									<span class="text-fg-secondary">{getTriggerLabel(triggerTypeValue)}</span>
+								</td>
+								<td class="border-b border-tertiary px-2 py-1.5">
+									<div class="flex items-center gap-1.5">
+										{#if triggerTypeValue === 'cron'}
+											<Clock size={12} class="shrink-0 text-fg-muted" />
+										{:else if triggerTypeValue === 'depends'}
+											<Link size={12} class="shrink-0 text-fg-muted" />
+										{:else}
+											<Database size={12} class="shrink-0 text-fg-muted" />
+										{/if}
+										<span class="truncate" title={triggerDesc}>
+											{triggerDesc}
+										</span>
 									</div>
 								</td>
+								<td class="border-b border-tertiary px-2 py-1.5">
+									<button
+										class="inline-flex items-center gap-1 border-none bg-transparent p-0 text-xs"
+										onclick={(e) => {
+											e.stopPropagation();
+											handleToggle(schedule);
+										}}
+										disabled={toggleMut.isPending || scheduleBlocked}
+										title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
+									>
+										{#if schedule.enabled}
+											<Power size={12} class="text-success-fg" />
+											<span class="text-success-fg">On</span>
+										{:else}
+											<PowerOff size={12} class="text-fg-muted" />
+											<span class="text-fg-muted">Off</span>
+										{/if}
+									</button>
+								</td>
+								<td class="border-b border-tertiary px-2 py-1.5 text-fg-secondary">
+									{formatDate(schedule.next_run)}
+								</td>
+								<td class="border-b border-tertiary px-2 py-1.5">
+									<button
+										class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-error-fg"
+										onclick={(e) => {
+											e.stopPropagation();
+											handleDelete(schedule.id);
+										}}
+										disabled={deleteMut.isPending}
+										title="Delete schedule"
+									>
+										<Trash2 size={12} />
+									</button>
+								</td>
 							</tr>
-						{/if}
-					{/each}
-				</tbody>
-			</table>
-		</div>
+							{#if expandedId === schedule.id}
+								<tr>
+									<td colspan={colCount} class="border-b border-tertiary bg-bg-primary p-0">
+										<div class="flex flex-wrap items-start gap-4 px-4 py-3">
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">Target Datasource</span>
+												<div class="flex items-center gap-1">
+													<BarChart3 size={10} class="text-fg-muted" />
+													<span class="text-[10px] text-fg-secondary">
+														{resolveDatasource(schedule.datasource_id)}
+													</span>
+												</div>
+											</div>
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">Produced By</span>
+												<span class="text-[10px] text-fg-secondary">
+													{provenanceDisplay}
+												</span>
+											</div>
+											{#if triggerTypeValue === 'cron'}
+												<div class="flex flex-col gap-1">
+													<span class="text-[10px] text-fg-muted">Cron Expression</span>
+													{#if editingCron === schedule.id}
+														<div class="flex items-center gap-1">
+															<input
+																type="text"
+																class="w-32 border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+																bind:value={editCronValue}
+																onkeydown={(e) => {
+																	if (e.key === 'Enter') saveCron(schedule.id);
+																	if (e.key === 'Escape') cancelEditCron();
+																}}
+																disabled={scheduleBlocked}
+															/>
+															<button
+																class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-success-fg hover:text-success-fg/80"
+																onclick={() => saveCron(schedule.id)}
+																disabled={cronMut.isPending || scheduleBlocked}
+																title="Save"
+															>
+																<Check size={12} />
+															</button>
+															<button
+																class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+																onclick={cancelEditCron}
+																title="Cancel"
+															>
+																<X size={12} />
+															</button>
+														</div>
+													{:else}
+														<div class="flex items-center gap-1">
+															<code class="bg-bg-tertiary px-1 py-0.5 text-[10px]">
+																{schedule.cron_expression}
+															</code>
+															<button
+																class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+																onclick={() => startEditCron(schedule)}
+																title="Edit cron expression"
+																disabled={scheduleBlocked}
+															>
+																<Pencil size={10} />
+															</button>
+														</div>
+													{/if}
+												</div>
+											{:else if triggerTypeValue === 'depends'}
+												<div class="flex flex-col gap-1">
+													<span class="text-[10px] text-fg-muted">Depends On</span>
+													<div class="flex items-center gap-1">
+														<select
+															class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+															value={schedule.depends_on ?? ''}
+															onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
+															onclick={(e) => e.stopPropagation()}
+															disabled={scheduleBlocked}
+														>
+															<option value="">None</option>
+															{#each depOptions(schedule.id) as dep (dep.id)}
+																<option value={dep.id}>{depLabel(dep.id)}</option>
+															{/each}
+														</select>
+														{#if schedule.depends_on}
+															<Link size={10} class="text-fg-muted" />
+														{/if}
+													</div>
+												</div>
+											{:else}
+												<div class="flex flex-col gap-1">
+													<span class="text-[10px] text-fg-muted">On Datasource Update</span>
+													<div class="flex items-center gap-1">
+														<select
+															class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+															value={schedule.trigger_on_datasource_id ?? ''}
+															onchange={(e) =>
+																handleTriggerChange(schedule.id, e.currentTarget.value)}
+															onclick={(e) => e.stopPropagation()}
+															disabled={scheduleBlocked}
+														>
+															<option value="">None</option>
+															{#each triggerables as ds (ds.id)}
+																<option value={ds.id}>{ds.name}</option>
+															{/each}
+														</select>
+														{#if schedule.trigger_on_datasource_id}
+															<Database size={10} class="text-fg-muted" />
+														{/if}
+													</div>
+												</div>
+											{/if}
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">Created</span>
+												<span class="text-[10px] text-fg-secondary">
+													{formatDate(schedule.created_at)}
+												</span>
+											</div>
+											<div class="flex flex-col gap-1">
+												<span class="text-[10px] text-fg-muted">Schedule ID</span>
+												<span class="font-mono text-[10px] text-fg-secondary">
+													{schedule.id}
+												</span>
+											</div>
+										</div>
+									</td>
+								</tr>
+							{/if}
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	{/if}
 </div>

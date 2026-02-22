@@ -20,7 +20,7 @@
 		renameAnalysisVersion
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { spawnEngine } from '$lib/api/compute';
+	import { getStepSchema, spawnEngine } from '$lib/api/compute';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
@@ -33,7 +33,17 @@
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { ChevronDown, ChevronLeft, ChevronRight, Pencil, Plus, X } from 'lucide-svelte';
+	import {
+		ChevronDown,
+		ChevronLeft,
+		ChevronRight,
+		ChevronUp,
+		PanelRight,
+		PanelBottom,
+		Pencil,
+		Plus,
+		X
+	} from 'lucide-svelte';
 
 	const analysisId = $derived($page.params.id ?? null);
 	let lastAnalysisId = $state<string | null>(null);
@@ -105,6 +115,8 @@
 				selectedStepId: string | null;
 				leftPaneCollapsed: boolean;
 				rightPaneCollapsed: boolean;
+				configPosition?: 'right' | 'bottom';
+				bottomPaneHeight?: number;
 			};
 			if (parsed.analysisId !== analysisId) {
 				draftLoaded = true;
@@ -122,6 +134,8 @@
 			selectedStepId = parsed.selectedStepId;
 			leftPaneCollapsed = parsed.leftPaneCollapsed;
 			rightPaneCollapsed = parsed.rightPaneCollapsed;
+			if (parsed.configPosition) configPosition = parsed.configPosition;
+			if (parsed.bottomPaneHeight) bottomPaneHeight = parsed.bottomPaneHeight;
 			isDirty = true;
 			draftLoaded = true;
 		});
@@ -140,7 +154,9 @@
 			engineDefaults: analysisStore.engineDefaults,
 			selectedStepId,
 			leftPaneCollapsed,
-			rightPaneCollapsed
+			rightPaneCollapsed,
+			configPosition,
+			bottomPaneHeight
 		};
 		if (draftTimer) window.clearTimeout(draftTimer);
 		draftTimer = window.setTimeout(() => {
@@ -160,6 +176,9 @@
 	let modalSource = $state<'datasource' | 'analysis'>('datasource');
 	let leftPaneCollapsed = $state(false);
 	let rightPaneCollapsed = $state(false);
+	let configPosition = $state<'right' | 'bottom'>('right');
+	let bottomPaneHeight = $state(300);
+	let isResizingBottomPane = $state(false);
 	let isEditingMode = $state(false);
 	let showModeDropdown = $state(false);
 	let showVersionModal = $state(false);
@@ -229,7 +248,7 @@
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
 		queryFn: async () => {
-			const result = await listDatasources();
+			const result = await listDatasources(false);
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
@@ -258,21 +277,50 @@
 		);
 	});
 
+	const datasourceId = $derived(analysisStore.activeTab?.datasource_id ?? undefined);
+	const schemaKey = $derived.by(() => {
+		const tab = analysisStore.activeTab;
+		if (!tab || !analysisId) return undefined;
+		if (tab.datasource_id) return tab.datasource_id;
+		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
+		const cfgAnalysisId = config.analysis_id as string | null | undefined;
+		const cfgTabId = config.analysis_tab_id as string | null | undefined;
+		if (!cfgAnalysisId || !cfgTabId) return undefined;
+		if (String(cfgAnalysisId) !== String(analysisId)) return undefined;
+		return `output:${analysisId}:${String(cfgTabId)}`;
+	});
+	const analysisTabName = $derived.by(() => {
+		const tab = analysisStore.activeTab;
+		if (!tab || !analysisId) return null;
+		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
+		const cfgAnalysisId = config.analysis_id as string | null | undefined;
+		const cfgTabId = config.analysis_tab_id as string | null | undefined;
+		if (!cfgAnalysisId || !cfgTabId) return null;
+		if (String(cfgAnalysisId) !== String(analysisId)) return null;
+		const sourceTab = analysisStore.tabs.find((item) => item.id === String(cfgTabId));
+		return sourceTab?.name ?? null;
+	});
+	const previewDatasourceId = $derived.by(() => datasourceId ?? schemaKey ?? undefined);
+
 	$effect(() => {
 		const datasourceIdValue = datasourceId;
-		if (!datasourceIdValue) return;
+		const schemaId = schemaKey;
+		if (!schemaId) return;
 
-		const existingSchema = analysisStore.sourceSchemas.get(datasourceIdValue);
+		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
 		if (existingSchema) return;
 
-		isLoadingSchema = true;
 		const current = datasourcesQuery.data?.find((ds) => ds.id === datasourceIdValue) ?? null;
+		const activeTabConfig = (analysisStore.activeTab?.datasource_config ?? {}) as Record<
+			string,
+			unknown
+		>;
 		const analysisSourceId =
-			(analysisStore.activeTab?.datasource_config?.analysis_id as string | null) ??
+			(activeTabConfig.analysis_id as string | null) ??
 			(current?.config?.analysis_id as string | null) ??
 			null;
 		const analysisTabId =
-			(analysisStore.activeTab?.datasource_config?.analysis_tab_id as string | null) ??
+			(activeTabConfig.analysis_tab_id as string | null) ??
 			(current?.config?.analysis_tab_id as string | null) ??
 			null;
 		const analysisPayload =
@@ -281,54 +329,45 @@
 				: null;
 
 		if (analysisSourceId) {
-			if (!analysisPayload) {
-				throw new Error('Analysis pipeline payload required for execute');
-			}
-			const tabParam = analysisTabId ? `?analysis_tab_id=${encodeURIComponent(analysisTabId)}` : '';
-			const body = JSON.stringify({ pipeline: analysisPayload });
-			void fetch(`/api/v1/analysis/${analysisSourceId}/execute${tabParam}`, {
-				method: 'POST',
-				body,
-				headers: { 'Content-Type': 'application/json' }
-			})
-				.then((response) => {
-					if (!response.ok) {
-						throw new Error('Failed to execute analysis');
-					}
-					return response.json() as Promise<{
-						schema: Record<string, string>;
-						rows: Array<Record<string, unknown>>;
-						row_count?: number;
-					}>;
-				})
-				.then((payload) => {
-					const columns = Object.entries(payload.schema).map(([name, dtype]) => ({
+			if (!analysisPayload) return;
+			isLoadingSchema = true;
+			const targetTabId = analysisTabId ?? analysisStore.activeTab?.id ?? null;
+			getStepSchema({
+				analysis_id: analysisSourceId,
+				analysis_pipeline: analysisPayload,
+				tab_id: targetTabId,
+				target_step_id: 'source'
+			}).match(
+				(payload) => {
+					const columns = payload.columns.map((name) => ({
 						name,
-						dtype: String(dtype),
+						dtype: payload.column_types[name] ?? 'unknown',
 						nullable: true
 					}));
-					analysisStore.setSourceSchema(datasourceIdValue, {
+					analysisStore.setSourceSchema(schemaId, {
 						columns,
-						row_count: payload.row_count ?? payload.rows.length
+						row_count: null
 					});
 					isLoadingSchema = false;
-				})
-				.catch((error: unknown) => {
-					const message = error instanceof Error ? error.message : 'Failed to execute analysis';
+				},
+				(error) => {
 					track({
 						event: 'schema_error',
 						action: 'analysis_source_schema',
 						target: analysisSourceId,
-						meta: { message }
+						meta: { message: error.message }
 					});
 					isLoadingSchema = false;
-				});
+				}
+			);
 			return;
 		}
 
+		if (!datasourcesQuery.data || !datasourceIdValue) return;
+		isLoadingSchema = true;
 		getDatasourceSchema(datasourceIdValue).match(
 			(schema) => {
-				analysisStore.setSourceSchema(datasourceIdValue, schema);
+				analysisStore.setSourceSchema(schemaId, schema);
 				isLoadingSchema = false;
 			},
 			(err) => {
@@ -343,14 +382,13 @@
 		);
 	});
 
-	const datasourceId = $derived(analysisStore.activeTab?.datasource_id ?? undefined);
-
 	const currentDatasource = $derived.by(() => {
 		if (!datasourceId) return null;
 		const data = datasourcesQuery.data;
 		if (!data) return null;
 		return data.find((ds) => ds.id === datasourceId) ?? null;
 	});
+	const datasourceLabel = $derived(analysisTabName ?? currentDatasource?.name ?? null);
 
 	function makeId() {
 		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -366,6 +404,13 @@
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
+		const isChart = type === 'chart' || type.startsWith('plot_');
+		if (type === 'view') {
+			return { ...base, is_applied: true } as PipelineStep & { is_applied: boolean };
+		}
+		if (isChart) {
+			return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
+		}
 		return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
 	}
 
@@ -379,6 +424,7 @@
 		const step = buildStep(type);
 		analysisStore.addStep(step);
 		selectedStepId = step.id;
+		rightPaneCollapsed = false;
 		markUnsaved();
 	}
 
@@ -388,6 +434,7 @@
 		const inserted = analysisStore.insertStep(step, target.index, target.parentId, target.nextId);
 		if (inserted) {
 			selectedStepId = step.id;
+			rightPaneCollapsed = false;
 			markUnsaved();
 		}
 	}
@@ -400,6 +447,7 @@
 
 	function handleSelectStep(stepId: string) {
 		selectedStepId = stepId;
+		rightPaneCollapsed = false;
 	}
 
 	function handleDeleteStep(stepId: string) {
@@ -432,7 +480,7 @@
 				isDirty = false;
 				selectedStepId = null;
 				isSaving = false;
-				void analysisStore.loadAnalysis(analysisId ?? '');
+				void datasourcesQuery.refetch();
 
 				if (storageKey) {
 					void idbDelete(storageKey);
@@ -534,6 +582,31 @@
 		checkLockStatus(analysisId);
 	});
 
+	function toggleConfigPosition() {
+		configPosition = configPosition === 'right' ? 'bottom' : 'right';
+	}
+
+	function handleBottomPaneResizeStart(e: PointerEvent) {
+		e.preventDefault();
+		isResizingBottomPane = true;
+		const startY = e.clientY;
+		const startHeight = bottomPaneHeight;
+
+		function onMove(ev: PointerEvent) {
+			const delta = startY - ev.clientY;
+			bottomPaneHeight = Math.max(150, Math.min(startHeight + delta, window.innerHeight - 200));
+		}
+
+		function onUp() {
+			isResizingBottomPane = false;
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+		}
+
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp);
+	}
+
 	function handleCloseConfig() {
 		selectedStepId = null;
 	}
@@ -551,6 +624,7 @@
 	function handleAddTab(datasourceId: string, name: string) {
 		const tab: AnalysisTab = {
 			id: `tab-${datasourceId}-${Date.now()}`,
+			output_datasource_id: makeId(),
 			name,
 			type: 'datasource',
 			parent_id: null,
@@ -580,6 +654,7 @@
 		}
 		const tab: AnalysisTab = {
 			id: `tab-analysis-${datasourceId}-${Date.now()}`,
+			output_datasource_id: makeId(),
 			name,
 			type: 'datasource',
 			parent_id: null,
@@ -598,7 +673,12 @@
 	function handleChangeDatasource(datasourceId: string, name: string) {
 		const active = analysisStore.activeTab;
 		if (!active) return;
-		analysisStore.updateTab(active.id, { datasource_id: datasourceId, name });
+		analysisStore.updateTab(active.id, {
+			datasource_id: datasourceId,
+			datasource_config: null,
+			name
+		});
+		if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
 		showDatasourceModal = false;
 		markUnsaved();
 	}
@@ -615,6 +695,19 @@
 				if (item.config?.analysis_tab_id !== analysisTabId) return false;
 				return String(item.config?.analysis_id ?? '') === String(analysisId ?? '');
 			});
+			if (modalMode === 'change') {
+				const active = analysisStore.activeTab;
+				if (!active) return;
+				analysisStore.updateTab(active.id, {
+					datasource_id: analysisMatch?.id ?? null,
+					datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
+					name
+				});
+				if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
+				showDatasourceModal = false;
+				markUnsaved();
+				return;
+			}
 			if (analysisMatch) {
 				handleAddAnalysisTab(
 					analysisMatch.id,
@@ -624,10 +717,9 @@
 				);
 				return;
 			}
-			// Defer datasource creation to save — backend update_analysis
-			// auto-creates analysis datasources when datasource_id is null
 			const tab: AnalysisTab = {
 				id: `tab-analysis-${Date.now()}`,
+				output_datasource_id: makeId(),
 				name,
 				type: 'datasource',
 				parent_id: null,
@@ -664,7 +756,9 @@
 
 	function openDatasourceModal(mode: 'add' | 'change' = 'add') {
 		modalMode = mode;
-		modalSource = 'datasource';
+		const config = (analysisStore.activeTab?.datasource_config ?? {}) as Record<string, unknown>;
+		const sourceType = config.analysis_tab_id ? 'analysis' : 'datasource';
+		modalSource = sourceType;
 		showDatasourceModal = true;
 	}
 
@@ -749,24 +843,25 @@
 		<p class="m-0">
 			{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}
 		</p>
-		<button
-			class="btn-primary mt-4"
-			onclick={() => goto(resolve('/'), { invalidateAll: true })}
-			type="button">Back to Gallery</button
-		>
+		<button class="btn-primary mt-4" onclick={() => goto(resolve('/analysis/new'))} type="button">
+			Create analysis
+		</button>
 	</div>
 {:else if analysisQuery.data}
-	<div class="analysis-page flex h-full flex-col bg-secondary">
+	<div
+		class="analysis-page flex h-full flex-col bg-secondary"
+		class:resizing={isResizingBottomPane}
+	>
 		<header
-			class="analysis-header flex items-stretch sticky top-0 h-12 bg-panel border-y border-tertiary"
+			class="analysis-header flex items-stretch sticky top-0 h-11 bg-panel border-b border-tertiary"
 		>
 			<div
 				class="header-left flex items-center h-full box-border border-r border-tertiary panel-width"
 			>
-				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-4">
+				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-5">
 					<h1
 						contenteditable={isEditingMode}
-						class="editable-title m-0 text-sm font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none text-fg-primary tracking-[0.02em]"
+						class="editable-title m-0 text-xs font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none text-fg-primary tracking-[0.04em]"
 						class:cursor-text={isEditingMode}
 						class:cursor-default={!isEditingMode}
 						onblur={(e) => {
@@ -787,7 +882,7 @@
 					</h1>
 					{#if analysisQuery.data.description}
 						<span
-							class="text-xs whitespace-nowrap overflow-hidden text-ellipsis text-fg-muted tracking-[0.02em]"
+							class="text-[0.625rem] whitespace-nowrap overflow-hidden text-ellipsis text-fg-faint tracking-[0.02em]"
 							>{analysisQuery.data.description}</span
 						>
 					{/if}
@@ -795,25 +890,23 @@
 			</div>
 			<div class="flex-1 min-w-0 overflow-hidden flex items-center justify-center gap-0">
 				<button
-					class="collapse-arrow collapse-arrow-left w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-r border-tertiary hover:text-fg-primary hover:bg-hover"
+					class="collapse-arrow collapse-arrow-left h-full flex items-center justify-center px-2 bg-panel border-none cursor-pointer shrink-0 text-fg-faint hover:text-fg-primary hover:bg-hover"
 					class:collapsed={leftPaneCollapsed}
-					class:hidden={!isEditingMode}
 					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
 					type="button"
 					title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
-					disabled={!isEditingMode}
 				>
 					{#if leftPaneCollapsed}
-						<ChevronRight size={14} />
+						<ChevronRight size={12} />
 					{:else}
-						<ChevronLeft size={14} />
+						<ChevronLeft size={12} />
 					{/if}
 				</button>
-				<div class="flex-1 overflow-hidden flex items-center px-4">
-					<div class="tabs flex items-center overflow-x-auto w-full gap-1">
+				<div class="flex-1 overflow-hidden flex items-center">
+					<div class="tabs flex items-center overflow-x-auto">
 						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
 							<div
-								class="tab inline-flex items-center bg-transparent border-none text-sm font-medium uppercase px-2 py-1 text-fg-muted gap-1 tracking-[0.06em]"
+								class="tab inline-flex items-center bg-transparent border-none text-xs font-medium uppercase text-fg-muted tracking-wide"
 								class:active={analysisStore.activeTab?.id === tab.id}
 							>
 								<button
@@ -827,55 +920,71 @@
 								</button>
 								{#if analysisStore.tabs.length > 1}
 									<button
-										class="tab-remove text-base leading-none ml-1 opacity-50 hover:opacity-100 hover:text-error"
+										class="tab-remove text-base leading-none ml-1 opacity-40 hover:opacity-100 hover:text-error"
 										onclick={() => handleRemoveTab(tab.id)}
 										type="button"
 										aria-label="Remove tab"
 									>
-										<X size={12} />
+										<X size={10} />
 									</button>
 								{/if}
 							</div>
 						{/each}
-						<div class="flex items-center gap-1">
+						<div class="flex items-center">
 							<button
-								class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-sm font-semibold uppercase px-2 py-1 text-fg-muted gap-1 tracking-[0.06em]"
+								class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-xs uppercase text-fg-faint hover:text-fg-primary"
 								onclick={() => openDatasourceModal('add')}
 								type="button"
 								title="Add datasource tab"
 							>
-								<Plus size={14} />
+								<Plus size={12} />
 							</button>
 						</div>
 					</div>
 				</div>
-				<button
-					class="collapse-arrow collapse-arrow-right w-6 h-full flex items-center justify-center bg-transparent border-none text-lg cursor-pointer shrink-0 text-fg-muted border-l border-tertiary hover:text-fg-primary hover:bg-hover"
-					class:collapsed={rightPaneCollapsed}
-					class:hidden={!isEditingMode}
-					onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
-					type="button"
-					title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
-					disabled={!isEditingMode}
-				>
-					{#if rightPaneCollapsed}
-						<ChevronLeft size={14} />
-					{:else}
-						<ChevronRight size={14} />
-					{/if}
-				</button>
 			</div>
-			<div
-				class="header-right flex items-center justify-end h-full box-border border-l border-tertiary panel-width"
+			<button
+				class="config-position-toggle shrink-0 h-full flex items-center justify-center px-2 bg-panel border-none cursor-pointer text-fg-faint hover:text-fg-primary hover:bg-hover"
+				onclick={toggleConfigPosition}
+				type="button"
+				title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
 			>
-				<div class="mode-toggle-container relative items-center px-1">
+				{#if configPosition === 'right'}
+					<PanelBottom size={13} />
+				{:else}
+					<PanelRight size={13} />
+				{/if}
+			</button>
+			<button
+				class="collapse-arrow collapse-arrow-right items-center px-2 bg-panel border-none text-fg-faint hover:text-fg-primary hover:bg-hover"
+				class:collapsed={rightPaneCollapsed}
+				onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
+				type="button"
+				title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
+			>
+				{#if configPosition === 'bottom'}
+					{#if rightPaneCollapsed}
+						<ChevronUp size={12} />
+					{:else}
+						<ChevronDown size={12} />
+					{/if}
+				{:else if rightPaneCollapsed}
+					<ChevronLeft size={12} />
+				{:else}
+					<ChevronRight size={12} />
+				{/if}
+			</button>
+			<div
+				class="panel-width header-right flex items-center justify-end h-full box-border border-l border-tertiary"
+			>
+				<div class="mode-toggle-container relative items-center px-2">
 					<button
-						class="mode-toggle flex items-center cursor-pointer text-sm py-2 bg-tertiary border border-tertiary text-fg-secondary gap-2 hover:bg-hover hover:border-tertiary"
+						class="mode-toggle flex items-center cursor-pointer text-xs py-1.5 px-3 bg-tertiary border border-tertiary text-fg-secondary gap-2 hover:bg-hover hover:border-tertiary"
 						onclick={() => (showModeDropdown = !showModeDropdown)}
 						type="button"
 					>
 						{isEditingMode ? 'Editing' : 'Viewing'}
-						<ChevronDown size={12} class="text-fg-muted" />
+						<ChevronDown size={10} class="text-fg-faint" />
 					</button>
 
 					{#if showModeDropdown}
@@ -883,44 +992,44 @@
 							class="mode-dropdown absolute left-0 min-w-35 bg-panel border border-tertiary p-1 z-100"
 						>
 							<button
-								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary hover:bg-hover"
+								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
 								onclick={() => setMode('viewing')}
 								type="button"
 							>
 								{#if isEditingMode}
-									<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+									<div class="w-3 h-3 border border-accent-primary"></div>
 								{:else}
-									<div class="w-4 h-4 rounded-full bg-accent-primary"></div>
+									<div class="w-3 h-3 bg-accent-primary"></div>
 								{/if}
 								<span>Viewing</span>
 							</button>
 							<button
-								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary hover:bg-hover"
+								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
 								onclick={() => setMode('editing')}
 								type="button"
 							>
 								{#if isEditingMode}
-									<div class="w-4 h-4 rounded-full bg-accent-primary"></div>
+									<div class="w-3 h-3 bg-accent-primary"></div>
 								{:else}
-									<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+									<div class="w-3 h-3 border border-accent-primary"></div>
 								{/if}
 								<span>Editing</span>
 							</button>
 							<button
-								class="mode-option flex items-center w-full bg-transparent border-none cursor-pointer text-sm text-left gap-2 py-2 text-fg-secondary hover:bg-hover"
+								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
 								onclick={openVersionModal}
 								type="button"
 							>
-								<div class="w-4 h-4 rounded-full border-2 border-accent-primary"></div>
+								<div class="w-3 h-3 border border-accent-primary"></div>
 								<span>Rollback</span>
 							</button>
 						</div>
 					{/if}
 				</div>
 
-				<div class="flex h-full flex-1 p-1">
+				<div class="flex h-full flex-1 p-1 gap-1">
 					<button
-						class="cancel-button flex-1 h-full bg-tertiary border-none text-sm font-medium cursor-pointer text-fg-secondary hover:bg-hover hover:text-fg-primary"
+						class="cancel-button flex-1 h-full bg-tertiary border-none text-xs font-medium cursor-pointer text-fg-muted hover:bg-hover hover:text-fg-primary"
 						onclick={discardChanges}
 						disabled={!isEditingMode || !isDirty || isSaving || analysisStore.loading}
 						type="button"
@@ -928,7 +1037,7 @@
 						Cancel
 					</button>
 					<button
-						class="save-button flex-1 h-full bg-transparent border-none text-sm font-medium cursor-pointer"
+						class="save-button flex-1 h-full bg-transparent border-none text-xs font-medium cursor-pointer"
 						class:saved={!isDirty}
 						class:unsaved={isDirty}
 						onclick={handleSave}
@@ -951,29 +1060,53 @@
 				</div>
 			{/if}
 
-			<div
-				class="center-pane flex-1 min-w-50 flex bg-secondary"
-				class:readonly={!isEditingMode}
-				class:expanded={!isEditingMode}
-			>
-				<PipelineCanvas
-					steps={analysisStore.pipeline}
-					analysisId={analysisId ?? undefined}
-					{datasourceId}
-					datasource={currentDatasource}
-					tabName={analysisStore.activeTab?.name}
-					activeTab={analysisStore.activeTab}
-					onStepClick={handleSelectStep}
-					onStepDelete={handleDeleteStep}
-					onStepToggle={handleToggleStep}
-					onInsertStep={handleInsertStep}
-					onMoveStep={handleMoveStep}
-					onChangeDatasource={() => openDatasourceModal('change')}
-					onRenameTab={handleRenameSourceTab}
-				/>
+			<div class="flex flex-1 min-w-0 flex-col overflow-hidden">
+				<div
+					class="center-pane flex-1 min-w-50 min-h-0 flex bg-secondary"
+					class:readonly={!isEditingMode}
+					class:expanded={!isEditingMode}
+				>
+					<PipelineCanvas
+						steps={analysisStore.pipeline}
+						analysisId={analysisId ?? undefined}
+						datasourceId={previewDatasourceId}
+						datasource={currentDatasource}
+						{datasourceLabel}
+						tabName={analysisStore.activeTab?.name}
+						activeTab={analysisStore.activeTab}
+						onStepClick={handleSelectStep}
+						onStepDelete={handleDeleteStep}
+						onStepToggle={handleToggleStep}
+						onInsertStep={handleInsertStep}
+						onMoveStep={handleMoveStep}
+						onChangeDatasource={() => openDatasourceModal('change')}
+						onRenameTab={handleRenameSourceTab}
+					/>
+				</div>
+
+				{#if isEditingMode && configPosition === 'bottom'}
+					<div
+						class="bottom-pane shrink-0 overflow-hidden flex box-border bg-panel border-t border-tertiary"
+						class:collapsed={rightPaneCollapsed}
+						style="height: {rightPaneCollapsed ? 0 : bottomPaneHeight}px;"
+					>
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="bottom-pane-resize-handle"
+							onpointerdown={handleBottomPaneResizeStart}
+						></div>
+						<StepConfig
+							bind:step={selectedStepState}
+							schema={analysisStore.calculatedSchema}
+							{isLoadingSchema}
+							onClose={handleCloseConfig}
+							onConfigApply={markUnsaved}
+						/>
+					</div>
+				{/if}
 			</div>
 
-			{#if isEditingMode}
+			{#if isEditingMode && configPosition === 'right'}
 				<div
 					class="right-pane shrink-0 overflow-hidden flex h-full box-border bg-panel border-l border-tertiary panel-width"
 					class:collapsed={rightPaneCollapsed}
@@ -999,6 +1132,7 @@
 	isLoading={datasourcesQuery.isLoading}
 	mode={modalMode}
 	sourceType={modalSource}
+	allowAnalysis
 	{analysisTabs}
 	excludeTabId={analysisStore.activeTabId}
 	onSelect={handleDatasourceSelect}
@@ -1007,7 +1141,12 @@
 
 {#if showVersionModal}
 	<div class="modal-backdrop" aria-hidden="true"></div>
-	<div class="modal" role="dialog" aria-modal="true" aria-labelledby="analysis-version-title">
+	<div
+		class="modal max-h-[80vh]"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="analysis-version-title"
+	>
 		<div class="modal-header">
 			<h2 id="analysis-version-title">Version history</h2>
 			<button class="modal-close" onclick={closeVersionModal} aria-label="Close">
@@ -1032,14 +1171,14 @@
 						<div
 							class="flex items-start justify-between gap-4 border border-tertiary bg-tertiary p-3"
 						>
-							<div class="flex min-w-0 flex-col gap-1">
-								<div class="text-[0.65rem] uppercase tracking-[0.1em] text-fg-muted">
+							<div class="flex min-w-0 flex-col">
+								<div class="text-[0.65rem] uppercase tracking-widest text-fg-muted">
 									Version {version.version} · {formatVersionDate(version.created_at)}
 								</div>
 								{#if editingVersionId === version.id}
 									<input
 										type="text"
-										class="text-sm font-semibold text-fg-primary bg-transparent border border-tertiary px-1 py-0.5 w-full"
+										class="text-sm font-semibold text-fg-primary bg-transparent border border-tertiary px-1 py-0.5"
 										bind:value={editingVersionName}
 										onblur={() => commitRenameVersion(version.version)}
 										onkeydown={(e) => {
@@ -1048,7 +1187,7 @@
 										}}
 									/>
 								{:else}
-									<div class="flex items-center gap-1.5">
+									<div class="flex items-center.5">
 										<span class="text-sm font-semibold text-fg-primary">
 											{version.name}
 										</span>

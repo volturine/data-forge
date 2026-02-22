@@ -10,7 +10,7 @@
 	interface Props {
 		/** File type (if known) */
 		fileType?: FileType;
-		/** Source type for non-file datasources (database, api, iceberg, etc.) */
+		/** Source type for non-file datasources (database, iceberg, etc.) */
 		sourceType?: SourceType;
 		/** File path (for auto-detection) */
 		path?: string;

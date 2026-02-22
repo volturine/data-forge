@@ -218,7 +218,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="With columns configuration">
-	<h3 class="m-0 mb-4 text-sm uppercase tracking-wider text-fg-muted">With Columns</h3>
+	<h3 class="m-0 mb-5 text-sm uppercase tracking-wider text-fg-muted">With Columns</h3>
 
 	<div class="flex flex-col gap-3 mb-5">
 		<select bind:value={exprType}>
@@ -295,7 +295,7 @@
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
-						<div class="flex flex-col gap-2 p-3 save-box">
+						<div class="flex flex-col gap-3 mt-3 pt-3 border-t border-tertiary">
 							<input type="text" placeholder="UDF name" bind:value={saveName} />
 							<input type="text" placeholder="Description" bind:value={saveDescription} />
 							<input type="text" placeholder="Tags (comma-separated)" bind:value={saveTags} />
@@ -313,7 +313,7 @@
 			</div>
 		{/if}
 
-		<div class="flex gap-2">
+		<div class="flex gap-3">
 			{#if isEditing}
 				<button type="button" class="btn-primary" onclick={saveExpression} disabled={!canAdd}
 					>Save</button
@@ -328,11 +328,11 @@
 	</div>
 
 	{#if (config.expressions ?? []).length > 0}
-		<div class="flex flex-col gap-2 p-3 save-box" role="list">
-			<h4 class="m-0 mb-3 text-xs uppercase tracking-wider text-fg-muted">Columns</h4>
+		<div class="flex flex-col" role="list">
+			<h4 class="m-0 mb-3">Columns</h4>
 			{#each config.expressions ?? [] as expr, index (index)}
 				<div
-					class="item item-row flex justify-between items-center py-2 px-3"
+					class="item item-row flex justify-between items-center py-2"
 					class:editing={editIndex === index}
 					class:border-accent-primary={editIndex === index}
 					class:bg-hover={editIndex === index}
@@ -373,7 +373,7 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="empty-dashed p-6 text-center">No columns configured yet.</p>
+		<p class="py-8 text-center text-xs text-fg-muted">No columns configured yet.</p>
 	{/if}
 </div>
 

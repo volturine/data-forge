@@ -68,8 +68,45 @@ def temp_upload_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True, scope='function')
-def isolate_upload_dir(temp_upload_dir: Path, monkeypatch):
-    monkeypatch.setattr(settings, 'upload_dir', temp_upload_dir, raising=False)
+def isolate_data_dir(tmp_path: Path, monkeypatch):
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = data_dir / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv('ENV_FILE', '')
+    monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
+    monkeypatch.setattr(settings, 'database_url', f'sqlite:///{data_dir / "app.db"}', raising=False)
+    monkeypatch.setattr(settings, 'log_sqlite_path', log_dir, raising=False)
+
+
+@pytest.fixture(autouse=True, scope='function')
+def isolate_settings_engine(isolate_data_dir, monkeypatch):
+    from core import database
+    from modules.settings.models import AppSettings
+
+    settings_db_path = settings.data_dir / 'app.db'
+    settings_url = f'sqlite:///{settings_db_path}'
+    engine = create_engine(
+        settings_url,
+        echo=False,
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
+    )
+    AppSettings.metadata.create_all(engine)
+    monkeypatch.setattr(settings, 'database_url', settings_url, raising=False)
+    monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(autouse=True, scope='function')
+def cleanup_namespace_engines():
+    from core import database
+
+    yield
+    for engine in database._namespace_engines.values():
+        engine.dispose()
+    database._namespace_engines.clear()
 
 
 @pytest.fixture(scope='function')

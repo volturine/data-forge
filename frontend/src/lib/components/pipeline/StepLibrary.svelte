@@ -219,21 +219,23 @@
 </script>
 
 <div
-	class="step-library flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden bg-primary px-3 py-4"
+	class="step-library flex h-full min-h-0 w-full flex-col overflow-hidden bg-primary"
 >
 	<img
 		class="drag-preview pointer-events-none fixed -left-2500 -top-2500 h-px w-px opacity-0"
 		alt=""
 		bind:this={dragImageEl}
 	/>
-	<h3 class="m-0 mb-3 shrink-0 text-sm uppercase tracking-widest text-fg-primary">Operations</h3>
+	<div class="shrink-0 px-5 pt-5 pb-3">
+		<h3 class="m-0 text-xs font-semibold uppercase tracking-widest text-fg-muted">Operations</h3>
+	</div>
 	<div
-		class="step-list flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden"
+		class="step-list flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto overflow-x-hidden px-3 pb-3"
 		role="list"
 	>
 		{#each stepTypes as stepType (stepType.type)}
 			<button
-				class="step-button relative flex cursor-grab items-center justify-start gap-3 border border-transparent bg-transparent p-3 text-left hover:border-tertiary hover:bg-bg-hover"
+				class="step-button relative flex cursor-grab items-center justify-start gap-3 border border-transparent bg-transparent px-3 py-2.5 text-left hover:bg-bg-hover"
 				class:dragging
 				onclick={() => handleClick(stepType.type)}
 				onpointerdown={(event) => startDrag(event, stepType.type)}
@@ -244,20 +246,20 @@
 				data-step={stepType.type}
 				data-drag-handle="true"
 			>
-				<stepType.icon size={18} class="shrink-0" data-drag-handle="true" />
-				<div class="flex min-w-0 flex-col items-start gap-0.5">
-					<span class="text-sm font-semibold text-fg-primary">{stepType.label}</span>
-					<span class="truncate text-xs text-fg-muted">{stepType.description}</span>
+				<stepType.icon size={15} class="shrink-0 text-fg-muted" data-drag-handle="true" />
+				<div class="flex min-w-0 flex-col items-start gap-0">
+					<span class="text-xs font-medium text-fg-primary">{stepType.label}</span>
+					<span class="truncate text-[0.625rem] text-fg-faint">{stepType.description}</span>
 				</div>
 			</button>
 		{/each}
 	</div>
 
-	<div class="mt-4 shrink-0 border-t border-tertiary pt-3">
-		<h4 class="m-0 mb-2 text-xs uppercase tracking-wide text-fg-muted">Quick Insert</h4>
+	<div class="shrink-0 border-t border-tertiary px-4 py-3">
+		<h4 class="m-0 mb-2 text-[0.625rem] uppercase tracking-widest text-fg-faint">Quick Insert</h4>
 		<div class="flex flex-col gap-2">
 			<select
-				class="rounded-sm border border-tertiary bg-bg-secondary p-2 text-fg-primary"
+				class="border border-tertiary bg-bg-secondary px-3 py-2 text-xs text-fg-primary"
 				value={selectedType ?? ''}
 				onchange={(event) => (selectedType = event.currentTarget.value || null)}
 			>
@@ -268,7 +270,7 @@
 			</select>
 			<div class="grid grid-cols-2 gap-2">
 				<button
-					class="fallback-btn cursor-pointer border border-tertiary bg-transparent p-2 text-fg-primary hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+					class="fallback-btn cursor-pointer border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-secondary hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {
@@ -281,7 +283,7 @@
 					Add to end
 				</button>
 				<button
-					class="fallback-btn cursor-pointer border border-tertiary bg-transparent p-2 text-fg-primary hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+					class="fallback-btn cursor-pointer border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-secondary hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40"
 					type="button"
 					disabled={!selectedType}
 					onclick={() => {

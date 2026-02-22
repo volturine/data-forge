@@ -1,9 +1,9 @@
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
-class EngineStatus(str, Enum):
+class EngineStatus(StrEnum):
     HEALTHY = 'healthy'
     TERMINATED = 'terminated'
 
@@ -135,7 +135,7 @@ class StepPreviewResponse(BaseModel):
 StepPreviewRequest.model_rebuild()
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     CSV = 'csv'
     PARQUET = 'parquet'
     JSON = 'json'
@@ -143,25 +143,24 @@ class ExportFormat(str, Enum):
     DUCKDB = 'duckdb'
 
 
-class ExportDestination(str, Enum):
+class ExportDestination(StrEnum):
     DOWNLOAD = 'download'
     FILESYSTEM = 'filesystem'
     DATASOURCE = 'datasource'
 
 
-class ExportDatasourceType(str, Enum):
+class ExportDatasourceType(StrEnum):
     ICEBERG = 'iceberg'
     DUCKDB = 'duckdb'
     FILE = 'file'
 
 
 class IcebergExportOptions(BaseModel):
-    """Options for Iceberg table export when destination is 'datasource'."""
-
     model_config = ConfigDict(from_attributes=True)
 
     table_name: str = 'exported_data'
-    namespace: str = 'exports'
+    namespace: str = 'outputs'
+    branch: str | None = None
 
 
 class DuckDBExportOptions(BaseModel):
@@ -220,6 +219,16 @@ class StepSchemaRequest(BaseModel):
     datasource_config: dict | None = None
 
 
+class StepRowCountRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str | None = None
+    target_step_id: str
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None
+    datasource_config: dict | None = None
+
+
 class IcebergSnapshotInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -251,6 +260,13 @@ class StepSchemaResponse(BaseModel):
     step_id: str
     columns: list[str]
     column_types: dict[str, str]
+
+
+class StepRowCountResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    step_id: str
+    row_count: int
 
 
 class BuildTabResult(BaseModel):

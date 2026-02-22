@@ -7,15 +7,16 @@
 		Trash2,
 		Search,
 		LoaderCircle,
-		Download,
 		Eye,
 		EyeOff,
 		Upload,
 		GitBranch
 	} from 'lucide-svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
+	import BuildComparisonPanel from '$lib/components/datasources/BuildComparisonPanel.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 
@@ -49,6 +50,7 @@
 	let showConfig = $state<string | null>(page.url.searchParams.get('id'));
 	let deletingId = $state<string | null>(null);
 	let searchQuery = $state('');
+	let showComparison = $state(false);
 
 	const datasources = $derived(query.data ?? []);
 	const filteredDatasources = $derived(
@@ -58,12 +60,17 @@
 	);
 	const selectedDatasource = $derived(datasources.find((d) => d.id === selectedId) ?? null);
 	let snapshotConfig = $state<Record<string, unknown> | null>(null);
-	let downloading = $state(false);
+	let selectedBranch = $state<string | null>(null);
 
 	function selectDatasource(id: string | null) {
 		selectedId = id;
 		showConfig = id;
-		snapshotConfig = null;
+		const nextDatasource = id ? (datasources.find((d) => d.id === id) ?? null) : null;
+		const nextConfig = (nextDatasource?.config ?? {}) as Record<string, unknown>;
+		const nextBranch = 'master';
+		snapshotConfig = id ? { ...nextConfig, branch: nextBranch } : null;
+		selectedBranch = id ? nextBranch : null;
+		showComparison = false;
 		const url = id ? `/datasources?id=${id}` : '/datasources';
 		goto(resolve(url as '/'), { replaceState: true });
 	}
@@ -81,12 +88,19 @@
 		snapshotConfig = config;
 	}
 
-	async function handleDownload(_format: 'csv' | 'parquet' | 'json') {
-		if (!selectedDatasource || downloading) return;
-		throw new Error(
-			'Datasource export requires an analysis pipeline payload; run exports from an analysis tab.'
-		);
-	}
+	const branchOptions = $derived.by(() => {
+		const config = (selectedDatasource?.config ?? {}) as Record<string, unknown>;
+		const branches = (config.branches as string[] | undefined) ?? [];
+		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
+		if (!cleaned.includes('master')) {
+			cleaned.unshift('master');
+		}
+		return cleaned;
+	});
+	const activeBranch = $derived.by(() => {
+		if (snapshotConfig && snapshotConfig.branch) return String(snapshotConfig.branch);
+		return 'master';
+	});
 </script>
 
 <div class="flex h-full">
@@ -179,7 +193,7 @@
 								</span>
 								{#if datasource.created_by === 'analysis'}
 									<span
-										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase font-medium text-accent-primary"
+										class="inline-flex items-center gap-0.5 shrink-0 bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase font-medium text-accent-primary"
 										title="Created by analysis"
 									>
 										<GitBranch size={10} />
@@ -187,7 +201,7 @@
 									</span>
 								{:else}
 									<span
-										class="inline-flex items-center gap-0.5 shrink-0 rounded-sm bg-tertiary px-1.5 py-0.5 text-[10px] uppercase font-medium text-fg-muted"
+										class="inline-flex items-center gap-0.5 shrink-0 bg-tertiary px-1.5 py-0.5 text-[10px] uppercase font-medium text-fg-muted"
 										title="Imported datasource"
 									>
 										<Upload size={10} />
@@ -230,57 +244,63 @@
 				>
 					<div class="flex-1 min-w-0">
 						{#if selectedDatasource.source_type === 'iceberg'}
-							<SnapshotPicker
-								datasourceId={selectedDatasource.id}
-								datasourceConfig={snapshotConfig ?? selectedDatasource.config}
-								label="Time Travel"
-								showDelete
-								onConfigChange={handleSnapshotConfigChange}
-							/>
+							<div class="flex items-center gap-2">
+								<div class="flex-1 min-w-0">
+									<SnapshotPicker
+										datasourceId={selectedDatasource.id}
+										datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+										label="Time Travel"
+										branch={selectedBranch}
+										showDelete
+										showBuildPreviews
+										onConfigChange={handleSnapshotConfigChange}
+									/>
+								</div>
+								<div class="flex items-center gap-2">
+									<GitBranch size={14} class="text-fg-tertiary" />
+									<BranchPicker
+										branches={branchOptions}
+										value={activeBranch}
+										placeholder="Select branch"
+										onChange={(value: string) => {
+											selectedBranch = value;
+											const next = {
+												...(snapshotConfig ?? selectedDatasource?.config ?? {})
+											} as Record<string, unknown>;
+											next.branch = value;
+											snapshotConfig = next;
+										}}
+									/>
+								</div>
+								<button
+									class="btn-ghost btn-sm border border-tertiary text-xs"
+									onclick={() => (showComparison = !showComparison)}
+									aria-pressed={showComparison}
+								>
+									{#if showComparison}
+										Hide comparison
+									{:else}
+										Compare builds
+									{/if}
+								</button>
+							</div>
 						{:else}
 							<div class="text-xs text-fg-tertiary">
 								Time travel is available for Iceberg datasources.
 							</div>
 						{/if}
 					</div>
-					<div class="flex items-center gap-1 shrink-0">
-						<button
-							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
-							title="Download as CSV"
-							disabled={downloading}
-							onclick={() => handleDownload('csv')}
-						>
-							{#if downloading}
-								<LoaderCircle size={14} class="spinning" />
-							{:else}
-								<Download size={14} />
-							{/if}
-							CSV
-						</button>
-						<button
-							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
-							title="Download as Parquet"
-							disabled={downloading}
-							onclick={() => handleDownload('parquet')}
-						>
-							Parquet
-						</button>
-						<button
-							class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-transparent border border-tertiary hover:bg-tertiary"
-							title="Download as JSON"
-							disabled={downloading}
-							onclick={() => handleDownload('json')}
-						>
-							JSON
-						</button>
-					</div>
 				</div>
-				<div class="flex-1 min-h-0 overflow-hidden">
-					<DatasourcePreview
-						datasourceId={selectedDatasource.id}
-						datasource={selectedDatasource}
-						datasourceConfig={snapshotConfig ?? selectedDatasource.config}
-					/>
+				<div class="flex-1 min-h-0 overflow-auto">
+					{#if showComparison}
+						<BuildComparisonPanel datasource={selectedDatasource} />
+					{:else}
+						<DatasourcePreview
+							datasourceId={selectedDatasource.id}
+							datasource={selectedDatasource}
+							datasourceConfig={snapshotConfig ?? selectedDatasource.config}
+						/>
+					{/if}
 				</div>
 			</div>
 		{:else}

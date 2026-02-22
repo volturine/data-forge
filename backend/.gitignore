@@ -128,7 +128,6 @@ Thumbs.db
 
 # FastAPI specific
 *.log
-logs/
 
 # Database
 *.db

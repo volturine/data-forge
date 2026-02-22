@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import croniter  # type: ignore[import-untyped]
 from sqlalchemy import select
-from sqlmodel import Session
+from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError, ScheduleValidationError
 from modules.analysis.models import Analysis
@@ -212,12 +212,20 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
             graph[analysis.id] = set()
             in_degree[analysis.id] = 0
 
-    deps = session.execute(select(AnalysisDataSource)).scalars().all()
+    deps = (
+        session.execute(
+            select(AnalysisDataSource).where(AnalysisDataSource.analysis_id.in_(list(graph.keys())))  # type: ignore[arg-type, attr-defined]
+        )
+        .scalars()
+        .all()
+    )
     for dep in deps:
         datasource = session.get(DataSource, dep.datasource_id)
         if not datasource or not datasource.created_by_analysis_id:
             continue
         upstream = datasource.created_by_analysis_id
+        if upstream not in graph or dep.analysis_id not in graph:
+            continue
         graph.setdefault(upstream, set()).add(dep.analysis_id)
         in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
 
@@ -252,6 +260,9 @@ def _is_triggered_by_datasource(
     datasource_id: str,
     last_run: datetime | None,
 ) -> bool:
+    datasource = session.get(DataSource, datasource_id)
+    if not datasource:
+        return False
     result = session.execute(
         select(EngineRun)
         .where(EngineRun.datasource_id == datasource_id)  # type: ignore[arg-type]
@@ -273,11 +284,14 @@ def _is_triggered_by_datasource(
 def get_due_schedules(session: Session) -> list[Schedule]:
     """Return all enabled schedules that are due to run."""
     result = session.execute(
-        select(Schedule).where(Schedule.enabled == True)  # type: ignore[arg-type]  # noqa: E712
+        select(Schedule).where(col(Schedule.enabled) == True)  # type: ignore[arg-type]  # noqa: E712
     )
     schedules = result.scalars().all()
     due: list[Schedule] = []
     for sched in schedules:
+        datasource = session.get(DataSource, sched.datasource_id)
+        if not datasource:
+            continue
         if should_run(sched.cron_expression, sched.last_run):
             due.append(sched)
             continue
@@ -374,10 +388,13 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
     if iceberg_cfg and isinstance(iceberg_cfg, dict):
         iceberg_options = {
             'table_name': iceberg_cfg.get('table_name', 'exported_data'),
-            'namespace': iceberg_cfg.get('namespace', 'exports'),
+            'namespace': iceberg_cfg.get('namespace', 'outputs'),
+            'branch': 'master',
         }
 
-    logger.info(f'Schedule {schedule_id}: Building tab {tab_name} (lazyframe deps auto-resolved in query plan)')
+    tab_build_mode = output_config.get('build_mode', 'full') if isinstance(output_config, dict) else 'full'
+
+    logger.info(f'Schedule {schedule_id}: Building tab {tab_name} mode={tab_build_mode} (lazyframe deps auto-resolved in query plan)')
 
     pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
     compute_service.export_data(
@@ -395,6 +412,7 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
         triggered_by=triggered_by,
         output_datasource_id=schedule.datasource_id,
         tab_id=str(tab_id),
+        build_mode=tab_build_mode,
     )
 
     return {
@@ -512,7 +530,8 @@ def run_analysis_build(
                 if iceberg_cfg and isinstance(iceberg_cfg, dict):
                     iceberg_options = {
                         'table_name': iceberg_cfg.get('table_name', 'exported_data'),
-                        'namespace': iceberg_cfg.get('namespace', 'exports'),
+                        'namespace': iceberg_cfg.get('namespace', 'outputs'),
+                        'branch': 'master',
                     }
 
                 duckdb_options = None
@@ -534,6 +553,10 @@ def run_analysis_build(
                     tab_id=str(current_tab_id),
                 )
             else:
+                if required_tabs and current_tab_id != tab_id:
+                    tabs_built += 1
+                    results.append({'tab_id': current_tab_id, 'tab_name': tab_name, 'status': 'success'})
+                    continue
                 raise ScheduleValidationError(f'Tab {current_tab_id} missing output configuration')
 
             tabs_built += 1

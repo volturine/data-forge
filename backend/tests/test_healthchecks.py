@@ -28,6 +28,7 @@ def _make_check(
     check_type: str = 'row_count',
     config: dict | None = None,
     name: str = 'Test Check',
+    critical: bool = False,
 ) -> HealthCheck:
     return HealthCheck(
         id=str(uuid.uuid4()),
@@ -36,6 +37,7 @@ def _make_check(
         check_type=check_type,
         config=config or {'min_rows': 1},
         enabled=True,
+        critical=critical,
         created_at=datetime.now(UTC),
     )
 
@@ -161,13 +163,16 @@ class TestRunHealthchecks:
             _make_check('ds-1', check_type='row_count', config={'min_rows': 1}, name='Row'),
             _make_check('ds-1', check_type='column_null', config={'column': 'name', 'threshold': 50}, name='Null'),
             _make_check('ds-1', check_type='column_range', config={'column': 'value', 'min': 0, 'max': 100}, name='Range'),
+            _make_check('ds-1', check_type='column_count', config={'min_columns': 3}, name='Columns'),
+            _make_check('ds-1', check_type='null_percentage', config={'threshold': 30}, name='Nulls Overall'),
+            _make_check('ds-1', check_type='duplicate_percentage', config={'threshold': 10}, name='Duplicates'),
         ]
         for c in checks:
             test_db_session.add(c)
         test_db_session.flush()
 
         results = run_healthchecks(test_db_session, checks, SAMPLE_LF)
-        assert len(results) == 3
+        assert len(results) == 6
         assert all(r.passed for r in results)
 
     def test_batch_mixed_pass_fail(self, test_db_session):
@@ -184,6 +189,49 @@ class TestRunHealthchecks:
         by_name = {r.healthcheck_id: r for r in results}
         assert by_name[checks[0].id].passed is False
         assert by_name[checks[1].id].passed is True
+
+    def test_null_percentage(self, test_db_session):
+        check = _make_check('ds-1', check_type='null_percentage', config={'threshold': 30})
+        test_db_session.add(check)
+        test_db_session.flush()
+
+        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert 'Nulls:' in results[0].message
+
+    def test_duplicate_percentage(self, test_db_session):
+        check = _make_check('ds-1', check_type='duplicate_percentage', config={'threshold': 10})
+        test_db_session.add(check)
+        test_db_session.flush()
+
+        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert 'Duplicates:' in results[0].message
+
+    def test_column_count(self, test_db_session):
+        check = _make_check('ds-1', check_type='column_count', config={'min_columns': 3, 'max_columns': 5})
+        test_db_session.add(check)
+        test_db_session.flush()
+
+        results = run_healthchecks(test_db_session, [check], SAMPLE_LF)
+        assert len(results) == 1
+        assert results[0].passed is True
+
+    def test_critical_only(self, test_db_session):
+        checks = [
+            _make_check('ds-1', check_type='row_count', config={'min_rows': 100}, name='Fail', critical=True),
+            _make_check('ds-1', check_type='column_null', config={'column': 'name', 'threshold': 50}, name='Pass'),
+        ]
+        for check in checks:
+            test_db_session.add(check)
+        test_db_session.flush()
+
+        results = run_healthchecks(test_db_session, checks, SAMPLE_LF, critical_only=True)
+        assert len(results) == 1
+        assert results[0].healthcheck_id == checks[0].id
+        assert results[0].passed is False
 
 
 class TestResolveBuildStatus:
@@ -214,6 +262,25 @@ class TestResolveBuildStatus:
         assert details is not None
         assert len(details) == 2
 
+    def test_critical_fail_ignored(self):
+        check = HealthCheck(
+            id='c1',
+            datasource_id='ds-1',
+            name='Critical Check',
+            check_type='row_count',
+            config={},
+            enabled=True,
+            critical=True,
+            created_at=datetime.now(UTC),
+        )
+        results = [
+            HealthCheckResult(id='r1', healthcheck_id='c1', passed=False, message='bad', details={}, checked_at=datetime.now(UTC)),
+        ]
+        status, summary, details = _resolve_build_status(results, [check])
+        assert status == 'warning'
+        assert summary == '1/1 failed'
+        assert details is not None
+
     def test_uses_check_name_not_id(self):
         check = HealthCheck(
             id='c1',
@@ -222,6 +289,7 @@ class TestResolveBuildStatus:
             check_type='row_count',
             config={},
             enabled=True,
+            critical=False,
             created_at=datetime.now(UTC),
         )
         results = [
@@ -230,6 +298,7 @@ class TestResolveBuildStatus:
         _, _, details = _resolve_build_status(results, [check])
         assert details is not None
         assert details[0]['name'] == 'Row Guard'
+        assert details[0]['critical'] is False
 
 
 class TestBuildSubscriberMessage:
@@ -304,11 +373,16 @@ def test_healthcheck_crud(test_db_session, client):
         'check_type': 'row_count',
         'config': {'min_rows': 1},
         'enabled': True,
+        'critical': True,
     }
     create_response = client.post('/api/v1/healthchecks', json=create_payload)
     assert create_response.status_code == 200
     created = create_response.json()
     assert created['name'] == 'Row Count Check'
+    assert created['critical'] is True
+
+    duplicate_response = client.post('/api/v1/healthchecks', json=create_payload)
+    assert duplicate_response.status_code == 400
 
     list_response = client.get(f'/api/v1/healthchecks?datasource_id={datasource_id}')
     assert list_response.status_code == 200
@@ -317,15 +391,52 @@ def test_healthcheck_crud(test_db_session, client):
 
     update_response = client.put(
         f'/api/v1/healthchecks/{created["id"]}',
-        json={'name': 'Updated Check', 'enabled': False},
+        json={'name': 'Updated Check', 'enabled': False, 'critical': False},
     )
     assert update_response.status_code == 200
     updated = update_response.json()
     assert updated['name'] == 'Updated Check'
     assert updated['enabled'] is False
+    assert updated['critical'] is False
 
     delete_response = client.delete(f'/api/v1/healthchecks/{created["id"]}')
     assert delete_response.status_code == 204
+
+
+def test_healthcheck_update_duplicate_row_count(test_db_session, client):
+    datasource_id = str(uuid.uuid4())
+    _create_datasource(test_db_session, datasource_id)
+
+    first_payload = {
+        'datasource_id': datasource_id,
+        'name': 'Row Count Check',
+        'check_type': 'row_count',
+        'config': {'min_rows': 1},
+        'enabled': True,
+        'critical': False,
+    }
+    first_response = client.post('/api/v1/healthchecks', json=first_payload)
+    assert first_response.status_code == 200
+    second_id = str(uuid.uuid4())
+    test_db_session.add(
+        HealthCheck(
+            id=second_id,
+            datasource_id=datasource_id,
+            name='Column Null Check',
+            check_type='column_null',
+            config={'column': 'name', 'threshold': 10},
+            enabled=True,
+            critical=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    test_db_session.commit()
+
+    update_response = client.put(
+        f'/api/v1/healthchecks/{second_id}',
+        json={'check_type': 'row_count'},
+    )
+    assert update_response.status_code == 400
 
 
 def test_list_results_empty(test_db_session, client):

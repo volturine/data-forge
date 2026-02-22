@@ -10,9 +10,7 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Sample configuration">
-	<h3>Sample Configuration</h3>
-
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="sample-input-fraction">Fraction</label>
 		<input
 			id="sample-input-fraction"

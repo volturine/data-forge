@@ -13,6 +13,7 @@
 		analysisId?: string;
 		datasourceId?: string;
 		datasource?: DataSource | null;
+		datasourceLabel?: string | null;
 		tabName?: string;
 		activeTab?: AnalysisTab | null;
 		onStepClick: (id: string) => void;
@@ -29,6 +30,7 @@
 		analysisId,
 		datasourceId,
 		datasource = null,
+		datasourceLabel = null,
 		tabName: _tabName,
 		activeTab = null,
 		onStepClick,
@@ -42,6 +44,21 @@
 
 	let canDrop = $derived(drag.active);
 	let hoverIndex = $derived(drag.target?.index ?? null);
+	let activeTabId = $derived(activeTab?.id ?? null);
+
+	let lastTabId = $state<string | null>(null);
+
+	// $effect: drag reset is a UI side effect not derivable from state
+	$effect(() => {
+		const tabId = activeTabId;
+		if (tabId === lastTabId) return;
+		lastTabId = tabId;
+		if (drag.active) {
+			drag.end();
+			return;
+		}
+		drag.clearTarget();
+	});
 
 	function getParentId(index: number): string | null {
 		if (index <= 0) return null;
@@ -218,14 +235,14 @@
 	});
 </script>
 
-<div class="pipeline-canvas flex-1 overflow-y-auto p-6 bg-secondary min-h-100">
-	{#if steps.length === 0 && !datasource && !activeTab?.datasource_config}
+<div class="pipeline-canvas flex-1 overflow-y-auto p-8 bg-secondary min-h-100">
+	{#if steps.length === 0}
 		<div
 			class="empty-state flex min-h-100 h-full flex-col items-center justify-center text-center text-fg-muted"
 		>
-			<LayoutGrid size={32} strokeWidth={1.5} class="mb-4 text-fg-faint" />
-			<h3 class="m-0 mb-2 text-base font-semibold text-fg-secondary">No pipeline steps</h3>
-			<p class="m-0 text-sm text-fg-muted">Drag operations from the library and drop here</p>
+			<LayoutGrid size={28} strokeWidth={1.2} class="mb-5 text-fg-faint opacity-40" />
+			<h3 class="m-0 mb-2 text-sm font-semibold text-fg-secondary">No pipeline steps</h3>
+			<p class="m-0 text-xs text-fg-muted">Drag operations from the library and drop here</p>
 			<div
 				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2"
 				class:ready={canDrop}
@@ -273,6 +290,7 @@
 		<div class="steps-container mx-auto flex w-full max-w-full flex-col items-center" role="list">
 			<DatasourceNode
 				{datasource}
+				{datasourceLabel}
 				{analysisId}
 				tabName={_tabName}
 				{activeTab}

@@ -11,6 +11,7 @@
 		isLoading?: boolean;
 		mode?: 'add' | 'change';
 		sourceType?: 'datasource' | 'analysis';
+		allowAnalysis?: boolean;
 		analysisTabs?: Array<{ id: string; name: string }>;
 		excludeTabId?: string | null;
 		onSelect: (id: string, name: string, sourceType: 'datasource' | 'analysis') => void;
@@ -23,6 +24,7 @@
 		isLoading = false,
 		mode = 'add',
 		sourceType = 'datasource',
+		allowAnalysis = true,
 		analysisTabs = [],
 		excludeTabId = null,
 		onSelect,
@@ -105,7 +107,7 @@
 
 	$effect(() => {
 		if (!show) return;
-		activeSource = sourceType;
+		activeSource = allowAnalysis ? sourceType : 'datasource';
 	});
 </script>
 
@@ -143,8 +145,8 @@
 				</button>
 			</div>
 			<div class="flex flex-col gap-4 overflow-y-auto p-4">
-				{#if mode === 'add'}
-					<div class="flex items-center gap-1 rounded-sm border border-tertiary bg-tertiary p-1">
+				{#if allowAnalysis}
+					<div class="flex items-center gap-1 border border-tertiary bg-tertiary p-1">
 						<button
 							class="flex-1 border-none bg-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em]"
 							class:text-fg-primary={activeSource === 'datasource'}
@@ -177,7 +179,7 @@
 				<div class="flex max-h-75 flex-col gap-1 overflow-y-auto">
 					{#if isLoading}
 						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">Loading...</div>
-					{:else if activeSource === 'analysis' && filteredTabs.length === 0}
+					{:else if activeSource === 'analysis' && allowAnalysis && filteredTabs.length === 0}
 						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
 							{searchQuery ? 'No matching analysis tabs' : 'No analysis tabs available'}
 						</div>
@@ -185,7 +187,7 @@
 						<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
 							{searchQuery ? 'No matching datasources' : 'No datasources available'}
 						</div>
-					{:else if activeSource === 'analysis'}
+					{:else if activeSource === 'analysis' && allowAnalysis}
 						{#each filteredTabs as entry (entry.id)}
 							<button
 								class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left hover:bg-hover hover:border-tertiary"

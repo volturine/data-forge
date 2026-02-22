@@ -1,6 +1,6 @@
 import datetime as dt
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ScheduleCreate(BaseModel):
@@ -18,6 +18,12 @@ class ScheduleCreate(BaseModel):
     depends_on: str | None = Field(default=None, description='Wait for this schedule to complete')
     trigger_on_datasource_id: str | None = Field(default=None, description='Trigger when this datasource updates')
 
+    @model_validator(mode='after')
+    def validate_trigger(self) -> 'ScheduleCreate':
+        if self.depends_on and self.trigger_on_datasource_id:
+            raise ValueError('Schedule trigger must use either depends_on or trigger_on_datasource_id, not both')
+        return self
+
 
 class ScheduleUpdate(BaseModel):
     """Update an existing schedule."""
@@ -29,6 +35,12 @@ class ScheduleUpdate(BaseModel):
     datasource_id: str | None = None
     depends_on: str | None = None
     trigger_on_datasource_id: str | None = None
+
+    @model_validator(mode='after')
+    def validate_trigger(self) -> 'ScheduleUpdate':
+        if self.depends_on and self.trigger_on_datasource_id:
+            raise ValueError('Schedule trigger must use either depends_on or trigger_on_datasource_id, not both')
+        return self
 
 
 class ScheduleResponse(BaseModel):

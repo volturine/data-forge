@@ -21,6 +21,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -39,7 +40,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -85,6 +91,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -98,7 +105,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -137,13 +149,19 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': missing_id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [],
                     }
                 ],
                 'sources': {
                     missing_id: {
                         'source_type': 'file',
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -163,6 +181,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {'id': 'step1', 'type': 'filter', 'config': {}},
                             {'id': 'step2', 'type': 'select', 'config': {}},
@@ -174,7 +193,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step2',
@@ -211,6 +235,7 @@ class TestComputePreview:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -224,7 +249,12 @@ class TestComputePreview:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -281,6 +311,7 @@ class TestComputeExport:
                         'id': 'tab1',
                         'datasource_id': sample_datasource.id,
                         'datasource_config': {},
+                        'output_datasource_id': 'out-1',
                         'steps': [
                             {
                                 'id': 'step1',
@@ -294,7 +325,12 @@ class TestComputeExport:
                     sample_datasource.id: {
                         'source_type': sample_datasource.source_type,
                         **sample_datasource.config,
-                    }
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
                 },
             },
             'target_step_id': 'step1',
@@ -347,6 +383,78 @@ class TestComputeExport:
         assert 'data' not in run.result_json
         assert run.result_json['query_plans']['optimized'] == 'opt'
         assert run.result_json['file_size_bytes'] > 0
+
+
+class TestComputeRowCount:
+    def test_row_count_logs_engine_run(self, client, sample_datasource: DataSource, test_db_session):
+        payload = {
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource_id': sample_datasource.id,
+                        'datasource_config': {},
+                        'output_datasource_id': 'out-1',
+                        'steps': [
+                            {
+                                'id': 'step1',
+                                'type': 'select',
+                                'config': {'columns': ['name']},
+                            }
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
+                },
+            },
+            'target_step_id': 'step1',
+        }
+
+        with patch('modules.compute.service.get_manager') as mock_get_manager:
+            mock_manager = MagicMock()
+            mock_engine = MagicMock()
+
+            mock_engine.get_row_count.return_value = 'row-count-job-123'
+            mock_engine.get_result.side_effect = [
+                None,
+                {
+                    'data': {
+                        'row_count': 42,
+                    },
+                    'error': None,
+                },
+            ]
+
+            mock_manager.get_engine.return_value = None
+            mock_manager.get_or_create_engine.return_value = mock_engine
+            mock_get_manager.return_value = mock_manager
+
+            response = client.post('/api/v1/compute/row-count', json=payload)
+
+            assert response.status_code == 200
+            result = response.json()
+            assert result['row_count'] == 42
+
+        test_db_session.expire_all()
+        runs = test_db_session.execute(select(EngineRun)).scalars().all()
+        assert len(runs) == 1
+
+        run = runs[0]
+        assert run.kind == 'row_count'
+        assert run.status == 'success'
+        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource_id'] == sample_datasource.id
+        assert run.result_json['row_count'] == 42
 
 
 def _build_fake_dataframe() -> MagicMock:

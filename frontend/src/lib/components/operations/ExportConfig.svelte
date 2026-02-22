@@ -43,11 +43,11 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Export configuration">
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<div class="flex items-center gap-2">
 			Destination
 			<span
-				class="rounded-sm border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
+				class="border border-tertiary bg-tertiary px-2 py-1 text-[10px] uppercase text-fg-muted"
 			>
 				Browser download
 			</span>
@@ -57,7 +57,7 @@
 		</span>
 	</div>
 
-	<div class="form-group mb-4">
+	<div class="form-group mb-5">
 		<label for="export-input-filename">Filename</label>
 		<input
 			id="export-input-filename"
@@ -73,7 +73,7 @@
 	</div>
 
 	{#if showFormatOptions}
-		<div class="form-group mb-4">
+		<div class="form-group mb-5">
 			<label for="export-select-format" class="flex items-center gap-2">
 				Format
 				{#if selectedFileType === 'duckdb'}

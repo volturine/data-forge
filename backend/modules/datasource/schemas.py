@@ -1,6 +1,9 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from modules.datasource.source_types import DataSourceType
 
 
 class ColumnSchema(BaseModel):
@@ -18,6 +21,49 @@ class SchemaInfo(BaseModel):
     columns: list[ColumnSchema]
     row_count: int | None = None
     sheet_names: list[str] | None = None
+
+
+class SnapshotCompareRequest(BaseModel):
+    snapshot_a: str
+    snapshot_b: str
+    row_limit: int = 100
+
+
+class SnapshotPreview(BaseModel):
+    columns: list[str]
+    column_types: dict[str, str]
+    data: list[dict[str, object]]
+    row_count: int
+
+
+class ColumnStats(BaseModel):
+    column: str
+    dtype: str
+    null_count: int
+    unique_count: int | None = None
+    min: object | None = None
+    max: object | None = None
+
+
+class SchemaDiff(BaseModel):
+    column: str
+    status: Literal['added', 'removed', 'type_changed']
+    type_a: str | None = None
+    type_b: str | None = None
+
+
+class SnapshotCompareResponse(BaseModel):
+    datasource_id: str
+    snapshot_a: str
+    snapshot_b: str
+    row_count_a: int
+    row_count_b: int
+    row_count_delta: int
+    schema_diff: list[SchemaDiff]
+    stats_a: list[ColumnStats]
+    stats_b: list[ColumnStats]
+    preview_a: SnapshotPreview
+    preview_b: SnapshotPreview
 
 
 class HistogramBin(BaseModel):
@@ -57,10 +103,24 @@ class ColumnStatsRequest(BaseModel):
     datasource_config: dict | None = None
 
 
+class ExcelPreflightPathRequest(BaseModel):
+    file_path: str
+    sheet_name: str | None = None
+    start_row: int = 0
+    start_col: int = 0
+    end_col: int = 0
+    end_row: int | None = None
+    has_header: bool = True
+    table_name: str | None = None
+    named_range: str | None = None
+    cell_range: str | None = None
+
+
 class ExcelPreflightResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     preflight_id: str
+    sheet_name: str | None = None
     sheet_names: list[str]
     tables: dict[str, list[str]]
     named_ranges: list[str]
@@ -75,6 +135,7 @@ class ExcelPreflightPreviewResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     preview: list[list[str | None]]
+    sheet_name: str | None = None
     start_row: int
     start_col: int
     end_col: int
@@ -82,8 +143,6 @@ class ExcelPreflightPreviewResponse(BaseModel):
 
 
 class CSVOptions(BaseModel):
-    """CSV-specific parsing options."""
-
     delimiter: str = ','
     quote_char: str = '"'
     has_header: bool = True
@@ -106,27 +165,18 @@ class FileDataSourceConfig(BaseModel):
     has_header: bool | None = None
     table_name: str | None = None
     named_range: str | None = None
+    cell_range: str | None = None
 
 
 class DatabaseDataSourceConfig(BaseModel):
     connection_string: str
     query: str
-
-
-class DuckDBDataSourceConfig(BaseModel):
-    """DuckDB-specific datasource configuration."""
-
-    db_path: str | None = None
-    query: str
-    read_only: bool = True
-
-    model_config = ConfigDict(from_attributes=True)
+    branch: str | None = None
 
 
 class IcebergDataSourceConfig(BaseModel):
-    """Iceberg-specific datasource configuration."""
-
     metadata_path: str
+    branch: str | None = None
     snapshot_id: str | None = None
     snapshot_timestamp_ms: int | None = None
     storage_options: dict | None = None
@@ -136,20 +186,15 @@ class IcebergDataSourceConfig(BaseModel):
     warehouse: str | None = None
     namespace: str | None = None
     table: str | None = None
+    source: dict | None = None
+    refresh: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class APIDataSourceConfig(BaseModel):
-    url: str
-    method: str = 'GET'
-    headers: dict | None = None
-    auth: dict | None = None
-
-
 class DataSourceCreate(BaseModel):
     name: str
-    source_type: str
+    source_type: DataSourceType
     config: dict
 
 
@@ -158,7 +203,7 @@ class DataSourceResponse(BaseModel):
 
     id: str
     name: str
-    source_type: str
+    source_type: DataSourceType
     config: dict
     schema_cache: dict | None
     created_by_analysis_id: str | None = None
@@ -169,8 +214,6 @@ class DataSourceResponse(BaseModel):
 
 
 class DataSourceUpdate(BaseModel):
-    """Update a datasource configuration (schema is read-only)."""
-
     model_config = ConfigDict(from_attributes=True)
 
     name: str | None = None

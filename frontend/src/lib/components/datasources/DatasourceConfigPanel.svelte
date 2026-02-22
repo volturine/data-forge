@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { resolve } from '$app/paths';
-	import { getDatasource, updateDatasource, getDatasourceSchema } from '$lib/api/datasource';
+	import {
+		getDatasource,
+		getDatasourceSchema,
+		refreshDatasource,
+		updateDatasource
+	} from '$lib/api/datasource';
 	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
 	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
@@ -10,6 +15,7 @@
 		CircleAlert,
 		RefreshCw,
 		Eye,
+		EyeOff,
 		Download,
 		CircleCheck,
 		CircleX,
@@ -25,8 +31,9 @@
 	} from '$lib/types/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import ExcelTableSelector from '$lib/components/common/ExcelTableSelector.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
-	import HealthChecksTab from '$lib/components/datasources/HealthChecksTab.svelte';
+	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/columnTypes';
@@ -57,7 +64,8 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !!datasource.id && datasource.source_type !== 'analysis'
+		enabled: !!datasource.id && datasource.source_type !== 'analysis',
+		staleTime: Infinity
 	}));
 
 	const runsQuery = createQuery(() => ({
@@ -117,6 +125,7 @@
 	);
 	let statsOpen = $state(false);
 	let statsColumn = $state<string | null>(null);
+	let showPreviews = $state(false);
 
 	// Reset state when datasource changes — DOM-dependent state reset, $derived insufficient
 	$effect(() => {
@@ -136,9 +145,9 @@
 		statsColumn = null;
 
 		// Initialize type-specific config
-		const config = ds.config as unknown as FileDataSourceConfig;
-		if (isCsv(ds)) {
-			const opts = config.csv_options;
+		const fileSource = getFileSource(ds);
+		if (isCsv(ds) && fileSource) {
+			const opts = fileSource.csv_options;
 			csvConfig = {
 				delimiter: opts?.delimiter ?? ',',
 				quote_char: opts?.quote_char ?? '"',
@@ -147,15 +156,27 @@
 				encoding: opts?.encoding ?? 'utf8'
 			};
 		}
-		if (isExcel(ds)) {
+		if (isExcel(ds) && fileSource) {
+			const excelSource = fileSource as unknown as Record<string, unknown>;
+			const cellRangeValue = excelSource.cell_range;
+			const cellRange = typeof cellRangeValue === 'string' ? cellRangeValue : '';
+			const sheetValue = excelSource.sheet_name;
+			const sheetName = typeof sheetValue === 'string' ? sheetValue : '';
+			const tableValue = excelSource.table_name;
+			const tableName = typeof tableValue === 'string' ? tableValue : '';
+			const rangeValue = excelSource.named_range;
+			const namedRange = typeof rangeValue === 'string' ? rangeValue : '';
+			const endRowValue = fileSource.end_row ?? null;
 			excelConfig = {
-				sheet_name: config.sheet_name ?? '',
-				table_name: config.table_name ?? '',
-				named_range: config.named_range ?? '',
-				start_row: config.start_row ?? 0,
-				start_col: config.start_col ?? 0,
-				end_col: config.end_col ?? 0,
-				has_header: config.has_header ?? true
+				sheet_name: sheetName,
+				table_name: tableName,
+				named_range: namedRange,
+				cell_range: cellRange,
+				start_row: fileSource.start_row ?? 0,
+				start_col: fileSource.start_col ?? 0,
+				end_col: fileSource.end_col ?? 0,
+				end_row: endRowValue,
+				has_header: fileSource.has_header ?? true
 			};
 		}
 	});
@@ -180,17 +201,21 @@
 		sheet_name: string;
 		table_name: string;
 		named_range: string;
+		cell_range: string;
 		start_row: number;
 		start_col: number;
 		end_col: number;
+		end_row: number | null;
 		has_header: boolean;
 	}>({
 		sheet_name: '',
 		table_name: '',
 		named_range: '',
+		cell_range: '',
 		start_row: 0,
 		start_col: 0,
 		end_col: 0,
+		end_row: null,
 		has_header: true
 	});
 
@@ -211,16 +236,27 @@
 		}));
 	}
 
+	function getFileSource(ds: DataSource): FileDataSourceConfig | null {
+		if (ds.source_type === 'file') {
+			return ds.config as unknown as FileDataSourceConfig;
+		}
+		if (ds.source_type === 'iceberg') {
+			const source = (ds.config as Record<string, unknown>)?.source as
+				| Record<string, unknown>
+				| undefined;
+			if (source?.source_type === 'file') {
+				return source as unknown as FileDataSourceConfig;
+			}
+		}
+		return null;
+	}
+
 	function isCsv(ds: DataSource): boolean {
-		if (ds.source_type !== 'file') return false;
-		const config = ds.config as unknown as FileDataSourceConfig;
-		return config.file_type === 'csv';
+		return getFileSource(ds)?.file_type === 'csv';
 	}
 
 	function isExcel(ds: DataSource): boolean {
-		if (ds.source_type !== 'file') return false;
-		const config = ds.config as unknown as FileDataSourceConfig;
-		return config.file_type === 'xlsx';
+		return getFileSource(ds)?.file_type === 'excel';
 	}
 
 	function isFile(ds: DataSource): boolean {
@@ -244,11 +280,8 @@
 		hasChanges = true;
 	}
 
-	function handleExcelConfigChange<K extends keyof typeof excelConfig>(
-		key: K,
-		value: (typeof excelConfig)[K]
-	) {
-		excelConfig = { ...excelConfig, [key]: value };
+	function handleExcelConfigUpdate(value: typeof excelConfig) {
+		excelConfig = value;
 		hasChanges = true;
 	}
 
@@ -258,33 +291,78 @@
 		const update: { name: string; config: Record<string, unknown> } = { name, config: {} };
 
 		if (isCsv(datasourceQuery.data)) {
-			update.config = {
-				...datasourceQuery.data.config,
-				csv_options: {
-					delimiter: csvConfig.delimiter,
-					quote_char: csvConfig.quote_char,
-					has_header: csvConfig.has_header,
-					skip_rows: csvConfig.skip_rows,
-					encoding: csvConfig.encoding
-				}
+			const csvOptions = {
+				delimiter: csvConfig.delimiter,
+				quote_char: csvConfig.quote_char,
+				has_header: csvConfig.has_header,
+				skip_rows: csvConfig.skip_rows,
+				encoding: csvConfig.encoding
 			};
+			if (datasourceQuery.data.source_type === 'iceberg') {
+				const existingSource = (datasourceQuery.data.config as Record<string, unknown>)?.source as
+					| Record<string, unknown>
+					| undefined;
+				update.config = {
+					...datasourceQuery.data.config,
+					source: { ...existingSource, csv_options: csvOptions }
+				};
+			} else {
+				update.config = {
+					...datasourceQuery.data.config,
+					csv_options: csvOptions
+				};
+			}
 		} else if (isExcel(datasourceQuery.data)) {
-			update.config = {
-				...datasourceQuery.data.config,
+			const excelOptions = {
 				sheet_name: excelConfig.sheet_name || null,
 				table_name: excelConfig.table_name || null,
 				named_range: excelConfig.named_range || null,
+				cell_range: excelConfig.cell_range || null,
 				start_row: excelConfig.start_row,
 				start_col: excelConfig.start_col,
 				end_col: excelConfig.end_col,
+				end_row: excelConfig.end_row,
 				has_header: excelConfig.has_header
 			};
+			if (datasourceQuery.data.source_type === 'iceberg') {
+				const existingSource = (datasourceQuery.data.config as Record<string, unknown>)?.source as
+					| Record<string, unknown>
+					| undefined;
+				update.config = {
+					...datasourceQuery.data.config,
+					source: { ...existingSource, ...excelOptions }
+				};
+			} else {
+				update.config = {
+					...datasourceQuery.data.config,
+					...excelOptions
+				};
+			}
 		} else if (isFile(datasourceQuery.data)) {
 			update.config = { ...datasourceQuery.data.config };
 		}
 
-		updateMutation.mutate(update);
+		await updateMutation.mutateAsync(update);
 		hasChanges = false;
+
+		if (update.config && ds.source_type === 'iceberg') {
+			const source = (ds.config as Record<string, unknown>)?.source as
+				| Record<string, unknown>
+				| undefined;
+			const sourceType = source?.source_type as string | undefined;
+			if (sourceType === 'database' || sourceType === 'file') {
+				const refreshResult = await refreshDatasource(ds.id);
+				if (refreshResult.isErr()) {
+					refreshError = refreshResult.error.message || 'Failed to re-ingest datasource';
+					return;
+				}
+				queryClient.invalidateQueries({ queryKey: ['datasource', ds.id] });
+				queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
+				queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
+				queryClient.invalidateQueries({ queryKey: ['datasources'] });
+				queryClient.invalidateQueries({ queryKey: ['datasource-runs', ds.id] });
+			}
+		}
 	}
 
 	async function handleRefresh() {
@@ -298,6 +376,14 @@
 			return;
 		}
 		try {
+			const config = datasource.config as Record<string, unknown> | null;
+			const source = config?.source as Record<string, unknown> | undefined;
+			if (datasource.source_type === 'iceberg' && source?.source_type === 'database') {
+				const refreshResult = await refreshDatasource(datasource.id);
+				if (refreshResult.isErr()) {
+					throw new Error(refreshResult.error.message);
+				}
+			}
 			const result = await getDatasourceSchema(datasource.id, { refresh: true });
 			if (result.isErr()) {
 				throw new Error(result.error.message);
@@ -329,17 +415,6 @@
 		}
 	}
 
-	function cellLabel(col: number): string {
-		let idx = col + 1;
-		let label = '';
-		while (idx > 0) {
-			const rem = (idx - 1) % 26;
-			label = String.fromCharCode(65 + rem) + label;
-			idx = Math.floor((idx - 1) / 26);
-		}
-		return label;
-	}
-
 	const healthChecks = $derived(healthChecksQuery.data ?? []);
 	const activeHealthChecks = $derived(healthChecks.filter((hc) => hc.enabled));
 	const healthStatus = $derived.by(() => {
@@ -361,6 +436,10 @@
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
 	const runs = $derived(runsQuery.data ?? []);
+	const filteredRuns = $derived.by(() => {
+		if (showPreviews) return runs;
+		return runs.filter((run) => run.kind !== 'preview');
+	});
 	const isOutputDatasource = $derived(ds.created_by === 'analysis');
 	const scheduleAnalysisId = $derived(
 		isOutputDatasource
@@ -443,8 +522,8 @@
 			onclick={() => (activeTab = 'runs')}
 		>
 			Runs
-			{#if runs.length > 0}
-				<span class="ml-1 text-fg-tertiary">({runs.length})</span>
+			{#if filteredRuns.length > 0}
+				<span class="ml-1 text-fg-tertiary">({filteredRuns.length})</span>
 			{/if}
 		</button>
 		<button
@@ -456,18 +535,11 @@
 			{#if activeHealthChecks.length > 0}
 				<span class="ml-1 text-fg-tertiary">({activeHealthChecks.length})</span>
 				{#if healthStatus === 'passing'}
-					<span
-						class="ml-1 inline-block h-2 w-2 rounded-full bg-success-fg"
-						title="All checks passing"
-					></span>
+					<span class="ml-1 inline-block h-2 w-2 bg-success-fg" title="All checks passing"></span>
 				{:else if healthStatus === 'failing'}
-					<span
-						class="ml-1 inline-block h-2 w-2 rounded-full bg-error-fg"
-						title="Some checks failing"
-					></span>
+					<span class="ml-1 inline-block h-2 w-2 bg-error-fg" title="Some checks failing"></span>
 				{:else}
-					<span class="ml-1 inline-block h-2 w-2 rounded-full bg-fg-muted" title="No results yet"
-					></span>
+					<span class="ml-1 inline-block h-2 w-2 bg-fg-muted" title="No results yet"></span>
 				{/if}
 			{/if}
 		</button>
@@ -510,16 +582,13 @@
 									{@const config = ds.config as unknown as FileDataSourceConfig}
 									<FileTypeBadge path={config.file_path} size="sm" />
 								{:else}
-									<FileTypeBadge
-										sourceType={ds.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-										size="sm"
-									/>
+									<FileTypeBadge sourceType={ds.source_type} size="sm" />
 								{/if}
 							</div>
 							{#if ds.is_hidden}
 								<div class="flex items-center gap-1.5">
 									<span
-										class="rounded-sm bg-warning-bg border border-warning-fg/20 px-1.5 py-0.5 text-[10px] uppercase font-medium text-warning-fg"
+										class="bg-warning-bg border border-warning-fg/20 px-1.5 py-0.5 text-[10px] uppercase font-medium text-warning-fg"
 									>
 										Hidden
 									</span>
@@ -577,26 +646,6 @@
 							{/if}
 						{/if}
 
-						{#if ds.source_type === 'api'}
-							{@const config = ds.config as unknown as { url?: string }}
-							{#if config.url}
-								<div class="flex flex-col gap-1">
-									<span class="uppercase tracking-wide text-fg-muted">Location</span>
-									<span class="break-all text-fg-secondary font-mono">{config.url}</span>
-								</div>
-							{/if}
-						{/if}
-
-						{#if ds.source_type === 'duckdb'}
-							{@const config = ds.config as unknown as { db_path?: string | null }}
-							<div class="flex flex-col gap-1">
-								<span class="uppercase tracking-wide text-fg-muted">Location</span>
-								<span class="break-all text-fg-secondary font-mono"
-									>{config.db_path ?? 'In-memory'}</span
-								>
-							</div>
-						{/if}
-
 						<!-- Metadata Path for Iceberg -->
 						{#if isIceberg(ds)}
 							{@const config = ds.config as unknown as IcebergDataSourceConfig}
@@ -604,6 +653,36 @@
 								<span class="uppercase tracking-wide text-fg-muted">Location</span>
 								<span class="break-all text-fg-secondary font-mono">{config.metadata_path}</span>
 							</div>
+							<div class="flex flex-col gap-1">
+								<span class="uppercase tracking-wide text-fg-muted">Branch</span>
+								<span class="break-all text-fg-secondary font-mono"
+									>{config.branch ?? 'master'}</span
+								>
+								<span class="text-[10px] text-fg-tertiary">Input branch for this datasource</span>
+							</div>
+							{#if config.source}
+								{@const fileSource = config.source as Record<string, unknown>}
+								<div class="border-t border-tertiary pt-2 mt-1 flex flex-col gap-2">
+									<span class="text-[10px] uppercase tracking-wider text-fg-muted font-semibold"
+										>Original Source</span
+									>
+									<div class="flex items-center gap-2">
+										<span class="uppercase tracking-wide text-fg-muted">Type</span>
+										<FileTypeBadge
+											path={typeof fileSource.file_path === 'string' ? fileSource.file_path : ''}
+											size="sm"
+										/>
+									</div>
+									{#if typeof fileSource.file_path === 'string'}
+										<div class="flex flex-col gap-1">
+											<span class="uppercase tracking-wide text-fg-muted">File</span>
+											<span class="break-all text-fg-secondary font-mono"
+												>{fileSource.file_path}</span
+											>
+										</div>
+									{/if}
+								</div>
+							{/if}
 						{/if}
 
 						<div class="flex items-center gap-4">
@@ -832,122 +911,15 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'excel' && excel}
+			{@const fileSource = getFileSource(ds)}
 			<div class="flex flex-col gap-4">
-				<h3 class="m-0 text-sm font-semibold">Excel Options</h3>
-
-				<div class="grid grid-cols-2 gap-3">
-					<div class="flex flex-col gap-1.5">
-						<label for="excel-sheet-{datasource.id}" class="text-xs font-medium text-fg-secondary"
-							>Sheet Name</label
-						>
-						<input
-							id="excel-sheet-{datasource.id}"
-							type="text"
-							value={excelConfig.sheet_name}
-							oninput={(e) => handleExcelConfigChange('sheet_name', e.currentTarget.value)}
-							placeholder="Sheet1"
-							class="input-base border px-3 py-2 text-sm"
-						/>
-					</div>
-
-					<div class="flex flex-col gap-1.5">
-						<label for="excel-table-{datasource.id}" class="text-xs font-medium text-fg-secondary"
-							>Table Name</label
-						>
-						<input
-							id="excel-table-{datasource.id}"
-							type="text"
-							value={excelConfig.table_name}
-							oninput={(e) => handleExcelConfigChange('table_name', e.currentTarget.value)}
-							placeholder="Optional"
-							class="input-base border px-3 py-2 text-sm"
-						/>
-					</div>
-				</div>
-
-				<div class="flex flex-col gap-1.5">
-					<label for="excel-range-{datasource.id}" class="text-xs font-medium text-fg-secondary"
-						>Named Range</label
-					>
-					<input
-						id="excel-range-{datasource.id}"
-						type="text"
-						value={excelConfig.named_range}
-						oninput={(e) => handleExcelConfigChange('named_range', e.currentTarget.value)}
-						placeholder="Optional"
-						class="input-base border px-3 py-2 text-sm"
-					/>
-				</div>
-
-				<div class="border border-tertiary bg-tertiary p-3">
-					<h4 class="m-0 mb-3 text-xs font-semibold text-fg-secondary">Table Bounds</h4>
-					<div class="grid grid-cols-3 gap-3">
-						<div class="flex flex-col gap-1.5">
-							<label
-								for="excel-start-row-{datasource.id}"
-								class="text-xs font-medium text-fg-secondary">Start Row</label
-							>
-							<input
-								id="excel-start-row-{datasource.id}"
-								type="number"
-								min="0"
-								value={excelConfig.start_row}
-								oninput={(e) =>
-									handleExcelConfigChange('start_row', parseInt(e.currentTarget.value) || 0)}
-								class="input-base border px-3 py-2 text-sm"
-							/>
-							<span class="text-xs text-fg-muted">Row {excelConfig.start_row + 1}</span>
-						</div>
-
-						<div class="flex flex-col gap-1.5">
-							<label
-								for="excel-start-col-{datasource.id}"
-								class="text-xs font-medium text-fg-secondary">Start Col</label
-							>
-							<input
-								id="excel-start-col-{datasource.id}"
-								type="number"
-								min="0"
-								value={excelConfig.start_col}
-								oninput={(e) =>
-									handleExcelConfigChange('start_col', parseInt(e.currentTarget.value) || 0)}
-								class="input-base border px-3 py-2 text-sm"
-							/>
-							<span class="text-xs text-fg-muted">{cellLabel(excelConfig.start_col)}</span>
-						</div>
-
-						<div class="flex flex-col gap-1.5">
-							<label
-								for="excel-end-col-{datasource.id}"
-								class="text-xs font-medium text-fg-secondary">End Col</label
-							>
-							<input
-								id="excel-end-col-{datasource.id}"
-								type="number"
-								min="0"
-								value={excelConfig.end_col}
-								oninput={(e) =>
-									handleExcelConfigChange('end_col', parseInt(e.currentTarget.value) || 0)}
-								class="input-base border px-3 py-2 text-sm"
-							/>
-							<span class="text-xs text-fg-muted">{cellLabel(excelConfig.end_col)}</span>
-						</div>
-					</div>
-				</div>
-
-				<div class="flex items-center gap-2">
-					<input
-						id="excel-header-{datasource.id}"
-						type="checkbox"
-						checked={excelConfig.has_header}
-						onchange={(e) => handleExcelConfigChange('has_header', e.currentTarget.checked)}
-						class="h-4 w-4 cursor-pointer"
-					/>
-					<label for="excel-header-{datasource.id}" class="m-0 text-sm text-fg-secondary"
-						>First row is header</label
-					>
-				</div>
-
+				<ExcelTableSelector
+					mode="config"
+					filePath={fileSource?.file_path ?? null}
+					initialConfig={excelConfig}
+					disabled={updateMutation.isPending}
+					onConfigChange={handleExcelConfigUpdate}
+				/>
 				{#if hasChanges}
 					<button
 						class="btn btn-primary w-full flex items-center justify-center gap-2"
@@ -963,9 +935,27 @@
 						{/if}
 					</button>
 				{/if}
+				{#if !fileSource?.file_path}
+					<p class="m-0 text-xs text-fg-muted">
+						No original file path available for Excel preview.
+					</p>
+				{/if}
 			</div>
 		{:else if activeTab === 'runs'}
 			<div class="flex flex-col gap-3">
+				<button
+					class="btn-ghost btn-sm border border-tertiary text-xs w-fit"
+					onclick={() => (showPreviews = !showPreviews)}
+					aria-pressed={showPreviews}
+				>
+					{#if showPreviews}
+						<EyeOff size={12} />
+						Hide previews
+					{:else}
+						<Eye size={12} />
+						Show previews
+					{/if}
+				</button>
 				{#if runsQuery.isLoading}
 					<div class="flex flex-col items-center justify-center gap-3 py-8 text-fg-muted">
 						<Loader size={24} class="spin" />
@@ -981,7 +971,7 @@
 							</p>
 						</div>
 					</div>
-				{:else if runs.length === 0}
+				{:else if filteredRuns.length === 0}
 					<div class="py-6 text-center text-fg-muted text-sm">
 						<p class="m-0">No engine runs associated with this datasource.</p>
 						<p class="m-0 mt-1 text-fg-tertiary">
@@ -998,7 +988,7 @@
 							<span>Duration</span>
 							<span>Created</span>
 						</div>
-						{#each runs as run, index (run.id)}
+						{#each filteredRuns as run, index (run.id)}
 							{@const dsTag = getDatasourceTag(run)}
 							<div
 								class="grid grid-cols-[1fr_80px_80px_100px] items-center gap-x-2 px-3 py-2"
@@ -1021,14 +1011,14 @@
 									{/if}
 									{#if dsTag === 'created'}
 										<span
-											class="text-[10px] px-1.5 py-0.5 bg-accent-bg text-accent-primary rounded"
+											class="text-[10px] px-1.5 py-0.5 bg-accent-bg text-accent-primary"
 											title="This datasource was created from this export"
 										>
 											CREATED
 										</span>
 									{:else if dsTag === 'updated'}
 										<span
-											class="text-[10px] px-1.5 py-0.5 bg-warning-bg text-warning-fg rounded"
+											class="text-[10px] px-1.5 py-0.5 bg-warning-bg text-warning-fg"
 											title="This datasource was updated in this run"
 										>
 											UPDATED
@@ -1053,7 +1043,7 @@
 							</div>
 						{/each}
 					</div>
-					{#if runs.length >= 50}
+					{#if filteredRuns.length >= 50}
 						<p class="text-xs text-fg-tertiary text-center">
 							Showing last 50 runs.
 							<a
@@ -1067,7 +1057,7 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'health'}
-			<HealthChecksTab datasourceId={datasource.id} />
+			<HealthChecksManager datasourceId={datasource.id} compact />
 		{:else if activeTab === 'schedules'}
 			<ScheduleManager datasourceId={datasource.id} compact />
 		{/if}

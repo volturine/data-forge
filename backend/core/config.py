@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 from zoneinfo import available_timezones
 
@@ -6,9 +7,6 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource
 from sqlalchemy.engine.url import make_url
-
-# Root data directory (relative to project root, not backend/)
-DATA_DIR = Path(__file__).parent.parent.parent / 'data'
 
 
 def _get_env_file() -> str | None:
@@ -58,7 +56,7 @@ class Settings(BaseSettings):
             file_secret_settings,
         )
 
-    app_name: str = 'Polars-FastAPI-Svelte Analysis Platform'
+    app_name: str = 'Data-Forge Analysis Platform'
     app_version: str = '1.0.0'
 
     # Debug mode - enables SQL echo, verbose logging
@@ -67,17 +65,9 @@ class Settings(BaseSettings):
     # CORS origins - comma-separated list of allowed origins
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
 
-    database_url: str = 'sqlite+libsql:///./database/app.db'
-
-    turso_database_url: str = Field(default='', alias='TURSO_DATABASE_URL')
-    turso_auth_token: str = Field(default='', alias='TURSO_AUTH_TOKEN')
-    turso_sync_interval: int = Field(default=60, alias='TURSO_SYNC_INTERVAL')
-
-    # All data directories under root data/ folder
-    data_dir: Path = Field(default=DATA_DIR, alias='DATA_DIR')
-    upload_dir: Path = Field(default=DATA_DIR / 'uploads', alias='UPLOAD_DIR')
-    clean_dir: Path = Field(default=DATA_DIR / 'clean', alias='CLEAN_DIR')
-    exports_dir: Path = Field(default=DATA_DIR / 'exports', alias='EXPORTS_DIR')
+    data_dir: Path = Field(default_factory=lambda: Path(tempfile.TemporaryDirectory().name), alias='DATA_DIR')
+    database_url: str = Field(default='', alias='DATABASE_URL')
+    default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 
     upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
     upload_max_file_size_bytes: int = Field(default=2 * 1024 * 1024 * 1024, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
@@ -140,12 +130,11 @@ class Settings(BaseSettings):
     # Cooldown in milliseconds before logging repeated flush failures
     log_client_flush_cooldown_ms: int = Field(default=3000, alias='LOG_CLIENT_FLUSH_COOLDOWN_MS')
 
-    # Server-side log directory for Iceberg logs and metadata
-    # Iceberg log base path (catalog + warehouse)
-    log_iceberg_path: Path = Field(default=DATA_DIR / 'logs' / 'iceberg', alias='LOG_ICEBERG_PATH')
+    # Server-side log directory for SQLite logs
+    log_sqlite_path: Path = Field(default=Path('.'), alias='LOG_SQLITE_PATH')
 
-    # Iceberg log flush interval in seconds
-    log_iceberg_flush_interval_seconds: int = Field(default=300, alias='LOG_ICEBERG_FLUSH_INTERVAL_SECONDS')
+    # SQLite log flush interval in seconds
+    log_sqlite_flush_interval_seconds: int = Field(default=5, alias='LOG_SQLITE_FLUSH_INTERVAL_SECONDS')
 
     # Max queued log batches before dropping
     log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
@@ -170,19 +159,22 @@ class Settings(BaseSettings):
         """Parse CORS origins from comma-separated string."""
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
 
-    @field_validator('data_dir', 'upload_dir', 'clean_dir', 'exports_dir', mode='before')
+    @field_validator('data_dir', mode='before')
     @classmethod
     def _ensure_dirs(cls, value: Path) -> Path:
         return _resolve_dir(value)
 
-    @field_validator('log_iceberg_path', mode='before')
+    @field_validator('log_sqlite_path', mode='before')
     @classmethod
-    def _ensure_log_iceberg_path(cls, value: Path | str) -> Path:
+    def _ensure_log_sqlite_path(cls, value: Path | str, info) -> Path:
+        data_dir = info.data.get('data_dir')
+        if str(value) in {'.', ''} and data_dir:
+            value = Path(data_dir) / 'logs'
         path_value = Path(value)
         if path_value.suffix in {'.db', '.json'}:
-            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+            raise ValueError('LOG_SQLITE_PATH must be a directory, not a file')
         if path_value.exists() and path_value.is_file():
-            raise ValueError('LOG_ICEBERG_PATH must be a directory, not a file')
+            raise ValueError('LOG_SQLITE_PATH must be a directory, not a file')
         return _resolve_dir(path_value)
 
     @field_validator('engine_idle_timeout', 'job_timeout', 'engine_pooling_interval', 'scheduler_check_interval')
@@ -191,13 +183,6 @@ class Settings(BaseSettings):
         """Ensure timeout values are positive."""
         if value <= 0:
             raise ValueError(f'{info.field_name} must be positive, got {value}')
-        return value
-
-    @field_validator('turso_sync_interval')
-    @classmethod
-    def _validate_turso_sync_interval(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError(f'turso_sync_interval must be non-negative, got {value}')
         return value
 
     @field_validator('upload_chunk_size')
@@ -256,7 +241,11 @@ class Settings(BaseSettings):
 
     @field_validator('database_url')
     @classmethod
-    def _validate_database_url(cls, value: str) -> str:
+    def _validate_database_url(cls, value: str, info) -> str:
+        if not value:
+            data_dir = info.data.get('data_dir')
+            if data_dir:
+                value = f'sqlite:///{Path(data_dir) / "app.db"}'
         try:
             make_url(value)
         except Exception as exc:
@@ -308,7 +297,7 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def _validate_directories_writable(self):
         """Ensure all directories are writable."""
-        for dir_name in ['data_dir', 'upload_dir', 'clean_dir', 'exports_dir']:
+        for dir_name in ['data_dir']:
             dir_path = getattr(self, dir_name)
             if not os.access(dir_path, os.W_OK):
                 raise ValueError(f'{dir_name} is not writable: {dir_path}')

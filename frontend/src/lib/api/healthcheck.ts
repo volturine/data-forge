@@ -9,6 +9,7 @@ export interface HealthCheck {
 	check_type: string;
 	config: Record<string, unknown>;
 	enabled: boolean;
+	critical: boolean;
 	created_at: string;
 }
 
@@ -18,6 +19,7 @@ export interface HealthCheckCreate {
 	check_type: string;
 	config: Record<string, unknown>;
 	enabled: boolean;
+	critical: boolean;
 }
 
 export interface HealthCheckUpdate {
@@ -25,6 +27,7 @@ export interface HealthCheckUpdate {
 	check_type?: string;
 	config?: Record<string, unknown>;
 	enabled?: boolean;
+	critical?: boolean;
 }
 
 export function listHealthChecks(datasourceId: string): ResultAsync<HealthCheck[], ApiError> {

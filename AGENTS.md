@@ -18,7 +18,8 @@ just dev             # start both servers
 
 Nothing is complete until `just verify` passes with **zero errors and zero warnings**.
 
-- Run `just verify` before declaring any task done
+- Run `just verify` before declaring any task done or asking for review
+- If `just verify` fails, fix the underlying issues immediately — do not ignore or suppress warnings, even if they seem unrelated. They indicate tech debt that must be addressed.
 - Write backend Python tests for new/changed functionality
 - Frontend API calls must match backend schema types exactly
 - Keep `docs/taskfile.md` updated as work progresses
@@ -31,7 +32,7 @@ Nothing is complete until `just verify` passes with **zero errors and zero warni
 2. **Plan** — Update `docs/taskfile.md`
 3. **Code** — Implement. Use parallel agents when possible
 4. **Verify** — Run `just verify`. Fix everything. No exceptions
-5. **Review** — Use Second Opinion agent before completing
+5. **Reviewer** — Use this subagent before completing any task
 6. **Commit** — Well-formed commit. Update `docs/taskfile.md`
 
 **Do not ask for confirmation on implementation details.** Make decisions, implement, verify. Stop and ask only on genuine ambiguity about requirements or conflicts with these rules.
@@ -48,6 +49,7 @@ Nothing is complete until `just verify` passes with **zero errors and zero warni
 - **Redesign over hotfix.** If existing code is wrong, redesign properly
 - **Fix warnings, not just errors.** Treat warnings as bugs
 - **Autonomous completion.** Continue until every requirement in `docs/bugs.md` is implemented, tested, and verified
+- **No legacy support.** New features/redesigns must not preserve legacy paths or backward compatibility
 
 ## Backend (Python / FastAPI)
 
@@ -218,14 +220,23 @@ import {
 } from "runed";
 ```
 
-## Agents
+## OpenCode Agents
 
-| Agent              | When to Use                          |
-| ------------------ | ------------------------------------ |
-| **Second Opinion** | Before completing ANY task           |
-| **E2E Testing**    | Automated UI testing                 |
-| **Docks**          | Writing documentation                |
-| **Learn**          | After sessions to record discoveries |
+These are built-in OpenCode roles.
+
+| Agent            | Purpose                                   | Permissions     |
+| ---------------- | ----------------------------------------- | --------------- |
+| **Orchestrator** | Coordinates tasks and delegations         | No write access |
+| **Ask**          | Clarifies requirements and open questions | No write access |
+
+## Specialized Subagents
+
+| Subagents       | When to Use                                                              | Permissions     |
+| --------------- | ------------------------------------------------------------------------ | --------------- |
+| **Explorer**    | Reads files and gathers context                                          | Read-only       |
+| **Planner**     | Produces structured plans                                                | No write access |
+| **Implementer** | Edits code and applies changes                                           | Write access    |
+| **Reviewer**    | Reviews diffs for correctness and quality use Before completing ANY task | Read-only       |
 
 ## MCP Servers
 
@@ -241,8 +252,19 @@ import {
 | **Filesystem**          | File system operations      |
 | **Git**                 | Git repository operations   |
 
+## Skills (.opencode/skills)
+
+- **skill-creator** — Create or update skills
+- **document** — Documentation workflow
+- **rmslop** — Remove AI-generated code slop
+- **learn** — Capture session learnings
+- **review** — Code review guidance
+- **explain-code** — Explain code and architecture
+- **simplifier** — Simplify designs and code
+- **webapp-testing** — UI testing workflow
+- **mcp-builder** — Build MCP servers
+
 ## Slash Commands
 
-- `/review` — Code review
 - `/clarify` — Ask clarifying questions
 - `/rmslop` — Clean up AI slop

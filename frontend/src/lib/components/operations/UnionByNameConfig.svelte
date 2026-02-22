@@ -70,7 +70,6 @@
 </script>
 
 <div class="config-panel">
-	<h3>Union By Name</h3>
 	<p class="description">Combine rows from multiple datasources using matching column names.</p>
 
 	<div class="form-section">
@@ -86,7 +85,7 @@
 	</div>
 
 	<div class="form-section">
-		<div class="flex justify-between items-center mb-4">
+		<div class="flex justify-between items-center mb-5">
 			<h4 class="mb-0">Union Sources</h4>
 		</div>
 
@@ -111,13 +110,12 @@
 
 	<div class="form-section">
 		<h4>Column Matching</h4>
-		<label class="flex items-center gap-2">
+		<label class="flex items-center gap-3">
 			<input id="allow-missing" type="checkbox" bind:checked={config.allow_missing} />
 			<span>Allow missing columns (fill with nulls)</span>
 		</label>
-		<p class="text-sm leading-relaxed mt-2 p-3 help-box">
-			When enabled, missing columns are created with null values to keep all rows. Disable to
-			require identical schemas.
-		</p>
+		<span class="mt-2 block text-xs text-fg-muted leading-relaxed">
+			When enabled, missing columns are created with null values to keep all rows.
+		</span>
 	</div>
 </div>

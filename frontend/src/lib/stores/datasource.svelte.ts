@@ -13,11 +13,11 @@ export class DatasourceStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 
-	async loadDatasources(): Promise<void> {
+	async loadDatasources(includeHidden: boolean = false): Promise<void> {
 		this.loading = true;
 		this.error = null;
 
-		listDatasources().match(
+		listDatasources(includeHidden).match(
 			(datasources) => {
 				this.datasources = datasources;
 				this.loading = false;

@@ -68,8 +68,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="String methods configuration">
-	<h3>String Methods Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="str-column-heading">
 		<h4 id="str-column-heading">Source Column</h4>
 		<ColumnDropdown

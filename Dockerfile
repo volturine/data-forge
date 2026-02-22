@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for Polars-FastAPI-Svelte Analysis Platform
+# Multi-stage Dockerfile for Data-Forge Analysis Platform
 # Combines frontend and backend into a single deployable image
 
 # ============================================
@@ -32,7 +32,7 @@ WORKDIR /app/backend
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 LABEL maintainer="Your Name <your.email@example.com>"
-LABEL description="Polars-FastAPI-Svelte Analysis Platform - Combined frontend and backend"
+LABEL description="Data-Forge Analysis Platform - Combined frontend and backend"
 
 # Create a custom user with UID 1000 and GID 1000
 RUN addgroup --gid 1000 appgroup && adduser --uid 1000 --gid 1000 --disabled-password --gecos "" appuser
@@ -50,7 +50,7 @@ COPY backend/ /app/backend/
 COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 
 # Create data directories with proper permissions
-RUN mkdir -p /app/data/uploads /app/data/results /app/data/exports /app/backend/database && \
+RUN mkdir -p /app/data/default/uploads /app/data/default/clean /app/data/default/exports /app/backend/database && \
     chmod -R 755 /app/data /app/backend/database
 
 # Fix ownership and permissions for all files

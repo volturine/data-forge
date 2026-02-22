@@ -3,7 +3,8 @@
 		config?: Record<string, never>;
 	}
 
-	let { config = $bindable({}) }: Props = $props();
+	let { config = $bindable({} as Record<string, never>) }: Props = $props();
+	void config;
 </script>
 
 <div class="config-panel">

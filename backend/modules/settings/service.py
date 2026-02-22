@@ -92,7 +92,7 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
 
 
 def get_resolved_smtp() -> dict[str, object]:
-    from core.database import run_db
+    from core.database import run_settings_db
 
     def _read(session: Session) -> dict[str, object]:
         row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
@@ -115,7 +115,7 @@ def get_resolved_smtp() -> dict[str, object]:
             'password': '',
         }
 
-    return run_db(_read)
+    return run_settings_db(_read)
 
 
 def get_resolved_telegram_token() -> str:
@@ -124,7 +124,7 @@ def get_resolved_telegram_token() -> str:
 
 
 def get_resolved_telegram_settings() -> dict[str, object]:
-    from core.database import run_db
+    from core.database import run_settings_db
 
     def _read(session: Session) -> dict[str, object]:
         row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
@@ -134,4 +134,4 @@ def get_resolved_telegram_settings() -> dict[str, object]:
             return {'enabled': enabled, 'token': token}
         return {'enabled': False, 'token': ''}
 
-    return run_db(_read)
+    return run_settings_db(_read)

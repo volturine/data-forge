@@ -32,32 +32,30 @@ export interface FileDataSourceConfig {
 	has_header?: boolean | null;
 	table_name?: string | null;
 	named_range?: string | null;
+	cell_range?: string | null;
 }
 
 export interface DatabaseDataSourceConfig {
 	connection_string: string;
 	query: string;
-}
-
-export interface APIDataSourceConfig {
-	url: string;
-	method?: string;
-	headers?: Record<string, string> | null;
-	auth?: Record<string, unknown> | null;
-}
-
-export interface DuckDBDataSourceConfig {
-	db_path: string | null;
-	query: string;
-	read_only?: boolean;
+	branch?: string | null;
 }
 
 export interface IcebergDataSourceConfig {
 	metadata_path: string;
+	branch?: string | null;
+	branches?: string[] | null;
 	snapshot_id?: string | null;
 	snapshot_timestamp_ms?: number | null;
 	storage_options?: Record<string, string> | null;
 	reader?: string | null;
+	catalog_type?: string | null;
+	catalog_uri?: string | null;
+	warehouse?: string | null;
+	namespace?: string | null;
+	table?: string | null;
+	source?: Record<string, unknown> | null;
+	refresh?: Record<string, unknown> | null;
 }
 
 export interface AnalysisDataSourceConfig {
@@ -65,16 +63,18 @@ export interface AnalysisDataSourceConfig {
 	analysis_tab_id?: string | null;
 }
 
+export type SourceType = 'file' | 'database' | 'iceberg' | 'analysis';
+
 export interface DataSourceCreate {
 	name: string;
-	source_type: string;
+	source_type: SourceType;
 	config: Record<string, unknown>;
 }
 
 export interface DataSource {
 	id: string;
 	name: string;
-	source_type: string;
+	source_type: SourceType;
 	config: Record<string, unknown>;
 	schema_cache: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;

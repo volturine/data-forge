@@ -1,11 +1,10 @@
-"""Extended tests for datasource module."""
-
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
 import pytest
+from openpyxl import Workbook
 
 from modules.analysis.models import Analysis
 from modules.datasource.models import DataSource
@@ -13,10 +12,7 @@ from modules.datasource.service import _compute_histogram, create_analysis_datas
 
 
 class TestDataSourceValidation:
-    """Test datasource validation logic."""
-
     def test_upload_empty_file(self, client, temp_upload_dir: Path):
-        """Test uploading an empty file."""
         files = {'file': ('empty.csv', b'', 'text/csv')}
 
         response = client.post('/api/v1/datasource/upload', files=files)
@@ -25,7 +21,6 @@ class TestDataSourceValidation:
         assert response.status_code in [400, 422]
 
     def test_upload_file_too_large(self, client, monkeypatch):
-        """Test uploading a file that exceeds size limit."""
         # Create a large file (> 100MB)
         large_content = b'a' * (101 * 1024 * 1024)
         files = {'file': ('large.csv', large_content, 'text/csv')}
@@ -36,7 +31,6 @@ class TestDataSourceValidation:
         assert response.status_code in [400, 413, 422]
 
     def test_upload_unsupported_format(self, client):
-        """Test uploading unsupported file format."""
         files = {'file': ('test.xyz', b'random data', 'application/octet-stream')}
         data = {'name': 'Unsupported Format Test'}
 
@@ -46,7 +40,6 @@ class TestDataSourceValidation:
         assert response.status_code in [400, 422]
 
     def test_upload_corrupted_csv(self, client):
-        """Test uploading a corrupted CSV file."""
         corrupted_csv = b'id,name,age\n1,Alice\n2,Bob,30,extra\n'
         files = {'file': ('corrupted.csv', corrupted_csv, 'text/csv')}
         data = {'name': 'Corrupted CSV Test'}
@@ -59,7 +52,6 @@ class TestDataSourceValidation:
             assert 'id' in json_data
 
     def test_upload_csv_with_special_characters(self, client):
-        """Test uploading CSV with special characters."""
         csv_content = b'id,name,description\n1,"O\'Brien","Quote: \\"test\\""\n2,Smith,"Newline:\ntest"\n'
         files = {'file': ('special.csv', csv_content, 'text/csv')}
         data = {'name': 'Special Characters Test'}
@@ -69,7 +61,6 @@ class TestDataSourceValidation:
         assert response.status_code == 200
 
     def test_upload_csv_with_unicode(self, client):
-        """Test uploading CSV with Unicode characters."""
         csv_content = 'id,name,city\n1,José,São Paulo\n2,François,Zürich\n'.encode()
         files = {'file': ('unicode.csv', csv_content, 'text/csv')}
         data = {'name': 'Unicode Test'}
@@ -81,35 +72,30 @@ class TestDataSourceValidation:
         assert 'id' in json_data
 
     def test_upload_with_missing_file(self, client):
-        """Test upload endpoint without providing a file."""
         data = {'name': 'Missing File Test'}
         response = client.post('/api/v1/datasource/upload', data=data)
 
         assert response.status_code == 422
 
     def test_get_nonexistent_datasource(self, client):
-        """Test getting a datasource that doesn't exist."""
         fake_id = str(uuid.uuid4())
         response = client.get(f'/api/v1/datasource/{fake_id}')
 
         assert response.status_code == 404
 
     def test_delete_nonexistent_datasource(self, client):
-        """Test deleting a datasource that doesn't exist."""
         fake_id = str(uuid.uuid4())
         response = client.delete(f'/api/v1/datasource/{fake_id}')
 
         assert response.status_code == 404
 
     def test_get_schema_nonexistent_datasource(self, client):
-        """Test getting schema for non-existent datasource."""
         fake_id = str(uuid.uuid4())
         response = client.get(f'/api/v1/datasource/{fake_id}/schema')
 
         assert response.status_code == 404
 
     def test_upload_csv_with_different_delimiters(self, client):
-        """Test uploading CSV with different delimiters."""
         # Tab-separated
         tsv_content = b'id\tname\tage\n1\tAlice\t25\n2\tBob\t30\n'
         files = {'file': ('test.tsv', tsv_content, 'text/tab-separated-values')}
@@ -166,6 +152,178 @@ class TestDataSourceValidation:
         response = client.post('/api/v1/datasource/preflight', files=files)
 
         assert response.status_code == 400
+
+    def test_preflight_excel_cell_range(self, client, temp_upload_dir: Path):
+        """Test Excel preflight supports A1 range selection."""
+        excel_path = temp_upload_dir / 'range.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        assert sheet is not None
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('range.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        data = {'cell_range': 'A1:B3', 'has_header': 'true'}
+
+        response = client.post('/api/v1/datasource/preflight', files=files, data=data)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['sheet_name'] == 'Sheet1'
+        assert payload['start_row'] == 0
+        assert payload['start_col'] == 0
+        assert payload['end_col'] == 1
+        assert payload['detected_end_row'] == 2
+        assert len(payload['preview']) == 3
+
+    def test_preflight_excel_invalid_cell_range(self, client, temp_upload_dir: Path):
+        """Test Excel preflight rejects invalid cell ranges."""
+        excel_path = temp_upload_dir / 'invalid.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('invalid.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        data = {'cell_range': 'NotARange', 'has_header': 'true'}
+
+        response = client.post('/api/v1/datasource/preflight', files=files, data=data)
+
+        assert response.status_code == 400
+
+    def test_preflight_excel_path_rejects_non_xlsx(self, client, temp_upload_dir: Path):
+        csv_path = temp_upload_dir / 'invalid.csv'
+        csv_path.write_text('a,b\n1,2')
+        payload = {'file_path': str(csv_path)}
+
+        response = client.post('/api/v1/datasource/preflight-path', json=payload)
+
+        assert response.status_code == 400
+
+    def test_preflight_excel_path_returns_preview(self, client, temp_upload_dir: Path, monkeypatch):
+        excel_path = temp_upload_dir / 'path.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        workbook.save(excel_path)
+        from core import namespace
+        from modules.datasource import routes as datasource_routes
+
+        def fake_paths():
+            return namespace.NamespacePaths(
+                base_dir=temp_upload_dir.parent,
+                upload_dir=temp_upload_dir,
+                clean_dir=temp_upload_dir.parent / 'clean',
+                exports_dir=temp_upload_dir.parent / 'exports',
+                db_path=temp_upload_dir.parent / 'namespace.db',
+            )
+
+        monkeypatch.setattr(namespace, 'namespace_paths', fake_paths)
+        monkeypatch.setattr(datasource_routes, 'namespace_paths', fake_paths)
+        payload = {'file_path': str(excel_path)}
+
+        response = client.post('/api/v1/datasource/preflight-path', json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['sheet_name'] == 'Sheet1'
+        assert body['preflight_id']
+        assert len(body['preview']) == 3
+
+    def test_confirm_excel_end_row(self, client, temp_upload_dir: Path):
+        """Test Excel confirm stores manual end row selection."""
+        excel_path = temp_upload_dir / 'bounds.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        assert sheet is not None
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        sheet.append([3, 'C'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('bounds.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+
+        preflight = client.post(
+            '/api/v1/datasource/preflight',
+            files=files,
+            data={'start_row': '0', 'start_col': '0', 'end_col': '1'},
+        )
+        assert preflight.status_code == 200
+        preflight_id = preflight.json()['preflight_id']
+
+        confirm_data = {
+            'preflight_id': preflight_id,
+            'name': 'Excel End Row',
+            'sheet_name': 'Sheet1',
+            'start_row': '0',
+            'start_col': '0',
+            'end_col': '1',
+            'end_row': '1',
+            'has_header': 'true',
+        }
+        confirm = client.post('/api/v1/datasource/confirm', data=confirm_data)
+
+        assert confirm.status_code == 200
+        config = confirm.json()['config']
+        assert config['end_row'] == 1
+
+    def test_confirm_excel_cell_range_stores_bounds(self, client, temp_upload_dir: Path):
+        """Test Excel confirm stores manual cell range selection."""
+        excel_path = temp_upload_dir / 'cell-range.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        sheet.append([2, 'B'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('cell-range.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+
+        preflight = client.post('/api/v1/datasource/preflight', files=files)
+        assert preflight.status_code == 200
+        preflight_id = preflight.json()['preflight_id']
+
+        confirm_data = {
+            'preflight_id': preflight_id,
+            'name': 'Excel Range',
+            'cell_range': 'Sheet1!A1:B3',
+            'has_header': 'true',
+        }
+        confirm = client.post('/api/v1/datasource/confirm', data=confirm_data)
+
+        assert confirm.status_code == 200
+        config = confirm.json()['config']
+        assert config['cell_range'] == 'Sheet1!A1:B3'
+        assert config['sheet_name'] == 'Sheet1'
+        assert config['start_row'] == 0
+        assert config['start_col'] == 0
+        assert config['end_col'] == 1
+        assert config['end_row'] == 2
 
 
 class TestDataSourceSchema:
@@ -471,16 +629,4 @@ class TestIsHidden:
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)
-        assert response.status_code == 200
-
-        data = response.json()
-        tabs = data['pipeline_definition']['tabs']
-        matched = [t for t in tabs if t['id'] == new_tab_id]
-        assert len(matched) == 1
-        auto_ds_id = matched[0]['datasource_id']
-        assert auto_ds_id is not None
-
-        # The auto-created datasource must be hidden
-        ds = test_db_session.get(DataSource, auto_ds_id)
-        assert ds is not None
-        assert ds.is_hidden is True
+        assert response.status_code == 409

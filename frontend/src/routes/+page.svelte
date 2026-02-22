@@ -210,7 +210,7 @@
 					onBulkDelete={requestBulkDelete}
 				/>
 				{#if filteredAndSortedAnalyses.length === 0}
-					<div class="rounded-sm border border-dashed border-tertiary px-6 py-12 text-center">
+					<div class="border border-dashed border-tertiary px-6 py-12 text-center">
 						<p class="text-fg-tertiary m-0 text-sm">No analyses match your search.</p>
 					</div>
 				{:else}

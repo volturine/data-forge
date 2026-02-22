@@ -5,34 +5,28 @@ import json
 import logging
 import logging.handlers
 import queue
+import sqlite3
 import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import pyarrow as pa  # type: ignore[import-untyped]
 from fastapi import Request, Response
-from pyiceberg.catalog import load_catalog
-from pyiceberg.schema import Schema
-from pyiceberg.types import DoubleType, IntegerType, StringType, TimestampType
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
 from core.config import settings
 
-_writer: IcebergLogWriter | None = None
+_writer: SqliteLogWriter | None = None
 _listener: logging.handlers.QueueListener | None = None
 _configured = False
 _LOG_RECORD_KEYS = set(logging.LogRecord('', 0, '', 0, '', (), None).__dict__.keys())
-_DEFAULT_FLUSH_INTERVAL = 300.0
-_LOG_TABLE_PROPERTIES = {
-    'write.metadata.delete-after-commit.enabled': 'true',
-    'write.metadata.previous-versions-max': '1',
-}
+_DEFAULT_FLUSH_INTERVAL = 5.0
 _logger = logging.getLogger('core.logging')
 
 
@@ -40,12 +34,11 @@ def _day_from_ts(ts: datetime | None) -> date:
     """Get the date in the configured timezone for daily table partitioning."""
     tz = ZoneInfo(settings.timezone)
     if isinstance(ts, datetime):
-        # Convert to configured timezone before extracting date
         return ts.astimezone(tz).date()
     return datetime.now(tz).date()
 
 
-class IcebergLogWriter:
+class SqliteLogWriter:
     def __init__(
         self,
         base_path: str,
@@ -60,37 +53,79 @@ class IcebergLogWriter:
         self._dropped_count = 0
         self._base_path = Path(base_path)
         self._base_path.mkdir(parents=True, exist_ok=True)
-        self._warehouse_path = (self._base_path / 'warehouse').resolve()
-        self._warehouse_path.mkdir(parents=True, exist_ok=True)
-        self._catalog_path = (self._base_path / 'catalog.db').resolve()
-        if not self._catalog_path.exists():
-            self._catalog_path.touch()
-        self._catalog = load_catalog(
-            'local',
-            **{
-                'type': 'sql',
-                'uri': f'sqlite:///{self._catalog_path}',
-                'warehouse': f'file://{self._warehouse_path}',
-            },
-        )
-        self._namespace = 'logs'
-        self._catalog.create_namespace_if_not_exists(self._namespace)
-        self._schema_map = {
-            'request_logs': _request_schema(),
-            'app_logs': _app_schema(),
-            'client_logs': _client_schema(),
-        }
-        self._arrow_map = {
-            'request_logs': _request_arrow_schema(),
-            'app_logs': _app_arrow_schema(),
-            'client_logs': _client_arrow_schema(),
-        }
-        self._table_cache: dict[str, Any] = {}
+        self._db_path = (self._base_path / 'logs.db').resolve()
+        self._conn: sqlite3.Connection | None = None
         self._buffers: dict[tuple[str, date], list[dict[str, Any]]] = {}
         self._flush_interval = flush_interval
         self._last_flush = time.monotonic()
-        self._worker = threading.Thread(target=self._run, name='iceberg-log-writer', daemon=True)
+        self._worker = threading.Thread(target=self._run, name='sqlite-log-writer', daemon=True)
+        self._init_db()
         self._worker.start()
+
+    def _init_db(self) -> None:
+        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+        self._conn.execute('PRAGMA journal_mode=WAL')
+        self._conn.execute('PRAGMA synchronous=NORMAL')
+        self._conn.execute('PRAGMA cache_size=-64000')
+        self._conn.execute('PRAGMA temp_store=MEMORY')
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS request_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                method TEXT,
+                path TEXT,
+                status INTEGER,
+                duration_ms REAL,
+                request_id TEXT,
+                client_id TEXT,
+                user_agent TEXT,
+                ip TEXT,
+                referer TEXT,
+                error TEXT,
+                request_json TEXT,
+                response_json TEXT,
+                chunk_index INTEGER,
+                day TEXT NOT NULL
+            )
+        """)
+        self._conn.execute('CREATE INDEX IF NOT EXISTS idx_request_day ON request_logs(day)')
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                level TEXT,
+                logger TEXT,
+                message TEXT,
+                module TEXT,
+                func TEXT,
+                line INTEGER,
+                extra_json TEXT,
+                day TEXT NOT NULL
+            )
+        """)
+        self._conn.execute('CREATE INDEX IF NOT EXISTS idx_app_day ON app_logs(day)')
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                event TEXT,
+                action TEXT,
+                page TEXT,
+                target TEXT,
+                form_id TEXT,
+                fields_json TEXT,
+                client_id TEXT,
+                session_id TEXT,
+                meta_json TEXT,
+                day TEXT NOT NULL
+            )
+        """)
+        self._conn.execute('CREATE INDEX IF NOT EXISTS idx_client_day ON client_logs(day)')
+
+        self._conn.commit()
 
     def write_request_log(self, payload: dict[str, Any]) -> None:
         row = {
@@ -149,7 +184,7 @@ class IcebergLogWriter:
             batches = self._buffers
             self._buffers = {}
         for (kind, day), rows in batches.items():
-            self._append_rows(kind, day, rows)
+            self._insert_rows(kind, day, rows)
         self._last_flush = time.monotonic()
 
     def stop(self) -> None:
@@ -157,6 +192,8 @@ class IcebergLogWriter:
         self._queue.put(('__stop__', []))
         self._worker.join(timeout=5)
         self.flush()
+        if self._conn:
+            self._conn.close()
 
     def _enqueue_rows(self, kind: str, rows: list[dict[str, Any]]) -> None:
         if not rows:
@@ -201,31 +238,124 @@ class IcebergLogWriter:
             return
         self.flush()
 
-    def _append_rows(self, kind: str, day: date, rows: list[dict[str, Any]]) -> None:
+    def _insert_rows(self, kind: str, day: date, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
         try:
-            table = self._get_table(kind, day)
-            table.append(pa.Table.from_pylist(rows, schema=self._arrow_map[kind]))
+            with self._lock_for_insert():
+                if kind == 'request_logs':
+                    self._insert_request_logs(rows, day)
+                elif kind == 'app_logs':
+                    self._insert_app_logs(rows, day)
+                elif kind == 'client_logs':
+                    self._insert_client_logs(rows, day)
         except Exception as e:
-            _logger.error(f'Failed to append {len(rows)} rows to {kind}/{day}: {e}', exc_info=True)
+            _logger.error(f'Failed to insert {len(rows)} rows to {kind}/{day}: {e}', exc_info=True)
 
-    def _get_table(self, kind: str, day: date):
-        name = _daily_table_name(kind, day)
-        cached = self._table_cache.get(name)
-        if cached:
-            return cached
-        self._catalog.create_namespace_if_not_exists(self._namespace)
-        identifier = f'{self._namespace}.{name}'
-        schema = self._schema_map[kind]
-        table = self._catalog.create_table_if_not_exists(identifier, schema=schema, properties=_LOG_TABLE_PROPERTIES)
-        _apply_table_properties(table)
-        self._table_cache[name] = table
-        return table
+    @contextmanager
+    def _lock_for_insert(self):
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def _insert_request_logs(self, rows: list[dict[str, Any]], day: date) -> None:
+        day_str = day.isoformat()
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        try:
+            conn.executemany(
+                """INSERT INTO request_logs
+                   (ts, method, path, status, duration_ms, request_id, client_id,
+                    user_agent, ip, referer, error, request_json, response_json,
+                    chunk_index, day)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        r.get('ts'),
+                        r.get('method'),
+                        r.get('path'),
+                        r.get('status'),
+                        r.get('duration_ms'),
+                        r.get('request_id'),
+                        r.get('client_id'),
+                        r.get('user_agent'),
+                        r.get('ip'),
+                        r.get('referer'),
+                        r.get('error'),
+                        r.get('request_json'),
+                        r.get('response_json'),
+                        r.get('chunk_index'),
+                        day_str,
+                    )
+                    for r in rows
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _insert_app_logs(self, rows: list[dict[str, Any]], day: date) -> None:
+        day_str = day.isoformat()
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        try:
+            conn.executemany(
+                """INSERT INTO app_logs 
+                   (ts, level, logger, message, module, func, line, extra_json, day)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        r.get('ts'),
+                        r.get('level'),
+                        r.get('logger'),
+                        r.get('message'),
+                        r.get('module'),
+                        r.get('func'),
+                        r.get('line'),
+                        r.get('extra_json'),
+                        day_str,
+                    )
+                    for r in rows
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _insert_client_logs(self, rows: list[dict[str, Any]], day: date) -> None:
+        day_str = day.isoformat()
+        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
+        try:
+            conn.executemany(
+                """INSERT INTO client_logs 
+                   (ts, event, action, page, target, form_id, fields_json, client_id, session_id, meta_json, day)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        r.get('ts'),
+                        r.get('event'),
+                        r.get('action'),
+                        r.get('page'),
+                        r.get('target'),
+                        r.get('form_id'),
+                        r.get('fields_json'),
+                        r.get('client_id'),
+                        r.get('session_id'),
+                        r.get('meta_json'),
+                        day_str,
+                    )
+                    for r in rows
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
-class IcebergLogHandler(logging.Handler):
-    def __init__(self, writer: IcebergLogWriter):
+class SqliteLogHandler(logging.Handler):
+    def __init__(self, writer: SqliteLogWriter):
         super().__init__()
         self.writer = writer
 
@@ -244,7 +374,7 @@ class IcebergLogHandler(logging.Handler):
             }
             self.writer.write_app_log(payload)
         except Exception as exc:
-            _logger.error('Iceberg log handler failed: %s', exc, exc_info=True)
+            _logger.error('SQLite log handler failed: %s', exc, exc_info=True)
             self.handleError(record)
 
 
@@ -252,7 +382,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        writer: IcebergLogWriter | None = None,
+        writer: SqliteLogWriter | None = None,
         get_time: Callable[[], float] | None = None,
         max_body_size: int = 0,
     ):
@@ -268,7 +398,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get('x-request-id') or uuid.uuid4().hex
         request.state.request_id = request_id
 
-        # Only read body if within size limit
         content_length = int(request.headers.get('content-length', 0))
         should_log_body = self.max_body_size == 0 or content_length <= self.max_body_size
         body = await request.body() if should_log_body else b''
@@ -299,14 +428,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         stream = response.body_iterator if isinstance(response, StreamingResponse) else getattr(response, 'body_iterator', None)
         if stream is not None:
-            # For streaming responses, only log metadata on first chunk
-            # Don't accumulate entire response body
+
             async def stream_wrapper():
                 index = 0
                 logged = False
                 async for chunk in stream:
                     logged = True
-                    # Only log body snippet for first chunk if within size limit
                     part = None
                     if index == 0:
                         raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
@@ -346,7 +473,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             response_body = bytes(response_data)
         else:
             response_body = response_data
-        # Apply size limit to response body
         body: bytes | None = response_body
         if body is not None and self.max_body_size > 0 and len(body) > self.max_body_size:
             body = None
@@ -402,7 +528,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return body.decode('utf-8', errors='ignore')
 
 
-def configure_logging() -> IcebergLogWriter:
+def configure_logging() -> SqliteLogWriter:
     global _configured, _listener, _writer
     if _configured and _writer:
         return _writer
@@ -414,13 +540,13 @@ def configure_logging() -> IcebergLogWriter:
     )
     logging.getLogger('httpx').setLevel(logging.WARNING)
 
-    _writer = IcebergLogWriter(
-        base_path=str(settings.log_iceberg_path),
-        flush_interval=float(settings.log_iceberg_flush_interval_seconds),
+    _writer = SqliteLogWriter(
+        base_path=str(settings.log_sqlite_path),
+        flush_interval=float(settings.log_sqlite_flush_interval_seconds),
         overflow_policy=settings.log_queue_overflow,
     )
     queue_handler = logging.handlers.QueueHandler(queue.Queue())
-    _listener = logging.handlers.QueueListener(queue_handler.queue, IcebergLogHandler(_writer))
+    _listener = logging.handlers.QueueListener(queue_handler.queue, SqliteLogHandler(_writer))
     _listener.start()
     atexit.register(_listener.stop)
     atexit.register(_writer.stop)
@@ -431,7 +557,7 @@ def configure_logging() -> IcebergLogWriter:
     return _writer
 
 
-def get_log_writer() -> IcebergLogWriter:
+def get_log_writer() -> SqliteLogWriter:
     if _writer:
         return _writer
     return configure_logging()
@@ -442,135 +568,3 @@ def _extract_log_extras(record: logging.LogRecord) -> str | None:
     if not extras:
         return None
     return json.dumps(extras, default=str)
-
-
-def _daily_table_name(kind: str, day: date) -> str:
-    return f'{kind}_{day.strftime("%Y_%m_%d")}'
-
-
-def _apply_table_properties(table: Any) -> None:
-    try:
-        props = table.properties
-        updates = {key: value for key, value in _LOG_TABLE_PROPERTIES.items() if props.get(key) != value}
-        if not updates:
-            return
-        updater = table.update_properties()
-        for key, value in updates.items():
-            updater.set(key, value)
-        updater.commit()
-    except Exception as e:
-        _logger.warning(f'Failed to apply table properties: {e}')
-
-
-def _request_schema() -> Schema:
-    return Schema(
-        _field(1, 'ts', TimestampType()),
-        _field(2, 'method', StringType()),
-        _field(3, 'path', StringType()),
-        _field(4, 'status', IntegerType()),
-        _field(5, 'duration_ms', DoubleType()),
-        _field(6, 'request_id', StringType()),
-        _field(7, 'client_id', StringType()),
-        _field(8, 'user_agent', StringType()),
-        _field(9, 'ip', StringType()),
-        _field(10, 'referer', StringType()),
-        _field(11, 'error', StringType()),
-        _field(12, 'request_json', StringType()),
-        _field(13, 'response_json', StringType()),
-        _field(14, 'chunk_index', IntegerType()),
-    )
-
-
-def _app_schema() -> Schema:
-    return Schema(
-        _field(1, 'ts', TimestampType()),
-        _field(2, 'level', StringType()),
-        _field(3, 'logger', StringType()),
-        _field(4, 'message', StringType()),
-        _field(5, 'module', StringType()),
-        _field(6, 'func', StringType()),
-        _field(7, 'line', IntegerType()),
-        _field(8, 'extra_json', StringType()),
-    )
-
-
-def _client_schema() -> Schema:
-    return Schema(
-        _field(1, 'ts', TimestampType()),
-        _field(2, 'event', StringType()),
-        _field(3, 'action', StringType()),
-        _field(4, 'page', StringType()),
-        _field(5, 'target', StringType()),
-        _field(6, 'form_id', StringType()),
-        _field(7, 'fields_json', StringType()),
-        _field(8, 'client_id', StringType()),
-        _field(9, 'session_id', StringType()),
-        _field(10, 'meta_json', StringType()),
-    )
-
-
-def _field(field_id: int, name: str, field_type) -> Any:
-    from pyiceberg.types import NestedField
-
-    return NestedField(field_id=field_id, name=name, field_type=field_type, required=False)
-
-
-def _request_arrow_schema() -> pa.Schema:
-    return pa.schema(
-        [
-            ('ts', pa.timestamp('us')),
-            ('method', pa.string()),
-            ('path', pa.string()),
-            ('status', pa.int32()),
-            ('duration_ms', pa.float64()),
-            ('request_id', pa.string()),
-            ('client_id', pa.string()),
-            ('user_agent', pa.string()),
-            ('ip', pa.string()),
-            ('referer', pa.string()),
-            ('error', pa.string()),
-            ('request_json', pa.string()),
-            ('response_json', pa.string()),
-            ('chunk_index', pa.int32()),
-        ]
-    )
-
-
-def _app_arrow_schema() -> pa.Schema:
-    return pa.schema(
-        [
-            ('ts', pa.timestamp('us')),
-            ('level', pa.string()),
-            ('logger', pa.string()),
-            ('message', pa.string()),
-            ('module', pa.string()),
-            ('func', pa.string()),
-            ('line', pa.int32()),
-            ('extra_json', pa.string()),
-        ]
-    )
-
-
-def _client_arrow_schema() -> pa.Schema:
-    return pa.schema(
-        [
-            ('ts', pa.timestamp('us')),
-            ('event', pa.string()),
-            ('action', pa.string()),
-            ('page', pa.string()),
-            ('target', pa.string()),
-            ('form_id', pa.string()),
-            ('fields_json', pa.string()),
-            ('client_id', pa.string()),
-            ('session_id', pa.string()),
-            ('meta_json', pa.string()),
-        ]
-    )
-
-
-def _catalog_path(base_path: str) -> str:
-    return f'{base_path}/catalog.db'
-
-
-def _warehouse_path(base_path: str) -> str:
-    return f'{base_path}/warehouse'

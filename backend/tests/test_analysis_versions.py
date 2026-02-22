@@ -5,6 +5,7 @@ from modules.analysis.models import Analysis
 from modules.analysis_versions.models import AnalysisVersion
 from modules.analysis_versions.service import create_version, get_version
 from modules.datasource.models import DataSource
+from modules.datasource.source_types import DataSourceType
 
 
 def test_list_versions_returns_versions(test_db_session, client):
@@ -252,7 +253,7 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
     datasource = DataSource(
         id=source_id,
         name='Source',
-        source_type='analysis',
+        source_type=DataSourceType.ANALYSIS,
         config={'analysis_id': 'source-analysis'},
         created_by='analysis',
         created_by_analysis_id='source-analysis',

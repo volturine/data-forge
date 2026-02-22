@@ -50,10 +50,16 @@
 	const layoutNodes = $derived.by(() => {
 		const next = [] as Array<{ id: string; label: string; meta: string | null; type: string }>;
 		for (const node of nodes) {
+			const meta =
+				node.type === 'datasource'
+					? node.branch
+						? `${node.source_type ?? ''} • ${node.branch}`
+						: (node.source_type ?? null)
+					: (node.status ?? null);
 			next.push({
 				id: node.id,
 				label: node.name,
-				meta: node.type === 'datasource' ? (node.source_type ?? null) : (node.status ?? null),
+				meta,
 				type: node.type
 			});
 		}
@@ -468,7 +474,7 @@
 					{@const pos = positionSnapshot[node.id]}
 					{#if pos}
 						<div
-							class="absolute flex flex-col gap-1 rounded-sm border px-4 py-3 shadow-sm lineage-node"
+							class="absolute flex flex-col gap-1 border px-4 py-3 shadow-sm lineage-node"
 							use:setPosition={pos}
 							onpointerdown={(event) => {
 								if (event.button === 0) startDrag(event, node.id);

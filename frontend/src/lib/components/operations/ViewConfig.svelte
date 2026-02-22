@@ -14,10 +14,8 @@
 </script>
 
 <div class="config-panel">
-	<h3>View Configuration</h3>
-
 	<div class="form-section">
-		<label for="row-limit" class="flex flex-col gap-2">
+		<label for="row-limit" class="flex flex-col gap-3">
 			Preview Rows
 			<input
 				id="row-limit"

@@ -70,7 +70,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'test_output',
-                        'iceberg': {'namespace': 'exports', 'table_name': 'test_output'},
+                        'iceberg': {'namespace': 'outputs', 'table_name': 'test_output'},
                     }
                 },
                 'steps': [],
@@ -86,7 +86,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'test_output_two',
-                        'iceberg': {'namespace': 'exports', 'table_name': 'test_output_two'},
+                        'iceberg': {'namespace': 'outputs', 'table_name': 'test_output_two'},
                     }
                 },
                 'steps': [],
@@ -211,6 +211,13 @@ class TestScheduleCrud:
         assert updated.cron_expression == '0 0 * * *'
         assert updated.next_run is not None
 
+    def test_update_schedule_rejected_for_multiple_triggers(self, test_db_session: Session, output_datasource: DataSource):
+        """Schedule updates cannot set multiple trigger fields."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match='depends_on or trigger_on_datasource_id'):
+            ScheduleUpdate(depends_on=str(uuid.uuid4()), trigger_on_datasource_id=str(uuid.uuid4()))
+
     def test_update_enabled(self, test_db_session: Session, output_datasource: DataSource):
         created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
         updated = update_schedule(test_db_session, created.id, ScheduleUpdate(enabled=False))
@@ -254,6 +261,18 @@ class TestScheduleCrud:
         )
         with pytest.raises(DataSourceNotFoundError):
             create_schedule(test_db_session, payload)
+
+    def test_create_schedule_rejected_for_multiple_triggers(self, test_db_session: Session, output_datasource: DataSource):
+        """Schedules cannot define multiple trigger fields."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match='depends_on or trigger_on_datasource_id'):
+            ScheduleCreate(
+                datasource_id=output_datasource.id,
+                cron_expression='0 * * * *',
+                depends_on=str(uuid.uuid4()),
+                trigger_on_datasource_id=str(uuid.uuid4()),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +555,7 @@ class TestRunAnalysisBuild:
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'tab_a',
-                            'iceberg': {'namespace': 'exports', 'table_name': 'tab_a'},
+                            'iceberg': {'namespace': 'outputs', 'table_name': 'tab_a'},
                         }
                     },
                     'steps': [],
@@ -552,7 +571,7 @@ class TestRunAnalysisBuild:
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'tab_b',
-                            'iceberg': {'namespace': 'exports', 'table_name': 'tab_b'},
+                            'iceberg': {'namespace': 'outputs', 'table_name': 'tab_b'},
                         }
                     },
                     'steps': [],

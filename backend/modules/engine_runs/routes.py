@@ -15,9 +15,15 @@ router = APIRouter(prefix='/engine-runs', tags=['engine-runs'])
 def compare_runs(
     run_a: str,
     run_b: str,
+    datasource_id: str | None = None,
     session: Session = Depends(get_db),
 ):
-    return service.compare_engine_runs(session, parse_engine_run_id(run_a), parse_engine_run_id(run_b))
+    return service.compare_engine_runs(
+        session,
+        parse_engine_run_id(run_a),
+        parse_engine_run_id(run_b),
+        datasource_id=parse_datasource_id(datasource_id) if datasource_id else None,
+    )
 
 
 @router.get('', response_model=list[schemas.EngineRunResponseSchema])

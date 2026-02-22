@@ -32,6 +32,7 @@ class AnalysisCreateSchema(BaseModel):
     datasource_ids: list[str]
     pipeline_steps: list[PipelineStepSchema]
     tabs: list[TabSchema] = []
+    output_branch: str | None = None
 
 
 class AnalysisUpdateSchema(BaseModel):
@@ -42,6 +43,7 @@ class AnalysisUpdateSchema(BaseModel):
     tabs: list[TabSchema] | None = None
     client_id: str | None = None
     lock_token: str | None = None
+    output_branch: str | None = None
 
 
 class AnalysisResponseSchema(BaseModel):

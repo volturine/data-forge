@@ -108,7 +108,7 @@
 											{engine.analysis_id.slice(0, 8)}...
 										</span>
 										<span
-											class="rounded-full px-2 py-px text-xs font-medium uppercase"
+											class="px-2 py-px text-xs font-medium uppercase"
 											class:bg-accent-bg={engine.status === 'healthy'}
 											class:text-accent-primary={engine.status === 'healthy'}
 											class:bg-tertiary={engine.status !== 'healthy'}

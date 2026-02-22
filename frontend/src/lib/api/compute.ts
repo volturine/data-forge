@@ -175,6 +175,28 @@ export function getStepSchema(
 	});
 }
 
+export interface StepRowCountRequest {
+	analysis_id?: string;
+	target_step_id: string;
+	analysis_pipeline: AnalysisPipelinePayload;
+	tab_id?: string | null;
+	datasource_config?: Record<string, unknown> | null;
+}
+
+export interface StepRowCountResponse {
+	step_id: string;
+	row_count: number;
+}
+
+export function getStepRowCount(
+	request: StepRowCountRequest
+): ResultAsync<StepRowCountResponse, ApiError> {
+	return apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
+		method: 'POST',
+		body: JSON.stringify(request)
+	});
+}
+
 export interface BuildTabResult {
 	tab_id: string;
 	tab_name: string;

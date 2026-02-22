@@ -7,8 +7,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Limit configuration">
-	<h3>Limit Configuration</h3>
-
 	<div class="form-group mb-0">
 		<label for="limit-input-n">Number of rows to keep</label>
 		<input

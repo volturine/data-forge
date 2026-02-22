@@ -48,7 +48,7 @@
 			rightSchema = null;
 			return;
 		}
-		let schemaInfo: Awaited<ReturnType<typeof datasourceStore.getSchema>> | null = null;
+		let schemaInfo: Awaited<ReturnType<typeof datasourceStore.getSchema>> | null;
 		try {
 			schemaInfo = await datasourceStore.getSchema(datasourceId);
 		} catch (err) {
@@ -101,8 +101,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Join configuration">
-	<h3>Join Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="right-datasource-heading">
 		<h4 id="right-datasource-heading">Right Datasource</h4>
 		<DatasourcePicker
@@ -117,8 +115,8 @@
 			}}
 		/>
 		{#if rightSchema}
-			<div id="join-schema-preview" class="mt-2 p-2 bg-panel" aria-live="polite">
-				<strong>{rightSchema.columns.length} columns</strong>
+			<div id="join-schema-preview" class="mt-2 text-xs text-fg-muted" aria-live="polite">
+				{rightSchema.columns.length} columns available
 			</div>
 		{/if}
 	</div>
@@ -133,7 +131,7 @@
 		</select>
 		<div
 			id="join-type-help"
-			class="help-box text-sm leading-relaxed p-3 mt-2"
+			class="help-box leading-relaxed mt-3"
 			aria-describedby="join-type-help"
 		>
 			<strong>Inner:</strong> Only matching rows from both.<br />
@@ -146,7 +144,7 @@
 
 	{#if !isCrossJoin}
 		<div class="form-section" role="group" aria-labelledby="join-columns-heading">
-			<div class="flex justify-between items-center mb-4">
+			<div class="flex justify-between items-center mb-5">
 				<h4 id="join-columns-heading" class="mb-0">Join Columns</h4>
 				<button
 					id="join-btn-add-column"
@@ -168,7 +166,7 @@
 
 			{#each config.join_columns ?? [] as joinCol, _index (joinCol.id)}
 				<div
-					class="flex gap-2 items-end mb-3 p-3 bg-panel"
+					class="flex gap-3 items-end mb-3 border-l-2 border-l-tertiary pl-4 pb-3"
 					role="group"
 					aria-label={`Join column pair ${_index + 1}`}
 				>
@@ -249,8 +247,8 @@
 			placeholder="_right"
 			aria-describedby="join-suffix-hint"
 		/>
-		<div id="join-suffix-hint" class="help-box text-sm leading-relaxed p-3 mt-2">
+		<span id="join-suffix-hint" class="mt-1 block text-xs text-fg-muted">
 			Suffix for columns from the right dataset (when names collide)
-		</div>
+		</span>
 	</div>
 </div>

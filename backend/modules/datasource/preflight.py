@@ -13,13 +13,14 @@ class ExcelPreflight:
     tables: dict[str, list[str]]
     named_ranges: list[str]
     created_at: datetime
+    delete_file: bool
 
 
 _PREFLIGHTS: dict[str, ExcelPreflight] = {}
 _PREFLIGHT_TTL = timedelta(minutes=30)
 
 
-def create_preflight(file_path: Path) -> tuple[str, ExcelPreflight]:
+def create_preflight(file_path: Path, *, delete_file: bool = True) -> tuple[str, ExcelPreflight]:
     workbook = load_workbook(file_path, read_only=False, data_only=True)
     sheets = workbook.sheetnames
     tables: dict[str, list[str]] = {}
@@ -37,6 +38,7 @@ def create_preflight(file_path: Path) -> tuple[str, ExcelPreflight]:
         tables=tables,
         named_ranges=named_ranges,
         created_at=datetime.now(UTC).replace(tzinfo=None),
+        delete_file=delete_file,
     )
     _PREFLIGHTS[preflight_id] = preflight
     return preflight_id, preflight
@@ -62,4 +64,5 @@ def _cleanup_expired() -> None:
         if now - preflight.created_at > _PREFLIGHT_TTL:
             expired.append(preflight_id)
     for preflight_id in expired:
-        clear_preflight(preflight_id)
+        delete_file = _PREFLIGHTS[preflight_id].delete_file
+        clear_preflight(preflight_id, delete_file=delete_file)

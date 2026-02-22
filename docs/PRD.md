@@ -2,7 +2,7 @@
 
 ## Document Control
 
-- **Product:** Polars-FastAPI-Svelte Analysis Platform
+- **Product:** Data-Forge Analysis Platform
 - **Status:** Active
 - **Last Updated:** 2026-02-15
 - **Owner:** Product + Engineering
@@ -187,6 +187,7 @@ Row 4: [Schedules section (collapsible)]
 **Core Principle**: Schedules target **datasets**, not analyses. The analysis is resolved at execution time from the datasource's provenance.
 
 **Schedule Model**:
+
 - `datasource_id` (required): The target dataset to rebuild.
 - `cron_expression`: When to run (time-based trigger).
 - `depends_on`: Wait for another schedule to complete (dependency trigger).
@@ -194,6 +195,7 @@ Row 4: [Schedules section (collapsible)]
 - `analysis_id` is **NOT stored** — resolved from `datasource.created_by_analysis_id` at execution.
 
 **Execution Flow**:
+
 ```
 Schedule triggers
     ↓
@@ -207,11 +209,13 @@ Build that tab (with lazyframe deps auto-resolved)
 ```
 
 **Benefits**:
+
 - Always uses latest analysis recipe (no version lock-in).
 - User thinks: "Rebuild the sales report" not "Run analysis v3".
 - Moving output to new analysis automatically updates schedule target.
 
 **Triggers**:
+
 1. **Cron**: Time-based scheduling (e.g., `0 9 * * *` = daily at 9 AM).
 2. **Depends On**: DAG-style dependencies between schedules.
 3. **Event**: React to upstream dataset updates (datasource change detection via engine runs).

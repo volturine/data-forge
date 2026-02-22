@@ -16,6 +16,7 @@ export interface FrontendConfig {
 	public_idb_debug: boolean;
 	smtp_enabled: boolean;
 	telegram_enabled: boolean;
+	default_namespace: string;
 }
 
 export function getConfig(): ResultAsync<FrontendConfig, ApiError> {

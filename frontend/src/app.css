@@ -42,7 +42,7 @@
 	--transition: 160ms ease;
 
 	/* Layout */
-	--operations-panel-width: 400px;
+	--operations-panel-width: 460px;
 	--datasource-panel-width: 520px;
 	--pipeline-connection-height: 18px;
 	--space-1: 0.25rem;
@@ -246,12 +246,12 @@
 	textarea,
 	select {
 		font-family: var(--font-mono);
-		font-size: 0.875rem;
+		font-size: 0.8125rem;
 		color: var(--fg-primary);
 		background-color: var(--bg-primary);
 		border: 1px solid var(--border-primary);
 		border-radius: 0;
-		padding: 0.5rem 0.75rem;
+		padding: 0.5625rem 0.875rem;
 		width: 100%;
 		transition: border-color var(--transition);
 	}
@@ -317,10 +317,12 @@
 
 	label {
 		display: block;
-		font-size: 0.875rem;
-		font-weight: 500;
-		color: var(--fg-secondary);
-		margin-bottom: 0.25rem;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		color: var(--fg-muted);
+		margin-bottom: 0.375rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 
 	/* Buttons */
@@ -497,30 +499,28 @@ button.btn-sm {
 
 /* Config Panel */
 .config-panel {
-	padding: 0.75rem;
-	border: 1px solid var(--border-primary);
+	padding: 0;
+	border: none;
 	border-radius: 0;
 	background-color: var(--bg-primary);
-}
-
-.config-panel h3 {
-	margin-top: 0;
-	margin-bottom: 0.75rem;
-	color: var(--fg-primary);
 }
 
 .config-panel .description {
 	margin-top: 0;
 	margin-bottom: 0.75rem;
 	color: var(--fg-tertiary);
-	font-size: 0.875rem;
+	font-size: 0.75rem;
+	line-height: 1.6;
 }
 
 .config-panel h4 {
 	margin-top: 0;
 	margin-bottom: 0.75rem;
-	font-size: 1rem;
-	color: var(--fg-secondary);
+	font-size: 0.6875rem;
+	font-weight: 600;
+	color: var(--fg-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
 }
 
 .lineage-node {
@@ -580,30 +580,35 @@ button.btn-sm {
 	overflow: hidden;
 }
 
-/* Form Section */
+/* Form Section — flat spacer with subtle top divider between sibling sections */
 .form-section {
-	margin-bottom: 1.5rem;
-	padding: 0.75rem;
-	background-color: var(--bg-tertiary);
+	margin-bottom: 0;
+	padding: 0 0 1.25rem 0;
+	background-color: transparent;
 	border-radius: 0;
-	border: 1px solid var(--border-primary);
+	border: none;
+}
+
+.form-section + .form-section {
+	padding-top: 1.25rem;
+	border-top: 1px solid var(--border-tertiary);
 }
 
 /* Column List Pattern */
 .column-list {
 	max-height: 300px;
 	overflow-y: auto;
-	border: 1px solid var(--border-primary);
+	border: none;
 	border-radius: 0;
-	padding: 0.5rem;
-	margin-bottom: 1rem;
-	background-color: var(--bg-primary);
+	padding: 0;
+	margin-bottom: 0;
+	background-color: transparent;
 }
 
 .column-item {
 	display: flex;
 	align-items: center;
-	padding: 0.5rem;
+	padding: 0.5rem 0.625rem;
 	cursor: pointer;
 	border-radius: 0;
 }
@@ -613,7 +618,7 @@ button.btn-sm {
 }
 
 .column-item input[type='checkbox'] {
-	margin-right: 0.5rem;
+	margin-right: 0.625rem;
 	cursor: pointer;
 }
 
@@ -634,20 +639,21 @@ button.btn-sm {
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
+	min-width: 160px;
 }
 
 .column-trigger {
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
-	padding: 0.5rem 0.75rem;
+	padding: 0.5625rem 0.875rem;
 	border-radius: 0;
 	border: 1px solid var(--border-primary);
 	background-color: var(--bg-secondary);
 	color: var(--fg-primary);
 	cursor: pointer;
 	justify-content: space-between;
-	font-size: 0.875rem;
+	font-size: 0.8125rem;
 }
 
 .column-trigger:focus-visible {
@@ -674,7 +680,7 @@ button.btn-sm {
 
 .column-menu {
 	position: absolute;
-	z-index: 10;
+	z-index: var(--z-dropdown);
 	top: calc(100% + 6px);
 	left: 0;
 	min-width: 100%;
@@ -688,6 +694,14 @@ button.btn-sm {
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
+}
+
+.branch-picker__menu {
+	left: var(--popover-left);
+	top: var(--popover-top);
+	width: var(--popover-width);
+	min-width: var(--popover-width);
+	max-width: var(--popover-width);
 }
 
 .column-search {
@@ -854,45 +868,49 @@ button.btn-sm {
 	background-color: var(--bg-hover);
 }
 
-/* Info/Warning/Success/Error Boxes */
+/* Info/Warning/Success/Error Boxes — subtle, no heavy borders */
 .info-box,
 .warning-box,
 .success-box,
 .error-box,
 .selected-summary {
-	padding: 1rem;
-	border: 1px solid;
+	padding: 0.625rem 0.75rem;
+	border: none;
+	border-left: 2px solid;
 	border-radius: 0;
-	margin-bottom: 1rem;
+	margin-top: 0.75rem;
+	margin-bottom: 0;
+	font-size: 0.75rem;
+	line-height: 1.5;
 }
 
 .info-box {
-	background-color: var(--accent-bg);
-	border-color: var(--border-primary);
-	color: var(--accent-primary);
+	background-color: transparent;
+	border-left-color: var(--accent-secondary);
+	color: var(--fg-tertiary);
 }
 
 .warning-box {
-	background-color: var(--bg-tertiary);
-	border-color: var(--border-primary);
+	background-color: transparent;
+	border-left-color: var(--warning-border);
 	color: var(--fg-tertiary);
 }
 
 .success-box {
-	background-color: var(--success-bg);
-	border-color: var(--border-primary);
-	color: var(--success-fg);
+	background-color: transparent;
+	border-left-color: var(--success-fg);
+	color: var(--fg-tertiary);
 }
 
 .error-box {
-	background-color: var(--error-bg);
-	border-color: var(--error-border);
+	background-color: transparent;
+	border-left-color: var(--error-border);
 	color: var(--error-fg);
 }
 
 .selected-summary {
-	background-color: var(--accent-bg);
-	border-color: var(--border-primary);
+	background-color: transparent;
+	border-left-color: var(--accent-secondary);
 	color: var(--accent-primary);
 }
 
@@ -1245,32 +1263,39 @@ button.btn-sm {
 
 .help-box {
 	color: var(--fg-tertiary);
-	background-color: var(--bg-primary);
-	border: 1px solid var(--border-primary);
-	border-left: 3px solid var(--accent-secondary);
+	background-color: transparent;
+	border: none;
+	border-left: 2px solid var(--border-tertiary);
+	font-size: 0.75rem;
+	padding: 0.5rem 0.75rem;
 }
 
 .callout-info {
-	background-color: var(--accent-bg);
-	border-color: var(--border-primary);
-	color: var(--accent-primary);
+	background-color: transparent;
+	border-color: var(--accent-secondary);
+	color: var(--fg-tertiary);
 }
 
 .callout-warning {
-	background-color: var(--warning-bg);
+	background-color: transparent;
 	border-color: var(--warning-border);
-	color: var(--warning-fg);
+	color: var(--fg-tertiary);
 }
 
 .empty-dashed {
 	color: var(--fg-muted);
-	background-color: var(--bg-tertiary);
-	border: 1px dashed var(--border-primary);
+	background-color: transparent;
+	border: 1px dashed var(--border-tertiary);
 }
 
 .item-row {
-	background-color: var(--bg-primary);
-	border: 1px solid var(--border-primary);
+	background-color: transparent;
+	border: none;
+	border-bottom: 1px solid var(--border-tertiary);
+}
+
+.item-row:last-child {
+	border-bottom: none;
 }
 
 .remove-pill {
@@ -1294,13 +1319,15 @@ button.btn-sm {
 
 .chip-grid {
 	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-	border: 1px solid var(--border-primary);
-	background-color: var(--bg-secondary);
+	border: none;
+	background-color: transparent;
 }
 
 .save-box {
-	background-color: var(--bg-tertiary);
-	border: 1px solid var(--border-primary);
+	background-color: transparent;
+	border: none;
+	border-top: 1px solid var(--border-tertiary);
+	padding-top: 1rem;
 }
 
 .accent-btn {
@@ -1668,6 +1695,33 @@ button.btn-sm {
 	contain: content;
 }
 
+.datasource-comparison-panel {
+	contain: content;
+}
+
+.datasource-comparison-scroll {
+	contain: content;
+}
+
+.datasource-comparison-scroll .dataset-table__row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 36px;
+}
+
+.excel-grid {
+	contain: content;
+}
+
+.excel-grid .dataset-table__row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 32px;
+}
+
+.excel-grid .preview-row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 32px;
+}
+
 /* Skip rendering off-screen step nodes in the pipeline canvas.
    The browser only renders steps visible in the scroll viewport. */
 .step-node {
@@ -1677,6 +1731,11 @@ button.btn-sm {
 
 .step-node.view-node {
 	contain-intrinsic-size: auto 500px;
+}
+
+.chart-placeholder {
+	border: 1px dashed var(--border-primary);
+	background-color: var(--bg-primary);
 }
 
 /* Isolate StepLibrary scroll from PipelineCanvas compositing layer.
@@ -1724,6 +1783,10 @@ body.touch-dragging .pipeline-canvas {
 	left: var(--popover-left);
 	top: var(--popover-top);
 	width: var(--popover-width);
+}
+
+.z-popover {
+	z-index: var(--z-popover);
 }
 
 .step-summary.inactive {
@@ -1914,6 +1977,47 @@ body.touch-dragging .pipeline-canvas {
 
 .analysis-page .center-pane.expanded {
 	flex: 1;
+}
+
+/* Bottom pane (footer config panel) */
+.analysis-page .bottom-pane {
+	width: 100%;
+	position: relative;
+	transition:
+		height var(--transition),
+		visibility var(--transition);
+}
+
+.analysis-page .bottom-pane.collapsed {
+	height: 0 !important;
+	border: none;
+}
+
+.analysis-page .bottom-pane > .step-config {
+	width: 100%;
+	flex: 1;
+	min-height: 0;
+}
+
+.bottom-pane-resize-handle {
+	position: absolute;
+	top: -3px;
+	left: 0;
+	right: 0;
+	height: 6px;
+	cursor: ns-resize;
+	z-index: 5;
+}
+
+.bottom-pane-resize-handle:hover,
+.bottom-pane-resize-handle:active {
+	background: var(--accent-primary);
+	opacity: 0.4;
+}
+
+.analysis-page.resizing {
+	user-select: none;
+	cursor: ns-resize;
 }
 
 .analysis-page .readonly {
@@ -2336,7 +2440,8 @@ tbody tr:last-child .dataset-table__td {
 	transform: rotate(180deg);
 }
 
-.collapse-arrow.hidden {
+.collapse-arrow.hidden,
+.config-position-toggle.hidden {
 	visibility: hidden;
 	pointer-events: none;
 }
@@ -2431,7 +2536,8 @@ tbody tr:last-child .dataset-table__td {
 	background-color: var(--bg-secondary);
 }
 
-.collapse-arrow.hidden {
+.collapse-arrow.hidden,
+.config-position-toggle.hidden {
 	visibility: hidden;
 	pointer-events: none;
 }

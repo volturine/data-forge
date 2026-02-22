@@ -1,104 +1,85 @@
 import uuid
 from pathlib import Path
-from unittest.mock import patch
 
-from core.config import settings
+from core.namespace import namespace_paths
 from modules.datasource.models import DataSource
 
 
 class TestDataSourceUpload:
     def test_upload_csv_file_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
-        with patch.object(settings, 'upload_dir', temp_upload_dir):
-            files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
-            data = {'name': 'Test CSV Upload'}
+        files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
+        data = {'name': 'Test CSV Upload'}
 
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-            assert response.status_code == 200
-            result = response.json()
+        assert response.status_code == 200
+        result = response.json()
 
-            assert result['name'] == 'Test CSV Upload'
-            assert result['source_type'] == 'file'
-            assert result['config']['file_type'] == 'csv'
-            assert 'id' in result
-            assert 'created_at' in result
-
-            uploaded_file = Path(result['config']['file_path'])
-            assert uploaded_file.exists()
-            uploaded_file.unlink()
+        assert result['name'] == 'Test CSV Upload'
+        assert result['source_type'] == 'iceberg'
+        assert 'id' in result
+        assert 'created_at' in result
+        assert result['config']['branch'] == 'master'
+        assert result['config']['metadata_path'].startswith(str(namespace_paths().clean_dir))
 
     def test_upload_parquet_file_success(self, client, temp_upload_dir: Path, sample_parquet_file: Path):
-        with patch.object(settings, 'upload_dir', temp_upload_dir):
-            with open(sample_parquet_file, 'rb') as f:
-                files = {'file': ('test.parquet', f, 'application/octet-stream')}
-                data = {'name': 'Test Parquet Upload'}
+        with open(sample_parquet_file, 'rb') as f:
+            files = {'file': ('test.parquet', f, 'application/octet-stream')}
+            data = {'name': 'Test Parquet Upload'}
 
-                response = client.post('/api/v1/datasource/upload', files=files, data=data)
+            response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-            assert response.status_code == 200
-            result = response.json()
+        assert response.status_code == 200
+        result = response.json()
 
-            assert result['name'] == 'Test Parquet Upload'
-            assert result['config']['file_type'] == 'parquet'
-
-            uploaded_file = Path(result['config']['file_path'])
-            assert uploaded_file.exists()
-            uploaded_file.unlink()
+        assert result['name'] == 'Test Parquet Upload'
+        assert result['source_type'] == 'iceberg'
+        assert result['config']['branch'] == 'master'
 
     def test_upload_json_file_success(self, client, temp_upload_dir: Path, sample_json_file: Path):
-        with patch.object(settings, 'upload_dir', temp_upload_dir):
-            with open(sample_json_file, 'rb') as f:
-                files = {'file': ('test.json', f, 'application/json')}
-                data = {'name': 'Test JSON Upload'}
+        with open(sample_json_file, 'rb') as f:
+            files = {'file': ('test.json', f, 'application/json')}
+            data = {'name': 'Test JSON Upload'}
 
-                response = client.post('/api/v1/datasource/upload', files=files, data=data)
+            response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-            assert response.status_code == 200
-            result = response.json()
+        assert response.status_code == 200
+        result = response.json()
 
-            assert result['name'] == 'Test JSON Upload'
-            assert result['config']['file_type'] == 'json'
-
-            uploaded_file = Path(result['config']['file_path'])
-            assert uploaded_file.exists()
-            uploaded_file.unlink()
+        assert result['name'] == 'Test JSON Upload'
+        assert result['source_type'] == 'iceberg'
+        assert result['config']['branch'] == 'master'
 
     def test_upload_ndjson_file_success(self, client, temp_upload_dir: Path, sample_ndjson_file: Path):
-        with patch.object(settings, 'upload_dir', temp_upload_dir):
-            with open(sample_ndjson_file, 'rb') as f:
-                files = {'file': ('test.ndjson', f, 'application/json')}
-                data = {'name': 'Test NDJSON Upload'}
+        with open(sample_ndjson_file, 'rb') as f:
+            files = {'file': ('test.ndjson', f, 'application/json')}
+            data = {'name': 'Test NDJSON Upload'}
 
-                response = client.post('/api/v1/datasource/upload', files=files, data=data)
+            response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-            assert response.status_code == 200
-            result = response.json()
+        assert response.status_code == 200
+        result = response.json()
 
-            assert result['name'] == 'Test NDJSON Upload'
-            assert result['config']['file_type'] == 'ndjson'
-
-            uploaded_file = Path(result['config']['file_path'])
-            assert uploaded_file.exists()
-            uploaded_file.unlink()
+        assert result['name'] == 'Test NDJSON Upload'
+        assert result['source_type'] == 'iceberg'
+        assert result['config']['branch'] == 'master'
 
     def test_upload_without_filename(self, client, temp_upload_dir: Path):
-        with patch.object(settings, 'upload_dir', temp_upload_dir):
-            files = {'file': ('', b'content', 'text/csv')}
-            data = {'name': 'Test Upload'}
+        files = {'file': ('', b'content', 'text/csv')}
+        data = {'name': 'Test Upload'}
 
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-            assert response.status_code == 422
+        assert response.status_code == 422
 
     def test_upload_unsupported_file_type(self, client, temp_upload_dir: Path):
-        with patch.object(settings, 'upload_dir', temp_upload_dir):
-            files = {'file': ('test.txt', b'content', 'text/plain')}
-            data = {'name': 'Test Upload'}
+        files = {'file': ('test.txt', b'content', 'text/plain')}
+        data = {'name': 'Test Upload'}
 
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-            assert response.status_code == 400
-            assert 'Unsupported file type' in response.json()['detail']
+        assert response.status_code == 400
+        assert 'Unsupported file type' in response.json()['detail']
 
 
 class TestDataSourceConnect:
@@ -122,28 +103,6 @@ class TestDataSourceConnect:
         assert result['config']['connection_string'] == 'postgresql://user:pass@localhost/db'
         assert result['config']['query'] == 'SELECT * FROM users'
 
-    def test_connect_api_datasource(self, client):
-        payload = {
-            'name': 'Test API Connection',
-            'source_type': 'api',
-            'config': {
-                'url': 'https://api.example.com/data',
-                'method': 'GET',
-                'headers': {'Authorization': 'Bearer token'},
-                'auth': None,
-            },
-        }
-
-        response = client.post('/api/v1/datasource/connect', json=payload)
-
-        assert response.status_code == 200
-        result = response.json()
-
-        assert result['name'] == 'Test API Connection'
-        assert result['source_type'] == 'api'
-        assert result['config']['url'] == 'https://api.example.com/data'
-        assert result['config']['method'] == 'GET'
-
     def test_connect_unsupported_source_type(self, client):
         payload = {
             'name': 'Test Unknown',
@@ -153,7 +112,7 @@ class TestDataSourceConnect:
 
         response = client.post('/api/v1/datasource/connect', json=payload)
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
 
 class TestDataSourceList:

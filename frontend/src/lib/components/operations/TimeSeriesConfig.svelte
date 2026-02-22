@@ -66,8 +66,6 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Time series configuration">
-	<h3>Time Series Configuration</h3>
-
 	<div class="form-section" role="group" aria-labelledby="ts-source-column-heading">
 		<h4 id="ts-source-column-heading">Source Column</h4>
 		<ColumnDropdown
@@ -142,7 +140,7 @@
 	{:else if config.operation_type === 'add' || config.operation_type === 'subtract'}
 		<div class="form-section" role="group" aria-labelledby="ts-period-heading">
 			<h4 id="ts-period-heading">Time Period</h4>
-			<div class="flex gap-2">
+			<div class="flex gap-3">
 				<div class="flex-1">
 					<label for="ts-input-value" class="block text-sm mb-1 text-fg-secondary">Value:</label>
 					<input

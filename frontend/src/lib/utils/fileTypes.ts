@@ -23,8 +23,7 @@ import {
 	Layers,
 	Snowflake,
 	Folder as FolderIcon,
-	File,
-	Globe
+	File
 } from 'lucide-svelte';
 
 /**
@@ -46,7 +45,17 @@ export type FileType =
 /**
  * Supported datasource types (non-file sources)
  */
-export type SourceType = 'database' | 'api' | 'iceberg' | 'file' | 'duckdb' | 'analysis';
+export type SourceType = 'database' | 'iceberg' | 'file' | 'analysis' | 'duckdb';
+
+export type SourceCategory = 'file' | 'database' | 'analysis' | 'duckdb';
+
+export const SOURCE_TYPE_CATEGORY: Record<SourceType, SourceCategory> = {
+	file: 'file',
+	iceberg: 'file',
+	database: 'database',
+	analysis: 'analysis',
+	duckdb: 'duckdb'
+};
 
 /**
  * Color scheme for a file type (CSS-in-JS format)
@@ -246,18 +255,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		icon: Database,
 		description: 'Database connection'
 	},
-	api: {
-		type: 'unknown',
-		label: 'API',
-		extensions: [],
-		colors: {
-			color: 'var(--source-api-fg)',
-			borderColor: 'var(--source-api-border)',
-			backgroundColor: 'var(--source-api-bg)'
-		},
-		icon: Globe,
-		description: 'API endpoint'
-	},
 	iceberg: {
 		type: 'iceberg',
 		label: 'Iceberg',
@@ -270,18 +267,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		icon: Snowflake,
 		description: 'Apache Iceberg table'
 	},
-	duckdb: {
-		type: 'unknown',
-		label: 'DuckDB',
-		extensions: ['.duckdb', '.db'],
-		colors: {
-			color: 'var(--source-duckdb-fg)',
-			borderColor: 'var(--source-duckdb-border)',
-			backgroundColor: 'var(--source-duckdb-bg)'
-		},
-		icon: Database,
-		description: 'DuckDB database'
-	},
 	analysis: {
 		type: 'unknown',
 		label: 'Analysis',
@@ -293,6 +278,18 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		},
 		icon: Layers,
 		description: 'Derived analysis output'
+	},
+	duckdb: {
+		type: 'unknown',
+		label: 'DuckDB',
+		extensions: [],
+		colors: {
+			color: 'var(--source-duckdb-fg)',
+			borderColor: 'var(--source-duckdb-border)',
+			backgroundColor: 'var(--source-duckdb-bg)'
+		},
+		icon: Database,
+		description: 'DuckDB export'
 	}
 };
 
@@ -423,6 +420,10 @@ export function getFileTypeLabel(fileType: FileType): string {
  */
 export function getSourceTypeConfig(sourceType: SourceType): FileTypeConfig {
 	return SOURCE_TYPE_REGISTRY[sourceType];
+}
+
+export function getSourceTypeCategory(sourceType: SourceType): SourceCategory {
+	return SOURCE_TYPE_CATEGORY[sourceType];
 }
 
 /**

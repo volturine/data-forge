@@ -85,7 +85,12 @@ export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {
 
 export function compareEngineRuns(
 	idA: string,
-	idB: string
+	idB: string,
+	datasourceId?: string
 ): ResultAsync<BuildComparison, ApiError> {
-	return apiRequest<BuildComparison>(`/v1/engine-runs/compare?run_a=${idA}&run_b=${idB}`);
+	const params = new URLSearchParams({ run_a: idA, run_b: idB });
+	if (datasourceId) {
+		params.set('datasource_id', datasourceId);
+	}
+	return apiRequest<BuildComparison>(`/v1/engine-runs/compare?${params.toString()}`);
 }

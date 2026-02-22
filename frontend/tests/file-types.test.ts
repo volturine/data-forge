@@ -18,7 +18,7 @@ describe('fileTypes utils', () => {
 	});
 
 	it('detects folders explicitly', () => {
-		expect(detectFileType('/data/exports', true)).toBe('folder');
+		expect(detectFileType('/data/default/exports', true)).toBe('folder');
 	});
 
 	it('falls back to unknown', () => {

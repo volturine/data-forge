@@ -172,10 +172,8 @@
 </script>
 
 <div class="config-panel" role="region" aria-label="Filter configuration">
-	<h3>Filter Configuration</h3>
-
-	<div class="form-section" role="group" aria-labelledby="{uid}-conditions-heading">
-		<div class="mb-4 flex items-center justify-between">
+	<div role="group" aria-labelledby="{uid}-conditions-heading">
+		<div class="mb-5 flex items-center justify-between">
 			<h4 id="{uid}-conditions-heading" class="mb-0">Conditions</h4>
 			<div class="flex items-center gap-2">
 				<div class="flex" role="radiogroup" aria-label="Condition logic">
@@ -215,7 +213,7 @@
 			</p>
 		{:else}
 			<div
-				class="flex flex-col gap-3"
+				class="flex flex-col gap-4"
 				role="list"
 				aria-label="Filter conditions"
 				aria-live="polite"
@@ -227,10 +225,10 @@
 					{@const ops = getOperatorsForType(colType, isColumn)}
 
 					<div
-						class="condition-card filter-config border border-tertiary bg-panel p-3"
+						class="condition-card filter-config border-l-2 border-l-tertiary pl-4 pb-2"
 						role="listitem"
 					>
-						<div class="mb-3 flex items-center gap-2 border-b border-tertiary pb-2">
+						<div class="mb-3 flex items-center gap-2 pb-2">
 							<span class="text-xs font-semibold text-fg-muted">#{i + 1}</span>
 							{#if cond.column}
 								<span class="text-sm font-medium text-fg-primary">{cond.column}</span>
@@ -246,7 +244,7 @@
 							</button>
 						</div>
 
-						<div class="relative flex flex-wrap items-start gap-3">
+						<div class="relative flex flex-wrap items-start gap-4">
 							<div class="flex min-w-55 flex-2 flex-col gap-1">
 								<label class="mb-0 text-xs font-normal text-fg-muted" for="{uid}-column-{i}"
 									>Column</label
@@ -360,7 +358,7 @@
 							{:else}
 								<div class="flex min-w-60 flex-2 flex-col gap-1">
 									<span class="text-xs font-normal text-fg-muted">Value</span>
-									<div class="flex items-center h-9 px-3 text-sm italic bg-tertiary text-fg-muted">
+									<div class="flex items-center h-9 px-3 text-xs italic text-fg-muted">
 										<span>No value needed</span>
 									</div>
 								</div>
@@ -372,3 +370,4 @@
 		{/if}
 	</div>
 </div>
+

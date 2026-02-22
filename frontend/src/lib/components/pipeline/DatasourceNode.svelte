@@ -1,27 +1,17 @@
 <script lang="ts">
 	import type { DataSource } from '$lib/types/datasource';
 	import type { AnalysisTab } from '$lib/types/analysis';
-	import { getDatasourceSchema } from '$lib/api/datasource';
-	interface AnalysisExecuteResponse {
-		schema: Record<string, string>;
-		rows: Array<Record<string, unknown>>;
-		row_count?: number;
-	}
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { track } from '$lib/utils/audit-log';
-	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import {
 		FileText,
 		Database,
-		Globe,
 		Layers,
 		Snowflake,
 		PanelLeft,
 		Pencil,
 		RefreshCw,
-		Hash,
 		Check,
 		X,
 		Cpu,
@@ -29,11 +19,13 @@
 	} from 'lucide-svelte';
 	import { drag } from '$lib/stores/drag.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
 
 	interface Props {
 		datasource: DataSource | null;
+		datasourceLabel?: string | null;
 		tabName?: string;
 		analysisId?: string;
 		activeTab?: AnalysisTab | null;
@@ -41,13 +33,18 @@
 		onRenameTab?: (name: string) => void;
 	}
 
-	let { datasource, tabName, analysisId, activeTab, onChangeDatasource, onRenameTab }: Props =
-		$props();
+	let {
+		datasource,
+		datasourceLabel = null,
+		tabName,
+		analysisId,
+		activeTab,
+		onChangeDatasource,
+		onRenameTab
+	}: Props = $props();
 
 	let isEditing = $state(false);
 	let draftName = $state('');
-	let rowCount = $state<number | null>(null);
-	let isLoadingRowCount = $state(false);
 
 	// Engine config - simple state bound to store
 	let engineExpanded = $state(false);
@@ -95,18 +92,15 @@
 
 	$effect(() => {
 		if (!isEditing) {
-			draftName = tabName ?? datasource?.name ?? '';
-		}
-	});
-
-	// Reset row count when datasource changes
-	$effect(() => {
-		if (datasource?.id) {
-			rowCount = null;
+			draftName = tabName ?? datasourceLabel ?? datasource?.name ?? '';
 		}
 	});
 
 	const isIceberg = $derived(datasource?.source_type === 'iceberg');
+	const isOutputSource = $derived(
+		activeTab?.datasource_id === activeTab?.output_datasource_id &&
+			!!activeTab?.output_datasource_id
+	);
 	function updateTimeTravelUi(updates: { open?: boolean; month?: string; day?: string }) {
 		const active = activeTab;
 		if (!active) return;
@@ -139,12 +133,12 @@
 	function startEdit() {
 		if (!onRenameTab) return;
 		isEditing = true;
-		draftName = tabName ?? datasource?.name ?? '';
+		draftName = tabName ?? datasourceLabel ?? datasource?.name ?? '';
 	}
 
 	function cancelEdit() {
 		isEditing = false;
-		draftName = tabName ?? datasource?.name ?? '';
+		draftName = tabName ?? datasourceLabel ?? datasource?.name ?? '';
 	}
 
 	function commitEdit() {
@@ -161,124 +155,69 @@
 		isEditing = false;
 	}
 
-	async function calculateRowCount() {
-		if (isLoadingRowCount) return;
-		if (analysisSourceId) {
-			const analysisPayload =
-				analysisId && analysisSourceId === analysisId
-					? buildAnalysisPipelinePayload(
-							analysisId,
-							analysisStore.tabs,
-							datasourceStore.datasources
-						)
-					: null;
-			if (!analysisPayload) {
-				throw new Error('Analysis pipeline payload required for execute');
-			}
-			const tabParam = analysisSourceTabId
-				? `?analysis_tab_id=${encodeURIComponent(analysisSourceTabId)}`
-				: '';
-			const body = JSON.stringify({ pipeline: analysisPayload });
-			isLoadingRowCount = true;
-			await fetch(`/api/v1/analysis/${analysisSourceId}/execute${tabParam}`, {
-				method: 'POST',
-				body,
-				headers: { 'Content-Type': 'application/json' }
-			})
-				.then((response) => {
-					if (!response.ok) {
-						throw new Error('Failed to execute analysis');
-					}
-					return response.json() as Promise<AnalysisExecuteResponse>;
-				})
-				.then((payload) => {
-					rowCount = payload.row_count ?? payload.rows.length;
-					isLoadingRowCount = false;
-				})
-				.catch((error: unknown) => {
-					const message = error instanceof Error ? error.message : 'Failed to execute analysis';
-					track({
-						event: 'schema_error',
-						action: 'analysis_source_row_count',
-						target: analysisSourceId,
-						meta: { message }
-					});
-					isLoadingRowCount = false;
-				});
-			return;
-		}
-
-		if (!datasource?.id) return;
-		isLoadingRowCount = true;
-		getDatasourceSchema(datasource.id).match(
-			(schema) => {
-				if (schema.row_count !== null && schema.row_count !== undefined) {
-					rowCount = schema.row_count;
-				}
-				isLoadingRowCount = false;
-			},
-			(error) => {
-				track({
-					event: 'schema_error',
-					action: 'row_count',
-					target: datasource.id,
-					meta: { message: error.message }
-				});
-				isLoadingRowCount = false;
-			}
-		);
-	}
-
 	let analysisSourceId = $derived(
 		(activeTab?.datasource_config?.analysis_id as string | null) ??
 			(datasource?.config?.analysis_id as string | null) ??
-			null
-	);
-	let analysisSourceTabId = $derived(
-		(activeTab?.datasource_config?.analysis_tab_id as string | null) ??
-			(datasource?.config?.analysis_tab_id as string | null) ??
 			null
 	);
 	let sourceType = $derived(
 		(analysisSourceId ? 'analysis' : (datasource?.source_type ?? 'file')) as string
 	);
 	let isDragActive = $derived(drag.active);
+	const branchValue = $derived.by(() => {
+		const next = (activeTab?.datasource_config as Record<string, unknown> | null)?.branch;
+		if (typeof next === 'string' && next.trim().length > 0) {
+			return next;
+		}
+		return 'master';
+	});
+
+	function applyBranchValue(next: string) {
+		const active = activeTab;
+		if (!active) return;
+		const config = { ...(active.datasource_config ?? {}) } as Record<string, unknown>;
+		if (next) {
+			config.branch = next;
+		} else {
+			delete config.branch;
+		}
+		analysisStore.updateTab(active.id, { datasource_config: config });
+		analysisStore.setActiveTab(active.id);
+	}
 </script>
 
-<div class="datasource-node relative w-[65%]" class:drag-active={isDragActive}>
-	<div class="node-content bg-primary border-tertiary border p-4 hover:border-tertiary">
+<div class="datasource-node relative w-[60%]" class:drag-active={isDragActive}>
+	<div class="node-content bg-primary border-tertiary border hover:border-tertiary">
 		<!-- Header with icon and badge -->
-		<div class="mb-4 flex items-center justify-between border-b border-tertiary pb-3">
+		<div class="flex items-center justify-between px-4 py-3 border-b border-tertiary">
 			<div class="flex items-center gap-2">
-				<div class="flex h-6 w-6 items-center justify-center bg-accent text-bg-primary">
+				<div class="flex h-5 w-5 items-center justify-center bg-accent text-bg-primary">
 					{#if sourceType === 'file'}
-						<FileText size={14} />
+						<FileText size={12} />
 					{:else if sourceType === 'database'}
-						<Database size={14} />
-					{:else if sourceType === 'api'}
-						<Globe size={14} />
+						<Database size={12} />
 					{:else if sourceType === 'iceberg'}
-						<Snowflake size={14} />
+						<Snowflake size={12} />
 					{:else if sourceType === 'analysis'}
-						<Layers size={14} />
+						<Layers size={12} />
 					{:else}
-						<FileText size={14} />
+						<FileText size={12} />
 					{/if}
 				</div>
-				<span class="text-sm font-semibold">source</span>
+				<span class="text-xs font-semibold uppercase tracking-wide">source</span>
 			</div>
 			<span
-				class="rounded-sm border border-tertiary bg-tertiary text-fg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+				class="border border-tertiary bg-tertiary text-fg-faint px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-widest"
 				>root</span
 			>
 		</div>
 
 		<!-- Tab Section -->
 		<div
-			class="mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
+			class="mx-4 mt-4 mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
 		>
-			<div class="info-label flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
-				<PanelLeft size={12} class="opacity-60" />
+			<div class="info-label flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint">
+				<PanelLeft size={11} class="opacity-50" />
 				<span>Tab name</span>
 			</div>
 			<div class="flex items-center gap-2">
@@ -311,7 +250,9 @@
 						</button>
 					</div>
 				{:else}
-					<span class="text-sm font-medium">{tabName ?? datasource?.name ?? 'Untitled'}</span>
+					<span class="text-sm font-medium"
+						>{tabName ?? datasourceLabel ?? datasource?.name ?? 'Untitled'}</span
+					>
 					{#if onRenameTab}
 						<button
 							class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
@@ -327,64 +268,70 @@
 		</div>
 
 		<!-- Dataset Section -->
-		<div class="mb-3">
+		<div class="mx-4 mb-3">
 			<div
-				class="info-label mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted"
+				class="info-label mb-2 flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint"
 			>
-				<Database size={12} class="opacity-60" />
+				<Database size={11} class="opacity-50" />
 				<span>Dataset</span>
 			</div>
-			{#if datasource}
+			{#if datasource || datasourceLabel}
 				<div class="flex flex-col gap-2 border border-tertiary bg-tertiary p-3">
 					<div class="flex items-center justify-between">
-						<div class="text-sm font-semibold">{datasource.name}</div>
+						<div class="text-sm font-semibold">{datasourceLabel ?? datasource?.name}</div>
 						<div class="flex items-center gap-2">
-							{#if datasource.source_type === 'file'}
-								<FileTypeBadge
-									path={(datasource.config?.file_path as string) ?? ''}
-									size="sm"
-									showIcon={true}
-								/>
-							{:else if datasource.source_type === 'analysis'}
+							{#if datasource}
+								{#if datasource.source_type === 'file'}
+									<FileTypeBadge
+										path={(datasource.config?.file_path as string) ?? ''}
+										size="sm"
+										showIcon={true}
+									/>
+								{:else if datasource.source_type === 'analysis'}
+									{@const badgeSource = sourceType as SourceType}
+									<FileTypeBadge sourceType={badgeSource} size="sm" showIcon={true} />
+								{:else}
+									<FileTypeBadge
+										sourceType={datasource.source_type as 'database' | 'iceberg'}
+										size="sm"
+										showIcon={true}
+									/>
+								{/if}
+							{:else}
 								{@const badgeSource = sourceType as SourceType}
 								<FileTypeBadge sourceType={badgeSource} size="sm" showIcon={true} />
-							{:else}
-								<FileTypeBadge
-									sourceType={datasource.source_type as 'database' | 'api' | 'iceberg' | 'duckdb'}
-									size="sm"
-									showIcon={true}
-								/>
 							{/if}
 						</div>
 					</div>
-					<!-- Row count section -->
-					<div class="flex items-center border-t border-tertiary pt-2">
-						{#if rowCount !== null}
-							<span class="flex items-center gap-1 text-xs text-fg-muted">
-								<Hash size={10} />
-								{rowCount.toLocaleString()} rows
-							</span>
-						{:else}
-							<button
-								class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-tertiary bg-secondary text-fg-muted px-2 py-0.5 text-[10px] disabled:cursor-not-allowed disabled:opacity-70 hover:border-tertiary hover:text-fg-primary"
-								onclick={calculateRowCount}
-								disabled={isLoadingRowCount}
-								type="button"
-								aria-label="Calculate row count"
-							>
-								{#if isLoadingRowCount}
-									<RefreshCw size={10} class="spinning" />
-									<span>counting...</span>
-								{:else}
-									<Hash size={10} />
-									<span>count rows</span>
-								{/if}
-							</button>
-						{/if}
-					</div>
+					{#if isIceberg && datasource}
+						<div class="flex items-start gap-2 border-t border-tertiary pt-2">
+							<div class="min-w-0 flex-1">
+								<SnapshotPicker
+									datasourceId={datasource.id}
+									datasourceConfig={activeTab?.datasource_config ?? {}}
+									label="Time Travel"
+									persistOpen
+									branch={(activeTab?.datasource_config as Record<string, unknown> | null)
+										?.branch as string | null | undefined}
+									showBuildPreviews={!isOutputSource}
+									onConfigChange={updateSnapshotConfig}
+									onUiChange={updateTimeTravelUi}
+									onSelect={handleSnapshotSelect}
+								/>
+							</div>
+							<div class="min-w-32 shrink-0">
+								<BranchPicker
+									branches={(datasource?.config?.branches as string[] | undefined) ?? []}
+									value={branchValue}
+									placeholder="master"
+									onChange={applyBranchValue}
+								/>
+							</div>
+						</div>
+					{/if}
 				</div>
 			{:else}
-				<div class="rounded-sm border border-dashed border-tertiary p-3 text-center">
+				<div class="border border-dashed border-tertiary p-3 text-center">
 					<span class="text-xs text-fg-muted">No datasource connected</span>
 				</div>
 			{/if}
@@ -392,7 +339,7 @@
 
 		<!-- Engine Resources Section -->
 		{#if analysisId}
-			<div class="mb-3 overflow-hidden border border-tertiary">
+			<div class="mx-4 mb-3 overflow-hidden border border-tertiary">
 				<button
 					class="engine-header flex w-full cursor-pointer items-center justify-between border-none bg-secondary p-2 px-3 hover:bg-tertiary"
 					onclick={() => (engineExpanded = !engineExpanded)}
@@ -450,24 +397,10 @@
 			</div>
 		{/if}
 
-		{#if isIceberg && datasource}
-			<div class="mb-3">
-				<SnapshotPicker
-					datasourceId={datasource.id}
-					datasourceConfig={activeTab?.datasource_config ?? {}}
-					label="Time Travel"
-					persistOpen
-					onConfigChange={updateSnapshotConfig}
-					onUiChange={updateTimeTravelUi}
-					onSelect={handleSnapshotSelect}
-				/>
-			</div>
-		{/if}
-
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class="change-source-btn flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-secondary p-2 px-3 text-xs font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
+				class="change-source-btn mx-4 mb-4 flex w-[calc(100%-2rem)] cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-muted p-2 px-3 text-[0.6875rem] font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
 				onclick={onChangeDatasource}
 				type="button"
 			>

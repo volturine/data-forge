@@ -32,5 +32,6 @@
     "**/node_modules": true,
     "**/.svelte-kit": true
   },
-  "python-envs.pythonProjects": []
+  "python-envs.pythonProjects": [],
+  "projectManager.hg.ignoredFolders": ["out", "typings", "test", ".haxelib"]
 }
