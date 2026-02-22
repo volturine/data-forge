@@ -1462,6 +1462,11 @@ button.btn-sm {
 	background-color: var(--color-transparent);
 }
 
+.type-badge.variant-compact {
+	padding: 2px 4px;
+	gap: 0;
+}
+
 /* File type badge */
 .file-badge {
 	display: inline-flex;
@@ -1910,6 +1915,54 @@ body.touch-dragging .pipeline-canvas {
 	border-color: var(--border-primary);
 	border-style: dashed;
 	opacity: 0.85;
+}
+
+.filter-token-input {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.filter-token-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.filter-token {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	border: 1px solid var(--border-tertiary);
+	background-color: var(--bg-tertiary);
+	color: var(--fg-primary);
+	font-size: 0.75rem;
+	padding: 0.25rem 0.5rem;
+}
+
+.filter-token__label {
+	max-width: 220px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.filter-token__remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--fg-muted);
+	transition:
+		color var(--transition),
+		background-color var(--transition);
+}
+
+.filter-token__remove:hover {
+	background-color: var(--bg-hover);
+	color: var(--fg-primary);
 }
 
 /* Analysis header */

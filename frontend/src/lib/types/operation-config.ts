@@ -5,7 +5,7 @@ export type FilterValueType = 'string' | 'number' | 'date' | 'datetime' | 'colum
 export interface FilterCondition {
 	column: string;
 	operator: string;
-	value: string | number | boolean | null;
+	value: string | number | boolean | string[] | null;
 	value_type: FilterValueType;
 	compare_column?: string;
 }

@@ -125,7 +125,7 @@
 							class="m-0 cursor-pointer accent-primary"
 						/>
 						<span class="flex flex-1 items-center justify-start gap-2">
-							<ColumnTypeBadge columnType={column.dtype} size="xs" />
+							<ColumnTypeBadge columnType={column.dtype} size="xs" variant="compact" />
 							<span class="text-left text-sm text-fg-primary">{column.name}</span>
 						</span>
 					</label>

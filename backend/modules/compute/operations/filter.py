@@ -17,7 +17,7 @@ class FilterCondition(BaseModel):
 
     column: str
     operator: str = '=='
-    value: Any | None = None
+    value: Any | list[Any] | None = None
     value_type: ValueType = 'string'
     compare_column: str | None = None
 
@@ -41,6 +41,9 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
     """Coerce value to the appropriate Python/Polars type."""
     if value is None:
         return None
+
+    if isinstance(value, list):
+        return [coerce_value(item, value_type) for item in value]
 
     if value_type == 'number':
         if isinstance(value, (int, float)):
@@ -181,6 +184,24 @@ class FilterHandler(OperationHandler):
         op = self.OPERATORS.get(cond.operator)
         if not op:
             raise ValueError(f'Unsupported filter operator: {cond.operator}')
+        if cond.operator == 'regex' and coerced == '':
+            return pl.lit(False)
+        if isinstance(coerced, list):
+            if not coerced:
+                if cond.operator in ('not_contains', 'not_in'):
+                    return pl.lit(True)
+                return pl.lit(False)
+            if cond.operator in ('in', 'not_in'):
+                return op(left, coerced)
+            if cond.operator == 'not_contains':
+                combined = op(left, coerced[0])
+                for item in coerced[1:]:
+                    combined = combined & op(left, item)
+                return combined
+            combined = op(left, coerced[0])
+            for item in coerced[1:]:
+                combined = combined | op(left, item)
+            return combined
         return op(left, coerced)
 
     def _is_date_only_value(self, value: Any) -> bool:

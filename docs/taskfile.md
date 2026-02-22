@@ -2,6 +2,8 @@
 
 ## Status:
 
+- [x] Compact column type badges + filter literal multi-entry
+- [x] Adjust filter operators for list literals and empty token semantics
 - [x] Reapply DatasourceNode snapshot/branch layout + OutputNode build mode select styling
 - [x] Fix analysis output branch defaults + branch creation in OutputNode
 - [x] Fix OutputNode hidden toggle to refresh datasource lists immediately

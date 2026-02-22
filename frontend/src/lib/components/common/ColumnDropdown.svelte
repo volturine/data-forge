@@ -58,7 +58,7 @@
 <div class="column-select" bind:this={menuRef}>
 	<button type="button" class="column-trigger" onclick={openMenu} aria-expanded={menuOpen}>
 		{#if selectedColumn}
-			<ColumnTypeBadge columnType={selectedColumn.dtype} size="xs" />
+			<ColumnTypeBadge columnType={selectedColumn.dtype} size="xs" variant="compact" />
 			<span class="column-label">{selectedColumn.name}</span>
 		{:else}
 			<span class="column-placeholder">{placeholder}</span>
@@ -86,7 +86,7 @@
 						role="option"
 						aria-selected={value === column.name}
 					>
-						<ColumnTypeBadge columnType={column.dtype} size="xs" />
+						<ColumnTypeBadge columnType={column.dtype} size="xs" variant="compact" />
 						<span>{column.name}</span>
 					</button>
 				{:else}

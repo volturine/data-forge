@@ -62,6 +62,7 @@ Nothing is complete until `just verify` passes with **zero errors and zero warni
 - File naming: `snake_case.py`
 - Store naive UTC datetimes: `datetime.now(UTC).replace(tzinfo=None)`
 - Handlers run in engine subprocesses — sync HTTP calls (e.g., `httpx`) are fine
+- Python 3.12+ sqlite3 datetime adapter is deprecated — register adapter to isoformat in `backend/core/logging.py` to avoid warnings
 
 ## Frontend (Svelte 5 + TypeScript)
 

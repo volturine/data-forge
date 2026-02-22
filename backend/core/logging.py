@@ -30,6 +30,13 @@ _DEFAULT_FLUSH_INTERVAL = 5.0
 _logger = logging.getLogger('core.logging')
 
 
+def _adapt_datetime(value: datetime) -> str:
+    return value.isoformat()
+
+
+sqlite3.register_adapter(datetime, _adapt_datetime)
+
+
 def _day_from_ts(ts: datetime | None) -> date:
     """Get the date in the configured timezone for daily table partitioning."""
     tz = ZoneInfo(settings.timezone)

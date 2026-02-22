@@ -616,7 +616,7 @@
 														<ColumnTypeBadge
 															columnType={getColumnType(header.id)}
 															size="xs"
-															showIcon={false}
+															variant="compact"
 														/>
 													{:else}
 														<span class="dataset-table__type-text">-</span>

@@ -11,7 +11,7 @@
 	interface Condition {
 		column: string;
 		operator: string;
-		value: string | number | boolean | null;
+		value: string | number | boolean | string[] | null;
 		value_type: ValueType;
 		compare_column?: string;
 	}
@@ -39,6 +39,7 @@
 	const conditions = $derived(config.conditions ?? [defaultCondition]);
 
 	const COMPARISON_OPS = ['=', '!=', '>', '<', '>=', '<='];
+	const LIST_OPS = ['in', 'not_in'];
 	const STRING_OPS = ['contains', 'not_contains', 'starts_with', 'ends_with', 'regex'];
 	const NULL_OPS = ['is_null', 'is_not_null'];
 
@@ -54,6 +55,8 @@
 		starts_with: 'starts with',
 		ends_with: 'ends with',
 		regex: 'regex',
+		in: 'in',
+		not_in: 'not in',
 		is_null: 'is null',
 		is_not_null: 'is not null'
 	};
@@ -72,7 +75,7 @@
 
 	function getOperatorsForType(type: string, isColumnMode: boolean): string[] {
 		if (isColumnMode) return COMPARISON_OPS;
-		if (type === 'string') return [...COMPARISON_OPS, ...STRING_OPS, ...NULL_OPS];
+		if (type === 'string') return [...COMPARISON_OPS, ...LIST_OPS, ...STRING_OPS, ...NULL_OPS];
 		return [...COMPARISON_OPS, ...NULL_OPS];
 	}
 
@@ -98,6 +101,34 @@
 			}
 		}
 		config.conditions = conditions.map((c, i) => (i === idx ? next : c));
+	}
+
+	function isMultiLiteralOperator(op: string): boolean {
+		return op !== 'regex' && op !== 'is_null' && op !== 'is_not_null';
+	}
+
+	function getLiteralList(value: string | number | boolean | string[] | null): string[] {
+		if (Array.isArray(value)) return value;
+		if (value === null || value === undefined) return [];
+		if (value === '') return [];
+		return [String(value)];
+	}
+
+	function setLiteralList(idx: number, values: string[]) {
+		const next = values.length === 0 ? '' : values;
+		updateCondition(idx, { value: next });
+	}
+
+	function appendLiteralToken(idx: number, token: string) {
+		const trimmed = token.trim();
+		if (!trimmed) return;
+		const next = [...getLiteralList(conditions[idx].value), trimmed];
+		setLiteralList(idx, next);
+	}
+
+	function removeLiteralToken(idx: number, tokenIndex: number) {
+		const next = getLiteralList(conditions[idx].value).filter((_, i) => i !== tokenIndex);
+		setLiteralList(idx, next);
 	}
 
 	function removeCondition(idx: number) {
@@ -126,7 +157,7 @@
 		const op = ops.includes(cond.operator) ? cond.operator : '=';
 
 		if (isColumn) {
-			updateCondition(idx, { value_type: 'column', compare_column: '', operator: op, value: null });
+			updateCondition(idx, { value_type: 'column', compare_column: '', operator: op, value: '' });
 		} else {
 			updateCondition(idx, {
 				value_type: colType,
@@ -140,14 +171,18 @@
 	function handleOperatorChange(idx: number, op: string) {
 		const updates: Partial<Condition> = { operator: op };
 		if (isNullOperator(op)) {
-			updates.value = null;
+			updates.value = '';
 			updates.compare_column = undefined;
+		}
+		if (op === 'regex' && Array.isArray(conditions[idx].value)) {
+			updates.value = '';
 		}
 		updateCondition(idx, updates);
 	}
 
-	function formatDatetimeForInput(val: string | number | boolean | null): string {
+	function formatDatetimeForInput(val: string | number | boolean | string[] | null): string {
 		if (!val) return '';
+		if (Array.isArray(val)) return '';
 		const str = String(val);
 		// If already in datetime-local format (YYYY-MM-DDTHH:MM), return as-is
 		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return str.slice(0, 16);
@@ -159,8 +194,9 @@
 		return '';
 	}
 
-	function formatDateForInput(val: string | number | boolean | null): string {
+	function formatDateForInput(val: string | number | boolean | string[] | null): string {
 		if (!val) return '';
+		if (Array.isArray(val)) return '';
 		const str = String(val);
 		// If already in date format (YYYY-MM-DD), return as-is
 		if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
@@ -222,6 +258,8 @@
 					{@const colType = getColumnType(cond.column)}
 					{@const isColumn = cond.value_type === 'column'}
 					{@const isNull = isNullOperator(cond.operator)}
+					{@const multiLiteral =
+						!isColumn && !isNull && colType === 'string' && isMultiLiteralOperator(cond.operator)}
 					{@const ops = getOperatorsForType(colType, isColumn)}
 
 					<div
@@ -344,6 +382,41 @@
 											<option value="true">true</option>
 											<option value="false">false</option>
 										</select>
+									{:else if multiLiteral}
+										{@const tokens = getLiteralList(cond.value)}
+										<div class="filter-token-input">
+											<input
+												id="{uid}-value-{i}"
+												data-testid={`filter-value-input-${i}`}
+												type="text"
+												value=""
+												onkeydown={(e) => {
+													if (e.key !== 'Enter') return;
+													e.preventDefault();
+													const target = e.currentTarget as HTMLInputElement;
+													appendLiteralToken(i, target.value);
+													target.value = '';
+												}}
+												placeholder="Type value and press Enter"
+											/>
+											{#if tokens.length > 0}
+												<div class="filter-token-list" role="list" aria-label="Filter values">
+													{#each tokens as token, tokenIndex (tokenIndex)}
+														<span class="filter-token" role="listitem">
+															<span class="filter-token__label">{token}</span>
+															<button
+																class="filter-token__remove"
+																onclick={() => removeLiteralToken(i, tokenIndex)}
+																aria-label={`Remove ${token}`}
+																type="button"
+															>
+																<X size={12} />
+															</button>
+														</span>
+													{/each}
+												</div>
+											{/if}
+										</div>
 									{:else}
 										<input
 											id="{uid}-value-{i}"
@@ -370,4 +443,3 @@
 		{/if}
 	</div>
 </div>
-

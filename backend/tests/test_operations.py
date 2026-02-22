@@ -65,6 +65,120 @@ def test_filter_handler_column_comparison():
     assert lf.collect().height == 3
 
 
+def test_filter_handler_contains_list_or():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': 'name',
+                    'operator': 'contains',
+                    'value': ['Ali', 'Bob'],
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect().height == 2
+
+
+def test_filter_handler_equals_list_or():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': 'group',
+                    'operator': '=',
+                    'value': ['a', 'b'],
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect().height == 3
+
+
+def test_filter_handler_not_contains_list_and():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': 'name',
+                    'operator': 'not_contains',
+                    'value': ['Ali', 'Bob'],
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect()['name'].to_list() == ['Charlie']
+
+
+def test_filter_handler_in_list():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': 'group',
+                    'operator': 'in',
+                    'value': ['a'],
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect().height == 2
+
+
+def test_filter_handler_not_in_list():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': 'group',
+                    'operator': 'not_in',
+                    'value': ['a'],
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect()['group'].to_list() == ['b']
+
+
+def test_filter_handler_empty_regex():
+    handler = FilterHandler()
+    lf = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': 'name',
+                    'operator': 'regex',
+                    'value': '',
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    )
+    assert lf.collect().height == 0
+
+
 def test_groupby_handler():
     handler = GroupByHandler()
     lf = handler(
