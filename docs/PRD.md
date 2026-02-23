@@ -4,7 +4,7 @@
 
 - **Product:** Data-Forge Analysis Platform
 - **Status:** Active
-- **Last Updated:** 2026-02-15
+- **Last Updated:** 2026-02-23
 - **Owner:** Product + Engineering
 
 ---
@@ -32,6 +32,7 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 3. Support scheduled and dependency-aware rebuilds.
 4. Provide operational visibility (builds, timings, lineage, healthchecks, notifications).
 5. Keep backend/frontend contracts strongly typed and aligned.
+6. Execute lazyframe cross-tab dependencies within a single engine run, forwarding LazyFrames between tabs without intermediate datasource reloads.
 
 ---
 
@@ -68,6 +69,7 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 - Step operations: add, insert, move, delete, configure.
 - Version history: restore and rename versions.
 - Save persists tabs and pipeline definition.
+- **Unified DAG Execution**: Tabs are frontend-only visualization and grouping, not execution boundaries. Backend treats analysis as a single transform file, resolving all tabs in one request using the full pipeline payload. Input datasources resolve to LazyFrames immediately when in the same DAG; no intermediate datasource reloads.
 
 ### FR-3 Datasources
 
@@ -80,6 +82,20 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 - Show provenance: whether datasource is raw (imported) or created by analysis.
 - For analysis-created datasources, provide direct link to the owning analysis.
 - A datasource can be output by exactly one analysis tab, but input by many.
+- **Creation Strategies**:
+  - **Upload File**: Upload files to namespace-specific upload directory, transform to Iceberg in clean directory. Supports CSV (with delimiter selection) and Excel (with preflight sheet detection). Uploads are re-ingestable; CSV/Excel settings in datasource config trigger re-ingest.
+  - **Use Existing Datasource**: Register existing Iceberg datasources by root UUID path; auto-scan branches.
+  - **Connect to External Database**: Ingest from external sources into local Iceberg copies with time-travel capabilities. Store connection details for future updates. Supports manual or scheduled ingestion.
+- **UI Requirements**:
+  - File upload offers only file upload (no path browsing).
+  - Excel preflight works reliably for uploads without preselected sheet.
+  - Bulk upload enforces single file type per batch; CSV/Excel settings apply globally.
+  - Iceberg datasource addition accepts only root UUID path (no branch input); auto-scan branches.
+  - Analysis/namespace picker anchored under button (popover-style), not centered modal.
+  - Branch picker buttons wider with long branch name support; dropdown appears above table headers.
+  - Build logs include datasource create/update events for uploads, database ingest/refresh, and Iceberg registration.
+  - Output node hidden toggle visible and first row (hidden/branch/table/build) is compact.
+  - Datasources default to master branch but allow selecting other branches even if latest build differs.
 
 ### FR-4 Builds and Observability
 
@@ -220,6 +236,35 @@ Build that tab (with lazyframe deps auto-resolved)
 2. **Depends On**: DAG-style dependencies between schedules.
 3. **Event**: React to upstream dataset updates (datasource change detection via engine runs).
 
+### 6.10 Namespace and Branch Architecture
+
+**Namespace System**:
+- Single `DATA_DIR` environment variable replaces multiple data directories.
+- Directories automatically derived: `${DATA_DIR}/${NAMESPACE}/uploads`, `${DATA_DIR}/${NAMESPACE}/clean`, `${DATA_DIR}/${NAMESPACE}/exports`.
+- Namespace selector in top-left corner (replaces polars/analysis indicator).
+- Changing namespace switches all data operations to that namespace's directories.
+
+**Storage Layout**:
+- `DATA_DIR/app.db`: Main database for global settings (SMTP, Telegram, app config).
+- `DATA_DIR/namespaces/{namespace}/namespace.db`: Per-namespace database for data records:
+  - Datasources
+  - Analyses
+  - Schedules
+  - Builds/Engine Runs
+  - Healthchecks
+
+**Branch Awareness**:
+- Each datasource and analysis output has an associated branch.
+- Branch picker allows selecting target branch (e.g., master, dev) per datasource input.
+- Lineage view filtered by output datasource + branch; shows upstream inputs including branch overrides.
+- Schedules always run on the master branch.
+- New uploads always create master branch data.
+
+**Frontend/Backend Contracts**:
+- All API endpoints namespace-aware via header or path parameter.
+- All UI components reflect current namespace context.
+- Branch selection persisted per datasource configuration in analysis pipeline.
+
 ---
 
 ## 7. End-to-End Flows
@@ -271,6 +316,28 @@ Build that tab (with lazyframe deps auto-resolved)
 1. Frontend requests lineage endpoint.
 2. Backend returns graph nodes/edges from datasource + analysis relationships.
 
+### 7.6 Namespace-Aware Data Handling
+
+1. **Environment Configuration**:
+   - Set `DATA_DIR` to base directory (e.g., `/home/kripso/workspace/polars-fastapi-svelte/data`).
+   - Set `DEFAULT_NAMESPACE` (e.g., `default`).
+   - System derives upload/clean/export paths automatically.
+
+2. **Namespace Selection**:
+   - User selects namespace from top-left corner dropdown.
+   - All subsequent operations (datasource, analysis, build, schedule) use selected namespace.
+   - UI reflects namespace context in all components.
+
+3. **Datasource Creation Flows**:
+   - **Upload**: File → Upload dir → Transform to Iceberg in `clean/{uuid}/master` → Register datasource.
+   - **Existing**: Path validation → Verify structure `clean/{uuid}/{branches}` → Register datasource.
+   - **External**: Connect → Ingest to Iceberg → Store connection details → Register datasource with local path.
+
+4. **Branch Operations**:
+   - Select branch per datasource in analysis pipeline.
+   - Lineage filters by output datasource + branch.
+   - Build exports to specified branch (schedules target master).
+
 ---
 
 ## 8. Non-Functional Requirements
@@ -280,6 +347,8 @@ Build that tab (with lazyframe deps auto-resolved)
 3. **Reliability:** Scheduler and bot lifecycle managed in app lifespan.
 4. **Observability:** All runs logged with status/timings/error context.
 5. **Consistency:** SQLite datetime handling uses naive UTC normalization.
+6. **Namespace Awareness:** All components (frontend/backend) must be namespace-aware; data isolation via per-namespace databases and directories.
+7. **Branch Awareness:** Datasources, analyses, and lineage must support branch selection and filtering.
 
 ---
 

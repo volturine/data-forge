@@ -1,7 +1,8 @@
 ---
 description: Code review, testing, and debugging — limited edit permissions
 mode: subagent
-model: opencode/minimax-m2.5-free
+model: github-copilot/claude-sonnet-4.6
+variant: medium
 name: reviewer
 tools:
   write: false
