@@ -100,7 +100,7 @@
 	const configDefaults = defaultConfig satisfies Record<string, unknown>;
 
 	let { schema, config = $bindable(configDefaults) }: Props = $props();
-	let plotConfig = $derived.by(() => config as unknown as PlotConfigData);
+	const plotConfig = $derived.by(() => config as unknown as PlotConfigData);
 
 	const chartTypes: Array<{ value: PlotConfigData['chart_type']; label: string }> = [
 		{ value: 'bar', label: 'Bar Chart' },

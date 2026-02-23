@@ -102,7 +102,7 @@
 	// the $effect below runs (which fires after the first render frame).
 	const draftReady = $derived(step !== null && draftStepId === step.id);
 
-	let inputSchema = $derived(
+	const inputSchema = $derived(
 		step
 			? (schemaStore.getInput(step.id) ?? { columns: [], row_count: null })
 			: { columns: [], row_count: null }
@@ -120,6 +120,7 @@
 		return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
 	}
 
+	// Subscription: $derived can't sync draft config.
 	$effect(() => {
 		if (!step) {
 			draftStepId = null;

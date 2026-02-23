@@ -6,7 +6,7 @@
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { listUdfs, createUdf } from '$lib/api/udf';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
-	import UdfPickerModal from '$lib/components/udfs/UdfPickerModal.svelte';
+	import UdfPickerModal from '$lib/components/common/UdfPickerModal.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import { Pencil, X } from 'lucide-svelte';
@@ -44,7 +44,7 @@
 	let codeEdited = $state(false);
 	let modalRef = $state<HTMLElement>();
 	let editIndex = $state<number | null>(null);
-	let isEditing = $derived(editIndex !== null);
+	const isEditing = $derived(editIndex !== null);
 	let pickerOpen = $state(false);
 	let saveToLibrary = $state(false);
 	let saveName = $state('');
@@ -98,7 +98,7 @@
 		}
 	}));
 
-	let canAdd = $derived(
+	const canAdd = $derived(
 		!!exprName &&
 			(exprType === 'column'
 				? !!exprColumn
@@ -121,6 +121,7 @@
 		return `def udf(${params}):\n    return ${first}\n`;
 	}
 
+	// Subscription: $derived can't sync editor code with args.
 	$effect(() => {
 		if (exprType !== 'udf') return;
 		if (codeEdited) return;

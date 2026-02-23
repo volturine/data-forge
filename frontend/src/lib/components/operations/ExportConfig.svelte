@@ -18,11 +18,11 @@
 		})
 	}: Props = $props();
 
-	let showDuckDBOptions = $derived(config.format === 'duckdb');
-	let showFormatOptions = $derived(true);
+	const showDuckDBOptions = $derived(config.format === 'duckdb');
+	const showFormatOptions = $derived(true);
 
 	// Map format string to FileType for badge display
-	let selectedFileType = $derived.by((): FileType | 'duckdb' => {
+	const selectedFileType = $derived.by((): FileType | 'duckdb' => {
 		const format = config.format ?? 'csv';
 		if (format === 'csv') return 'csv';
 		if (format === 'parquet') return 'parquet';
@@ -39,7 +39,7 @@
 		{ value: 'duckdb', label: 'DuckDB (.duckdb)' }
 	];
 
-	let formatOptions = $derived.by(() => formats);
+	const formatOptions = $derived.by(() => formats);
 </script>
 
 <div class="config-panel" role="region" aria-label="Export configuration">

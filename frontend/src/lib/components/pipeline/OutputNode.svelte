@@ -358,6 +358,7 @@
 		);
 	}
 
+	// DOM: $derived can't close menu on outside click.
 	$effect(() => {
 		if (!modeMenuOpen) return;
 		const handleOutside = (event: MouseEvent) => {

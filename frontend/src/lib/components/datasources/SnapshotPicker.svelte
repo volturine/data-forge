@@ -65,12 +65,13 @@
 		}
 		return snapshotList.filter((snap) => mapped.has(snap.id));
 	});
-	let filteredSnapshots = $derived(
+	const filteredSnapshots = $derived(
 		selectedDay
 			? filteredSnapshotList.filter((snap) => formatSnapshotKey(snap.timestamp) === selectedDay)
 			: []
 	);
 
+	// Subscription: $derived can't sync state from config.
 	$effect(() => {
 		const ui = (datasourceConfig.time_travel_ui as Record<string, unknown>) ?? {};
 		if (persistOpen && !hasOpened) {
@@ -101,6 +102,7 @@
 	});
 
 	let lastDatasourceId = $state<string | null>(null);
+	// Subscription: $derived can't reset snapshot state.
 	$effect(() => {
 		if (datasourceId === lastDatasourceId) return;
 		lastDatasourceId = datasourceId;
@@ -220,6 +222,7 @@
 		buildCalendar(monthKey);
 	}
 
+	// Subscription: $derived can't clear day selection.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		if (!filteredSnapshotList.length) return;
@@ -232,12 +235,14 @@
 		updateUi({ day: '' });
 	});
 
+	// Subscription: $derived can't rebuild calendar.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		if (!snapshotMonth) return;
 		buildCalendar(snapshotMonth);
 	});
 
+	// Subscription: $derived can't select month on open.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		const source = showBuildPreviews ? filteredSnapshotList : snapshotList;
@@ -399,6 +404,7 @@
 		};
 	}
 
+	// DOM: $derived can't handle outside click.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		const handleOutside = (event: MouseEvent) => {

@@ -123,6 +123,7 @@
 
 	let lastTooltipUpdate = { text: '', x: 0, y: 0, visible: false };
 
+	// DOM: $derived can't position tooltip via measurements.
 	$effect(() => {
 		if (!tipRef) return;
 		if (

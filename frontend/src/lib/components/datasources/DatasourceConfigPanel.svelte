@@ -127,7 +127,8 @@
 	let statsColumn = $state<string | null>(null);
 	let showPreviews = $state(false);
 
-	// Reset state when datasource changes — DOM-dependent state reset, $derived insufficient
+	// Subscription: $derived can't reset state on datasource changes.
+	// Subscription: $derived can't sync schema into local state.
 	$effect(() => {
 		const ds = datasource;
 		if (!ds) return;
@@ -219,6 +220,7 @@
 		has_header: true
 	});
 
+	// Network: $derived can't sync columns from async schema fetch.
 	$effect(() => {
 		if (!schemaQuery.data) return;
 		setSchema(schemaQuery.data);
@@ -1061,10 +1063,10 @@
 					{#if filteredRuns.length >= 50}
 						<p class="text-xs text-fg-tertiary text-center">
 							Showing last 50 runs.
-							<a
-								href="{resolve('/builds')}?datasource_id={datasource.id}"
-								class="text-accent-primary hover:underline"
-							>
+						<a
+							href="{resolve('/monitoring')}?datasource_id={datasource.id}"
+							class="text-accent-primary hover:underline"
+						>
 								View all runs
 							</a>
 						</p>

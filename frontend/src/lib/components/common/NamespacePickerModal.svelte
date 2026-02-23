@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onClickOutside, Debounced } from 'runed';
+	import { Debounced } from 'runed';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listNamespaces } from '$lib/api/namespaces';
 	import { normalizeNamespace } from '$lib/utils/namespace';
@@ -15,16 +15,10 @@
 	let { open, selected, onSelect, onClose, anchor = null }: Props = $props();
 
 	let searchQuery = $state('');
-	let debouncedSearch = new Debounced(() => searchQuery, 200);
-	let modalRef = $state<HTMLElement>();
+	const debouncedSearch = new Debounced(() => searchQuery, 200);
 	let popoverRect = $state({ left: 0, top: 0, width: 320 });
+	let lastAnchor = $state<HTMLElement | null>(null);
 	let searchInput = $state<HTMLInputElement>();
-
-	onClickOutside(
-		() => modalRef,
-		() => handleClose(),
-		{ immediate: true }
-	);
 
 	const namespacesQuery = createQuery(() => ({
 		queryKey: ['namespaces'],
@@ -80,8 +74,9 @@
 	}
 
 	function updatePopoverPosition() {
-		if (!anchor) return;
-		const rect = anchor.getBoundingClientRect();
+		const node = lastAnchor;
+		if (!node) return;
+		const rect = node.getBoundingClientRect();
 		const width = Math.max(rect.width, 240);
 		let left = rect.left;
 		const maxLeft = window.innerWidth - width - 8;
@@ -116,9 +111,11 @@
 		};
 	}
 
+	// DOM: $derived can't track anchor position.
 	$effect(() => {
 		if (!open) return;
-		if (!anchor) return;
+		lastAnchor = anchor;
+		if (!lastAnchor) return;
 		updatePopoverPosition();
 		const handleResize = () => updatePopoverPosition();
 		window.addEventListener('resize', handleResize);
@@ -129,6 +126,8 @@
 		};
 	});
 
+
+	// DOM: $derived can't lock scroll.
 	$effect(() => {
 		if (!open) return;
 		document.body.style.overflow = 'hidden';
@@ -137,6 +136,7 @@
 		};
 	});
 
+	// DOM: $derived can't focus the search input.
 	$effect(() => {
 		if (open && searchInput) {
 			searchInput.focus();
@@ -157,7 +157,6 @@
 	></div>
 	<div
 		class="fixed z-overlay flex flex-col border border-tertiary bg-panel shadow-drag focus:outline-none max-h-[60vh]"
-		bind:this={modalRef}
 		role="dialog"
 		aria-modal="false"
 		aria-labelledby="namespace-picker-search"

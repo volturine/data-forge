@@ -21,9 +21,9 @@
 	let error = $state<string | null>(null);
 	let entries = $state<FileListItem[]>([]);
 
-	let canUp = $derived(Boolean(root) && path.replace(/\/+$/, '') !== root.replace(/\/+$/, ''));
+	const canUp = $derived(Boolean(root) && path.replace(/\/+$/, '') !== root.replace(/\/+$/, ''));
 
-	let crumbs = $derived.by(() => {
+	const crumbs = $derived.by(() => {
 		if (!root) return [] as { label: string; path: string }[];
 		const base = root.replace(/\/+$/, '');
 		const current = (path || root).replace(/\/+$/, '');
@@ -89,6 +89,7 @@
 		event.stopPropagation();
 	}
 
+	// Network: $derived can't load file list on mount.
 	$effect(() => {
 		if (!root) {
 			load(initialPath || undefined);

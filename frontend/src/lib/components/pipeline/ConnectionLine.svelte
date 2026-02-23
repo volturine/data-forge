@@ -23,15 +23,15 @@
 	const arrowHeight = 8;
 
 	// Calculate dot positions
-	let dots = $derived(
+	const dots = $derived(
 		Array.from(
 			{ length: Math.floor((height - arrowHeight - 6) / dotSpacing) },
 			(_, i) => i * dotSpacing + 6
 		)
 	);
 
-	let isDragActive = $derived(drag.active);
-	let lineClass = $derived(
+	const isDragActive = $derived(drag.active);
+	const lineClass = $derived(
 		`connection-line flex w-full shrink-0 items-center justify-center h-pipeline-connection${
 			isDragActive ? ' drag-active' : ''
 		}${highlighted ? ' highlighted' : ''}`

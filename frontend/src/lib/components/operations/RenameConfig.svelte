@@ -17,16 +17,16 @@
 	let formOldName = $state('');
 	let formNewName = $state('');
 
-	let safeMapping = $derived(config?.column_mapping ?? {});
+	const safeMapping = $derived(config?.column_mapping ?? {});
 
-	let mappings = $derived(
+	const mappings = $derived(
 		Object.entries(safeMapping).map(([oldName, newName]) => ({
 			oldName,
 			newName
 		}))
 	);
 
-	let canAdd = $derived(!!formOldName && !!formNewName);
+	const canAdd = $derived(!!formOldName && !!formNewName);
 
 	function addMapping() {
 		if (!canAdd) return;

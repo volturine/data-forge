@@ -12,7 +12,7 @@
 
 	let { schema, config = $bindable({ columns: [], descending: [] }) }: Props = $props();
 
-	let safeConfig = $derived({
+	const safeConfig = $derived({
 		columns: config?.columns ?? [],
 		descending: config?.descending ?? []
 	});
@@ -45,7 +45,7 @@
 		};
 	}
 
-	let availableColumns = $derived(
+	const availableColumns = $derived(
 		schema.columns.filter((col) => !safeConfig.columns.includes(col.name))
 	);
 </script>

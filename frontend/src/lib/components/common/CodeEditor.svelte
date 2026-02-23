@@ -61,6 +61,7 @@
 		};
 	}
 
+	// DOM: $derived can't update CodeMirror imperatively.
 	$effect(() => {
 		if (!view) return;
 		if (skipUpdate) return;

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { PipelineStep } from '$lib/types/analysis';
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
-	import InlineDataTable from '$lib/components/viewers/InlineDataTable.svelte';
-	import ChartPreview from '$lib/components/viewers/ChartPreview.svelte';
+	import InlineDataTable from '$lib/components/pipeline/InlineDataTable.svelte';
+	import ChartPreview from '$lib/components/pipeline/ChartPreview.svelte';
 	import { createQuery } from '@tanstack/svelte-query';
 	import {
 		previewStepData,
@@ -52,11 +52,13 @@
 	);
 
 	// Derived values from declarative config
-	let stepConfig = $derived(getStepTypeConfig(step.type));
-	let Icon = $derived(stepConfig.icon);
-	let label = $derived(stepConfig.label);
-	let summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
-	let isApplied = $derived((step as PipelineStep & { is_applied?: boolean }).is_applied !== false);
+	const stepConfig = $derived(getStepTypeConfig(step.type));
+	const Icon = $derived(stepConfig.icon);
+	const label = $derived(stepConfig.label);
+	const summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
+	const isApplied = $derived(
+		(step as PipelineStep & { is_applied?: boolean }).is_applied !== false
+	);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
 	const chartPipeline = $derived(applySteps(allSteps));
@@ -185,7 +187,7 @@
 	let isDragging = $state(false);
 
 	// Is another node being dragged (not this one)?
-	let isOtherDragging = $derived(drag.active && drag.stepId !== step.id);
+	const isOtherDragging = $derived(drag.active && drag.stepId !== step.id);
 
 	function handleClick(event: MouseEvent) {
 		if (!clickConsumed) return;

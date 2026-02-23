@@ -42,13 +42,14 @@
 		onRenameTab: _onRenameTab
 	}: Props = $props();
 
-	let canDrop = $derived(drag.active);
-	let hoverIndex = $derived(drag.target?.index ?? null);
-	let activeTabId = $derived(activeTab?.id ?? null);
+	const canDrop = $derived(drag.active);
+	const hoverIndex = $derived(drag.target?.index ?? null);
+	const activeTabId = $derived(activeTab?.id ?? null);
 
 	let lastTabId = $state<string | null>(null);
 
 	// $effect: drag reset is a UI side effect not derivable from state
+	// Subscription: $derived can't reset drag UI on tab change.
 	$effect(() => {
 		const tabId = activeTabId;
 		if (tabId === lastTabId) return;
@@ -190,6 +191,7 @@
 		return buildTarget(fallback.index);
 	}
 
+	// DOM: $derived can't update drop target from pointer.
 	$effect(() => {
 		if (!drag.active) return;
 		if (drag.pointerX === null || drag.pointerY === null) return;
@@ -218,6 +220,7 @@
 		}
 	}
 
+	// DOM: $derived can't auto-scroll while dragging.
 	$effect(() => {
 		if (!drag.active) return;
 		if (drag.pointerY === null) return;

@@ -50,12 +50,12 @@
 	let engineExpanded = $state(false);
 
 	// Use defaults from store (fetched by analysis page on load)
-	let defaults = $derived(analysisStore.engineDefaults);
+	const defaults = $derived(analysisStore.engineDefaults);
 
 	// Threads: show effective value (default when not overridden)
-	let threadsOverride = $derived(analysisStore.resourceConfig?.max_threads ?? 0);
-	let effectiveThreads = $derived(threadsOverride || defaults?.max_threads || 0);
-	let isUsingDefaultThreads = $derived(threadsOverride === 0);
+	const threadsOverride = $derived(analysisStore.resourceConfig?.max_threads ?? 0);
+	const effectiveThreads = $derived(threadsOverride || defaults?.max_threads || 0);
+	const isUsingDefaultThreads = $derived(threadsOverride === 0);
 	function setThreads(value: number) {
 		const current = analysisStore.resourceConfig ?? {};
 		// If set to the default value, treat as "use default" (store undefined)
@@ -65,13 +65,13 @@
 	}
 
 	// Memory: show effective value (default when not overridden)
-	let memoryGbOverride = $derived(
+	const memoryGbOverride = $derived(
 		Math.floor((analysisStore.resourceConfig?.max_memory_mb ?? 0) / 1024)
 	);
-	let effectiveMemoryGb = $derived(
+	const effectiveMemoryGb = $derived(
 		memoryGbOverride || Math.floor((defaults?.max_memory_mb ?? 0) / 1024)
 	);
-	let isUsingDefaultMemory = $derived(memoryGbOverride === 0);
+	const isUsingDefaultMemory = $derived(memoryGbOverride === 0);
 	function setMemoryGb(value: number) {
 		const current = analysisStore.resourceConfig ?? {};
 		// If set to the default value, treat as "use default" (store undefined)
@@ -82,7 +82,7 @@
 
 	const standardMemoryOptions = [1, 2, 4, 8, 16, 32, 64];
 	// Include the default/effective value in options if not already present
-	let memoryOptions = $derived.by(() => {
+	const memoryOptions = $derived.by(() => {
 		const val = effectiveMemoryGb;
 		if (val && !standardMemoryOptions.includes(val)) {
 			return [...standardMemoryOptions, val].sort((a, b) => a - b);
@@ -90,6 +90,7 @@
 		return standardMemoryOptions;
 	});
 
+	// Subscription: $derived can't sync draft name.
 	$effect(() => {
 		if (!isEditing) {
 			draftName = tabName ?? datasourceLabel ?? datasource?.name ?? '';
@@ -155,15 +156,15 @@
 		isEditing = false;
 	}
 
-	let analysisSourceId = $derived(
+	const analysisSourceId = $derived(
 		(activeTab?.datasource_config?.analysis_id as string | null) ??
 			(datasource?.config?.analysis_id as string | null) ??
 			null
 	);
-	let sourceType = $derived(
+	const sourceType = $derived(
 		(analysisSourceId ? 'analysis' : (datasource?.source_type ?? 'file')) as string
 	);
-	let isDragActive = $derived(drag.active);
+	const isDragActive = $derived(drag.active);
 	const branchValue = $derived.by(() => {
 		const next = (activeTab?.datasource_config as Record<string, unknown> | null)?.branch;
 		if (typeof next === 'string' && next.trim().length > 0) {

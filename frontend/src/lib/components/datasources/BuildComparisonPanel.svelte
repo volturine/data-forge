@@ -4,7 +4,7 @@
 	import { compareDatasourceSnapshots, listIcebergSnapshots } from '$lib/api/datasource';
 	import type { SnapshotCompareResponse } from '$lib/api/datasource';
 	import type { DataSource } from '$lib/types/datasource';
-	import DataTable from '$lib/components/viewers/DataTable.svelte';
+	import DataTable from '$lib/components/common/DataTable.svelte';
 	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';

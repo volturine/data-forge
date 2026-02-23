@@ -18,12 +18,12 @@
 	}: Props = $props();
 
 	// Check if config is valid for schema refresh
-	let isConfigValid = $derived(
+	const isConfigValid = $derived(
 		!!(config?.columns && Array.isArray(config?.index) && config.index.length > 0)
 	);
 
 	// Safe accessor
-	let safeIndex = $derived(Array.isArray(config?.index) ? config.index : []);
+	const safeIndex = $derived(Array.isArray(config?.index) ? config.index : []);
 
 	const aggregateFunctions = ['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'count'];
 

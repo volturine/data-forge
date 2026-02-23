@@ -56,24 +56,25 @@
 	};
 
 	// Derive reactive values from drag store
-	let active = $derived(drag.active);
-	let type = $derived(drag.type);
-	let info = $derived(type ? stepTypeInfo[type] : null);
-	let Icon = $derived(info?.icon ?? Filter);
-	let isReorder = $derived(drag.isReorder);
+	const active = $derived(drag.active);
+	const type = $derived(drag.type);
+	const info = $derived(type ? stepTypeInfo[type] : null);
+	const Icon = $derived(info?.icon ?? Filter);
+	const isReorder = $derived(drag.isReorder);
 
 	// Local reactive state for pointer position (drag store uses non-reactive getters)
 	let pointerX = $state<number | null>(null);
 	let pointerY = $state<number | null>(null);
 
 	// Sync with drag store - needed because pointerX/Y are non-reactive getters
+	// DOM: $derived can't sync pointer coordinates from store getters.
 	$effect(() => {
 		pointerX = drag.pointerX;
 		pointerY = drag.pointerY;
 	});
 
 	// Position is simply the tracked pointer coordinates
-	let position = $derived(
+	const position = $derived(
 		active && pointerX !== null && pointerY !== null ? { x: pointerX, y: pointerY } : null
 	);
 </script>

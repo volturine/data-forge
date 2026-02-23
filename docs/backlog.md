@@ -75,6 +75,7 @@ Build targets must execute only the required upstream chain **within the same en
 - Uploads should be re-ingestable from the original uploaded file; CSV/Excel settings in datasource config should trigger re-ingest into Iceberg.
 
 ### Progress notes (2026-02-20)
+
 - Upload UI now supports upload-only flow with CSV options, Excel preflight defaults to returned sheet, and bulk uploads enforce single file type.
 - Iceberg add accepts only root UUID paths (no branch), branch picker popovers are now anchored and above headers, and namespace picker is anchored under the header trigger.
 - Builds filter includes datasource create/update kinds, output hidden toggle is restored with a compact row, and datasources default to master branch with master included in branch list.
@@ -136,10 +137,10 @@ All of these will be separated then by namespace so you can have different names
 That means our database has to split to two levels as well, we will have main database for all settings and such but then per namespace database for all data related records, inside the NAMESPACE_DIR/namespace.db
 Schedules, builds, and healthchecks are namespace aware and their metadata is stored in the respective namespace.db.
 
-
 so all our frontend and backend need to be aware of the namespaces and branches..so in analysis i can have per whole analysis output branch and that can per input datasource change the branch...
 
 Clarifications:
+
 - Schedules always run on the master branch.
 - Lineage view is filtered by output datasource + branch. When selecting an output datasource and branch, lineage should show the upstream inputs (including their branch overrides) that contributed to that specific output branch.
 - Per-namespace storage layout uses DATA_DIR/app.db for settings and DATA_DIR/namespaces/{namespace}/namespace.db for data records (datasources, analyses, schedules, builds, health checks).

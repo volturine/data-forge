@@ -41,6 +41,7 @@
 		}
 	}));
 
+	// Network: $derived can't hydrate form state from query result.
 	$effect(() => {
 		if (mode !== 'edit') return;
 		if (initialized) return;

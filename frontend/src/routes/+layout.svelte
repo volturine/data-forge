@@ -27,8 +27,9 @@
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
 	let settingsOpen = $state(false);
-	let currentPath = $derived(page.url.pathname);
+	const currentPath = $derived(page.url.pathname);
 
+	// DOM: $derived can't sync theme to DOM/storage.
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme);
 		void idbSet('theme', theme);
@@ -41,27 +42,32 @@
 		});
 	}
 
+	// Network: $derived can't fetch config on client.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		untrack(() => configStore.fetch());
 	});
 
+	// Storage: $derived can't load namespace from storage.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		void initNamespace();
 	});
 
+	// Subscription: $derived can't install listeners.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		if (!configStore.config) return;
 		installAuditListeners();
 	});
 
+	// Subscription: $derived can't update audit page.
 	$effect(() => {
 		if (!configStore.config) return;
 		setAuditPage(currentPath);
 	});
 
+	// Subscription: $derived can't attach global listeners.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onError = (event: ErrorEvent) => {

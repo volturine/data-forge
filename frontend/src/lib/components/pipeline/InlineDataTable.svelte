@@ -13,7 +13,7 @@
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
-	import DataTable from '$lib/components/viewers/DataTable.svelte';
+	import DataTable from '$lib/components/common/DataTable.svelte';
 
 	interface Props {
 		analysisId: string;
@@ -32,8 +32,8 @@
 	let currentPage = $state(1);
 	let columnSearch = $state('');
 
-	let activePipeline = $derived(applySteps(pipeline));
-	let isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
+	const activePipeline = $derived(applySteps(pipeline));
+	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
 	const pipelineKey = $derived.by(() => hashPipeline(activePipeline));
 	const datasourceConfig = $derived.by(() => {
 		const config = buildDatasourceConfig({
@@ -123,14 +123,15 @@
 	const resetKey = $derived(
 		`${analysisId}-${datasourceId}-${stepId}-${rowLimit}-${pipelineKey}-${datasourceKey}`
 	);
+	// Subscription: $derived can't reset pagination on pipeline change.
 	$effect(() => {
 		void resetKey;
 		currentPage = 1;
 	});
 
+	// Network: $derived can't persist preview run state.
 	$effect(() => {
 		if (!isActiveStep || hasRun) return;
-		// $effect needed: persist preview run state for auto-preview
 		analysisStore.setPreviewRun(runKey, true);
 	});
 

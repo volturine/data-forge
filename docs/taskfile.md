@@ -2,6 +2,13 @@
 
 ## Status:
 
+- [x] Move chart/inline preview components into pipeline folder
+- [x] Frontend refactor: consolidate pickers/modals + folder structure
+  - [x] Add ui primitives (BaseModal/SearchableDropdown)
+  - [x] Move pickers/modals into new folders and update imports
+  - [x] Refactor Column/Datasource/UDF/Namespace/Confirm/Settings components to use primitives
+  - [x] Remove superseded duplicates
+
 - [x] Compact column type badges + filter literal multi-entry
 - [x] Adjust filter operators for list literals and empty token semantics
 - [x] Reapply DatasourceNode snapshot/branch layout + OutputNode build mode select styling
@@ -37,11 +44,14 @@
 - [x] Generate output datasource IDs at tab creation (UUID stored in analysis config)
 - [x] Document OpenCode subagents and skills lists in AGENTS.md
 - [x] Follow-up: tweak OpenCode subagents note, fix Docs agent label, trim slash commands
+- [x] Frontend: move pickers/viewers into components/common and update imports
+- [x] Frontend: move modal components into components/common and update imports
 - [x] Fix snapshot compare unique_count to ignore nulls
 - [x] Update monitoring/builds/datasources preview toggles + snapshot mapping reuse
 - [x] Datasources runs preview toggle + comparison toggle + bugs.md restore
 - [x] Update datasources compare layout + snapshot filtering + monitoring toggle placement
 - [x] Fix Iceberg export warehouse path to align with exports dir
+- [x] Remove frontend tests and test tooling
 - [x] Use per-output Iceberg catalog.db for exports
 - [x] Branch-aware export path layout (master default)
 - [x] Test isolation for exports directory
@@ -129,6 +139,7 @@
 
 - [x] Monitoring page tabs + compact health checks reuse
 - [x] Monitoring page global search across builds/schedules/health checks
+- [x] Cleanup: remove builds/schedules pages and update monitoring links
 
 ### Redesign
 

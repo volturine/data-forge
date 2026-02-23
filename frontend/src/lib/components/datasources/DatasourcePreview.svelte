@@ -5,7 +5,7 @@
 		type StepPreviewRequest,
 		type StepPreviewResponse
 	} from '$lib/api/compute';
-	import DataTable from '$lib/components/viewers/DataTable.svelte';
+	import DataTable from '$lib/components/common/DataTable.svelte';
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -37,8 +37,8 @@
 		statsOpen = false;
 	}
 
+	// Subscription: $derived can't reset pagination/state.
 	$effect(() => {
-		// Reset pagination and close stats when datasource or config changes; requires effect to update state.
 		if (!datasourceId) return;
 		void datasourceConfig;
 		page = 1;
@@ -46,8 +46,8 @@
 		statsColumn = null;
 	});
 
+	// Subscription: $derived can't reset pagination on pipeline changes.
 	$effect(() => {
-		// Reset pagination when live analysis pipeline changes; requires effect to update state.
 		if (!analysisPipeline) return;
 		page = 1;
 	});

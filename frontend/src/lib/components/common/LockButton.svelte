@@ -11,9 +11,9 @@
 	let { resourceId, onAcquire, onRelease }: Props = $props();
 
 	// Reactive state for this resource's lock
-	let state = $derived(getLockState(resourceId));
-	let isLocked = $derived(state.locked);
-	let isMine = $derived(state.byMe);
+	const state = $derived(getLockState(resourceId));
+	const isLocked = $derived(state.locked);
+	const isMine = $derived(state.byMe);
 
 	async function handleAcquire() {
 		const success = await acquireLock(resourceId);

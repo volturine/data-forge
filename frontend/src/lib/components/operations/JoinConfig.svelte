@@ -29,11 +29,12 @@
 	// Use config.right_source directly as single source of truth
 	let loadedRightSource = $state('');
 	let rightSchema = $state<Schema | null>(null);
-	let rightColumns = $derived(rightSchema?.columns ?? []);
+	const rightColumns = $derived(rightSchema?.columns ?? []);
 
 	const isCrossJoin = $derived(config.how === 'cross');
 
 	// Load right schema when config.right_source changes
+	// Network: $derived can't fetch schema for selected datasource.
 	$effect(() => {
 		const source = config.right_source;
 		if (source && source !== loadedRightSource) {
@@ -107,7 +108,6 @@
 			datasources={datasourceOptions}
 			selected={config.right_source ?? ''}
 			mode="single"
-			id={uid}
 			highlightId={currentTabDatasource ?? undefined}
 			onSelect={(id) => {
 				config.right_source = id;

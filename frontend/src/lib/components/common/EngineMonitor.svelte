@@ -8,6 +8,7 @@
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
 
+	// Subscription: $derived can't start/stop polling.
 	$effect(() => {
 		untrack(() => enginesStore.startPolling());
 		return () => enginesStore.stopPolling();

@@ -53,12 +53,12 @@
 	let zoomTransform = $state<d3.ZoomTransform | null>(null);
 	let zoomBehavior = $state<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 	let zoomTarget = $state<SVGSVGElement | null>(null);
-	let zoomEnabled = $derived(Boolean(config.pan_zoom_enabled));
-	let selectEnabled = $derived(Boolean(config.selection_enabled));
-	let areaSelectEnabled = $derived(Boolean(config.area_selection_enabled));
-	let zoomActive = $derived(Boolean(zoomTransform));
+	const zoomEnabled = $derived(Boolean(config.pan_zoom_enabled));
+	const selectEnabled = $derived(Boolean(config.selection_enabled));
+	const areaSelectEnabled = $derived(Boolean(config.area_selection_enabled));
+	const zoomActive = $derived(Boolean(zoomTransform));
 
-	// $derived is not sufficient: disable zoom state when config toggles it off.
+	// Subscription: $derived can't reset zoom state.
 	$effect(() => {
 		if (zoomEnabled) return;
 		zoomTransform = null;
@@ -66,7 +66,7 @@
 		zoomTarget = null;
 	});
 
-	// $derived is not sufficient: selection toggles should clear stored selections.
+	// Subscription: $derived can't clear selection sets.
 	$effect(() => {
 		if (selectEnabled) return;
 		selectedKeys.clear();
@@ -1026,7 +1026,7 @@
 
 	/* ── Main render effect ── */
 
-	// $derived is not sufficient: D3 requires imperative DOM access to render SVG
+	// DOM: $derived can't render SVG imperatively.
 	$effect(() => {
 		if (!chartEl || data.length === 0) return;
 
@@ -1071,7 +1071,7 @@
 			}
 		}
 
-		// $derived cannot drive ResizeObserver — imperative resize tracking needed
+		// DOM: $derived can't drive ResizeObserver.
 		const observer = new ResizeObserver(() => {
 			cancelAnimationFrame(rafId);
 			rafId = requestAnimationFrame(draw);

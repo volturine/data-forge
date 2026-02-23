@@ -35,7 +35,7 @@
 	}: Props = $props();
 
 	// Get configuration based on priority: sourceType > fileType > auto-detect from path
-	let config = $derived.by(() => {
+	const config = $derived.by(() => {
 		if (sourceType) {
 			return getSourceTypeConfig(sourceType);
 		}
@@ -48,7 +48,7 @@
 		}
 		return getFileTypeConfig('unknown');
 	});
-	let Icon = $derived(config.icon);
+	const Icon = $derived(config.icon);
 
 	// Size configurations
 	const sizeConfig = {

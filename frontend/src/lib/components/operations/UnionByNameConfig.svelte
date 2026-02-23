@@ -32,11 +32,13 @@
 	const datasourceOptions = $derived.by(() => datasourceStore.datasources);
 
 	// Sync selectedSources with config.sources
+	// Subscription: $derived can't sync selected sources to config.
 	$effect(() => {
 		config.sources = selectedSources;
 	});
 
 	// Load schemas for selected sources
+	// Network: $derived can't fetch source schemas.
 	$effect(() => {
 		const selected = new Set(selectedSources);
 		for (const sourceId of selectedSources) {
@@ -96,7 +98,6 @@
 				datasources={datasourceOptions}
 				bind:selected={selectedSources}
 				mode="multi"
-				id="union"
 				showChips={true}
 				showBulkActions={true}
 				onSelect={(id) => loadSourceSchema(id)}

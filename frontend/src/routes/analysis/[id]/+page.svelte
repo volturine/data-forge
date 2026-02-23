@@ -49,7 +49,7 @@
 	let lastAnalysisId = $state<string | null>(null);
 
 	let selectedStepId = $state<string | null>(null);
-	let selectedStepState = $derived.by(() => {
+	const selectedStepState = $derived.by(() => {
 		if (!selectedStepId) return null;
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
 	});
@@ -62,6 +62,7 @@
 
 	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
+	// Timer: $derived can't schedule schema refresh.
 	$effect(() => {
 		if (!analysisId) return;
 		if (schemaRefreshTimer) window.clearTimeout(schemaRefreshTimer);
@@ -82,6 +83,7 @@
 		}, 1500);
 	});
 
+	// Storage: $derived can't hydrate from IndexedDB.
 	$effect(() => {
 		if (!storageKey || draftLoaded) return;
 		if (!analysisStore.tabs.length) return;
@@ -141,6 +143,7 @@
 		});
 	});
 
+	// Timer: $derived can't debounce draft persistence.
 	$effect(() => {
 		if (!storageKey || !draftLoaded) return;
 		if (!analysisStore.tabs.length) return;
@@ -164,6 +167,7 @@
 		}, 400);
 	});
 
+	// Subscription: $derived can't sync store side effects.
 	$effect(() => {
 		if (!analysisId) return;
 		if (!isEditingMode) return;
@@ -192,6 +196,7 @@
 	const isMobileScreen = new MediaQuery('max-width: 600px');
 
 	// Auto-collapse left pane on narrow screens when entering edit mode
+	// Subscription: $derived can't auto-collapse on media query.
 	$effect(() => {
 		if (isEditingMode && isNarrowScreen.current && !leftPaneCollapsed) {
 			leftPaneCollapsed = true;
@@ -199,6 +204,7 @@
 	});
 
 	// Auto-collapse right pane on very narrow screens
+	// Subscription: $derived can't auto-collapse on media query.
 	$effect(() => {
 		if (isEditingMode && isMobileScreen.current && !rightPaneCollapsed) {
 			rightPaneCollapsed = true;
@@ -258,6 +264,7 @@
 		}
 	}));
 
+	// Network: $derived can't fetch engine defaults.
 	$effect(() => {
 		if (!analysisId || analysisStore.engineDefaults) return;
 		spawnEngine(analysisId).match(
@@ -302,6 +309,7 @@
 	});
 	const previewDatasourceId = $derived.by(() => datasourceId ?? schemaKey ?? undefined);
 
+	// Network: $derived can't load schema via network calls.
 	$effect(() => {
 		const datasourceIdValue = datasourceId;
 		const schemaId = schemaKey;
@@ -568,6 +576,7 @@
 		}
 	}
 
+	// Subscription: $derived can't manage lock teardown.
 	$effect(() => {
 		return () => {
 			if (analysisId && hasLock(analysisId)) {
@@ -577,6 +586,7 @@
 		};
 	});
 
+	// Network: $derived can't check lock status on mount.
 	$effect(() => {
 		if (!analysisId) return;
 		checkLockStatus(analysisId);
@@ -1096,7 +1106,7 @@
 							onpointerdown={handleBottomPaneResizeStart}
 						></div>
 						<StepConfig
-							bind:step={selectedStepState}
+							step={selectedStepState}
 							schema={analysisStore.calculatedSchema}
 							{isLoadingSchema}
 							onClose={handleCloseConfig}
@@ -1112,7 +1122,7 @@
 					class:collapsed={rightPaneCollapsed}
 				>
 					<StepConfig
-						bind:step={selectedStepState}
+						step={selectedStepState}
 						schema={analysisStore.calculatedSchema}
 						{isLoadingSchema}
 						onClose={handleCloseConfig}

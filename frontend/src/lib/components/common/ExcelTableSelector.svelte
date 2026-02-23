@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
-	import DataTable from '$lib/components/viewers/DataTable.svelte';
+	import DataTable from '$lib/components/common/DataTable.svelte';
 
 	interface ExcelConfig {
 		sheet_name: string;
@@ -93,8 +93,7 @@
 		});
 	});
 
-	// $effect required to notify parent callback; $derived can't emit side effects.
-	// Suppress notification during initial sync to avoid spurious hasChanges.
+	// Subscription: $derived can't notify parent callbacks.
 	$effect(() => {
 		if (!onConfigChange || !initialized) return;
 		if (suppressNotification) {
@@ -104,7 +103,7 @@
 		onConfigChange(config);
 	});
 
-	// $effect required to sync external config into local state; $derived can't mutate inputs.
+	// Subscription: $derived can't sync external config.
 	$effect(() => {
 		const next = initialConfig;
 		if (!next) return;
@@ -390,7 +389,7 @@
 		previewTimer = null;
 	});
 
-	// $effect runs preflight only when file/path changes; untrack prevents re-runs on config changes.
+	// Network: $derived can't run preflight.
 	$effect(() => {
 		if (mode === 'upload') {
 			if (!file) {

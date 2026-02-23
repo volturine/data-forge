@@ -1,5 +1,12 @@
 <script lang="ts">
 	import { ChevronDown, Plus } from 'lucide-svelte';
+	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
+
+	interface BranchOption {
+		id: string;
+		label: string;
+		kind: 'branch' | 'create';
+	}
 
 	interface Props {
 		branches: string[];
@@ -17,45 +24,41 @@
 		onChange
 	}: Props = $props();
 
+	let searchValue = $state('');
 	let menuOpen = $state(false);
-	let menuRef = $state<HTMLElement>();
-	let triggerRef = $state<HTMLButtonElement>();
-	let searchQuery = $state('');
-	let searchInputRef = $state<HTMLInputElement>();
 	let popoverRect = $state({ left: 0, top: 0, width: 240 });
 
 	const normalizedBranches = $derived(branches.length ? branches : ['master']);
-	const filteredBranches = $derived(
-		searchQuery
-			? normalizedBranches.filter((branch) =>
-					branch.toLowerCase().includes(searchQuery.toLowerCase())
-				)
-			: normalizedBranches
-	);
-	const trimmedSearch = $derived(searchQuery.trim());
+	const trimmedSearch = $derived(searchValue.trim());
 	const canCreate = $derived(
 		allowCreate &&
 			trimmedSearch.length > 0 &&
 			!normalizedBranches.some((branch) => branch === trimmedSearch)
 	);
 	const currentValue = $derived(value || 'master');
+	const options = $derived.by(() => {
+		const base = normalizedBranches.map((branch) => ({
+			id: branch,
+			label: branch,
+			kind: 'branch'
+		}) satisfies BranchOption);
+		if (!canCreate) return base;
+		return [
+			{
+				id: `__create__${trimmedSearch}`,
+				label: `Create "${trimmedSearch}"`,
+				kind: 'create'
+			} satisfies BranchOption,
+			...base
+		];
+	});
 
-	function selectBranch(branch: string) {
-		onChange(branch);
-		menuOpen = false;
-		searchQuery = '';
-	}
+	let lastTrigger = $state<HTMLElement | null>(null);
 
-	function openMenu() {
-		menuOpen = true;
-		updatePopoverPosition();
-		setTimeout(() => searchInputRef?.focus(), 0);
-	}
-
-	function updatePopoverPosition() {
-		const trigger = triggerRef;
-		if (!trigger) return;
-		const rect = trigger.getBoundingClientRect();
+	function updatePopoverPosition(trigger?: HTMLElement | null) {
+		const node = trigger;
+		if (!node) return;
+		const rect = node.getBoundingClientRect();
 		const width = Math.max(rect.width, 180);
 		let left = rect.left;
 		const maxLeft = window.innerWidth - width - 8;
@@ -90,35 +93,66 @@
 		};
 	}
 
+	function handleChange(next: string | string[]) {
+		const id = next as string;
+		const match = options.find((option) => option.id === id);
+		if (!match) return;
+		if (match.kind === 'create') {
+			onChange(trimmedSearch);
+			searchValue = '';
+			return;
+		}
+		onChange(match.label);
+		searchValue = '';
+	}
+
+	function handleOpen(trigger?: HTMLButtonElement | HTMLInputElement) {
+		menuOpen = true;
+		lastTrigger = trigger ?? null;
+		updatePopoverPosition(trigger ?? null);
+	}
+
+	function handleClose() {
+		menuOpen = false;
+		searchValue = '';
+	}
+
+	// DOM: $derived can't track resize/scroll.
 	$effect(() => {
 		if (!menuOpen) return;
-		const handleOutside = (event: MouseEvent) => {
-			const target = event.target as Node | null;
-			if (!target) return;
-			if (menuRef?.contains(target)) return;
-			if (triggerRef?.contains(target)) return;
-			menuOpen = false;
-			searchQuery = '';
-		};
-		const handleResize = () => updatePopoverPosition();
-		window.addEventListener('mousedown', handleOutside, true);
+		const handleResize = () => updatePopoverPosition(lastTrigger);
 		window.addEventListener('resize', handleResize);
 		window.addEventListener('scroll', handleResize, true);
 		return () => {
-			window.removeEventListener('mousedown', handleOutside, true);
 			window.removeEventListener('resize', handleResize);
 			window.removeEventListener('scroll', handleResize, true);
 		};
 	});
 </script>
 
-<div class="column-select" bind:this={menuRef}>
+<SearchableDropdown
+	options={options}
+	value={currentValue}
+	onChange={handleChange}
+	placeholder={placeholder}
+	searchPlaceholder="Search branches..."
+	menuClass="branch-picker__menu fixed z-popover"
+	menuAction={portal}
+	menuActionValue={popoverRect}
+	searchValue={searchValue}
+	onOpen={handleOpen}
+	onClose={handleClose}
+	renderTrigger={renderTrigger}
+	renderOption={renderOption}
+/>
+
+{#snippet renderTrigger(payload: { open: boolean; selectedCount: number; selectedOption: unknown; displayLabel: string; disabled: boolean; onOpen: () => void; triggerAction: (node: HTMLElement, value: unknown) => { update?: (value: unknown) => void; destroy?: () => void } })}
 	<button
 		type="button"
 		class="column-trigger"
-		onclick={openMenu}
-		aria-expanded={menuOpen}
-		bind:this={triggerRef}
+		onclick={payload.onOpen}
+		aria-expanded={payload.open}
+		use:payload.triggerAction={undefined}
 	>
 		{#if currentValue}
 			<span class="column-label">{currentValue}</span>
@@ -127,51 +161,21 @@
 		{/if}
 		<ChevronDown size={14} class="chevron" />
 	</button>
-	{#if menuOpen}
-		<div
-			class="column-menu branch-picker__menu fixed z-popover"
-			role="listbox"
-			bind:this={menuRef}
-			use:portal={popoverRect}
-		>
-			<div class="column-search">
-				<input
-					bind:this={searchInputRef}
-					bind:value={searchQuery}
-					type="text"
-					placeholder="Search branches..."
-					class="column-search-input"
-					aria-label="Search branches"
-				/>
-			</div>
-			<div class="column-options">
-				{#if canCreate}
-					<button
-						type="button"
-						class="column-option"
-						onclick={() => selectBranch(trimmedSearch)}
-						role="option"
-						aria-selected="false"
-					>
-						<Plus size={12} />
-						<span>Create "{trimmedSearch}"</span>
-					</button>
-				{/if}
-				{#each filteredBranches as branch (branch)}
-					<button
-						type="button"
-						class="column-option"
-						class:selected={currentValue === branch}
-						onclick={() => selectBranch(branch)}
-						role="option"
-						aria-selected={currentValue === branch}
-					>
-						<span>{branch}</span>
-					</button>
-				{:else}
-					<div class="no-results">No branches found</div>
-				{/each}
-			</div>
-		</div>
-	{/if}
-</div>
+{/snippet}
+
+{#snippet renderOption(payload: { option: { id: string; label: string }; selected: boolean; onSelect: () => void })}
+	{@const option = payload.option as BranchOption}
+	<button
+		type="button"
+		class="column-option"
+		class:selected={payload.selected}
+		onclick={payload.onSelect}
+		role="option"
+		aria-selected={payload.selected}
+	>
+		{#if option.kind === 'create'}
+			<Plus size={12} />
+		{/if}
+		<span>{option.label}</span>
+	</button>
+{/snippet}

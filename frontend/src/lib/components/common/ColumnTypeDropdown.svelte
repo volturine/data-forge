@@ -1,8 +1,14 @@
 <script lang="ts">
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
 	import { getAllColumnTypes } from '$lib/utils/columnTypes';
-	import { onClickOutside } from 'runed';
-	import { ChevronDown } from 'lucide-svelte';
+
+	interface ColumnTypeOption {
+		id: string;
+		label: string;
+		type: string;
+		description?: string;
+	}
 
 	interface Props {
 		value: string;
@@ -18,91 +24,38 @@
 		disabled = false
 	}: Props = $props();
 
-	let menuOpen = $state(false);
-	let menuRef = $state<HTMLElement>();
-	let searchQuery = $state('');
-	let searchInputRef = $state<HTMLInputElement>();
-
 	const allColumnTypes = getAllColumnTypes();
-	let filteredTypes = $derived(
-		searchQuery
-			? allColumnTypes.filter(
-					(t) =>
-						t.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-						t.type.toLowerCase().includes(searchQuery.toLowerCase())
-				)
-			: allColumnTypes
-	);
-	let selectedType = $derived(allColumnTypes.find((t) => t.type === value));
-
-	function selectType(typeValue: string) {
-		onChange(typeValue);
-		menuOpen = false;
-		searchQuery = '';
-	}
-
-	function openMenu() {
-		if (disabled) return;
-		menuOpen = true;
-		setTimeout(() => searchInputRef?.focus(), 0);
-	}
-
-	onClickOutside(
-		() => menuRef,
-		() => {
-			if (menuOpen) {
-				menuOpen = false;
-				searchQuery = '';
-			}
-		}
+	const options = $derived(
+		allColumnTypes.map((entry) => ({
+			id: entry.type,
+			label: entry.label,
+			type: entry.type,
+			description: entry.description
+		}))
 	);
 </script>
 
-<div class="column-select" bind:this={menuRef}>
+<SearchableDropdown
+	options={options}
+	value={value}
+	onChange={(next) => onChange(next as string)}
+	placeholder={placeholder}
+	searchPlaceholder="Search types..."
+	disabled={disabled}
+	renderOption={renderOption}
+ />
+
+{#snippet renderOption(payload: { option: { id: string; label: string }; selected: boolean; onSelect: () => void })}
+	{@const item = payload.option as ColumnTypeOption}
 	<button
 		type="button"
-		class="column-trigger"
-		class:opacity-60={disabled}
-		class:cursor-not-allowed={disabled}
-		onclick={openMenu}
-		aria-expanded={menuOpen}
-		{disabled}
+		class="column-option type-option"
+		class:selected={payload.selected}
+		onclick={payload.onSelect}
+		role="option"
+		aria-selected={payload.selected}
+		title={item.description}
 	>
-		{#if selectedType}
-			<ColumnTypeBadge columnType={selectedType.type} size="sm" />
-		{:else}
-			<span class="column-placeholder">{placeholder}</span>
-		{/if}
-		<ChevronDown size={14} class="chevron" />
+		<ColumnTypeBadge columnType={item.type} size="sm" />
 	</button>
-	{#if menuOpen}
-		<div class="column-menu" role="listbox">
-			<div class="column-search">
-				<input
-					bind:this={searchInputRef}
-					bind:value={searchQuery}
-					type="text"
-					placeholder="Search types..."
-					class="column-search-input"
-				/>
-			</div>
-			<div class="column-options">
-				{#each filteredTypes as typeConfig (typeConfig.type)}
-					<button
-						type="button"
-						class="column-option type-option"
-						class:selected={value === typeConfig.type}
-						onclick={() => selectType(typeConfig.type)}
-						role="option"
-						aria-selected={value === typeConfig.type}
-						title={typeConfig.description}
-					>
-						<ColumnTypeBadge columnType={typeConfig.type} size="sm" />
-					</button>
-				{:else}
-					<div class="no-results">No types found</div>
-				{/each}
-			</div>
-		</div>
-	{/if}
-</div>
+{/snippet}

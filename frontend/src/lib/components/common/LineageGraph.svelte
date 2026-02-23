@@ -200,7 +200,7 @@
 		positionSnapshot = next;
 	}
 
-	// $effect needed: must apply layout when graph data or layout mode changes — not expressible via $derived (imperative physicsMap mutations)
+	// DOM: $derived can't apply layout/reset bounds.
 	$effect(() => {
 		void layoutNodes;
 		applyDeterministicLayout(layoutMode);
@@ -353,6 +353,7 @@
 		applyDeterministicLayout(mode);
 	}
 
+	// Subscription: $derived can't sync zoom percent.
 	$effect(() => {
 		zoomPercent = Math.round(scale * 100);
 	});
@@ -436,12 +437,7 @@
 			oncontextmenu={(e) => e.preventDefault()}
 		>
 			<!-- Transformed layer -->
-			<svg
-				class="pointer-events-none absolute inset-0"
-				width={canvasWidth}
-				height={canvasHeight}
-				style="transform-origin: 0 0; transform: {transform};"
-			>
+			<svg class="pointer-events-none absolute inset-0" width={canvasWidth} height={canvasHeight}>
 				<defs>
 					<marker
 						id="lineage-arrow"
@@ -469,36 +465,34 @@
 				{/each}
 			</svg>
 
-			<div class="absolute inset-0" style="transform-origin: 0 0; transform: {transform};">
-				{#each layoutNodes as node (node.id)}
-					{@const pos = positionSnapshot[node.id]}
-					{#if pos}
-						<div
-							class="absolute flex flex-col gap-1 border px-4 py-3 shadow-sm lineage-node"
-							use:setPosition={pos}
-							onpointerdown={(event) => {
-								if (event.button === 0) startDrag(event, node.id);
-							}}
-							onpointermove={moveDrag}
-							onpointerup={stopDrag}
-							onpointercancel={stopDrag}
-							role="button"
-							tabindex="0"
-							aria-label={`${node.type} ${node.label}`}
-						>
-							<div class="text-xs uppercase tracking-wide text-fg-muted">
-								{node.type === 'datasource' ? 'Datasource' : 'Analysis'}
-							</div>
-							<div class="truncate text-sm font-semibold text-fg-primary">
-								{node.label}
-							</div>
-							{#if node.meta}
-								<div class="text-xs text-fg-tertiary">{node.meta}</div>
-							{/if}
+			{#each layoutNodes as node (node.id)}
+				{@const pos = positionSnapshot[node.id]}
+				{#if pos}
+					<div
+						class="absolute flex flex-col gap-1 border px-4 py-3 shadow-sm lineage-node"
+						use:setPosition={pos}
+						onpointerdown={(event) => {
+							if (event.button === 0) startDrag(event, node.id);
+						}}
+						onpointermove={moveDrag}
+						onpointerup={stopDrag}
+						onpointercancel={stopDrag}
+						role="button"
+						tabindex="0"
+						aria-label={`${node.type} ${node.label}`}
+					>
+						<div class="text-xs uppercase tracking-wide text-fg-muted">
+							{node.type === 'datasource' ? 'Datasource' : 'Analysis'}
 						</div>
-					{/if}
-				{/each}
-			</div>
+						<div class="truncate text-sm font-semibold text-fg-primary">
+							{node.label}
+						</div>
+						{#if node.meta}
+							<div class="text-xs text-fg-tertiary">{node.meta}</div>
+						{/if}
+					</div>
+				{/if}
+			{/each}
 		</div>
 	</div>
 {/if}

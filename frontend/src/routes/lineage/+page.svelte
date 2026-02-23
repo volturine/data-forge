@@ -48,6 +48,7 @@
 		return branches;
 	});
 
+	// Subscription: $derived can't sync branch selection.
 	$effect(() => {
 		if (!selectedDatasourceId) {
 			selectedBranch = '';
