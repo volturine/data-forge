@@ -1,6 +1,6 @@
 import type {
 	Analysis,
-	AnalysisCreate,
+	AnalysisCreateInput,
 	AnalysisGalleryItem,
 	AnalysisUpdate
 } from '$lib/types/analysis';
@@ -8,7 +8,7 @@ import { apiRequest, apiRequestWithHeaders } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
-export function createAnalysis(data: AnalysisCreate): ResultAsync<Analysis, ApiError> {
+export function createAnalysis(data: AnalysisCreateInput): ResultAsync<Analysis, ApiError> {
 	return apiRequest<Analysis>('/v1/analysis', {
 		method: 'POST',
 		body: JSON.stringify(data)
@@ -88,11 +88,9 @@ export type AnalysisExecuteResponse = {
 
 export function executeAnalysis(
 	analysisId: string,
-	pipeline: Record<string, unknown>,
-	analysisTabId?: string | null
+	pipeline: Record<string, unknown>
 ): ResultAsync<AnalysisExecuteResponse, ApiError> {
-	const params = analysisTabId ? `?analysis_tab_id=${encodeURIComponent(analysisTabId)}` : '';
-	return apiRequest<AnalysisExecuteResponse>(`/v1/analysis/${analysisId}/execute${params}`, {
+	return apiRequest<AnalysisExecuteResponse>(`/v1/analysis/${analysisId}/execute`, {
 		method: 'POST',
 		body: JSON.stringify({ pipeline })
 	});

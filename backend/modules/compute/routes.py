@@ -35,7 +35,6 @@ def preview_step(
         page=request.page,
         analysis_id=analysis_id,
         resource_config=resource_config,
-        datasource_config=request.datasource_config,
         tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
     )
@@ -55,7 +54,6 @@ def get_step_schema(
         target_step_id=request.target_step_id,
         analysis_id=analysis_id or '',
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
-        datasource_config=request.datasource_config,
         tab_id=request.tab_id,
     )
 
@@ -74,7 +72,6 @@ def get_step_row_count(
         target_step_id=request.target_step_id,
         analysis_id=analysis_id or '',
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
-        datasource_config=request.datasource_config,
         tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
     )
@@ -225,7 +222,6 @@ def export_data(
         datasource_type=request.datasource_type.value,
         iceberg_options=request.iceberg_options.model_dump() if request.iceberg_options else None,
         duckdb_options=request.duckdb_options.model_dump() if request.duckdb_options else None,
-        datasource_config=request.datasource_config,
         analysis_id=request.analysis_id,
         tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
@@ -281,7 +277,6 @@ def download_step(
         export_format=request.format.value,
         filename=request.filename,
         analysis_id=request.analysis_id,
-        datasource_config=request.datasource_config,
         tab_id=request.tab_id,
     )
 

@@ -34,10 +34,7 @@
 		type NotificationConfigData,
 		type AIConfigData
 	} from '$lib/utils/step-config-defaults';
-	import {
-		buildAnalysisPipelinePayload,
-		buildDatasourceConfig
-	} from '$lib/utils/analysis-pipeline';
+	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -152,17 +149,11 @@
 		if (!(columns && Array.isArray(index) && index.length > 0)) return;
 
 		const analysis = analysisStore.current;
-		const datasourceId = analysisStore.activeTab?.datasource_id;
+		const datasourceId = analysisStore.activeTab?.datasource.id ?? null;
 		if (!analysis?.id || !datasourceId) return;
 
 		fetchingPivotSchema = true;
 
-		const datasourceConfig = buildDatasourceConfig({
-			analysisId: analysis.id,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
 		const analysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
 			analysisStore.tabs,
@@ -177,8 +168,7 @@
 			analysis_id: analysis.id,
 			analysis_pipeline: analysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id,
-			datasource_config: datasourceConfig
+			target_step_id: step.id
 		} as unknown as StepSchemaRequest)
 			.map((response: StepSchemaResponse) => {
 				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);

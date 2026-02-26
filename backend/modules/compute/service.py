@@ -13,7 +13,7 @@ import pyarrow as pa  # type: ignore[import-untyped]
 from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table as IcebergTable
 from sqlalchemy import select
-from sqlmodel import Session
+from sqlmodel import Session, col
 
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
@@ -451,24 +451,12 @@ def _resolve_pipeline_request(
     if not selected:
         selected = tabs[0]
 
-    datasource_id = selected.get('datasource_id')
+    datasource = selected.get('datasource')
+    if not isinstance(datasource, dict):
+        raise ValueError('analysis_pipeline tab datasource must be a dict')
+    datasource_id = datasource.get('id')
     if not datasource_id:
-        config = selected.get('datasource_config') or {}
-        if isinstance(config, dict) and config.get('analysis_id') and config.get('analysis_tab_id'):
-            output_map: dict[str, str] = {}
-            for tab in tabs:
-                tab_id_value = tab.get('id')
-                output_id = tab.get('output_datasource_id')
-                if not tab_id_value or not output_id:
-                    continue
-                output_map[str(tab_id_value)] = str(output_id)
-            datasource_id = output_map.get(str(config.get('analysis_tab_id')))
-    if not datasource_id:
-        sources = pipeline.get('sources', {})
-        if isinstance(sources, dict) and len(sources) == 1:
-            datasource_id = next(iter(sources.keys()))
-    if not datasource_id:
-        raise ValueError('analysis_pipeline tab missing datasource_id')
+        raise ValueError('analysis_pipeline tab missing datasource.id')
 
     steps = selected.get('steps', [])
     if not isinstance(steps, list):
@@ -482,11 +470,17 @@ def _resolve_pipeline_request(
     if not isinstance(datasource_config, dict):
         raise ValueError(f'analysis_pipeline missing datasource config for {datasource_id}')
 
-    overrides = selected.get('datasource_config') or {}
+    overrides = datasource.get('config') or {}
     if overrides and not isinstance(overrides, dict):
-        raise ValueError('analysis_pipeline tab datasource_config must be a dict')
+        raise ValueError('analysis_pipeline tab datasource.config must be a dict')
+    branch = overrides.get('branch') if isinstance(overrides, dict) else None
+    if not isinstance(branch, str) or not branch.strip():
+        raise ValueError('analysis_pipeline tab datasource.config.branch is required')
 
     merged = {**datasource_config, **overrides}
+    output_override = selected.get('output')
+    if isinstance(output_override, dict):
+        merged = {**merged, **output_override}
     analysis_id = pipeline.get('analysis_id')
     analysis_id = str(analysis_id) if analysis_id is not None else None
     if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
@@ -513,9 +507,13 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
     output_map: dict[str, str] = {}
     for tab in tabs:
         tab_id = tab.get('id')
-        output_id = tab.get('output_datasource_id')
-        if not output_id and tab_id:
-            output_id = f'output:{analysis.id}:{tab_id}'
+        output = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output, dict):
+            raise ValueError('Analysis pipeline tab missing output configuration')
+        output_id = output.get('output_datasource_id')
+        if not output_id:
+            raise ValueError('Analysis pipeline tab missing output.output_datasource_id')
+        output_id = str(output_id)
         if output_id and tab_id:
             output_map[str(tab_id)] = str(output_id)
             sources[str(output_id)] = {
@@ -526,28 +524,35 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
 
     next_tabs: list[dict] = []
     for tab in tabs:
-        tab_datasource_id = tab.get('datasource_id')
-        config = tab.get('datasource_config') or {}
-        if isinstance(config, dict) and config.get('analysis_id') == str(analysis.id):
-            source_tab_id = config.get('analysis_tab_id')
-            if source_tab_id:
-                tab_datasource_id = output_map.get(str(source_tab_id))
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        if not isinstance(datasource, dict):
+            raise ValueError('Analysis pipeline tab datasource must be a dict')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output, dict):
+            raise ValueError('Analysis pipeline tab missing output configuration')
+        output_id = output.get('output_datasource_id')
+        if not output_id:
+            raise ValueError('Analysis pipeline tab missing output.output_datasource_id')
+        config = datasource.get('config')
+        if not isinstance(config, dict):
+            raise ValueError('Analysis pipeline tab datasource.config must be a dict')
+        branch = config.get('branch')
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError('Analysis pipeline tab datasource.config.branch is required')
+        tab_datasource_id = datasource.get('id')
 
-        if tab_datasource_id:
-            if (
-                datasource_id
-                and str(datasource_id) != str(tab.get('output_datasource_id'))
-                and str(datasource_id) != str(tab_datasource_id)
-            ):
-                next_tabs.append({**tab, 'datasource_id': tab_datasource_id})
-                continue
-            datasource = session.get(DataSource, str(tab_datasource_id))
-            if datasource:
-                sources[str(tab_datasource_id)] = {
-                    'source_type': datasource.source_type,
-                    **datasource.config,
-                }
-        next_tabs.append({**tab, 'datasource_id': tab_datasource_id})
+        if not tab_datasource_id:
+            raise ValueError('Analysis pipeline tab missing datasource.id')
+        if datasource_id and str(datasource_id) != output_id and str(datasource_id) != str(tab_datasource_id):
+            next_tabs.append({**tab, 'datasource': {**datasource, 'id': tab_datasource_id, 'config': config}})
+            continue
+        datasource_model = session.get(DataSource, str(tab_datasource_id))
+        if datasource_model:
+            sources[str(tab_datasource_id)] = {
+                'source_type': datasource_model.source_type,
+                **datasource_model.config,
+            }
+        next_tabs.append({**tab, 'datasource': {**datasource, 'id': tab_datasource_id, 'config': config}})
 
     return {
         'analysis_id': str(analysis.id),
@@ -565,7 +570,6 @@ def preview_step(
     timeout: int | None = None,
     analysis_id: str | None = None,
     resource_config: dict | None = None,
-    datasource_config: dict | None = None,
     tab_id: str | None = None,
     request_json: dict | None = None,
     triggered_by: str | None = None,
@@ -716,7 +720,6 @@ def get_step_schema(
     analysis_id: str,
     analysis_pipeline: dict,
     timeout: int | None = None,
-    datasource_config: dict | None = None,
     tab_id: str | None = None,
 ):
     """Get the output schema of a pipeline step without returning data."""
@@ -785,7 +788,6 @@ def get_step_row_count(
     analysis_id: str,
     analysis_pipeline: dict,
     timeout: int | None = None,
-    datasource_config: dict | None = None,
     tab_id: str | None = None,
     request_json: dict | None = None,
     triggered_by: str | None = None,
@@ -914,7 +916,6 @@ def export_data(
     datasource_type: str = 'iceberg',
     iceberg_options: dict | None = None,
     duckdb_options: dict | None = None,
-    datasource_config: dict | None = None,
     timeout: int | None = None,
     analysis_id: str | None = None,
     tab_id: str | None = None,
@@ -956,7 +957,6 @@ def export_data(
         'datasource_type': datasource_type,
         'iceberg_options': iceberg_options,
         'duckdb_options': duckdb_options,
-        'datasource_config': datasource_config,
         'analysis_pipeline': analysis_pipeline,
         'tab_id': tab_id,
         'build_mode': build_mode,
@@ -1073,7 +1073,7 @@ def export_data(
                 hc_datasource_id = str(output_datasource_id)
             if destination != 'download':
                 db_result = session.execute(
-                    select(HealthCheck).where(HealthCheck.datasource_id == hc_datasource_id)  # type: ignore[arg-type]
+                    select(HealthCheck).where(col(HealthCheck.datasource_id) == hc_datasource_id)  # type: ignore[arg-type]
                 )
                 hc_checks = [c for c in db_result.scalars().all() if c.enabled]
                 logger.info(f'Health checks: found {len(hc_checks)} enabled for datasource {hc_datasource_id}')
@@ -1120,12 +1120,10 @@ def export_data(
 
             output_notification = None
             if isinstance(datasource_config, dict):
-                output_cfg = datasource_config.get('output')
-                if isinstance(output_cfg, dict):
-                    output_notification = output_cfg.get('notification')
-                    excluded = output_cfg.get('excluded_recipients')
-                    if output_notification and excluded is not None:
-                        output_notification = {**output_notification, 'excluded_recipients': excluded}
+                output_notification = datasource_config.get('notification')
+                excluded = datasource_config.get('excluded_recipients')
+                if output_notification and excluded is not None:
+                    output_notification = {**output_notification, 'excluded_recipients': excluded}
 
             _send_pipeline_notifications(
                 pipeline_steps=apply_pipeline_steps(export_steps),
@@ -1341,7 +1339,6 @@ def download_step(
     filename: str = 'download',
     timeout: int | None = None,
     analysis_id: str | None = None,
-    datasource_config: dict | None = None,
     tab_id: str | None = None,
 ):
     """Download the result of a pipeline step in a specific format."""
@@ -1362,9 +1359,9 @@ def download_step(
     resolved_config = resolved['datasource_config']
     analysis_id_value = resolved['analysis_id'] or analysis_id
 
-    datasource_config = {**resolved_config, **datasource_config} if isinstance(datasource_config, dict) else resolved_config
-    if not isinstance(datasource_config, dict):
+    if not isinstance(resolved_config, dict):
         raise ValueError('Download requires datasource_config')
+    datasource_config = resolved_config
 
     if not analysis_id_value:
         analysis_id_value = f'__download__{datasource_id}'
@@ -1510,8 +1507,10 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
 
     for tab in tabs:
         tid = tab.get('id')
-        output_id = tab.get('output_datasource_id')
-        input_id = tab.get('datasource_id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
             output_to_tab[str(output_id)] = str(tid)
         if tid and input_id:
@@ -1556,16 +1555,16 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
             continue
         tab_id = tab.get('id', 'unknown')
         tab_name = tab.get('name', 'unnamed')
-        tab_datasource_id = tab.get('datasource_id')
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        tab_datasource_id = datasource.get('id') if isinstance(datasource, dict) else None
         steps = tab.get('steps', [])
-        datasource_config = tab.get('datasource_config')
 
         if not tab_datasource_id:
             continue
 
-        output_config = None
-        if isinstance(datasource_config, dict):
-            output_config = datasource_config.get('output')
+        output_config = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output_config, dict) or 'filename' not in output_config:
+            output_config = None
 
         target_step_id = 'source'
         if steps:
@@ -1575,18 +1574,18 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
             if output_config is not None:
                 datasource_type = 'iceberg'
                 export_format = 'parquet'
-                filename = output_config.get('filename', f'{tab_name}_out') if isinstance(output_config, dict) else f'{tab_name}_out'
+                filename = output_config.get('filename', f'{tab_name}_out')
 
                 iceberg_options = None
-                iceberg_cfg = output_config.get('iceberg') if isinstance(output_config, dict) else None
-                if iceberg_cfg and isinstance(iceberg_cfg, dict):
+                iceberg_cfg = output_config.get('iceberg')
+                if isinstance(iceberg_cfg, dict):
                     iceberg_options = {
                         'table_name': iceberg_cfg.get('table_name', 'exported_data'),
                         'namespace': iceberg_cfg.get('namespace', 'outputs'),
                         'branch': iceberg_cfg.get('branch', 'master'),
                     }
 
-                tab_build_mode = output_config.get('build_mode', 'full') if isinstance(output_config, dict) else 'full'
+                tab_build_mode = output_config.get('build_mode', 'full')
 
                 export_data(
                     session=session,
@@ -1598,10 +1597,9 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
                     datasource_type=datasource_type,
                     iceberg_options=iceberg_options,
                     duckdb_options=None,
-                    datasource_config=datasource_config if isinstance(datasource_config, dict) else None,
                     analysis_id=analysis_id,
                     tab_id=str(tab_id) if tab_id else None,
-                    output_datasource_id=tab.get('output_datasource_id'),
+                    output_datasource_id=output_config.get('output_datasource_id'),
                     build_mode=tab_build_mode,
                 )
             else:

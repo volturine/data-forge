@@ -58,11 +58,6 @@ export interface IcebergDataSourceConfig {
 	refresh?: Record<string, unknown> | null;
 }
 
-export interface AnalysisDataSourceConfig {
-	analysis_id: string;
-	analysis_tab_id?: string | null;
-}
-
 export type SourceType = 'file' | 'database' | 'iceberg' | 'analysis';
 
 export interface DataSourceCreate {

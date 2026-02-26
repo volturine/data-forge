@@ -12,7 +12,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'New Analysis',
             'description': 'Test analysis description',
-            'datasource_ids': [sample_datasource.id],
             'pipeline_steps': [
                 {
                     'id': 'step1',
@@ -25,9 +24,19 @@ class TestAnalysisCreate:
                 {
                     'id': 'tab1',
                     'name': 'Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': sample_datasource.id,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_1',
+                    },
+                    'steps': [],
                 }
             ],
         }
@@ -46,8 +55,8 @@ class TestAnalysisCreate:
 
         assert 'pipeline_definition' in result
         assert len(result['pipeline_definition']['steps']) == 1
-        assert result['pipeline_definition']['datasource_ids'] == [sample_datasource.id]
-        assert result['tabs'][0]['datasource_id'] == sample_datasource.id
+        assert 'datasource_ids' not in result['pipeline_definition']
+        assert result['tabs'][0]['datasource']['id'] == sample_datasource.id
 
     def test_create_analysis_with_multiple_datasources(self, client, sample_datasources: list[DataSource]):
         datasource_ids = [ds.id for ds in sample_datasources]
@@ -55,7 +64,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Multi-Source Analysis',
             'description': 'Analysis with multiple datasources',
-            'datasource_ids': datasource_ids,
             'pipeline_steps': [
                 {
                     'id': 'step1',
@@ -68,16 +76,36 @@ class TestAnalysisCreate:
                 {
                     'id': 'tab-left',
                     'name': 'Left Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': datasource_ids[0],
+                    'datasource': {
+                        'id': datasource_ids[0],
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'left_source',
+                    },
+                    'steps': [],
                 },
                 {
                     'id': 'tab-right',
                     'name': 'Right Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': datasource_ids[1],
+                    'datasource': {
+                        'id': datasource_ids[1],
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'right_source',
+                    },
+                    'steps': [],
                 },
             ],
         }
@@ -88,15 +116,32 @@ class TestAnalysisCreate:
         result = response.json()
 
         assert result['name'] == 'Multi-Source Analysis'
-        assert set(result['pipeline_definition']['datasource_ids']) == set(datasource_ids)
+        assert 'datasource_ids' not in result['pipeline_definition']
 
     def test_create_analysis_with_invalid_datasource(self, client):
         payload = {
             'name': 'Invalid Analysis',
             'description': 'Test',
-            'datasource_ids': [str(uuid.uuid4())],
             'pipeline_steps': [],
-            'tabs': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': str(uuid.uuid4()),
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_2',
+                    },
+                    'steps': [],
+                }
+            ],
         }
 
         response = client.post('/api/v1/analysis', json=payload)
@@ -107,15 +152,24 @@ class TestAnalysisCreate:
     def test_create_analysis_without_description(self, client, sample_datasource: DataSource):
         payload = {
             'name': 'Analysis Without Description',
-            'datasource_ids': [sample_datasource.id],
             'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
                     'name': 'Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': sample_datasource.id,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_3',
+                    },
+                    'steps': [],
                 }
             ],
         }
@@ -133,7 +187,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Complex Pipeline Analysis',
             'description': 'Multi-step pipeline',
-            'datasource_ids': [sample_datasource.id],
             'pipeline_steps': [
                 {
                     'id': 'step1',
@@ -158,9 +211,19 @@ class TestAnalysisCreate:
                 {
                     'id': 'tab1',
                     'name': 'Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': sample_datasource.id,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_4',
+                    },
+                    'steps': [],
                 }
             ],
         }
@@ -239,7 +302,7 @@ class TestAnalysisUpdate:
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
             'name': 'Updated Analysis Name',
-            'tabs': [],
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -256,7 +319,7 @@ class TestAnalysisUpdate:
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
             'description': 'Updated description',
-            'tabs': [],
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -284,9 +347,19 @@ class TestAnalysisUpdate:
                 {
                     'id': 'tab-updated',
                     'name': 'Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': sample_analysis.pipeline_definition['datasource_ids'][0],
+                    'datasource': {
+                        'id': sample_analysis.pipeline_definition['tabs'][0]['datasource']['id'],
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_5',
+                    },
+                    'steps': [],
                 }
             ],
             'client_id': client_id,
@@ -307,7 +380,7 @@ class TestAnalysisUpdate:
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
             'status': 'completed',
-            'tabs': [],
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -325,7 +398,7 @@ class TestAnalysisUpdate:
             'name': 'Updated Name',
             'description': 'Updated Description',
             'status': 'running',
-            'tabs': [],
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -339,10 +412,10 @@ class TestAnalysisUpdate:
         assert result['description'] == 'Updated Description'
         assert result['status'] == 'running'
 
-    def test_update_analysis_not_found(self, client):
+    def test_update_analysis_not_found(self, client, sample_analysis: Analysis):
         payload = {
             'name': 'Updated Name',
-            'tabs': [],
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': str(uuid.uuid4()),
             'lock_token': str(uuid.uuid4()),
         }
@@ -356,7 +429,7 @@ class TestAnalysisUpdate:
     def test_update_analysis_empty_payload(self, client, sample_analysis: Analysis):
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload: dict[str, object] = {
-            'tabs': [],
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -415,7 +488,7 @@ class TestAnalysisDataSourceLink:
         get_response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         result = get_response.json()
 
-        assert new_datasource.id in result['pipeline_definition']['datasource_ids']
+        assert any(tab.get('datasource', {}).get('id') == new_datasource.id for tab in result['pipeline_definition']['tabs'])
 
     def test_link_datasource_already_linked(self, client, sample_analysis: Analysis, sample_datasource: DataSource):
         response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{sample_datasource.id}')
@@ -425,7 +498,9 @@ class TestAnalysisDataSourceLink:
         get_response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
         result = get_response.json()
 
-        datasource_count = result['pipeline_definition']['datasource_ids'].count(sample_datasource.id)
+        datasource_count = sum(
+            1 for tab in result['pipeline_definition']['tabs'] if tab.get('datasource', {}).get('id') == sample_datasource.id
+        )
         assert datasource_count == 1
 
     def test_link_datasource_analysis_not_found(self, client, sample_datasource: DataSource):

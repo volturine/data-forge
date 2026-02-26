@@ -1,5 +1,21 @@
 <script lang="ts">
-	import type { AnalysisTab } from '$lib/types/analysis';
+	type OutputTab = {
+		id: string;
+		name: string;
+		output: {
+			output_datasource_id: string;
+			datasource_type: string;
+			format: string;
+			filename: string;
+			build_mode?: string;
+			iceberg?: Record<string, unknown>;
+		} & Record<string, unknown>;
+		datasource?: {
+			config?: {
+				branch?: string;
+			};
+		};
+	};
 	import type { Subscriber } from '$lib/api/settings';
 	import type { BuildResponse } from '$lib/api/compute';
 	import { getSubscribers } from '$lib/api/settings';
@@ -34,7 +50,7 @@
 	interface Props {
 		analysisId?: string;
 		datasourceId?: string;
-		activeTab?: AnalysisTab | null;
+		activeTab?: OutputTab | null;
 	}
 
 	let { analysisId, datasourceId, activeTab = null }: Props = $props();
@@ -52,16 +68,7 @@
 	let modeMenuRef = $state<HTMLElement>();
 	let modeTriggerRef = $state<HTMLButtonElement>();
 
-	const defaultBranch = $derived.by(() => {
-		const current = analysisStore.current?.pipeline_definition ?? {};
-		const branch = (current as Record<string, unknown>).output_branch as string | undefined;
-		const next = branch ?? '';
-		return next.trim().length > 0 ? next : 'master';
-	});
-	const branchValue = $derived.by(() => {
-		const next = outputConfig.iceberg.branch ?? defaultBranch;
-		return next.trim().length > 0 ? next : defaultBranch;
-	});
+	const branchValue = $derived.by(() => outputConfig.iceberg.branch);
 	const branchOptions = $derived.by(() => {
 		const branches = (outputDatasourceQuery.data?.config?.branches as string[] | undefined) ?? [];
 		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
@@ -72,7 +79,35 @@
 	});
 	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
 
-	const outputDatasourceId = $derived(activeTab?.output_datasource_id ?? null);
+	const outputDatasourceId = $derived(activeTab?.output?.output_datasource_id ?? null);
+	const outputDefaults = $derived.by(() => {
+		const tab = activeTab;
+		if (!tab) return null;
+		const output = tab.output as Record<string, unknown> | null;
+		const icebergRaw = output?.iceberg as Record<string, unknown> | undefined;
+		const defaultName = tab.name ? tab.name.trim() : 'export';
+		const tableName =
+			(icebergRaw?.table_name as string) ||
+			defaultName.replace(/\s+/g, '_').toLowerCase() ||
+			'export';
+		const namespace = (icebergRaw?.namespace as string) || 'outputs';
+		const branch =
+			typeof icebergRaw?.branch === 'string'
+				? icebergRaw.branch
+				: (((tab.datasource as Record<string, unknown>)?.config as { branch?: string } | undefined)
+						?.branch ?? '');
+		return {
+			datasource_type: 'iceberg',
+			format: 'parquet',
+			filename: (output?.filename as string) || tableName,
+			build_mode: (output?.build_mode as string) || 'full',
+			iceberg: {
+				namespace,
+				table_name: tableName,
+				branch
+			}
+		};
+	});
 	const outputDatasource = $derived(
 		outputDatasourceId ? (datasourceStore.getDatasource(outputDatasourceId) ?? null) : null
 	);
@@ -156,31 +191,31 @@
 	}));
 
 	const outputConfig = $derived.by(() => {
-		const tab = activeTab;
-		const base = (tab?.datasource_config ?? {}) as Record<string, unknown>;
-		const output = (base.output as Record<string, unknown> | undefined) ?? {};
-		const icebergRaw = (output.iceberg as Record<string, unknown> | undefined) ?? {};
+		const tab = activeTab as (OutputTab & { datasource?: { config?: { branch?: string } } }) | null;
+		const output = (tab?.output as Record<string, unknown> | null) ?? null;
+		const icebergRaw = output?.iceberg as Record<string, unknown> | undefined;
 		const defaultName = tab?.name ? tab.name.trim() : 'export';
 		const tableName =
-			(icebergRaw.table_name as string) ||
+			(icebergRaw?.table_name as string) ||
 			defaultName.replace(/\s+/g, '_').toLowerCase() ||
 			'export';
 		const branch =
-			typeof icebergRaw.branch === 'string' && icebergRaw.branch.trim().length > 0
-				? icebergRaw.branch.trim()
-				: defaultBranch;
-		const namespace = typeof icebergRaw.namespace === 'string' ? icebergRaw.namespace : '';
+			typeof icebergRaw?.branch === 'string'
+				? icebergRaw.branch
+				: (((tab?.datasource as Record<string, unknown>)?.config as { branch?: string } | undefined)
+						?.branch ?? '');
+		const namespace = (icebergRaw?.namespace as string) || 'outputs';
 		return {
 			datasource_type: 'iceberg',
 			format: 'parquet',
-			filename: (output.filename as string) || tableName,
-			build_mode: (output.build_mode as string) || 'full',
+			filename: (output?.filename as string) || tableName,
+			build_mode: (output?.build_mode as string) || 'full',
 			iceberg: {
-				namespace: namespace || 'outputs',
+				namespace,
 				table_name: tableName,
 				branch
 			},
-			notification: (output.notification as Record<string, unknown> | undefined) ?? null
+			notification: (output?.notification as Record<string, unknown> | undefined) ?? null
 		};
 	});
 
@@ -210,10 +245,17 @@
 	function updateOutputConfig(patch: Record<string, unknown>) {
 		const tab = activeTab;
 		if (!tab) return;
-		const next = { ...tab.datasource_config } as Record<string, unknown>;
-		const currentOutput = (next.output as Record<string, unknown> | undefined) ?? {};
-		next.output = { ...currentOutput, ...patch };
-		analysisStore.updateTab(tab.id, { datasource_config: next });
+		const currentOutput = tab.output as Record<string, unknown>;
+		const fallback = outputDefaults ?? {
+			output_datasource_id: tab.output.output_datasource_id,
+			datasource_type: 'iceberg',
+			format: 'parquet',
+			filename: 'export',
+			build_mode: 'full',
+			iceberg: { namespace: 'outputs', table_name: 'export', branch: '' }
+		};
+		const nextOutput = { ...fallback, ...currentOutput, ...patch };
+		analysisStore.updateTab(tab.id, { output: nextOutput as OutputTab['output'] });
 	}
 
 	function updateIcebergConfig(patch: Record<string, unknown>) {
@@ -222,24 +264,7 @@
 	}
 
 	function ensureOutputConfig(): void {
-		const tab = activeTab;
-		if (!tab) return;
-		const base = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const output = (base.output as Record<string, unknown> | undefined) ?? null;
-		if (output) return;
-		const defaultName = tab.name ? tab.name.trim() : 'export';
-		const tableName = defaultName.replace(/\s+/g, '_').toLowerCase() || 'export';
-		updateOutputConfig({
-			datasource_type: 'iceberg',
-			format: 'parquet',
-			filename: tableName,
-			build_mode: 'full',
-			iceberg: {
-				namespace: 'outputs',
-				table_name: tableName,
-				branch: defaultBranch
-			}
-		});
+		return;
 	}
 
 	function startNameEdit() {
@@ -259,20 +284,16 @@
 	}
 
 	function applyGlobalBranchValue(next: string) {
-		ensureOutputConfig();
 		const tab = activeTab;
 		if (!tab) return;
-		const base = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const output = (base.output as Record<string, unknown> | undefined) ?? {};
-		const iceberg = (output.iceberg as Record<string, unknown> | undefined) ?? {};
-		const trimmed = next.trim();
-		const branch = trimmed.length > 0 ? trimmed : defaultBranch;
-		analysisStore.setOutputBranch(branch);
+		const output = (tab.output as Record<string, unknown>) ?? {};
+		const iceberg = output.iceberg as Record<string, unknown> | undefined;
+		const branch = next.trim();
+		if (!branch) return;
 		updateOutputConfig({ iceberg: { ...iceberg, branch } });
 	}
 
 	function toggleNotification() {
-		ensureOutputConfig();
 		if (notifyConfig.enabled) {
 			updateOutputConfig({ notification: null });
 			return;
@@ -287,7 +308,6 @@
 	}
 
 	function updateNotification(patch: Record<string, unknown>) {
-		ensureOutputConfig();
 		const current = outputConfig.notification ?? {};
 		updateOutputConfig({ notification: { ...current, ...patch } });
 	}

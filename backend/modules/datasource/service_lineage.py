@@ -151,15 +151,24 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
     target_tab_id = str(tab_override) if tab_override else None
     if not target_tab_id:
         for tab in tabs:
-            if tab.get('output_datasource_id') == target_datasource_id:
+            output = tab.get('output') if isinstance(tab, dict) else None
+            output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+            if output_id == target_datasource_id:
                 target_tab_id = str(tab.get('id')) if tab.get('id') else None
                 break
     if not target_tab_id:
         add_dependency_edges(analysis.id)
         return {'nodes': list(nodes.values()), 'edges': edges}
 
-    output_map = {tab.get('id'): tab.get('output_datasource_id') for tab in tabs if tab.get('id')}
-    output_to_tab = {tab.get('output_datasource_id'): tab.get('id') for tab in tabs if tab.get('output_datasource_id')}
+    output_map: dict[str, str] = {}
+    output_to_tab: dict[str, str] = {}
+    for tab in tabs:
+        tab_id = tab.get('id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        if tab_id and output_id:
+            output_map[str(tab_id)] = str(output_id)
+            output_to_tab[str(output_id)] = str(tab_id)
     tab_map = {tab.get('id'): tab for tab in tabs if tab.get('id')}
 
     ordered: list[dict] = []
@@ -173,8 +182,11 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
         if not current_tab:
             break
         ordered.append(current_tab)
-        input_id = current_tab.get('datasource_id')
-        upstream_tab_id = output_to_tab.get(input_id)
+        datasource = current_tab.get('datasource') if isinstance(current_tab, dict) else None
+        input_id = datasource.get('id') if isinstance(datasource, dict) else None
+        upstream_tab_id = None
+        if input_id:
+            upstream_tab_id = output_to_tab.get(str(input_id))
         if upstream_tab_id:
             current_id = str(upstream_tab_id)
             continue
@@ -184,23 +196,22 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
     branch_overrides: dict[str, str | None] = {}
     input_ids: set[str] = set()
     for tab in ordered:
-        input_id = tab.get('datasource_id')
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if not input_id:
             continue
-        tab_config = tab.get('datasource_config') if isinstance(tab.get('datasource_config'), dict) else {}
-        output_config = tab_config.get('output') if isinstance(tab_config, dict) else None
+        tab_config = datasource.get('config') if isinstance(datasource, dict) else {}
+        output_branch = None
+        output_config = tab.get('output') if isinstance(tab.get('output'), dict) else None
         if isinstance(output_config, dict):
             iceberg_cfg = output_config.get('iceberg')
             if isinstance(iceberg_cfg, dict):
                 output_branch = iceberg_cfg.get('branch') or run_branch
-                output_id = tab.get('output_datasource_id')
-                if output_id:
-                    branch_overrides[str(output_id)] = str(output_branch) if output_branch is not None else None
-        if isinstance(tab_config, dict) and tab_config.get('analysis_id') == str(analysis.id) and tab_config.get('analysis_tab_id'):
-            source_tab_id = str(tab_config.get('analysis_tab_id'))
-            output_id = output_map.get(source_tab_id)
-            if output_id:
-                input_id = output_id
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        if output_id:
+            branch_value = str(output_branch) if output_branch is not None else None
+            branch_overrides[str(output_id)] = branch_value
         base_config = sources.get(str(input_id)) if isinstance(sources, dict) else None
         if not isinstance(base_config, dict):
             base_config = {}

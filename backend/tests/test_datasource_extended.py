@@ -506,7 +506,7 @@ class TestDataSourceDeletion:
 
     def test_delete_datasource_cascades(self, client, test_db_session, sample_analysis):
         """Test that deleting a datasource handles linked analyses."""
-        datasource_id = sample_analysis.pipeline_definition['datasource_ids'][0]
+        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
 
         # Delete the datasource
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
@@ -608,7 +608,7 @@ class TestIsHidden:
         assert response.json()['is_hidden'] is True
 
     def test_auto_creation_on_analysis_update(self, client, test_db_session, sample_analysis: Analysis):
-        """Updating an analysis with a tab lacking datasource_id auto-creates a hidden datasource."""
+        """Updating an analysis keeps explicit datasource ids."""
         from tests.conftest import acquire_lock
 
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
@@ -621,7 +621,18 @@ class TestIsHidden:
                 {
                     'id': new_tab_id,
                     'name': 'Auto Tab',
-                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_analysis.pipeline_definition['tabs'][0]['datasource']['id'],
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_datasource',
+                    },
                     'steps': [],
                 },
             ],
@@ -629,4 +640,4 @@ class TestIsHidden:
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)
-        assert response.status_code == 409
+        assert response.status_code == 200

@@ -22,7 +22,7 @@ export class SchemaStore {
 	previewSchemas = $state(new SvelteMap<string, Schema>());
 
 	// Derived: primary datasource ID from active tab
-	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource_id ?? null);
+	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource.id ?? null);
 
 	// Derived: current pipeline steps
 	steps = $derived(analysisStore.pipeline);

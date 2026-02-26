@@ -95,7 +95,7 @@
 		{ value: 'cross', label: 'Cross Join' }
 	];
 
-	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource_id);
+	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	const datasourceOptions = $derived.by(() =>
 		datasourceStore.datasources.filter((ds) => ds.source_type !== 'analysis')
 	);

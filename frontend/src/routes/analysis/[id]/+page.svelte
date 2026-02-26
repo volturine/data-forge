@@ -8,6 +8,12 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import {
+		buildOutputConfig,
+		ensureTabDefaults,
+		formatPipelineErrors,
+		validatePipelineTabs
+	} from '$lib/utils/analysis-tab';
+	import {
 		acquireLock,
 		releaseLock,
 		checkLockStatus,
@@ -129,7 +135,8 @@
 				draftLoaded = true;
 				return;
 			}
-			analysisStore.setTabs(parsed.tabs);
+			const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
+			analysisStore.setTabs(sanitized);
 			analysisStore.activeTabId = parsed.activeTabId;
 			analysisStore.setResourceConfig(parsed.resourceConfig);
 			analysisStore.setEngineDefaults(parsed.engineDefaults);
@@ -219,8 +226,12 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
+			const normalizedTabs = (result.value.analysis.tabs ?? []).map((tab, index) =>
+				ensureTabDefaults(tab, index)
+			);
 			analysisStore.applyAnalysis({
 				...result.value.analysis,
+				tabs: normalizedTabs,
 				version: result.value.version
 			});
 			lastLoadedVersion = result.value.version;
@@ -284,30 +295,25 @@
 		);
 	});
 
-	const datasourceId = $derived(analysisStore.activeTab?.datasource_id ?? undefined);
+	const activeTab = $derived(analysisStore.activeTab);
+	const datasourceId = $derived(activeTab?.datasource?.id ?? null);
 	const schemaKey = $derived.by(() => {
-		const tab = analysisStore.activeTab;
+		const tab = activeTab;
 		if (!tab || !analysisId) return undefined;
-		if (tab.datasource_id) return tab.datasource_id;
-		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const cfgAnalysisId = config.analysis_id as string | null | undefined;
-		const cfgTabId = config.analysis_tab_id as string | null | undefined;
-		if (!cfgAnalysisId || !cfgTabId) return undefined;
-		if (String(cfgAnalysisId) !== String(analysisId)) return undefined;
-		return `output:${analysisId}:${String(cfgTabId)}`;
+		if (tab.datasource.id) return tab.datasource.id;
+		const sourceTabId = tab.datasource.analysis_tab_id;
+		if (!sourceTabId) return undefined;
+		return `output:${analysisId}:${String(sourceTabId)}`;
 	});
 	const analysisTabName = $derived.by(() => {
-		const tab = analysisStore.activeTab;
+		const tab = activeTab;
 		if (!tab || !analysisId) return null;
-		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const cfgAnalysisId = config.analysis_id as string | null | undefined;
-		const cfgTabId = config.analysis_tab_id as string | null | undefined;
-		if (!cfgAnalysisId || !cfgTabId) return null;
-		if (String(cfgAnalysisId) !== String(analysisId)) return null;
-		const sourceTab = analysisStore.tabs.find((item) => item.id === String(cfgTabId));
+		const sourceTabId = tab.datasource.analysis_tab_id;
+		if (!sourceTabId) return null;
+		const sourceTab = analysisStore.tabs.find((item) => item.id === String(sourceTabId));
 		return sourceTab?.name ?? null;
 	});
-	const previewDatasourceId = $derived.by(() => datasourceId ?? schemaKey ?? undefined);
+	const previewDatasourceId = $derived.by(() => datasourceId ?? schemaKey ?? null);
 
 	// Network: $derived can't load schema via network calls.
 	$effect(() => {
@@ -318,30 +324,17 @@
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
 		if (existingSchema) return;
 
-		const current = datasourcesQuery.data?.find((ds) => ds.id === datasourceIdValue) ?? null;
-		const activeTabConfig = (analysisStore.activeTab?.datasource_config ?? {}) as Record<
-			string,
-			unknown
-		>;
-		const analysisSourceId =
-			(activeTabConfig.analysis_id as string | null) ??
-			(current?.config?.analysis_id as string | null) ??
-			null;
-		const analysisTabId =
-			(activeTabConfig.analysis_tab_id as string | null) ??
-			(current?.config?.analysis_tab_id as string | null) ??
-			null;
-		const analysisPayload =
-			analysisSourceId && analysisId && analysisSourceId === analysisId
-				? buildAnalysisPipelinePayload(analysisId, analysisStore.tabs, datasourceStore.datasources)
-				: null;
+		const analysisTabId = activeTab?.datasource?.analysis_tab_id ?? null;
+		const analysisPayload = analysisId
+			? buildAnalysisPipelinePayload(analysisId, analysisStore.tabs, datasourceStore.datasources)
+			: null;
 
-		if (analysisSourceId) {
+		if (analysisTabId) {
 			if (!analysisPayload) return;
 			isLoadingSchema = true;
-			const targetTabId = analysisTabId ?? analysisStore.activeTab?.id ?? null;
+			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema({
-				analysis_id: analysisSourceId,
+				analysis_id: analysisId ?? undefined,
 				analysis_pipeline: analysisPayload,
 				tab_id: targetTabId,
 				target_step_id: 'source'
@@ -362,7 +355,7 @@
 					track({
 						event: 'schema_error',
 						action: 'analysis_source_schema',
-						target: analysisSourceId,
+						target: analysisId ?? '',
 						meta: { message: error.message }
 					});
 					isLoadingSchema = false;
@@ -402,7 +395,7 @@
 		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
 			return crypto.randomUUID();
 		}
-		return 'id-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+		return `id-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
 	}
 
 	function buildStep(type: string): PipelineStep {
@@ -483,6 +476,12 @@
 
 		isSaving = true;
 
+		const errors = validatePipelineTabs(analysisStore.tabs);
+		if (errors.length) {
+			alert(`Failed to save pipeline: ${formatPipelineErrors(errors)}`);
+			isSaving = false;
+			return;
+		}
 		analysisStore.save().match(
 			() => {
 				isDirty = false;
@@ -632,17 +631,21 @@
 	}
 
 	function handleAddTab(datasourceId: string, name: string) {
-		const tab: AnalysisTab = {
-			id: `tab-${datasourceId}-${Date.now()}`,
-			output_datasource_id: makeId(),
+		const tabId = `tab-${datasourceId}-${Date.now()}`;
+		const output = buildOutputConfig({ name, branch: 'master' });
+		analysisStore.addTab({
+			id: tabId,
 			name,
-			type: 'datasource',
 			parent_id: null,
-			datasource_id: datasourceId,
+			datasource: {
+				id: datasourceId,
+				analysis_tab_id: null,
+				config: { branch: 'master' }
+			},
+			output,
 			steps: buildInitialSteps()
-		};
-		analysisStore.addTab(tab);
-		analysisStore.setActiveTab(tab.id);
+		});
+		analysisStore.setActiveTab(tabId);
 		showDatasourceModal = false;
 		markUnsaved();
 	}
@@ -662,31 +665,36 @@
 			alert('Select a different tab to avoid using the current tab as its own source.');
 			return;
 		}
-		const tab: AnalysisTab = {
-			id: `tab-analysis-${datasourceId}-${Date.now()}`,
-			output_datasource_id: makeId(),
+		const tabId = `tab-analysis-${datasourceId}-${Date.now()}`;
+		const output = buildOutputConfig({ name, branch: 'master' });
+		analysisStore.addTab({
+			id: tabId,
 			name,
-			type: 'datasource',
 			parent_id: null,
-			datasource_id: datasourceId,
-			datasource_config: sourceTabId
-				? { analysis_id: sourceAnalysisId, analysis_tab_id: sourceTabId }
-				: { analysis_id: sourceAnalysisId },
+			datasource: {
+				id: datasourceId,
+				analysis_tab_id: sourceTabId,
+				config: { branch: 'master' }
+			},
+			output,
 			steps: buildInitialSteps()
-		};
-		analysisStore.addTab(tab);
-		analysisStore.setActiveTab(tab.id);
+		});
+		analysisStore.setActiveTab(tabId);
 		showDatasourceModal = false;
 		markUnsaved();
 	}
 
 	function handleChangeDatasource(datasourceId: string, name: string) {
-		const active = analysisStore.activeTab;
+		const active = activeTab;
 		if (!active) return;
 		analysisStore.updateTab(active.id, {
-			datasource_id: datasourceId,
-			datasource_config: null,
-			name
+			datasource: { ...active.datasource, id: datasourceId, analysis_tab_id: null },
+			name,
+			output: buildOutputConfig({
+				outputId: active.output?.output_datasource_id ?? null,
+				name,
+				branch: active.datasource.config?.branch ?? null
+			})
 		});
 		if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
 		showDatasourceModal = false;
@@ -699,48 +707,36 @@
 		source: 'datasource' | 'analysis'
 	) {
 		if (source === 'analysis') {
+			if (!analysisId) return;
 			const analysisTabId = datasourceId;
-			const analysisMatch = datasourcesQuery.data?.find((item) => {
-				if (item.source_type !== 'analysis') return false;
-				if (item.config?.analysis_tab_id !== analysisTabId) return false;
-				return String(item.config?.analysis_id ?? '') === String(analysisId ?? '');
-			});
+			const sourceTab = analysisStore.tabs.find((item) => item.id === String(analysisTabId));
+			const outputId = sourceTab?.output.output_datasource_id ?? null;
+			if (!outputId) {
+				alert('Selected analysis tab is missing an output datasource.');
+				return;
+			}
 			if (modalMode === 'change') {
-				const active = analysisStore.activeTab;
+				const active = activeTab;
 				if (!active) return;
 				analysisStore.updateTab(active.id, {
-					datasource_id: analysisMatch?.id ?? null,
-					datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
-					name
+					datasource: {
+						...active.datasource,
+						id: outputId,
+						analysis_tab_id: analysisTabId
+					},
+					name,
+					output: buildOutputConfig({
+						outputId: active.output?.output_datasource_id ?? null,
+						name,
+						branch: active.datasource.config?.branch ?? null
+					})
 				});
 				if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
 				showDatasourceModal = false;
 				markUnsaved();
 				return;
 			}
-			if (analysisMatch) {
-				handleAddAnalysisTab(
-					analysisMatch.id,
-					String(analysisMatch.config?.analysis_id ?? ''),
-					name,
-					analysisTabId
-				);
-				return;
-			}
-			const tab: AnalysisTab = {
-				id: `tab-analysis-${Date.now()}`,
-				output_datasource_id: makeId(),
-				name,
-				type: 'datasource',
-				parent_id: null,
-				datasource_id: null,
-				datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
-				steps: buildInitialSteps()
-			};
-			analysisStore.addTab(tab);
-			analysisStore.setActiveTab(tab.id);
-			showDatasourceModal = false;
-			markUnsaved();
+			handleAddAnalysisTab(outputId, analysisId, name, analysisTabId);
 			return;
 		}
 		if (modalMode === 'change') {
@@ -756,7 +752,7 @@
 	}
 
 	function handleRenameSourceTab(nextName: string) {
-		const active = analysisStore.activeTab;
+		const active = activeTab;
 		if (!active) return;
 		const trimmed = nextName.trim();
 		if (!trimmed || trimmed === active.name) return;
@@ -766,8 +762,7 @@
 
 	function openDatasourceModal(mode: 'add' | 'change' = 'add') {
 		modalMode = mode;
-		const config = (analysisStore.activeTab?.datasource_config ?? {}) as Record<string, unknown>;
-		const sourceType = config.analysis_tab_id ? 'analysis' : 'datasource';
+		const sourceType = activeTab?.datasource.analysis_tab_id ? 'analysis' : 'datasource';
 		modalSource = sourceType;
 		showDatasourceModal = true;
 	}
@@ -811,7 +806,10 @@
 			versionError = result.error.message;
 			return;
 		}
-		analysisStore.applyAnalysis(result.value);
+		const normalizedTabs = (result.value.tabs ?? []).map((tab, index) =>
+			ensureTabDefaults(tab, index)
+		);
+		analysisStore.applyAnalysis({ ...result.value, tabs: normalizedTabs });
 		showVersionModal = false;
 		isDirty = false;
 	}
@@ -914,7 +912,7 @@
 				</button>
 				<div class="flex-1 overflow-hidden flex items-center">
 					<div class="tabs flex items-center overflow-x-auto">
-						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
+						{#each analysisStore.tabs as tab (tab.id)}
 							<div
 								class="tab inline-flex items-center bg-transparent border-none text-xs font-medium uppercase text-fg-muted tracking-wide"
 								class:active={analysisStore.activeTab?.id === tab.id}
@@ -1078,8 +1076,8 @@
 				>
 					<PipelineCanvas
 						steps={analysisStore.pipeline}
-						analysisId={analysisId ?? undefined}
-						datasourceId={previewDatasourceId}
+						analysisId={analysisId || undefined}
+						datasourceId={previewDatasourceId || undefined}
 						datasource={currentDatasource}
 						{datasourceLabel}
 						tabName={analysisStore.activeTab?.name}

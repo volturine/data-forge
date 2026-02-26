@@ -25,7 +25,7 @@
 	let selectedSources = $state<string[]>(config.sources ?? []);
 	let loadedSources = $state<string[]>([]);
 
-	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource_id ?? null);
+	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	const currentDatasource = $derived(
 		datasourceStore.datasources.find((ds) => ds.id === currentTabDatasource)
 	);

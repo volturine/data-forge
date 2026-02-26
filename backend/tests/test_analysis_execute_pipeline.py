@@ -10,8 +10,17 @@ def test_execute_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         'tabs': [
             {
                 'id': 'tab-1',
-                'datasource_id': sample_datasource.id,
-                'datasource_config': {'snapshot_id': '123'},
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master', 'snapshot_id': '123'},
+                },
+                'output': {
+                    'output_datasource_id': 'out-1',
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'out',
+                },
                 'steps': [
                     {
                         'id': 'step1',
@@ -53,4 +62,4 @@ def test_execute_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         assert mock_preview.call_count == 1
         _, kwargs = mock_preview.call_args
         assert kwargs['analysis_pipeline']['analysis_id'] == analysis_id
-        assert kwargs['datasource_config']['snapshot_id'] == '123'
+        assert kwargs['analysis_pipeline']['tabs'][0]['datasource']['config']['snapshot_id'] == '123'

@@ -8,13 +8,35 @@ from modules.datasource.models import DataSource
 from modules.datasource.source_types import DataSourceType
 
 
-def test_list_versions_returns_versions(test_db_session, client):
+def test_list_versions_returns_versions(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
+    pipeline_definition: dict[str, object] = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
+    }
     analysis = Analysis(
         id=analysis_id,
         name='Versioned Analysis',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -25,7 +47,7 @@ def test_list_versions_returns_versions(test_db_session, client):
         version=1,
         name='Versioned Analysis',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         created_at=datetime.now(UTC),
     )
     test_db_session.add(analysis)
@@ -40,13 +62,35 @@ def test_list_versions_returns_versions(test_db_session, client):
     assert data[0]['version'] == 1
 
 
-def test_restore_version_updates_analysis(test_db_session, client):
+def test_restore_version_updates_analysis(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
+    analysis_pipeline: dict[str, object] = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
+    }
     analysis = Analysis(
         id=analysis_id,
         name='Original',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=analysis_pipeline,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -57,7 +101,28 @@ def test_restore_version_updates_analysis(test_db_session, client):
         version=2,
         name='Restored',
         description='restored',
-        pipeline_definition={'steps': [{'id': 'step-1', 'type': 'select', 'config': {}}], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition={
+            'steps': [{'id': 'step-1', 'type': 'select', 'config': {}}],
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'version_output',
+                    },
+                    'steps': [],
+                }
+            ],
+        },
         created_at=datetime.now(UTC),
     )
     test_db_session.add(analysis)
@@ -71,13 +136,35 @@ def test_restore_version_updates_analysis(test_db_session, client):
     assert payload['name'] == 'Restored'
 
 
-def test_rename_version(test_db_session, client):
+def test_rename_version(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
+    pipeline_definition: dict[str, object] = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
+    }
     analysis = Analysis(
         id=analysis_id,
         name='Rename Test',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -88,7 +175,7 @@ def test_rename_version(test_db_session, client):
         version=1,
         name='Original Name',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         created_at=datetime.now(UTC),
     )
     test_db_session.add(analysis)
@@ -106,13 +193,35 @@ def test_rename_version(test_db_session, client):
     assert data['version'] == 1
 
 
-def test_rename_version_not_found(test_db_session, client):
+def test_rename_version_not_found(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
+    pipeline_definition: dict[str, object] = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
+    }
     analysis = Analysis(
         id=analysis_id,
         name='Not Found Test',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -128,13 +237,35 @@ def test_rename_version_not_found(test_db_session, client):
     assert response.status_code == 404
 
 
-def test_create_version_increments(test_db_session):
+def test_create_version_increments(test_db_session, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
+    pipeline_definition: dict[str, object] = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
+    }
     analysis = Analysis(
         id=analysis_id,
         name='Versioned Analysis',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -148,13 +279,35 @@ def test_create_version_increments(test_db_session):
     assert second.version == first.version + 1
 
 
-def test_get_version_returns_none(test_db_session):
+def test_get_version_returns_none(test_db_session, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
+    pipeline_definition: dict[str, object] = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
+    }
     analysis = Analysis(
         id=analysis_id,
         name='Missing Version',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -166,20 +319,40 @@ def test_get_version_returns_none(test_db_session):
     assert result is None
 
 
-def test_restore_version_cycle_detection(test_db_session, client):
+def test_restore_version_cycle_detection(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    pipeline_definition = {
+    cycle_id = str(uuid.uuid4())
+    cycle_ds = DataSource(
+        id=cycle_id,
+        name='Cycle Source',
+        source_type=DataSourceType.ANALYSIS,
+        config={
+            'analysis_tab_id': 'tab-1',
+        },
+        created_by='analysis',
+        created_by_analysis_id=analysis_id,
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(cycle_ds)
+    pipeline_definition: dict[str, object] = {
         'steps': [],
-        'datasource_ids': [],
         'tabs': [
             {
                 'id': 'tab-1',
                 'name': 'Source',
-                'type': 'datasource',
-                'datasource_id': None,
-                'datasource_config': {
-                    'analysis_id': analysis_id,
+                'parent_id': None,
+                'datasource': {
+                    'id': cycle_id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
                 },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
             }
         ],
     }
@@ -187,7 +360,7 @@ def test_restore_version_cycle_detection(test_db_session, client):
         id=analysis_id,
         name='Cycle Analysis',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -216,14 +389,31 @@ def test_restore_version_requires_datasource(test_db_session, client):
     missing_ds_id = str(uuid.uuid4())
     pipeline_definition = {
         'steps': [],
-        'datasource_ids': [missing_ds_id],
-        'tabs': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': missing_ds_id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
     }
     analysis = Analysis(
         id=analysis_id,
         name='Missing Datasource',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -254,21 +444,38 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
         id=source_id,
         name='Source',
         source_type=DataSourceType.ANALYSIS,
-        config={'analysis_id': 'source-analysis'},
+        config={'analysis_tab_id': 'tab-1'},
         created_by='analysis',
         created_by_analysis_id='source-analysis',
         created_at=datetime.now(UTC),
     )
     pipeline_definition = {
         'steps': [],
-        'datasource_ids': [source_id],
-        'tabs': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': source_id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            }
+        ],
     }
     analysis = Analysis(
         id=analysis_id,
         name='Relink Analysis',
         description=None,
-        pipeline_definition={'steps': [], 'datasource_ids': [], 'tabs': []},
+        pipeline_definition=pipeline_definition,
         status='draft',
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),

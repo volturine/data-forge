@@ -552,15 +552,9 @@ def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session) -> 
 
 
 def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
-    analysis_id = datasource.config.get('analysis_id')
-    analysis_tab_id = datasource.config.get('analysis_tab_id')
-    if not analysis_id:
-        raise HTTPException(status_code=400, detail='analysis_id required for analysis datasource')
-    return service.create_analysis_datasource(
-        session=session,
-        name=datasource.name,
-        analysis_id=str(analysis_id),
-        analysis_tab_id=str(analysis_tab_id) if analysis_tab_id else None,
+    raise HTTPException(
+        status_code=400,
+        detail='Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id.',
     )
 
 
@@ -656,12 +650,16 @@ def _handle_column_stats(
     payload: schemas.ColumnStatsRequest | None,
     session: Session,
 ):
+    datasource = payload.datasource if payload else None
+    config = None
+    if isinstance(datasource, dict):
+        config = datasource.get('config')
     return service.get_column_stats(
         session=session,
         datasource_id=parse_datasource_id(datasource_id),
         column_name=column_name,
         use_sample=sample,
-        datasource_config=payload.datasource_config if payload else None,
+        datasource_config=config if isinstance(config, dict) else None,
     )
 
 

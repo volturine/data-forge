@@ -75,7 +75,7 @@
 		if (!resolvedDatasource) return null;
 		return buildDatasourcePipelinePayload({
 			datasource: resolvedDatasource,
-			datasourceConfig: datasourceConfig ?? null
+			datasourceConfig: datasourceConfig ?? { branch: 'master' }
 		});
 	});
 
@@ -89,9 +89,6 @@
 			analysisPipeline
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const combinedConfig = analysisPipeline
-				? { ...(datasourceConfig ?? {}), analysis_pipeline: analysisPipeline }
-				: datasourceConfig;
 			if (!analysisPipeline) {
 				throw new Error('Analysis pipeline payload required for preview');
 			}
@@ -100,8 +97,7 @@
 				target_step_id: 'source',
 				analysis_pipeline: analysisPipeline,
 				row_limit: rowLimit,
-				page,
-				datasource_config: combinedConfig
+				page
 			} satisfies StepPreviewRequest;
 			const result = await previewStepData(request);
 			if (result.isErr()) {

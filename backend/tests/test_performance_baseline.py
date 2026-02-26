@@ -20,8 +20,17 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
         'tabs': [
             {
                 'id': 'tab1',
-                'datasource_id': sample_datasource.id,
-                'datasource_config': {},
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': 'out-1',
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'perf_out',
+                },
                 'steps': [],
             }
         ],

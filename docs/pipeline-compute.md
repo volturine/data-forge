@@ -2,7 +2,7 @@
 
 ## Overview
 
-The pipeline compute system executes data transformation pipelines against analyses. It uses a **multiprocessing engine architecture** withPolars as the compute engine to process lazyframes through a series of transformation steps.
+The pipeline compute system executes data transformation pipelines against analyses. It uses a **multiprocessing engine architecture** with Polars as the compute engine to process lazyframes through a series of transformation steps.
 
 ---
 
@@ -18,17 +18,18 @@ An analysis contains a `pipeline_definition` with the following structure:
         {
             'id': 'tab-1',
             'name': 'Export Tab',
-            'type': 'datasource',
-            'datasource_id': 'uuid-of-input-datasource',
-            'output_datasource_id': 'uuid-of-output-datasource',  # optional
-            'datasource_config': {
-                'output': {
-                    'datasource_type': 'iceberg',
-                    'format': 'parquet',
-                    'filename': 'output_name',
-                    'iceberg': {'namespace': 'outputs', 'table_name': 'table_name'},
-                    'build_mode': 'full'  # or 'incremental' or 'recreate'
-                }
+            'datasource': {
+                'id': 'uuid-of-input-datasource',
+                'analysis_tab_id': None,
+                'config': {'branch': 'master'}
+            },
+            'output': {
+                'output_datasource_id': 'uuid-of-output-datasource',
+                'datasource_type': 'iceberg',
+                'format': 'parquet',
+                'filename': 'output_name',
+                'iceberg': {'namespace': 'outputs', 'table_name': 'table_name', 'branch': 'master'},
+                'build_mode': 'full'  # or 'incremental' or 'recreate'
             },
             'steps': [
                 {
@@ -45,9 +46,7 @@ An analysis contains a `pipeline_definition` with the following structure:
                 }
             ]
         }
-    ],
-    'datasource_ids': ['uuid1', 'uuid2'],  # all input datasources
-    'output_branch': 'master'  # optional Iceberg branch
+    ]
 }
 ```
 
@@ -62,17 +61,18 @@ This example shows an analysis with two tabs where the second tab uses the first
             # TAB 1: Raw data → Cleaned data
             'id': 'tab-clean',
             'name': 'Clean Data',
-            'type': 'datasource',
-            'datasource_id': 'uuid-raw-csv',  # External CSV datasource
-            'output_datasource_id': 'uuid-clean-output',
-            'datasource_config': {
-                'output': {
-                    'datasource_type': 'iceberg',
-                    'format': 'parquet',
-                    'filename': 'clean_data',
-                    'iceberg': {'namespace': 'outputs', 'table_name': 'clean_data'},
-                    'build_mode': 'full'
-                }
+            'datasource': {
+                'id': 'uuid-raw-csv',  # External CSV datasource
+                'analysis_tab_id': None,
+                'config': {'branch': 'master'}
+            },
+            'output': {
+                'output_datasource_id': 'uuid-clean-output',
+                'datasource_type': 'iceberg',
+                'format': 'parquet',
+                'filename': 'clean_data',
+                'iceberg': {'namespace': 'outputs', 'table_name': 'clean_data', 'branch': 'master'},
+                'build_mode': 'full'
             },
             'steps': [
                 {
@@ -97,18 +97,17 @@ This example shows an analysis with two tabs where the second tab uses the first
             # TAB 2: Uses TAB 1's output as its input
             'id': 'tab-aggregate',
             'name': 'Aggregation',
-            'type': 'datasource',
-            'datasource_id': 'uuid-clean-output',  # ← References Tab 1's output!
-            'output_datasource_id': 'uuid-agg-output',
-            'datasource_config': {
-                'analysis_id': 'analysis-uuid',         # ← Must match current analysis
+            'datasource': {
+                'id': 'uuid-clean-output',  # ← References Tab 1's output!
                 'analysis_tab_id': 'tab-clean',         # ← Must match Tab 1's ID
-                'output': {
-                    'datasource_type': 'iceberg',
-                    'format': 'parquet',
-                    'filename': 'aggregated',
-                    'iceberg': {'namespace': 'outputs', 'table_name': 'aggregated'}
-                }
+                'config': {'branch': 'master'}
+            },
+            'output': {
+                'output_datasource_id': 'uuid-agg-output',
+                'datasource_type': 'iceberg',
+                'format': 'parquet',
+                'filename': 'aggregated',
+                'iceberg': {'namespace': 'outputs', 'table_name': 'aggregated', 'branch': 'master'}
             },
             'steps': [
                 {
@@ -124,17 +123,17 @@ This example shows an analysis with two tabs where the second tab uses the first
                 }
             ]
         }
-    ],
-    'datasource_ids': ['uuid-raw-csv', 'uuid-clean-output', 'uuid-agg-output']
+    ]
 }
 ```
 
 **Key points:**
 
 1. **Tab 1** (`tab-clean`) reads from an external datasource and produces an output
-2. **Tab 2** (`tab-aggregate`) sets its `datasource_id` to Tab 1's `output_datasource_id`
-3. Tab 2 also sets `analysis_id` and `analysis_tab_id` in its config to indicate it's an **analysis-to-analysis** dependency
-4. At build time, the system resolves Tab 2's source as a lazyframe query (not a separate table read)
+2. **Tab 2** (`tab-aggregate`) sets its `datasource.id` to Tab 1's `output.output_datasource_id` (required; datasource object is mandatory)
+3. Tab 2 sets `analysis_tab_id` to indicate it's an **analysis-to-analysis** dependency
+4. Every tab must include `output.output_datasource_id` (no implicit output IDs)
+5. At build time, the system resolves Tab 2's source as a lazyframe query (not a separate table read)
 
 **How it works at runtime:**
 
@@ -352,24 +351,38 @@ def build_analysis_pipeline_payload(
     # 1. Extract tabs
     tabs = pipeline.get('tabs', [])
     
-    # 2. Build source map (output_datasource_id → source_config)
+    # 2. Build source map (output.output_datasource_id → source_config)
     sources: dict[str, dict] = {}
+    output_map: dict[str, str] = {}
     for tab in tabs:
-        output_id = tab.get('output_datasource_id')
-        if output_id:
-            sources[output_id] = {
+        output = tab.get('output')
+        if not isinstance(output, dict):
+            raise ValueError('Analysis pipeline tab missing output configuration')
+        output_id = output.get('output_datasource_id')
+        if not output_id:
+            raise ValueError('Analysis pipeline tab missing output.output_datasource_id')
+        if tab.get('id'):
+            output_map[str(tab['id'])] = str(output_id)
+            sources[str(output_id)] = {
                 'source_type': 'analysis',
                 'analysis_id': analysis.id,
-                'analysis_tab_id': tab.id,
+                'analysis_tab_id': tab['id'],
             }
     
     # 3. Resolve input datasources
     for tab in tabs:
-        datasource = session.get(DataSource, tab.datasource_id)
-        sources[tab.datasource_id] = {
-            'source_type': datasource.source_type,
-            **datasource.config,
-        }
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict):
+            raise ValueError('Analysis pipeline tab datasource must be a dict')
+        tab_datasource_id = datasource.get('id')
+        if not tab_datasource_id:
+            raise ValueError('Analysis pipeline tab missing datasource.id')
+        datasource_model = session.get(DataSource, str(tab_datasource_id))
+        if datasource_model:
+            sources[str(tab_datasource_id)] = {
+                'source_type': datasource_model.source_type,
+                **datasource_model.config,
+            }
     
     return {
         'analysis_id': analysis.id,

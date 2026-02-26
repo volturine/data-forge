@@ -22,7 +22,7 @@
 			}
 			const result = await getColumnStats(datasourceId, columnName, {
 				sample: true,
-				datasource_config: datasourceConfig ?? undefined
+				datasource: datasourceConfig ? { config: datasourceConfig } : undefined
 			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;

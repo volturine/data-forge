@@ -238,9 +238,7 @@ def create_analysis_datasource(
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
     datasource_id = str(uuid.uuid4())
-    config = {
-        'analysis_id': analysis_id,
-    }
+    config = {}
     if analysis_tab_id:
         config['analysis_tab_id'] = analysis_tab_id
 

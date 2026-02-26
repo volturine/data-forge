@@ -67,16 +67,16 @@
 	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
 	const chartDatasourceConfig = $derived.by(() => {
 		if (!isChart) return {};
-		return (
-			buildDatasourceConfig({
-				analysisId: analysisId ?? null,
-				tab: analysisStore.activeTab ?? null,
-				tabs: analysisStore.tabs,
-				datasources: datasourceStore.datasources
-			}) ??
-			analysisStore.activeTab?.datasource_config ??
-			{}
-		);
+		const config = buildDatasourceConfig({
+			analysisId: analysisId ?? null,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
+		});
+		if (config) return config;
+		const active = analysisStore.activeTab;
+		if (!active) return {};
+		return active.datasource.config;
 	});
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
@@ -107,8 +107,7 @@
 				target_step_id: step.id,
 				row_limit: 5000,
 				page: 1,
-				resource_config: resourceConfig,
-				datasource_config: chartDatasourceConfig
+				resource_config: resourceConfig
 			} as unknown as StepPreviewRequest);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
@@ -132,16 +131,16 @@
 	const rowCountPipeline = $derived.by(() => applySteps(allSteps));
 	const rowCountPipelineKey = $derived.by(() => hashPipeline(rowCountPipeline));
 	const rowCountDatasourceConfig = $derived.by(() => {
-		return (
-			buildDatasourceConfig({
-				analysisId: analysisId ?? null,
-				tab: analysisStore.activeTab ?? null,
-				tabs: analysisStore.tabs,
-				datasources: datasourceStore.datasources
-			}) ??
-			analysisStore.activeTab?.datasource_config ??
-			{}
-		);
+		const config = buildDatasourceConfig({
+			analysisId: analysisId ?? null,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
+		});
+		if (config) return config;
+		const active = analysisStore.activeTab;
+		if (!active) return {};
+		return active.datasource.config;
 	});
 	const rowCountKey = $derived.by(() => {
 		const configKey = JSON.stringify(rowCountDatasourceConfig ?? {});
@@ -170,8 +169,7 @@
 		const result = await getStepRowCount({
 			analysis_pipeline: analysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id,
-			datasource_config: rowCountDatasourceConfig
+			target_step_id: step.id
 		} as StepRowCountRequest);
 		rowCountLoads.set(rowCountKey, false);
 		if (result.isErr()) {

@@ -18,25 +18,22 @@ just dev             # start both servers
 - If `just verify` fails, fix the underlying issues immediately
 - do not ignore or suppress warnings, even if they seem unrelated
 - Write backend Python tests for new/changed functionality
-- Keep `docs/taskfile.md` updated as work progresses
 - Pre-existing warnings are tech debt — fix them, do not ignore them
 - If a warning cannot be fixed (third-party stubs), suppress with an inline comment explaining why
 
 ## Workflow
 
 1. **Explore** — Read relevant files, understand context
-2. **Plan** — Update `docs/taskfile.md`
+2. **Plan** —
 3. **Code** — Implement. Use parallel agents when possible
 4. **Verify** — Run `just verify` mandatorily before declaring any task done
 5. **Reviewer** — Ask for review and address feedback
-6. **Finish** — Update `docs/taskfile.md`
+6. **Finish** —
 7. **Reflect** — Update `AGENTS.md` if you did anything wrong on first pass either prompted by user feedback or your own reflection
 
 **Do not ask for confirmation on implementation details.** Make decisions, implement, verify. Stop and ask only on genuine ambiguity about requirements or conflicts with these rules.
 
 **Reflect on your work.** After completing a task, review the process and outcome. If you made any mistakes or could have done something better, update this document to prevent future issues.
-
-**Re-read `docs/backlog.md` before declaring any bug/task done** — the user may have updated it while you work.
 
 ## Non-Negotiables
 

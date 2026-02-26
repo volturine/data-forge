@@ -6,7 +6,7 @@ from sqlmodel import Session
 
 from core.namespace import namespace_paths
 from modules.analysis.models import Analysis
-from modules.analysis.schemas import AnalysisUpdateSchema, TabSchema
+from modules.analysis.schemas import AnalysisUpdateSchema, TabDatasourceConfig, TabDatasourceSchema, TabOutputSchema, TabSchema
 from modules.analysis.service import update_analysis
 from modules.compute.service import _upsert_output_datasource, export_data
 from modules.datasource.models import DataSource
@@ -19,26 +19,48 @@ from modules.datasource.source_types import DataSourceType
 
 
 class TestTabSchemaOutputDatasourceId:
-    """TabSchema must declare output_datasource_id as an optional field."""
-
-    def test_default_is_none(self):
-        tab = TabSchema(id='t1', name='Tab 1')
-        assert tab.output_datasource_id is None
+    """TabSchema requires output_datasource_id for pipeline output routing."""
 
     def test_accepts_string(self):
-        tab = TabSchema(id='t1', name='Tab 1', output_datasource_id='ds-abc')
-        assert tab.output_datasource_id == 'ds-abc'
-
-    def test_accepts_none_explicitly(self):
-        tab = TabSchema(id='t1', name='Tab 1', output_datasource_id=None)
-        assert tab.output_datasource_id is None
+        tab = TabSchema(
+            id='t1',
+            name='Tab 1',
+            datasource=TabDatasourceSchema(
+                id='ds-1',
+                analysis_tab_id=None,
+                config=TabDatasourceConfig(branch='master'),
+            ),
+            output=TabOutputSchema(
+                output_datasource_id='ds-abc',
+                datasource_type='iceberg',
+                format='parquet',
+                filename='tab_output',
+            ),
+            steps=[],
+        )
+        assert tab.output.output_datasource_id == 'ds-abc'
 
     def test_round_trips_through_model_dump(self):
-        tab = TabSchema(id='t1', name='Tab 1', output_datasource_id='ds-xyz')
+        tab = TabSchema(
+            id='t1',
+            name='Tab 1',
+            datasource=TabDatasourceSchema(
+                id='ds-1',
+                analysis_tab_id=None,
+                config=TabDatasourceConfig(branch='master'),
+            ),
+            output=TabOutputSchema(
+                output_datasource_id='ds-xyz',
+                datasource_type='iceberg',
+                format='parquet',
+                filename='tab_output',
+            ),
+            steps=[],
+        )
         dumped = tab.model_dump()
-        assert dumped['output_datasource_id'] == 'ds-xyz'
+        assert dumped['output']['output_datasource_id'] == 'ds-xyz'
         restored = TabSchema.model_validate(dumped)
-        assert restored.output_datasource_id == 'ds-xyz'
+        assert restored.output.output_datasource_id == 'ds-xyz'
 
 
 # ---------------------------------------------------------------------------
@@ -147,22 +169,31 @@ class TestUpsertOutputDatasource:
 
 
 # ---------------------------------------------------------------------------
-# update_analysis — output_datasource_id auto-creation
+# update_analysis — output_datasource_id required
 # ---------------------------------------------------------------------------
 
 
 class TestUpdateAnalysisOutputDatasource:
-    """update_analysis only allocates output_datasource_id values, no datasource rows."""
+    """update_analysis requires output_datasource_id and does not create datasources."""
 
-    def test_allocates_output_id_without_creating_datasource(
+    def test_keeps_output_id_without_creating_datasource(
         self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
     ):
         tabs = [
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    output_datasource_id='out-1',
+                    datasource_type='iceberg',
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
@@ -173,8 +204,8 @@ class TestUpdateAnalysisOutputDatasource:
         result = update_analysis(test_db_session, sample_analysis.id, update)
         assert len(result.tabs) == 1
         tab = result.tabs[0]
-        assert tab.output_datasource_id is not None
-        output_ds = test_db_session.get(DataSource, tab.output_datasource_id)
+        assert tab.output.output_datasource_id == 'out-1'
+        output_ds = test_db_session.get(DataSource, tab.output.output_datasource_id)
         assert output_ds is None
 
     def test_reuses_existing_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
@@ -182,45 +213,82 @@ class TestUpdateAnalysisOutputDatasource:
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    output_datasource_id='out-1',
+                    datasource_type='iceberg',
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
         update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
 
         result1 = update_analysis(test_db_session, sample_analysis.id, update)
-        output_id_1 = result1.tabs[0].output_datasource_id
-        assert output_id_1 is not None
+        output_id_1 = result1.tabs[0].output.output_datasource_id
 
         tabs2 = [
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
-                output_datasource_id=output_id_1,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    output_datasource_id=output_id_1,
+                    datasource_type='iceberg',
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
         update2 = AnalysisUpdateSchema(tabs=tabs2, pipeline_steps=[])
         result2 = update_analysis(test_db_session, sample_analysis.id, update2)
-        output_id_2 = result2.tabs[0].output_datasource_id
+        output_id_2 = result2.tabs[0].output.output_datasource_id
 
         assert output_id_2 == output_id_1
 
     def test_multiple_tabs_each_get_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
         tabs = [
-            TabSchema(id='tab-a', name='Tab A', type='datasource', datasource_id=sample_datasource.id, steps=[]),
+            TabSchema(
+                id='tab-a',
+                name='Tab A',
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    output_datasource_id='out-a',
+                    datasource_type='iceberg',
+                    format='parquet',
+                    filename='tab_output',
+                ),
+                steps=[],
+            ),
             TabSchema(
                 id='tab-b',
                 name='Tab B',
-                type='derived',
                 parent_id='tab-a',
-                datasource_config={
-                    'analysis_id': sample_analysis.id,
-                    'analysis_tab_id': 'tab-a',
-                },
+                datasource=TabDatasourceSchema(
+                    id='out-a',
+                    analysis_tab_id='tab-a',
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    output_datasource_id='out-b',
+                    datasource_type='iceberg',
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
@@ -228,10 +296,10 @@ class TestUpdateAnalysisOutputDatasource:
         result = update_analysis(test_db_session, sample_analysis.id, update)
 
         assert len(result.tabs) == 2
-        ids = [t.output_datasource_id for t in result.tabs]
+        ids = [t.output.output_datasource_id for t in result.tabs]
         assert all(i is not None for i in ids)
         assert ids[0] != ids[1]
-        assert result.tabs[1].datasource_id == ids[0]
+        assert result.tabs[1].datasource.id == 'out-a'
 
 
 # ---------------------------------------------------------------------------
@@ -254,24 +322,24 @@ class TestRunAnalysisBuildOutputDatasource:
             description='',
             pipeline_definition={
                 'steps': [],
-                'datasource_ids': [sample_datasource.id],
                 'tabs': [
                     {
                         'id': 'tab1',
                         'name': 'Main',
-                        'type': 'datasource',
-                        'datasource_id': sample_datasource.id,
-                        'output_datasource_id': output_ds_id,
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
                         'steps': [
                             {'id': 's1', 'type': 'filter', 'config': {'column': 'age', 'operator': '>', 'value': 30}, 'depends_on': []}
                         ],
-                        'datasource_config': {
-                            'output': {
-                                'datasource_type': 'iceberg',
-                                'format': 'parquet',
-                                'filename': 'test_out',
-                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                            }
+                        'output': {
+                            'output_datasource_id': output_ds_id,
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'test_out',
+                            'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
                         },
                     }
                 ],
@@ -312,22 +380,22 @@ class TestRunAnalysisBuildOutputDatasource:
             description='',
             pipeline_definition={
                 'steps': [],
-                'datasource_ids': [sample_datasource.id],
                 'tabs': [
                     {
                         'id': 'tab1',
                         'name': 'Main',
-                        'type': 'datasource',
-                        'datasource_id': sample_datasource.id,
-                        'output_datasource_id': output_ds_id,
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
                         'steps': [],
-                        'datasource_config': {
-                            'output': {
-                                'datasource_type': 'iceberg',
-                                'format': 'parquet',
-                                'filename': 'test_out',
-                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                            }
+                        'output': {
+                            'output_datasource_id': output_ds_id,
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'test_out',
+                            'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
                         },
                     }
                 ],
@@ -357,15 +425,17 @@ class TestRunAnalysisBuildOutputDatasource:
                     'tabs': [
                         {
                             'id': 'tab1',
-                            'datasource_id': sample_datasource.id,
-                            'output_datasource_id': output_ds_id,
-                            'datasource_config': {
-                                'output': {
-                                    'datasource_type': 'iceberg',
-                                    'format': 'parquet',
-                                    'filename': 'test_out',
-                                    'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                                }
+                            'datasource': {
+                                'id': sample_datasource.id,
+                                'analysis_tab_id': None,
+                                'config': {'branch': 'master'},
+                            },
+                            'output': {
+                                'output_datasource_id': output_ds_id,
+                                'datasource_type': 'iceberg',
+                                'format': 'parquet',
+                                'filename': 'test_out',
+                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
                             },
                             'steps': [],
                         }
@@ -405,15 +475,21 @@ class TestRunAnalysisBuildOutputDatasource:
             description='',
             pipeline_definition={
                 'steps': [],
-                'datasource_ids': [sample_datasource.id],
                 'tabs': [
                     {
                         'id': 'tab1',
                         'name': 'No Output',
-                        'type': 'datasource',
-                        'datasource_id': sample_datasource.id,
-                        'output_datasource_id': 'some-output-id',
-                        'datasource_config': {},
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'some-output-id',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'missing_output',
+                        },
                         'steps': [],
                     }
                 ],
@@ -439,6 +515,50 @@ class TestRunAnalysisBuildOutputDatasource:
 
             mock_export.assert_not_called()
             mock_preview.assert_not_called()
+            assert result['tabs_built'] == 0
+            assert result['results'][0]['status'] == 'failed'
+
+    def test_tab_missing_output_filename_fails(self, test_db_session: Session, sample_datasource: DataSource):
+        analysis_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+
+        analysis = Analysis(
+            id=analysis_id,
+            name='Missing Output Fields',
+            description='',
+            pipeline_definition={
+                'steps': [],
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'name': 'No Filename',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'some-output-id',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                        },
+                        'steps': [],
+                    }
+                ],
+            },
+            status='draft',
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(analysis)
+        test_db_session.commit()
+
+        with patch('modules.compute.service.export_data') as mock_export:
+            from modules.scheduler.service import run_analysis_build
+
+            result = run_analysis_build(test_db_session, analysis_id)
+
+            mock_export.assert_not_called()
             assert result['tabs_built'] == 0
             assert result['results'][0]['status'] == 'failed'
 
@@ -529,14 +649,23 @@ class TestSourceTypeCreatedBy:
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    output_datasource_id='out-1',
+                    datasource_type='iceberg',
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
         update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
         result = update_analysis(test_db_session, sample_analysis.id, update)
-        output_ds = test_db_session.get(DataSource, result.tabs[0].output_datasource_id)
+        output_ds = test_db_session.get(DataSource, result.tabs[0].output.output_datasource_id)
         assert output_ds is None
 
     def test_upsert_output_sets_created_by_analysis(self, test_db_session: Session):

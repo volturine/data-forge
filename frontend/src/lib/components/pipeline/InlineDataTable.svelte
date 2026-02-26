@@ -42,7 +42,10 @@
 			tabs: analysisStore.tabs,
 			datasources: datasourceStore.datasources
 		});
-		return config ?? analysisStore.activeTab?.datasource_config ?? {};
+		if (config) return config;
+		const active = analysisStore.activeTab;
+		if (!active) return {};
+		return active.datasource.config;
 	});
 	const datasourceKey = $derived.by(() => {
 		const config = datasourceConfig as Record<string, unknown>;
@@ -99,8 +102,7 @@
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage,
-				resource_config: resourceConfig,
-				datasource_config: datasourceConfig
+				resource_config: resourceConfig
 			} as unknown as StepPreviewRequest);
 			if (result.isErr()) {
 				throw new Error(result.error.message);

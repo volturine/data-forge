@@ -41,7 +41,7 @@ def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> Da
         id=str(uuid.uuid4()),
         name='Output DataSource',
         source_type='iceberg',
-        config={'analysis_id': sample_analysis.id, 'analysis_tab_id': 'tab1'},
+        config={'analysis_tab_id': 'tab1'},
         created_by='analysis',
         created_by_analysis_id=sample_analysis.id,
         is_hidden=True,
@@ -62,32 +62,36 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
             {
                 'id': 'tab-1',
                 'name': 'Export Tab',
-                'type': 'datasource',
                 'parent_id': None,
-                'datasource_id': sample_datasource.id,
-                'datasource_config': {
-                    'output': {
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'test_output',
-                        'iceberg': {'namespace': 'outputs', 'table_name': 'test_output'},
-                    }
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'test_output',
+                    'iceberg': {'namespace': 'outputs', 'table_name': 'test_output'},
                 },
                 'steps': [],
             },
             {
                 'id': 'tab-2',
                 'name': 'No Output Tab',
-                'type': 'datasource',
                 'parent_id': None,
-                'datasource_id': sample_datasource.id,
-                'datasource_config': {
-                    'output': {
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'test_output_two',
-                        'iceberg': {'namespace': 'outputs', 'table_name': 'test_output_two'},
-                    }
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'test_output_two',
+                    'iceberg': {'namespace': 'outputs', 'table_name': 'test_output_two'},
                 },
                 'steps': [],
             },
@@ -189,7 +193,7 @@ class TestScheduleCrud:
             id=str(uuid.uuid4()),
             name='Output DataSource 2',
             source_type='iceberg',
-            config={'analysis_id': sample_analyses[1].id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=sample_analyses[1].id,
             is_hidden=True,
@@ -402,7 +406,27 @@ class TestGetBuildOrder:
             id=upstream_id,
             name='Upstream',
             description='',
-            pipeline_definition={'tabs': []},
+            pipeline_definition={
+                'tabs': [
+                    {
+                        'id': 'tab-upstream',
+                        'name': 'Upstream',
+                        'parent_id': None,
+                        'datasource': {
+                            'id': ds_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': str(uuid.uuid4()),
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'scheduled_source',
+                        },
+                        'steps': [],
+                    }
+                ]
+            },
             status='draft',
             created_at=now,
             updated_at=now,
@@ -415,7 +439,27 @@ class TestGetBuildOrder:
             id=downstream_id,
             name='Downstream',
             description='',
-            pipeline_definition={'tabs': []},
+            pipeline_definition={
+                'tabs': [
+                    {
+                        'id': 'tab-downstream',
+                        'name': 'Downstream',
+                        'parent_id': None,
+                        'datasource': {
+                            'id': ds_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': str(uuid.uuid4()),
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'scheduled_source',
+                        },
+                        'steps': [],
+                    }
+                ]
+            },
             status='draft',
             created_at=now,
             updated_at=now,
@@ -474,12 +518,12 @@ class TestRunAnalysisBuild:
     @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
     def test_builds_all_tabs(self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis):
-        """All tabs with datasource_id should be built — export for output tabs."""
+        """All tabs with output config should be built — export for output tabs."""
         mock_export.return_value = None
         mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        # Both tabs have datasource_id and output config
+        # Both tabs have output config
         assert result['tabs_built'] == 2
         assert len(result['results']) == 2
         assert result['results'][0]['status'] == 'success'
@@ -536,43 +580,47 @@ class TestRunAnalysisBuild:
     def test_build_only_matching_datasource_tab(
         self, mock_export, mock_preview, mock_notify, test_db_session: Session, sample_datasource: DataSource
     ):
-        """When datasource_id is provided, only the tab with that datasource runs."""
+        """When datasource_id is provided, only the tab with that output runs."""
         other_ds_id = str(uuid.uuid4())
         output_a = str(uuid.uuid4())
         output_b = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        pipeline = {
+        pipeline: dict[str, object] = {
             'tabs': [
                 {
                     'id': 'tab-a',
                     'name': 'Tab A',
-                    'type': 'datasource',
-                    'datasource_id': sample_datasource.id,
-                    'output_datasource_id': output_a,
-                    'datasource_config': {
-                        'output': {
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'tab_a',
-                            'iceberg': {'namespace': 'outputs', 'table_name': 'tab_a'},
-                        }
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': output_a,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'tab_a',
+                        'iceberg': {'namespace': 'outputs', 'table_name': 'tab_a'},
                     },
                     'steps': [],
                 },
                 {
                     'id': 'tab-b',
                     'name': 'Tab B',
-                    'type': 'datasource',
-                    'datasource_id': other_ds_id,
-                    'output_datasource_id': output_b,
-                    'datasource_config': {
-                        'output': {
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'tab_b',
-                            'iceberg': {'namespace': 'outputs', 'table_name': 'tab_b'},
-                        }
+                    'parent_id': None,
+                    'datasource': {
+                        'id': other_ds_id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': output_b,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'tab_b',
+                        'iceberg': {'namespace': 'outputs', 'table_name': 'tab_b'},
                     },
                     'steps': [],
                 },
@@ -640,7 +688,7 @@ class TestScheduleRoutes:
             id=str(uuid.uuid4()),
             name='Output 1',
             source_type='iceberg',
-            config={'analysis_id': a1.id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=a1.id,
             is_hidden=True,
@@ -650,7 +698,7 @@ class TestScheduleRoutes:
             id=str(uuid.uuid4()),
             name='Output 2',
             source_type='iceberg',
-            config={'analysis_id': a2.id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=a2.id,
             is_hidden=True,
@@ -723,7 +771,7 @@ class TestScheduleRoutes:
             id=str(uuid.uuid4()),
             name='Output DataSource 2',
             source_type='iceberg',
-            config={'analysis_id': sample_analysis.id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=sample_analysis.id,
             is_hidden=True,

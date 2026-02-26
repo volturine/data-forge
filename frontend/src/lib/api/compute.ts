@@ -17,7 +17,6 @@ export interface StepPreviewRequest {
 	row_limit?: number;
 	page?: number;
 	resource_config?: EngineResourceConfig | null;
-	datasource_config?: Record<string, unknown> | null;
 }
 
 export type StepPreviewResourceConfig = StepPreviewRequest['resource_config'];
@@ -106,8 +105,7 @@ export interface ExportRequest {
 	duckdb_options?: {
 		table_name?: string;
 	};
-	datasource_config?: Record<string, unknown> | null;
-	output_datasource_id?: string | null;
+	output_datasource_id: string;
 }
 
 export interface ExportResponse {
@@ -150,7 +148,6 @@ export interface DownloadRequest {
 	tab_id?: string | null;
 	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel' | 'duckdb';
 	filename?: string;
-	datasource_config?: Record<string, unknown> | null;
 }
 
 export function downloadStep(request: DownloadRequest): ResultAsync<Blob, ApiError> {
@@ -182,7 +179,6 @@ export interface StepSchemaRequest {
 	target_step_id: string;
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: string | null;
-	datasource_config?: Record<string, unknown> | null;
 }
 
 export interface StepSchemaResponse {
@@ -205,7 +201,6 @@ export interface StepRowCountRequest {
 	target_step_id: string;
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: string | null;
-	datasource_config?: Record<string, unknown> | null;
 }
 
 export interface StepRowCountResponse {

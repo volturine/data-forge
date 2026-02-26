@@ -10,37 +10,50 @@ export interface PipelineStep {
 	outputSchema?: Schema;
 }
 
-export type AnalysisTabType = 'datasource' | 'derived';
+export interface AnalysisTabDatasource {
+	id: string;
+	analysis_tab_id: string | null;
+	config: { branch: string } & Record<string, unknown>;
+}
 
-export interface AnalysisTab {
+export interface AnalysisTabOutput {
+	output_datasource_id: string;
+	datasource_type: string;
+	format: string;
+	filename: string;
+	build_mode?: string;
+	iceberg?: Record<string, unknown>;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabInput {
 	id: string;
 	name: string;
-	type: AnalysisTabType;
 	parent_id: string | null;
-	datasource_id: string | null;
-	output_datasource_id?: string | null;
-	datasource_config?: Record<string, unknown> | null;
+	datasource: AnalysisTabDatasource;
+	output: AnalysisTabOutput;
 	steps: PipelineStep[];
 }
+
+export type AnalysisTab = AnalysisTabInput;
 
 export interface AnalysisCreate {
 	name: string;
 	description?: string | null;
-	datasource_ids: string[];
 	pipeline_steps: PipelineStep[];
-	tabs: AnalysisTab[];
-	output_branch?: string | null;
+	tabs: AnalysisTabInput[];
 }
+
+export type AnalysisCreateInput = AnalysisCreate;
 
 export interface AnalysisUpdate {
 	name?: string | null;
 	description?: string | null;
 	pipeline_steps?: PipelineStep[] | null;
 	status?: string | null;
-	tabs?: AnalysisTab[] | null;
+	tabs: AnalysisTabInput[];
 	client_id?: string | null;
 	lock_token?: string | null;
-	output_branch?: string | null;
 }
 
 export interface Analysis {
@@ -53,9 +66,8 @@ export interface Analysis {
 	updated_at: string;
 	result_path: string | null;
 	thumbnail: string | null;
-	tabs: AnalysisTab[];
+	tabs: AnalysisTabInput[];
 	version?: string | null;
-	output_branch?: string | null;
 }
 
 export interface AnalysisGalleryItem {

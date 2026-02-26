@@ -10,34 +10,125 @@ from tests.conftest import acquire_lock
 class TestAnalysisValidation:
     """Test analysis validation logic."""
 
-    def test_create_analysis_missing_name(self, client):
+    def test_create_analysis_missing_name(self, client, sample_datasource: DataSource):
         """Test creating analysis without a name."""
-        payload = {'description': 'Test analysis'}
+        payload = {
+            'description': 'Test analysis',
+            'pipeline_steps': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_a',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
 
         response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code == 422
 
-    def test_create_analysis_empty_name(self, client):
+    def test_create_analysis_empty_name(self, client, sample_datasource: DataSource):
         """Test creating analysis with empty name."""
-        payload = {'name': '', 'description': 'Test'}
+        payload = {
+            'name': '',
+            'description': 'Test',
+            'pipeline_steps': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_b',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
 
         response = client.post('/api/v1/analysis', json=payload)
 
         assert response.status_code in [400, 422]
 
-    def test_create_analysis_with_long_name(self, client):
+    def test_create_analysis_with_long_name(self, client, sample_datasource: DataSource):
         """Test creating analysis with very long name."""
-        payload = {'name': 'A' * 1000, 'description': 'Test'}
+        payload = {
+            'name': 'A' * 1000,
+            'description': 'Test',
+            'pipeline_steps': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_c',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
 
         response = client.post('/api/v1/analysis', json=payload)
 
         # Should succeed or fail with validation error
         assert response.status_code in [200, 201, 422]
 
-    def test_create_analysis_with_special_characters(self, client):
+    def test_create_analysis_with_special_characters(self, client, sample_datasource: DataSource):
         """Test creating analysis with special characters in name."""
-        payload = {'name': 'Test <script>alert("xss")</script>', 'description': 'Test'}
+        payload = {
+            'name': 'Test <script>alert("xss")</script>',
+            'description': 'Test',
+            'pipeline_steps': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_d',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
 
         response = client.post('/api/v1/analysis', json=payload)
 
@@ -51,7 +142,25 @@ class TestAnalysisValidation:
         fake_id = str(uuid.uuid4())
         payload = {
             'name': 'Updated',
-            'tabs': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': str(uuid.uuid4()),
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_e',
+                    },
+                    'steps': [],
+                }
+            ],
             'client_id': str(uuid.uuid4()),
             'lock_token': str(uuid.uuid4()),
         }
@@ -80,13 +189,30 @@ class TestAnalysisValidation:
 class TestAnalysisPipeline:
     """Test analysis pipeline functionality."""
 
-    def test_create_analysis_with_empty_pipeline(self, client):
+    def test_create_analysis_with_empty_pipeline(self, client, sample_datasource: DataSource):
         """Test creating analysis with empty pipeline."""
         payload = {
             'name': 'Empty Pipeline Analysis',
             'pipeline_steps': [],
-            'datasource_ids': [],
-            'tabs': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_f',
+                    },
+                    'steps': [],
+                }
+            ],
         }
 
         response = client.post('/api/v1/analysis', json=payload)
@@ -117,13 +243,23 @@ class TestAnalysisPipeline:
                     'depends_on': ['step2'],
                 },
             ],
-            'datasource_ids': [sample_datasource.id],
             'tabs': [
                 {
                     'id': 'tab1',
                     'name': 'Source',
-                    'type': 'datasource',
-                    'datasource_id': sample_datasource.id,
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_g',
+                    },
+                    'steps': [],
                 }
             ],
         }
@@ -148,6 +284,7 @@ class TestAnalysisPipeline:
 
         payload = {
             'pipeline_steps': new_steps,
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -159,7 +296,7 @@ class TestAnalysisPipeline:
         # Check that the pipeline was updated
         assert len(data['pipeline_definition']['steps']) >= 1
 
-    def test_analysis_with_circular_dependencies(self, client):
+    def test_analysis_with_circular_dependencies(self, client, sample_datasource: DataSource):
         """Test creating analysis with circular dependencies."""
         payload = {
             'name': 'Circular Deps',
@@ -167,8 +304,25 @@ class TestAnalysisPipeline:
                 {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': ['step2']},
                 {'id': 'step2', 'type': 'filter', 'config': {}, 'depends_on': ['step1']},
             ],
-            'datasource_ids': [],
-            'tabs': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_h',
+                    },
+                    'steps': [],
+                }
+            ],
         }
 
         response = client.post('/api/v1/analysis', json=payload)
@@ -206,7 +360,7 @@ class TestAnalysisDataSourceLinking:
 
     def test_unlink_datasource(self, client, sample_analysis: Analysis):
         """Test unlinking datasource from analysis."""
-        datasource_id = sample_analysis.pipeline_definition['datasource_ids'][0]
+        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
 
         response = client.delete(f'/api/v1/analysis/{sample_analysis.id}/datasources/{datasource_id}')
 
@@ -222,7 +376,7 @@ class TestAnalysisDataSourceLinking:
 
     def test_link_same_datasource_twice(self, client, sample_analysis: Analysis):
         """Test linking the same datasource twice."""
-        datasource_id = sample_analysis.pipeline_definition['datasource_ids'][0]
+        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
 
         response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{datasource_id}')
 
@@ -238,6 +392,7 @@ class TestAnalysisStatus:
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
             'status': 'running',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -253,6 +408,7 @@ class TestAnalysisStatus:
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
             'status': 'invalid_status',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -270,6 +426,7 @@ class TestAnalysisStatus:
         for status in statuses:
             payload = {
                 'status': status,
+                'tabs': sample_analysis.pipeline_definition['tabs'],
                 'client_id': client_id,
                 'lock_token': lock_token,
             }
@@ -318,6 +475,7 @@ class TestAnalysisMetadata:
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
             'description': 'Updated description',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -334,6 +492,7 @@ class TestAnalysisMetadata:
         thumbnail = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
         payload = {
             'thumbnail': thumbnail,
+            'tabs': sample_analysis.pipeline_definition['tabs'],
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -344,12 +503,30 @@ class TestAnalysisMetadata:
         data = response.json()
         assert 'thumbnail' in data
 
-    def test_analysis_timestamps(self, client):
+    def test_analysis_timestamps(self, client, sample_datasource: DataSource):
         """Test that analysis has proper timestamps."""
         payload = {
             'name': 'Timestamp Test',
             'pipeline_steps': [],
-            'datasource_ids': [],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_i',
+                    },
+                    'steps': [],
+                }
+            ],
         }
 
         response = client.post('/api/v1/analysis', json=payload)
@@ -366,7 +543,11 @@ class TestAnalysisMetadata:
         response1.json()
 
         # Update
-        client.put(f'/api/v1/analysis/{sample_analysis.id}', json={'name': 'Updated'})
+        client_id, lock_token = acquire_lock(client, sample_analysis.id)
+        client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'name': 'Updated', 'tabs': sample_analysis.pipeline_definition['tabs'], 'client_id': client_id, 'lock_token': lock_token},
+        )
 
         # Get updated
         response2 = client.get(f'/api/v1/analysis/{sample_analysis.id}')

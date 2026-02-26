@@ -22,7 +22,6 @@ class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
     source_type: Literal['file', 'database', 'duckdb', 'iceberg', 'analysis'] = 'file'
-    analysis_id: str | None = None
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
     file_path: str | None = None
@@ -172,16 +171,13 @@ class DatasourceHandler(OperationHandler):
         )
 
     def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
-        if not config.analysis_id:
-            raise ValueError('Datasource analysis loading requires analysis_id')
         pipeline = config.analysis_pipeline
         if isinstance(pipeline, dict):
-            analysis_id = str(config.analysis_id)
             pipeline_id = pipeline.get('analysis_id')
             if pipeline_id:
                 pipeline_id = str(pipeline_id)
-            if not pipeline_id or pipeline_id == analysis_id:
-                return _load_analysis_pipeline(pipeline, analysis_id, config.analysis_tab_id)
+            if pipeline_id:
+                return _load_analysis_pipeline(pipeline, pipeline_id, config.analysis_tab_id)
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
 
 
@@ -237,17 +233,27 @@ def _resolve_analysis_tab(tabs: list[dict], analysis_tab_id: str | None) -> dict
     if not selected:
         selected = next((tab for tab in tabs if tab.get('steps')), None)
     if not selected:
-        selected = tabs[0]
+        raise ValueError('Analysis pipeline missing tab steps')
     return selected
 
 
 def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     output_to_tab: dict[str, dict] = {}
     tab_input: dict[str, str] = {}
+    output_map: dict[str, str] = {}
+    for tab in tabs:
+        tab_id = tab.get('id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        if not tab_id or not output_id:
+            continue
+        output_map[str(tab_id)] = str(output_id)
     for tab in tabs:
         tid = tab.get('id')
-        output_id = tab.get('output_datasource_id')
-        input_id = tab.get('datasource_id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
             output_to_tab[str(output_id)] = tab
         if tid and input_id:
@@ -280,9 +286,12 @@ def _build_tab_pipeline(
     pipeline: dict,
     cache: dict[str, pl.LazyFrame],
 ) -> pl.LazyFrame:
-    datasource_id = tab.get('datasource_id')
+    datasource = tab.get('datasource') if isinstance(tab, dict) else None
+    if not isinstance(datasource, dict):
+        raise ValueError('Analysis tab datasource must be a dict')
+    datasource_id = datasource.get('id')
     if not datasource_id:
-        raise ValueError('Analysis tab missing datasource_id')
+        raise ValueError('Analysis tab missing datasource.id')
 
     if datasource_id in cache:
         base_frame = cache[datasource_id]
@@ -291,11 +300,18 @@ def _build_tab_pipeline(
         if not isinstance(datasource_config, dict):
             raise ValueError(f'Analysis pipeline missing datasource config for {datasource_id}')
 
-        overrides = tab.get('datasource_config') or {}
-        if overrides and not isinstance(overrides, dict):
-            raise ValueError('Analysis tab datasource_config must be a dict')
+        overrides = datasource.get('config')
+        if not isinstance(overrides, dict):
+            raise ValueError('Analysis tab datasource.config must be a dict')
+        branch = overrides.get('branch')
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError('Analysis tab datasource.config.branch is required')
 
-        merged = {**datasource_config, **overrides}
+        base_config = datasource_config if isinstance(datasource_config, dict) else {}
+        merged = {**base_config, **overrides}
+        output_override = tab.get('output')
+        if isinstance(output_override, dict):
+            merged = {**merged, **output_override}
         analysis_id = pipeline.get('analysis_id')
         analysis_id = str(analysis_id) if analysis_id is not None else None
         if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
@@ -327,7 +343,8 @@ def _build_tab_pipeline(
         )
         cache[step_id] = base_frame
 
-    output_id = tab.get('output_datasource_id')
+    output = tab.get('output') if isinstance(tab, dict) else None
+    output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
     if output_id:
         cache[str(output_id)] = base_frame
 

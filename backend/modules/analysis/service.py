@@ -24,27 +24,62 @@ def create_analysis(
 ) -> AnalysisResponseSchema:
     analysis_id = str(uuid.uuid4())
 
-    for datasource_id in data.datasource_ids:
-        result = session.execute(select(DataSource).where(col(DataSource.id) == datasource_id))  # type: ignore[arg-type]
-        datasource = result.scalar_one_or_none()
-        if not datasource:
-            raise DataSourceNotFoundError(datasource_id)
-        if datasource.source_type == 'analysis':
-            source_id = _get_analysis_source_id(datasource)
-            _ensure_no_cycle(session, analysis_id, source_id)
-
+    if not data.tabs:
+        raise ValueError('Analysis requires at least one tab')
     tabs_payload = [tab.model_dump() for tab in data.tabs]
+    output_map: dict[str, str] = {}
     for tab in tabs_payload:
-        if not tab.get('output_datasource_id'):
-            tab['output_datasource_id'] = str(uuid.uuid4())
+        output = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output, dict):
+            raise ValueError('Analysis tab missing output configuration')
+        output_id = output.get('output_datasource_id')
+        if not output_id:
+            raise ValueError('Analysis tab missing output.output_datasource_id')
+        if not output.get('filename'):
+            raise ValueError('Analysis tab missing output.filename')
+        if not output.get('format'):
+            raise ValueError('Analysis tab missing output.format')
+        if not output.get('datasource_type'):
+            raise ValueError('Analysis tab missing output.datasource_type')
+        output_id = str(output_id)
+        tab_id = tab.get('id')
+        if tab_id:
+            output_map[str(tab_id)] = output_id
 
-    pipeline_definition = {
+    datasource_ids = []
+    output_ids = set(output_map.values())
+    for tab in tabs_payload:
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict):
+            raise ValueError('Analysis tab datasource must be a dict')
+        config = datasource.get('config')
+        if not isinstance(config, dict):
+            raise ValueError('Analysis tab datasource.config must be a dict')
+        branch = config.get('branch')
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError('Analysis tab datasource.config.branch is required')
+        config['branch'] = branch.strip()
+        datasource['config'] = config
+        tab['datasource'] = datasource
+        datasource_id = datasource.get('id')
+        if not datasource_id:
+            raise ValueError('Analysis tab missing datasource.id')
+        datasource_row = session.get(DataSource, datasource_id)
+        if datasource_row:
+            datasource_ids.append(str(datasource_id))
+            if datasource_row.source_type == 'analysis':
+                source_id = _get_analysis_source_id(datasource_row)
+                _ensure_no_cycle(session, analysis_id, source_id)
+            continue
+        if str(datasource_id) in output_ids:
+            datasource_ids.append(str(datasource_id))
+            continue
+        raise DataSourceNotFoundError(str(datasource_id))
+
+    pipeline_definition: dict[str, object] = {
         'steps': [step.model_dump() for step in data.pipeline_steps],
-        'datasource_ids': data.datasource_ids,
         'tabs': tabs_payload,
     }
-    if data.output_branch is not None:
-        pipeline_definition['output_branch'] = data.output_branch
 
     now = datetime.now(UTC).replace(tzinfo=None)
     analysis = Analysis(
@@ -61,7 +96,7 @@ def create_analysis(
     with transaction:
         session.add(analysis)
 
-        for datasource_id in data.datasource_ids:
+        for datasource_id in datasource_ids:
             link = AnalysisDataSource(
                 analysis_id=analysis_id,
                 datasource_id=datasource_id,
@@ -73,7 +108,10 @@ def create_analysis(
     session.refresh(analysis)
 
     response = AnalysisResponseSchema.model_validate(analysis)
-    response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    if not isinstance(tabs, list):
+        tabs = []
+    response.tabs = [TabSchema.model_validate(tab) for tab in tabs if isinstance(tab, dict)]
     return response
 
 
@@ -87,7 +125,8 @@ def get_analysis(
         raise AnalysisNotFoundError(analysis_id)
 
     response = AnalysisResponseSchema.model_validate(analysis)
-    response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    response.tabs = [TabSchema.model_validate(tab) for tab in tabs if isinstance(tab, dict)]
     return response
 
 
@@ -122,118 +161,98 @@ def update_analysis(
         tabs_payload = [tab.model_dump() for tab in data.tabs] if data.tabs is not None else analysis.pipeline_definition.get('tabs', [])
         output_map: dict[str, str] = {}
         if data.tabs is not None:
+            if not data.tabs:
+                raise ValueError('Analysis requires at least one tab')
             for tab in tabs_payload:
                 tab_id = tab.get('id')
-                output_id = tab.get('output_datasource_id')
+                output = tab.get('output') if isinstance(tab, dict) else None
+                if not isinstance(output, dict):
+                    raise ValueError('Analysis tab missing output configuration')
+                output_id = output.get('output_datasource_id')
                 if not output_id:
-                    output_id = str(uuid.uuid4())
-                    tab['output_datasource_id'] = output_id
+                    raise ValueError('Analysis tab missing output.output_datasource_id')
+                if not output.get('filename'):
+                    raise ValueError('Analysis tab missing output.filename')
+                if not output.get('format'):
+                    raise ValueError('Analysis tab missing output.format')
+                if not output.get('datasource_type'):
+                    raise ValueError('Analysis tab missing output.datasource_type')
+                output_id = str(output_id)
                 if tab_id and output_id:
-                    output_map[str(tab_id)] = str(output_id)
+                    output_map[str(tab_id)] = output_id
 
         if data.tabs is not None:
+            output_ids = set(output_map.values())
             for tab in tabs_payload:
-                config = tab.get('datasource_config') or {}
-                source_analysis_id = config.get('analysis_id')
-                datasource_id = tab.get('datasource_id')
+                datasource = tab.get('datasource')
+                if not isinstance(datasource, dict):
+                    raise ValueError('Analysis tab datasource must be a dict')
+                datasource_id = datasource.get('id')
+                config = datasource.get('config')
+                if not isinstance(config, dict):
+                    raise ValueError('Analysis tab datasource.config must be a dict')
 
-                if source_analysis_id:
-                    if str(source_analysis_id) == analysis_id and not config.get('analysis_tab_id'):
-                        raise ValueError('Analysis cannot use itself as a datasource')
-                    if str(source_analysis_id) == analysis_id and config.get('analysis_tab_id'):
-                        source_tab_id = config.get('analysis_tab_id')
-                        output_id = output_map.get(str(source_tab_id)) if source_tab_id else None
-                        if output_id:
-                            tab['datasource_id'] = output_id
-                            datasource_id = output_id
-                    if str(source_analysis_id) != analysis_id:
-                        if not datasource_id:
-                            raise ValueError('Cross-analysis tab requires datasource_id')
-                        if not session.get(DataSource, datasource_id):
-                            raise DataSourceNotFoundError(str(datasource_id))
-                else:
-                    if not datasource_id:
-                        raise ValueError('Analysis tab missing datasource_id')
-                    if not session.get(DataSource, datasource_id):
-                        raise DataSourceNotFoundError(str(datasource_id))
+                if not datasource_id:
+                    raise ValueError('Analysis tab missing datasource.id')
+                if not session.get(DataSource, datasource_id) and str(datasource_id) not in output_ids:
+                    raise DataSourceNotFoundError(str(datasource_id))
 
-                output_config = tab.get('datasource_config')
+                branch = config.get('branch')
+                if not isinstance(branch, str) or not branch.strip():
+                    raise ValueError('Analysis tab datasource.config.branch is required')
+                config['branch'] = branch.strip()
+                datasource['config'] = config
+                tab['datasource'] = datasource
+
+                output_config = tab.get('output')
                 if not isinstance(output_config, dict):
-                    output_config = {}
-                if 'output' not in output_config:
-                    base_name = tab.get('name') or 'export'
-                    table_name = base_name.replace(' ', '_').lower() or 'export'
-                    output_branch = (
-                        analysis.pipeline_definition.get('output_branch') if isinstance(analysis.pipeline_definition, dict) else None
-                    )
-                    output_config['output'] = {
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': base_name,
-                        'iceberg': {
-                            'namespace': 'outputs',
-                            'table_name': table_name,
-                            'branch': output_branch if isinstance(output_branch, str) and output_branch else 'master',
-                        },
-                    }
-                    tab['datasource_config'] = output_config
-        datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
-        if data.tabs is not None:
-            datasource_ids = []
-            for tab in tabs_payload:
-                ds_id = tab.get('datasource_id')
-                if not ds_id:
-                    continue
-                if session.get(DataSource, ds_id):
-                    datasource_ids.append(ds_id)
-                    continue
-                tab_config = tab.get('datasource_config') or {}
-                if not isinstance(tab_config, dict):
-                    continue
-                if tab_config.get('analysis_id') != analysis_id:
-                    continue
-                source_tab_id = tab_config.get('analysis_tab_id')
-                output_id = output_map.get(str(source_tab_id)) if source_tab_id else None
-                if output_id and output_id == ds_id:
-                    continue
-        pipeline_definition = {
+                    raise ValueError('Analysis tab missing output configuration')
+                output_id = output_config.get('output_datasource_id')
+                if not output_id:
+                    raise ValueError('Analysis tab missing output.output_datasource_id')
+                if not output_config.get('filename'):
+                    raise ValueError('Analysis tab missing output.filename')
+                if not output_config.get('format'):
+                    raise ValueError('Analysis tab missing output.format')
+                if not output_config.get('datasource_type'):
+                    raise ValueError('Analysis tab missing output.datasource_type')
+                tab['output'] = {**output_config, 'output_datasource_id': output_id}
+        pipeline_definition: dict[str, object] = {
             'steps': (
                 [step.model_dump() for step in data.pipeline_steps]
                 if data.pipeline_steps is not None
                 else analysis.pipeline_definition.get('steps', [])
             ),
-            'datasource_ids': datasource_ids,
             'tabs': tabs_payload,
         }
         analysis.pipeline_definition = pipeline_definition
 
-        datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
+        datasource_ids = []
+        output_ids = set(output_map.values())
         session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
-        for datasource_id in datasource_ids:
-            datasource = session.get(DataSource, datasource_id)
-            if not datasource:
-                raise DataSourceNotFoundError(datasource_id)
-            if datasource.source_type == 'analysis':
-                source_id = _get_analysis_source_id(datasource)
-                if source_id == analysis_id and datasource.config.get('analysis_tab_id'):
-                    continue
+        for tab in tabs_payload:
+            datasource = tab.get('datasource')
+            if not isinstance(datasource, dict):
+                raise ValueError('Analysis tab datasource must be a dict')
+            ds_id = datasource.get('id')
+            if not ds_id:
+                raise ValueError('Analysis tab missing datasource.id')
+            if not session.get(DataSource, ds_id) and str(ds_id) not in output_ids:
+                raise DataSourceNotFoundError(str(ds_id))
+            datasource_ids.append(ds_id)
+            datasource_model = session.get(DataSource, ds_id)
+            if datasource_model and datasource_model.source_type == 'analysis':
+                source_id = _get_analysis_source_id(datasource_model)
                 _ensure_no_cycle(session, analysis_id, source_id)
             session.add(
                 AnalysisDataSource(
                     analysis_id=analysis_id,
-                    datasource_id=datasource_id,
+                    datasource_id=ds_id,
                 )
             )
 
     if data.status is not None:
         analysis.status = data.status
-
-    if data.output_branch is not None:
-        pipeline = analysis.pipeline_definition
-        if not isinstance(pipeline, dict):
-            pipeline = {}
-        pipeline['output_branch'] = data.output_branch
-        analysis.pipeline_definition = pipeline
 
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
@@ -241,7 +260,10 @@ def update_analysis(
     session.refresh(analysis)
 
     response = AnalysisResponseSchema.model_validate(analysis)
-    response.tabs = [TabSchema.model_validate(tab) for tab in analysis.pipeline_definition.get('tabs', [])]
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    if not isinstance(tabs, list):
+        tabs = []
+    response.tabs = [TabSchema.model_validate(tab) for tab in tabs if isinstance(tab, dict)]
     return response
 
 
@@ -311,19 +333,31 @@ def link_datasource(
     )
     session.add(link)
 
-    if datasource_id not in analysis.pipeline_definition.get('datasource_ids', []):
-        analysis.pipeline_definition['datasource_ids'] = analysis.pipeline_definition.get('datasource_ids', []) + [datasource_id]
-        analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     tabs = analysis.pipeline_definition.get('tabs', [])
-    if not any(tab.get('datasource_id') == datasource_id for tab in tabs):
+    if not any((tab.get('datasource') or {}).get('id') == datasource_id for tab in tabs):
         tabs.append(
             {
                 'id': f'tab-{datasource_id}',
                 'name': f'Source {len(tabs) + 1}',
-                'type': 'datasource',
                 'parent_id': None,
-                'datasource_id': datasource_id,
+                'datasource': {
+                    'id': datasource_id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': f'Source {len(tabs) + 1}',
+                    'iceberg': {
+                        'namespace': 'outputs',
+                        'table_name': f'source_{len(tabs) + 1}',
+                        'branch': 'master',
+                    },
+                },
                 'steps': [],
             }
         )
@@ -334,9 +368,9 @@ def link_datasource(
 
 
 def _get_analysis_source_id(datasource: DataSource) -> str:
-    analysis_id = datasource.config.get('analysis_id')
+    analysis_id = datasource.created_by_analysis_id
     if not analysis_id:
-        raise ValueError(f'Analysis datasource {datasource.id} missing analysis_id')
+        raise ValueError(f'Analysis datasource {datasource.id} missing created_by_analysis_id')
     return str(analysis_id)
 
 
@@ -369,7 +403,7 @@ def _detect_cycle(session: Session, analysis_id: str, source_analysis_id: str) -
                 continue
             if datasource.source_type != 'analysis':
                 continue
-            next_id = datasource.config.get('analysis_id')
+            next_id = datasource.created_by_analysis_id
             if not next_id:
                 continue
             if visit(str(next_id)):
@@ -401,14 +435,8 @@ def unlink_datasource(
         )
     )
 
-    datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
-    if datasource_id in datasource_ids:
-        datasource_ids.remove(datasource_id)
-        analysis.pipeline_definition['datasource_ids'] = datasource_ids
-        analysis.updated_at = datetime.now(UTC)
-
     tabs = analysis.pipeline_definition.get('tabs', [])
-    next_tabs = [tab for tab in tabs if tab.get('datasource_id') != datasource_id]
+    next_tabs = [tab for tab in tabs if (tab.get('datasource') or {}).get('id') != datasource_id]
     if len(next_tabs) != len(tabs):
         analysis.pipeline_definition['tabs'] = next_tabs
         analysis.updated_at = datetime.now(UTC)

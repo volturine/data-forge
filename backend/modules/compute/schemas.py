@@ -1,6 +1,7 @@
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
 
 class EngineStatus(StrEnum):
@@ -57,15 +58,47 @@ class EngineDefaults(BaseModel):
     streaming_chunk_size: int  # 0 = auto
 
 
+class AnalysisPipelineDatasourceConfig(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra='allow')
+
+    branch: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+
+
+class AnalysisPipelineDatasource(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    analysis_tab_id: str | None
+    config: AnalysisPipelineDatasourceConfig
+
+
 class AnalysisPipelineTab(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     name: str | None = None
-    datasource_id: str | None = None
-    output_datasource_id: str | None = None
-    datasource_config: dict | None = None
+    datasource: AnalysisPipelineDatasource
+    output: dict
     steps: list[dict]
+
+    @field_validator('output')
+    @classmethod
+    def validate_output(cls, value: dict) -> dict:
+        if not isinstance(value, dict):
+            raise ValueError('Analysis pipeline tab output must be a dict')
+        output_id = value.get('output_datasource_id')
+        if not isinstance(output_id, str) or not output_id.strip():
+            raise ValueError('Analysis pipeline tab output.output_datasource_id is required')
+        filename = value.get('filename')
+        if not isinstance(filename, str) or not filename.strip():
+            raise ValueError('Analysis pipeline tab output.filename is required')
+        export_format = value.get('format')
+        if not isinstance(export_format, str) or not export_format.strip():
+            raise ValueError('Analysis pipeline tab output.format is required')
+        datasource_type = value.get('datasource_type')
+        if not isinstance(datasource_type, str) or not datasource_type.strip():
+            raise ValueError('Analysis pipeline tab output.datasource_type is required')
+        return value
 
 
 class AnalysisPipelinePayload(BaseModel):
@@ -74,6 +107,13 @@ class AnalysisPipelinePayload(BaseModel):
     analysis_id: str
     tabs: list[AnalysisPipelineTab]
     sources: dict[str, dict]
+
+    @field_validator('tabs')
+    @classmethod
+    def validate_tabs(cls, value: list[AnalysisPipelineTab]) -> list[AnalysisPipelineTab]:
+        if not isinstance(value, list) or not value:
+            raise ValueError('analysis_pipeline.tabs must include at least one tab')
+        return value
 
 
 class EngineStatusSchema(BaseModel):
@@ -117,7 +157,6 @@ class StepPreviewRequest(BaseModel):
     row_limit: int = 1000
     page: int = 1
     resource_config: EngineResourceConfig | None = None
-    datasource_config: dict | None = None
 
 
 class StepPreviewResponse(BaseModel):
@@ -186,8 +225,17 @@ class ExportRequest(BaseModel):
     datasource_type: ExportDatasourceType = ExportDatasourceType.ICEBERG
     iceberg_options: IcebergExportOptions | None = None
     duckdb_options: DuckDBExportOptions | None = None
-    datasource_config: dict | None = None
     output_datasource_id: str | None = None
+
+    @field_validator('output_datasource_id')
+    @classmethod
+    def validate_output_datasource_id(cls, value: str | None, info):
+        if not info.data:
+            return value
+        destination = info.data.get('destination')
+        if destination == ExportDestination.DATASOURCE and (not isinstance(value, str) or not value.strip()):
+            raise ValueError('Output exports require output_datasource_id')
+        return value
 
     @field_validator('datasource_type')
     @classmethod
@@ -222,7 +270,6 @@ class DownloadRequest(BaseModel):
     tab_id: str | None = None
     format: ExportFormat = ExportFormat.CSV
     filename: str = 'download'
-    datasource_config: dict | None = None
 
 
 class StepSchemaRequest(BaseModel):
@@ -232,7 +279,6 @@ class StepSchemaRequest(BaseModel):
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
-    datasource_config: dict | None = None
 
 
 class StepRowCountRequest(BaseModel):
@@ -242,7 +288,6 @@ class StepRowCountRequest(BaseModel):
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
-    datasource_config: dict | None = None
 
 
 class IcebergSnapshotInfo(BaseModel):

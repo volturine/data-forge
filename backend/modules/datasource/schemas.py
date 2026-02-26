@@ -100,7 +100,7 @@ class ColumnStatsResponse(BaseModel):
 
 
 class ColumnStatsRequest(BaseModel):
-    datasource_config: dict | None = None
+    datasource: dict | None = None
 
 
 class ExcelPreflightPathRequest(BaseModel):

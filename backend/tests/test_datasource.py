@@ -199,10 +199,12 @@ class TestDataSourceSchema:
 class TestColumnStats:
     def test_column_stats_with_config_override(self, client, sample_datasource: DataSource, sample_csv_file: Path):
         payload = {
-            'datasource_config': {
-                'file_path': str(sample_csv_file),
-                'file_type': 'csv',
-                'options': {},
+            'datasource': {
+                'config': {
+                    'file_path': str(sample_csv_file),
+                    'file_type': 'csv',
+                    'options': {},
+                }
             }
         }
 

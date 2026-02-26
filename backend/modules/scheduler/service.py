@@ -349,7 +349,11 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
 
     target_tab = None
     for tab in tabs:
-        if tab.get('output_datasource_id') == schedule.datasource_id:
+        output = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output, dict):
+            continue
+        output_id = output.get('output_datasource_id')
+        if output_id == schedule.datasource_id:
             target_tab = tab
             break
 
@@ -358,19 +362,15 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
 
     tab_id = target_tab.get('id', 'unknown')
     tab_name = target_tab.get('name', 'unnamed')
-    tab_datasource_id = target_tab.get('datasource_id')
+    datasource = target_tab.get('datasource') if isinstance(target_tab, dict) else None
+    tab_datasource_id = datasource.get('id') if isinstance(datasource, dict) else None
     steps = target_tab.get('steps', [])
-    datasource_config = target_tab.get('datasource_config')
+    output_config = target_tab.get('output') if isinstance(target_tab, dict) else None
 
     if not tab_datasource_id:
         raise ValueError(f'Tab {tab_id} has no input datasource')
 
-    # Extract output config
-    output_config = None
-    if isinstance(datasource_config, dict):
-        output_config = datasource_config.get('output')
-
-    if not output_config:
+    if not isinstance(output_config, dict):
         raise ValueError(f'Tab {tab_id} missing output configuration')
 
     # Determine target step
@@ -385,14 +385,14 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
 
     iceberg_options = None
     iceberg_cfg = output_config.get('iceberg')
-    if iceberg_cfg and isinstance(iceberg_cfg, dict):
+    if isinstance(iceberg_cfg, dict):
         iceberg_options = {
             'table_name': iceberg_cfg.get('table_name', 'exported_data'),
             'namespace': iceberg_cfg.get('namespace', 'outputs'),
             'branch': iceberg_cfg.get('branch', 'master'),
         }
 
-    tab_build_mode = output_config.get('build_mode', 'full') if isinstance(output_config, dict) else 'full'
+    tab_build_mode = output_config.get('build_mode', 'full')
 
     logger.info(f'Schedule {schedule_id}: Building tab {tab_name} mode={tab_build_mode} (lazyframe deps auto-resolved in query plan)')
 
@@ -407,7 +407,6 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
         datasource_type=datasource_type,
         iceberg_options=iceberg_options,
         duckdb_options=None,
-        datasource_config=datasource_config,
         analysis_id=analysis_id,
         triggered_by=triggered_by,
         output_datasource_id=schedule.datasource_id,
@@ -432,12 +431,14 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
 
     for tab in tabs:
         tid = tab.get('id')
-        output_id = tab.get('output_datasource_id')
-        input_id = tab.get('datasource_id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
-            output_to_tab[output_id] = tid
+            output_to_tab[str(output_id)] = str(tid)
         if tid and input_id:
-            tab_input[tid] = input_id
+            tab_input[str(tid)] = str(input_id)
 
     required: set[str] = set()
     queue = [target_tab_id]
@@ -494,10 +495,13 @@ def run_analysis_build(
     for tab in tabs:
         current_tab_id = tab.get('id', 'unknown')
         tab_name = tab.get('name', 'unnamed')
-        tab_datasource_id = tab.get('datasource_id')
-        tab_output_id = tab.get('output_datasource_id')
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        tab_datasource_id = datasource.get('id') if isinstance(datasource, dict) else None
+        output = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output, dict) or 'filename' not in output:
+            output = None
+        tab_output_id = output.get('output_datasource_id') if output else None
         steps = tab.get('steps', [])
-        datasource_config = tab.get('datasource_config')
 
         if not tab_datasource_id:
             continue
@@ -509,9 +513,7 @@ def run_analysis_build(
             continue
 
         # Extract output config if present
-        output_config = None
-        if isinstance(datasource_config, dict):
-            output_config = datasource_config.get('output')
+        output_config = output if output else None
 
         # Determine the target step (last step, or 'source' if no steps)
         target_step_id = 'source'
@@ -527,7 +529,7 @@ def run_analysis_build(
 
                 iceberg_options = None
                 iceberg_cfg = output_config.get('iceberg')
-                if iceberg_cfg and isinstance(iceberg_cfg, dict):
+                if isinstance(iceberg_cfg, dict):
                     iceberg_options = {
                         'table_name': iceberg_cfg.get('table_name', 'exported_data'),
                         'namespace': iceberg_cfg.get('namespace', 'outputs'),
@@ -546,10 +548,9 @@ def run_analysis_build(
                     datasource_type=datasource_type,
                     iceberg_options=iceberg_options,
                     duckdb_options=duckdb_options,
-                    datasource_config=datasource_config,
                     analysis_id=analysis_id,
                     triggered_by=triggered_by,
-                    output_datasource_id=tab.get('output_datasource_id'),
+                    output_datasource_id=output_config.get('output_datasource_id'),
                     tab_id=str(current_tab_id),
                 )
             else:

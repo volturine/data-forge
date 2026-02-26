@@ -1,6 +1,20 @@
 <script lang="ts">
 	import type { DataSource } from '$lib/types/datasource';
-	import type { AnalysisTab } from '$lib/types/analysis';
+	type TabDatasource = {
+		id: string;
+		analysis_tab_id: string | null;
+		config: { branch: string } & Record<string, unknown>;
+	};
+
+	type TabOutput = {
+		output_datasource_id: string;
+		datasource_type: string;
+		format: string;
+		filename: string;
+		build_mode?: string;
+		iceberg?: Record<string, unknown>;
+		[key: string]: unknown;
+	};
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { track } from '$lib/utils/audit-log';
@@ -23,12 +37,19 @@
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
 
+	type ActiveTab = {
+		id: string;
+		name: string;
+		datasource: TabDatasource;
+		output: TabOutput;
+	};
+
 	interface Props {
 		datasource: DataSource | null;
 		datasourceLabel?: string | null;
 		tabName?: string;
 		analysisId?: string;
-		activeTab?: AnalysisTab | null;
+		activeTab?: ActiveTab | null;
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
 	}
@@ -38,10 +59,12 @@
 		datasourceLabel = null,
 		tabName,
 		analysisId,
-		activeTab,
+		activeTab: activeTabRaw,
 		onChangeDatasource,
 		onRenameTab
 	}: Props = $props();
+
+	const activeTab = $derived(activeTabRaw);
 
 	let isEditing = $state(false);
 	let draftName = $state('');
@@ -98,23 +121,43 @@
 	});
 
 	const isIceberg = $derived(datasource?.source_type === 'iceberg');
-	const isOutputSource = $derived(
-		activeTab?.datasource_id === activeTab?.output_datasource_id &&
-			!!activeTab?.output_datasource_id
-	);
+	const outputId = $derived(activeTab?.output.output_datasource_id ?? null);
+	const isOutputSource = $derived(activeTab?.datasource?.id === outputId && !!outputId);
+	function ensureBranch(config: Record<string, unknown> | null | undefined, fallback: string) {
+		const branch = fallback.trim();
+		return { ...(config ?? {}), branch } as {
+			branch: string;
+		} & Record<string, unknown>;
+	}
+
 	function updateTimeTravelUi(updates: { open?: boolean; month?: string; day?: string }) {
 		const active = activeTab;
 		if (!active) return;
-		const nextConfig = { ...(active.datasource_config ?? {}) };
+		const branch = active?.datasource?.config?.branch as string;
+		const nextConfig = ensureBranch(active?.datasource?.config, branch ?? '');
 		const currentUi = (nextConfig.time_travel_ui as Record<string, unknown>) ?? {};
 		nextConfig.time_travel_ui = { ...currentUi, ...updates };
-		analysisStore.updateTab(active.id, { datasource_config: nextConfig });
+		const tab = active;
+		analysisStore.updateTab(active.id, {
+			datasource: {
+				...(tab?.datasource ?? {}),
+				config: nextConfig
+			}
+		});
 	}
 
 	function updateSnapshotConfig(nextConfig: Record<string, unknown>) {
 		const active = activeTab;
 		if (!active) return;
-		analysisStore.updateTab(active.id, { datasource_config: nextConfig });
+		const branch = active?.datasource?.config?.branch as string;
+		const config = ensureBranch(nextConfig, branch ?? '');
+		const tab = active;
+		analysisStore.updateTab(active.id, {
+			datasource: {
+				...(tab?.datasource ?? {}),
+				config
+			}
+		});
 		analysisStore.setActiveTab(active.id);
 	}
 
@@ -156,33 +199,30 @@
 		isEditing = false;
 	}
 
-	const analysisSourceId = $derived(
-		(activeTab?.datasource_config?.analysis_id as string | null) ??
-			(datasource?.config?.analysis_id as string | null) ??
-			null
-	);
+	const analysisSourceId = $derived(datasource?.created_by_analysis_id ?? null);
 	const sourceType = $derived(
 		(analysisSourceId ? 'analysis' : (datasource?.source_type ?? 'file')) as string
 	);
 	const isDragActive = $derived(drag.active);
-	const branchValue = $derived.by(() => {
-		const next = (activeTab?.datasource_config as Record<string, unknown> | null)?.branch;
-		if (typeof next === 'string' && next.trim().length > 0) {
-			return next;
-		}
-		return 'master';
+	const snapshotConfig = $derived.by(() => activeTab?.datasource?.config ?? {});
+	const snapshotBranch = $derived.by((): string | null => {
+		const branch = activeTab?.datasource?.config?.branch;
+		return typeof branch === 'string' ? branch : null;
 	});
+	const branchValue = $derived.by(() => activeTab?.datasource?.config?.branch ?? '');
 
 	function applyBranchValue(next: string) {
 		const active = activeTab;
 		if (!active) return;
-		const config = { ...(active.datasource_config ?? {}) } as Record<string, unknown>;
-		if (next) {
-			config.branch = next;
-		} else {
-			delete config.branch;
-		}
-		analysisStore.updateTab(active.id, { datasource_config: config });
+		if (!next.trim()) return;
+		const config = ensureBranch(active?.datasource?.config, next);
+		const tab = active;
+		analysisStore.updateTab(active.id, {
+			datasource: {
+				...(tab?.datasource ?? {}),
+				config
+			}
+		});
 		analysisStore.setActiveTab(active.id);
 	}
 </script>
@@ -311,11 +351,10 @@
 							<div class="min-w-0 flex-1">
 								<SnapshotPicker
 									datasourceId={datasource.id}
-									datasourceConfig={activeTab?.datasource_config ?? {}}
+									datasourceConfig={snapshotConfig}
 									label="Time Travel"
 									persistOpen
-									branch={(activeTab?.datasource_config as Record<string, unknown> | null)
-										?.branch as string | null | undefined}
+									branch={snapshotBranch}
 									showBuildPreviews={!isOutputSource}
 									onConfigChange={updateSnapshotConfig}
 									onUiChange={updateTimeTravelUi}

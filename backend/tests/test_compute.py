@@ -19,9 +19,17 @@ class TestComputePreview:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': sample_datasource.id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [
                             {
                                 'id': 'step1',
@@ -89,9 +97,17 @@ class TestComputePreview:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': sample_datasource.id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [
                             {
                                 'id': 'step1',
@@ -147,9 +163,17 @@ class TestComputePreview:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': missing_id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': missing_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [],
                     }
                 ],
@@ -179,9 +203,17 @@ class TestComputePreview:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': sample_datasource.id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [
                             {'id': 'step1', 'type': 'filter', 'config': {}},
                             {'id': 'step2', 'type': 'select', 'config': {}},
@@ -233,9 +265,17 @@ class TestComputePreview:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': sample_datasource.id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [
                             {
                                 'id': 'step1',
@@ -295,7 +335,7 @@ class TestComputePreview:
         run = runs[0]
         assert run.kind == 'preview'
         assert run.status == 'success'
-        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource_id'] == sample_datasource.id
+        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource']['id'] == sample_datasource.id
         assert 'data' not in run.result_json
         assert run.result_json['query_plans']['optimized'] == 'opt'
 
@@ -309,9 +349,17 @@ class TestComputeExport:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': sample_datasource.id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [
                             {
                                 'id': 'step1',
@@ -379,7 +427,7 @@ class TestComputeExport:
         run = runs[0]
         assert run.kind == 'export'
         assert run.status == 'success'
-        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource_id'] == sample_datasource.id
+        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource']['id'] == sample_datasource.id
         assert 'data' not in run.result_json
         assert run.result_json['query_plans']['optimized'] == 'opt'
         assert run.result_json['file_size_bytes'] > 0
@@ -394,9 +442,17 @@ class TestComputeRowCount:
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'datasource_id': sample_datasource.id,
-                        'datasource_config': {},
-                        'output_datasource_id': 'out-1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'output_datasource_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
                         'steps': [
                             {
                                 'id': 'step1',
@@ -453,7 +509,7 @@ class TestComputeRowCount:
         run = runs[0]
         assert run.kind == 'row_count'
         assert run.status == 'success'
-        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource_id'] == sample_datasource.id
+        assert run.request_json['analysis_pipeline']['tabs'][0]['datasource']['id'] == sample_datasource.id
         assert run.result_json['row_count'] == 42
 
 

@@ -111,17 +111,19 @@ class TestBuildModeWiring:
                 {
                     'id': 'tab1',
                     'name': 'Test Tab',
-                    'type': 'datasource',
-                    'datasource_id': datasource.id,
-                    'output_datasource_id': output_ds_id,
-                    'datasource_config': {
-                        'output': {
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'test_out',
-                            'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                            'build_mode': build_mode,
-                        }
+                    'parent_id': None,
+                    'datasource': {
+                        'id': datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': output_ds_id,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'test_out',
+                        'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                        'build_mode': build_mode,
                     },
                     'steps': [],
                 }
@@ -286,7 +288,7 @@ class TestBuildModeWiring:
     def test_default_build_mode_is_full(self, test_db_session: Session, sample_datasource: DataSource):
         output_ds_id = str(uuid.uuid4())
         pipeline = self._make_pipeline(sample_datasource, output_ds_id)
-        del pipeline['tabs'][0]['datasource_config']['output']['build_mode']
+        del pipeline['tabs'][0]['output']['build_mode']
         mock_catalog, mock_table, mock_arrow = self._setup_mocks(table_exists=True)
 
         with (

@@ -6,9 +6,9 @@
 	import { listDatasources } from '$lib/api/datasource';
 	import { createAnalysis } from '$lib/api/analysis';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
-	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { AnalysisCreate, PipelineStep } from '$lib/types/analysis';
+	import { buildOutputConfig } from '$lib/utils/analysis-tab';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 
 	let step = $state(1);
@@ -17,7 +17,6 @@
 	let selectedDatasourceIds = $state<string[]>([]);
 	let error = $state('');
 	let creating = $state(false);
-	let outputBranch = $state('master');
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -40,7 +39,7 @@
 		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
 			return crypto.randomUUID();
 		}
-		return 'id-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+		return `id-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
 	}
 
 	function buildInitialSteps(): PipelineStep[] {
@@ -60,24 +59,31 @@
 		creating = true;
 		error = '';
 
-		const payload = {
+		const tabs = selectedDatasourceIds.map((datasourceId, index) => {
+			const name = `Source ${index + 1}`;
+			const output = buildOutputConfig({ name, branch: 'master' });
+			return {
+				id: makeId(),
+				name,
+				parent_id: null,
+				datasource: {
+					id: datasourceId,
+					analysis_tab_id: null,
+					config: { branch: 'master' }
+				},
+				output,
+				steps: buildInitialSteps()
+			};
+		});
+
+		const payload: AnalysisCreate = {
 			name: name.trim(),
 			description: description.trim() || null,
-			datasource_ids: selectedDatasourceIds,
 			pipeline_steps: [],
-			output_branch: outputBranch.trim() || 'master',
-			tabs: selectedDatasourceIds.map((datasourceId, index) => ({
-				id: makeId(),
-				output_datasource_id: makeId(),
-				name: `Source ${index + 1}`,
-				type: 'datasource' as const,
-				parent_id: null,
-				datasource_id: datasourceId,
-				steps: buildInitialSteps()
-			}))
+			tabs
 		};
 
-		const result = await createAnalysis(payload as AnalysisCreate);
+		const result = await createAnalysis(payload);
 		result.match(
 			(analysis) => {
 				goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
@@ -177,19 +183,6 @@
 						rows="4"
 						class="min-h-25 w-full resize-y border border-tertiary bg-bg-primary p-3 text-sm focus:border-accent-primary"
 					></textarea>
-				</div>
-				<div class="mb-5 flex flex-col gap-2">
-					<label for="output-branch" class="block text-sm font-medium text-fg-secondary">
-						Output branch (optional)
-					</label>
-					<BranchPicker
-						branches={['master']}
-						value={outputBranch}
-						placeholder="master"
-						allowCreate={true}
-						onChange={(value: string) => (outputBranch = value)}
-					/>
-					<p class="m-0 text-xs text-fg-muted">Sets the default output branch for all exports.</p>
 				</div>
 			</div>
 		{:else if step === 2}

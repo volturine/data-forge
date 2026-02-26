@@ -15,7 +15,6 @@ from core.exceptions import (
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.analysis_versions.models import AnalysisVersion
 from modules.datasource.models import DataSource
-from modules.datasource.source_types import DataSourceType
 
 
 def create_version(session: Session, analysis: Analysis, *, commit: bool = True) -> AnalysisVersion:
@@ -90,31 +89,28 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
     tabs = analysis.pipeline_definition.get('tabs', [])
     for tab in tabs:
-        config = tab.get('datasource_config') or {}
-        source_analysis_id = config.get('analysis_id')
-        if not source_analysis_id:
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        if not isinstance(datasource, dict):
             continue
-        datasource_id = tab.get('datasource_id')
-        if datasource_id and session.get(DataSource, datasource_id):
-            continue
-        datasource_id = str(uuid.uuid4())
-        datasource = DataSource(
-            id=datasource_id,
-            name=tab.get('name') or 'Analysis Source',
-            source_type=DataSourceType.ANALYSIS,
-            config={'analysis_id': str(source_analysis_id)},
-            created_by_analysis_id=str(source_analysis_id),
-            created_by='analysis',
-            created_at=datetime.now(UTC).replace(tzinfo=None),
-        )
-        session.add(datasource)
-        tab['datasource_id'] = datasource_id
+        datasource_id = datasource.get('id')
+        if not datasource_id:
+            raise AnalysisValidationError('Analysis tab missing datasource.id')
+        if not session.get(DataSource, datasource_id):
+            raise DataSourceNotFoundError(str(datasource_id))
+        output = tab.get('output') if isinstance(tab, dict) else None
+        if not isinstance(output, dict):
+            raise AnalysisValidationError('Analysis tab missing output configuration')
+        output_id = output.get('output_datasource_id')
+        if not output_id:
+            raise AnalysisValidationError('Analysis tab missing output.output_datasource_id')
 
     stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)  # type: ignore[arg-type]
     session.execute(stmt)
-    datasource_ids = analysis.pipeline_definition.get('datasource_ids', [])
-    if tabs:
-        datasource_ids = [tab.get('datasource_id') for tab in tabs if tab.get('datasource_id')]
+    datasource_ids = [
+        tab.get('datasource', {}).get('id')
+        for tab in tabs
+        if isinstance(tab.get('datasource'), dict) and tab.get('datasource', {}).get('id')
+    ]
     for datasource_id in datasource_ids:
         ds: DataSource | None = session.get(DataSource, datasource_id)
         if not ds:
@@ -137,9 +133,9 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
 
 def _get_analysis_source_id(datasource: DataSource) -> str:
-    analysis_id = datasource.config.get('analysis_id')
+    analysis_id = datasource.created_by_analysis_id
     if not analysis_id:
-        raise ValueError(f'Analysis datasource {datasource.id} missing analysis_id')
+        raise ValueError(f'Analysis datasource {datasource.id} missing created_by_analysis_id')
     return str(analysis_id)
 
 
@@ -167,7 +163,7 @@ def _detect_cycle(session: Session, analysis_id: str, source_analysis_id: str) -
                 continue
             if datasource.source_type != 'analysis':
                 continue
-            next_id = datasource.config.get('analysis_id')
+            next_id = datasource.created_by_analysis_id
             if not next_id:
                 continue
             if visit(str(next_id)):

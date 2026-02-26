@@ -241,14 +241,23 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
                 'depends_on': [],
             }
         ],
-        'datasource_ids': [sample_datasource.id],
         'tabs': [
             {
                 'id': 'tab1',
                 'name': 'Source',
-                'type': 'datasource',
                 'parent_id': None,
-                'datasource_id': sample_datasource.id,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'output_datasource_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'fixture_output',
+                },
+                'steps': [],
             }
         ],
     }
@@ -294,14 +303,23 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
                     'depends_on': [],
                 }
             ],
-            'datasource_ids': [sample_datasources[0].id],
             'tabs': [
                 {
                     'id': f'tab-{idx}',
                     'name': 'Source',
-                    'type': 'datasource',
                     'parent_id': None,
-                    'datasource_id': sample_datasources[0].id,
+                    'datasource': {
+                        'id': sample_datasources[0].id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'fixture_output',
+                    },
+                    'steps': [],
                 }
             ],
         }

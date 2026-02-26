@@ -3,6 +3,11 @@ import type { SchemaInfo } from '$lib/types/datasource';
 import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 import type { Schema } from '$lib/types/schema';
 import { getAnalysisWithHeaders, updateAnalysis } from '$lib/api/analysis';
+import {
+	buildOutputConfig,
+	ensureTabDefaults,
+	validatePipelineTabs
+} from '$lib/utils/analysis-tab';
 import { normalizeDtype } from '$lib/utils/transform';
 import { normalizeConfig } from '$lib/utils/step-config-defaults';
 import { track } from '$lib/utils/audit-log';
@@ -31,7 +36,6 @@ export class AnalysisStore {
 	tabs = $state<AnalysisTab[]>([]);
 	savedTabs = $state<AnalysisTab[]>([]);
 	activeTabId = $state<string | null>(null);
-	outputBranch = $state<string | null>(null);
 	sourceSchemas = $state(new SvelteMap<string, SchemaInfo>());
 	resourceConfig = $state<EngineResourceConfig | null>(null);
 	engineDefaults = $state<EngineDefaults | null>(null);
@@ -50,7 +54,7 @@ export class AnalysisStore {
 		savePreviewRuns(this.previewRuns);
 	}
 
-	activeTab = $derived.by(() => {
+	activeTab: AnalysisTab | null = $derived.by((): AnalysisTab | null => {
 		const match = this.tabs.find((tab) => tab.id === this.activeTabId) ?? null;
 		if (match) return match;
 		return this.tabs[0] ?? null;
@@ -60,13 +64,11 @@ export class AnalysisStore {
 		const tab = this.activeTab;
 		const analysisId = this.current?.id ?? null;
 		if (!tab || !analysisId) return null;
-		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const cfgAnalysisId = config.analysis_id as string | null | undefined;
-		const cfgTabId = config.analysis_tab_id as string | null | undefined;
-		if (cfgAnalysisId && cfgTabId && String(cfgAnalysisId) === String(analysisId)) {
-			return `output:${analysisId}:${String(cfgTabId)}`;
+		const sourceTabId = tab.datasource.analysis_tab_id;
+		if (sourceTabId) {
+			return `output:${analysisId}:${String(sourceTabId)}`;
 		}
-		return tab.datasource_id ?? null;
+		return tab.datasource.id;
 	});
 
 	// Current tab's pipeline
@@ -100,8 +102,6 @@ export class AnalysisStore {
 		const previousId = this.current?.id ?? null;
 		this.current = analysis;
 		this.lastSaved = { name: analysis.name, description: analysis.description ?? null };
-		this.outputBranch =
-			(analysis.pipeline_definition?.output_branch as string | null | undefined) ?? null;
 		if (previousId !== analysis.id) {
 			this.activeTabId = null;
 			this.sourceSchemas.clear();
@@ -110,16 +110,14 @@ export class AnalysisStore {
 		const definition = analysis.pipeline_definition as {
 			steps?: PipelineStep[];
 			tabs?: AnalysisTab[];
-			datasource_ids?: string[];
-			output_branch?: string | null;
 		};
-		this.outputBranch = definition?.output_branch ?? this.outputBranch;
 
-		const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
+		const tabs = analysis.tabs.length ? analysis.tabs : definition?.tabs;
 		if (tabs && tabs.length && tabs[0].steps !== undefined) {
 			const normalized = this.normalizeTabSteps(tabs);
-			this.setTabs(normalized);
-			this.savedTabs = normalized;
+			const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+			this.setTabs(sanitized);
+			this.savedTabs = sanitized;
 			this.loading = false;
 			this.error = null;
 			return;
@@ -133,17 +131,19 @@ export class AnalysisStore {
 				steps: index === 0 ? legacySteps : []
 			}));
 			const normalized = this.normalizeTabSteps(migratedTabs);
-			this.setTabs(normalized);
-			this.savedTabs = normalized;
+			const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+			this.setTabs(sanitized);
+			this.savedTabs = sanitized;
 			this.loading = false;
 			this.error = null;
 			return;
 		}
 
-		const defaults = this.buildTabs(definition?.datasource_ids ?? [], legacySteps);
+		const defaults = this.buildTabs([], legacySteps);
 		const normalized = this.normalizeTabSteps(defaults);
-		this.setTabs(normalized);
-		this.savedTabs = normalized;
+		const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+		this.setTabs(sanitized);
+		this.savedTabs = sanitized;
 		this.loading = false;
 		this.error = null;
 	}
@@ -164,16 +164,14 @@ export class AnalysisStore {
 				const definition = analysis.pipeline_definition as {
 					steps?: PipelineStep[];
 					tabs?: AnalysisTab[];
-					datasource_ids?: string[];
-					output_branch?: string | null;
 				};
-				this.outputBranch = definition?.output_branch ?? this.outputBranch;
 
-				const tabs = analysis.tabs?.length ? analysis.tabs : definition?.tabs;
+				const tabs = analysis.tabs.length ? analysis.tabs : definition?.tabs;
 				if (tabs && tabs.length && tabs[0].steps !== undefined) {
 					const normalized = this.normalizeTabSteps(tabs);
-					this.setTabs(normalized);
-					this.savedTabs = normalized;
+					const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+					this.setTabs(sanitized);
+					this.savedTabs = sanitized;
 					this.loading = false;
 					return ok(undefined);
 				}
@@ -186,16 +184,18 @@ export class AnalysisStore {
 						steps: index === 0 ? legacySteps : []
 					}));
 					const normalized = this.normalizeTabSteps(migratedTabs);
-					this.setTabs(normalized);
-					this.savedTabs = normalized;
+					const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+					this.setTabs(sanitized);
+					this.savedTabs = sanitized;
 					this.loading = false;
 					return ok(undefined);
 				}
 
-				const defaults = this.buildTabs(definition?.datasource_ids ?? [], legacySteps);
+				const defaults = this.buildTabs([], legacySteps);
 				const normalized = this.normalizeTabSteps(defaults);
-				this.setTabs(normalized);
-				this.savedTabs = normalized;
+				const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+				this.setTabs(sanitized);
+				this.savedTabs = sanitized;
 				this.loading = false;
 				return ok(undefined);
 			})
@@ -222,14 +222,18 @@ export class AnalysisStore {
 			if (!savedTab) return true;
 			if (currentTab.id !== savedTab.id) return true;
 			if (currentTab.name !== savedTab.name) return true;
-			if (currentTab.type !== savedTab.type) return true;
 			if ((currentTab.parent_id ?? null) !== (savedTab.parent_id ?? null)) return true;
-			if ((currentTab.datasource_id ?? null) !== (savedTab.datasource_id ?? null)) return true;
-			const currentConfig = JSON.stringify(currentTab.datasource_config ?? {});
-			const savedConfig = JSON.stringify(savedTab.datasource_config ?? {});
+			if (currentTab.datasource.id !== savedTab.datasource.id) return true;
+			if (currentTab.datasource.analysis_tab_id !== savedTab.datasource.analysis_tab_id)
+				return true;
+			const currentConfig = JSON.stringify(currentTab.datasource.config);
+			const savedConfig = JSON.stringify(savedTab.datasource.config);
 			if (currentConfig !== savedConfig) return true;
-			const currentSteps = currentTab.steps ?? [];
-			const savedSteps = savedTab.steps ?? [];
+			const currentOutput = JSON.stringify(currentTab.output ?? {});
+			const savedOutput = JSON.stringify(savedTab.output ?? {});
+			if (currentOutput !== savedOutput) return true;
+			const currentSteps = currentTab.steps;
+			const savedSteps = savedTab.steps;
 			if (currentSteps.length !== savedSteps.length) return true;
 			for (let j = 0; j < currentSteps.length; j += 1) {
 				const currentStep = currentSteps[j];
@@ -291,10 +295,13 @@ export class AnalysisStore {
 	}
 
 	private normalizeTabSteps(tabs: AnalysisTab[]): AnalysisTab[] {
-		return tabs.map((tab) => ({
-			...tab,
-			steps: this.normalizeSteps(tab.steps)
-		}));
+		return tabs.map((tab) => {
+			return {
+				...tab,
+				datasource: { ...tab.datasource, config: { ...tab.datasource.config } },
+				steps: this.normalizeSteps(tab.steps)
+			};
+		});
 	}
 
 	private normalizeSteps(steps: PipelineStep[]): PipelineStep[] {
@@ -341,39 +348,6 @@ export class AnalysisStore {
 
 	setActiveTab(id: string): void {
 		this.activeTabId = id;
-	}
-
-	setOutputBranch(branch: string | null): void {
-		this.outputBranch = branch;
-		if (this.current) {
-			const pipeline = {
-				...(this.current.pipeline_definition ?? {}),
-				output_branch: branch
-			} as Record<string, unknown>;
-			this.current = { ...this.current, pipeline_definition: pipeline };
-		}
-		const next = this.tabs.map((tab) => {
-			const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
-			const output = config.output as Record<string, unknown> | undefined;
-			if (!output || typeof output !== 'object' || Array.isArray(output)) {
-				return tab;
-			}
-			const iceberg = output.iceberg as Record<string, unknown> | undefined;
-			const branchValue = branch ?? 'master';
-			const tableName = tab.name ? tab.name.trim().replace(/\s+/g, '_').toLowerCase() : 'export';
-			const nextOutput = iceberg
-				? { ...output, iceberg: { ...iceberg, branch: branchValue } }
-				: {
-						...output,
-						iceberg: {
-							namespace: 'outputs',
-							table_name: tableName,
-							branch: branchValue
-						}
-					};
-			return { ...tab, datasource_config: { ...config, output: nextOutput } };
-		});
-		this.tabs = next;
 	}
 
 	addTab(tab: AnalysisTab): void {
@@ -485,9 +459,9 @@ export class AnalysisStore {
 		const keys = Object.keys(safeConfig);
 		this.logStep('update', step, { keys, count: keys.length });
 		const analysisId = this.current?.id ?? null;
-		const datasourceId = this.activeTab.datasource_id ?? null;
-		if (!analysisId || !datasourceId) return;
-		const configSnapshot = (this.activeTab.datasource_config ?? {}) as Record<string, unknown>;
+		const datasourceId = this.activeTab.datasource.id;
+		if (!analysisId) return;
+		const configSnapshot = this.activeTab.datasource.config as Record<string, unknown>;
 		const snapshotId = (configSnapshot.snapshot_id as string | null | undefined) ?? null;
 		const snapshotMs = (configSnapshot.snapshot_timestamp_ms as number | null | undefined) ?? null;
 		const snapshotKey = `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
@@ -523,12 +497,10 @@ export class AnalysisStore {
 		const activeTabId = this.activeTab.id;
 		for (const tab of this.tabs) {
 			if (tab.id === activeTabId) continue;
-			const cfg = (tab.datasource_config ?? {}) as Record<string, unknown>;
-			if (String(cfg.analysis_tab_id ?? '') !== activeTabId) continue;
-			if (String(cfg.analysis_id ?? '') !== analysisId) continue;
-			const depDatasourceId = tab.datasource_id ?? null;
-			if (!depDatasourceId) continue;
-			const depConfig = (tab.datasource_config ?? {}) as Record<string, unknown>;
+			const sourceTabId = tab.datasource.analysis_tab_id;
+			if (String(sourceTabId ?? '') !== activeTabId) continue;
+			const depDatasourceId = tab.datasource.id;
+			const depConfig = tab.datasource.config as Record<string, unknown>;
 			const depSnapshotId = (depConfig.snapshot_id as string | null | undefined) ?? null;
 			const depSnapshotMs = (depConfig.snapshot_timestamp_ms as number | null | undefined) ?? null;
 			const depSnapshotKey = `${depSnapshotId ?? 'latest'}:${depSnapshotMs ?? 0}`;
@@ -680,6 +652,14 @@ export class AnalysisStore {
 			}) as unknown as ResultAsync<void, ApiError>;
 		}
 
+		const errors = validatePipelineTabs(this.tabs);
+		if (errors.length) {
+			this.loading = false;
+			return err({
+				type: 'parse' as const,
+				message: errors[0]?.message ?? 'Pipeline validation failed'
+			}) as unknown as ResultAsync<void, ApiError>;
+		}
 		const pipelineSteps = this.tabs.flatMap((tab) => tab.steps ?? []);
 		const update: AnalysisUpdate = {
 			name: this.current.name,
@@ -687,8 +667,7 @@ export class AnalysisStore {
 			tabs: this.tabs,
 			pipeline_steps: pipelineSteps,
 			client_id: lockPayload.clientId,
-			lock_token: lockPayload.lockToken,
-			output_branch: this.outputBranch
+			lock_token: lockPayload.lockToken
 		};
 
 		return updateAnalysis(this.current.id, update)
@@ -699,8 +678,9 @@ export class AnalysisStore {
 				const tabs = updated.tabs ?? [];
 				if (tabs.length) {
 					const normalized = this.normalizeTabSteps(tabs);
-					this.tabs = normalized;
-					this.savedTabs = normalized;
+					const sanitized = normalized.map((tab, index) => ensureTabDefaults(tab, index));
+					this.tabs = sanitized;
+					this.savedTabs = sanitized;
 					if (!this.activeTabId || !tabs.some((tab) => tab.id === this.activeTabId)) {
 						this.activeTabId = this.tabs[0]?.id ?? null;
 					}
@@ -748,20 +728,26 @@ export class AnalysisStore {
 		this.resourceConfig = null;
 		this.engineDefaults = null;
 		this.lastSaved = null;
-		this.outputBranch = null;
 		this.loading = false;
 		this.error = null;
 	}
 
 	buildTabs(datasourceIds: string[], initialSteps: PipelineStep[] = []): AnalysisTab[] {
-		return datasourceIds.map((datasourceId, index) => ({
-			id: `tab-${datasourceId}`,
-			name: `Source ${index + 1}`,
-			type: 'datasource' as const,
-			parent_id: null,
-			datasource_id: datasourceId,
-			steps: index === 0 ? initialSteps : []
-		}));
+		return datasourceIds.map((datasourceId, index) => {
+			const name = `Source ${index + 1}`;
+			return {
+				id: `tab-${datasourceId}`,
+				name,
+				parent_id: null,
+				datasource: {
+					id: datasourceId,
+					analysis_tab_id: null,
+					config: { branch: 'master' }
+				},
+				output: buildOutputConfig({ name, branch: 'master' }),
+				steps: index === 0 ? initialSteps : []
+			};
+		});
 	}
 }
 
@@ -770,7 +756,6 @@ export type AnalysisStoreApi = {
 	engineDefaults: EngineDefaults | null;
 	setResourceConfig: (config: EngineResourceConfig | null) => void;
 	setEngineDefaults: (defaults: EngineDefaults | null) => void;
-	setOutputBranch: (branch: string | null) => void;
 	insertStep: (
 		step: PipelineStep,
 		index: number,
