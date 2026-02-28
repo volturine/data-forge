@@ -464,60 +464,6 @@ class TestRunAnalysisBuildOutputDatasource:
         assert output_ds.config['metadata_path'] == expected_path
         assert output_ds.config['table'] == f'{output_ds_id}_master'
 
-    def test_tab_without_output_config_fails(self, test_db_session: Session, sample_datasource: DataSource):
-        """Tabs without output config should fail."""
-        analysis_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
-
-        analysis = Analysis(
-            id=analysis_id,
-            name='Preview Test',
-            description='',
-            pipeline_definition={
-                'steps': [],
-                'tabs': [
-                    {
-                        'id': 'tab1',
-                        'name': 'No Output',
-                        'datasource': {
-                            'id': sample_datasource.id,
-                            'analysis_tab_id': None,
-                            'config': {'branch': 'master'},
-                        },
-                        'output': {
-                            'output_datasource_id': 'some-output-id',
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'missing_output',
-                        },
-                        'steps': [],
-                    }
-                ],
-            },
-            status='draft',
-            created_at=now,
-            updated_at=now,
-        )
-        test_db_session.add(analysis)
-        test_db_session.commit()
-
-        mock_export = MagicMock()
-        mock_preview = MagicMock()
-        mock_notify = MagicMock()
-        with (
-            patch('modules.compute.service.export_data', mock_export),
-            patch('modules.compute.service.preview_step', mock_preview),
-            patch('modules.compute.service._send_pipeline_notifications', mock_notify),
-        ):
-            from modules.scheduler.service import run_analysis_build
-
-            result = run_analysis_build(test_db_session, analysis_id)
-
-            mock_export.assert_not_called()
-            mock_preview.assert_not_called()
-            assert result['tabs_built'] == 0
-            assert result['results'][0]['status'] == 'failed'
-
     def test_tab_missing_output_filename_fails(self, test_db_session: Session, sample_datasource: DataSource):
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)

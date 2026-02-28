@@ -220,6 +220,7 @@
 
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
+		enabled: !!analysisId,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
 			const result = await getAnalysisWithHeaders(analysisId);

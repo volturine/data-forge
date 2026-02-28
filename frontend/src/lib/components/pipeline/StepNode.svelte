@@ -300,6 +300,8 @@
 
 <div
 	class="step-node relative w-[60%]"
+	data-step-id={step.id}
+	data-step-type={step.type}
 	class:view-node={step.type === 'view'}
 	class:opacity-40={isDragging}
 	class:grayscale-50={isDragging}

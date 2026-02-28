@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listEngineRuns, type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
-	import { listDatasources } from '$lib/api/datasource';
+	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
 	import { page as pageState } from '$app/state';
 	import {
@@ -145,15 +145,26 @@
 		return sortRuns(result);
 	});
 
+	const datasourceId = $derived(
+		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
+	);
+	const datasourceQuery = createQuery(() => ({
+		queryKey: ['datasource', datasourceId],
+		queryFn: async () => {
+			if (!datasourceId) return null;
+			const result = await getDatasource(datasourceId);
+			if (result.isErr()) return null;
+			return result.value;
+		},
+		enabled: !!datasourceId
+	}));
 	const branchOptions = $derived.by(() => {
+		const config = (datasourceQuery.data?.config ?? {}) as Record<string, unknown>;
+		const branches = (config.branches as string[] | undefined) ?? [];
+		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
 		const set = new SvelteSet<string>();
 		set.add('master');
-		for (const run of runs) {
-			const payload = run.request_json as Record<string, unknown>;
-			const opts = payload.iceberg_options as Record<string, unknown> | undefined;
-			const runBranch = opts?.branch as string | undefined;
-			if (runBranch) set.add(runBranch);
-		}
+		for (const branch of cleaned) set.add(branch);
 		return Array.from(set).sort((a, b) => a.localeCompare(b));
 	});
 

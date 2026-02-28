@@ -39,8 +39,11 @@
 		}
 	}));
 
+	let snapshotConfig = $state<Record<string, unknown> | null>(null);
+	let selectedBranch = $state<string | null>(null);
+
 	const selectedDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', selectedId],
+		queryKey: ['datasource', selectedId, selectedBranch ?? ''],
 		queryFn: async () => {
 			if (!selectedId) return null;
 			const result = await getDatasource(selectedId);
@@ -72,8 +75,6 @@
 	const selectedDatasource = $derived(
 		selectedDatasourceQuery.data ?? datasources.find((d) => d.id === selectedId) ?? null
 	);
-	let snapshotConfig = $state<Record<string, unknown> | null>(null);
-	let selectedBranch = $state<string | null>(null);
 
 	function selectDatasource(id: string | null) {
 		selectedId = id;

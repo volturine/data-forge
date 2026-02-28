@@ -124,7 +124,7 @@
 
 	const isIceberg = $derived(datasource?.source_type === 'iceberg');
 	const datasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', datasource?.id ?? null],
+		queryKey: ['datasource', datasource?.id ?? null, datasource?.config?.branch ?? ''],
 		queryFn: async () => {
 			if (!datasource?.id) return null;
 			const result = await getDatasource(datasource.id);

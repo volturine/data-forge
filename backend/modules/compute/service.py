@@ -1274,7 +1274,7 @@ def export_data(
                     keep_schema_cache=build_mode == 'incremental',
                 )
                 ds_id = target_ds.id
-                run_kind = 'datasource_update' if output_datasource_id and target_ds.id == output_datasource_id else 'datasource_create'
+                run_kind = 'datasource_update' if output_ds else 'datasource_create'
 
                 result_meta['datasource_id'] = ds_id
                 result_meta['datasource_name'] = iceberg_opts.get('table_name', 'exported_data')
