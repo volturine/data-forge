@@ -224,55 +224,6 @@ def convert_string_transform_config(config: dict) -> dict:
     }
 
 
-def convert_sample_config(config: dict) -> dict:
-    """Convert sample config from frontend to backend format.
-
-    Frontend: {fraction, seed}
-    Backend: {fraction, seed}
-    """
-    return {
-        'fraction': config.get('fraction'),
-        'seed': config.get('seed'),
-    }
-
-
-def convert_limit_config(config: dict) -> dict:
-    """Convert limit config from frontend to backend format.
-
-    Frontend: {n}
-    Backend: {n}
-    """
-    return {
-        'n': config.get('n', 10),
-    }
-
-
-def convert_topk_config(config: dict) -> dict:
-    """Convert topk config from frontend to backend format.
-
-    Frontend: {column, k, descending}
-    Backend: {column, k, descending}
-    """
-    return {
-        'column': config.get('column'),
-        'k': config.get('k', 10),
-        'descending': config.get('descending', False),
-    }
-
-
-def convert_value_counts_config(config: dict) -> dict:
-    """Convert value_counts config from frontend to backend format.
-
-    Frontend: {column, normalize, sort}
-    Backend: {column, normalize, sort}
-    """
-    return {
-        'column': config.get('column'),
-        'normalize': config.get('normalize', False),
-        'sort': config.get('sort', True),
-    }
-
-
 def convert_export_config(config: dict) -> dict:
     """Convert export config from frontend to backend format.
 
@@ -298,18 +249,6 @@ def convert_union_by_name_config(config: dict) -> dict:
     return {
         'sources': config.get('sources', []),
         'allow_missing': config.get('allow_missing', config.get('allowMissing', True)),
-    }
-
-
-def convert_expression_config(config: dict) -> dict:
-    """Convert expression config from frontend to backend format.
-
-    Frontend: {expression: str, column_name: str}
-    Backend: {expression: str, column_name: str}
-    """
-    return {
-        'expression': config.get('expression', ''),
-        'column_name': config.get('column_name', 'new_column'),
     }
 
 
@@ -423,29 +362,17 @@ def convert_notification_config(config: dict) -> dict:
 
 _CONVERTERS: dict = {
     'filter': convert_filter_config,
-    'select': lambda c: c,
     'groupby': convert_groupby_config,
     'sort': convert_sort_config,
     'rename': convert_rename_config,
-    'drop': lambda c: c,
     'join': convert_join_config,
-    'with_columns': lambda c: c,
     'deduplicate': convert_deduplicate_config,
     'fill_null': convert_fillnull_config,
-    'explode': lambda c: c,
     'pivot': convert_pivot_config,
-    'unpivot': lambda c: c,
-    'view': lambda c: c,
     'timeseries': convert_timeseries_config,
     'string_transform': convert_string_transform_config,
-    'sample': convert_sample_config,
-    'limit': convert_limit_config,
-    'topk': convert_topk_config,
-    'null_count': lambda c: c,
-    'value_counts': convert_value_counts_config,
     'export': convert_export_config,
     'union_by_name': convert_union_by_name_config,
-    'expression': convert_expression_config,
     'chart': convert_plot_config,
     'ai': convert_ai_config,
     'notification': convert_notification_config,

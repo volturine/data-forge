@@ -147,6 +147,16 @@ class PolarsComputeEngine:
             f'chunk_size: {streaming_chunk_size or "auto"})'
         )
 
+    def _enqueue(self, command_type: str, **kwargs) -> str:
+        """Create a job, ensure process is alive, and enqueue the command."""
+        job_id = str(uuid.uuid4())
+        self.current_job_id = job_id
+        self.check_health()
+        if not self.is_running:
+            self.start()
+        self.command_queue.put({'type': command_type, 'job_id': job_id, **kwargs})
+        return job_id
+
     def preview(
         self,
         datasource_config: dict,
@@ -155,35 +165,14 @@ class PolarsComputeEngine:
         offset: int = 0,
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
-        """Preview pipeline results with limited rows.
-
-        Args:
-            datasource_config: Configuration for the main datasource
-            pipeline_steps: List of pipeline transformation steps
-            row_limit: Maximum rows to return for display
-            offset: Row offset for pagination
-            additional_datasources: Dict of datasource_id -> config for additional datasources
-        """
-        job_id = str(uuid.uuid4())
-        self.current_job_id = job_id
-
-        # Check health and restart if needed
-        self.check_health()
-        if not self.is_running:
-            self.start()
-
-        command = {
-            'type': 'preview',
-            'job_id': job_id,
-            'datasource_config': datasource_config,
-            'pipeline_steps': pipeline_steps,
-            'row_limit': row_limit,
-            'offset': offset,
-            'additional_datasources': additional_datasources or {},
-        }
-
-        self.command_queue.put(command)
-        return job_id
+        return self._enqueue(
+            'preview',
+            datasource_config=datasource_config,
+            pipeline_steps=pipeline_steps,
+            row_limit=row_limit,
+            offset=offset,
+            additional_datasources=additional_datasources or {},
+        )
 
     def export(
         self,
@@ -193,35 +182,14 @@ class PolarsComputeEngine:
         export_format: str = 'csv',
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
-        """Export full pipeline results to file.
-
-        Args:
-            datasource_config: Configuration for the main datasource
-            pipeline_steps: List of pipeline transformation steps
-            output_path: Path to write the exported file
-            export_format: Export format (csv, parquet, json, ndjson)
-            additional_datasources: Dict of datasource_id -> config for additional datasources
-        """
-        job_id = str(uuid.uuid4())
-        self.current_job_id = job_id
-
-        # Check health and restart if needed
-        self.check_health()
-        if not self.is_running:
-            self.start()
-
-        command = {
-            'type': 'export',
-            'job_id': job_id,
-            'datasource_config': datasource_config,
-            'pipeline_steps': pipeline_steps,
-            'output_path': output_path,
-            'export_format': export_format,
-            'additional_datasources': additional_datasources or {},
-        }
-
-        self.command_queue.put(command)
-        return job_id
+        return self._enqueue(
+            'export',
+            datasource_config=datasource_config,
+            pipeline_steps=pipeline_steps,
+            output_path=output_path,
+            export_format=export_format,
+            additional_datasources=additional_datasources or {},
+        )
 
     def get_schema(
         self,
@@ -229,31 +197,12 @@ class PolarsComputeEngine:
         pipeline_steps: list[dict],
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
-        """Get schema of pipeline result without collecting full data.
-
-        Args:
-            datasource_config: Configuration for the main datasource
-            pipeline_steps: List of pipeline transformation steps
-            additional_datasources: Dict of datasource_id -> config for additional datasources
-        """
-        job_id = str(uuid.uuid4())
-        self.current_job_id = job_id
-
-        # Check health and restart if needed
-        self.check_health()
-        if not self.is_running:
-            self.start()
-
-        command = {
-            'type': 'schema',
-            'job_id': job_id,
-            'datasource_config': datasource_config,
-            'pipeline_steps': pipeline_steps,
-            'additional_datasources': additional_datasources or {},
-        }
-
-        self.command_queue.put(command)
-        return job_id
+        return self._enqueue(
+            'schema',
+            datasource_config=datasource_config,
+            pipeline_steps=pipeline_steps,
+            additional_datasources=additional_datasources or {},
+        )
 
     def get_row_count(
         self,
@@ -261,25 +210,12 @@ class PolarsComputeEngine:
         pipeline_steps: list[dict],
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
-        """Get row count of pipeline result without collecting full data."""
-        job_id = str(uuid.uuid4())
-        self.current_job_id = job_id
-
-        # Check health and restart if needed
-        self.check_health()
-        if not self.is_running:
-            self.start()
-
-        command = {
-            'type': 'row_count',
-            'job_id': job_id,
-            'datasource_config': datasource_config,
-            'pipeline_steps': pipeline_steps,
-            'additional_datasources': additional_datasources or {},
-        }
-
-        self.command_queue.put(command)
-        return job_id
+        return self._enqueue(
+            'row_count',
+            datasource_config=datasource_config,
+            pipeline_steps=pipeline_steps,
+            additional_datasources=additional_datasources or {},
+        )
 
     def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> dict | None:
         """Get result from result queue (non-blocking)."""
@@ -492,15 +428,6 @@ class PolarsComputeEngine:
                         details={'datasource_id': ds_id},
                     ) from e
 
-        for step in pipeline_steps:
-            deps = step.get('depends_on') or []
-            if len(deps) > 1:
-                step_id = step.get('id') or ''
-                raise PipelineValidationError(
-                    f'Step {step_id} has multiple dependencies. Merge steps are not supported.',
-                    step_id=str(step_id),
-                )
-
         pipeline_steps = apply_pipeline_steps(pipeline_steps)
 
         if not pipeline_steps:
@@ -656,6 +583,14 @@ class PolarsComputeEngine:
         }
 
     @staticmethod
+    def _extract_plans(plan_frames: list[pl.LazyFrame]) -> tuple[dict | None, str | None]:
+        """Build merged query plans and return (query_plans, optimized_plan_str)."""
+        segments = [PolarsComputeEngine._get_query_plans(f) for f in plan_frames]
+        query_plans = PolarsComputeEngine._merge_query_plans(segments)
+        query_plan = query_plans.get('optimized') if query_plans else None
+        return query_plans, query_plan
+
+    @staticmethod
     def _execute_preview(
         datasource_config: dict,
         pipeline_steps: list[dict],
@@ -671,9 +606,7 @@ class PolarsComputeEngine:
             job_id,
             additional_datasources,
         )
-        plan_segments = [PolarsComputeEngine._get_query_plans(frame) for frame in list(plan_frames)]
-        query_plans = PolarsComputeEngine._merge_query_plans(plan_segments)
-        query_plan = query_plans.get('optimized') if query_plans else None
+        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
 
         preview_lf = lf
         metadata: dict | None = None
@@ -746,9 +679,7 @@ class PolarsComputeEngine:
             job_id,
             additional_datasources,
         )
-        plan_segments = [PolarsComputeEngine._get_query_plans(frame) for frame in list(plan_frames)]
-        query_plans = PolarsComputeEngine._merge_query_plans(plan_segments)
-        query_plan = query_plans.get('optimized') if query_plans else None
+        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
 
         logger.debug(f'Job {job_id}: Writing export file')
 
@@ -789,9 +720,7 @@ class PolarsComputeEngine:
         schema_obj = lf.collect_schema()
         schema = {col: str(dtype) for col, dtype in schema_obj.items()}
 
-        plan_segments = [PolarsComputeEngine._get_query_plans(frame) for frame in list(plan_frames)]
-        query_plans = PolarsComputeEngine._merge_query_plans(plan_segments)
-        query_plan = query_plans.get('optimized') if query_plans else None
+        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
 
         return {
             'schema': schema,
@@ -816,9 +745,7 @@ class PolarsComputeEngine:
             additional_datasources,
         )
 
-        plan_segments = [PolarsComputeEngine._get_query_plans(frame) for frame in list(plan_frames)]
-        query_plans = PolarsComputeEngine._merge_query_plans(plan_segments)
-        query_plan = query_plans.get('optimized') if query_plans else None
+        query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
 
         row_count = lf.select(pl.len()).collect().item()
 

@@ -30,86 +30,43 @@ from modules.compute.operations.view import ViewHandler
 from modules.compute.operations.with_columns import WithColumnsHandler
 
 __all__ = [
-    # Base
     'OperationHandler',
     'OperationParams',
-    # Handlers
-    'DatasourceHandler',
-    'AIHandler',
-    'DeduplicateHandler',
-    'DownloadHandler',
-    'DropHandler',
-    'ExplodeHandler',
-    'ExportHandler',
-    'FillNullHandler',
-    'FilterHandler',
-    'GroupByHandler',
-    'JoinHandler',
-    'LimitHandler',
-    'NullCountHandler',
-    'NotificationHandler',
-    'PivotHandler',
-    'RenameHandler',
-    'SampleHandler',
-    'SelectHandler',
-    'SortHandler',
-    'StringTransformHandler',
-    'TimeseriesHandler',
-    'TopKHandler',
-    'UnionByNameHandler',
-    'UnpivotHandler',
-    'ValueCountsHandler',
-    'ViewHandler',
-    'WithColumnsHandler',
-    'ExpressionHandler',
-    'ChartHandler',
-    # Registry
-    'register_operation',
     'get_operation_handlers',
 ]
 
-_OPERATION_REGISTRY: dict[str, OperationHandler] = {}
-
-
-def register_operation(name: str, handler: OperationHandler) -> None:
-    if name in _OPERATION_REGISTRY:
-        raise ValueError(f'Operation already registered: {name}')
-    _OPERATION_REGISTRY[name] = handler
+_HANDLERS: dict[str, OperationHandler] = {
+    'datasource': DatasourceHandler(),
+    'ai': AIHandler(),
+    'deduplicate': DeduplicateHandler(),
+    'download': DownloadHandler(),
+    'drop': DropHandler(),
+    'explode': ExplodeHandler(),
+    'export': ExportHandler(),
+    'fill_null': FillNullHandler(),
+    'filter': FilterHandler(),
+    'groupby': GroupByHandler(),
+    'join': JoinHandler(),
+    'limit': LimitHandler(),
+    'null_count': NullCountHandler(),
+    'notification': NotificationHandler(),
+    'pivot': PivotHandler(),
+    'rename': RenameHandler(),
+    'sample': SampleHandler(),
+    'select': SelectHandler(),
+    'sort': SortHandler(),
+    'string_transform': StringTransformHandler(),
+    'timeseries': TimeseriesHandler(),
+    'topk': TopKHandler(),
+    'union_by_name': UnionByNameHandler(),
+    'unpivot': UnpivotHandler(),
+    'value_counts': ValueCountsHandler(),
+    'view': ViewHandler(),
+    'with_columns': WithColumnsHandler(),
+    'expression': ExpressionHandler(),
+    'chart': ChartHandler(),
+}
 
 
 def get_operation_handlers() -> dict[str, OperationHandler]:
-    if not _OPERATION_REGISTRY:
-        _register_defaults()
-    return dict(_OPERATION_REGISTRY)
-
-
-def _register_defaults() -> None:
-    register_operation('datasource', DatasourceHandler())
-    register_operation('ai', AIHandler())
-    register_operation('deduplicate', DeduplicateHandler())
-    register_operation('download', DownloadHandler())
-    register_operation('drop', DropHandler())
-    register_operation('explode', ExplodeHandler())
-    register_operation('export', ExportHandler())
-    register_operation('fill_null', FillNullHandler())
-    register_operation('filter', FilterHandler())
-    register_operation('groupby', GroupByHandler())
-    register_operation('join', JoinHandler())
-    register_operation('limit', LimitHandler())
-    register_operation('null_count', NullCountHandler())
-    register_operation('notification', NotificationHandler())
-    register_operation('pivot', PivotHandler())
-    register_operation('rename', RenameHandler())
-    register_operation('sample', SampleHandler())
-    register_operation('select', SelectHandler())
-    register_operation('sort', SortHandler())
-    register_operation('string_transform', StringTransformHandler())
-    register_operation('timeseries', TimeseriesHandler())
-    register_operation('topk', TopKHandler())
-    register_operation('union_by_name', UnionByNameHandler())
-    register_operation('unpivot', UnpivotHandler())
-    register_operation('value_counts', ValueCountsHandler())
-    register_operation('view', ViewHandler())
-    register_operation('with_columns', WithColumnsHandler())
-    register_operation('expression', ExpressionHandler())
-    register_operation('chart', ChartHandler())
+    return _HANDLERS
