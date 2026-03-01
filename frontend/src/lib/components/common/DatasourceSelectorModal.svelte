@@ -139,6 +139,8 @@
 			class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-accent-primary"
 			type="text"
 			bind:this={searchInput}
+			id="dsm-search"
+			aria-label="Search datasources"
 			bind:value={searchQuery}
 			placeholder={activeSource === 'analysis' ? 'Search analyses...' : 'Search datasources...'}
 		/>

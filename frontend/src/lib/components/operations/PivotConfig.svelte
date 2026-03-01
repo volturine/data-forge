@@ -40,9 +40,9 @@
 
 <div class="config-panel" role="region" aria-label="Pivot configuration">
 	<div class="mb-5">
-		<label for="pivot-column"
-			>Pivot Column <span class="text-xs text-fg-muted">(values become new columns)</span></label
-		>
+		<div class="form-label">
+			Pivot Column <span class="text-xs text-fg-muted">(values become new columns)</span>
+		</div>
 		<ColumnDropdown
 			{schema}
 			value={config.columns ?? ''}
@@ -85,7 +85,7 @@
 	</div>
 
 	<div class="mb-5">
-		<label for="pivot-select-values">Values Column</label>
+		<div class="form-label">Values Column</div>
 		<ColumnDropdown
 			{schema}
 			value={config.values ?? ''}

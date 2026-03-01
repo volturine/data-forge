@@ -315,7 +315,8 @@
 		background-color: var(--bg-hover);
 	}
 
-	label {
+	label,
+	.form-label {
 		display: block;
 		font-size: 0.6875rem;
 		font-weight: 600;

@@ -60,6 +60,7 @@
 	>
 		<input
 			type="checkbox"
+			id="msc-col-{item.id}"
 			checked={payload.selected}
 			onchange={payload.onSelect}
 			onclick={(event) => event.stopPropagation()}

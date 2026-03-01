@@ -125,6 +125,8 @@
 			<div class="flex items-center gap-2">
 				<select
 					class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+					id="lineage-ds"
+					aria-label="Output datasource"
 					value={selectedDatasourceId}
 					onchange={handleDatasourceChange}
 				>
@@ -135,6 +137,8 @@
 				</select>
 				<select
 					class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+					id="lineage-branch"
+					aria-label="Branch"
 					value={selectedBranch}
 					onchange={handleBranchChange}
 					disabled={!selectedDatasourceId}

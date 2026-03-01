@@ -281,6 +281,7 @@
 					<div class="flex items-center gap-1">
 						<input
 							class="min-w-25 border border-tertiary bg-primary px-2 py-0.5 text-sm outline-none"
+							id="ds-node-name"
 							bind:value={draftName}
 							onkeydown={(e) => {
 								if (e.key === 'Enter') commitEdit();

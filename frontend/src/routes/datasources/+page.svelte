@@ -164,6 +164,8 @@
 				<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 				<input
 					type="text"
+					id="ds-search"
+					aria-label="Search datasources"
 					placeholder="Search datasources..."
 					class="w-full bg-transparent border border-tertiary px-3 py-1 pl-8 text-sm"
 					bind:value={searchQuery}

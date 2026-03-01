@@ -231,6 +231,7 @@
 					<input
 						type="text"
 						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						id="smtp-host"
 						bind:value={smtp_host}
 						placeholder="smtp.example.com"
 					/>
@@ -240,6 +241,7 @@
 					<input
 						type="number"
 						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						id="smtp-port"
 						bind:value={smtp_port}
 					/>
 				</label>
@@ -251,6 +253,7 @@
 					<input
 						type="text"
 						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						id="smtp-user"
 						bind:value={smtp_user}
 						placeholder="user@example.com"
 					/>
@@ -260,6 +263,7 @@
 					<input
 						type="password"
 						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						id="smtp-password"
 						bind:value={smtp_password}
 						placeholder="••••••••"
 					/>
@@ -272,6 +276,7 @@
 					<input
 						type="email"
 						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						id="smtp-test-to"
 						bind:value={smtpTestTo}
 						placeholder="test@example.com"
 					/>
@@ -313,6 +318,7 @@
 				<input
 					type="password"
 					class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+					id="telegram-bot-token"
 					bind:value={telegram_bot_token}
 					placeholder="123456:ABC-DEF..."
 				/>

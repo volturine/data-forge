@@ -39,7 +39,7 @@
 		</button>
 	</div>
 	<div class="modal-body">
-		<input type="text" placeholder="Search UDFs..." bind:value={search} />
+		<input name="search" type="text" placeholder="Search UDFs..." bind:value={search} />
 		<div class="flex flex-col gap-2 max-h-90 overflow-auto">
 			{#if filtered.length === 0}
 				<p class="m-0 text-fg-muted">No matching UDFs.</p>

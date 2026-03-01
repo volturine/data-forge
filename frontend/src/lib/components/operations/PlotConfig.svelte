@@ -381,7 +381,7 @@
 <div class="config-panel" role="region" aria-label="Plot configuration">
 	<div class="form-section" role="group" aria-labelledby={`${uid}-plot-type`}>
 		<h4 id={`${uid}-plot-type`}>Chart Type</h4>
-		<select bind:value={plotConfig.chart_type} class="select-mono">
+		<select id={`${uid}-chart-type`} bind:value={plotConfig.chart_type} class="select-mono">
 			{#each chartTypes as type (type.value)}
 				<option value={type.value}>{type.label}</option>
 			{/each}
@@ -425,14 +425,14 @@
 	{#if needsBins}
 		<div class="form-section" role="group" aria-labelledby={`${uid}-plot-bins`}>
 			<h4 id={`${uid}-plot-bins`}>Bins</h4>
-			<input type="number" min="2" max="100" bind:value={plotConfig.bins} />
+			<input id={`${uid}-bins`} type="number" min="2" max="100" bind:value={plotConfig.bins} />
 		</div>
 	{/if}
 
 	{#if needsAggregation}
 		<div class="form-section" role="group" aria-labelledby={`${uid}-plot-agg`}>
 			<h4 id={`${uid}-plot-agg`}>Aggregation</h4>
-			<select bind:value={plotConfig.aggregation} class="select-mono">
+			<select id={`${uid}-aggregation`} bind:value={plotConfig.aggregation} class="select-mono">
 				{#each aggregations as agg (agg.value)}
 					<option value={agg.value}>{agg.label}</option>
 				{/each}
@@ -443,7 +443,7 @@
 	{#if showStackMode}
 		<div class="form-section" role="group" aria-labelledby={`${uid}-plot-stack`}>
 			<h4 id={`${uid}-plot-stack`}>Stack Mode</h4>
-			<select bind:value={plotConfig.stack_mode} class="select-mono">
+			<select id={`${uid}-stack-mode`} bind:value={plotConfig.stack_mode} class="select-mono">
 				<option value="grouped">Grouped</option>
 				<option value="stacked">Stacked</option>
 				<option value="100%">100%</option>
@@ -493,8 +493,8 @@
 				</div>
 				{#if plotConfig.group_sort_by === 'custom'}
 					<div>
-						<label class="form-label" for={`${uid}-group-sort-column`}>Sort Column</label>
-						<div id={`${uid}-group-sort-column`}>
+						<div class="form-label">Sort Column</div>
+						<div>
 							<ColumnDropdown
 								{schema}
 								value={plotConfig.group_sort_column ?? ''}
@@ -512,6 +512,7 @@
 		<div class="form-section" role="group" aria-labelledby={`${uid}-plot-colors`}>
 			<h4 id={`${uid}-plot-colors`}>Series Colors</h4>
 			<input
+				id={`${uid}-series-colors`}
 				type="text"
 				value={plotConfig.series_colors.join(', ')}
 				oninput={(e) => (plotConfig.series_colors = parseSeriesColors(e.currentTarget.value))}
@@ -525,6 +526,7 @@
 		<div class="form-section" role="group" aria-labelledby={`${uid}-plot-area-opacity`}>
 			<h4 id={`${uid}-plot-area-opacity`}>Area Opacity</h4>
 			<input
+				id={`${uid}-area-opacity`}
 				type="number"
 				min="0"
 				max="1"
@@ -609,6 +611,7 @@
 	<div class="form-section" role="group" aria-labelledby={`${uid}-plot-title`}>
 		<h4 id={`${uid}-plot-title`}>Chart Title</h4>
 		<input
+			id={`${uid}-title`}
 			type="text"
 			value={plotConfig.title ?? ''}
 			oninput={(e) => (plotConfig.title = e.currentTarget.value)}
@@ -638,8 +641,8 @@
 				</div>
 				{#if plotConfig.sort_by === 'custom'}
 					<div>
-						<label class="form-label" for={`${uid}-sort-column`}>Sort Column</label>
-						<div id={`${uid}-sort-column`}>
+						<div class="form-label">Sort Column</div>
+						<div>
 							<ColumnDropdown
 								{schema}
 								value={plotConfig.sort_column ?? ''}
@@ -763,7 +766,7 @@
 		<h4 id={`${uid}-plot-overlays`}>Overlays</h4>
 		<div class="grid gap-3">
 			<div>
-				<label class="form-label" for={`${uid}-overlay-column`}>Y Column</label>
+				<div class="form-label">Y Column</div>
 				<ColumnDropdown
 					{schema}
 					value={overlayValue}
@@ -820,6 +823,8 @@
 							/>
 						</div>
 						<select
+							id={`${uid}-overlay-${index}-type`}
+							aria-label="Overlay chart type"
 							class="select-mono"
 							bind:value={overlay.chart_type}
 							onchange={(e) =>
@@ -833,6 +838,8 @@
 							<option value="scatter">Scatter</option>
 						</select>
 						<select
+							id={`${uid}-overlay-${index}-agg`}
+							aria-label="Overlay aggregation"
 							class="select-mono"
 							bind:value={overlay.aggregation}
 							onchange={(e) =>
@@ -845,6 +852,8 @@
 							{/each}
 						</select>
 						<select
+							id={`${uid}-overlay-${index}-yaxis`}
+							aria-label="Overlay Y axis position"
 							class="select-mono"
 							bind:value={overlay.y_axis_position}
 							onchange={(e) =>
@@ -929,6 +938,8 @@
 				{#each plotConfig.reference_lines as line, index (index)}
 					<div class="flex flex-wrap items-center gap-2 border border-tertiary p-2" role="group">
 						<select
+							id={`${uid}-ref-${index}-axis`}
+							aria-label="Reference line axis"
 							class="select-mono"
 							bind:value={line.axis}
 							onchange={(e) =>
@@ -940,6 +951,8 @@
 							<option value="x">X</option>
 						</select>
 						<input
+							id={`${uid}-ref-${index}-value`}
+							aria-label="Reference line value"
 							type="number"
 							value={line.value ?? ''}
 							oninput={(e) =>
@@ -949,6 +962,8 @@
 							placeholder="0"
 						/>
 						<input
+							id={`${uid}-ref-${index}-label`}
+							aria-label="Reference line label"
 							type="text"
 							value={line.label ?? ''}
 							oninput={(e) =>
@@ -958,6 +973,8 @@
 							placeholder="Label"
 						/>
 						<input
+							id={`${uid}-ref-${index}-color`}
+							aria-label="Reference line color"
 							type="text"
 							value={line.color ?? ''}
 							oninput={(e) =>

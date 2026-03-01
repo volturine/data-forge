@@ -51,6 +51,7 @@
 		<input
 			type="checkbox"
 			class="absolute left-5 top-5 h-4.5 w-4.5"
+			id="analysis-{analysis.id}-select"
 			checked={selected}
 			onchange={(e) => {
 				e.stopPropagation();

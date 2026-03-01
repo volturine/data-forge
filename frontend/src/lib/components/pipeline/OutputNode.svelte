@@ -426,6 +426,7 @@
 					<div class="flex items-center gap-1">
 						<input
 							class="min-w-25 border border-tertiary bg-primary px-2 py-0.5 text-sm outline-none"
+							id="output-node-name"
 							bind:value={draftName}
 							onkeydown={(e) => {
 								if (e.key === 'Enter') commitNameEdit();
@@ -587,7 +588,12 @@
 				{#if notifyOpen}
 					<div class="mt-2 flex flex-col gap-2 pl-5">
 						<label class="flex cursor-pointer items-center gap-2 text-xs">
-							<input type="checkbox" checked={notifyConfig.enabled} onchange={toggleNotification} />
+							<input
+								name="notify_enabled"
+								type="checkbox"
+								checked={notifyConfig.enabled}
+								onchange={toggleNotification}
+							/>
 							<span>Notify subscribers on build</span>
 						</label>
 

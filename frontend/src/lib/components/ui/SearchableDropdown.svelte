@@ -99,6 +99,8 @@
 		renderTrigger
 	}: Props = $props();
 
+	const uid = `sd-${Math.random().toString(36).slice(2, 7)}`;
+
 	const noopAction: Action<MenuActionValue> = () => ({
 		update: () => undefined,
 		destroy: () => undefined
@@ -234,6 +236,8 @@
 		<input
 			type="text"
 			class={inputClass}
+			id="{uid}-trigger"
+			aria-label="Search"
 			bind:value={searchValue}
 			{placeholder}
 			onfocus={openMenu}
@@ -269,6 +273,8 @@
 				<div class="column-search">
 					<input
 						bind:this={searchInputRef}
+						id="{uid}-menu-search"
+						aria-label="Search"
 						bind:value={searchValue}
 						type="text"
 						placeholder={searchPlaceholder}

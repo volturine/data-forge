@@ -240,6 +240,8 @@
 								/>
 								<input
 									type="text"
+									id="bcp-search"
+									aria-label="Search builds"
 									placeholder="Search builds by ID or date..."
 									class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-xs"
 									bind:value={runSearch}
@@ -415,7 +417,7 @@
 					<div class="p-4">
 						<h4 class="mb-2 text-sm font-medium text-fg-secondary">Column Statistics</h4>
 						<div class="border border-tertiary">
-							<div class="max-h-[500px] overflow-auto datasource-comparison-scroll">
+							<div class="max-h-125 overflow-auto datasource-comparison-scroll">
 								<table class="w-full border-collapse text-sm">
 									<thead class="sticky top-0 z-10 bg-bg-tertiary shadow-sm">
 										<tr>

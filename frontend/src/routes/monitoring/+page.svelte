@@ -28,6 +28,8 @@
 			<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 			<input
 				type="text"
+				id="monitor-search"
+				aria-label="Search builds, schedules, or health checks"
 				placeholder="Search builds, schedules, or health checks..."
 				class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
 				bind:value={search}

@@ -422,6 +422,8 @@
 						<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 						<input
 							type="text"
+							id="sched-search"
+							aria-label="Search schedules"
 							placeholder="Search schedules, datasources, or IDs..."
 							class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
 							bind:value={searchQuery}
@@ -581,6 +583,7 @@
 									<input
 										type="text"
 										class="w-32 border border-tertiary bg-transparent px-2 py-1 font-mono text-xs"
+										name="cron"
 										bind:value={newCron}
 										placeholder="0 * * * *"
 										disabled={scheduleBlocked}
@@ -615,6 +618,7 @@
 								<div class="mt-2">
 									<select
 										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
+										name="depends_on"
 										bind:value={newDependsOn}
 										disabled={scheduleBlocked}
 									>
@@ -650,6 +654,7 @@
 								<div class="mt-2">
 									<select
 										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
+										name="trigger_datasource"
 										bind:value={newTrigger}
 										disabled={scheduleBlocked}
 									>
@@ -790,6 +795,8 @@
 													<input
 														type="text"
 														class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+														id="sched-{schedule.id}-cron"
+														aria-label="Cron expression"
 														bind:value={editCronValue}
 														onkeydown={(e) => {
 															if (e.key === 'Enter') saveCron(schedule.id);
@@ -834,6 +841,8 @@
 											<span class="text-[10px] text-fg-muted">Depends On</span>
 											<select
 												class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+												id="sched-{schedule.id}-depends"
+												aria-label="Depends on schedule"
 												value={schedule.depends_on ?? ''}
 												onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
 												onclick={(e) => e.stopPropagation()}
@@ -850,6 +859,8 @@
 											<span class="text-[10px] text-fg-muted">On Datasource Update</span>
 											<select
 												class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+												id="sched-{schedule.id}-trigger"
+												aria-label="Trigger datasource"
 												value={schedule.trigger_on_datasource_id ?? ''}
 												onchange={(e) => handleTriggerChange(schedule.id, e.currentTarget.value)}
 												onclick={(e) => e.stopPropagation()}
@@ -1006,6 +1017,8 @@
 															<input
 																type="text"
 																class="w-32 border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+																id="sched-{schedule.id}-cron"
+																aria-label="Cron expression"
 																bind:value={editCronValue}
 																onkeydown={(e) => {
 																	if (e.key === 'Enter') saveCron(schedule.id);
@@ -1051,6 +1064,8 @@
 													<div class="flex items-center gap-1">
 														<select
 															class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+															id="sched-{schedule.id}-depends"
+															aria-label="Depends on schedule"
 															value={schedule.depends_on ?? ''}
 															onchange={(e) => handleDepChange(schedule.id, e.currentTarget.value)}
 															onclick={(e) => e.stopPropagation()}
@@ -1072,6 +1087,8 @@
 													<div class="flex items-center gap-1">
 														<select
 															class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+															id="sched-{schedule.id}-trigger"
+															aria-label="Trigger datasource"
 															value={schedule.trigger_on_datasource_id ?? ''}
 															onchange={(e) =>
 																handleTriggerChange(schedule.id, e.currentTarget.value)}

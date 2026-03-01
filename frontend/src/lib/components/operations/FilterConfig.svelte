@@ -284,9 +284,7 @@
 
 						<div class="relative flex flex-wrap items-start gap-4">
 							<div class="flex min-w-55 flex-2 flex-col gap-1">
-								<label class="mb-0 text-xs font-normal text-fg-muted" for="{uid}-column-{i}"
-									>Column</label
-								>
+								<span class="mb-0 text-xs font-normal text-fg-muted">Column</span>
 								<ColumnDropdown
 									{schema}
 									value={cond.column}

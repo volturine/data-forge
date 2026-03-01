@@ -212,6 +212,8 @@
 							class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-fg-muted"
 						/>
 						<input
+							id="notif-search"
+							aria-label="Search subscribers"
 							class="resource-input w-full border border-tertiary bg-secondary py-1 pl-7 pr-2 text-xs text-fg-primary"
 							placeholder="Search subscribers..."
 							value={search}
@@ -235,6 +237,7 @@
 									class="flex cursor-pointer items-center gap-3 border-b border-tertiary px-2 py-1.5 last:border-b-0 hover:bg-tertiary"
 								>
 									<input
+										id={`sub-${sub.id}`}
 										type="checkbox"
 										checked={isSelected(sub.chat_id)}
 										onchange={() => toggleSubscriber(sub.chat_id)}

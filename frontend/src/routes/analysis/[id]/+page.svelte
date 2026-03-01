@@ -1191,6 +1191,8 @@
 									<input
 										type="text"
 										class="text-sm font-semibold text-fg-primary bg-transparent border border-tertiary px-1 py-0.5"
+										id="version-name-{version.id}"
+										aria-label="Version name"
 										bind:value={editingVersionName}
 										onblur={() => commitRenameVersion(version.version)}
 										onkeydown={(e) => {

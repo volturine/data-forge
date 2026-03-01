@@ -303,6 +303,8 @@
 					<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 					<input
 						type="text"
+						id="builds-search"
+						aria-label="Search builds"
 						placeholder="Search builds..."
 						class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
 						bind:value={search}
@@ -330,6 +332,8 @@
 					<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 					<input
 						type="text"
+						id="builds-search-full"
+						aria-label="Search builds"
 						placeholder="Search by name, ID, datasource, or analysis..."
 						class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
 						bind:value={search}
@@ -338,6 +342,8 @@
 			{/if}
 			<select
 				class="border border-tertiary bg-transparent px-3 py-1.5 text-sm"
+				id="builds-kind-filter"
+				aria-label="Filter by type"
 				bind:value={kindFilter}
 			>
 				<option value="">All types</option>
@@ -349,6 +355,8 @@
 			</select>
 			<select
 				class="border border-tertiary bg-transparent px-3 py-1.5 text-sm"
+				id="builds-status-filter"
+				aria-label="Filter by status"
 				bind:value={statusFilter}
 			>
 				<option value="">All statuses</option>
@@ -366,12 +374,16 @@
 				<input
 					type="date"
 					class="border border-tertiary bg-transparent px-2 py-1 text-sm"
+					id="builds-date-from"
+					aria-label="From date"
 					bind:value={dateFrom}
 				/>
 				<span class="text-fg-muted">To</span>
 				<input
 					type="date"
 					class="border border-tertiary bg-transparent px-2 py-1 text-sm"
+					id="builds-date-to"
+					aria-label="To date"
 					bind:value={dateTo}
 				/>
 			</div>

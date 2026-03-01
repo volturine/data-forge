@@ -141,7 +141,14 @@
 	</header>
 
 	<div class="mb-4 flex items-center gap-3">
-		<input type="text" placeholder="Search UDFs..." bind:value={search} class="max-w-90" />
+		<input
+			id="udf-search"
+			aria-label="Search UDFs"
+			type="text"
+			placeholder="Search UDFs..."
+			bind:value={search}
+			class="max-w-90"
+		/>
 	</div>
 
 	{#if query.isLoading}
@@ -230,14 +237,16 @@
 				<button class="modal-close" onclick={() => (importOpen = false)}>x</button>
 			</div>
 			<div class="modal-body">
+				<label for="udf-import-json">Import JSON</label>
 				<textarea
 					rows="10"
+					id="udf-import-json"
 					placeholder="Paste exported JSON here..."
 					bind:value={importText}
 					class="font-mono"
 				></textarea>
 				<label class="flex items-center gap-2 text-fg-secondary">
-					<input type="checkbox" bind:checked={overwriteImport} />
+					<input id="udf-overwrite-import" type="checkbox" bind:checked={overwriteImport} />
 					Overwrite existing by name
 				</label>
 				{#if importError}

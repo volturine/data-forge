@@ -265,6 +265,8 @@
 		<div class="flex flex-col gap-2">
 			<select
 				class="border border-tertiary bg-bg-secondary px-3 py-2 text-xs text-fg-primary"
+				id="step-lib-type"
+				aria-label="Quick insert operation type"
 				value={selectedType ?? ''}
 				onchange={(event) => (selectedType = event.currentTarget.value || null)}
 			>

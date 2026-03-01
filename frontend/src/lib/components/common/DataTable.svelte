@@ -517,6 +517,8 @@
 			<input
 				type="text"
 				class="input-base border px-2 py-1 text-xs ml-auto w-60"
+				id="dt-col-search"
+				aria-label="Filter columns"
 				placeholder="Filter columns"
 				bind:value={columnSearch}
 			/>

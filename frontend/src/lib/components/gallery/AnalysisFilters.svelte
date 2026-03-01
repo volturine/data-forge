@@ -34,6 +34,8 @@
 		/>
 		<input
 			type="text"
+			id="filters-search"
+			aria-label="Search analyses"
 			placeholder="Search analyses..."
 			value={searchQuery}
 			oninput={(e) => onSearch((e.target as HTMLInputElement).value)}

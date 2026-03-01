@@ -222,13 +222,15 @@
 	<h3 class="m-0 mb-5 text-sm uppercase tracking-wider text-fg-muted">With Columns</h3>
 
 	<div class="flex flex-col gap-3 mb-5">
-		<select bind:value={exprType}>
+		<label for="wc-expr-type">Type</label>
+		<select id="wc-expr-type" bind:value={exprType}>
 			<option value="column">From column</option>
 			<option value="literal">Literal value</option>
 			<option value="udf">Python UDF</option>
 		</select>
 
-		<input type="text" bind:value={exprName} placeholder="New column name" />
+		<label for="wc-expr-name">Column name</label>
+		<input id="wc-expr-name" type="text" bind:value={exprName} placeholder="New column name" />
 
 		{#if exprType === 'column'}
 			<ColumnDropdown
@@ -238,16 +240,17 @@
 				placeholder="Select source column..."
 			/>
 		{:else if exprType === 'literal'}
-			<input type="text" bind:value={exprValue} placeholder="Literal value" />
+			<label for="wc-expr-value">Value</label>
+			<input id="wc-expr-value" type="text" bind:value={exprValue} placeholder="Literal value" />
 		{:else}
 			<div class="flex flex-col gap-3">
 				<div class="flex gap-3 items-center">
 					<label class="inline-flex items-center gap-2 text-sm text-fg-secondary">
-						<input type="radio" bind:group={useLibrary} value={false} />
+						<input id="wc-use-lib-no" type="radio" bind:group={useLibrary} value={false} />
 						Inline UDF
 					</label>
 					<label class="inline-flex items-center gap-2 text-sm text-fg-secondary">
-						<input type="radio" bind:group={useLibrary} value={true} />
+						<input id="wc-use-lib-yes" type="radio" bind:group={useLibrary} value={true} />
 						Library UDF
 					</label>
 				</div>
@@ -281,10 +284,13 @@
 					/>
 
 					<div class="flex items-center justify-between">
-						<span class="text-xs uppercase tracking-wider text-fg-muted">Function</span>
+						<label for="wc-expr-code" class="text-xs uppercase tracking-wider text-fg-muted"
+							>Function</label
+						>
 						<button type="button" class="btn-ghost btn-sm" onclick={openEditor}>Expand</button>
 					</div>
 					<textarea
+						id="wc-expr-code"
 						class="resize-y min-h-25 text-sm font-mono"
 						rows="5"
 						placeholder="def udf(*args):&#10;    return ..."
@@ -292,14 +298,27 @@
 						oninput={() => (codeEdited = true)}
 					></textarea>
 					<label class="inline-flex items-center gap-2 text-sm mt-2 text-fg-secondary">
-						<input type="checkbox" bind:checked={saveToLibrary} />
+						<input id="wc-save-to-lib" type="checkbox" bind:checked={saveToLibrary} />
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
 						<div class="flex flex-col gap-3 mt-3 pt-3 border-t border-tertiary">
-							<input type="text" placeholder="UDF name" bind:value={saveName} />
-							<input type="text" placeholder="Description" bind:value={saveDescription} />
-							<input type="text" placeholder="Tags (comma-separated)" bind:value={saveTags} />
+							<label for="wc-save-name">Name</label>
+							<input id="wc-save-name" type="text" placeholder="UDF name" bind:value={saveName} />
+							<label for="wc-save-desc">Description</label>
+							<input
+								id="wc-save-desc"
+								type="text"
+								placeholder="Description"
+								bind:value={saveDescription}
+							/>
+							<label for="wc-save-tags">Tags</label>
+							<input
+								id="wc-save-tags"
+								type="text"
+								placeholder="Tags (comma-separated)"
+								bind:value={saveTags}
+							/>
 							<button
 								type="button"
 								class="btn-secondary btn-sm"

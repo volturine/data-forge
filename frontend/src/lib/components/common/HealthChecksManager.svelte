@@ -575,6 +575,7 @@
 				<input
 					type="checkbox"
 					class="border-tertiary text-accent-primary focus:ring-0"
+					id="hc-critical"
 					checked={critical}
 					onchange={(e) => (critical = e.currentTarget.checked)}
 				/>
@@ -638,6 +639,8 @@
 						<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
 						<input
 							type="text"
+							id="hc-search"
+							aria-label="Search health checks"
 							placeholder="Search by check, datasource, or ID..."
 							class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
 							bind:value={search}
@@ -928,6 +931,8 @@
 								<input
 									type="checkbox"
 									class="h-3 w-3 border-tertiary text-success-fg focus:ring-0"
+									id="check-{check.id}-enabled"
+									aria-label="Enable check"
 									checked={check.enabled}
 									onchange={() => toggleEnabled(check)}
 								/>
