@@ -11,10 +11,6 @@ class SortParams(OperationParams):
 
 
 class SortHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'sort'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

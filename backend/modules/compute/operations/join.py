@@ -25,10 +25,6 @@ class JoinParams(OperationParams):
 
 
 class JoinHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'join'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

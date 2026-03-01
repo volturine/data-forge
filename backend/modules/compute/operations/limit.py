@@ -10,10 +10,6 @@ class LimitParams(OperationParams):
 
 
 class LimitHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'limit'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

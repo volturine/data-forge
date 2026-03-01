@@ -169,10 +169,6 @@ class ChartHandler(OperationHandler):
     Visualization data is computed separately via compute_chart_data().
     """
 
-    @property
-    def name(self) -> str:
-        return 'chart'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

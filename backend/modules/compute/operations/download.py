@@ -11,10 +11,6 @@ class DownloadParams(OperationParams):
 
 
 class DownloadHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'download'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

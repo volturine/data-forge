@@ -107,10 +107,6 @@ class FilterHandler(OperationHandler):
         '<=': lambda left, right: left <= right,
     }
 
-    @property
-    def name(self) -> str:
-        return 'filter'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
@@ -234,4 +230,7 @@ class FilterHandler(OperationHandler):
 
 
 def get_operator(name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
-    return FilterHandler()._get_operator(name)
+    op = FilterHandler.OPERATORS.get(name)
+    if not op:
+        raise ValueError(f'Unsupported filter operator: {name}')
+    return op

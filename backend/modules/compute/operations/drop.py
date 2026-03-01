@@ -10,10 +10,6 @@ class DropParams(OperationParams):
 
 
 class DropHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'drop'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

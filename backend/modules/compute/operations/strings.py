@@ -29,10 +29,6 @@ class StringTransformHandler(OperationHandler):
         'length': lambda col: col.str.len_chars(),
     }
 
-    @property
-    def name(self) -> str:
-        return 'string_transform'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

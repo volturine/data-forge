@@ -9,10 +9,6 @@ class UnionParams(OperationParams):
 
 
 class UnionByNameHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'union_by_name'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

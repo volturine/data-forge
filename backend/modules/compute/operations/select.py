@@ -10,10 +10,6 @@ class SelectParams(OperationParams):
 
 
 class SelectHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'select'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

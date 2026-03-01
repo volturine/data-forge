@@ -56,10 +56,6 @@ def parse_expression(expr_str: str) -> pl.Expr:
 class ExpressionHandler(OperationHandler):
     """Create a new column using a Polars expression string."""
 
-    @property
-    def name(self) -> str:
-        return 'expression'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

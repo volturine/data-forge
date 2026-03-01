@@ -14,10 +14,6 @@ class PivotParams(OperationParams):
 
 
 class PivotHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'pivot'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

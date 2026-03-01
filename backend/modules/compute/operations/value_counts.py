@@ -14,10 +14,6 @@ class ValueCountsParams(OperationParams):
 class ValueCountsHandler(OperationHandler):
     """Count unique values in a column."""
 
-    @property
-    def name(self) -> str:
-        return 'value_counts'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

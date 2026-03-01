@@ -10,10 +10,6 @@ class NullCountParams(OperationParams):
 
 
 class NullCountHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'null_count'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

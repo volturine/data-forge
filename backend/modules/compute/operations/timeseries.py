@@ -38,10 +38,6 @@ class TimeseriesHandler(OperationHandler):
         'weeks': lambda value: pl.duration(weeks=value),
     }
 
-    @property
-    def name(self) -> str:
-        return 'timeseries'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

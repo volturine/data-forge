@@ -32,10 +32,6 @@ class FillNullHandler(OperationHandler):
         'Datetime': (None, pl.Datetime()),
     }
 
-    @property
-    def name(self) -> str:
-        return 'fill_null'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

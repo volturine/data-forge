@@ -13,10 +13,6 @@ class DeduplicateParams(OperationParams):
 
 
 class DeduplicateHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'deduplicate'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

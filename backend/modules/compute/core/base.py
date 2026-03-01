@@ -10,9 +10,6 @@ class OperationParams(BaseModel):
 
 @runtime_checkable
 class OperationHandler(Protocol):
-    @property
-    def name(self) -> str: ...
-
     def __call__(
         self,
         lf: pl.LazyFrame,

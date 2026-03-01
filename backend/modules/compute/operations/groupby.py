@@ -35,10 +35,6 @@ class GroupByHandler(OperationHandler):
         'collect_set': lambda col: pl.col(col).implode().list.unique(),
     }
 
-    @property
-    def name(self) -> str:
-        return 'groupby'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

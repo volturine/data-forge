@@ -15,10 +15,6 @@ class ExportParams(OperationParams):
 
 
 class ExportHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'export'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

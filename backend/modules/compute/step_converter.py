@@ -350,25 +350,7 @@ def convert_plot_config(config: dict) -> dict:
 
 
 def _normalize_chart_type(step_type: str) -> str:
-    if step_type == 'plot_bar':
-        return 'chart'
-    if step_type == 'plot_horizontal_bar':
-        return 'chart'
-    if step_type == 'plot_area':
-        return 'chart'
-    if step_type == 'plot_heatgrid':
-        return 'chart'
-    if step_type == 'plot_histogram':
-        return 'chart'
-    if step_type == 'plot_scatter':
-        return 'chart'
-    if step_type == 'plot_line':
-        return 'chart'
-    if step_type == 'plot_pie':
-        return 'chart'
-    if step_type == 'plot_boxplot':
-        return 'chart'
-    return step_type
+    return 'chart' if step_type.startswith('plot_') else step_type
 
 
 def _normalize_chart_config(step_type: str, config: dict) -> dict:
@@ -439,43 +421,40 @@ def convert_notification_config(config: dict) -> dict:
     }
 
 
-def get_converters() -> dict:
-    """Return all converters dictionary."""
-    return {
-        'filter': convert_filter_config,
-        'select': lambda c: c,
-        'groupby': convert_groupby_config,
-        'sort': convert_sort_config,
-        'rename': convert_rename_config,
-        'drop': lambda c: c,
-        'join': convert_join_config,
-        'with_columns': lambda c: c,
-        'deduplicate': convert_deduplicate_config,
-        'fill_null': convert_fillnull_config,
-        'explode': lambda c: c,
-        'pivot': convert_pivot_config,
-        'unpivot': lambda c: c,
-        'view': lambda c: c,
-        'timeseries': convert_timeseries_config,
-        'string_transform': convert_string_transform_config,
-        'sample': convert_sample_config,
-        'limit': convert_limit_config,
-        'topk': convert_topk_config,
-        'null_count': lambda c: c,
-        'value_counts': convert_value_counts_config,
-        'export': convert_export_config,
-        'union_by_name': convert_union_by_name_config,
-        'expression': convert_expression_config,
-        'chart': convert_plot_config,
-        'ai': convert_ai_config,
-        'notification': convert_notification_config,
-    }
+_CONVERTERS: dict = {
+    'filter': convert_filter_config,
+    'select': lambda c: c,
+    'groupby': convert_groupby_config,
+    'sort': convert_sort_config,
+    'rename': convert_rename_config,
+    'drop': lambda c: c,
+    'join': convert_join_config,
+    'with_columns': lambda c: c,
+    'deduplicate': convert_deduplicate_config,
+    'fill_null': convert_fillnull_config,
+    'explode': lambda c: c,
+    'pivot': convert_pivot_config,
+    'unpivot': lambda c: c,
+    'view': lambda c: c,
+    'timeseries': convert_timeseries_config,
+    'string_transform': convert_string_transform_config,
+    'sample': convert_sample_config,
+    'limit': convert_limit_config,
+    'topk': convert_topk_config,
+    'null_count': lambda c: c,
+    'value_counts': convert_value_counts_config,
+    'export': convert_export_config,
+    'union_by_name': convert_union_by_name_config,
+    'expression': convert_expression_config,
+    'chart': convert_plot_config,
+    'ai': convert_ai_config,
+    'notification': convert_notification_config,
+}
 
 
 def convert_config_to_params(operation: str, config: dict) -> dict:
     """Convert operation-specific config to params."""
-    converters = get_converters()
-    converter = converters.get(operation, lambda c: c)
+    converter = _CONVERTERS.get(operation, lambda c: c)
     try:
         return converter(config)
     except Exception as e:

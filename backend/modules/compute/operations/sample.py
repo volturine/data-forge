@@ -13,10 +13,6 @@ class SampleParams(OperationParams):
 class SampleHandler(OperationHandler):
     """Sample rows using a deterministic hash-based approach for lazy evaluation."""
 
-    @property
-    def name(self) -> str:
-        return 'sample'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

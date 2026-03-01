@@ -59,10 +59,6 @@ class NotificationHandler(OperationHandler):
     result of each send (``sent`` or ``[error: ...]``).
     """
 
-    @property
-    def name(self) -> str:
-        return 'notification'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

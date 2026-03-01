@@ -10,10 +10,6 @@ class RenameParams(OperationParams):
 
 
 class RenameHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'rename'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

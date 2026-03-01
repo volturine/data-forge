@@ -75,10 +75,6 @@ def _build_prompt(template: str, row: dict[str, object]) -> str:
 
 
 class AIHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'ai'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

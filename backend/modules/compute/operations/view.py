@@ -10,10 +10,6 @@ class ViewParams(OperationParams):
 
 
 class ViewHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'view'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

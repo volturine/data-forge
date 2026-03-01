@@ -53,10 +53,6 @@ class DatasourceHandler(OperationHandler):
     FILE_LOADERS: dict[str, Callable[[str, dict], pl.LazyFrame]] = {}
     SOURCE_LOADERS: dict[str, Callable[['DatasourceHandler', DatasourceParams], pl.LazyFrame]] = {}
 
-    @property
-    def name(self) -> str:
-        return 'datasource'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

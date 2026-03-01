@@ -26,20 +26,9 @@ class EngineInfo:
 
 
 class ProcessManager:
-    _instance: 'ProcessManager | None' = None
-    _engines: dict[str, EngineInfo]
-    _engines_lock: threading.Lock
-    _lock = threading.Lock()
-
-    def __new__(cls) -> 'ProcessManager':
-        if cls._instance is None:
-            with cls._lock:
-                # Double-check pattern to ensure thread safety
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._engines = {}
-                    cls._instance._engines_lock = threading.Lock()
-        return cls._instance
+    def __init__(self) -> None:
+        self._engines: dict[str, EngineInfo] = {}
+        self._engines_lock = threading.Lock()
 
     def spawn_engine(self, analysis_id: str, resource_config: dict | None = None) -> EngineInfo:
         """
@@ -274,19 +263,6 @@ class ProcessManager:
             engine.shutdown()
         return cleaned
 
-    def cleanup_dead_engines(self) -> list[str]:
-        """Clean up engines whose processes have died. Returns list of cleaned up analysis_ids."""
-        cleaned = []
-        with self._engines_lock:
-            for analysis_id, info in list(self._engines.items()):
-                if info.engine.is_running and not info.engine.is_process_alive():
-                    logger.info(f'Cleaning up dead engine for analysis {analysis_id}')
-                    info.engine._reset_state()
-                    del self._engines[analysis_id]
-                    cleaned.append(analysis_id)
-
-        return cleaned
-
     def list_engines(self) -> list[str]:
         """List all active engine analysis_ids."""
         with self._engines_lock:
@@ -299,6 +275,9 @@ class ProcessManager:
         return [self.get_engine_status(aid) for aid in analysis_ids]
 
 
+_manager = ProcessManager()
+
+
 def get_manager() -> ProcessManager:
     """Get the singleton ProcessManager instance."""
-    return ProcessManager()
+    return _manager

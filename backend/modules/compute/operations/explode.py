@@ -10,10 +10,6 @@ class ExplodeParams(OperationParams):
 
 
 class ExplodeHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'explode'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

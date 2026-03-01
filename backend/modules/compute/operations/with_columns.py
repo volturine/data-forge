@@ -29,10 +29,6 @@ class WithColumnsParams(OperationParams):
 class WithColumnsHandler(OperationHandler):
     """Add or modify columns using expressions."""
 
-    @property
-    def name(self) -> str:
-        return 'with_columns'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

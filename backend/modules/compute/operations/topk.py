@@ -12,10 +12,6 @@ class TopKParams(OperationParams):
 
 
 class TopKHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'topk'
-
     def __call__(
         self,
         lf: pl.LazyFrame,

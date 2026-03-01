@@ -670,7 +670,7 @@
 								<span class="uppercase tracking-wide text-fg-muted">Location</span>
 								<span class="break-all text-fg-secondary font-mono">{config.metadata_path}</span>
 							</div>
-						<!-- Branch selection lives in the preview header; omit here to avoid confusion. -->
+							<!-- Branch selection lives in the preview header; omit here to avoid confusion. -->
 							{#if config.source}
 								{@const fileSource = config.source as Record<string, unknown>}
 								<div class="border-t border-tertiary pt-2 mt-1 flex flex-col gap-2">

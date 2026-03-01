@@ -15,10 +15,6 @@ class UnpivotParams(OperationParams):
 
 
 class UnpivotHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'unpivot'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
