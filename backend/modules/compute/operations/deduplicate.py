@@ -17,9 +17,7 @@ class DeduplicateHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = DeduplicateParams.model_validate(params)
         return lf.unique(subset=validated.subset, keep=validated.keep, maintain_order=True)

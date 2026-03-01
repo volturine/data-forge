@@ -29,13 +29,12 @@ def convert_step_format(frontend_step: dict) -> dict:
         raise ValueError('Step must have a type field')
 
     config = frontend_step.get('config', {})
-    config = _normalize_chart_config(step_type, config)
-    normalized_type = _normalize_chart_type(step_type)
-
-    step_id = frontend_step.get('id', 'Unknown Step')
+    if step_type in _CHART_TYPES:
+        config = {**config, 'chart_type': _CHART_TYPES[step_type]}
+    normalized_type = 'chart' if step_type.startswith('plot_') else step_type
 
     return {
-        'name': step_id,
+        'name': frontend_step.get('id', 'Unknown Step'),
         'operation': normalized_type,
         'params': convert_config_to_params(normalized_type, config),
     }
@@ -288,25 +287,17 @@ def convert_plot_config(config: dict) -> dict:
     }
 
 
-def _normalize_chart_type(step_type: str) -> str:
-    return 'chart' if step_type.startswith('plot_') else step_type
-
-
-def _normalize_chart_config(step_type: str, config: dict) -> dict:
-    chart_map = {
-        'plot_bar': 'bar',
-        'plot_horizontal_bar': 'horizontal_bar',
-        'plot_area': 'area',
-        'plot_heatgrid': 'heatgrid',
-        'plot_histogram': 'histogram',
-        'plot_scatter': 'scatter',
-        'plot_line': 'line',
-        'plot_pie': 'pie',
-        'plot_boxplot': 'boxplot',
-    }
-    if step_type not in chart_map:
-        return config
-    return {**config, 'chart_type': chart_map[step_type]}
+_CHART_TYPES: dict[str, str] = {
+    'plot_bar': 'bar',
+    'plot_horizontal_bar': 'horizontal_bar',
+    'plot_area': 'area',
+    'plot_heatgrid': 'heatgrid',
+    'plot_histogram': 'histogram',
+    'plot_scatter': 'scatter',
+    'plot_line': 'line',
+    'plot_pie': 'pie',
+    'plot_boxplot': 'boxplot',
+}
 
 
 def convert_ai_config(config: dict) -> dict:

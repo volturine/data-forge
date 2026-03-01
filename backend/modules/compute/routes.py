@@ -192,13 +192,13 @@ def list_engines():
     return {'engines': statuses, 'total': len(statuses)}
 
 
-@router.get('/defaults', response_model=schemas.EngineDefaultsResponse)
+@router.get('/defaults', response_model=schemas.EngineDefaults)
 @handle_errors(operation='get engine defaults')
 def get_engine_defaults():
     """Get default engine resource settings from environment configuration."""
     from core.config import settings
 
-    return schemas.EngineDefaultsResponse(
+    return schemas.EngineDefaults(
         max_threads=settings.polars_max_threads,
         max_memory_mb=settings.polars_max_memory_mb,
         streaming_chunk_size=settings.polars_streaming_chunk_size,

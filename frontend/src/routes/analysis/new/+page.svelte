@@ -35,16 +35,9 @@
 		(datasourcesQuery.data ?? []).filter((ds) => ds.source_type !== 'analysis')
 	);
 
-	function makeId() {
-		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-			return crypto.randomUUID();
-		}
-		return `id-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-	}
-
 	function buildInitialSteps(): PipelineStep[] {
 		const step: PipelineStep = {
-			id: makeId(),
+			id: crypto.randomUUID(),
 			type: 'view',
 			config: getDefaultConfig('view') as Record<string, unknown>,
 			depends_on: [],
@@ -63,7 +56,7 @@
 			const name = `Source ${index + 1}`;
 			const output = buildOutputConfig({ name, branch: 'master' });
 			return {
-				id: makeId(),
+				id: crypto.randomUUID(),
 				name,
 				parent_id: null,
 				datasource: {

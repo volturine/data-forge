@@ -392,16 +392,9 @@
 	});
 	const datasourceLabel = $derived(analysisTabName ?? currentDatasource?.name ?? null);
 
-	function makeId() {
-		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-			return crypto.randomUUID();
-		}
-		return `id-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-	}
-
 	function buildStep(type: string): PipelineStep {
 		const base: PipelineStep = {
-			id: makeId(),
+			id: crypto.randomUUID(),
 			type,
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []

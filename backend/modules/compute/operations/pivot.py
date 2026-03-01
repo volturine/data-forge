@@ -18,9 +18,7 @@ class PivotHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = PivotParams.model_validate(params)
         on_columns = validated.on_columns or params.get('onColumns')

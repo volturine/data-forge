@@ -144,9 +144,6 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
-EngineDefaultsResponse = EngineDefaults  # Alias for backwards compatibility
-
-
 class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -31,7 +31,7 @@ class JoinHandler(OperationHandler):
         params: dict,
         *,
         right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = JoinParams.model_validate(params)
         join_columns = validated.join_columns or []

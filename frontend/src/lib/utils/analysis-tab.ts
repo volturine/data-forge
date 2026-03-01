@@ -7,10 +7,6 @@ const defaultFormat = 'parquet';
 const defaultDatasourceType = 'iceberg';
 const outputNameFallback = 'export';
 
-function makeId(): string {
-	return crypto.randomUUID();
-}
-
 function cleanBranch(value: unknown): string {
 	if (typeof value !== 'string') return defaultBranch;
 	const trimmed = value.trim();
@@ -29,7 +25,8 @@ export function buildOutputConfig(args: {
 	name?: string | null;
 	branch?: string | null;
 }): AnalysisTabOutput {
-	const outputId = args.outputId && args.outputId.trim() ? args.outputId.trim() : makeId();
+	const outputId =
+		args.outputId && args.outputId.trim() ? args.outputId.trim() : crypto.randomUUID();
 	const name = args.name ?? outputNameFallback;
 	const tableName = toSlug(name);
 	const branch = cleanBranch(args.branch);

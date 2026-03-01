@@ -66,5 +66,3 @@ HANDLERS: dict[str, OperationHandler] = {
     'expression': ExpressionHandler(),
     'chart': ChartHandler(),
 }
-
-

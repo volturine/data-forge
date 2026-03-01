@@ -38,9 +38,7 @@ class StringTransformHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = StringTransformParams.model_validate(params)
         target = validated.new_column or validated.column

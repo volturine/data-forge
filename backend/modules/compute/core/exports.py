@@ -11,10 +11,6 @@ class ExportFormat:
     writer: Callable[[pl.DataFrame, str], None]
 
 
-def _write_excel(df: pl.DataFrame, path: str) -> None:
-    df.write_excel(path)
-
-
 def _write_duckdb(df: pl.DataFrame, path: str) -> None:
     import duckdb
 
@@ -30,7 +26,9 @@ EXPORT_FORMATS: dict[str, ExportFormat] = {
     'parquet': ExportFormat('.parquet', 'application/octet-stream', lambda df, path: df.write_parquet(path)),
     'json': ExportFormat('.json', 'application/json', lambda df, path: df.write_json(path)),
     'ndjson': ExportFormat('.ndjson', 'application/x-ndjson', lambda df, path: df.write_ndjson(path)),
-    'excel': ExportFormat('.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', _write_excel),
+    'excel': ExportFormat(
+        '.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', lambda df, path: df.write_excel(path)
+    ),
     'duckdb': ExportFormat('.duckdb', 'application/octet-stream', _write_duckdb),
 }
 

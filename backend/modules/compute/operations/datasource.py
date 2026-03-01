@@ -57,9 +57,7 @@ class DatasourceHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
         loader = self.SOURCE_LOADERS.get(validated.source_type)
