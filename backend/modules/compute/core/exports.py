@@ -25,23 +25,18 @@ def _write_duckdb(df: pl.DataFrame, path: str) -> None:
         conn.close()
 
 
-class ExportRegistry:
-    FORMATS: dict[str, ExportFormat] = {
-        'csv': ExportFormat('.csv', 'text/csv', lambda df, path: df.write_csv(path)),
-        'parquet': ExportFormat('.parquet', 'application/octet-stream', lambda df, path: df.write_parquet(path)),
-        'json': ExportFormat('.json', 'application/json', lambda df, path: df.write_json(path)),
-        'ndjson': ExportFormat('.ndjson', 'application/x-ndjson', lambda df, path: df.write_ndjson(path)),
-        'excel': ExportFormat('.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', _write_excel),
-        'duckdb': ExportFormat('.duckdb', 'application/octet-stream', _write_duckdb),
-    }
-
-    @classmethod
-    def get(cls, name: str) -> ExportFormat:
-        fmt = cls.FORMATS.get(name)
-        if not fmt:
-            raise ValueError(f'Unsupported export format: {name}')
-        return fmt
+EXPORT_FORMATS: dict[str, ExportFormat] = {
+    'csv': ExportFormat('.csv', 'text/csv', lambda df, path: df.write_csv(path)),
+    'parquet': ExportFormat('.parquet', 'application/octet-stream', lambda df, path: df.write_parquet(path)),
+    'json': ExportFormat('.json', 'application/json', lambda df, path: df.write_json(path)),
+    'ndjson': ExportFormat('.ndjson', 'application/x-ndjson', lambda df, path: df.write_ndjson(path)),
+    'excel': ExportFormat('.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', _write_excel),
+    'duckdb': ExportFormat('.duckdb', 'application/octet-stream', _write_duckdb),
+}
 
 
 def get_export_format(name: str) -> ExportFormat:
-    return ExportRegistry.get(name)
+    fmt = EXPORT_FORMATS.get(name)
+    if not fmt:
+        raise ValueError(f'Unsupported export format: {name}')
+    return fmt

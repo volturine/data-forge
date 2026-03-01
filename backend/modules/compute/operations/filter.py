@@ -118,24 +118,12 @@ class FilterHandler(OperationHandler):
         validated = FilterParams.model_validate(params)
         self._last_schema = lf.collect_schema()
 
-        exprs: list[pl.Expr] = []
-        for cond in validated.conditions:
-            exprs.append(self._build_expr(cond))
+        exprs = [self._build_expr(cond) for cond in validated.conditions]
 
-        if len(exprs) == 1:
-            return lf.filter(exprs[0])
-
-        combined = exprs[0]
         if validated.logic == 'AND':
-            for expr in exprs[1:]:
-                combined = combined & expr
-            return lf.filter(combined)
-
+            return lf.filter(pl.all_horizontal(exprs))
         if validated.logic == 'OR':
-            for expr in exprs[1:]:
-                combined = combined | expr
-            return lf.filter(combined)
-
+            return lf.filter(pl.any_horizontal(exprs))
         raise ValueError(f'Unsupported logic operator: {validated.logic}')
 
     def _build_expr(self, cond: FilterCondition) -> pl.Expr:
@@ -205,12 +193,6 @@ class FilterHandler(OperationHandler):
         if not isinstance(value, str):
             return False
         return len(value) == 10 and '-' in value and 'T' not in value
-
-    def _get_operator(self, name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
-        op = self.OPERATORS.get(name)
-        if not op:
-            raise ValueError(f'Unsupported filter operator: {name}')
-        return op
 
     @property
     def _schema(self) -> dict[str, pl.DataType] | None:

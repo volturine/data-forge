@@ -13,7 +13,7 @@ import polars as pl
 
 from core.exceptions import PipelineValidationError
 from modules.compute.core.exports import get_export_format
-from modules.compute.operations import get_operation_handlers
+from modules.compute.operations import HANDLERS
 from modules.compute.operations.datasource import load_datasource
 from modules.compute.operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
 from modules.compute.step_converter import convert_config_to_params, convert_step_format
@@ -769,8 +769,7 @@ class PolarsComputeEngine:
             raise ValueError('Step operation is required')
         params = step.get('params', {})
 
-        handlers = get_operation_handlers()
-        handler = handlers.get(operation)
+        handler = HANDLERS.get(operation)
 
         if not handler:
             raise ValueError(f'Unsupported operation: {operation}')

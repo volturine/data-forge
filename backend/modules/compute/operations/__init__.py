@@ -32,10 +32,10 @@ from modules.compute.operations.with_columns import WithColumnsHandler
 __all__ = [
     'OperationHandler',
     'OperationParams',
-    'get_operation_handlers',
+    'HANDLERS',
 ]
 
-_HANDLERS: dict[str, OperationHandler] = {
+HANDLERS: dict[str, OperationHandler] = {
     'datasource': DatasourceHandler(),
     'ai': AIHandler(),
     'deduplicate': DeduplicateHandler(),
@@ -68,5 +68,3 @@ _HANDLERS: dict[str, OperationHandler] = {
 }
 
 
-def get_operation_handlers() -> dict[str, OperationHandler]:
-    return _HANDLERS

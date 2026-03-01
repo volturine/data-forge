@@ -18,17 +18,22 @@ class StringTransformParams(OperationParams):
     index: int | None = None
 
 
-class StringTransformHandler(OperationHandler):
-    STRING_METHODS: dict[str, Callable[[pl.Expr], pl.Expr]] = {
-        'uppercase': lambda col: col.str.to_uppercase(),
-        'lowercase': lambda col: col.str.to_lowercase(),
-        'title': lambda col: col.str.to_titlecase(),
-        'strip': lambda col: col.str.strip_chars(),
-        'lstrip': lambda col: col.str.strip_chars_start(),
-        'rstrip': lambda col: col.str.strip_chars_end(),
-        'length': lambda col: col.str.len_chars(),
-    }
+_STRING_METHODS: dict[str, Callable[[pl.Expr], pl.Expr]] = {
+    'uppercase': lambda col: col.str.to_uppercase(),
+    'lowercase': lambda col: col.str.to_lowercase(),
+    'title': lambda col: col.str.to_titlecase(),
+    'strip': lambda col: col.str.strip_chars(),
+    'lstrip': lambda col: col.str.strip_chars_start(),
+    'rstrip': lambda col: col.str.strip_chars_end(),
+    'length': lambda col: col.str.len_chars(),
+}
 
+
+def get_string_method(name: str) -> Callable[[pl.Expr], pl.Expr] | None:
+    return _STRING_METHODS.get(name)
+
+
+class StringTransformHandler(OperationHandler):
     def __call__(
         self,
         lf: pl.LazyFrame,
@@ -43,7 +48,7 @@ class StringTransformHandler(OperationHandler):
             raise ValueError('string_transform requires new_column parameter')
 
         base = pl.col(validated.column)
-        method = self._get_string_method(validated.method)
+        method = get_string_method(validated.method)
         if method:
             return lf.with_columns(method(base).alias(target))
 
@@ -73,10 +78,3 @@ class StringTransformHandler(OperationHandler):
             return lf.with_columns(base.str.split(delimiter).list.get(index).alias(target))
 
         raise ValueError(f'Unsupported string method: {validated.method}')
-
-    def _get_string_method(self, name: str) -> Callable[[pl.Expr], pl.Expr] | None:
-        return self.STRING_METHODS.get(name)
-
-
-def get_string_method(name: str) -> Callable[[pl.Expr], pl.Expr] | None:
-    return StringTransformHandler()._get_string_method(name)

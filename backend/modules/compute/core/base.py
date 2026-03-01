@@ -1,4 +1,4 @@
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict
@@ -8,7 +8,6 @@ class OperationParams(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-@runtime_checkable
 class OperationHandler(Protocol):
     def __call__(
         self,

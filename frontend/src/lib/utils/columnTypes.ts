@@ -134,16 +134,12 @@ export interface CategoryConfig {
 	icon: ComponentType;
 }
 
-/**
- * Mapping of backend values to canonical display names
- */
-const CANONICAL_NAMES: Record<string, string> = {
-	Utf8: 'String',
+// Aliases for Python/Polars shorthand names not present in COLUMN_TYPE_REGISTRY
+const _ALIASES: Record<string, string> = {
 	str: 'String',
 	int: 'Int64',
 	float: 'Float64',
 	bool: 'Boolean',
-	Timestamp: 'Datetime',
 	Unknown: 'Any',
 	unknown: 'Any'
 };
@@ -504,106 +500,14 @@ export const COLUMN_TYPE_REGISTRY: Record<ColumnType, ColumnTypeConfig> = {
 	}
 };
 
-/**
- * Detects if a type string represents a complex/nested type
- * Examples: "List<Int64>", "Array<String>", "Struct{name: String, age: Int64}"
- */
-export function detectComplexType(type: string): boolean {
-	const lowercased = type.toLowerCase();
-	return (
-		lowercased.includes('list') ||
-		lowercased.includes('array') ||
-		lowercased.includes('struct') ||
-		lowercased.includes('<') ||
-		lowercased.includes('{')
-	);
-}
-
-/**
- * Normalizes column type names to their canonical form
- * Examples: 'Utf8' -> 'String', 'int' -> 'Int64', 'bool' -> 'Boolean'
- *
- * Handles Polars' parameterized type formats:
- * - "Datetime(time_unit='us', time_zone=None)" -> "Datetime"
- * - "Duration(time_unit='us')" -> "Duration"
- * - "List(Int64)" -> "List"
- * - "Struct({'a': Int64})" -> "Struct"
- */
 export function normalizeColumnType(type: string): string {
-	// Handle parameterized types - extract base type name before parenthesis
-	// Examples: "Datetime(time_unit='us')" -> "Datetime", "List(Int64)" -> "List"
-	const paramMatch = type.match(/^([A-Za-z0-9]+)\(/);
-	if (paramMatch) {
-		const baseType = paramMatch[1];
-
-		// Map common base types to canonical names
-		const baseTypeMap: Record<string, string> = {
-			Datetime: 'Datetime',
-			Duration: 'Duration',
-			List: 'List',
-			Array: 'List', // Normalize Array to List
-			Struct: 'Struct',
-			Timestamp: 'Datetime' // Timestamp is just Datetime
-		};
-
-		if (baseType in baseTypeMap) {
-			return baseTypeMap[baseType];
-		}
-
-		// If it's a known type, use it
-		if (baseType in COLUMN_TYPE_REGISTRY) {
-			return COLUMN_TYPE_REGISTRY[baseType as ColumnType].canonicalName;
-		}
-
-		return baseType;
-	}
-
-	// Check if it's a known alias
-	if (type in CANONICAL_NAMES) {
-		return CANONICAL_NAMES[type];
-	}
-
-	// Check if it's already in the registry
-	if (type in COLUMN_TYPE_REGISTRY) {
-		return COLUMN_TYPE_REGISTRY[type as ColumnType].canonicalName;
-	}
-
-	// Check if it's a complex type (legacy format with < or {)
-	if (detectComplexType(type)) {
-		// Try to extract base type (e.g., "List<Int64>" -> "List")
-		const match = type.match(/^(List|Array|Struct)/i);
-		if (match) {
-			const baseType = match[1];
-			// Normalize to List for Array
-			return baseType.toLowerCase() === 'array' ? 'List' : baseType;
-		}
-		return 'List'; // Default to List for complex types
-	}
-
-	// Return as-is if we can't normalize
-	return type;
+	const base = type.match(/^([A-Za-z0-9]+)[(<{]/)?.[1] ?? type;
+	return COLUMN_TYPE_REGISTRY[base as ColumnType]?.canonicalName ?? _ALIASES[base] ?? base;
 }
 
-/**
- * Gets the full configuration for a column type
- * Handles aliases and complex types automatically
- */
 export function getColumnTypeConfig(type: string): ColumnTypeConfig {
-	// Normalize the type first
 	const normalized = normalizeColumnType(type);
-
-	// Check if it exists in registry
-	if (normalized in COLUMN_TYPE_REGISTRY) {
-		return COLUMN_TYPE_REGISTRY[normalized as ColumnType];
-	}
-
-	// Check for complex types
-	if (detectComplexType(type)) {
-		return COLUMN_TYPE_REGISTRY.List;
-	}
-
-	// Fallback to Any
-	return COLUMN_TYPE_REGISTRY.Any;
+	return COLUMN_TYPE_REGISTRY[normalized as ColumnType] ?? COLUMN_TYPE_REGISTRY.Any;
 }
 
 /**
@@ -614,38 +518,15 @@ export function resolveColumnType(type?: string | null): string {
 	return getColumnTypeConfig(type).canonicalName;
 }
 
-/**
- * Gets just the colors for a column type
- */
-export function getColumnTypeColors(type: string): ColumnTypeColors {
-	return getColumnTypeConfig(type).colors;
+function canonicalTypes(): ColumnTypeConfig[] {
+	const seen = new Set<string>();
+	return Object.values(COLUMN_TYPE_REGISTRY).filter((c) => {
+		if (seen.has(c.canonicalName)) return false;
+		seen.add(c.canonicalName);
+		return true;
+	});
 }
 
-/**
- * Gets just the icon component for a column type
- */
-export function getColumnTypeIcon(type: string): ComponentType {
-	return getColumnTypeConfig(type).icon;
-}
-
-/**
- * Gets just the category for a column type
- */
-export function getColumnTypeCategory(type: string): ColumnTypeCategory {
-	return getColumnTypeConfig(type).category;
-}
-
-/**
- * Gets the display label for a column type (normalized)
- */
-export function getColumnTypeLabel(type: string): string {
-	return getColumnTypeConfig(type).label;
-}
-
-/**
- * Groups column types by category for use in optgroups
- * Returns a map of category -> array of type configs
- */
 export function getColumnTypesByCategory(): Record<ColumnTypeCategory, ColumnTypeConfig[]> {
 	const grouped: Record<ColumnTypeCategory, ColumnTypeConfig[]> = {
 		string: [],
@@ -656,41 +537,14 @@ export function getColumnTypesByCategory(): Record<ColumnTypeCategory, ColumnTyp
 		complex: [],
 		other: []
 	};
-
-	// Get unique types only (skip aliases like Utf8)
-	const uniqueTypes = new Set<string>();
-	Object.values(COLUMN_TYPE_REGISTRY).forEach((config) => {
-		if (!uniqueTypes.has(config.canonicalName)) {
-			uniqueTypes.add(config.canonicalName);
-			grouped[config.category].push(config);
-		}
-	});
-
+	for (const config of canonicalTypes()) grouped[config.category].push(config);
 	return grouped;
 }
 
-/**
- * Gets all column types as a flat array (for simple dropdowns)
- * Only includes canonical types (no aliases)
- */
 export function getAllColumnTypes(): ColumnTypeConfig[] {
-	const unique = new Set<string>();
-	const types: ColumnTypeConfig[] = [];
-
-	Object.values(COLUMN_TYPE_REGISTRY).forEach((config) => {
-		if (!unique.has(config.canonicalName)) {
-			unique.add(config.canonicalName);
-			types.push(config);
-		}
-	});
-
-	return types;
+	return canonicalTypes();
 }
 
-/**
- * Checks if a type string is a valid column type
- */
 export function isValidColumnType(type: string): boolean {
-	const normalized = normalizeColumnType(type);
-	return normalized in COLUMN_TYPE_REGISTRY || detectComplexType(type);
+	return normalizeColumnType(type) in COLUMN_TYPE_REGISTRY;
 }

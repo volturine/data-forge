@@ -359,54 +359,6 @@ export function getFileTypeConfig(fileType: FileType): FileTypeConfig {
 }
 
 /**
- * Get the color scheme for a file type
- *
- * @param fileType - The file type
- * @returns The color scheme
- *
- * @example
- * ```typescript
- * const colors = getFileTypeColors('csv');
- * // Returns { color: 'var(--file-csv-fg)', borderColor: '...', backgroundColor: '...' }
- * ```
- */
-export function getFileTypeColors(fileType: FileType): FileTypeColors {
-	return FILE_TYPE_REGISTRY[fileType].colors;
-}
-
-/**
- * Get the Lucide icon component for a file type
- *
- * @param fileType - The file type
- * @returns The Lucide icon component
- *
- * @example
- * ```typescript
- * const Icon = getFileTypeIcon('json');
- * // Use in Svelte: <Icon size={16} />
- * ```
- */
-export function getFileTypeIcon(fileType: FileType): ComponentType {
-	return FILE_TYPE_REGISTRY[fileType].icon;
-}
-
-/**
- * Get the display label for a file type
- *
- * @param fileType - The file type
- * @returns The display label
- *
- * @example
- * ```typescript
- * getFileTypeLabel('parquet') // 'Parquet'
- * getFileTypeLabel('ndjson') // 'NDJSON'
- * ```
- */
-export function getFileTypeLabel(fileType: FileType): string {
-	return FILE_TYPE_REGISTRY[fileType].label;
-}
-
-/**
  * Get the complete configuration for a datasource source type
  *
  * @param sourceType - The source type (database, api, iceberg, etc.)

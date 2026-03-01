@@ -19,24 +19,18 @@ def is_step_applied(step: dict) -> bool:
     return step.get('is_applied') is not False
 
 
+def _build_step_map(pipeline_steps: list[dict]) -> dict[str, dict]:
+    return {str(s['id']): s for s in pipeline_steps if s.get('id')}
+
+
 def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
     applied = [step for step in pipeline_steps if is_step_applied(step)]
     if not applied:
         return []
 
-    step_map: dict[str, dict] = {}
-    for step in pipeline_steps:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        step_map[str(step_id)] = step
+    step_map = _build_step_map(pipeline_steps)
 
-    applied_ids: set[str] = set()
-    for step in applied:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        applied_ids.add(str(step_id))
+    applied_ids = {str(s['id']) for s in applied if s.get('id')}
 
     def resolve_parent(step_id: str, seen: set[str] | None = None) -> str | None:
         step = step_map.get(step_id)
@@ -77,12 +71,7 @@ def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> s
     if target_step_id == 'source':
         return 'source'
 
-    step_map: dict[str, dict] = {}
-    for step in pipeline_steps:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        step_map[str(step_id)] = step
+    step_map = _build_step_map(pipeline_steps)
 
     if target_step_id not in step_map:
         return 'source'

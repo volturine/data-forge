@@ -30,83 +30,29 @@ const SCHEMA_STORE_KEY = Symbol('schema-store');
 const ENGINES_STORE_KEY = Symbol('engines-store');
 const CONFIG_STORE_KEY = Symbol('config-store');
 
-// Store factory functions
-export function createAnalysisStore(): AnalysisStore {
-	return new AnalysisStore();
+function makeStoreContext<T>(key: symbol, fallback: T) {
+	return {
+		set: (store: T) => setContext(key, store),
+		get: (): T => (hasContext(key) ? getContext<T>(key) : fallback)
+	};
 }
 
-export function createDatasourceStore(): DatasourceStore {
-	return new DatasourceStore();
-}
+const analysisCtx = makeStoreContext(ANALYSIS_STORE_KEY, analysisSingleton);
+const datasourceCtx = makeStoreContext(DATASOURCE_STORE_KEY, datasourceSingleton);
+const schemaCtx = makeStoreContext(SCHEMA_STORE_KEY, schemaSingleton);
+const enginesCtx = makeStoreContext(ENGINES_STORE_KEY, enginesSingleton);
+const configCtx = makeStoreContext(CONFIG_STORE_KEY, configSingleton);
 
-export function createSchemaStore(): SchemaStore {
-	return new SchemaStore();
-}
-
-export function createEnginesStore(): EnginesStore {
-	return new EnginesStore();
-}
-
-export function createConfigStore(): ConfigStore {
-	return new ConfigStore();
-}
-
-// Context setters (called in root layout)
-export function setAnalysisContext(store: AnalysisStore): void {
-	setContext(ANALYSIS_STORE_KEY, store);
-}
-
-export function setDatasourceContext(store: DatasourceStore): void {
-	setContext(DATASOURCE_STORE_KEY, store);
-}
-
-export function setSchemaContext(store: SchemaStore): void {
-	setContext(SCHEMA_STORE_KEY, store);
-}
-
-export function setEnginesContext(store: EnginesStore): void {
-	setContext(ENGINES_STORE_KEY, store);
-}
-
-export function setConfigContext(store: ConfigStore): void {
-	setContext(CONFIG_STORE_KEY, store);
-}
-
-// Context getters with fallback to singleton for backward compatibility
-export function getAnalysisContext(): AnalysisStore {
-	if (hasContext(ANALYSIS_STORE_KEY)) {
-		return getContext<AnalysisStore>(ANALYSIS_STORE_KEY);
-	}
-	return analysisSingleton;
-}
-
-export function getDatasourceContext(): DatasourceStore {
-	if (hasContext(DATASOURCE_STORE_KEY)) {
-		return getContext<DatasourceStore>(DATASOURCE_STORE_KEY);
-	}
-	return datasourceSingleton;
-}
-
-export function getSchemaContext(): SchemaStore {
-	if (hasContext(SCHEMA_STORE_KEY)) {
-		return getContext<SchemaStore>(SCHEMA_STORE_KEY);
-	}
-	return schemaSingleton;
-}
-
-export function getEnginesContext(): EnginesStore {
-	if (hasContext(ENGINES_STORE_KEY)) {
-		return getContext<EnginesStore>(ENGINES_STORE_KEY);
-	}
-	return enginesSingleton;
-}
-
-export function getConfigContext(): ConfigStore {
-	if (hasContext(CONFIG_STORE_KEY)) {
-		return getContext<ConfigStore>(CONFIG_STORE_KEY);
-	}
-	return configSingleton;
-}
+export const setAnalysisContext = analysisCtx.set;
+export const getAnalysisContext = analysisCtx.get;
+export const setDatasourceContext = datasourceCtx.set;
+export const getDatasourceContext = datasourceCtx.get;
+export const setSchemaContext = schemaCtx.set;
+export const getSchemaContext = schemaCtx.get;
+export const setEnginesContext = enginesCtx.set;
+export const getEnginesContext = enginesCtx.get;
+export const setConfigContext = configCtx.set;
+export const getConfigContext = configCtx.get;
 
 // Stores interface for type safety
 export interface AppStores {
@@ -120,11 +66,11 @@ export interface AppStores {
 // Initialize all stores and set them in context (call from root layout)
 export function initializeStores(): AppStores {
 	const stores: AppStores = {
-		analysis: createAnalysisStore(),
-		datasource: createDatasourceStore(),
-		schema: createSchemaStore(),
-		engines: createEnginesStore(),
-		config: createConfigStore()
+		analysis: new AnalysisStore(),
+		datasource: new DatasourceStore(),
+		schema: new SchemaStore(),
+		engines: new EnginesStore(),
+		config: new ConfigStore()
 	};
 
 	setAnalysisContext(stores.analysis);
