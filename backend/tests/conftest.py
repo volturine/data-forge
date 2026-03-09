@@ -233,14 +233,6 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
     analysis_id = str(uuid.uuid4())
 
     pipeline_definition = {
-        'steps': [
-            {
-                'id': 'step1',
-                'type': 'filter',
-                'config': {'column': 'age', 'operator': '>', 'value': 30},
-                'depends_on': [],
-            }
-        ],
         'tabs': [
             {
                 'id': 'tab1',
@@ -257,7 +249,14 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
                     'format': 'parquet',
                     'filename': 'fixture_output',
                 },
-                'steps': [],
+                'steps': [
+                    {
+                        'id': 'step1',
+                        'type': 'filter',
+                        'config': {'column': 'age', 'operator': '>', 'value': 30},
+                        'depends_on': [],
+                    }
+                ],
             }
         ],
     }
@@ -295,14 +294,6 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
         analysis_id = str(uuid.uuid4())
 
         pipeline_definition = {
-            'steps': [
-                {
-                    'id': f'step{idx}',
-                    'type': 'filter',
-                    'config': {'column': 'id', 'operator': '>', 'value': idx},
-                    'depends_on': [],
-                }
-            ],
             'tabs': [
                 {
                     'id': f'tab-{idx}',
@@ -319,7 +310,14 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
                         'format': 'parquet',
                         'filename': 'fixture_output',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': f'step{idx}',
+                            'type': 'filter',
+                            'config': {'column': 'id', 'operator': '>', 'value': idx},
+                            'depends_on': [],
+                        }
+                    ],
                 }
             ],
         }

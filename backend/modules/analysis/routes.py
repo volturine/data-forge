@@ -118,10 +118,10 @@ async def execute_analysis(
     if not isinstance(datasource, dict):
         raise HTTPException(status_code=400, detail='Analysis tab datasource must be a dict')
     datasource_id = datasource.get('id')
-    pipeline_steps = selected.get('steps', [])
+    steps = selected.get('steps', [])
     if not datasource_id:
         raise HTTPException(status_code=400, detail='Analysis tab missing datasource.id')
-    if not isinstance(pipeline_steps, list):
+    if not isinstance(steps, list):
         raise HTTPException(status_code=400, detail='Analysis tab steps must be a list')
     config = datasource.get('config') or {}
     if not isinstance(config, dict):
@@ -135,7 +135,7 @@ async def execute_analysis(
 
     preview = compute_service.preview_step(
         session=session,
-        target_step_id=pipeline_steps[-1]['id'] if pipeline_steps else 'source',
+        target_step_id=steps[-1]['id'] if steps else 'source',
         row_limit=50,
         page=1,
         analysis_id=analysis_id_value,

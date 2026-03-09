@@ -14,7 +14,6 @@ class TestAnalysisValidation:
         """Test creating analysis without a name."""
         payload = {
             'description': 'Test analysis',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -45,7 +44,6 @@ class TestAnalysisValidation:
         payload = {
             'name': '',
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -76,7 +74,6 @@ class TestAnalysisValidation:
         payload = {
             'name': 'A' * 1000,
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -108,7 +105,6 @@ class TestAnalysisValidation:
         payload = {
             'name': 'Test <script>alert("xss")</script>',
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -193,7 +189,6 @@ class TestAnalysisPipeline:
         """Test creating analysis with empty pipeline."""
         payload = {
             'name': 'Empty Pipeline Analysis',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -223,26 +218,6 @@ class TestAnalysisPipeline:
         """Test creating analysis with complex pipeline."""
         payload = {
             'name': 'Complex Pipeline',
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 30},
-                    'depends_on': [],
-                },
-                {
-                    'id': 'step2',
-                    'type': 'select',
-                    'config': {'columns': ['name', 'age']},
-                    'depends_on': ['step1'],
-                },
-                {
-                    'id': 'step3',
-                    'type': 'sort',
-                    'config': {'column': 'age', 'descending': True},
-                    'depends_on': ['step2'],
-                },
-            ],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -259,7 +234,26 @@ class TestAnalysisPipeline:
                         'format': 'parquet',
                         'filename': 'source_g',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': 'step1',
+                            'type': 'filter',
+                            'config': {'column': 'age', 'operator': '>', 'value': 30},
+                            'depends_on': [],
+                        },
+                        {
+                            'id': 'step2',
+                            'type': 'select',
+                            'config': {'columns': ['name', 'age']},
+                            'depends_on': ['step1'],
+                        },
+                        {
+                            'id': 'step3',
+                            'type': 'sort',
+                            'config': {'column': 'age', 'descending': True},
+                            'depends_on': ['step2'],
+                        },
+                    ],
                 }
             ],
         }
@@ -268,7 +262,7 @@ class TestAnalysisPipeline:
 
         assert response.status_code in [200, 201]
         data = response.json()
-        assert len(data['pipeline_definition']['steps']) == 3
+        assert len(data['tabs'][0]['steps']) == 3
 
     def test_update_analysis_pipeline(self, client, sample_analysis: Analysis):
         """Test updating analysis pipeline."""
@@ -281,10 +275,11 @@ class TestAnalysisPipeline:
                 'depends_on': [],
             }
         ]
+        tabs = sample_analysis.pipeline_definition['tabs']
+        tabs[0]['steps'] = new_steps
 
         payload = {
-            'pipeline_steps': new_steps,
-            'tabs': sample_analysis.pipeline_definition['tabs'],
+            'tabs': tabs,
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -293,17 +288,12 @@ class TestAnalysisPipeline:
 
         assert response.status_code == 200
         data = response.json()
-        # Check that the pipeline was updated
-        assert len(data['pipeline_definition']['steps']) >= 1
+        assert len(data['tabs'][0]['steps']) >= 1
 
     def test_analysis_with_circular_dependencies(self, client, sample_datasource: DataSource):
         """Test creating analysis with circular dependencies."""
         payload = {
             'name': 'Circular Deps',
-            'pipeline_steps': [
-                {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': ['step2']},
-                {'id': 'step2', 'type': 'filter', 'config': {}, 'depends_on': ['step1']},
-            ],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -320,7 +310,10 @@ class TestAnalysisPipeline:
                         'format': 'parquet',
                         'filename': 'source_h',
                     },
-                    'steps': [],
+                    'steps': [
+                        {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': ['step2']},
+                        {'id': 'step2', 'type': 'filter', 'config': {}, 'depends_on': ['step1']},
+                    ],
                 }
             ],
         }
@@ -507,7 +500,6 @@ class TestAnalysisMetadata:
         """Test that analysis has proper timestamps."""
         payload = {
             'name': 'Timestamp Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',

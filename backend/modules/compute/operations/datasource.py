@@ -309,9 +309,9 @@ def _build_tab_pipeline(
     if not isinstance(steps, list):
         raise ValueError('Analysis tab steps must be a list')
 
-    from modules.compute.utils import apply_pipeline_steps
+    from modules.compute.utils import apply_steps
 
-    steps = apply_pipeline_steps(steps)
+    steps = apply_steps(steps)
     additional = _collect_analysis_sources(steps, sources, pipeline, cache)
 
     from modules.compute.engine import PolarsComputeEngine

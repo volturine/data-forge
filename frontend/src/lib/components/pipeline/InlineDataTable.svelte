@@ -9,6 +9,7 @@
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { schemaStore } from '$lib/stores/schema.svelte';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
@@ -136,6 +137,13 @@
 	$effect(() => {
 		if (!isActiveStep || hasRun) return;
 		analysisStore.setPreviewRun(runKey, true);
+	});
+
+	// Schema sync: $derived can't write to an external store reactively.
+	$effect(() => {
+		const response = query.data;
+		if (!response) return;
+		schemaStore.syncPreviewSchema(stepId, response, pipelineKey);
 	});
 
 	function runPreview() {

@@ -17,7 +17,7 @@ from modules.compute.operations import HANDLERS
 from modules.compute.operations.datasource import load_datasource
 from modules.compute.operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
 from modules.compute.step_converter import convert_config_to_params, convert_step_format
-from modules.compute.utils import apply_pipeline_steps, normalize_timezones
+from modules.compute.utils import apply_steps, normalize_timezones
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class PolarsComputeEngine:
     def preview(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         row_limit: int = 1000,
         offset: int = 0,
         additional_datasources: dict[str, dict] | None = None,
@@ -158,7 +158,7 @@ class PolarsComputeEngine:
         return self._enqueue(
             'preview',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             row_limit=row_limit,
             offset=offset,
             additional_datasources=additional_datasources or {},
@@ -167,7 +167,7 @@ class PolarsComputeEngine:
     def export(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         output_path: str,
         export_format: str = 'csv',
         additional_datasources: dict[str, dict] | None = None,
@@ -175,7 +175,7 @@ class PolarsComputeEngine:
         return self._enqueue(
             'export',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             output_path=output_path,
             export_format=export_format,
             additional_datasources=additional_datasources or {},
@@ -184,26 +184,26 @@ class PolarsComputeEngine:
     def get_schema(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
         return self._enqueue(
             'schema',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             additional_datasources=additional_datasources or {},
         )
 
     def get_row_count(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
         return self._enqueue(
             'row_count',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             additional_datasources=additional_datasources or {},
         )
 
@@ -296,7 +296,7 @@ class PolarsComputeEngine:
 
                 job_id = command['job_id']
                 datasource_config = command['datasource_config']
-                pipeline_steps = command['pipeline_steps']
+                steps = command['steps']
                 additional_datasources = command.get('additional_datasources', {})
 
                 logger.debug(f'Job {job_id}: Starting {command["type"]} operation')
@@ -309,7 +309,7 @@ class PolarsComputeEngine:
                         offset = command.get('offset', 0)
                         result_data = PolarsComputeEngine._execute_preview(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             row_limit,
                             offset,
                             job_id,
@@ -320,7 +320,7 @@ class PolarsComputeEngine:
                         export_format = command.get('export_format', 'csv')
                         result_data = PolarsComputeEngine._execute_export(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             output_path,
                             export_format,
                             job_id,
@@ -329,14 +329,14 @@ class PolarsComputeEngine:
                     elif command['type'] == 'schema':
                         result_data = PolarsComputeEngine._execute_schema(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             job_id,
                             additional_datasources,
                         )
                     elif command['type'] == 'row_count':
                         result_data = PolarsComputeEngine._execute_row_count(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             job_id,
                             additional_datasources,
                         )
@@ -385,13 +385,13 @@ class PolarsComputeEngine:
     @staticmethod
     def build_pipeline(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> pl.LazyFrame:
         lf, _step_timings, _plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -400,7 +400,7 @@ class PolarsComputeEngine:
     @staticmethod
     def _build_pipeline(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> tuple[pl.LazyFrame, dict[str, float], list[pl.LazyFrame]]:
@@ -417,13 +417,13 @@ class PolarsComputeEngine:
                     details={'datasource_id': ds_id},
                 ) from e
 
-        pipeline_steps = apply_pipeline_steps(pipeline_steps)
+        steps = apply_steps(steps)
 
-        if not pipeline_steps:
+        if not steps:
             return lf, {}, [lf]
 
         step_map: dict[str, dict] = {}
-        for step in pipeline_steps:
+        for step in steps:
             step_id = step.get('id')
             if not step_id:
                 raise ValueError('Each pipeline step must include an id')
@@ -582,7 +582,7 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_preview(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         row_limit: int,
         offset: int,
         job_id: str,
@@ -591,7 +591,7 @@ class PolarsComputeEngine:
         """Execute pipeline and return limited rows for preview."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -599,8 +599,8 @@ class PolarsComputeEngine:
 
         preview_lf = lf
         metadata: dict | None = None
-        if pipeline_steps:
-            last_step = pipeline_steps[-1]
+        if steps:
+            last_step = steps[-1]
             last_type = str(last_step.get('type', ''))
             if last_type == 'chart' or last_type.startswith('plot_'):
                 chart_config = last_step.get('config', {})
@@ -654,7 +654,7 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_export(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         output_path: str,
         export_format: str,
         job_id: str,
@@ -663,7 +663,7 @@ class PolarsComputeEngine:
         """Execute pipeline and write full results to file."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -692,14 +692,14 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_schema(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and return schema without collecting full data."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -721,14 +721,14 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_row_count(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and return row count without collecting full data."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )

@@ -1,4 +1,5 @@
 import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
+
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 import type { Schema } from '$lib/types/schema';
@@ -130,21 +131,14 @@ export class AnalysisStore {
 	}
 
 	private resolveTabs(analysis: Analysis): void {
-		const definition = analysis.pipeline_definition as {
-			steps?: PipelineStep[];
-			tabs?: AnalysisTab[];
-		};
-		const tabs = analysis.tabs.length ? analysis.tabs : definition?.tabs;
-		if (tabs?.length && tabs[0].steps !== undefined) {
+		const tabs = analysis.tabs.length
+			? analysis.tabs
+			: (analysis.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs;
+		if (tabs?.length) {
 			this.applyTabs(tabs);
 			return;
 		}
-		const legacySteps = definition?.steps ?? [];
-		if (tabs?.length) {
-			this.applyTabs(tabs.map((tab, index) => ({ ...tab, steps: index === 0 ? legacySteps : [] })));
-			return;
-		}
-		this.applyTabs(this.buildTabs([], legacySteps));
+		this.applyTabs(this.buildTabs([]));
 	}
 
 	isDirty(): boolean {
@@ -548,7 +542,6 @@ export class AnalysisStore {
 			name: this.current.name,
 			description: this.current.description,
 			tabs: this.tabs,
-			pipeline_steps: this.tabs.flatMap((tab) => tab.steps ?? []),
 			client_id: lockPayload.clientId,
 			lock_token: lockPayload.lockToken
 		};
@@ -614,7 +607,7 @@ export class AnalysisStore {
 		this.error = null;
 	}
 
-	buildTabs(datasourceIds: string[], initialSteps: PipelineStep[] = []): AnalysisTab[] {
+	buildTabs(datasourceIds: string[]): AnalysisTab[] {
 		return datasourceIds.map((datasourceId, index) => {
 			const name = `Source ${index + 1}`;
 			return {
@@ -627,7 +620,7 @@ export class AnalysisStore {
 					config: { branch: 'master' }
 				},
 				output: buildOutputConfig({ name, branch: 'master' }),
-				steps: index === 0 ? initialSteps : []
+				steps: []
 			};
 		});
 	}

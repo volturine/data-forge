@@ -523,7 +523,7 @@ def test_pipeline_cycle_detection(mock_apply_step: MagicMock, mock_load: MagicMo
     mock_load.return_value = MagicMock()
     mock_apply_step.side_effect = lambda frame, _step, **kwargs: frame
 
-    pipeline_steps = [
+    steps = [
         {
             'id': 'step1',
             'type': 'filter',
@@ -534,7 +534,7 @@ def test_pipeline_cycle_detection(mock_apply_step: MagicMock, mock_load: MagicMo
     ]
 
     with pytest.raises(PipelineValidationError, match='cycle'):
-        PolarsComputeEngine._build_pipeline({}, pipeline_steps, 'job', MagicMock())
+        PolarsComputeEngine._build_pipeline({}, steps, 'job', MagicMock())
 
 
 @patch('modules.compute.engine.load_datasource')
@@ -543,7 +543,7 @@ def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: M
     mock_load.return_value = MagicMock()
     mock_apply_step.side_effect = lambda frame, _step, **kwargs: frame
 
-    pipeline_steps = [
+    steps = [
         {
             'id': 'step1',
             'type': 'filter',
@@ -560,7 +560,7 @@ def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: M
     ]
 
     with pytest.raises(PipelineValidationError, match='multiple dependencies'):
-        PolarsComputeEngine._build_pipeline({}, pipeline_steps, 'job', MagicMock())
+        PolarsComputeEngine._build_pipeline({}, steps, 'job', MagicMock())
 
 
 @patch('modules.compute.engine.load_datasource')
@@ -572,7 +572,7 @@ def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: Magic
     mock_load.return_value = fake_lf
     mock_apply_step.return_value = fake_lf
 
-    pipeline_steps = [
+    steps = [
         {
             'id': 'step1',
             'type': 'filter',
@@ -589,7 +589,7 @@ def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: Magic
     ]
 
     # build_pipeline returns just the LazyFrame
-    result = PolarsComputeEngine.build_pipeline({}, pipeline_steps, 'job', MagicMock())
+    result = PolarsComputeEngine.build_pipeline({}, steps, 'job', MagicMock())
     assert result == fake_lf
 
 

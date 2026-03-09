@@ -35,6 +35,8 @@
 		type AIConfigData
 	} from '$lib/utils/step-config-defaults';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import { applySteps } from '$lib/utils/pipeline';
+	import { hashPipeline } from '$lib/utils/hash';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -199,6 +201,39 @@
 			});
 		}
 		onConfigApply?.();
+		if (step.type === 'expression' || step.type === 'with_columns') {
+			refreshStepSchema(step.id);
+		}
+	}
+
+	function refreshStepSchema(stepId: string) {
+		const analysis = analysisStore.current;
+		if (!analysis?.id) return;
+		const analysisPipeline = buildAnalysisPipelinePayload(
+			analysis.id,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+		if (!analysisPipeline) return;
+		const pipelineHash = hashPipeline(applySteps(analysisStore.pipeline));
+		getStepSchema({
+			analysis_id: analysis.id,
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			target_step_id: stepId
+		} as unknown as StepSchemaRequest)
+			.map((response: StepSchemaResponse) => {
+				schemaStore.syncPreviewSchema(stepId, response, pipelineHash);
+			})
+			.mapErr((error: unknown) => {
+				const err = error instanceof Error ? error.message : String(error);
+				track({
+					event: 'schema_error',
+					action: 'apply_schema_refresh',
+					target: stepId,
+					meta: { message: err }
+				});
+			});
 	}
 
 	function handleCancelConfig() {

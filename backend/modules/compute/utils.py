@@ -6,10 +6,10 @@ from core.config import settings
 from core.exceptions import EngineTimeoutError, StepNotFoundError
 
 
-def find_step_index(pipeline_steps: list[dict], target_step_id: str) -> int:
+def find_step_index(steps: list[dict], target_step_id: str) -> int:
     if target_step_id == 'source':
         return -1
-    for idx, step in enumerate(pipeline_steps):
+    for idx, step in enumerate(steps):
         if step.get('id') == target_step_id:
             return idx
     raise StepNotFoundError(target_step_id)
@@ -19,16 +19,16 @@ def is_step_applied(step: dict) -> bool:
     return step.get('is_applied') is not False
 
 
-def _build_step_map(pipeline_steps: list[dict]) -> dict[str, dict]:
-    return {str(s['id']): s for s in pipeline_steps if s.get('id')}
+def _build_step_map(steps: list[dict]) -> dict[str, dict]:
+    return {str(s['id']): s for s in steps if s.get('id')}
 
 
-def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
-    applied = [step for step in pipeline_steps if is_step_applied(step)]
+def apply_steps(steps: list[dict]) -> list[dict]:
+    applied = [step for step in steps if is_step_applied(step)]
     if not applied:
         return []
 
-    step_map = _build_step_map(pipeline_steps)
+    step_map = _build_step_map(steps)
 
     applied_ids = {str(s['id']) for s in applied if s.get('id')}
 
@@ -65,11 +65,11 @@ def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
     return next_steps
 
 
-def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> str:
+def resolve_applied_target(steps: list[dict], target_step_id: str) -> str:
     if target_step_id == 'source':
         return 'source'
 
-    step_map = _build_step_map(pipeline_steps)
+    step_map = _build_step_map(steps)
 
     if target_step_id not in step_map:
         return 'source'

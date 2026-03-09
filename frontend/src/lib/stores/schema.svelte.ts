@@ -9,6 +9,8 @@ import {
 	type StepConfig
 } from '$lib/utils/transform';
 import { resolveColumnType } from '$lib/utils/columnTypes';
+import { hashPipeline } from '$lib/utils/hash';
+import { applySteps } from '$lib/utils/pipeline';
 import { SvelteMap } from 'svelte/reactivity';
 
 export interface StepSchemas {
@@ -16,9 +18,14 @@ export interface StepSchemas {
 	output: Schema;
 }
 
+interface PreviewEntry {
+	schema: Schema;
+	hash: string | null;
+}
+
 export class SchemaStore {
 	joinSchemas = $state(new SvelteMap<string, Schema>());
-	previewSchemas = $state(new SvelteMap<string, Schema>());
+	previewSchemas = $state(new SvelteMap<string, PreviewEntry>());
 
 	primaryDatasourceId = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	steps = $derived(analysisStore.pipeline);
@@ -29,6 +36,7 @@ export class SchemaStore {
 
 		const schemaKey = analysisStore.activeSchemaKey;
 		const sourceSchema = schemaKey ? (analysisStore.sourceSchemas.get(schemaKey) ?? null) : null;
+		const currentHash = hashPipeline(applySteps(this.steps));
 
 		for (const step of this.steps) {
 			const input =
@@ -39,11 +47,13 @@ export class SchemaStore {
 			const isApplied = (step as PipelineStep & { is_applied?: boolean }).is_applied !== false;
 
 			let output: Schema;
-			const cachedSchema = this.previewSchemas.get(step.id);
+			const entry = this.previewSchemas.get(step.id);
 			if (!isApplied) {
 				output = input;
-			} else if (cachedSchema && (step.type === 'pivot' || step.type === 'unpivot')) {
-				output = cachedSchema;
+			} else if (entry && (step.type === 'pivot' || step.type === 'unpivot')) {
+				output = entry.schema;
+			} else if (entry?.hash !== null && entry?.hash === currentHash) {
+				output = entry.schema;
 			} else if (step.type === 'join') {
 				const rightSource = typeof config.right_source === 'string' ? config.right_source : '';
 				const rightSchema = rightSource
@@ -79,13 +89,30 @@ export class SchemaStore {
 		return this.joinSchemas.get(datasourceId) ?? null;
 	}
 
-	setPreviewSchema(stepId: string, columns: string[], columnTypes?: Record<string, string>): void {
+	syncPreviewSchema(
+		stepId: string,
+		response: { columns?: string[]; column_types?: Record<string, string> },
+		pipelineHash: string
+	): void {
+		if (!response.columns?.length || !response.column_types) return;
+		this.setPreviewSchema(stepId, response.columns, response.column_types, pipelineHash);
+	}
+
+	setPreviewSchema(
+		stepId: string,
+		columns: string[],
+		columnTypes?: Record<string, string>,
+		pipelineHash?: string | null
+	): void {
 		const schemaColumns: ColumnInfo[] = columns.map((name) => ({
 			name,
 			dtype: resolveColumnType(columnTypes?.[name]),
 			nullable: true
 		}));
-		this.previewSchemas.set(stepId, { columns: schemaColumns, row_count: null });
+		this.previewSchemas.set(stepId, {
+			schema: { columns: schemaColumns, row_count: null },
+			hash: pipelineHash ?? null
+		});
 	}
 
 	clearPreviewSchema(stepId: string): void {

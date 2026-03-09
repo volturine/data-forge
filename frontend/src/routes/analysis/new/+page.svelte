@@ -74,7 +74,6 @@
 		const payload: AnalysisCreate = {
 			name: name.trim(),
 			description: description.trim() || null,
-			pipeline_steps: [],
 			tabs
 		};
 

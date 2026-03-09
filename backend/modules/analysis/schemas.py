@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 
 
 class PipelineStepSchema(BaseModel):
@@ -50,18 +50,30 @@ class TabSchema(BaseModel):
 class AnalysisCreateSchema(BaseModel):
     name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     description: str | None = None
-    pipeline_steps: list[PipelineStepSchema]
     tabs: list[TabSchema]
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_pipeline_steps(cls, data: Any) -> Any:
+        if isinstance(data, dict) and 'pipeline_steps' in data:
+            raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
+        return data
 
 
 class AnalysisUpdateSchema(BaseModel):
     name: str | None = None
     description: str | None = None
-    pipeline_steps: list[PipelineStepSchema] | None = None
     status: str | None = None
     tabs: list[TabSchema]
     client_id: str | None = None
     lock_token: str | None = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def reject_pipeline_steps(cls, data: Any) -> Any:
+        if isinstance(data, dict) and 'pipeline_steps' in data:
+            raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
+        return data
 
 
 class AnalysisResponseSchema(BaseModel):

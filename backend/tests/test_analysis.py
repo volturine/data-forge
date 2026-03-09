@@ -12,14 +12,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'New Analysis',
             'description': 'Test analysis description',
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 25},
-                    'depends_on': [],
-                }
-            ],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -36,7 +28,14 @@ class TestAnalysisCreate:
                         'format': 'parquet',
                         'filename': 'source_1',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': 'step1',
+                            'type': 'filter',
+                            'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            'depends_on': [],
+                        }
+                    ],
                 }
             ],
         }
@@ -54,7 +53,7 @@ class TestAnalysisCreate:
         assert 'updated_at' in result
 
         assert 'pipeline_definition' in result
-        assert len(result['pipeline_definition']['steps']) == 1
+        assert len(result['tabs'][0]['steps']) == 1
         assert 'datasource_ids' not in result['pipeline_definition']
         assert result['tabs'][0]['datasource']['id'] == sample_datasource.id
 
@@ -64,14 +63,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Multi-Source Analysis',
             'description': 'Analysis with multiple datasources',
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'join',
-                    'config': {'left': datasource_ids[0], 'right': datasource_ids[1], 'on': 'id'},
-                    'depends_on': [],
-                }
-            ],
             'tabs': [
                 {
                     'id': 'tab-left',
@@ -88,7 +79,14 @@ class TestAnalysisCreate:
                         'format': 'parquet',
                         'filename': 'left_source',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': 'step1',
+                            'type': 'join',
+                            'config': {'left': datasource_ids[0], 'right': datasource_ids[1], 'on': 'id'},
+                            'depends_on': [],
+                        }
+                    ],
                 },
                 {
                     'id': 'tab-right',
@@ -122,7 +120,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Invalid Analysis',
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -152,7 +149,6 @@ class TestAnalysisCreate:
     def test_create_analysis_without_description(self, client, sample_datasource: DataSource):
         payload = {
             'name': 'Analysis Without Description',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -187,26 +183,6 @@ class TestAnalysisCreate:
         payload = {
             'name': 'Complex Pipeline Analysis',
             'description': 'Multi-step pipeline',
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 25},
-                    'depends_on': [],
-                },
-                {
-                    'id': 'step2',
-                    'type': 'select',
-                    'config': {'columns': ['name', 'age']},
-                    'depends_on': ['step1'],
-                },
-                {
-                    'id': 'step3',
-                    'type': 'sort',
-                    'config': {'column': 'age', 'descending': True},
-                    'depends_on': ['step2'],
-                },
-            ],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -223,7 +199,26 @@ class TestAnalysisCreate:
                         'format': 'parquet',
                         'filename': 'source_4',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': 'step1',
+                            'type': 'filter',
+                            'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            'depends_on': [],
+                        },
+                        {
+                            'id': 'step2',
+                            'type': 'select',
+                            'config': {'columns': ['name', 'age']},
+                            'depends_on': ['step1'],
+                        },
+                        {
+                            'id': 'step3',
+                            'type': 'sort',
+                            'config': {'column': 'age', 'descending': True},
+                            'depends_on': ['step2'],
+                        },
+                    ],
                 }
             ],
         }
@@ -233,9 +228,38 @@ class TestAnalysisCreate:
         assert response.status_code == 200
         result = response.json()
 
-        assert len(result['pipeline_definition']['steps']) == 3
-        assert result['pipeline_definition']['steps'][1]['depends_on'] == ['step1']
-        assert result['pipeline_definition']['steps'][2]['depends_on'] == ['step2']
+        assert len(result['tabs'][0]['steps']) == 3
+        assert result['tabs'][0]['steps'][1]['depends_on'] == ['step1']
+        assert result['tabs'][0]['steps'][2]['depends_on'] == ['step2']
+
+    def test_create_analysis_rejects_pipeline_steps(self, client, sample_datasource: DataSource):
+        payload = {
+            'name': 'Legacy Payload',
+            'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}],
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'output_datasource_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_legacy',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
+
+        response = client.post('/api/v1/analysis', json=payload)
+
+        assert response.status_code == 422
 
 
 class TestAnalysisGet:
@@ -332,17 +356,9 @@ class TestAnalysisUpdate:
         assert result['description'] == 'Updated description'
         assert result['name'] == sample_analysis.name
 
-    def test_update_analysis_pipeline_steps(self, client, sample_analysis: Analysis):
+    def test_update_analysis_tab_steps(self, client, sample_analysis: Analysis):
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
         payload = {
-            'pipeline_steps': [
-                {
-                    'id': 'new_step',
-                    'type': 'aggregate',
-                    'config': {'column': 'age', 'operation': 'mean'},
-                    'depends_on': [],
-                }
-            ],
             'tabs': [
                 {
                     'id': 'tab-updated',
@@ -359,7 +375,14 @@ class TestAnalysisUpdate:
                         'format': 'parquet',
                         'filename': 'source_5',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': 'new_step',
+                            'type': 'aggregate',
+                            'config': {'column': 'age', 'operation': 'mean'},
+                            'depends_on': [],
+                        }
+                    ],
                 }
             ],
             'client_id': client_id,
@@ -371,9 +394,9 @@ class TestAnalysisUpdate:
         assert response.status_code == 200
         result = response.json()
 
-        assert len(result['pipeline_definition']['steps']) == 1
-        assert result['pipeline_definition']['steps'][0]['id'] == 'new_step'
-        assert result['pipeline_definition']['steps'][0]['type'] == 'aggregate'
+        assert len(result['tabs'][0]['steps']) == 1
+        assert result['tabs'][0]['steps'][0]['id'] == 'new_step'
+        assert result['tabs'][0]['steps'][0]['type'] == 'aggregate'
         assert result['tabs']
 
     def test_update_analysis_status(self, client, sample_analysis: Analysis):
@@ -441,6 +464,19 @@ class TestAnalysisUpdate:
 
         assert result['name'] == sample_analysis.name
         assert result['description'] == sample_analysis.description
+
+    def test_update_analysis_rejects_pipeline_steps(self, client, sample_analysis: Analysis):
+        client_id, lock_token = acquire_lock(client, sample_analysis.id)
+        payload: dict[str, object] = {
+            'tabs': sample_analysis.pipeline_definition['tabs'],
+            'pipeline_steps': [{'id': 'step1', 'type': 'filter', 'config': {}}],
+            'client_id': client_id,
+            'lock_token': lock_token,
+        }
+
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
+
+        assert response.status_code == 422
 
 
 class TestAnalysisDelete:

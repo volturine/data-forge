@@ -194,10 +194,7 @@ class TestUpdateAnalysisOutputDatasource:
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(
-            tabs=tabs,
-            pipeline_steps=[],
-        )
+        update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
         assert len(result.tabs) == 1
         tab = result.tabs[0]
@@ -223,7 +220,7 @@ class TestUpdateAnalysisOutputDatasource:
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        update = AnalysisUpdateSchema(tabs=tabs)
 
         result1 = update_analysis(test_db_session, sample_analysis.id, update)
         output_id_1 = result1.tabs[0].output.output_datasource_id
@@ -245,7 +242,7 @@ class TestUpdateAnalysisOutputDatasource:
                 steps=[],
             ),
         ]
-        update2 = AnalysisUpdateSchema(tabs=tabs2, pipeline_steps=[])
+        update2 = AnalysisUpdateSchema(tabs=tabs2)
         result2 = update_analysis(test_db_session, sample_analysis.id, update2)
         output_id_2 = result2.tabs[0].output.output_datasource_id
 
@@ -285,7 +282,7 @@ class TestUpdateAnalysisOutputDatasource:
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
 
         assert len(result.tabs) == 2
@@ -594,7 +591,7 @@ class TestSourceTypeCreatedBy:
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
         output_ds = test_db_session.get(DataSource, result.tabs[0].output.output_datasource_id)
         assert output_ds is None

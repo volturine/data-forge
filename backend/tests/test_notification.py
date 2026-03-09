@@ -577,7 +577,7 @@ class TestSendPipelineNotifications:
     def test_output_notification_email(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={'analysis_name': 'Test', 'status': 'success', 'datasource_id': 'ds-1'},
                 output_notification={
                     'method': 'email',
@@ -599,7 +599,7 @@ class TestSendPipelineNotifications:
         ):
             mock_run_db.side_effect = [[], [MockSubscriber('99999', 'tok')]]
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={'analysis_name': 'A', 'status': 'done', 'datasource_id': 'ds-1'},
                 output_notification={
                     'method': 'telegram',
@@ -617,7 +617,7 @@ class TestSendPipelineNotifications:
     def test_output_notification_empty_recipient_skipped(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={},
                 output_notification={
                     'method': 'email',
@@ -629,7 +629,7 @@ class TestSendPipelineNotifications:
     def test_output_notification_none_skipped(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={},
                 output_notification=None,
             )
@@ -639,7 +639,7 @@ class TestSendPipelineNotifications:
     def test_output_notification_excluded_recipients(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={'analysis_name': 'Test', 'status': 'success', 'datasource_id': 'ds-1'},
                 output_notification={
                     'method': 'email',
@@ -661,7 +661,7 @@ class TestSendPipelineNotifications:
         ):
             mock_run_db.side_effect = [[], [MockSubscriber('111', 'token-a')]]
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={'analysis_name': 'Test', 'status': 'success', 'datasource_id': 'ds-1'},
                 output_notification={
                     'method': 'telegram',
@@ -681,7 +681,7 @@ class TestSendPipelineNotifications:
         ):
             mock_run_db.side_effect = [[], [MockSubscriber('111', 'token-a')]]
             _send_pipeline_notifications(
-                pipeline_steps=[],
+                steps=[],
                 context={'analysis_name': 'Test', 'status': 'success', 'datasource_id': 'ds-1'},
                 output_notification={
                     'method': 'telegram',
@@ -698,7 +698,7 @@ class TestSendPipelineNotifications:
             mock_svc.send_email.side_effect = RuntimeError('SMTP error')
             with pytest.raises(PipelineExecutionError):
                 _send_pipeline_notifications(
-                    pipeline_steps=[],
+                    steps=[],
                     context={},
                     output_notification={
                         'method': 'email',
@@ -709,7 +709,7 @@ class TestSendPipelineNotifications:
     def test_skips_per_row_notification_steps(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[
+                steps=[
                     {
                         'type': 'notification',
                         'config': {
@@ -726,7 +726,7 @@ class TestSendPipelineNotifications:
     def test_legacy_build_notification_still_works(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[
+                steps=[
                     {
                         'type': 'notification',
                         'config': {
@@ -744,7 +744,7 @@ class TestSendPipelineNotifications:
     def test_non_notification_steps_ignored(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[
+                steps=[
                     {'type': 'filter', 'config': {}},
                     {'type': 'export', 'config': {}},
                 ],
@@ -756,7 +756,7 @@ class TestSendPipelineNotifications:
     def test_both_output_and_legacy(self):
         with patch('modules.compute.service.notification_service') as mock_svc:
             _send_pipeline_notifications(
-                pipeline_steps=[
+                steps=[
                     {
                         'type': 'notification',
                         'config': {

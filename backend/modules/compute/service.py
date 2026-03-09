@@ -25,7 +25,7 @@ from modules.compute.operations.datasource import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
-from modules.compute.utils import apply_pipeline_steps, await_engine_result, find_step_index, resolve_applied_target
+from modules.compute.utils import apply_steps, await_engine_result, find_step_index, resolve_applied_target
 from modules.datasource.models import DataSource
 from modules.datasource.source_types import DataSourceType
 from modules.engine_runs import service as engine_run_service
@@ -135,7 +135,7 @@ def _load_healthcheck_lazy(output_path: str, export_format: str) -> pl.LazyFrame
 
 
 def _send_pipeline_notifications(
-    pipeline_steps: list[dict],
+    steps: list[dict],
     context: dict[str, object],
     output_notification: dict | None = None,
 ) -> None:
@@ -156,7 +156,7 @@ def _send_pipeline_notifications(
                 logger.warning(f'Failed to send output {method} notification to {recipient}: {e}', exc_info=True)
                 failed.append(f'output:{method}')
 
-    for step in pipeline_steps:
+    for step in steps:
         if step.get('type') != 'notification':
             continue
         config = step.get('config', {})
@@ -362,18 +362,18 @@ def _ensure_request_branch(request_payload: dict, branch: str) -> dict:
 
 def _get_additional_datasources(
     session: Session,
-    pipeline_steps: list[dict],
+    steps: list[dict],
     analysis_pipeline: dict,
 ) -> dict[str, dict]:
     """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins)."""
-    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+    steps = apply_steps(steps)
     additional: dict[str, dict] = {}
     sources = analysis_pipeline.get('sources')
     pipeline_sources = {str(k): v for k, v in sources.items() if isinstance(v, dict)} if isinstance(sources, dict) else None
     pipeline_id = analysis_pipeline.get('analysis_id')
     analysis_id = str(pipeline_id) if pipeline_id is not None else None
 
-    for step in pipeline_steps:
+    for step in steps:
         config = step.get('config', {})
         right_source_id = config.get('right_source') or config.get('rightDataSource')
 
@@ -400,9 +400,9 @@ def _get_additional_datasources(
     return additional
 
 
-def _hydrate_udfs(session: Session, pipeline_steps: list[dict]) -> list[dict]:
+def _hydrate_udfs(session: Session, steps: list[dict]) -> list[dict]:
     next_steps: list[dict] = []
-    for step in pipeline_steps:
+    for step in steps:
         if step.get('type') != 'with_columns':
             next_steps.append(step)
             continue
@@ -495,7 +495,7 @@ def _resolve_pipeline_request(
     return {
         'analysis_id': analysis_id,
         'datasource_id': str(datasource_id),
-        'pipeline_steps': steps,
+        'steps': steps,
         'target_step_id': resolved_target,
         'datasource_config': merged,
     }
@@ -588,7 +588,7 @@ def preview_step(
     started_perf = time.perf_counter()
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
-    pipeline_steps = resolved['pipeline_steps']
+    steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
     analysis_id_value = resolved['analysis_id'] or analysis_id
@@ -609,7 +609,7 @@ def preview_step(
         or {
             'analysis_id': run_analysis_id,
             'datasource_id': datasource_id,
-            'pipeline_steps': pipeline_steps,
+            'steps': steps,
             'target_step_id': target_step_id,
             'row_limit': row_limit,
             'page': page,
@@ -621,13 +621,13 @@ def preview_step(
         branch,
     )
 
-    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+    steps = apply_steps(steps)
 
     if target_step_id == 'source':
         preview_steps = []
     else:
-        step_index = find_step_index(pipeline_steps, target_step_id)
-        preview_steps = pipeline_steps[: step_index + 1]
+        step_index = find_step_index(steps, target_step_id)
+        preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
     manager = get_manager()
@@ -641,7 +641,7 @@ def preview_step(
     # Use the new preview method that efficiently fetches only needed rows
     job_id = engine.preview(
         datasource_config=config,
-        pipeline_steps=preview_steps,
+        steps=preview_steps,
         row_limit=row_limit,
         offset=offset,
         additional_datasources=additional_datasources,
@@ -737,7 +737,7 @@ def get_step_schema(
 
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
-    pipeline_steps = resolved['pipeline_steps']
+    steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
     analysis_id_value = resolved['analysis_id'] or analysis_id
@@ -749,13 +749,13 @@ def get_step_schema(
 
     config: dict = datasource_config
 
-    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+    steps = apply_steps(steps)
 
     if target_step_id == 'source':
         schema_steps = []
     else:
-        step_index = find_step_index(pipeline_steps, target_step_id)
-        schema_steps = pipeline_steps[: step_index + 1]
+        step_index = find_step_index(steps, target_step_id)
+        schema_steps = steps[: step_index + 1]
         schema_steps = _hydrate_udfs(session, schema_steps)
 
     manager = get_manager()
@@ -766,7 +766,7 @@ def get_step_schema(
     # Use the new schema command that doesn't collect full data
     job_id = engine.get_schema(
         datasource_config=config,
-        pipeline_steps=schema_steps,
+        steps=schema_steps,
         additional_datasources=additional_datasources,
     )
 
@@ -808,7 +808,7 @@ def get_step_row_count(
 
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
-    pipeline_steps = resolved['pipeline_steps']
+    steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
     analysis_id_value = resolved['analysis_id'] or analysis_id
@@ -826,7 +826,7 @@ def get_step_row_count(
         or {
             'analysis_id': analysis_id_value,
             'datasource_id': datasource_id,
-            'pipeline_steps': pipeline_steps,
+            'steps': steps,
             'target_step_id': target_step_id,
             'analysis_pipeline': analysis_pipeline,
             'tab_id': tab_id,
@@ -834,13 +834,13 @@ def get_step_row_count(
         branch,
     )
 
-    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+    steps = apply_steps(steps)
 
     if target_step_id == 'source':
         count_steps = []
     else:
-        step_index = find_step_index(pipeline_steps, target_step_id)
-        count_steps = pipeline_steps[: step_index + 1]
+        step_index = find_step_index(steps, target_step_id)
+        count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
     manager = get_manager()
@@ -850,7 +850,7 @@ def get_step_row_count(
 
     job_id = engine.get_row_count(
         datasource_config=config,
-        pipeline_steps=count_steps,
+        steps=count_steps,
         additional_datasources=additional_datasources,
     )
 
@@ -940,7 +940,7 @@ def export_data(
 
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
-    pipeline_steps = resolved['pipeline_steps']
+    steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
     analysis_id_value = resolved['analysis_id'] or analysis_id
@@ -957,7 +957,7 @@ def export_data(
         or {
             'analysis_id': analysis_id_value,
             'datasource_id': datasource_id,
-            'pipeline_steps': pipeline_steps,
+            'steps': steps,
             'target_step_id': target_step_id,
             'format': 'parquet',
             'filename': filename,
@@ -970,13 +970,13 @@ def export_data(
         branch,
     )
 
-    pipeline_steps = apply_pipeline_steps(pipeline_steps)
+    steps = apply_steps(steps)
 
     if target_step_id == 'source':
         export_steps = []
     else:
-        step_index = find_step_index(pipeline_steps, target_step_id)
-        export_steps = pipeline_steps[: step_index + 1]
+        step_index = find_step_index(steps, target_step_id)
+        export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
 
     manager = get_manager()
@@ -998,7 +998,7 @@ def export_data(
     try:
         job_id = engine.export(
             datasource_config=datasource_config,
-            pipeline_steps=export_steps,
+            steps=export_steps,
             output_path=tmp_output,
             export_format='parquet',
             additional_datasources=additional_datasources,
@@ -1077,7 +1077,7 @@ def export_data(
             output_notification = {**output_notification, 'excluded_recipients': excluded}
 
         _send_pipeline_notifications(
-            pipeline_steps=apply_pipeline_steps(export_steps),
+            steps=apply_steps(export_steps),
             context={
                 'analysis_name': analysis_name,
                 'status': status,
@@ -1238,7 +1238,7 @@ def download_step(
 
     resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
-    pipeline_steps = resolved['pipeline_steps']
+    steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
     analysis_id_value = resolved['analysis_id'] or analysis_id
@@ -1249,8 +1249,8 @@ def download_step(
     if not analysis_id_value:
         analysis_id_value = f'__download__{datasource_id}'
 
-    download_steps = [step for step in pipeline_steps if step.get('operation') != 'download']
-    target_step = next((step for step in pipeline_steps if step.get('id') == target_step_id), None)
+    download_steps = [step for step in steps if step.get('operation') != 'download']
+    target_step = next((step for step in steps if step.get('id') == target_step_id), None)
     if target_step and target_step.get('operation') == 'download':
         depends_on = target_step.get('depends_on') or []
         parent_id = str(depends_on[0]) if depends_on and depends_on[0] else None
@@ -1261,13 +1261,13 @@ def download_step(
         else:
             target_step_id = 'source'
 
-    pipeline_steps = apply_pipeline_steps(download_steps)
+    steps = apply_steps(download_steps)
 
     if target_step_id == 'source':
         download_steps = []
     else:
-        step_index = find_step_index(pipeline_steps, target_step_id)
-        download_steps = pipeline_steps[: step_index + 1]
+        step_index = find_step_index(steps, target_step_id)
+        download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
     manager = get_manager()
@@ -1277,7 +1277,7 @@ def download_step(
         {
             'analysis_id': analysis_id_value,
             'datasource_id': datasource_id,
-            'pipeline_steps': download_steps,
+            'steps': download_steps,
             'target_step_id': target_step_id,
             'format': export_format,
             'filename': filename,
@@ -1300,7 +1300,7 @@ def download_step(
     try:
         job_id = engine.preview(
             datasource_config=datasource_config,
-            pipeline_steps=download_steps,
+            steps=download_steps,
             row_limit=10_000_000,  # Large limit to get all data for download
             offset=0,
             additional_datasources=additional_datasources,

@@ -636,7 +636,6 @@ class TestIsHidden:
                     'steps': [],
                 },
             ],
-            'pipeline_steps': [],
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)

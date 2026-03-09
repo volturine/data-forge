@@ -482,13 +482,11 @@
 											onChange={(val) => updateCondition(i, { value: val })}
 										/>
 									{:else if colType === 'date'}
-										<input
+										<DateTimeInput
 											id="{uid}-value-{i}"
-											data-testid={`filter-value-input-${i}`}
-											type="date"
 											value={formatDateForInput(cond.value)}
-											onchange={(e) => updateCondition(i, { value: e.currentTarget.value })}
-											class={cx(input(), css({ cursor: 'pointer' }))}
+											onChange={(val) => updateCondition(i, { value: val })}
+											withTime={false}
 										/>
 									{:else if colType === 'boolean'}
 										<select

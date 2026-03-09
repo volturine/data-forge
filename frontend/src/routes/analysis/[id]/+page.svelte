@@ -31,6 +31,8 @@
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
+	import { hashPipeline } from '$lib/utils/hash';
+	import { applySteps } from '$lib/utils/pipeline';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -66,6 +68,7 @@
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
 	let schemaRefreshTimer: number | null = null;
+	let hydratedGates = $state(new Set<string>());
 
 	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
@@ -82,6 +85,7 @@
 			schemaStore.reset();
 			selectedStepId = null;
 			isEditingMode = false;
+			hydratedGates = new Set();
 			lastAnalysisId = analysisId;
 		}
 		draftLoaded = false;
@@ -295,6 +299,49 @@
 				});
 			}
 		);
+	});
+
+	// Network: $derived can't hydrate inferred schemas for expression/with_columns steps.
+	$effect(() => {
+		if (!analysisId) return;
+		const tab = analysisStore.activeTab;
+		if (!tab) return;
+		const pipeline = analysisStore.pipeline;
+		if (!pipeline.length) return;
+		const analysisPayload = buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+		if (!analysisPayload) return;
+		const pipelineHash = hashPipeline(applySteps(pipeline));
+		const gate = `${analysisId}:${tab.id}:${pipelineHash}`;
+		if (hydratedGates.has(gate)) return;
+		hydratedGates = new Set([...hydratedGates, gate]);
+
+		const targets = pipeline.filter(
+			(step) =>
+				(step.type === 'expression' || step.type === 'with_columns') &&
+				(step as PipelineStep & { is_applied?: boolean }).is_applied !== false
+		);
+		for (const step of targets) {
+			getStepSchema({
+				analysis_id: analysisId,
+				analysis_pipeline: analysisPayload,
+				tab_id: tab.id,
+				target_step_id: step.id
+			}).match(
+				(res) => schemaStore.syncPreviewSchema(step.id, res, pipelineHash),
+				(err) => {
+					track({
+						event: 'schema_error',
+						action: 'hydrate',
+						target: step.id,
+						meta: { message: err.message }
+					});
+				}
+			);
+		}
 	});
 
 	const activeTab = $derived(analysisStore.activeTab);

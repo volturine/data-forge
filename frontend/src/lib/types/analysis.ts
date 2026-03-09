@@ -39,7 +39,6 @@ export type AnalysisTab = AnalysisTabInput;
 export interface AnalysisCreate {
 	name: string;
 	description?: string | null;
-	pipeline_steps: PipelineStep[];
 	tabs: AnalysisTabInput[];
 }
 
@@ -48,7 +47,6 @@ export type AnalysisCreateInput = AnalysisCreate;
 export interface AnalysisUpdate {
 	name?: string | null;
 	description?: string | null;
-	pipeline_steps?: PipelineStep[] | null;
 	status?: string | null;
 	tabs: AnalysisTabInput[];
 	client_id?: string | null;
