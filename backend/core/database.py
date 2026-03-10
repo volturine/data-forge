@@ -74,6 +74,7 @@ def init_db() -> None:
     if not namespaces:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
+        namespace_paths(namespace)
         _init_namespace_db(namespace)
 
 
