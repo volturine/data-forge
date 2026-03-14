@@ -460,8 +460,8 @@
 								maxWidth: 'fieldMd',
 								overflow: 'hidden',
 								textOverflow: 'ellipsis',
-								whiteSpace: 'nowrap',
-															})}
+								whiteSpace: 'nowrap'
+							})}
 							title={expr.name}>{expr.name}</span
 						>
 						<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>

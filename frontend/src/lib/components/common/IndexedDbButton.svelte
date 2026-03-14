@@ -124,9 +124,7 @@
 						backgroundColor: 'bg.secondary'
 					})}
 				>
-					<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
-						IndexedDB
-					</span>
+					<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> IndexedDB </span>
 					<div class={cx(row, css({ gap: '2' }))}>
 						<button
 							class={css({
@@ -230,8 +228,8 @@
 												<span
 													class={css({
 														fontFamily: 'mono',
-														fontSize: 'xs',
-																											})}
+														fontSize: 'xs'
+													})}
 												>
 													{entry.key}
 												</span>
@@ -277,8 +275,8 @@
 													<pre
 														class={css({
 															whiteSpace: 'pre-wrap',
-															fontSize: 'xs',
-																													})}>
+															fontSize: 'xs'
+														})}>
 													{formatValue(entry.value)}
 												</pre>
 												{:else}

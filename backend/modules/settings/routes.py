@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from core.database import get_settings_db
 from core.error_handlers import handle_errors
+from modules.mcp.decorators import deterministic_tool
 from modules.settings.schemas import (
     DetectCustomBotRequest,
     DetectTelegramResponse,
@@ -34,12 +35,14 @@ router = APIRouter(prefix='/settings', tags=['settings'])
 
 @router.get('', response_model=SettingsResponse)
 @handle_errors(operation='get settings')
+@deterministic_tool
 def read_settings(session: Session = Depends(get_settings_db)) -> SettingsResponse:
     return get_settings(session)
 
 
 @router.put('', response_model=SettingsResponse)
 @handle_errors(operation='update settings')
+@deterministic_tool
 def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings_db)) -> SettingsResponse:
     from modules.telegram.bot import telegram_bot
 
@@ -58,6 +61,7 @@ def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings
 
 @router.post('/test-smtp', response_model=TestResult)
 @handle_errors(operation='test smtp')
+@deterministic_tool
 def test_smtp(body: TestSmtpRequest) -> TestResult:
     smtp = get_resolved_smtp()
     host = str(smtp.get('host', ''))
@@ -87,6 +91,7 @@ def test_smtp(body: TestSmtpRequest) -> TestResult:
 
 @router.post('/test-telegram', response_model=TestResult)
 @handle_errors(operation='test telegram')
+@deterministic_tool
 def test_telegram(body: TestTelegramRequest) -> TestResult:
     resolved = get_resolved_telegram_settings()
     token = str(resolved.get('token', ''))
@@ -113,6 +118,7 @@ def test_telegram(body: TestTelegramRequest) -> TestResult:
 
 @router.post('/detect-telegram-chat', response_model=DetectTelegramResponse)
 @handle_errors(operation='detect telegram chat')
+@deterministic_tool
 def detect_telegram_chat() -> DetectTelegramResponse:
     from modules.telegram.bot import telegram_bot
 
@@ -162,6 +168,7 @@ def detect_telegram_chat() -> DetectTelegramResponse:
 
 @router.post('/detect-chat-custom', response_model=DetectTelegramResponse)
 @handle_errors(operation='detect custom telegram chat')
+@deterministic_tool
 def detect_custom_bot_chat(body: DetectCustomBotRequest) -> DetectTelegramResponse:
     from modules.telegram.bot import telegram_bot
 

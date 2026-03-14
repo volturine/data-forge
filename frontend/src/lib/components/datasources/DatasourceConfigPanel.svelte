@@ -877,8 +877,7 @@
 										color: 'fg.muted'
 									})}>Created</span
 								>
-								<span class={css({ fontWeight: 'medium' })}
-									>{formatDateDisplay(ds.created_at)}</span
+								<span class={css({ fontWeight: 'medium' })}>{formatDateDisplay(ds.created_at)}</span
 								>
 							</div>
 							{#if schemaQuery.data}

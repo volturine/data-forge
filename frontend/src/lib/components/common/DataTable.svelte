@@ -500,7 +500,7 @@
 						paddingX: '2.5',
 						borderWidth: '1',
 						backgroundColor: 'bg.primary',
-												fontSize: 'xs',
+						fontSize: 'xs',
 						_disabled: { opacity: 0.5, cursor: 'not-allowed' }
 					})}
 					onclick={pagination.onPrev}
@@ -515,7 +515,7 @@
 						paddingX: '2.5',
 						borderWidth: '1',
 						backgroundColor: 'bg.primary',
-												fontSize: 'xs',
+						fontSize: 'xs',
 						_disabled: { opacity: 0.5, cursor: 'not-allowed' }
 					})}
 					onclick={pagination.onNext}
@@ -642,7 +642,7 @@
 											padding: '0',
 											textAlign: 'left',
 											fontWeight: 'semibold',
-											borderBottomWidth: '1',
+											borderBottomWidth: '1'
 										}),
 										dragOver === header.id &&
 											css({
@@ -743,8 +743,8 @@
 														whiteSpace: 'nowrap',
 														fontFamily: 'mono',
 														fontSize: 'sm',
-														fontWeight: 'semibold',
-																											})}
+														fontWeight: 'semibold'
+													})}
 												>
 													{typeof header.column.columnDef.header === 'string'
 														? header.column.columnDef.header
@@ -998,7 +998,7 @@
 			paddingY: '2',
 			borderWidth: '1',
 			background: 'bg.primary',
-						fontSize: 'sm',
+			fontSize: 'sm',
 			boxShadow: 'menu',
 			zIndex: 'tooltip',
 			whiteSpace: 'normal',
@@ -1027,7 +1027,7 @@
 			fontSize: 'sm',
 			fontWeight: 'semibold',
 			backgroundColor: 'bg.primary',
-						boxShadow: 'popup'
+			boxShadow: 'popup'
 		})}
 		style="left: {dragPointerX + 12}px; top: {dragPointerY + 12}px;"
 	>

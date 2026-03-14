@@ -567,7 +567,7 @@
 							opacity: '0.5',
 							lineHeight: '1',
 							_hover: {
-																backgroundColor: 'bg.tertiary',
+								backgroundColor: 'bg.tertiary',
 								opacity: '1'
 							}
 						})}
@@ -674,7 +674,7 @@
 									paddingY: '2',
 									borderWidth: '1',
 									backgroundColor: 'bg.secondary',
-																		cursor: 'pointer',
+									cursor: 'pointer',
 									justifyContent: 'space-between',
 									fontSize: 'sm',
 									_focusVisible: {
@@ -750,7 +750,7 @@
 													justifyContent: 'flex-start',
 													gap: '2',
 													cursor: 'pointer',
-																										fontSize: 'sm',
+													fontSize: 'sm',
 													'& span': { minWidth: '0', overflowWrap: 'anywhere' },
 													_hover: { backgroundColor: 'bg.hover' }
 												}),
@@ -800,7 +800,7 @@
 					color: 'fg.secondary',
 					_hover: {
 						backgroundColor: 'bg.tertiary',
-												'& svg': { opacity: '1' }
+						'& svg': { opacity: '1' }
 					},
 					_disabled: { cursor: 'not-allowed', opacity: '0.5' }
 				})}

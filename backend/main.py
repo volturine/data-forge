@@ -184,11 +184,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             return True, row.telegram_bot_token
         return False, ''
 
-    from core.database import run_db as _run_db
+    from core.database import run_settings_db
 
-    enabled, token = _run_db(_check_bot_enabled)
+    enabled, token = run_settings_db(_check_bot_enabled)
     if enabled:
         telegram_bot.start(token)
+
+    from modules.mcp.routes import get_registry
+
+    get_registry(app)
 
     yield
 

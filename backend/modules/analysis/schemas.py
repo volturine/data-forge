@@ -1,14 +1,16 @@
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from modules.analysis.step_schemas import StepType
 
 
 class PipelineStepSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    type: str
+    type: StepType
     config: dict
     depends_on: list[str] = []
     is_applied: bool | None = None
@@ -23,15 +25,25 @@ class TabDatasourceConfig(BaseModel):
 class TabDatasourceSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
-    analysis_tab_id: str | None
+    id: Annotated[
+        str,
+        StringConstraints(min_length=1, strip_whitespace=True),
+        Field(
+            description=('ID of an existing datasource from GET /api/v1/datasource. Must be a real datasource ID, not an invented value.')
+        ),
+    ]
+    analysis_tab_id: str | None = None
     config: TabDatasourceConfig
 
 
 class TabOutputSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra='allow')
 
-    output_datasource_id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    output_datasource_id: Annotated[
+        str,
+        StringConstraints(min_length=1, strip_whitespace=True),
+        Field(description=('ID of an existing datasource to write output to. Typically the same datasource ID used in datasource.id.')),
+    ]
     format: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     filename: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 

@@ -32,9 +32,7 @@
 			})
 		)}
 	>
-		<h3 class={css({ margin: '0', fontSize: 'lg', fontWeight: 'semibold' })}>
-			Schema
-		</h3>
+		<h3 class={css({ margin: '0', fontSize: 'lg', fontWeight: 'semibold' })}>Schema</h3>
 		{#if schema.row_count !== null}
 			<span class={css({ fontSize: 'sm', color: 'fg.muted' })}>
 				{schema.row_count.toLocaleString()} rows

@@ -176,8 +176,8 @@
 								maxWidth: 'inputSm',
 								overflow: 'hidden',
 								textOverflow: 'ellipsis',
-								whiteSpace: 'nowrap',
-															})}
+								whiteSpace: 'nowrap'
+							})}
 							title={mapping.oldName}>{mapping.oldName}</span
 						>
 						<ArrowRight size={12} class={muted} aria-hidden="true" />

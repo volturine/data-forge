@@ -274,7 +274,7 @@
 					paddingY: '2.5',
 					borderWidth: '1',
 					backgroundColor: 'bg.secondary',
-										cursor: 'pointer',
+					cursor: 'pointer',
 					justifyContent: 'space-between',
 					fontSize: 'sm',
 					_focusVisible: {

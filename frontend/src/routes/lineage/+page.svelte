@@ -306,7 +306,7 @@
 							overflow: 'hidden',
 							whiteSpace: 'nowrap',
 							fontSize: 'sm',
-							fontWeight: 'semibold',
+							fontWeight: 'semibold'
 						})}
 					>
 						{selectedNode ? selectedNode.name : 'Select a node'}
@@ -371,7 +371,7 @@
 								class={css({
 									marginBottom: '3',
 									fontSize: 'sm',
-									fontWeight: 'semibold',
+									fontWeight: 'semibold'
 								})}
 							>
 								Schedules

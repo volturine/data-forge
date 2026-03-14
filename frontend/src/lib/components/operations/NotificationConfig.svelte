@@ -319,8 +319,8 @@
 											overflow: 'hidden',
 											textOverflow: 'ellipsis',
 											whiteSpace: 'nowrap',
-											fontSize: 'xs',
-																					})}
+											fontSize: 'xs'
+										})}
 									>
 										{sub.title}
 									</span>

@@ -80,9 +80,11 @@ def init_db() -> None:
 
 
 def _init_settings_db() -> None:
+    from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
 
     AppSettings.metadata.create_all(settings_engine)
+    ChatSession.metadata.create_all(settings_engine)
     _run_settings_migrations(settings_engine)
 
 
@@ -100,6 +102,18 @@ def _run_settings_migrations(db_engine: Engine) -> None:
             conn.commit()
         if 'smtp_password_encrypted' not in settings_columns:
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''"))
+            conn.commit()
+        if 'openrouter_api_key' not in settings_columns:
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''"))
+            conn.commit()
+
+    if not inspector.has_table('chat_sessions'):
+        return
+
+    chat_columns = {col['name'] for col in inspector.get_columns('chat_sessions')}
+    with db_engine.connect() as conn:
+        if 'system_prompt' not in chat_columns:
+            conn.execute(sa_text("ALTER TABLE chat_sessions ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''"))
             conn.commit()
 
 

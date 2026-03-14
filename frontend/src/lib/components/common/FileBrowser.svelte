@@ -142,11 +142,7 @@
 			})}
 		>
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-				<h4
-					class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}
-				>
-					Data directory
-				</h4>
+				<h4 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>Data directory</h4>
 				<div
 					class={cx(row, css({ flexWrap: 'wrap', gap: '1' }))}
 					role="navigation"
@@ -282,7 +278,7 @@
 						fontSize: 'sm',
 						fontWeight: 'medium',
 						backgroundColor: 'bg.secondary',
-												_hover: { backgroundColor: 'bg.hover' },
+						_hover: { backgroundColor: 'bg.hover' },
 						_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 					})}
 					onclick={() => onselect(path, true)}
@@ -300,7 +296,7 @@
 					fontSize: 'sm',
 					fontWeight: 'medium',
 					backgroundColor: 'bg.secondary',
-										_hover: { backgroundColor: 'bg.hover' },
+					_hover: { backgroundColor: 'bg.hover' },
 					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 				})}
 				onclick={() => load(path)}

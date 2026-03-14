@@ -4,12 +4,14 @@
 	import { resolve } from '$app/paths';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
-	import { Sun, Moon, Settings } from 'lucide-svelte';
+	import { Sun, Moon, Settings, MessageSquare } from 'lucide-svelte';
 	import { css, cx, iconButton, navLink, row, muted } from '$lib/styles/panda';
 	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
 	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
 	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
+	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
+	import { chatStore } from '$lib/stores/chat.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
 	import { initNamespace, setNamespace, useNamespace } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
@@ -233,6 +235,20 @@
 					</button>
 					<button
 						class={iconButton()}
+						onclick={() => {
+							if (chatStore.open) {
+								chatStore.close();
+							} else {
+								void chatStore.open_panel();
+							}
+						}}
+						title="AI Assistant"
+						aria-label="AI Assistant"
+					>
+						<MessageSquare size={16} />
+					</button>
+					<button
+						class={iconButton()}
 						onclick={toggleTheme}
 						title="Toggle theme"
 						aria-label="Toggle theme"
@@ -262,4 +278,5 @@
 		onClose={() => (namespaceOpen = false)}
 		anchor={namespaceTrigger}
 	/>
+	<ChatPanel />
 </QueryClientProvider>

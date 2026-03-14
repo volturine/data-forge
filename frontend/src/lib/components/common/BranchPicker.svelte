@@ -182,7 +182,7 @@
 			paddingX: '3',
 			borderWidth: '1',
 			background: 'bg.secondary',
-						fontSize: 'sm',
+			fontSize: 'sm',
 			textTransform: 'none'
 		})}
 		onclick={payload.onOpen}

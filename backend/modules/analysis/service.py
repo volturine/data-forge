@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError
@@ -18,12 +19,11 @@ from modules.datasource.models import DataSource
 from modules.locks import service as lock_service
 
 
-def create_analysis(
+def _validate_analysis_payload(
     session: Session,  # type: ignore[type-arg]
     data: AnalysisCreateSchema,
-) -> AnalysisResponseSchema:
-    analysis_id = str(uuid.uuid4())
-
+    analysis_id: str | None = None,
+) -> tuple[list[dict], list[str]]:
     if not data.tabs:
         raise ValueError('Analysis requires at least one tab')
     tabs_payload = [tab.model_dump() for tab in data.tabs]
@@ -65,7 +65,7 @@ def create_analysis(
         datasource_row = session.get(DataSource, datasource_id)
         if datasource_row:
             datasource_ids.append(str(datasource_id))
-            if datasource_row.source_type == 'analysis':
+            if datasource_row.source_type == 'analysis' and analysis_id:
                 source_id = _get_analysis_source_id(datasource_row)
                 _ensure_no_cycle(session, analysis_id, source_id)
             continue
@@ -73,6 +73,26 @@ def create_analysis(
             datasource_ids.append(str(datasource_id))
             continue
         raise DataSourceNotFoundError(str(datasource_id))
+
+    return tabs_payload, datasource_ids
+
+
+def validate_analysis(
+    session: Session,  # type: ignore[type-arg]
+    data: AnalysisCreateSchema,
+) -> dict:
+    """Validate analysis payload without persisting."""
+    tabs_payload, _ = _validate_analysis_payload(session, data)
+    return {'valid': True, 'payload': {'tabs': tabs_payload}}
+
+
+def create_analysis(
+    session: Session,  # type: ignore[type-arg]
+    data: AnalysisCreateSchema,
+) -> AnalysisResponseSchema:
+    analysis_id = str(uuid.uuid4())
+
+    tabs_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
 
     pipeline_definition: dict[str, object] = {
         'tabs': tabs_payload,
@@ -380,6 +400,118 @@ def _detect_cycle(session: Session, analysis_id: str, source_analysis_id: str) -
         return False
 
     return visit(source_analysis_id)
+
+
+def add_step(
+    session: Session,  # type: ignore[type-arg]
+    analysis_id: str,
+    tab_id: str,
+    step_type: str,
+    config: dict,
+    position: int | None = None,
+    depends_on: list[str] | None = None,
+) -> dict:
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise AnalysisNotFoundError(analysis_id)
+
+    version_service.create_version(session, analysis, commit=False)
+
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    tab = next((t for t in tabs if t.get('id') == tab_id), None)
+    if not tab:
+        raise ValueError(f'Tab {tab_id} not found')
+
+    step_id = str(uuid.uuid4())
+    step: dict = {
+        'id': step_id,
+        'type': step_type,
+        'config': config,
+        'depends_on': depends_on or [],
+        'is_applied': True,
+    }
+
+    steps = tab.setdefault('steps', [])
+    if position is None:
+        steps.append(step)
+    else:
+        pos = max(0, min(position, len(steps)))
+        steps.insert(pos, step)
+
+    flag_modified(analysis, 'pipeline_definition')
+    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    session.commit()
+    session.refresh(analysis)
+    return step
+
+
+def update_step(
+    session: Session,  # type: ignore[type-arg]
+    analysis_id: str,
+    tab_id: str,
+    step_id: str,
+    config: dict | None = None,
+    step_type: str | None = None,
+) -> dict:
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise AnalysisNotFoundError(analysis_id)
+
+    version_service.create_version(session, analysis, commit=False)
+
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    tab = next((t for t in tabs if t.get('id') == tab_id), None)
+    if not tab:
+        raise ValueError(f'Tab {tab_id} not found')
+
+    step = next((s for s in tab.get('steps', []) if s.get('id') == step_id), None)
+    if not step:
+        raise ValueError(f'Step {step_id} not found')
+
+    if step_type is not None:
+        step['type'] = step_type
+    if config is not None:
+        step['config'] = config
+
+    flag_modified(analysis, 'pipeline_definition')
+    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    session.commit()
+    session.refresh(analysis)
+    return step
+
+
+def remove_step(
+    session: Session,  # type: ignore[type-arg]
+    analysis_id: str,
+    tab_id: str,
+    step_id: str,
+) -> None:
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise AnalysisNotFoundError(analysis_id)
+
+    version_service.create_version(session, analysis, commit=False)
+
+    tabs = analysis.pipeline_definition.get('tabs', [])
+    tab = next((t for t in tabs if t.get('id') == tab_id), None)
+    if not tab:
+        raise ValueError(f'Tab {tab_id} not found')
+
+    steps = tab.get('steps', [])
+    idx = next((i for i, s in enumerate(steps) if s.get('id') == step_id), None)
+    if idx is None:
+        raise ValueError(f'Step {step_id} not found')
+
+    steps.pop(idx)
+
+    for s in steps:
+        deps = s.get('depends_on', [])
+        if step_id in deps:
+            deps.remove(step_id)
+
+    flag_modified(analysis, 'pipeline_definition')
+    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    session.commit()
 
 
 def unlink_datasource(

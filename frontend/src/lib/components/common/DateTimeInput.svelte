@@ -65,7 +65,7 @@
 	const headerBtn = css({
 		fontSize: 'xs',
 		fontWeight: '600',
-				cursor: 'pointer',
+		cursor: 'pointer',
 		border: 'none',
 		background: 'transparent',
 		padding: '0',
@@ -365,13 +365,9 @@
 						</button>
 					</span>
 				{:else if mode === 'month'}
-					<span class={css({ fontSize: 'xs', fontWeight: '600' })}
-						>{currentYear}</span
-					>
+					<span class={css({ fontSize: 'xs', fontWeight: '600' })}>{currentYear}</span>
 				{:else}
-					<span class={css({ fontSize: 'xs', fontWeight: '600' })}
-						>{yearLabel}</span
-					>
+					<span class={css({ fontSize: 'xs', fontWeight: '600' })}>{yearLabel}</span>
 				{/if}
 				<div class={css({ display: 'flex', alignItems: 'center' })}>
 					{#if mode === 'date'}

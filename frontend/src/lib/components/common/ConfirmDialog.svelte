@@ -58,10 +58,7 @@
 {#snippet content()}
 	<PanelHeader>
 		{#snippet title()}
-			<h2
-				id="dialog-title"
-				class={css({ margin: '0', fontSize: 'md', fontWeight: 'semibold' })}
-			>
+			<h2 id="dialog-title" class={css({ margin: '0', fontSize: 'md', fontWeight: 'semibold' })}>
 				{heading}
 			</h2>
 		{/snippet}

@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from core.config import settings
 from core.database import get_settings_db
+from modules.mcp.decorators import deterministic_tool
 from modules.settings.service import get_settings
 
 router = APIRouter(prefix='/config', tags=['config'])
@@ -31,6 +32,7 @@ class FrontendConfig(BaseModel):
 
 
 @router.get('', response_model=FrontendConfig)
+@deterministic_tool
 def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
     """Get configuration values for frontend."""
     db_settings = get_settings(session)

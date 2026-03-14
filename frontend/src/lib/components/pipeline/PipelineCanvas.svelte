@@ -336,8 +336,8 @@
 									fontFamily: 'mono',
 									fontSize: 'sm',
 									fontWeight: '500',
-									textTransform: 'lowercase',
-																	})}>{drag.type ?? 'step'}</span
+									textTransform: 'lowercase'
+								})}>{drag.type ?? 'step'}</span
 							>
 						{/if}
 					</div>
@@ -430,8 +430,8 @@
 										fontFamily: 'mono',
 										fontSize: 'sm',
 										fontWeight: '500',
-										textTransform: 'lowercase',
-																			})}>{drag.type ?? 'step'}</span
+										textTransform: 'lowercase'
+									})}>{drag.type ?? 'step'}</span
 								>
 							{/if}
 						</div>
@@ -534,8 +534,8 @@
 												fontFamily: 'mono',
 												fontSize: 'sm',
 												fontWeight: '500',
-												textTransform: 'lowercase',
-																							})}>{drag.type ?? 'step'}</span
+												textTransform: 'lowercase'
+											})}>{drag.type ?? 'step'}</span
 										>
 									{/if}
 								</div>

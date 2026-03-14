@@ -118,10 +118,7 @@
 			})
 		)}
 	>
-		<h2
-			id="modal-title"
-			class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}
-		>
+		<h2 id="modal-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
 			{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}
 		</h2>
 		<button

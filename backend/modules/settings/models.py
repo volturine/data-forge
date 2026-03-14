@@ -21,5 +21,8 @@ class AppSettings(SQLModel, table=True):
     telegram_bot_token: str = Field(default='')
     telegram_bot_enabled: bool = Field(default=False)
 
+    # OpenRouter
+    openrouter_api_key: str = Field(default='')
+
     # Display
     public_idb_debug: bool = Field(default=False)

@@ -82,7 +82,7 @@
 				justifyContent: 'flex-start',
 				gap: '2',
 				cursor: 'pointer',
-								fontSize: 'sm',
+				fontSize: 'sm',
 				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
 				_hover: { backgroundColor: 'bg.hover' }
 			}),

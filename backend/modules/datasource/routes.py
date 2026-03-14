@@ -17,6 +17,7 @@ from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 from modules.datasource.source_types import DataSourceType
+from modules.mcp.decorators import deterministic_tool
 
 router = APIRouter(prefix='/datasource', tags=['datasource'])
 
@@ -478,6 +479,7 @@ async def confirm_excel(
 
 @router.post('/connect', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='connect datasource', value_error_status=400)
+@deterministic_tool
 def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: Session = Depends(get_db),
@@ -551,6 +553,7 @@ def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session) ->
 
 @router.get('', response_model=list[schemas.DataSourceResponse])
 @handle_errors(operation='list datasources')
+@deterministic_tool
 def list_datasources(include_hidden: bool = False, session: Session = Depends(get_db)):
     """List all data sources. Set include_hidden=true to include auto-generated hidden datasources."""
     return service.list_datasources(session, include_hidden=include_hidden)
@@ -558,6 +561,7 @@ def list_datasources(include_hidden: bool = False, session: Session = Depends(ge
 
 @router.get('/lineage')
 @handle_errors(operation='get lineage')
+@deterministic_tool
 def get_lineage(
     target_datasource_id: DataSourceId | None = None,
     branch: str | None = None,
@@ -580,6 +584,7 @@ def get_lineage(
 
 @router.get('/{datasource_id}', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='get datasource')
+@deterministic_tool
 def get_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
@@ -599,6 +604,7 @@ def get_datasource(
 
 @router.get('/{datasource_id}/schema', response_model=schemas.SchemaInfo)
 @handle_errors(operation='get datasource schema')
+@deterministic_tool
 def get_datasource_schema(
     datasource_id: DataSourceId,
     sheet_name: str | None = None,
@@ -615,6 +621,7 @@ def get_datasource_schema(
 
 @router.post('/{datasource_id}/compare-snapshots', response_model=schemas.SnapshotCompareResponse)
 @handle_errors(operation='compare datasource snapshots')
+@deterministic_tool
 def compare_snapshots(
     datasource_id: DataSourceId,
     payload: schemas.SnapshotCompareRequest,
@@ -656,6 +663,7 @@ def _handle_column_stats(
 
 @router.get('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse)
 @handle_errors(operation='get column stats')
+@deterministic_tool
 def get_column_stats(
     datasource_id: DataSourceId,
     column_name: str,
@@ -672,6 +680,7 @@ def get_column_stats(
 
 @router.post('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse)
 @handle_errors(operation='get column stats')
+@deterministic_tool
 def get_column_stats_with_config(
     datasource_id: DataSourceId,
     column_name: str,
@@ -689,6 +698,7 @@ def get_column_stats_with_config(
 
 @router.get('/iceberg/resolve')
 @handle_errors(operation='resolve iceberg metadata', value_error_status=400)
+@deterministic_tool
 async def resolve_iceberg(metadata_path: str):
     resolved = resolve_iceberg_metadata_path(metadata_path)
     return {'metadata_path': resolved}
@@ -696,12 +706,14 @@ async def resolve_iceberg(metadata_path: str):
 
 @router.get('/file/list', response_model=schemas.FileListResponse)
 @handle_errors(operation='list data files', value_error_status=400)
+@deterministic_tool
 async def list_files(path: str | None = None):
     return service.list_data_files(path)
 
 
 @router.put('/{datasource_id}', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='update datasource')
+@deterministic_tool
 def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
@@ -717,6 +729,7 @@ def update_datasource(
 
 @router.post('/{datasource_id}/refresh', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='refresh datasource')
+@deterministic_tool
 def refresh_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
@@ -731,6 +744,7 @@ def refresh_datasource(
 
 @router.delete('/{datasource_id}', status_code=204)
 @handle_errors(operation='delete datasource')
+@deterministic_tool
 def delete_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),

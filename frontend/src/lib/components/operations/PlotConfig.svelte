@@ -404,7 +404,7 @@
 	<div
 		class={css({
 			padding: '3 0',
-			borderBottomWidth: '1',
+			borderBottomWidth: '1'
 		})}
 		role="group"
 		aria-labelledby={`${uid}-plot-type`}
@@ -474,7 +474,7 @@
 		class={css({
 			margin: '0',
 			display: 'flex',
-			borderBottomWidth: '1',
+			borderBottomWidth: '1'
 		})}
 	>
 		<button

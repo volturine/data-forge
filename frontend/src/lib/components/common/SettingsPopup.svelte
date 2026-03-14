@@ -195,10 +195,7 @@
 {#snippet content()}
 	<PanelHeader>
 		{#snippet title()}
-			<h2
-				id="settings-title"
-				class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}
-			>
+			<h2 id="settings-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
 				Settings
 			</h2>
 		{/snippet}
@@ -396,9 +393,7 @@
 
 			<div class={rowBetween}>
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
-					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}
-						>Enable Bot</span
-					>
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Enable Bot</span>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 						Start the Telegram bot listener on save
 					</span>
@@ -544,9 +539,7 @@
 
 			<div class={rowBetween}>
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
-					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>
-						IndexedDB Inspector
-					</span>
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}> IndexedDB Inspector </span>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 						Show cache debug button in header
 					</span>

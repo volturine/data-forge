@@ -321,9 +321,7 @@
 						gap: '0'
 					})}
 				>
-					<span class={css({ fontSize: 'xs', fontWeight: '500' })}
-						>{stepType.label}</span
-					>
+					<span class={css({ fontSize: 'xs', fontWeight: '500' })}>{stepType.label}</span>
 					<span
 						class={css({
 							overflow: 'hidden',

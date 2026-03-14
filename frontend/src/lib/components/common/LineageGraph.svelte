@@ -565,8 +565,8 @@
 								textOverflow: 'ellipsis',
 								whiteSpace: 'nowrap',
 								fontSize: 'sm',
-								fontWeight: '600',
-															})}
+								fontWeight: '600'
+							})}
 						>
 							{node.label}
 						</div>

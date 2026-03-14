@@ -3594,7 +3594,7 @@
 		justifyContent: 'space-between',
 		paddingY: '1.5',
 		paddingX: '2.5',
-		borderBottomWidth: '1',
+		borderBottomWidth: '1'
 	});
 
 	const controlsCss = css({ display: 'flex', gap: '1.5' });
@@ -3641,7 +3641,7 @@
 		rowGap: '1',
 		columnGap: '2',
 		backgroundColor: 'bg.secondary',
-		borderBottomWidth: '1',
+		borderBottomWidth: '1'
 	});
 
 	const legendCollapsedCss = css({

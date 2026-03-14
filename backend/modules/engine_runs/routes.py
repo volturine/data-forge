@@ -6,12 +6,14 @@ from core.error_handlers import handle_errors
 from core.validation import EngineRunId, parse_analysis_id, parse_datasource_id, parse_engine_run_id
 from modules.engine_runs import schemas, service
 from modules.engine_runs.models import EngineRun
+from modules.mcp.decorators import deterministic_tool
 
 router = APIRouter(prefix='/engine-runs', tags=['engine-runs'])
 
 
 @router.get('/compare', response_model=schemas.BuildComparisonResponse)
 @handle_errors(operation='compare engine runs')
+@deterministic_tool
 def compare_runs(
     run_a: str,
     run_b: str,
@@ -28,6 +30,7 @@ def compare_runs(
 
 @router.get('', response_model=list[schemas.EngineRunResponseSchema])
 @handle_errors(operation='list engine runs')
+@deterministic_tool
 def list_runs(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
@@ -50,6 +53,7 @@ def list_runs(
 
 @router.get('/{run_id}', response_model=schemas.EngineRunResponseSchema)
 @handle_errors(operation='get engine run')
+@deterministic_tool
 def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
     run = session.get(EngineRun, parse_engine_run_id(run_id))
     if not run:

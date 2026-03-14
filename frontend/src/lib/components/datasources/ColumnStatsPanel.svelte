@@ -145,7 +145,7 @@
 										class={css({
 											fontSize: 'xs',
 											fontWeight: '600',
-																						fontFamily: 'mono'
+											fontFamily: 'mono'
 										})}>{stats.count.toLocaleString()}</span
 									>
 								</div>
@@ -162,7 +162,7 @@
 										class={css({
 											fontSize: 'xs',
 											fontWeight: '600',
-																						fontFamily: 'mono'
+											fontFamily: 'mono'
 										})}
 									>
 										{stats.null_count.toLocaleString()}
@@ -204,7 +204,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.unique.toLocaleString()}</span
 										>
 									</div>
@@ -239,7 +239,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{fmt(stats.mean)}</span
 										>
 									</div>
@@ -257,7 +257,7 @@
 												class={css({
 													fontSize: 'xs',
 													fontWeight: '600',
-																										fontFamily: 'mono'
+													fontFamily: 'mono'
 												})}>{fmt(stats.median)}</span
 											>
 										</div>
@@ -276,7 +276,7 @@
 												class={css({
 													fontSize: 'xs',
 													fontWeight: '600',
-																										fontFamily: 'mono'
+													fontFamily: 'mono'
 												})}>{fmt(stats.std)}</span
 											>
 										</div>
@@ -294,7 +294,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.min}</span
 										>
 									</div>
@@ -312,7 +312,7 @@
 												class={css({
 													fontSize: 'xs',
 													fontWeight: '600',
-																										fontFamily: 'mono'
+													fontFamily: 'mono'
 												})}>{fmt(stats.q25)}</span
 											>
 										</div>
@@ -331,7 +331,7 @@
 												class={css({
 													fontSize: 'xs',
 													fontWeight: '600',
-																										fontFamily: 'mono'
+													fontFamily: 'mono'
 												})}>{fmt(stats.q75)}</span
 											>
 										</div>
@@ -349,7 +349,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.max}</span
 										>
 									</div>
@@ -384,7 +384,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.min}</span
 										>
 									</div>
@@ -401,7 +401,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.max}</span
 										>
 									</div>
@@ -486,7 +486,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.min_length}</span
 										>
 									</div>
@@ -503,7 +503,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{fmt(stats.avg_length)}</span
 										>
 									</div>
@@ -520,7 +520,7 @@
 											class={css({
 												fontSize: 'xs',
 												fontWeight: '600',
-																								fontFamily: 'mono'
+												fontFamily: 'mono'
 											})}>{stats.max_length}</span
 										>
 									</div>
@@ -624,7 +624,7 @@
 														class={css({
 															fontSize: 'xs',
 															fontFamily: 'mono',
-																														overflow: 'hidden',
+															overflow: 'hidden',
 															textOverflow: 'ellipsis',
 															whiteSpace: 'nowrap',
 															maxWidth: 'listSm'

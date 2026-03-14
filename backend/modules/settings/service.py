@@ -55,6 +55,7 @@ def get_settings(session: Session) -> SettingsResponse:
         smtp_password=smtp_password,
         telegram_bot_token=row.telegram_bot_token,
         telegram_bot_enabled=row.telegram_bot_enabled,
+        openrouter_api_key=row.openrouter_api_key,
         public_idb_debug=row.public_idb_debug,
     )
 
@@ -72,6 +73,7 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
     row.smtp_password = ''
     row.telegram_bot_token = data.telegram_bot_token
     row.telegram_bot_enabled = data.telegram_bot_enabled
+    row.openrouter_api_key = data.openrouter_api_key
     row.public_idb_debug = data.public_idb_debug
 
     session.commit()
@@ -83,6 +85,7 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
         smtp_password=data.smtp_password,
         telegram_bot_token=row.telegram_bot_token,
         telegram_bot_enabled=row.telegram_bot_enabled,
+        openrouter_api_key=row.openrouter_api_key,
         public_idb_debug=row.public_idb_debug,
     )
 
@@ -125,5 +128,17 @@ def get_resolved_telegram_settings() -> dict[str, object]:
             enabled = bool(row.telegram_bot_enabled and token)
             return {'enabled': enabled, 'token': token}
         return {'enabled': False, 'token': ''}
+
+    return run_settings_db(_read)
+
+
+def get_resolved_openrouter_key() -> str:
+    from core.database import run_settings_db
+
+    def _read(session: Session) -> str:
+        row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
+        if row:
+            return row.openrouter_api_key
+        return ''
 
     return run_settings_db(_read)

@@ -312,9 +312,7 @@
 						>
 							<span class={cx(label(), css({ fontWeight: 'semibold' }))}>#{i + 1}</span>
 							{#if cond.column}
-								<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}
-									>{cond.column}</span
-								>
+								<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>{cond.column}</span>
 							{/if}
 							<button
 								type="button"
@@ -530,7 +528,7 @@
 																gap: '1',
 																borderWidth: '1',
 																backgroundColor: 'bg.tertiary',
-																																fontSize: 'xs',
+																fontSize: 'xs',
 																paddingY: '1',
 																paddingX: '2'
 															})}

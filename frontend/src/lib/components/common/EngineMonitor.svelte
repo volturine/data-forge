@@ -128,9 +128,7 @@
 					})
 				)}
 			>
-				<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
-					Active Engines
-				</span>
+				<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> Active Engines </span>
 				<button
 					class={css({
 						display: 'flex',
@@ -191,8 +189,8 @@
 										<span
 											class={css({
 												fontFamily: 'mono',
-												fontSize: 'xs',
-																							})}
+												fontSize: 'xs'
+											})}
 											title={engine.analysis_id}
 										>
 											{engine.analysis_id.slice(0, 8)}...

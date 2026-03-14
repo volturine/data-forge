@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from core.error_handlers import handle_errors
 from modules.ai.service import get_ai_client
+from modules.mcp.decorators import deterministic_tool
 
 router = APIRouter(prefix='/ai', tags=['ai'])
 
@@ -19,6 +20,7 @@ class AIConnectionResponse(BaseModel):
 
 @router.get('/models', response_model=list[AIModelResponse])
 @handle_errors(operation='list ai models', value_error_status=400)
+@deterministic_tool
 def list_models(
     provider: str = Query('ollama'),
     endpoint_url: str | None = Query(None),
@@ -31,6 +33,7 @@ def list_models(
 
 @router.get('/test', response_model=AIConnectionResponse)
 @handle_errors(operation='test ai connection', value_error_status=400)
+@deterministic_tool
 def test_connection(
     provider: str = Query('ollama'),
     endpoint_url: str | None = Query(None),

@@ -304,9 +304,7 @@
 				paddingBottom: '2'
 			})}
 		>
-			<span class={css({ fontSize: 'xs', fontWeight: 'semibold' })}
-				>New Health Check</span
-			>
+			<span class={css({ fontSize: 'xs', fontWeight: 'semibold' })}>New Health Check</span>
 			<button
 				class={css({
 					backgroundColor: 'bg.primary',
@@ -1220,9 +1218,7 @@
 										paddingY: '1.5'
 									})}
 								>
-									<span class={css({ fontWeight: 'medium' })}
-										>{check.name}</span
-									>
+									<span class={css({ fontWeight: 'medium' })}>{check.name}</span>
 								</td>
 								{#if !datasourceId}
 									<td
@@ -1489,8 +1485,8 @@
 									textOverflow: 'ellipsis',
 									whiteSpace: 'nowrap',
 									fontSize: 'xs',
-									fontWeight: 'medium',
-																	})}
+									fontWeight: 'medium'
+								})}
 								title={check.name}
 							>
 								{check.name}
