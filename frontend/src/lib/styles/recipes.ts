@@ -145,19 +145,9 @@ export const callout = defineRecipe({
 export const button = defineRecipe({
 	className: 'btn',
 	base: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		gap: '2',
-		cursor: 'pointer',
-		borderWidth: '1',
-		fontFamily: 'mono',
-		fontSize: 'sm',
-		fontWeight: 'medium',
-		transitionProperty: 'color, background-color, border-color, opacity',
-		transitionDuration: '160ms',
-		transitionTimingFunction: 'ease',
-		_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+		// display, alignItems, justifyContent, gap, cursor, fontFamily, fontSize,
+		// fontWeight, transition, and _disabled are all set by globalCss body button
+		borderWidth: '1'
 	},
 	variants: {
 		variant: {
@@ -185,7 +175,7 @@ export const button = defineRecipe({
 			}
 		},
 		size: {
-			default: { paddingX: '4', paddingY: '2' },
+			default: {},
 			sm: { fontSize: 'xs', paddingX: '2', paddingY: '1' }
 		}
 	},
@@ -321,7 +311,6 @@ export const input = defineRecipe({
 	className: 'input',
 	base: {
 		width: 'full',
-		fontFamily: 'mono',
 		fontSize: 'sm2',
 		color: 'fg.primary',
 		backgroundColor: 'bg.primary',
@@ -372,7 +361,6 @@ export const input = defineRecipe({
 				paddingLeft: '10',
 				paddingRight: '10',
 				backgroundColor: 'bg.primary',
-				fontFamily: 'mono',
 				fontSize: 'sm'
 			}
 		}
@@ -458,7 +446,6 @@ export const badge = defineRecipe({
 	base: {
 		display: 'inline-flex',
 		alignItems: 'center',
-		fontFamily: 'mono',
 		borderWidth: '1',
 		backgroundColor: 'accent.bg',
 		color: 'accent.primary'

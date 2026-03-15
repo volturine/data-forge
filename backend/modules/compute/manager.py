@@ -241,11 +241,3 @@ class ProcessManager:
         with self._engines_lock:
             analysis_ids = list(self._engines.keys())
         return [self.get_engine_status(aid) for aid in analysis_ids]
-
-
-_manager = ProcessManager()
-
-
-def get_manager() -> ProcessManager:
-    """Get the singleton ProcessManager instance."""
-    return _manager

@@ -3,163 +3,88 @@
  * Centralizes config shape definitions to eliminate defensive $effect blocks in components.
  */
 
-import type { FilterCondition, JoinColumn, PlotConfigData } from '$lib/types/operation-config';
+import type { PlotConfigData } from '$lib/types/operation-config';
+import type {
+	SelectConfig,
+	DropConfig,
+	FilterConfig,
+	GroupByConfig,
+	UnionByNameConfig,
+	ValueCountsConfig,
+	UnpivotConfig,
+	ExplodeConfig,
+	PivotConfig,
+	SampleConfig,
+	LimitConfig,
+	ViewConfig,
+	ExportConfig,
+	DownloadConfig,
+	NotificationConfig,
+	AIConfig
+} from '$lib/types/step-schemas.generated';
 
-export interface SelectConfigData {
-	columns: string[];
-}
+// Re-export generated types under the legacy names used by components.
+export type { SelectConfig as SelectConfigData } from '$lib/types/step-schemas.generated';
+export type { DropConfig as DropConfigData } from '$lib/types/step-schemas.generated';
+export type { FilterConfig as FilterConfigData } from '$lib/types/step-schemas.generated';
+export type { GroupByConfig as GroupByConfigData } from '$lib/types/step-schemas.generated';
+export type { UnionByNameConfig as UnionByNameConfigData } from '$lib/types/step-schemas.generated';
+export type { ValueCountsConfig as ValueCountsConfigData } from '$lib/types/step-schemas.generated';
+export type { UnpivotConfig as UnpivotConfigData } from '$lib/types/step-schemas.generated';
+export type { ExplodeConfig as ExplodeConfigData } from '$lib/types/step-schemas.generated';
+export type { PivotConfig as PivotConfigData } from '$lib/types/step-schemas.generated';
+export type { SampleConfig as SampleConfigData } from '$lib/types/step-schemas.generated';
+export type { LimitConfig as LimitConfigData } from '$lib/types/step-schemas.generated';
+export type { ViewConfig as ViewConfigData } from '$lib/types/step-schemas.generated';
+export type { ExportConfig as ExportConfigData } from '$lib/types/step-schemas.generated';
+export type { DownloadConfig as DownloadConfigData } from '$lib/types/step-schemas.generated';
 
-export interface DropConfigData {
-	columns: string[];
-}
-
-export interface FilterConfigData {
-	conditions: FilterCondition[];
-	logic: 'AND' | 'OR';
-}
-
-export interface GroupByConfigData {
-	groupBy: string[];
-	aggregations: Array<{
-		column: string;
-		function: string;
-		alias: string;
-	}>;
-}
-
-export interface JoinConfigData {
-	how: 'inner' | 'left' | 'right' | 'outer' | 'cross';
-	right_source: string;
-	join_columns: JoinColumn[];
-	right_columns: string[];
-	suffix: string;
-}
-
-export interface UnionByNameConfigData {
-	sources: string[];
-	allow_missing: boolean;
-}
-
-export interface ValueCountsConfigData {
-	column: string;
-	sort: boolean;
-}
-
-export interface UnpivotConfigData {
-	id_vars: string[];
-	value_vars: string[];
-	variable_name: string;
-	value_name: string;
-}
-
-export interface ExplodeConfigData {
-	columns: string[];
-}
-
-export interface PivotConfigData {
-	index: string[];
-	columns: string[];
-	values: string[];
-	aggregate_function: string;
-}
-
-export interface SampleConfigData {
-	n: number;
-	with_replacement: boolean;
-	shuffle: boolean;
-	seed: number | null;
-}
-
-export interface LimitConfigData {
-	n: number;
-}
-
+// Frontend-only type: TopK uses different field names than the Pydantic model.
+// The backend uses `column`/`descending`; the frontend UI uses `by`/`reverse`.
 export interface TopKConfigData {
 	by: string;
 	k: number;
 	reverse: boolean;
 }
 
-export interface ViewConfigData {
-	rowLimit: number | null;
-}
-
-export interface ExportConfigData {
-	format: string;
-	filename: string;
-	destination: string;
-}
-
-export interface DownloadConfigData {
-	format: string;
-	filename: string;
-}
-
+// ChartConfigData re-uses the richer PlotConfigData type from operation-config.
 export type ChartConfigData = PlotConfigData;
 
-export interface NotificationConfigData {
-	method: 'email' | 'telegram';
-	recipient: string;
-	subscriber_ids: string[];
-	bot_token: string;
-	recipient_source: 'manual' | 'column';
-	recipient_column: string;
-	input_columns: string[];
-	output_column: string;
-	message_template: string;
-	subject_template: string;
-	batch_size: number;
-	timeout_seconds: number;
-}
-
-export interface AIConfigData {
-	provider: 'ollama' | 'openai';
-	model: string;
-	input_columns: string[];
-	output_column: string;
-	prompt_template: string;
-	batch_size: number;
-	endpoint_url: string;
-	api_key: string;
-	request_options?: Record<string, unknown> | null;
-}
-
 export type StepConfig =
-	| SelectConfigData
-	| DropConfigData
-	| FilterConfigData
-	| GroupByConfigData
-	| JoinConfigData
-	| UnionByNameConfigData
-	| ValueCountsConfigData
-	| UnpivotConfigData
-	| ExplodeConfigData
-	| PivotConfigData
-	| SampleConfigData
-	| LimitConfigData
+	| SelectConfig
+	| DropConfig
+	| FilterConfig
+	| GroupByConfig
+	| UnionByNameConfig
+	| ValueCountsConfig
+	| UnpivotConfig
+	| ExplodeConfig
+	| PivotConfig
+	| SampleConfig
+	| LimitConfig
 	| TopKConfigData
-	| ViewConfigData
-	| ExportConfigData
-	| DownloadConfigData
+	| ViewConfig
+	| ExportConfig
+	| DownloadConfig
 	| PlotConfigData
-	| NotificationConfigData
-	| AIConfigData
+	| NotificationConfig
+	| AIConfig
 	| Record<string, unknown>;
 
 const defaultConfigs: Record<string, StepConfig> = {
-	select: { columns: [] } satisfies SelectConfigData,
+	select: { columns: [] } satisfies SelectConfig,
 
-	drop: { columns: [] } satisfies DropConfigData,
+	drop: { columns: [] } satisfies DropConfig,
 
 	filter: {
 		conditions: [{ column: '', operator: '=', value: '', value_type: 'string' }],
 		logic: 'AND'
-	} satisfies FilterConfigData,
+	} satisfies FilterConfig,
 
 	groupby: {
 		groupBy: [],
 		aggregations: []
-	} satisfies GroupByConfigData,
+	} satisfies GroupByConfig,
 
 	join: {
 		how: 'inner',
@@ -167,46 +92,46 @@ const defaultConfigs: Record<string, StepConfig> = {
 		join_columns: [],
 		right_columns: [],
 		suffix: '_right'
-	} satisfies JoinConfigData,
+	} as Record<string, unknown>,
 
 	union_by_name: {
 		sources: [],
 		allow_missing: true
-	} satisfies UnionByNameConfigData,
+	} satisfies UnionByNameConfig,
 
 	value_counts: {
 		column: '',
 		sort: true
-	} satisfies ValueCountsConfigData,
+	} satisfies ValueCountsConfig,
 
 	unpivot: {
 		id_vars: [],
 		value_vars: [],
 		variable_name: 'variable',
 		value_name: 'value'
-	} satisfies UnpivotConfigData,
+	} satisfies UnpivotConfig,
 
 	explode: {
 		columns: []
-	} satisfies ExplodeConfigData,
+	} satisfies ExplodeConfig,
 
 	pivot: {
 		index: [],
 		columns: [],
 		values: [],
 		aggregate_function: 'first'
-	} satisfies PivotConfigData,
+	} satisfies PivotConfig,
 
 	sample: {
 		n: 1000,
 		with_replacement: false,
 		shuffle: true,
 		seed: null
-	} satisfies SampleConfigData,
+	} satisfies SampleConfig,
 
 	limit: {
 		n: 100
-	} satisfies LimitConfigData,
+	} satisfies LimitConfig,
 
 	topk: {
 		by: '',
@@ -216,18 +141,18 @@ const defaultConfigs: Record<string, StepConfig> = {
 
 	view: {
 		rowLimit: 100
-	} satisfies ViewConfigData,
+	} satisfies ViewConfig,
 
 	export: {
 		format: 'csv',
 		filename: 'export',
 		destination: 'download'
-	} satisfies ExportConfigData,
+	} satisfies ExportConfig,
 
 	download: {
 		format: 'csv',
 		filename: 'download'
-	} satisfies DownloadConfigData,
+	} satisfies DownloadConfig,
 
 	chart: {
 		chart_type: 'bar',
@@ -278,7 +203,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 		subject_template: 'Notification',
 		batch_size: 10,
 		timeout_seconds: 20
-	} satisfies NotificationConfigData,
+	} satisfies NotificationConfig,
 
 	ai: {
 		provider: 'ollama',
@@ -290,7 +215,7 @@ const defaultConfigs: Record<string, StepConfig> = {
 		endpoint_url: '',
 		api_key: '',
 		request_options: null
-	} satisfies AIConfigData,
+	} satisfies AIConfig,
 
 	// Operations that don't need config
 	datasource: {},

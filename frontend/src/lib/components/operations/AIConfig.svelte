@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import type { AIConfigData } from '$lib/utils/step-config-defaults';
+	import type { AIConfigData } from '$lib/types/operation-config';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import { css, label, stepConfig, input } from '$lib/styles/panda';
 

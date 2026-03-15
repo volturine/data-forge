@@ -29,11 +29,8 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepSchema, type StepSchemaRequest, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
-	import {
-		normalizeConfig,
-		type NotificationConfigData,
-		type AIConfigData
-	} from '$lib/utils/step-config-defaults';
+	import { normalizeConfig } from '$lib/utils/step-config-defaults';
+	import type { NotificationConfigData, AIConfigData } from '$lib/types/operation-config';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';

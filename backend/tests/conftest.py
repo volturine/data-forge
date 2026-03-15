@@ -13,7 +13,6 @@ from core.database import clear_engine_override, get_db, set_engine_override
 from main import app
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.datasource.models import DataSource
-from modules.mcp.routes import reset_registry_cache
 
 
 def acquire_lock(client: TestClient, resource_id: str) -> tuple[str, str]:
@@ -55,7 +54,8 @@ def client(test_db_session):
     def override_get_db():
         yield test_db_session
 
-    reset_registry_cache()
+    if hasattr(app.state, 'mcp_registry'):
+        del app.state.mcp_registry
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as ac:
         yield ac

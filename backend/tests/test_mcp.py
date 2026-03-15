@@ -158,46 +158,6 @@ class TestMCPValidate:
         assert resp.status_code == 404
 
 
-class TestMCPPreflight:
-    def test_preflight_returns_pending_for_mutating_tool(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        post_tool = next((t for t in tools if t['method'] == 'POST'), None)
-        assert post_tool is not None
-        resp = client.post('/api/v1/mcp/preflight', json={'tool_id': post_tool['id'], 'args': {}})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['status'] == 'pending'
-        assert data['valid'] is True
-        assert 'token' in data
-
-    def test_preflight_returns_ready_for_safe_tool(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        get_tool = next((t for t in tools if t['method'] == 'GET'), None)
-        assert get_tool is not None
-        resp = client.post('/api/v1/mcp/preflight', json={'tool_id': get_tool['id'], 'args': {}})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['status'] == 'ready'
-        assert data['valid'] is True
-
-    def test_preflight_returns_invalid_for_bad_args(self, client: TestClient) -> None:
-        response = client.get('/api/v1/mcp/tools')
-        tools = response.json()
-        post_tool = next((t for t in tools if t['method'] == 'POST' and t['input_schema'].get('required')), None)
-        if post_tool is None:
-            return
-        resp = client.post('/api/v1/mcp/preflight', json={'tool_id': post_tool['id'], 'args': {'__invalid_key__': True}})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data['valid'] is False
-
-    def test_preflight_unknown_tool_returns_404(self, client: TestClient) -> None:
-        resp = client.post('/api/v1/mcp/preflight', json={'tool_id': 'nonexistent_tool', 'args': {}})
-        assert resp.status_code == 404
-
-
 class TestMCPCallValidation:
     def test_call_returns_validation_error_for_invalid_args(self, client: TestClient) -> None:
         response = client.get('/api/v1/mcp/tools')
@@ -521,22 +481,6 @@ class TestCheckSchemaSupported:
         assert len(issues) > 0
         assert any('x-unsupported' in i for i in issues)
 
-    def test_preflight_route_returns_invalid_for_unsupported_schema(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'object', 'x-unsupported': True}
-        issues = check_schema_supported(schema)
-        assert len(issues) > 0
-        assert any('x-unsupported' in i for i in issues)
-
-    def test_call_route_returns_invalid_for_unsupported_schema(self) -> None:
-        from modules.mcp.validation import check_schema_supported
-
-        schema = {'type': 'object', 'x-unsupported': True}
-        issues = check_schema_supported(schema)
-        assert len(issues) > 0
-        assert any('x-unsupported' in i for i in issues)
-
 
 class TestMCPCapabilities:
     def test_capabilities_all_tools_returns_list(self, client: TestClient) -> None:
@@ -676,7 +620,7 @@ class TestStartupEnforcement:
         from fastapi.routing import APIRoute
 
         from modules.mcp.decorators import deterministic_tool
-        from modules.mcp.routes import get_registry, reset_registry_cache
+        from modules.mcp.routes import get_registry
 
         def fake_openapi() -> dict:
             return {
@@ -705,16 +649,14 @@ class TestStartupEnforcement:
         app.routes.append(APIRoute('/api/v1/startup/check', startup_check, methods=['GET']))
         monkeypatch.setattr(app, 'openapi', fake_openapi)
 
-        reset_registry_cache()
         with pytest.raises(ValueError, match='get_api_v1_startup_check'):
             get_registry(app)
-        reset_registry_cache()
 
     def test_startup_populates_cache_so_no_double_build(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
         from fastapi import FastAPI
 
         import modules.mcp.routes as routes_mod
-        from modules.mcp.routes import get_registry, reset_registry_cache
+        from modules.mcp.routes import get_registry
 
         build_calls: list[int] = []
         original_build = routes_mod.build_tool_registry
@@ -725,10 +667,8 @@ class TestStartupEnforcement:
 
         monkeypatch.setattr(routes_mod, 'build_tool_registry', counting_build)
 
-        reset_registry_cache()
         app = FastAPI()
 
         get_registry(app)
         get_registry(app)
         assert len(build_calls) == 1
-        reset_registry_cache()

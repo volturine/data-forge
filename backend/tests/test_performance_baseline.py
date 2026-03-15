@@ -3,7 +3,7 @@ import time
 import uuid
 
 from modules.compute import service as compute_service
-from modules.compute.manager import get_manager
+from modules.compute.manager import ProcessManager
 
 
 def _measure(func, *args, **kwargs):
@@ -41,11 +41,12 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
         },
     }
 
-    manager = get_manager()
+    manager = ProcessManager()
     try:
         preview_result, preview_ms = _measure(
             compute_service.preview_step,
             session=test_db_session,
+            manager=manager,
             target_step_id='source',
             analysis_pipeline=pipeline,
             row_limit=100,
@@ -56,6 +57,7 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
         schema_result, schema_ms = _measure(
             compute_service.get_step_schema,
             session=test_db_session,
+            manager=manager,
             target_step_id='source',
             analysis_id=analysis_id,
             analysis_pipeline=pipeline,
@@ -64,6 +66,7 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
         export_result, export_ms = _measure(
             compute_service.export_data,
             session=test_db_session,
+            manager=manager,
             target_step_id='source',
             analysis_pipeline=pipeline,
             export_format='csv',

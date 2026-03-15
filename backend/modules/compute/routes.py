@@ -5,11 +5,12 @@ from fastapi.responses import Response
 from sqlmodel import Session
 
 from core.database import get_db
+from core.dependencies import get_manager
 from core.error_handlers import handle_errors
 from core.exceptions import EngineNotFoundError
 from core.validation import AnalysisId, DataSourceId, parse_analysis_id, parse_datasource_id
 from modules.compute import schemas, service
-from modules.compute.manager import get_manager
+from modules.compute.manager import ProcessManager
 from modules.mcp.decorators import deterministic_tool
 
 router = APIRouter(prefix='/compute', tags=['compute'])
@@ -21,12 +22,14 @@ router = APIRouter(prefix='/compute', tags=['compute'])
 def preview_step(
     request: schemas.StepPreviewRequest,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Preview the result of a pipeline step with pagination."""
     analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
 
     return service.preview_step(
         session=session,
+        manager=manager,
         target_step_id=request.target_step_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         row_limit=request.row_limit,
@@ -44,12 +47,14 @@ def preview_step(
 def get_step_schema(
     request: schemas.StepSchemaRequest,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Get the output schema of a pipeline step (for pivot/unpivot dynamic columns)."""
     analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
 
     return service.get_step_schema(
         session=session,
+        manager=manager,
         target_step_id=request.target_step_id,
         analysis_id=analysis_id or '',
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
@@ -63,12 +68,14 @@ def get_step_schema(
 def get_step_row_count(
     request: schemas.StepRowCountRequest,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Get the row count of a pipeline step."""
     analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
 
     return service.get_step_row_count(
         session=session,
+        manager=manager,
         target_step_id=request.target_step_id,
         analysis_id=analysis_id or '',
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
@@ -110,12 +117,13 @@ def delete_iceberg_snapshot(
 def build_analysis_from_payload(
     request: schemas.BuildRequest,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     pipeline = request.analysis_pipeline.model_dump(mode='json') if request.analysis_pipeline else None
     if not isinstance(pipeline, dict):
         raise ValueError('analysis_pipeline is required')
     pipeline = {**pipeline, 'tab_id': request.tab_id}
-    result = service.run_analysis_build_from_payload(session, pipeline)
+    result = service.run_analysis_build_from_payload(session, manager, pipeline)
     return schemas.BuildResponse(**result)
 
 
@@ -125,12 +133,15 @@ def build_analysis_from_payload(
 @router.post('/engine/spawn/{analysis_id}', response_model=schemas.EngineStatusSchema)
 @handle_errors(operation='spawn engine')
 @deterministic_tool
-def spawn_engine(analysis_id: AnalysisId, request: schemas.SpawnEngineRequest | None = None):
+def spawn_engine(
+    analysis_id: AnalysisId,
+    request: schemas.SpawnEngineRequest | None = None,
+    manager: ProcessManager = Depends(get_manager),
+):
     """Spawn a compute engine for an analysis (called when analysis page opens).
 
     Optionally accepts resource configuration overrides.
     """
-    manager = get_manager()
     resource_config = request.resource_config.model_dump() if request and request.resource_config else None
     analysis_id_value = parse_analysis_id(analysis_id)
     manager.spawn_engine(analysis_id_value, resource_config=resource_config)
@@ -140,9 +151,8 @@ def spawn_engine(analysis_id: AnalysisId, request: schemas.SpawnEngineRequest | 
 @router.post('/engine/keepalive/{analysis_id}', response_model=schemas.EngineStatusSchema)
 @handle_errors(operation='keepalive engine')
 @deterministic_tool
-def keepalive(analysis_id: AnalysisId):
+def keepalive(analysis_id: AnalysisId, manager: ProcessManager = Depends(get_manager)):
     """Send keepalive ping for an analysis engine."""
-    manager = get_manager()
     analysis_id_value = parse_analysis_id(analysis_id)
     info = manager.keepalive(analysis_id_value)
     if not info:
@@ -153,13 +163,16 @@ def keepalive(analysis_id: AnalysisId):
 @router.post('/engine/configure/{analysis_id}', response_model=schemas.EngineStatusSchema)
 @handle_errors(operation='configure engine')
 @deterministic_tool
-def configure_engine(analysis_id: AnalysisId, request: schemas.EngineResourceConfig):
+def configure_engine(
+    analysis_id: AnalysisId,
+    request: schemas.EngineResourceConfig,
+    manager: ProcessManager = Depends(get_manager),
+):
     """Update engine resource configuration (restarts the engine).
 
     This will terminate any running jobs and restart the engine with the new
     resource configuration. Values set to null will use the default from settings.
     """
-    manager = get_manager()
     resource_config = request.model_dump()
     analysis_id_value = parse_analysis_id(analysis_id)
     manager.restart_engine_with_config(analysis_id_value, resource_config)
@@ -169,18 +182,16 @@ def configure_engine(analysis_id: AnalysisId, request: schemas.EngineResourceCon
 @router.get('/engine/status/{analysis_id}', response_model=schemas.EngineStatusSchema)
 @handle_errors(operation='get engine status')
 @deterministic_tool
-def get_engine_status(analysis_id: AnalysisId):
+def get_engine_status(analysis_id: AnalysisId, manager: ProcessManager = Depends(get_manager)):
     """Get the status of an analysis engine."""
-    manager = get_manager()
     return manager.get_engine_status(parse_analysis_id(analysis_id))
 
 
 @router.delete('/engine/{analysis_id}', status_code=204)
 @handle_errors(operation='shutdown engine')
 @deterministic_tool
-def shutdown_engine(analysis_id: AnalysisId):
+def shutdown_engine(analysis_id: AnalysisId, manager: ProcessManager = Depends(get_manager)):
     """Shutdown an analysis engine."""
-    manager = get_manager()
     analysis_id_value = parse_analysis_id(analysis_id)
     engine = manager.get_engine(analysis_id_value)
     if not engine:
@@ -192,9 +203,8 @@ def shutdown_engine(analysis_id: AnalysisId):
 @router.get('/engines', response_model=schemas.EngineListSchema)
 @handle_errors(operation='list engines')
 @deterministic_tool
-def list_engines():
+def list_engines(manager: ProcessManager = Depends(get_manager)):
     """List all active engines with their status."""
-    manager = get_manager()
     statuses = manager.list_all_engine_statuses()
     return {'engines': statuses, 'total': len(statuses)}
 
@@ -219,11 +229,13 @@ def get_engine_defaults():
 def export_data(
     request: schemas.ExportRequest,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Export pipeline result to download or output datasource."""
     if request.destination == schemas.ExportDestination.DOWNLOAD:
         file_bytes, filename, content_type = service.download_step(
             session=session,
+            manager=manager,
             target_step_id=request.target_step_id,
             analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
             export_format=request.format.value,
@@ -240,6 +252,7 @@ def export_data(
 
     result = service.export_data(
         session=session,
+        manager=manager,
         target_step_id=request.target_step_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         filename=request.filename,
@@ -266,10 +279,12 @@ def export_data(
 def download_step(
     request: schemas.DownloadRequest,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Download the result of a pipeline step in a specified format."""
     file_bytes, filename, content_type = service.download_step(
         session=session,
+        manager=manager,
         target_step_id=request.target_step_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         export_format=request.format.value,

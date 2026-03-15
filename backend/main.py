@@ -16,7 +16,7 @@ from core.config import settings
 from core.database import get_db, get_settings_db, init_db
 from core.logging import RequestLoggingMiddleware, configure_logging
 from core.namespace import list_namespaces, namespace_paths, reset_namespace, set_namespace_context
-from modules.compute.manager import get_manager
+from modules.compute.manager import ProcessManager
 from modules.scheduler import service as scheduler_service
 from modules.udf.seed import ensure_udf_seeds
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 
-async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
+async def engine_cleanup_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     """Periodically check and clean up idle engines."""
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
@@ -33,7 +33,6 @@ async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
         if stop_event.is_set():
             break
         try:
-            manager = get_manager()
             cleaned = manager.cleanup_idle_engines()
             if cleaned:
                 for analysis_id in cleaned:
@@ -44,7 +43,7 @@ async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
             logger.error(f'Error in engine cleanup: {e}', exc_info=True)
 
 
-async def scheduler_loop(stop_event: asyncio.Event) -> None:
+async def scheduler_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=settings.scheduler_check_interval)
@@ -107,7 +106,9 @@ async def scheduler_loop(stop_event: asyncio.Event) -> None:
                                     continue
 
                                 try:
-                                    result = scheduler_service.run_analysis_build(session, aid, datasource_id=sched.datasource_id)
+                                    result = scheduler_service.run_analysis_build(
+                                        session, aid, manager=manager, datasource_id=sched.datasource_id
+                                    )
                                     scheduler_service.mark_schedule_run(session, sched.id)
                                     completed_schedule_ids.add(sched.id)
                                     logger.info(
@@ -163,6 +164,7 @@ def _topo_sort_schedules(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info('Starting application...')
+    app.state.manager = ProcessManager()
     init_db()
     for session in get_db():
         ensure_udf_seeds(session)
@@ -170,8 +172,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Start background cleanup task
     stop_event = asyncio.Event()
-    cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event))
-    scheduler_task = asyncio.create_task(scheduler_loop(stop_event))
+    cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event, app.state.manager))
+    scheduler_task = asyncio.create_task(scheduler_loop(stop_event, app.state.manager))
 
     # Start Telegram bot only if explicitly enabled in settings
     from modules.telegram.bot import telegram_bot
@@ -207,8 +209,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Cleanup compute processes on shutdown
     logger.info('Shutting down compute processes...')
-    manager = get_manager()
-    manager.shutdown_all()
+    app.state.manager.shutdown_all()
     logger.info('Application shutdown complete')
 
 
@@ -257,7 +258,7 @@ async def health():
 
 
 @app.get('/health/ready')
-def readiness(session: Session = Depends(get_settings_db)):
+def readiness(request: Request, session: Session = Depends(get_settings_db)):
     """
     Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
@@ -277,7 +278,7 @@ def readiness(session: Session = Depends(get_settings_db)):
 
     # Check engine manager
     try:
-        manager = get_manager()
+        manager = request.app.state.manager
         engine_count = len(manager.list_engines())
         checks['engine_manager'] = 'ok'
         checks['active_engines'] = str(engine_count)

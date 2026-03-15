@@ -5,11 +5,13 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from core.database import get_db
+from core.dependencies import get_manager
 from core.error_handlers import handle_errors
 from core.validation import AnalysisId, DataSourceId, parse_analysis_id, parse_datasource_id
 from modules.analysis import schemas, service
 from modules.analysis.step_schemas import StepType, get_config_model, get_step_catalog
 from modules.compute import service as compute_service
+from modules.compute.manager import ProcessManager
 from modules.locks import service as lock_service
 from modules.mcp.decorators import deterministic_tool
 
@@ -148,6 +150,7 @@ async def execute_analysis(
     analysis_id: AnalysisId,
     request: Request,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Execute the analysis pipeline and return preview results with schema, rows, and row count."""
     analysis_payload = None
@@ -189,6 +192,7 @@ async def execute_analysis(
 
     preview = compute_service.preview_step(
         session=session,
+        manager=manager,
         target_step_id=steps[-1]['id'] if steps else 'source',
         row_limit=50,
         page=1,

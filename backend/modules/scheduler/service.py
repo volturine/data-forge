@@ -8,6 +8,7 @@ from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError, ScheduleValidationError
 from modules.analysis.models import Analysis
+from modules.compute.manager import ProcessManager
 from modules.datasource.models import DataSource
 from modules.engine_runs.models import EngineRun
 from modules.scheduler.models import Schedule
@@ -306,7 +307,7 @@ def mark_schedule_run(session: Session, schedule_id: str) -> None:
     session.commit()
 
 
-def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'schedule') -> dict:
+def execute_schedule(session: Session, manager: ProcessManager, schedule_id: str, triggered_by: str = 'schedule') -> dict:
     """Execute a schedule by building its target dataset.
 
     The datasource determines which analysis and tab to run.
@@ -387,6 +388,7 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
     pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
     compute_service.export_data(
         session=session,
+        manager=manager,
         target_step_id=target_step_id,
         analysis_pipeline=pipeline_payload,
         filename=filename,
@@ -443,6 +445,7 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
 def run_analysis_build(
     session: Session,
     analysis_id: str,
+    manager: ProcessManager | None = None,
     datasource_id: str | None = None,
     triggered_by: str = 'schedule',
     tab_id: str | None = None,
@@ -520,6 +523,7 @@ def run_analysis_build(
 
                 compute_service.export_data(
                     session=session,
+                    manager=manager,  # type: ignore[arg-type]
                     target_step_id=target_step_id,
                     analysis_pipeline=pipeline_payload,
                     filename=filename,

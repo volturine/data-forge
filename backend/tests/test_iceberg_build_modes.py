@@ -159,6 +159,7 @@ class TestBuildModeWiring:
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
                 filename='test_out',
@@ -184,6 +185,7 @@ class TestBuildModeWiring:
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
                 filename='test_out',
@@ -208,6 +210,7 @@ class TestBuildModeWiring:
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
                 filename='test_out',
@@ -232,6 +235,7 @@ class TestBuildModeWiring:
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
                 filename='test_out',
@@ -257,6 +261,7 @@ class TestBuildModeWiring:
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
                 filename='test_out',
@@ -287,6 +292,7 @@ class TestBuildModeWiring:
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
                 filename='test_out',

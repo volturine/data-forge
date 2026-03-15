@@ -14,7 +14,8 @@ export interface MCPTool {
 }
 
 export interface MCPCallResult {
-	status: 'executed' | 'pending';
+	status: 'executed' | 'pending' | 'validation_error';
+	errors?: { path: string; message: string }[];
 	token?: string;
 	tool_id?: string;
 	method?: string;
@@ -57,33 +58,11 @@ export interface MCPValidateResult {
 	args: Record<string, unknown>;
 }
 
-export interface MCPPreflightResult {
-	valid: boolean;
-	status?: 'pending' | 'ready';
-	errors?: { path: string; message: string }[];
-	token?: string;
-	tool_id?: string;
-	method?: string;
-	path?: string;
-	args?: Record<string, unknown>;
-	confirm_required?: boolean;
-}
-
 export function validateTool(
 	toolId: string,
 	args: Record<string, unknown>
 ): ResultAsync<MCPValidateResult, ApiError> {
 	return apiRequest<MCPValidateResult>('/v1/mcp/validate', {
-		method: 'POST',
-		body: JSON.stringify({ tool_id: toolId, args })
-	});
-}
-
-export function preflightTool(
-	toolId: string,
-	args: Record<string, unknown>
-): ResultAsync<MCPPreflightResult, ApiError> {
-	return apiRequest<MCPPreflightResult>('/v1/mcp/preflight', {
 		method: 'POST',
 		body: JSON.stringify({ tool_id: toolId, args })
 	});

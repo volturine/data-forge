@@ -17,7 +17,7 @@ from modules.chat.openrouter import chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.mcp.executor import call_tool
 from modules.mcp.pending import pending_store
-from modules.mcp.validation import check_schema_supported, validate_args
+from modules.mcp.validation import validate_args
 
 router = APIRouter(prefix='/ai/chat', tags=['ai-chat'])
 
@@ -145,22 +145,6 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
             tool_count += 1
 
             session.push_event({'type': 'tool_call', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args})
-
-            unsupported = check_schema_supported(tool.get('input_schema', {'type': 'object'}))
-            if unsupported:
-                schema_errors = [{'path': p, 'message': 'unsupported schema'} for p in unsupported]
-                session.push_event(
-                    {'type': 'tool_error', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args, 'errors': schema_errors}
-                )
-                tool_result_str = json.dumps({'status': 'unsupported_schema', 'errors': schema_errors})
-                session.messages.append(
-                    {
-                        'role': 'tool',
-                        'tool_call_id': tc.get('id', tool_id),
-                        'content': tool_result_str,
-                    }
-                )
-                continue
 
             valid, errors, normalized = validate_args(tool.get('input_schema', {'type': 'object'}), args)
             if not valid:

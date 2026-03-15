@@ -8,6 +8,14 @@ import { apiRequest } from './client';
 import { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
+function appendCsvOptions(formData: FormData, csvOptions: CSVOptions): void {
+	formData.append('delimiter', csvOptions.delimiter);
+	formData.append('quote_char', csvOptions.quote_char);
+	formData.append('has_header', String(csvOptions.has_header));
+	formData.append('skip_rows', String(csvOptions.skip_rows));
+	formData.append('encoding', csvOptions.encoding);
+}
+
 export function uploadFile(
 	file: File,
 	name: string,
@@ -17,13 +25,7 @@ export function uploadFile(
 	formData.append('file', file);
 	formData.append('name', name);
 
-	if (csvOptions) {
-		formData.append('delimiter', csvOptions.delimiter);
-		formData.append('quote_char', csvOptions.quote_char);
-		formData.append('has_header', String(csvOptions.has_header));
-		formData.append('skip_rows', String(csvOptions.skip_rows));
-		formData.append('encoding', csvOptions.encoding);
-	}
+	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
 	return apiRequest<DataSource>('/v1/datasource/upload', {
 		method: 'POST',
@@ -57,13 +59,7 @@ export function uploadBulkFiles(
 	const formData = new FormData();
 	files.forEach((file) => formData.append('files', file));
 
-	if (csvOptions) {
-		formData.append('delimiter', csvOptions.delimiter);
-		formData.append('quote_char', csvOptions.quote_char);
-		formData.append('has_header', String(csvOptions.has_header));
-		formData.append('skip_rows', String(csvOptions.skip_rows));
-		formData.append('encoding', csvOptions.encoding);
-	}
+	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
 	return apiRequest<BulkUploadResponse>('/v1/datasource/upload/bulk', {
 		method: 'POST',

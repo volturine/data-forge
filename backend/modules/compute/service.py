@@ -20,7 +20,7 @@ from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
 from core.namespace import get_namespace, namespace_paths
 from modules.analysis.models import Analysis
-from modules.compute.manager import get_manager
+from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
@@ -567,6 +567,7 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
 
 def preview_step(
     session: Session,
+    manager: ProcessManager,
     target_step_id: str,
     analysis_pipeline: dict,
     row_limit: int = 1000,
@@ -630,7 +631,6 @@ def preview_step(
         preview_steps = steps[: step_index + 1]
         preview_steps = _hydrate_udfs(session, preview_steps)
 
-    manager = get_manager()
     engine = manager.get_or_create_engine(analysis_id_value, resource_config=resource_config)
 
     additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
@@ -723,6 +723,7 @@ def preview_step(
 
 def get_step_schema(
     session: Session,
+    manager: ProcessManager,
     target_step_id: str,
     analysis_id: str,
     analysis_pipeline: dict,
@@ -758,7 +759,6 @@ def get_step_schema(
         schema_steps = steps[: step_index + 1]
         schema_steps = _hydrate_udfs(session, schema_steps)
 
-    manager = get_manager()
     engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
 
     additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
@@ -789,6 +789,7 @@ def get_step_schema(
 
 def get_step_row_count(
     session: Session,
+    manager: ProcessManager,
     target_step_id: str,
     analysis_id: str,
     analysis_pipeline: dict,
@@ -843,7 +844,6 @@ def get_step_row_count(
         count_steps = steps[: step_index + 1]
         count_steps = _hydrate_udfs(session, count_steps)
 
-    manager = get_manager()
     engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
 
     additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
@@ -916,6 +916,7 @@ def get_step_row_count(
 
 def export_data(
     session: Session,
+    manager: ProcessManager,
     target_step_id: str,
     analysis_pipeline: dict,
     filename: str = 'export',
@@ -978,8 +979,6 @@ def export_data(
         step_index = find_step_index(steps, target_step_id)
         export_steps = steps[: step_index + 1]
     export_steps = _hydrate_udfs(session, export_steps)
-
-    manager = get_manager()
 
     temp_engine = False
     temp_engine_id = f'{datasource_id}_export'
@@ -1219,6 +1218,7 @@ def export_data(
 
 def download_step(
     session: Session,
+    manager: ProcessManager,
     target_step_id: str,
     analysis_pipeline: dict,
     export_format: str = 'csv',
@@ -1270,7 +1270,6 @@ def download_step(
         download_steps = steps[: step_index + 1]
         download_steps = _hydrate_udfs(session, download_steps)
 
-    manager = get_manager()
     engine = manager.get_or_create_engine(analysis_id_value)
     branch = _resolve_branch_value(datasource_config)
     request_payload = _ensure_request_branch(
@@ -1407,7 +1406,7 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
     return required
 
 
-def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> dict:
+def run_analysis_build_from_payload(session: Session, manager: ProcessManager, pipeline: dict | None) -> dict:
     if not isinstance(pipeline, dict):
         raise ValueError('analysis_pipeline is required')
 
@@ -1462,6 +1461,7 @@ def run_analysis_build_from_payload(session: Session, pipeline: dict | None) -> 
 
                 export_data(
                     session=session,
+                    manager=manager,
                     target_step_id=target_step_id,
                     analysis_pipeline=pipeline,
                     filename=filename,

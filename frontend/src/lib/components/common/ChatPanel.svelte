@@ -23,7 +23,7 @@
 	import type { ChatEvent } from '$lib/api/chat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ToolArgsForm from '$lib/components/common/ToolArgsForm.svelte';
-	import { validateTool, preflightTool, callTool } from '$lib/api/mcp';
+	import { validateTool, callTool } from '$lib/api/mcp';
 	import type { MCPTool } from '$lib/api/mcp';
 
 	const queryClient = useQueryClient();
@@ -218,51 +218,38 @@
 	}
 
 	async function runPreflight(toolId: string, args: Record<string, unknown>): Promise<void> {
-		const result = await preflightTool(toolId, args);
+		const result = await callTool(toolId, args);
 		result.match(
-			(pr) => {
-				if (!pr.valid) {
-					chatStore.setDraftErrors(toolId, pr.errors ?? []);
+			(r) => {
+				if (r.status === 'validation_error') {
+					chatStore.setDraftErrors(toolId, r.errors ?? []);
 					reviewApplying = false;
 					return;
 				}
-				if (pr.status === 'pending' && pr.token) {
+				if (r.status === 'pending' && r.token) {
 					const tool = findTool(toolId);
 					const tc = chatStore.addLocalToolCall(
-						pr.tool_id ?? toolId,
-						pr.method ?? tool?.method ?? '',
-						pr.path ?? tool?.path ?? '',
-						pr.args ?? args
+						r.tool_id ?? toolId,
+						r.method ?? tool?.method ?? '',
+						r.path ?? tool?.path ?? '',
+						r.args ?? args
 					);
 					tc.status = 'pending';
 					chatStore.pending.push({
-						token: pr.token,
-						tool_id: pr.tool_id ?? toolId,
-						method: pr.method ?? '',
-						path: pr.path ?? '',
-						args: pr.args ?? args,
-						confirm_required: pr.confirm_required ?? false
+						token: r.token,
+						tool_id: r.tool_id ?? toolId,
+						method: r.method ?? '',
+						path: r.path ?? '',
+						args: r.args ?? args,
+						confirm_required: r.confirm_required ?? false
 					});
 					chatStore.clearDraft(toolId);
 					reviewingToolId = null;
 					reviewApplying = false;
 					return;
 				}
-				void executeDirectly(toolId, args);
-			},
-			(e) => {
-				chatStore.error = e.message;
-				reviewApplying = false;
-			}
-		);
-	}
-
-	async function executeDirectly(toolId: string, args: Record<string, unknown>): Promise<void> {
-		const tool = findTool(toolId);
-		chatStore.addLocalToolCall(toolId, tool?.method ?? '', tool?.path ?? '', args);
-		const result = await callTool(toolId, args);
-		result.match(
-			(r) => {
+				const tool = findTool(toolId);
+				chatStore.addLocalToolCall(toolId, tool?.method ?? '', tool?.path ?? '', args);
 				chatStore.setLocalToolResult(toolId, r.result ?? null);
 				void queryClient.invalidateQueries();
 				chatStore.clearDraft(toolId);

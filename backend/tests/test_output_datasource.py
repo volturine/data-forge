@@ -407,6 +407,7 @@ class TestRunAnalysisBuildOutputDatasource:
             mock_read.return_value.to_arrow.return_value = MagicMock(schema=MagicMock())
             export_result = export_data(
                 session=test_db_session,
+                manager=MagicMock(),
                 target_step_id='source',
                 analysis_pipeline={
                     'analysis_id': analysis_id,

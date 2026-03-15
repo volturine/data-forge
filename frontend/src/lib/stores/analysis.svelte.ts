@@ -143,51 +143,16 @@ export class AnalysisStore {
 
 	isDirty(): boolean {
 		if (!this.current) return false;
-		const savedMeta = this.lastSaved ?? {
+		const saved = this.lastSaved ?? {
 			name: this.current.name,
 			description: this.current.description ?? null
 		};
-		if (this.current.name !== savedMeta.name) return true;
-		if ((this.current.description ?? null) !== savedMeta.description) return true;
-		if (this.tabs.length !== this.savedTabs.length) return true;
-		for (let i = 0; i < this.tabs.length; i += 1) {
-			const currentTab = this.tabs[i];
-			const savedTab = this.savedTabs[i];
-			if (!savedTab) return true;
-			if (currentTab.id !== savedTab.id) return true;
-			if (currentTab.name !== savedTab.name) return true;
-			if ((currentTab.parent_id ?? null) !== (savedTab.parent_id ?? null)) return true;
-			if (currentTab.datasource.id !== savedTab.datasource.id) return true;
-			if (currentTab.datasource.analysis_tab_id !== savedTab.datasource.analysis_tab_id)
-				return true;
-			const currentConfig = JSON.stringify(currentTab.datasource.config);
-			const savedConfig = JSON.stringify(savedTab.datasource.config);
-			if (currentConfig !== savedConfig) return true;
-			const currentOutput = JSON.stringify(currentTab.output ?? {});
-			const savedOutput = JSON.stringify(savedTab.output ?? {});
-			if (currentOutput !== savedOutput) return true;
-			const currentSteps = currentTab.steps;
-			const savedSteps = savedTab.steps;
-			if (currentSteps.length !== savedSteps.length) return true;
-			for (let j = 0; j < currentSteps.length; j += 1) {
-				const currentStep = currentSteps[j];
-				const savedStep = savedSteps[j];
-				if (!savedStep) return true;
-				if (currentStep.id !== savedStep.id) return true;
-				if (currentStep.type !== savedStep.type) return true;
-				const currentDepends = currentStep.depends_on ?? [];
-				const savedDepends = savedStep.depends_on ?? [];
-				if (currentDepends.length !== savedDepends.length) return true;
-				if (currentDepends.some((d, k) => d !== savedDepends[k])) return true;
-				const currentConfig = JSON.stringify(currentStep.config ?? {});
-				const savedConfig = JSON.stringify(savedStep.config ?? {});
-				if (currentConfig !== savedConfig) return true;
-				const currentApplied = currentStep.is_applied !== false;
-				const savedApplied = savedStep.is_applied !== false;
-				if (currentApplied !== savedApplied) return true;
-			}
-		}
-		return false;
+		if (
+			this.current.name !== saved.name ||
+			(this.current.description ?? null) !== saved.description
+		)
+			return true;
+		return JSON.stringify(this.tabs) !== JSON.stringify(this.savedTabs);
 	}
 
 	private logStep(action: string, step: PipelineStep, meta?: Record<string, unknown>): void {
