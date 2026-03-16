@@ -7,7 +7,7 @@ from sqlmodel import Session
 from core.database import get_db
 from core.dependencies import get_manager
 from core.error_handlers import handle_errors
-from core.validation import AnalysisId, DataSourceId, parse_analysis_id, parse_datasource_id
+from core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas, service
 from modules.analysis.step_schemas import StepType, get_config_model, get_step_catalog
 from modules.compute import service as compute_service
@@ -39,12 +39,14 @@ def create_analysis(
     """Create a new analysis pipeline.
 
     IMPORTANT: Before calling this, use GET /api/v1/datasource to list existing datasources
-    and obtain a valid datasource ID. Both `tabs[].datasource.id` and
-    `tabs[].output.output_datasource_id` must reference an existing datasource ID
-    (or a sibling tab's output_datasource_id). Do NOT invent datasource IDs.
+    and obtain a valid datasource ID. `tabs[].datasource.id` must reference an existing
+    datasource ID. Do NOT invent datasource IDs.
+
+    `tabs[].output.result_id` must be a NEW UUID (uuid4) unique to each tab.
+    This is NOT a datasource — generate a fresh uuid4 for each tab's result_id.
 
     Each tab requires: a datasource (with id and config.branch), an output
-    (with output_datasource_id, format, filename), and optionally steps.
+    (with result_id, format, filename), and optionally steps.
     Use GET /api/v1/analysis/step-types to discover valid step types and their config schemas.
     """
     return service.create_analysis(session, data)
@@ -93,10 +95,11 @@ def update_analysis(
     data: schemas.AnalysisUpdateSchema,
     session: Session = Depends(get_db),
 ):
-    """Update an analysis.
+    """Update an analysis (requires editing lock — NOT for AI agent use).
 
     Requires client_id and lock_token from the lock system. Replaces the full tabs array.
-    Use step-level endpoints for adding/removing individual steps.
+    DO NOT call this to add tabs — use POST /analysis/{id}/tabs/{tab_id}/derive instead,
+    then add steps via POST /analysis/{id}/tabs/{tab_id}/steps.
     """
     analysis_id_value = parse_analysis_id(analysis_id)
     try:
@@ -126,21 +129,6 @@ def delete_analysis(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return None
-
-
-@router.post('/{analysis_id}/datasource/{datasource_id}')
-@handle_errors(operation='link datasource', value_error_status=400)
-@deterministic_tool
-def link_datasource(
-    analysis_id: AnalysisId,
-    datasource_id: DataSourceId,
-    session: Session = Depends(get_db),
-):
-    """Link a datasource to an analysis, creating a new tab if needed."""
-    analysis_id_value = parse_analysis_id(analysis_id)
-    datasource_id_value = parse_datasource_id(datasource_id)
-    service.link_datasource(session, analysis_id_value, datasource_id_value)
-    return {'message': f'DataSource {datasource_id_value} linked to Analysis {analysis_id_value}'}
 
 
 @router.post('/{analysis_id}/execute')
@@ -208,19 +196,6 @@ async def execute_analysis(
     }
 
 
-@router.delete('/{analysis_id}/datasources/{datasource_id}', status_code=204)
-@handle_errors(operation='unlink datasource', value_error_status=400)
-@deterministic_tool
-def unlink_datasource(
-    analysis_id: AnalysisId,
-    datasource_id: DataSourceId,
-    session: Session = Depends(get_db),
-):
-    """Remove a datasource link from an analysis and its associated tab."""
-    service.unlink_datasource(session, parse_analysis_id(analysis_id), parse_datasource_id(datasource_id))
-    return None
-
-
 class AddStepBody(BaseModel):
     type: StepType = Field(description='The step type. Use GET /step-types to see valid types.')
     config: dict = Field(default_factory=dict, description='Step configuration. Schema depends on step type.')
@@ -277,14 +252,26 @@ def update_step(
     Provide only the fields you want to change.
     If changing type, also provide the new config matching the new type's schema.
     """
-    effective = data.type
-    if effective and data.config:
-        model = get_config_model(effective)
+    analysis_id_value = parse_analysis_id(analysis_id)
+    if data.type and data.config:
+        model = get_config_model(data.type)
         if model:
             model.model_validate(data.config)
+    elif data.type and not data.config:
+        existing = service.get_step(session, analysis_id_value, tab_id, step_id)
+        model = get_config_model(data.type)
+        if model:
+            model.model_validate(existing.get('config', {}))
+    elif data.config and not data.type:
+        existing = service.get_step(session, analysis_id_value, tab_id, step_id)
+        existing_type = existing.get('type')
+        if existing_type:
+            model = get_config_model(existing_type)
+            if model:
+                model.model_validate(data.config)
     return service.update_step(
         session,
-        parse_analysis_id(analysis_id),
+        analysis_id_value,
         tab_id,
         step_id,
         data.config,
@@ -309,3 +296,24 @@ def remove_step(
         step_id,
     )
     return None
+
+
+class DeriveTabBody(BaseModel):
+    name: str | None = Field(None, description='Name for the new derived tab. Defaults to "Derived N".')
+
+
+@router.post('/{analysis_id}/tabs/{tab_id}/derive')
+@handle_errors(operation='derive tab', value_error_status=400)
+@deterministic_tool
+def derive_tab(
+    analysis_id: AnalysisId,
+    tab_id: str,
+    data: DeriveTabBody,
+    session: Session = Depends(get_db),
+):
+    """Create a new tab whose datasource is the given tab's output result_id.
+
+    This chains the output of an existing tab into a new tab for further processing.
+    The source tab must have a computed output.result_id. The new tab starts with no steps.
+    """
+    return service.derive_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)

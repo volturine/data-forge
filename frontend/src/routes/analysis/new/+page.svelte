@@ -56,7 +56,7 @@
 
 		const tabs = selectedDatasourceIds.map((datasourceId, index) => {
 			const name = `Source ${index + 1}`;
-			const output = buildOutputConfig({ name, branch: 'master' });
+			const output = buildOutputConfig({ outputId: crypto.randomUUID(), name, branch: 'master' });
 			return {
 				id: crypto.randomUUID(),
 				name,

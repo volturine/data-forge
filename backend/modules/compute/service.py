@@ -248,7 +248,7 @@ def _sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
 
 def _upsert_output_datasource(
     session: Session,
-    output_datasource_id: str | None,
+    result_id: str,
     name: str,
     source_type: str,
     config: dict,
@@ -259,26 +259,29 @@ def _upsert_output_datasource(
 ) -> DataSource:
     """Create or update the output datasource for an export.
 
-    If ``output_datasource_id`` points to an existing row, update it in-place.
+    If ``result_id`` points to an existing row, update it in-place.
     Otherwise create a brand-new ``DataSource``.  Returns the DB object.
     """
-    if output_datasource_id:
-        existing = session.get(DataSource, output_datasource_id)
-        if existing:
-            existing.name = name
-            existing.source_type = source_type
-            existing.config = config
-            if not keep_schema_cache:
-                existing.schema_cache = schema_cache
-            existing.created_by_analysis_id = analysis_id
-            existing.created_by = 'analysis'
-            if is_hidden is not None:
-                existing.is_hidden = is_hidden
-            session.add(existing)
-            session.commit()
-            return existing
+    try:
+        uuid.UUID(result_id)
+    except (ValueError, AttributeError):
+        raise ValueError(f'result_id must be a valid UUID, got: {result_id!r}') from None
+    existing = session.get(DataSource, result_id)
+    if existing:
+        existing.name = name
+        existing.source_type = source_type
+        existing.config = config
+        if not keep_schema_cache:
+            existing.schema_cache = schema_cache
+        existing.created_by_analysis_id = analysis_id
+        existing.created_by = 'analysis'
+        if is_hidden is not None:
+            existing.is_hidden = is_hidden
+        session.add(existing)
+        session.commit()
+        return existing
 
-    new_id = str(output_datasource_id) if output_datasource_id else str(uuid.uuid4())
+    new_id = result_id
     ds = DataSource(
         id=new_id,
         name=name,
@@ -514,9 +517,9 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
         output = tab.get('output') if isinstance(tab, dict) else None
         if not isinstance(output, dict):
             raise ValueError('Analysis pipeline tab missing output configuration')
-        output_id = output.get('output_datasource_id')
+        output_id = output.get('result_id')
         if not output_id:
-            raise ValueError('Analysis pipeline tab missing output.output_datasource_id')
+            raise ValueError('Analysis pipeline tab missing output.result_id')
         output_id = str(output_id)
         if output_id and tab_id:
             output_map[str(tab_id)] = str(output_id)
@@ -534,9 +537,9 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
         output = tab.get('output') if isinstance(tab, dict) else None
         if not isinstance(output, dict):
             raise ValueError('Analysis pipeline tab missing output configuration')
-        output_id = output.get('output_datasource_id')
+        output_id = output.get('result_id')
         if not output_id:
-            raise ValueError('Analysis pipeline tab missing output.output_datasource_id')
+            raise ValueError('Analysis pipeline tab missing output.result_id')
         config = datasource.get('config')
         if not isinstance(config, dict):
             raise ValueError('Analysis pipeline tab datasource.config must be a dict')
@@ -926,11 +929,11 @@ def export_data(
     tab_id: str | None = None,
     request_json: dict | None = None,
     triggered_by: str | None = None,
-    output_datasource_id: str | None = None,
+    result_id: str | None = None,
     build_mode: str = 'full',
 ) -> ExportDatasourceResult:
-    if output_datasource_id is None:
-        raise ValueError('Output exports require output_datasource_id')
+    if result_id is None:
+        raise ValueError('Output exports require result_id')
     if not iceberg_options or not isinstance(iceberg_options.get('branch'), str):
         raise ValueError('Iceberg exports require iceberg_options with an explicit branch')
     if timeout is None:
@@ -950,7 +953,7 @@ def export_data(
         raise ValueError('Export requires datasource_config')
 
     branch = _resolve_branch_value(datasource_config)
-    existing_output_ds = session.get(DataSource, output_datasource_id)
+    existing_output_ds = session.get(DataSource, result_id)
     run_kind = 'datasource_update' if existing_output_ds else 'datasource_create'
 
     request_payload = _ensure_request_branch(
@@ -1025,7 +1028,7 @@ def export_data(
             file_size_bytes=os.path.getsize(tmp_output),
         )
 
-        hc_datasource_id = str(output_datasource_id)
+        hc_datasource_id = str(result_id)
         db_result = session.execute(
             select(HealthCheck).where(col(HealthCheck.datasource_id) == hc_datasource_id)  # type: ignore[arg-type]
         )
@@ -1094,8 +1097,8 @@ def export_data(
         namespace = iceberg_options.get('namespace', 'outputs')
         branch_name = iceberg_options['branch']
         safe_branch = re.sub(r'[^a-zA-Z0-9_]+', '_', branch_name).strip('_')
-        table_name = f'{output_datasource_id}_{safe_branch}'
-        export_base = namespace_paths().exports_dir / str(output_datasource_id)
+        table_name = f'{result_id}_{safe_branch}'
+        export_base = namespace_paths().exports_dir / str(result_id)
         table_path = export_base / branch_name
         warehouse_path = namespace_paths().exports_dir
         catalog_path = export_base / 'catalog.db'
@@ -1155,7 +1158,7 @@ def export_data(
         schema_cache = data.get('schema', {})
         target_ds = _upsert_output_datasource(
             session=session,
-            output_datasource_id=output_datasource_id,
+            result_id=result_id,
             name=datasource_name,
             source_type=DataSourceType.ICEBERG,
             config=iceberg_ds_config,
@@ -1382,7 +1385,7 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
     for tab in tabs:
         tid = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         datasource = tab.get('datasource') if isinstance(tab, dict) else None
         input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
@@ -1468,7 +1471,7 @@ def run_analysis_build_from_payload(session: Session, manager: ProcessManager, p
                     iceberg_options=iceberg_options,
                     analysis_id=analysis_id,
                     tab_id=str(tab_id) if tab_id else None,
-                    output_datasource_id=output_config.get('output_datasource_id'),
+                    result_id=output_config.get('result_id'),
                     build_mode=tab_build_mode,
                 )
             else:

@@ -24,7 +24,7 @@ An analysis contains a `pipeline_definition` with the following structure:
                 'config': {'branch': 'master'}
             },
             'output': {
-                'output_datasource_id': 'uuid-of-output-datasource',
+                'result_id': 'uuid4-of-output-datasource',
                 'datasource_type': 'iceberg',
                 'format': 'parquet',
                 'filename': 'output_name',
@@ -67,7 +67,7 @@ This example shows an analysis with two tabs where the second tab uses the first
                 'config': {'branch': 'master'}
             },
             'output': {
-                'output_datasource_id': 'uuid-clean-output',
+                'result_id': 'uuid-clean-output',
                 'datasource_type': 'iceberg',
                 'format': 'parquet',
                 'filename': 'clean_data',
@@ -103,7 +103,7 @@ This example shows an analysis with two tabs where the second tab uses the first
                 'config': {'branch': 'master'}
             },
             'output': {
-                'output_datasource_id': 'uuid-agg-output',
+                'result_id': 'uuid-agg-output',
                 'datasource_type': 'iceberg',
                 'format': 'parquet',
                 'filename': 'aggregated',
@@ -130,9 +130,9 @@ This example shows an analysis with two tabs where the second tab uses the first
 **Key points:**
 
 1. **Tab 1** (`tab-clean`) reads from an external datasource and produces an output
-2. **Tab 2** (`tab-aggregate`) sets its `datasource.id` to Tab 1's `output.output_datasource_id` (required; datasource object is mandatory)
+2. **Tab 2** (`tab-aggregate`) sets its `datasource.id` to Tab 1's `output.result_id` (required; datasource object is mandatory)
 3. Tab 2 sets `analysis_tab_id` to indicate it's an **analysis-to-analysis** dependency
-4. Every tab must include `output.output_datasource_id` (no implicit output IDs)
+4. Every tab must include `output.result_id` as a valid UUID v4 (no implicit or non-UUID output IDs)
 5. At build time, the system resolves Tab 2's source as a lazyframe query (not a separate table read)
 
 **How it works at runtime:**
@@ -351,19 +351,17 @@ def build_analysis_pipeline_payload(
     # 1. Extract tabs
     tabs = pipeline.get('tabs', [])
     
-    # 2. Build source map (output.output_datasource_id → source_config)
+    # 2. Build source map (output.result_id → source_config)
     sources: dict[str, dict] = {}
-    output_map: dict[str, str] = {}
     for tab in tabs:
         output = tab.get('output')
         if not isinstance(output, dict):
             raise ValueError('Analysis pipeline tab missing output configuration')
-        output_id = output.get('output_datasource_id')
-        if not output_id:
-            raise ValueError('Analysis pipeline tab missing output.output_datasource_id')
+        result_id = output.get('result_id')
+        if not result_id:
+            raise ValueError('Analysis pipeline tab missing output.result_id')
         if tab.get('id'):
-            output_map[str(tab['id'])] = str(output_id)
-            sources[str(output_id)] = {
+            sources[str(result_id)] = {
                 'source_type': 'analysis',
                 'analysis_id': analysis.id,
                 'analysis_tab_id': tab['id'],

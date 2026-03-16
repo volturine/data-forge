@@ -208,6 +208,33 @@ def create_file_datasource(
     return response
 
 
+def create_placeholder_output_datasource(
+    session: Session,
+    result_id: str,
+    analysis_id: str,
+    analysis_tab_id: str,
+) -> None:
+    try:
+        uuid.UUID(result_id)
+    except ValueError:
+        raise ValueError(f'result_id must be a valid UUID, got: {result_id!r}') from None
+    existing = session.get(DataSource, result_id)
+    if existing:
+        return
+    datasource = DataSource(
+        id=result_id,
+        name=result_id,
+        source_type=DataSourceType.ANALYSIS,
+        config={'analysis_tab_id': analysis_tab_id},
+        created_by_analysis_id=analysis_id,
+        created_by='analysis',
+        is_hidden=False,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    session.add(datasource)
+    session.flush()
+
+
 def create_analysis_datasource(
     session: Session,
     name: str,

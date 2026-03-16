@@ -11,7 +11,7 @@ type PipelineTab = {
 		config: { branch: string } & Record<string, unknown>;
 	};
 	output: {
-		output_datasource_id: string;
+		result_id: string;
 		format: string;
 		filename: string;
 		build_mode?: string;
@@ -64,7 +64,7 @@ export function buildAnalysisPipelinePayload(
 	const outputByTabId = new Map<string, string>();
 	for (const tab of tabs) {
 		if (!tab.id) continue;
-		const outputId = tab.output.output_datasource_id;
+		const outputId = tab.output.result_id;
 		if (!outputId) {
 			missing.push(`output:${tab.id}`);
 			continue;
@@ -77,12 +77,12 @@ export function buildAnalysisPipelinePayload(
 		};
 	}
 	for (const id of sourceIds) {
-		if (sources[id]) continue;
 		const ds = datasourceMap.get(id);
 		if (!ds) {
-			missing.push(id);
+			if (!sources[id]) missing.push(id);
 			continue;
 		}
+		// Real datasource configs take priority over output analysis refs
 		sources[id] = { source_type: ds.source_type, ...ds.config };
 	}
 	if (missing.length) {
@@ -103,7 +103,7 @@ export function buildAnalysisPipelinePayload(
 				analysis_tab_id: analysisTabId,
 				config: config as { branch: string } & Record<string, unknown>
 			},
-			output: { ...tab.output, output_datasource_id: outputId },
+			output: { ...tab.output, result_id: outputId },
 			steps: applySteps(tab.steps ?? [])
 		};
 	});
@@ -126,7 +126,7 @@ export function buildTabPipelinePayload(args: {
 	const outputById = new Map<string, string>();
 	for (const item of args.tabs) {
 		if (!item.id) continue;
-		const outputId = item.output.output_datasource_id;
+		const outputId = item.output.result_id;
 		if (!outputId) continue;
 		outputMap.set(item.id, outputId);
 		outputById.set(outputId, item.id);
@@ -205,7 +205,7 @@ export function buildDatasourcePipelinePayload(args: {
 				config: { branch, ...(args.datasourceConfig ?? {}) }
 			},
 			output: {
-				output_datasource_id: datasource.id,
+				result_id: datasource.id,
 				format: 'parquet',
 				filename: datasource.name ?? 'export',
 				build_mode: 'full',

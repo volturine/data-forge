@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 
+async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
+    """Periodically sweep expired chat sessions."""
+    while not stop_event.is_set():
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=300)
+        if stop_event.is_set():
+            break
+        try:
+            from modules.chat.sessions import session_store
+
+            session_store.sweep()
+        except Exception as e:
+            logger.error('Chat sweep error: %s', e, exc_info=True)
+
+
 async def engine_cleanup_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     """Periodically check and clean up idle engines."""
     while not stop_event.is_set():
@@ -174,6 +189,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stop_event = asyncio.Event()
     cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event, app.state.manager))
     scheduler_task = asyncio.create_task(scheduler_loop(stop_event, app.state.manager))
+    chat_sweep_task = asyncio.create_task(chat_sweep_loop(stop_event))
 
     # Start Telegram bot only if explicitly enabled in settings
     from modules.telegram.bot import telegram_bot
@@ -206,6 +222,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.wait_for(cleanup_task, timeout=5)
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(scheduler_task, timeout=5)
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(chat_sweep_task, timeout=5)
 
     # Cleanup compute processes on shutdown
     logger.info('Shutting down compute processes...')

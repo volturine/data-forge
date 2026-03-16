@@ -17,7 +17,6 @@ export interface ChatEvent {
 	type:
 		| 'message'
 		| 'tool_call'
-		| 'pending'
 		| 'tool_result'
 		| 'tool_error'
 		| 'ui_patch'
@@ -41,12 +40,7 @@ export interface ChatEvent {
 	prompt_tokens?: number;
 	completion_tokens?: number;
 	total_tokens?: number;
-}
-
-export interface ApplyResult {
-	status: 'executed';
-	result: { status: number; body: unknown; ok: boolean };
-	patch: { resource: string; action: string; id?: string; data?: unknown } | null;
+	ts?: number;
 }
 
 export function createSession(
@@ -77,15 +71,18 @@ export function sendMessage(
 	});
 }
 
-export function applyPending(sessionId: string, token: string): ResultAsync<ApplyResult, ApiError> {
-	return apiRequest<ApplyResult>('/v1/ai/chat/apply', {
-		method: 'POST',
-		body: JSON.stringify({ session_id: sessionId, token })
-	});
-}
-
 export function getHistory(sessionId: string): ResultAsync<ChatHistoryResponse, ApiError> {
 	return apiRequest<ChatHistoryResponse>(`/v1/ai/chat/history/${sessionId}`);
+}
+
+export function updateSession(
+	sessionId: string,
+	updates: { model?: string; system_prompt?: string; api_key?: string }
+): ResultAsync<ChatSession, ApiError> {
+	return apiRequest<ChatSession>(`/v1/ai/chat/sessions/${sessionId}`, {
+		method: 'PATCH',
+		body: JSON.stringify(updates)
+	});
 }
 
 export function closeSession(
@@ -103,6 +100,18 @@ export interface OpenRouterModel {
 export function listModels(apiKey?: string): ResultAsync<OpenRouterModel[], ApiError> {
 	const params = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '';
 	return apiRequest<OpenRouterModel[]>(`/v1/ai/chat/models${params}`);
+}
+
+export interface ChatSessionInfo {
+	id: string;
+	model: string;
+	provider: string;
+	created_at: number;
+	preview: string;
+}
+
+export function listSessions(): ResultAsync<ChatSessionInfo[], ApiError> {
+	return apiRequest<ChatSessionInfo[]>('/v1/ai/chat/sessions');
 }
 
 export function openEventStream(sessionId: string): EventSource {

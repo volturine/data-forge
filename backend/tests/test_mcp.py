@@ -580,7 +580,7 @@ class TestBuildRegistryFailFast:
         app.routes.append(APIRoute('/api/v1/fake/endpoint', fake_endpoint, methods=['GET']))
         monkeypatch.setattr(app, 'openapi', fake_openapi)
 
-        with pytest.raises(ValueError, match='get_api_v1_fake_endpoint'):
+        with pytest.raises(ValueError, match='fake_endpoint'):
             reg.build_tool_registry(app)
 
     def test_undecorated_route_excluded(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -649,7 +649,7 @@ class TestStartupEnforcement:
         app.routes.append(APIRoute('/api/v1/startup/check', startup_check, methods=['GET']))
         monkeypatch.setattr(app, 'openapi', fake_openapi)
 
-        with pytest.raises(ValueError, match='get_api_v1_startup_check'):
+        with pytest.raises(ValueError, match='startup_check'):
             get_registry(app)
 
     def test_startup_populates_cache_so_no_double_build(self, monkeypatch) -> None:  # type: ignore[no-untyped-def]

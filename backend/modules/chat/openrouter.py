@@ -44,6 +44,7 @@ async def chat_with_tools(
     tools: list[dict],
 ) -> dict[str, Any]:
     """Send a chat completion request with tool definitions."""
+    logger.debug('chat_with_tools model=%s messages=%d tools=%d', model, len(messages), len(tools))
     payload: dict[str, Any] = {
         'model': model,
         'messages': messages,
@@ -68,7 +69,8 @@ async def list_models(api_key: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         resp = await client.get(f'{_OPENROUTER_BASE}/models', headers=_headers(api_key))
         if not resp.is_success:
-            return []
+            logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
+            raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
         data = resp.json()
         return [
             {'id': m.get('id', ''), 'name': m.get('name', m.get('id', '')), 'context_length': m.get('context_length', 0)}

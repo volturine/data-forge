@@ -150,9 +150,10 @@ class ProcessManager:
             'streaming_chunk_size': settings.polars_streaming_chunk_size,
         }
 
-    def get_engine_status(self, analysis_id: str) -> dict:
+    def get_engine_status(self, analysis_id: str, *, defaults: dict | None = None) -> dict:
         """Get status info for an engine - non-blocking."""
-        defaults = self._get_defaults()
+        if defaults is None:
+            defaults = self._get_defaults()
 
         with self._engines_lock:
             info = self._engines.get(analysis_id)
@@ -238,6 +239,7 @@ class ProcessManager:
 
     def list_all_engine_statuses(self) -> list[dict]:
         """Get status info for all engines."""
+        defaults = self._get_defaults()
         with self._engines_lock:
             analysis_ids = list(self._engines.keys())
-        return [self.get_engine_status(aid) for aid in analysis_ids]
+        return [self.get_engine_status(aid, defaults=defaults) for aid in analysis_ids]

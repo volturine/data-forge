@@ -25,7 +25,13 @@ LockResourceId = Annotated[str, Path(description='Lock resource ID', examples=['
 
 
 parse_analysis_id = _parse_uuid
-parse_datasource_id = _parse_uuid
+
+
+def parse_datasource_id(value: str) -> str:
+    """Datasource IDs may be UUIDs or slug strings — accept both."""
+    return value.strip()
+
+
 parse_schedule_id = _parse_uuid
 parse_engine_run_id = _parse_uuid
 parse_healthcheck_id = _parse_uuid

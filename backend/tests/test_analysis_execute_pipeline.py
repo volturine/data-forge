@@ -16,7 +16,7 @@ def test_execute_analysis_uses_pipeline_payload(client, sample_datasource: DataS
                     'config': {'branch': 'master', 'snapshot_id': '123'},
                 },
                 'output': {
-                    'output_datasource_id': 'out-1',
+                    'result_id': 'out-1',
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'out',

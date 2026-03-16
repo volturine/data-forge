@@ -90,7 +90,7 @@ def _build_tool(route_data: dict, components: dict) -> dict:
     if required:
         tool_schema['required'] = required
 
-    tool_id = f'{method.lower()}_{path.replace("/", "_").replace("{", "").replace("}", "").strip("_")}'
+    tool_id = route_data.get('name') or f'{method.lower()}_{path.replace("/", "_").replace("{", "").replace("}", "").strip("_")}'
 
     return {
         'id': tool_id,
@@ -104,17 +104,18 @@ def _build_tool(route_data: dict, components: dict) -> dict:
     }
 
 
-def _marked_routes(app: FastAPI) -> frozenset[tuple[str, str]]:
-    """Return (METHOD, path) pairs whose endpoint is marked with __mcp_tool__."""
-    marked = set()
+def _marked_routes(app: FastAPI) -> dict[tuple[str, str], str]:
+    """Return mapping of (METHOD, path) -> endpoint function name for marked routes."""
+    marked: dict[tuple[str, str], str] = {}
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
         if not getattr(route.endpoint, '__mcp_tool__', False):
             continue
+        name = route.endpoint.__name__
         for method in route.methods or []:
-            marked.add((method.upper(), route.path))
-    return frozenset(marked)
+            marked[(method.upper(), route.path)] = name
+    return marked
 
 
 def build_tool_registry(app: FastAPI) -> list[dict]:
@@ -136,7 +137,8 @@ def build_tool_registry(app: FastAPI) -> list[dict]:
                 continue
             if (method.upper(), path) not in allowed:
                 continue
-            tool = _build_tool({'method': method.upper(), 'path': path, 'operation': op}, components)
+            tool_name = allowed[(method.upper(), path)]
+            tool = _build_tool({'method': method.upper(), 'path': path, 'operation': op, 'name': tool_name}, components)
             issues = check_schema_supported(tool['input_schema'])
             if issues:
                 raise ValueError(f'Tool {tool["id"]!r} has unsupported schema: {", ".join(issues)}')

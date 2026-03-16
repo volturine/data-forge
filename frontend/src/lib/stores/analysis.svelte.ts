@@ -131,9 +131,7 @@ export class AnalysisStore {
 	}
 
 	private resolveTabs(analysis: Analysis): void {
-		const tabs = analysis.tabs.length
-			? analysis.tabs
-			: (analysis.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs;
+		const tabs = (analysis.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs;
 		if (tabs?.length) {
 			this.applyTabs(tabs);
 			return;
@@ -516,7 +514,7 @@ export class AnalysisStore {
 				const version = this.current?.version ?? null;
 				this.current = { ...updated, version };
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
-				const tabs = updated.tabs ?? [];
+				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
 				if (tabs.length) {
 					const sanitized = this.normalizeTabSteps(tabs).map((tab, i) => ensureTabDefaults(tab, i));
 					this.tabs = sanitized;
@@ -584,7 +582,7 @@ export class AnalysisStore {
 					analysis_tab_id: null,
 					config: { branch: 'master' }
 				},
-				output: buildOutputConfig({ name, branch: 'master' }),
+				output: buildOutputConfig({ outputId: crypto.randomUUID(), name, branch: 'master' }),
 				steps: []
 			};
 		});

@@ -11,6 +11,7 @@
 		buildOutputConfig,
 		ensureTabDefaults,
 		formatPipelineErrors,
+		isUuid,
 		validatePipelineTabs
 	} from '$lib/utils/analysis-tab';
 	import {
@@ -232,12 +233,8 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
-			const normalizedTabs = (result.value.analysis.tabs ?? []).map((tab, index) =>
-				ensureTabDefaults(tab, index)
-			);
 			analysisStore.applyAnalysis({
 				...result.value.analysis,
-				tabs: normalizedTabs,
 				version: result.value.version
 			});
 			lastLoadedVersion = result.value.version;
@@ -674,7 +671,7 @@
 
 	function handleAddTab(datasourceId: string, name: string) {
 		const tabId = `tab-${datasourceId}-${Date.now()}`;
-		const output = buildOutputConfig({ name, branch: 'master' });
+		const output = buildOutputConfig({ outputId: crypto.randomUUID(), name, branch: 'master' });
 		analysisStore.addTab({
 			id: tabId,
 			name,
@@ -708,7 +705,7 @@
 			return;
 		}
 		const tabId = `tab-analysis-${datasourceId}-${Date.now()}`;
-		const output = buildOutputConfig({ name, branch: 'master' });
+		const output = buildOutputConfig({ outputId: crypto.randomUUID(), name, branch: 'master' });
 		analysisStore.addTab({
 			id: tabId,
 			name,
@@ -732,11 +729,13 @@
 	function handleChangeDatasource(datasourceId: string, name: string) {
 		const active = activeTab;
 		if (!active) return;
+		const existingOutputId = active.output?.result_id as string | undefined;
+		const outputId = isUuid(existingOutputId) ? (existingOutputId as string) : crypto.randomUUID();
 		analysisStore.updateTab(active.id, {
 			datasource: { ...active.datasource, id: datasourceId, analysis_tab_id: null },
 			name,
 			output: buildOutputConfig({
-				outputId: active.output?.output_datasource_id ?? null,
+				outputId,
 				name,
 				branch: active.datasource.config?.branch ?? null
 			})
@@ -755,7 +754,8 @@
 			if (!analysisId) return;
 			const analysisTabId = datasourceId;
 			const sourceTab = analysisStore.tabs.find((item) => item.id === String(analysisTabId));
-			const outputId = sourceTab?.output.output_datasource_id ?? null;
+			const outputId =
+				typeof sourceTab?.output.result_id === 'string' ? sourceTab.output.result_id : null;
 			if (!outputId) {
 				alert('Selected analysis tab is missing an output datasource.');
 				return;
@@ -763,6 +763,8 @@
 			if (modalMode === 'change') {
 				const active = activeTab;
 				if (!active) return;
+				const existingId = active.output?.result_id as string | undefined;
+				const keepId = isUuid(existingId) ? (existingId as string) : crypto.randomUUID();
 				analysisStore.updateTab(active.id, {
 					datasource: {
 						...active.datasource,
@@ -771,7 +773,7 @@
 					},
 					name,
 					output: buildOutputConfig({
-						outputId: active.output?.output_datasource_id ?? null,
+						outputId: keepId,
 						name,
 						branch: active.datasource.config?.branch ?? null
 					})
@@ -781,7 +783,7 @@
 				markUnsaved();
 				return;
 			}
-			handleAddAnalysisTab(outputId, analysisId, name, analysisTabId);
+			handleAddAnalysisTab(outputId as string, analysisId, name, analysisTabId);
 			return;
 		}
 		if (modalMode === 'change') {
@@ -851,10 +853,7 @@
 			versionError = result.error.message;
 			return;
 		}
-		const normalizedTabs = (result.value.tabs ?? []).map((tab, index) =>
-			ensureTabDefaults(tab, index)
-		);
-		analysisStore.applyAnalysis({ ...result.value, tabs: normalizedTabs });
+		analysisStore.applyAnalysis(result.value);
 		showVersionModal = false;
 		isDirty = false;
 	}

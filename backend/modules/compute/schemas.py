@@ -86,9 +86,9 @@ class AnalysisPipelineTab(BaseModel):
     def validate_output(cls, value: dict) -> dict:
         if not isinstance(value, dict):
             raise ValueError('Analysis pipeline tab output must be a dict')
-        output_id = value.get('output_datasource_id')
+        output_id = value.get('result_id')
         if not isinstance(output_id, str) or not output_id.strip():
-            raise ValueError('Analysis pipeline tab output.output_datasource_id is required')
+            raise ValueError('Analysis pipeline tab output.result_id is required')
         filename = value.get('filename')
         if not isinstance(filename, str) or not filename.strip():
             raise ValueError('Analysis pipeline tab output.filename is required')
@@ -202,16 +202,16 @@ class ExportRequest(BaseModel):
     filename: str = 'export'
     destination: ExportDestination = ExportDestination.DOWNLOAD
     iceberg_options: IcebergExportOptions | None = None
-    output_datasource_id: str | None = None
+    result_id: str | None = None
 
-    @field_validator('output_datasource_id')
+    @field_validator('result_id')
     @classmethod
-    def validate_output_datasource_id(cls, value: str | None, info):
+    def validate_result_id(cls, value: str | None, info):
         if not info.data:
             return value
         destination = info.data.get('destination')
         if destination == ExportDestination.DATASOURCE and (not isinstance(value, str) or not value.strip()):
-            raise ValueError('Output exports require output_datasource_id')
+            raise ValueError('Output exports require result_id')
         return value
 
 

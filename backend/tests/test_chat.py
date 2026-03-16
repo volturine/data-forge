@@ -54,13 +54,13 @@ class TestLiveSession:
         s.push_event({'type': 'done'})
         assert len(s.get_history()) == 5
 
-    def test_busy_guard(self) -> None:
+    async def test_busy_guard(self) -> None:
         row = ChatSession(id='sid', provider='openrouter', model='gpt-4o-mini', api_key='key')
         s = LiveSession(row)
         assert s.busy is False
-        s.set_busy(True)
+        await s.set_busy(True)
         assert s.busy is True
-        s.set_busy(False)
+        await s.set_busy(False)
         assert s.busy is False
 
     def test_bounded_messages(self) -> None:
@@ -69,6 +69,7 @@ class TestLiveSession:
         for i in range(120):
             s.add_message('user', f'msg-{i}')
         assert len(s.messages) == 100
+        # No system messages, so oldest non-system kept is msg-20
         assert s.messages[0]['content'] == 'msg-20'
 
     def test_bounded_history(self) -> None:
@@ -209,6 +210,48 @@ class TestChatRoutes:
         assert live.system_prompt == 'Be brief.'
         assert live.messages[0] == {'role': 'system', 'content': 'Be brief.'}
 
+    def test_update_session_model(self, client: TestClient) -> None:
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'model': 'gpt-4o-mini', 'api_key': 'key'},
+        )
+        sid = resp.json()['session_id']
+        patch_resp = client.patch(
+            f'/api/v1/ai/chat/sessions/{sid}',
+            json={'model': 'anthropic/claude-3.5-sonnet'},
+        )
+        assert patch_resp.status_code == 200
+        assert patch_resp.json()['model'] == 'anthropic/claude-3.5-sonnet'
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert live.model == 'anthropic/claude-3.5-sonnet'
+
+    def test_update_session_system_prompt(self, client: TestClient) -> None:
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'model': 'gpt-4o-mini', 'api_key': 'key', 'system_prompt': 'Original.'},
+        )
+        sid = resp.json()['session_id']
+        client.patch(
+            f'/api/v1/ai/chat/sessions/{sid}',
+            json={'system_prompt': 'Updated prompt.'},
+        )
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert live.system_prompt == 'Updated prompt.'
+        assert live.messages[0] == {'role': 'system', 'content': 'Updated prompt.'}
+
+    def test_update_session_not_found(self, client: TestClient) -> None:
+        resp = client.patch(
+            '/api/v1/ai/chat/sessions/nonexistent',
+            json={'model': 'new-model'},
+        )
+        assert resp.status_code == 404
+
     def test_history_empty_for_new_session(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
@@ -262,13 +305,6 @@ class TestChatRoutes:
         resp = client.delete('/api/v1/ai/chat/sessions/nonexistent')
         assert resp.status_code == 404
 
-    def test_apply_unknown_session_returns_404(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/apply',
-            json={'session_id': 'nonexistent', 'token': 'tok'},
-        )
-        assert resp.status_code == 404
-
     def test_send_message_triggers_agent_task(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
@@ -293,7 +329,7 @@ class TestChatRoutes:
         assert send_resp.status_code == 200
         assert send_resp.json()['status'] == 'processing'
 
-    def test_send_message_busy_returns_409(self, client: TestClient) -> None:
+    async def test_send_message_busy_returns_409(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
             json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
@@ -304,7 +340,7 @@ class TestChatRoutes:
 
         live = session_store.get(sid)
         assert live is not None
-        live.set_busy(True)
+        await live.set_busy(True)
 
         send_resp = client.post(
             '/api/v1/ai/chat/message',
@@ -698,39 +734,8 @@ class TestToolValidationInChat:
         pending_events = [e for e in history if e.get('type') == 'pending']
         assert len(pending_events) == 0
 
-    async def test_valid_safe_tool_emits_pending_event(self, client: TestClient) -> None:
-        resp = client.post(
-            '/api/v1/ai/chat/sessions',
-            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
-        )
-        sid = resp.json()['session_id']
-
-        call_count = 0
-
-        async def mock_chat(api_key, model, messages, tools):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return TOOL_CALL_RESPONSE_VALID
-            return STOP_RESPONSE
-
-        with (
-            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
-            patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
-        ):
-            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
-
-        from modules.chat.sessions import session_store
-
-        live = session_store.get(sid)
-        assert live is not None
-        history = live.get_history()
-        pending_events = [e for e in history if e.get('type') == 'pending']
-        assert len(pending_events) == 1
-        assert pending_events[0]['tool_id'] == 'safe_tool'
-
-    async def test_valid_safe_tool_does_not_auto_execute(self, client: TestClient) -> None:
+    async def test_valid_safe_tool_auto_executes(self, client: TestClient) -> None:
+        """Tools are auto-executed during the agent turn and emit tool_result events."""
         resp = client.post(
             '/api/v1/ai/chat/sessions',
             json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
@@ -759,7 +764,8 @@ class TestToolValidationInChat:
         assert live is not None
         history = live.get_history()
         result_events = [e for e in history if e.get('type') == 'tool_result']
-        assert len(result_events) == 0
+        assert len(result_events) == 1
+        assert result_events[0]['tool_id'] == 'safe_tool'
 
 
 UNSUPPORTED_SCHEMA_REGISTRY = [
@@ -789,7 +795,43 @@ TOOL_CALL_UNSUPPORTED = {
 
 
 class TestUnsupportedSchemaInChat:
-    async def test_unsupported_schema_emits_tool_error(self, client: TestClient) -> None:
+    async def test_unsupported_schema_auto_executes(self, client: TestClient) -> None:
+        """Unsupported schema extensions are ignored by validate_args, so tools
+        with extra schema keywords pass validation and are auto-executed.
+        """
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        call_count = 0
+
+        async def mock_chat(api_key, model, messages, tools):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return TOOL_CALL_UNSUPPORTED
+            return STOP_RESPONSE
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=UNSUPPORTED_SCHEMA_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
+            await asyncio.sleep(0.15)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        history = live.get_history()
+        result_events = [e for e in history if e.get('type') == 'tool_result']
+        assert len(result_events) == 1
+        assert result_events[0]['tool_id'] == 'tool_with_bad_schema'
+
+    async def test_unsupported_schema_does_not_emit_tool_error(self, client: TestClient) -> None:
+        """Unsupported schema extensions don't trigger validation errors."""
         resp = client.post(
             '/api/v1/ai/chat/sessions',
             json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
@@ -818,11 +860,222 @@ class TestUnsupportedSchemaInChat:
         assert live is not None
         history = live.get_history()
         error_events = [e for e in history if e.get('type') == 'tool_error']
-        assert len(error_events) == 1
-        assert error_events[0]['tool_id'] == 'tool_with_bad_schema'
-        assert any(e['message'] == 'unsupported schema' for e in error_events[0]['errors'])
+        assert len(error_events) == 0
 
-    async def test_unsupported_schema_does_not_create_pending(self, client: TestClient) -> None:
+
+class TestProductionHardening:
+    """Tests for the 7 production-hardening fixes."""
+
+    def test_truncation_preserves_system_message(self) -> None:
+        """System message at index 0 survives truncation."""
+        row = ChatSession(id='sid', provider='openrouter', model='m', api_key='k')
+        s = LiveSession(row)
+        s.add_message('system', 'You are helpful.')
+        for i in range(120):
+            s.add_message('user', f'msg-{i}')
+        assert len(s.messages) == 100
+        assert s.messages[0] == {'role': 'system', 'content': 'You are helpful.'}
+        assert s.messages[1]['role'] == 'user'
+
+    async def test_acquire_turn_is_atomic(self) -> None:
+        """Two concurrent acquire_turn calls — exactly one wins."""
+        row = ChatSession(id='sid', provider='openrouter', model='m', api_key='k')
+        s = LiveSession(row)
+        results = await asyncio.gather(s.acquire_turn(), s.acquire_turn())
+        assert sorted(results) == [False, True]
+        assert s.busy is True
+
+    async def test_openrouter_error_pushes_error_event(self, client: TestClient) -> None:
+        """OpenRouterError during agent turn emits error+done events and clears busy."""
+        from modules.chat.openrouter import OpenRouterError
+
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        async def mock_chat(*_args, **_kwargs):
+            raise OpenRouterError('rate limited')
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=SAMPLE_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
+            await asyncio.sleep(0.15)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert live.busy is False
+        history = live.get_history()
+        error_events = [e for e in history if e.get('type') == 'error']
+        assert any('AI provider error' in e.get('content', '') for e in error_events)
+        done_events = [e for e in history if e.get('type') == 'done']
+        assert len(done_events) >= 1
+
+    async def test_timeout_pushes_error_event(self, client: TestClient) -> None:
+        """httpx.ReadTimeout during agent turn emits error+done events."""
+        import httpx
+
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        async def mock_chat(*_args, **_kwargs):
+            raise httpx.ReadTimeout('timed out')
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=SAMPLE_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
+            await asyncio.sleep(0.15)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert live.busy is False
+        history = live.get_history()
+        error_events = [e for e in history if e.get('type') == 'error']
+        assert any('timed out' in e.get('content', '') for e in error_events)
+
+    async def test_unexpected_error_pushes_error_event(self, client: TestClient) -> None:
+        """Unexpected RuntimeError during agent turn emits error+done events."""
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        async def mock_chat(*_args, **_kwargs):
+            raise RuntimeError('kaboom')
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=SAMPLE_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
+            await asyncio.sleep(0.15)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        assert live.busy is False
+        history = live.get_history()
+        error_events = [e for e in history if e.get('type') == 'error']
+        assert any('RuntimeError' in e.get('content', '') for e in error_events)
+
+    def test_models_raises_on_api_error(self, client: TestClient) -> None:
+        """list_models raising OpenRouterError returns 502."""
+        from modules.chat.openrouter import OpenRouterError
+
+        with patch('modules.chat.routes.list_models', new=AsyncMock(side_effect=OpenRouterError('bad gateway'))):
+            resp = client.get('/api/v1/ai/chat/models', params={'api_key': 'sk-test'})
+        assert resp.status_code == 502
+        assert 'bad gateway' in resp.json()['detail']
+
+    def test_reopen_stream_preserves_queued_events(self) -> None:
+        """Events queued before reopen_stream are not lost."""
+        row = ChatSession(id='sid', provider='openrouter', model='m', api_key='k')
+        s = LiveSession(row)
+        s.push_event({'type': 'message', 'content': 'preserved'})
+        s.reopen_stream()
+        assert not s._queue.empty()
+        event = s._queue.get_nowait()
+        assert event is not None
+        assert event['content'] == 'preserved'
+
+
+class TestTextToolCallParsing:
+    """Tests for _parse_text_tool_calls handling malformed model output."""
+
+    def test_parses_well_formed_array(self) -> None:
+        from modules.chat.routes import _parse_text_tool_calls
+
+        content = 'TOOLCALL>[{"name": "get_config", "arguments": {}}]'
+        cleaned, calls = _parse_text_tool_calls(content)
+        assert cleaned == ''
+        assert len(calls) == 1
+        assert calls[0]['function']['name'] == 'get_config'
+
+    def test_parses_single_object(self) -> None:
+        from modules.chat.routes import _parse_text_tool_calls
+
+        content = 'Some text TOOLCALL>{"name": "get_config", "arguments": {"id": "abc"}}'
+        cleaned, calls = _parse_text_tool_calls(content)
+        assert 'TOOLCALL' not in cleaned
+        assert len(calls) == 1
+        assert calls[0]['function']['name'] == 'get_config'
+
+    def test_handles_trailing_garbage(self) -> None:
+        from modules.chat.routes import _parse_text_tool_calls
+
+        content = 'TOOLCALL>[{"name": "my_tool", "arguments": {"x": 1}}]CALL>extra garbage'
+        cleaned, calls = _parse_text_tool_calls(content)
+        assert len(calls) == 1
+        assert calls[0]['function']['name'] == 'my_tool'
+
+    def test_handles_completely_malformed(self) -> None:
+        from modules.chat.routes import _parse_text_tool_calls
+
+        content = 'TOOLCALL>[not valid json at all'
+        cleaned, calls = _parse_text_tool_calls(content)
+        assert calls == []
+
+    def test_no_toolcall_returns_original(self) -> None:
+        from modules.chat.routes import _parse_text_tool_calls
+
+        content = 'Just a normal message'
+        cleaned, calls = _parse_text_tool_calls(content)
+        assert cleaned == content
+        assert calls == []
+
+    def test_preserves_text_before_toolcall(self) -> None:
+        from modules.chat.routes import _parse_text_tool_calls
+
+        content = 'I will call the tool now.\nTOOLCALL>[{"name": "test", "arguments": {}}]'
+        cleaned, calls = _parse_text_tool_calls(content)
+        assert cleaned == 'I will call the tool now.'
+        assert len(calls) == 1
+
+
+MALFORMED_ARGS_REGISTRY = [
+    {
+        'id': 'safe_tool',
+        'method': 'GET',
+        'path': '/api/v1/config',
+        'safety': 'safe',
+        'tags': ['config'],
+        'confirm_required': False,
+        'input_schema': {'type': 'object', 'properties': {}, 'required': []},
+    },
+]
+
+MALFORMED_ARGS_RESPONSE = {
+    'choices': [
+        {
+            'message': {
+                'content': None,
+                'tool_calls': [{'id': 'tc1', 'function': {'name': 'safe_tool', 'arguments': '{not valid json}'}}],
+            },
+            'finish_reason': 'tool_calls',
+        }
+    ],
+    'usage': {'prompt_tokens': 5, 'completion_tokens': 3, 'total_tokens': 8},
+}
+
+
+class TestMalformedToolArgs:
+    """Tests that malformed tool call arguments are handled deterministically."""
+
+    async def test_malformed_args_emits_tool_error(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
             json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
@@ -835,12 +1088,12 @@ class TestUnsupportedSchemaInChat:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return TOOL_CALL_UNSUPPORTED
+                return MALFORMED_ARGS_RESPONSE
             return STOP_RESPONSE
 
         with (
             patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
-            patch('modules.mcp.routes.get_registry', return_value=UNSUPPORTED_SCHEMA_REGISTRY),
+            patch('modules.mcp.routes.get_registry', return_value=MALFORMED_ARGS_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
             await asyncio.sleep(0.15)
@@ -850,5 +1103,63 @@ class TestUnsupportedSchemaInChat:
         live = session_store.get(sid)
         assert live is not None
         history = live.get_history()
-        pending_events = [e for e in history if e.get('type') == 'pending']
-        assert len(pending_events) == 0
+        error_events = [e for e in history if e.get('type') == 'tool_error']
+        assert len(error_events) == 1
+        assert error_events[0]['tool_id'] == 'safe_tool'
+        assert any('Malformed' in err.get('message', '') for err in error_events[0].get('errors', []))
+
+    async def test_malformed_args_skips_tool_execution(self, client: TestClient) -> None:
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        call_count = 0
+
+        async def mock_chat(api_key, model, messages, tools):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return MALFORMED_ARGS_RESPONSE
+            return STOP_RESPONSE
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=MALFORMED_ARGS_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
+            await asyncio.sleep(0.15)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        history = live.get_history()
+        result_events = [e for e in history if e.get('type') == 'tool_result']
+        assert len(result_events) == 0
+
+    async def test_events_have_ts_field(self, client: TestClient) -> None:
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', new=AsyncMock(return_value=STOP_RESPONSE)),
+            patch('modules.mcp.routes.get_registry', return_value=MALFORMED_ARGS_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
+            await asyncio.sleep(0.15)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        history = live.get_history()
+        assert len(history) > 0
+        for event in history:
+            assert 'ts' in event, f'Event missing ts: {event}'
+            assert isinstance(event['ts'], float)
+            assert event['ts'] > 0

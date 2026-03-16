@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from modules.chat.openrouter import chat_with_tools, list_models
+from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.mcp.executor import call_tool
-from modules.mcp.pending import pending_store
 from modules.mcp.validation import validate_args
 
 router = APIRouter(prefix='/ai/chat', tags=['ai-chat'])
@@ -35,19 +37,20 @@ class CreateSessionRequest(BaseModel):
     system_prompt: str = ''
 
 
+class UpdateSessionRequest(BaseModel):
+    """Request body to update session settings."""
+
+    model: str | None = None
+    system_prompt: str | None = None
+    api_key: str | None = None
+
+
 class MessageRequest(BaseModel):
     """Request body to send a message."""
 
     session_id: str
     content: str
     tool_ids: list[str] = []
-
-
-class ApplyRequest(BaseModel):
-    """Request body to apply a pending tool action."""
-
-    session_id: str
-    token: str
 
 
 def _resolve_api_key(session_key: str) -> str:
@@ -74,6 +77,56 @@ def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | N
     return {'resource': resource, 'action': action, 'id': record_id, 'data': body}
 
 
+_TOOL_CALL_RE = re.compile(r'TOOLCALL>\s*(\[.*\])', re.DOTALL)
+_TOOL_CALL_OBJ_RE = re.compile(r'TOOLCALL>\s*(\{.*\})', re.DOTALL)
+
+
+def _try_parse_json(text: str) -> list[dict] | None:
+    """Try to parse JSON, progressively trimming trailing garbage on failure."""
+    for end in range(len(text), 0, -1):
+        candidate = text[:end]
+        if not candidate.rstrip().endswith((']', '}')):
+            continue
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                return [data]
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _parse_text_tool_calls(content: str) -> tuple[str, list[dict]]:
+    """Extract tool calls dumped as text by models that don't support function calling.
+
+    Returns (cleaned_content, tool_calls) where tool_calls is in OpenAI format.
+    """
+    match = _TOOL_CALL_RE.search(content) or _TOOL_CALL_OBJ_RE.search(content)
+    if not match:
+        return content, []
+    calls_data = _try_parse_json(match.group(1))
+    if calls_data is None:
+        return content, []
+    tool_calls = []
+    for i, call in enumerate(calls_data):
+        if not isinstance(call, dict) or 'name' not in call:
+            continue
+        tool_calls.append(
+            {
+                'id': f'text_call_{i}',
+                'type': 'function',
+                'function': {
+                    'name': call['name'],
+                    'arguments': json.dumps(call.get('arguments', {})),
+                },
+            }
+        )
+    cleaned = re.sub(r'TOOLCALL>.*', '', content, flags=re.DOTALL).strip()
+    return cleaned, tool_calls
+
+
 async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, tool_ids: list[str] | None = None) -> None:
     """Run one agent turn: send message, handle tool calls, push SSE events."""
     from modules.mcp.routes import get_registry
@@ -82,7 +135,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
     if not api_key:
         session.push_event({'type': 'error', 'content': 'No API key configured'})
         session.push_event({'type': 'done'})
-        session.set_busy(False)
+        await session.set_busy(False)
         session_store.flush(session.id)
         return
 
@@ -102,56 +155,104 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
     mutating_tools = [t for t in registry if t['safety'] == 'mutating']
     all_tools = safe_tools + mutating_tools
 
-    max_turns = 5
-    for _ in range(max_turns):
-        response = await chat_with_tools(
-            api_key,
-            session.model,
-            session.messages,
-            all_tools,
-        )
-        choice = response.get('choices', [{}])[0]
-        msg = choice.get('message', {})
-        finish = choice.get('finish_reason', '')
+    try:
+        max_turns = 5
+        for _ in range(max_turns):
+            response = await chat_with_tools(
+                api_key,
+                session.model,
+                session.messages,
+                all_tools,
+            )
+            choice = response.get('choices', [{}])[0]
+            msg = choice.get('message', {})
+            finish = choice.get('finish_reason', '')
 
-        usage = response.get('usage', {})
-        turn_usage['prompt_tokens'] += usage.get('prompt_tokens', 0)
-        turn_usage['completion_tokens'] += usage.get('completion_tokens', 0)
-        turn_usage['total_tokens'] += usage.get('total_tokens', 0)
+            usage = response.get('usage', {})
+            turn_usage['prompt_tokens'] += usage.get('prompt_tokens', 0)
+            turn_usage['completion_tokens'] += usage.get('completion_tokens', 0)
+            turn_usage['total_tokens'] += usage.get('total_tokens', 0)
 
-        assistant_content = msg.get('content') or ''
-        tool_calls = msg.get('tool_calls') or []
+            assistant_content = msg.get('content') or ''
+            tool_calls = msg.get('tool_calls') or []
 
-        session.messages.append({'role': 'assistant', 'content': assistant_content, 'tool_calls': tool_calls or None})
+            # Fallback: parse tool calls from text when model doesn't support function calling
+            if not tool_calls and assistant_content:
+                cleaned, parsed = _parse_text_tool_calls(assistant_content)
+                if parsed:
+                    tool_calls = parsed
+                    assistant_content = cleaned
+                    finish = 'tool_calls'
 
-        if assistant_content:
-            session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
+            session.messages.append({'role': 'assistant', 'content': assistant_content, 'tool_calls': tool_calls or None})
 
-        if not tool_calls or finish not in ('tool_calls', 'stop', None, ''):
-            break
+            if assistant_content:
+                session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
 
-        for tc in tool_calls:
-            fn = tc.get('function', {})
-            tool_id = fn.get('name', '')
-            raw_args = fn.get('arguments', '{}')
-            args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            if not tool_calls or finish not in ('tool_calls', 'stop', None, ''):
+                break
 
-            tool = next((t for t in all_tools if t['id'] == tool_id), None)
-            if tool is None:
-                continue
+            for tc in tool_calls:
+                fn = tc.get('function', {})
+                tool_id = fn.get('name', '')
+                raw_args = fn.get('arguments', '{}')
 
-            method = tool['method']
-            path = tool['path']
-            tool_count += 1
+                tool = next((t for t in all_tools if t['id'] == tool_id), None)
+                if tool is None:
+                    continue
 
-            session.push_event({'type': 'tool_call', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args})
+                method = tool['method']
+                path = tool['path']
 
-            valid, errors, normalized = validate_args(tool.get('input_schema', {'type': 'object'}), args)
-            if not valid:
-                session.push_event(
-                    {'type': 'tool_error', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args, 'errors': errors}
-                )
-                tool_result_str = json.dumps({'status': 'validation_error', 'errors': errors})
+                try:
+                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except json.JSONDecodeError as exc:
+                    logger.warning('Malformed tool args session=%s tool=%s: %s', session.id, tool_id, exc)
+                    session.push_event(
+                        {
+                            'type': 'tool_error',
+                            'tool_id': tool_id,
+                            'method': method,
+                            'path': path,
+                            'args': {},
+                            'errors': [{'path': '$', 'message': f'Malformed arguments: {exc}'}],
+                        }
+                    )
+                    session.messages.append(
+                        {
+                            'role': 'tool',
+                            'tool_call_id': tc.get('id', tool_id),
+                            'content': json.dumps({'status': 'error', 'message': f'Malformed arguments: {exc}'}),
+                        }
+                    )
+                    continue
+                tool_count += 1
+
+                session.push_event({'type': 'tool_call', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args})
+
+                valid, errors, normalized = validate_args(tool.get('input_schema', {'type': 'object'}), args)
+                if not valid:
+                    session.push_event(
+                        {'type': 'tool_error', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args, 'errors': errors}
+                    )
+                    tool_result_str = json.dumps({'status': 'validation_error', 'errors': errors})
+                    session.messages.append(
+                        {
+                            'role': 'tool',
+                            'tool_call_id': tc.get('id', tool_id),
+                            'content': tool_result_str,
+                        }
+                    )
+                    continue
+
+                result = await call_tool(app, method, path, normalized)
+                patch = _infer_patch(tool_id, method, path, result)
+
+                session.push_event({'type': 'tool_result', 'tool_id': tool_id, 'result': result})
+                if patch:
+                    session.push_event({'type': 'ui_patch', **patch})
+
+                tool_result_str = json.dumps(result.get('body', ''))
                 session.messages.append(
                     {
                         'role': 'tool',
@@ -159,39 +260,32 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                         'content': tool_result_str,
                     }
                 )
-                continue
 
-            token = pending_store.create(tool_id, method, path, normalized)
-            event: dict[str, Any] = {
-                'type': 'pending',
-                'token': token,
-                'tool_id': tool_id,
-                'method': method,
-                'path': path,
-                'args': normalized,
-                'confirm_required': tool.get('confirm_required', False),
-            }
-            session.push_event(event)
-            tool_result_str = json.dumps({'status': 'pending', 'token': token})
+            if finish not in ('tool_calls',):
+                break
 
-            session.messages.append(
-                {
-                    'role': 'tool',
-                    'tool_call_id': tc.get('id', tool_id),
-                    'content': tool_result_str,
-                }
-            )
+        session.push_event({'type': 'usage', **turn_usage})
+    except OpenRouterError as exc:
+        logger.error('OpenRouter error session=%s: %s', session.id, exc)
+        session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
+    except httpx.TimeoutException as exc:
+        logger.error('Timeout session=%s: %s', session.id, exc)
+        session.push_event({'type': 'error', 'content': 'Request timed out'})
+    except Exception as exc:
+        logger.exception('Unexpected error session=%s', session.id)
+        session.push_event({'type': 'error', 'content': f'Internal error: {type(exc).__name__}'})
+    finally:
+        elapsed = time.monotonic() - turn_start
+        logger.info('chat turn end session=%s elapsed=%.2fs tools=%d', session.id, elapsed, tool_count)
+        session.push_event({'type': 'done'})
+        await session.set_busy(False)
+        session_store.flush(session.id)
 
-        if finish not in ('tool_calls',):
-            break
 
-    elapsed = time.monotonic() - turn_start
-    logger.info('chat turn end session=%s elapsed=%.2fs tools=%d', session.id, elapsed, tool_count)
-
-    session.push_event({'type': 'usage', **turn_usage})
-    session.push_event({'type': 'done'})
-    session.set_busy(False)
-    session_store.flush(session.id)
+@router.get('/sessions')
+def list_sessions() -> list[dict]:
+    """List all active chat sessions with preview info."""
+    return session_store.list_sessions()
 
 
 @router.post('/sessions')
@@ -201,6 +295,27 @@ def create_session(body: CreateSessionRequest) -> dict:
     return {'session_id': session.id, 'model': session.model, 'provider': session.provider}
 
 
+@router.patch('/sessions/{session_id}')
+def update_session(session_id: str, body: UpdateSessionRequest) -> dict:
+    """Update model, system prompt, or API key on a live session."""
+    session = session_store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail='Session not found')
+    if body.model is not None:
+        session.model = body.model
+    if body.api_key is not None:
+        session.api_key = body.api_key
+    if body.system_prompt is not None:
+        session.system_prompt = body.system_prompt
+        # Update system message in conversation history
+        if session.messages and session.messages[0].get('role') == 'system':
+            session.messages[0]['content'] = body.system_prompt
+        elif body.system_prompt:
+            session.messages.insert(0, {'role': 'system', 'content': body.system_prompt})
+    session_store.flush(session_id)
+    return {'session_id': session_id, 'model': session.model, 'provider': session.provider}
+
+
 @router.post('/message')
 async def send_message(request: Request, body: MessageRequest) -> dict:
     """Send a user message; agent processing is kicked off asynchronously."""
@@ -208,11 +323,10 @@ async def send_message(request: Request, body: MessageRequest) -> dict:
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
 
-    if session.busy:
+    acquired = await session.acquire_turn()
+    if not acquired:
         session.push_event({'type': 'error', 'content': 'Agent is busy — wait for the current turn to finish'})
         raise HTTPException(status_code=409, detail='Agent busy')
-
-    session.set_busy(True)
     asyncio.create_task(_run_agent_turn(session, request.app, body.content, body.tool_ids or None))
     return {'status': 'processing', 'session_id': body.session_id}
 
@@ -237,6 +351,7 @@ async def stream(session_id: str) -> StreamingResponse:
 
     async def generate() -> AsyncIterator[bytes]:
         queue = session._queue
+        heartbeat_task: asyncio.Task[None] | None = None
 
         async def _heartbeat_loop() -> None:
             while True:
@@ -244,18 +359,25 @@ async def stream(session_id: str) -> StreamingResponse:
                 if not session._closed:
                     queue.put_nowait({'_heartbeat': True})
 
-        heartbeat_task = asyncio.create_task(_heartbeat_loop())
-
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            if event.get('_heartbeat'):
-                yield b': heartbeat\n\n'
-                continue
-            yield f'data: {json.dumps(event)}\n\n'.encode()
-
-        heartbeat_task.cancel()
+        try:
+            heartbeat_task = asyncio.create_task(_heartbeat_loop())
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL * 3)
+                except TimeoutError:
+                    yield b': heartbeat\n\n'
+                    continue
+                if event is None:
+                    break
+                if event.get('_heartbeat'):
+                    yield b': heartbeat\n\n'
+                    continue
+                yield f'data: {json.dumps(event)}\n\n'.encode()
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
     return StreamingResponse(generate(), media_type='text/event-stream', headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
@@ -269,31 +391,6 @@ def delete_session(session_id: str) -> dict:
     return {'status': 'closed', 'session_id': session_id}
 
 
-@router.post('/apply')
-async def apply(request: Request, body: ApplyRequest) -> dict:
-    """Apply a pending tool action by token."""
-    session = session_store.get(body.session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail='Session not found')
-
-    entry = pending_store.pop(body.token)
-    if entry is None:
-        raise HTTPException(status_code=404, detail='Token not found or expired')
-
-    result = await call_tool(request.app, entry['method'], entry['path'], entry['args'])
-    patch = _infer_patch(entry['tool_id'], entry['method'], entry['path'], result)
-
-    session.messages.append({'role': 'tool', 'tool_call_id': entry['tool_id'], 'content': json.dumps(result.get('body', ''))})
-
-    event: dict[str, Any] = {'type': 'tool_result', 'tool_id': entry['tool_id'], 'result': result}
-    session.push_event(event)
-    if patch:
-        session.push_event({'type': 'ui_patch', **patch})
-
-    session_store.flush(body.session_id)
-    return {'status': 'executed', 'result': result, 'patch': patch}
-
-
 @router.get('/models')
 async def get_models(api_key: str = '') -> list[dict]:
     """List models available from OpenRouter. Uses provided key or falls back to global."""
@@ -302,4 +399,7 @@ async def get_models(api_key: str = '') -> list[dict]:
     key = api_key or get_resolved_openrouter_key()
     if not key:
         raise HTTPException(status_code=400, detail='No API key configured')
-    return await list_models(key)
+    try:
+        return await list_models(key)
+    except OpenRouterError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

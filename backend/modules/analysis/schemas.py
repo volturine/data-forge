@@ -1,7 +1,8 @@
+import re
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from modules.analysis.step_schemas import StepType
 
@@ -36,16 +37,31 @@ class TabDatasourceSchema(BaseModel):
     config: TabDatasourceConfig
 
 
+_UUID4_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', re.IGNORECASE)
+
+
 class TabOutputSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra='allow')
 
-    output_datasource_id: Annotated[
+    result_id: Annotated[
         str,
         StringConstraints(min_length=1, strip_whitespace=True),
-        Field(description=('ID of an existing datasource to write output to. Typically the same datasource ID used in datasource.id.')),
+        Field(
+            description=(
+                "A new UUID v4 identifier for this tab's result output. Generate a new UUID (uuid4) for each tab. "
+                'This is NOT a datasource reference — it is a brand-new ID where the computed output will be stored.'
+            )
+        ),
     ]
     format: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     filename: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+
+    @field_validator('result_id')
+    @classmethod
+    def validate_uuid4(cls, v: str) -> str:
+        if not _UUID4_RE.match(v):
+            raise ValueError(f'result_id must be a valid UUID v4, got: {v!r}')
+        return v
 
 
 class TabSchema(BaseModel):
@@ -59,6 +75,12 @@ class TabSchema(BaseModel):
     steps: list[PipelineStepSchema] = []
 
 
+def _reject_pipeline_steps(data: Any) -> Any:
+    if isinstance(data, dict) and 'pipeline_steps' in data:
+        raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
+    return data
+
+
 class AnalysisCreateSchema(BaseModel):
     name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     description: str | None = None
@@ -67,9 +89,7 @@ class AnalysisCreateSchema(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def reject_pipeline_steps(cls, data: Any) -> Any:
-        if isinstance(data, dict) and 'pipeline_steps' in data:
-            raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
-        return data
+        return _reject_pipeline_steps(data)
 
 
 class AnalysisUpdateSchema(BaseModel):
@@ -83,9 +103,7 @@ class AnalysisUpdateSchema(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def reject_pipeline_steps(cls, data: Any) -> Any:
-        if isinstance(data, dict) and 'pipeline_steps' in data:
-            raise ValueError("'pipeline_steps' is not accepted; use 'tabs'")
-        return data
+        return _reject_pipeline_steps(data)
 
 
 class AnalysisResponseSchema(BaseModel):
@@ -100,7 +118,6 @@ class AnalysisResponseSchema(BaseModel):
     updated_at: datetime
     result_path: str | None
     thumbnail: str | None
-    tabs: list[TabSchema] = []
 
 
 class AnalysisGalleryItemSchema(BaseModel):

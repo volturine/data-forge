@@ -23,7 +23,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_1',
@@ -53,9 +53,9 @@ class TestAnalysisCreate:
         assert 'updated_at' in result
 
         assert 'pipeline_definition' in result
-        assert len(result['tabs'][0]['steps']) == 1
+        assert len(result['pipeline_definition']['tabs'][0]['steps']) == 1
         assert 'datasource_ids' not in result['pipeline_definition']
-        assert result['tabs'][0]['datasource']['id'] == sample_datasource.id
+        assert result['pipeline_definition']['tabs'][0]['datasource']['id'] == sample_datasource.id
 
     def test_create_analysis_with_multiple_datasources(self, client, sample_datasources: list[DataSource]):
         datasource_ids = [ds.id for ds in sample_datasources]
@@ -74,7 +74,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'left_source',
@@ -98,7 +98,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'right_source',
@@ -131,7 +131,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_2',
@@ -160,7 +160,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_3',
@@ -177,7 +177,7 @@ class TestAnalysisCreate:
 
         assert result['name'] == 'Analysis Without Description'
         assert result['description'] is None
-        assert result['tabs']
+        assert result['pipeline_definition']['tabs']
 
     def test_create_analysis_with_complex_pipeline(self, client, sample_datasource: DataSource):
         payload = {
@@ -194,7 +194,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_4',
@@ -215,7 +215,7 @@ class TestAnalysisCreate:
                         {
                             'id': 'step3',
                             'type': 'sort',
-                            'config': {'column': 'age', 'descending': True},
+                            'config': {'columns': ['age'], 'descending': [True]},
                             'depends_on': ['step2'],
                         },
                     ],
@@ -228,9 +228,9 @@ class TestAnalysisCreate:
         assert response.status_code == 200
         result = response.json()
 
-        assert len(result['tabs'][0]['steps']) == 3
-        assert result['tabs'][0]['steps'][1]['depends_on'] == ['step1']
-        assert result['tabs'][0]['steps'][2]['depends_on'] == ['step2']
+        assert len(result['pipeline_definition']['tabs'][0]['steps']) == 3
+        assert result['pipeline_definition']['tabs'][0]['steps'][1]['depends_on'] == ['step1']
+        assert result['pipeline_definition']['tabs'][0]['steps'][2]['depends_on'] == ['step2']
 
     def test_create_analysis_rejects_pipeline_steps(self, client, sample_datasource: DataSource):
         payload = {
@@ -247,7 +247,7 @@ class TestAnalysisCreate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_legacy',
@@ -370,7 +370,7 @@ class TestAnalysisUpdate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_5',
@@ -394,10 +394,10 @@ class TestAnalysisUpdate:
         assert response.status_code == 200
         result = response.json()
 
-        assert len(result['tabs'][0]['steps']) == 1
-        assert result['tabs'][0]['steps'][0]['id'] == 'new_step'
-        assert result['tabs'][0]['steps'][0]['type'] == 'groupby'
-        assert result['tabs']
+        assert len(result['pipeline_definition']['tabs'][0]['steps']) == 1
+        assert result['pipeline_definition']['tabs'][0]['steps'][0]['id'] == 'new_step'
+        assert result['pipeline_definition']['tabs'][0]['steps'][0]['type'] == 'groupby'
+        assert result['pipeline_definition']['tabs']
 
     def test_update_analysis_status(self, client, sample_analysis: Analysis):
         client_id, lock_token = acquire_lock(client, sample_analysis.id)
@@ -512,48 +512,6 @@ class TestAnalysisDelete:
         assert len(links_after) == 0
 
 
-class TestAnalysisDataSourceLink:
-    def test_link_datasource_success(self, client, sample_analysis: Analysis, sample_datasources: list[DataSource]):
-        new_datasource = sample_datasources[1]
-
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{new_datasource.id}')
-
-        assert response.status_code == 200
-        assert 'linked' in response.json()['message']
-
-        get_response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
-        result = get_response.json()
-
-        assert any(tab.get('datasource', {}).get('id') == new_datasource.id for tab in result['pipeline_definition']['tabs'])
-
-    def test_link_datasource_already_linked(self, client, sample_analysis: Analysis, sample_datasource: DataSource):
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{sample_datasource.id}')
-
-        assert response.status_code == 200
-
-        get_response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
-        result = get_response.json()
-
-        datasource_count = sum(
-            1 for tab in result['pipeline_definition']['tabs'] if tab.get('datasource', {}).get('id') == sample_datasource.id
-        )
-        assert datasource_count == 1
-
-    def test_link_datasource_analysis_not_found(self, client, sample_datasource: DataSource):
-        missing_id = str(uuid.uuid4())
-        response = client.post(f'/api/v1/analysis/{missing_id}/datasource/{sample_datasource.id}')
-
-        assert response.status_code == 404
-        assert 'not found' in response.json()['detail']
-
-    def test_link_datasource_datasource_not_found(self, client, sample_analysis: Analysis):
-        missing_id = str(uuid.uuid4())
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{missing_id}')
-
-        assert response.status_code == 404
-        assert 'not found' in response.json()['detail']
-
-
 class TestStepTypes:
     def test_list_step_types(self, client):
         response = client.get('/api/v1/analysis/step-types')
@@ -624,7 +582,7 @@ class TestAddStep:
         assert result['type'] == 'limit'
 
         analysis = client.get(f'/api/v1/analysis/{sample_analysis.id}').json()
-        assert analysis['tabs'][0]['steps'][0]['type'] == 'limit'
+        assert analysis['pipeline_definition']['tabs'][0]['steps'][0]['type'] == 'limit'
 
     def test_add_step_with_depends_on(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
@@ -749,7 +707,7 @@ class TestRemoveStep:
         assert response.status_code == 204
 
         analysis = client.get(f'/api/v1/analysis/{sample_analysis.id}').json()
-        assert len(analysis['tabs'][0]['steps']) == 0
+        assert len(analysis['pipeline_definition']['tabs'][0]['steps']) == 0
 
     def test_remove_step_cleans_depends_on(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
@@ -768,7 +726,7 @@ class TestRemoveStep:
         assert delete_response.status_code == 204
 
         analysis = client.get(f'/api/v1/analysis/{sample_analysis.id}').json()
-        remaining = analysis['tabs'][0]['steps']
+        remaining = analysis['pipeline_definition']['tabs'][0]['steps']
         assert len(remaining) == 1
         assert remaining[0]['id'] == second_step_id
         assert first_step_id not in remaining[0].get('depends_on', [])
@@ -803,7 +761,7 @@ class TestAnalysisValidate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'out_validate',
@@ -836,7 +794,7 @@ class TestAnalysisValidate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'out_validate_bad',
@@ -865,7 +823,7 @@ class TestAnalysisValidate:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'out_no_persist',
@@ -882,3 +840,101 @@ class TestAnalysisValidate:
         analyses = list_response.json()
         names = [a['name'] for a in analyses]
         assert 'Validate No Persist' not in names
+
+
+class TestStepValidation:
+    def _make_payload(self, datasource_id: str, steps: list[dict]) -> dict:
+        return {
+            'name': 'Step Validation Test',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': datasource_id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'format': 'parquet',
+                        'filename': 'test_out',
+                    },
+                    'steps': steps,
+                }
+            ],
+        }
+
+    def test_rejects_unknown_step_type(self, client, sample_datasource: DataSource):
+        payload = self._make_payload(
+            sample_datasource.id,
+            [{'id': 's1', 'type': 'nonexistent_op', 'config': {}, 'depends_on': []}],
+        )
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 422
+
+    def test_rejects_invalid_sort_config(self, client, sample_datasource: DataSource):
+        payload = self._make_payload(
+            sample_datasource.id,
+            [{'id': 's1', 'type': 'sort', 'config': {'descending': True}, 'depends_on': []}],
+        )
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 400
+
+    def test_rejects_depends_on_nonexistent_step(self, client, sample_datasource: DataSource):
+        payload = self._make_payload(
+            sample_datasource.id,
+            [{'id': 's1', 'type': 'select', 'config': {'columns': ['a']}, 'depends_on': ['missing']}],
+        )
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 400
+
+    def test_rejects_join_with_nonexistent_tab(self, client, sample_datasource: DataSource):
+        payload = self._make_payload(
+            sample_datasource.id,
+            [
+                {
+                    'id': 's1',
+                    'type': 'join',
+                    'config': {'right_source': 'nonexistent_tab', 'how': 'inner', 'join_columns': []},
+                    'depends_on': [],
+                }
+            ],
+        )
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 400
+
+    def test_accepts_valid_steps(self, client, sample_datasource: DataSource):
+        payload = self._make_payload(
+            sample_datasource.id,
+            [
+                {
+                    'id': 's1',
+                    'type': 'filter',
+                    'config': {
+                        'conditions': [{'column': 'age', 'operator': '>', 'value': 25}],
+                        'logic': 'AND',
+                    },
+                    'depends_on': [],
+                },
+                {
+                    'id': 's2',
+                    'type': 'select',
+                    'config': {'columns': ['name']},
+                    'depends_on': ['s1'],
+                },
+            ],
+        )
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 200
+
+    def test_add_step_rejects_bad_dependency(self, client, sample_analysis: Analysis):
+        tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
+        payload = {
+            'type': 'select',
+            'config': {'columns': ['name']},
+            'depends_on': ['nonexistent_step'],
+        }
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/steps', json=payload)
+        assert response.status_code == 400

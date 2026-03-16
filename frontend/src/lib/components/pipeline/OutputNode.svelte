@@ -3,7 +3,7 @@
 		id: string;
 		name: string;
 		output: {
-			output_datasource_id: string;
+			result_id: string;
 			format: string;
 			filename: string;
 			build_mode?: string;
@@ -15,6 +15,7 @@
 			};
 		};
 	};
+	import type { AnalysisTabOutput } from '$lib/types/analysis';
 	import type { Subscriber } from '$lib/api/settings';
 	import type { BuildResponse } from '$lib/api/compute';
 	import { getSubscribers } from '$lib/api/settings';
@@ -25,6 +26,7 @@
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import { isUuid } from '$lib/utils/analysis-tab';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
@@ -107,7 +109,7 @@
 	});
 	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
 
-	const outputDatasourceId = $derived(activeTab?.output?.output_datasource_id ?? null);
+	const outputDatasourceId = $derived(activeTab?.output?.result_id ?? null);
 	const outputDefaults = $derived.by(() => {
 		const tab = activeTab;
 		if (!tab) return null;
@@ -135,10 +137,7 @@
 			}
 		};
 	});
-	const outputDatasource = $derived(
-		outputDatasourceId ? (datasourceStore.getDatasource(outputDatasourceId) ?? null) : null
-	);
-	const canQueryOutput = $derived(!!outputDatasourceId && !!outputDatasource);
+	const canQueryOutput = $derived(isUuid(outputDatasourceId));
 
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['healthchecks', outputDatasourceId],
@@ -245,14 +244,14 @@
 		if (!tab) return;
 		const currentOutput = tab.output as Record<string, unknown>;
 		const fallback = outputDefaults ?? {
-			output_datasource_id: tab.output.output_datasource_id,
+			result_id: tab.output.result_id,
 			format: 'parquet',
 			filename: 'export',
 			build_mode: 'full',
 			iceberg: { namespace: 'outputs', table_name: 'export', branch: '' }
 		};
 		const nextOutput = { ...fallback, ...currentOutput, ...patch };
-		analysisStore.updateTab(tab.id, { output: nextOutput as OutputTab['output'] });
+		analysisStore.updateTab(tab.id, { output: nextOutput as unknown as AnalysisTabOutput });
 	}
 
 	function updateIcebergConfig(patch: Record<string, unknown>) {

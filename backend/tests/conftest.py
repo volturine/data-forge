@@ -239,6 +239,7 @@ def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_p
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     analysis_id = str(uuid.uuid4())
+    tab1_result_id = str(uuid.uuid4())
 
     pipeline_definition = {
         'tabs': [
@@ -252,7 +253,7 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': tab1_result_id,
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'fixture_output',
@@ -288,6 +289,18 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
     )
     test_db_session.add(link)
 
+    placeholder = DataSource(
+        id=tab1_result_id,
+        name=tab1_result_id,
+        source_type='analysis',
+        config={'analysis_tab_id': 'tab1'},
+        created_by_analysis_id=analysis_id,
+        created_by='analysis',
+        is_hidden=False,
+        created_at=now.replace(tzinfo=None),
+    )
+    test_db_session.add(placeholder)
+
     test_db_session.commit()
     test_db_session.refresh(analysis)
 
@@ -313,7 +326,7 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'fixture_output',

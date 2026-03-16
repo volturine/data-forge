@@ -101,7 +101,7 @@ export interface ExportRequest {
 		namespace?: string;
 		branch: string;
 	};
-	output_datasource_id: string;
+	result_id: string;
 }
 
 export interface ExportResponse {

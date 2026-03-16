@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import Request
 
-from modules.compute.manager import ProcessManager
+if TYPE_CHECKING:
+    from modules.compute.manager import ProcessManager
 
 
 def get_manager(request: Request) -> ProcessManager:

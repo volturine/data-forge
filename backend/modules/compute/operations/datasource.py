@@ -231,14 +231,14 @@ def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     for tab in tabs:
         tab_id = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         if not tab_id or not output_id:
             continue
         output_map[str(tab_id)] = str(output_id)
     for tab in tabs:
         tid = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         datasource = tab.get('datasource') if isinstance(tab, dict) else None
         input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
@@ -330,7 +330,7 @@ def _build_tab_pipeline(
         cache[step_id] = base_frame
 
     output = tab.get('output') if isinstance(tab, dict) else None
-    output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+    output_id = output.get('result_id') if isinstance(output, dict) else None
     if output_id:
         cache[str(output_id)] = base_frame
 

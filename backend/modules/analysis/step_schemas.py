@@ -662,3 +662,11 @@ def get_config_model(step_type: str) -> type[BaseModel] | None:
     if not entry:
         return None
     return entry['config']
+
+
+def validate_step(step_type: str, config: dict) -> None:
+    """Validate a step type and its config. Raises ValueError on failure."""
+    if step_type not in STEP_CATALOG:
+        raise ValueError(f"Unknown step type '{step_type}'")
+    model = STEP_CATALOG[step_type]['config']
+    model.model_validate(config)

@@ -260,7 +260,7 @@ def export_data(
         analysis_id=request.analysis_id,
         tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
-        output_datasource_id=request.output_datasource_id,
+        result_id=request.result_id,
     )
     return schemas.ExportResponse(
         success=True,

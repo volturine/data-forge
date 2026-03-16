@@ -17,7 +17,7 @@ export interface AnalysisTabDatasource {
 }
 
 export interface AnalysisTabOutput {
-	output_datasource_id: string;
+	result_id: string;
 	format: string;
 	filename: string;
 	build_mode?: string;
@@ -63,7 +63,6 @@ export interface Analysis {
 	updated_at: string;
 	result_path: string | null;
 	thumbnail: string | null;
-	tabs: AnalysisTabInput[];
 	version?: string | null;
 }
 

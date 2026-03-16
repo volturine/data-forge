@@ -13,15 +13,21 @@ from modules.datasource.models import DataSource
 from modules.datasource.service import create_analysis_datasource
 from modules.datasource.source_types import DataSourceType
 
+_OUT_A = str(uuid.uuid4())
+_OUT_B = str(uuid.uuid4())
+_OUT_1 = str(uuid.uuid4())
+_OUT_XYZ = str(uuid.uuid4())
+
 # ---------------------------------------------------------------------------
 # TabSchema
 # ---------------------------------------------------------------------------
 
 
 class TestTabSchemaOutputDatasourceId:
-    """TabSchema requires output_datasource_id for pipeline output routing."""
+    """TabSchema requires result_id for pipeline output routing."""
 
-    def test_accepts_string(self):
+    def test_accepts_uuid(self):
+        rid = str(uuid.uuid4())
         tab = TabSchema(
             id='t1',
             name='Tab 1',
@@ -31,15 +37,23 @@ class TestTabSchemaOutputDatasourceId:
                 config=TabDatasourceConfig(branch='master'),
             ),
             output=TabOutputSchema(
-                output_datasource_id='ds-abc',
+                result_id=rid,
                 format='parquet',
                 filename='tab_output',
             ),
             steps=[],
         )
-        assert tab.output.output_datasource_id == 'ds-abc'
+        assert tab.output.result_id == rid
+
+    def test_rejects_non_uuid(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            TabOutputSchema(result_id='not-a-uuid', format='parquet', filename='tab_output')
 
     def test_round_trips_through_model_dump(self):
+        rid = str(uuid.uuid4())
         tab = TabSchema(
             id='t1',
             name='Tab 1',
@@ -49,16 +63,16 @@ class TestTabSchemaOutputDatasourceId:
                 config=TabDatasourceConfig(branch='master'),
             ),
             output=TabOutputSchema(
-                output_datasource_id='ds-xyz',
+                result_id=rid,
                 format='parquet',
                 filename='tab_output',
             ),
             steps=[],
         )
         dumped = tab.model_dump()
-        assert dumped['output']['output_datasource_id'] == 'ds-xyz'
+        assert dumped['output']['result_id'] == rid
         restored = TabSchema.model_validate(dumped)
-        assert restored.output.output_datasource_id == 'ds-xyz'
+        assert restored.output.result_id == rid
 
 
 # ---------------------------------------------------------------------------
@@ -103,36 +117,37 @@ class TestCreateAnalysisDatasourceHidden:
 class TestUpsertOutputDatasource:
     """_upsert_output_datasource creates or updates a DataSource."""
 
-    def test_creates_new_when_no_id(self, test_db_session: Session):
+    def test_creates_new_with_uuid(self, test_db_session: Session):
+        rid = str(uuid.uuid4())
         ds = _upsert_output_datasource(
             session=test_db_session,
-            output_datasource_id=None,
+            result_id=rid,
             name='brand-new',
             source_type='file',
             config={'file_path': '/tmp/test.csv', 'file_type': 'csv'},
             schema_cache={'col': 'Utf8'},
             analysis_id='a1',
         )
-        assert ds.id is not None
+        assert ds.id == rid
         assert ds.name == 'brand-new'
         assert ds.source_type == 'file'
         assert ds.created_by_analysis_id == 'a1'
         assert ds.created_by == 'analysis'
         assert ds.is_hidden is True
 
-    def test_creates_new_when_id_not_found(self, test_db_session: Session):
-        ds = _upsert_output_datasource(
-            session=test_db_session,
-            output_datasource_id='nonexistent-id',
-            name='fallback',
-            source_type='file',
-            config={'file_path': '/tmp/x.csv', 'file_type': 'csv'},
-            schema_cache={},
-            analysis_id=None,
-        )
-        assert ds.id == 'nonexistent-id'
-        assert ds.name == 'fallback'
-        assert ds.is_hidden is True
+    def test_rejects_non_uuid(self, test_db_session: Session):
+        import pytest
+
+        with pytest.raises(ValueError, match='result_id must be a valid UUID'):
+            _upsert_output_datasource(
+                session=test_db_session,
+                result_id='nonexistent-id',  # type: ignore[arg-type]
+                name='fallback',
+                source_type='file',
+                config={'file_path': '/tmp/x.csv', 'file_type': 'csv'},
+                schema_cache={},
+                analysis_id=None,
+            )
 
     def test_updates_existing(self, test_db_session: Session):
         existing_id = str(uuid.uuid4())
@@ -149,7 +164,7 @@ class TestUpsertOutputDatasource:
 
         ds = _upsert_output_datasource(
             session=test_db_session,
-            output_datasource_id=existing_id,
+            result_id=existing_id,
             name='new-name',
             source_type='iceberg',
             config={'table': 't1'},
@@ -167,12 +182,12 @@ class TestUpsertOutputDatasource:
 
 
 # ---------------------------------------------------------------------------
-# update_analysis — output_datasource_id required
+# update_analysis — result_id required
 # ---------------------------------------------------------------------------
 
 
 class TestUpdateAnalysisOutputDatasource:
-    """update_analysis requires output_datasource_id and does not create datasources."""
+    """update_analysis requires result_id and does not create datasources."""
 
     def test_keeps_output_id_without_creating_datasource(
         self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
@@ -187,7 +202,7 @@ class TestUpdateAnalysisOutputDatasource:
                     config=TabDatasourceConfig(branch='master'),
                 ),
                 output=TabOutputSchema(
-                    output_datasource_id='out-1',
+                    result_id=_OUT_1,
                     format='parquet',
                     filename='tab_output',
                 ),
@@ -196,10 +211,10 @@ class TestUpdateAnalysisOutputDatasource:
         ]
         update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
-        assert len(result.tabs) == 1
-        tab = result.tabs[0]
-        assert tab.output.output_datasource_id == 'out-1'
-        output_ds = test_db_session.get(DataSource, tab.output.output_datasource_id)
+        assert len(result.pipeline_definition['tabs']) == 1
+        tab = result.pipeline_definition['tabs'][0]
+        assert tab['output']['result_id'] == _OUT_1
+        output_ds = test_db_session.get(DataSource, tab['output']['result_id'])
         assert output_ds is None
 
     def test_reuses_existing_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
@@ -213,7 +228,7 @@ class TestUpdateAnalysisOutputDatasource:
                     config=TabDatasourceConfig(branch='master'),
                 ),
                 output=TabOutputSchema(
-                    output_datasource_id='out-1',
+                    result_id=_OUT_1,
                     format='parquet',
                     filename='tab_output',
                 ),
@@ -223,7 +238,7 @@ class TestUpdateAnalysisOutputDatasource:
         update = AnalysisUpdateSchema(tabs=tabs)
 
         result1 = update_analysis(test_db_session, sample_analysis.id, update)
-        output_id_1 = result1.tabs[0].output.output_datasource_id
+        output_id_1 = result1.pipeline_definition['tabs'][0]['output']['result_id']
 
         tabs2 = [
             TabSchema(
@@ -235,7 +250,7 @@ class TestUpdateAnalysisOutputDatasource:
                     config=TabDatasourceConfig(branch='master'),
                 ),
                 output=TabOutputSchema(
-                    output_datasource_id=output_id_1,
+                    result_id=output_id_1,
                     format='parquet',
                     filename='tab_output',
                 ),
@@ -244,11 +259,26 @@ class TestUpdateAnalysisOutputDatasource:
         ]
         update2 = AnalysisUpdateSchema(tabs=tabs2)
         result2 = update_analysis(test_db_session, sample_analysis.id, update2)
-        output_id_2 = result2.tabs[0].output.output_datasource_id
+        output_id_2 = result2.pipeline_definition['tabs'][0]['output']['result_id']
 
         assert output_id_2 == output_id_1
 
     def test_multiple_tabs_each_get_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
+        from datetime import UTC, datetime
+
+        other_analysis_id = str(uuid.uuid4())
+        placeholder = DataSource(
+            id=_OUT_A,
+            name=_OUT_A,
+            source_type='analysis',
+            config={'analysis_tab_id': 'tab-a'},
+            created_by_analysis_id=other_analysis_id,
+            created_by='analysis',
+            is_hidden=False,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        test_db_session.add(placeholder)
+        test_db_session.flush()
         tabs = [
             TabSchema(
                 id='tab-a',
@@ -259,7 +289,7 @@ class TestUpdateAnalysisOutputDatasource:
                     config=TabDatasourceConfig(branch='master'),
                 ),
                 output=TabOutputSchema(
-                    output_datasource_id='out-a',
+                    result_id=_OUT_A,
                     format='parquet',
                     filename='tab_output',
                 ),
@@ -270,12 +300,12 @@ class TestUpdateAnalysisOutputDatasource:
                 name='Tab B',
                 parent_id='tab-a',
                 datasource=TabDatasourceSchema(
-                    id='out-a',
+                    id=_OUT_A,
                     analysis_tab_id='tab-a',
                     config=TabDatasourceConfig(branch='master'),
                 ),
                 output=TabOutputSchema(
-                    output_datasource_id='out-b',
+                    result_id=_OUT_B,
                     format='parquet',
                     filename='tab_output',
                 ),
@@ -285,23 +315,23 @@ class TestUpdateAnalysisOutputDatasource:
         update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
 
-        assert len(result.tabs) == 2
-        ids = [t.output.output_datasource_id for t in result.tabs]
+        assert len(result.pipeline_definition['tabs']) == 2
+        ids = [t['output']['result_id'] for t in result.pipeline_definition['tabs']]
         assert all(i is not None for i in ids)
         assert ids[0] != ids[1]
-        assert result.tabs[1].datasource.id == 'out-a'
+        assert result.pipeline_definition['tabs'][1]['datasource']['id'] == _OUT_A
 
 
 # ---------------------------------------------------------------------------
-# run_analysis_build passes output_datasource_id
+# run_analysis_build passes result_id
 # ---------------------------------------------------------------------------
 
 
 class TestRunAnalysisBuildOutputDatasource:
-    """Scheduler's run_analysis_build passes output_datasource_id to export_data."""
+    """Scheduler's run_analysis_build passes result_id to export_data."""
 
-    def test_passes_output_datasource_id(self, test_db_session: Session, sample_datasource: DataSource):
-        """run_analysis_build should forward output_datasource_id from the tab."""
+    def test_passes_result_id(self, test_db_session: Session, sample_datasource: DataSource):
+        """run_analysis_build should forward result_id from the tab."""
         output_ds_id = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -325,7 +355,7 @@ class TestRunAnalysisBuildOutputDatasource:
                             {'id': 's1', 'type': 'filter', 'config': {'column': 'age', 'operator': '>', 'value': 30}, 'depends_on': []}
                         ],
                         'output': {
-                            'output_datasource_id': output_ds_id,
+                            'result_id': output_ds_id,
                             'format': 'parquet',
                             'filename': 'test_out',
                             'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
@@ -354,11 +384,11 @@ class TestRunAnalysisBuildOutputDatasource:
 
             mock_export.assert_called_once()
             call_kwargs = mock_export.call_args
-            assert call_kwargs.kwargs.get('output_datasource_id') == output_ds_id
+            assert call_kwargs.kwargs.get('result_id') == output_ds_id
             assert call_kwargs.kwargs.get('triggered_by') == 'schedule'
             mock_preview.assert_not_called()
 
-    def test_export_uses_output_datasource_id_for_table_name(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_export_uses_result_id_for_table_name(self, test_db_session: Session, sample_datasource: DataSource):
         output_ds_id = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -380,7 +410,7 @@ class TestRunAnalysisBuildOutputDatasource:
                         },
                         'steps': [],
                         'output': {
-                            'output_datasource_id': output_ds_id,
+                            'result_id': output_ds_id,
                             'format': 'parquet',
                             'filename': 'test_out',
                             'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
@@ -400,14 +430,27 @@ class TestRunAnalysisBuildOutputDatasource:
         mock_catalog.table_exists.return_value = False
         mock_catalog.create_table.return_value = mock_table
 
+        engine_mock = MagicMock()
+        engine_mock.is_process_alive.return_value = True
+        engine_mock.export.return_value = 'job-1'
+        engine_mock.get_result.return_value = {
+            'data': {'row_count': 1},
+            'error': None,
+            'step_timings': {},
+        }
+        manager_mock = MagicMock()
+        manager_mock.get_engine.return_value = engine_mock
+        manager_mock.get_or_create_engine.return_value = engine_mock
+
         with (
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = MagicMock(schema=MagicMock())
             export_result = export_data(
                 session=test_db_session,
-                manager=MagicMock(),
+                manager=manager_mock,
                 target_step_id='source',
                 analysis_pipeline={
                     'analysis_id': analysis_id,
@@ -420,7 +463,7 @@ class TestRunAnalysisBuildOutputDatasource:
                                 'config': {'branch': 'master'},
                             },
                             'output': {
-                                'output_datasource_id': output_ds_id,
+                                'result_id': output_ds_id,
                                 'format': 'parquet',
                                 'filename': 'test_out',
                                 'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
@@ -437,7 +480,7 @@ class TestRunAnalysisBuildOutputDatasource:
                 },
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
             )
 
         identifier = mock_catalog.create_table.call_args.args[0]
@@ -469,7 +512,7 @@ class TestRunAnalysisBuildOutputDatasource:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'some-output-id',
+                            'result_id': str(uuid.uuid4()),
                             'format': 'parquet',
                         },
                         'steps': [],
@@ -585,7 +628,7 @@ class TestSourceTypeCreatedBy:
                     config=TabDatasourceConfig(branch='master'),
                 ),
                 output=TabOutputSchema(
-                    output_datasource_id='out-1',
+                    result_id=_OUT_1,
                     format='parquet',
                     filename='tab_output',
                 ),
@@ -594,14 +637,15 @@ class TestSourceTypeCreatedBy:
         ]
         update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
-        output_ds = test_db_session.get(DataSource, result.tabs[0].output.output_datasource_id)
+        output_ds = test_db_session.get(DataSource, result.pipeline_definition['tabs'][0]['output']['result_id'])
         assert output_ds is None
 
     def test_upsert_output_sets_created_by_analysis(self, test_db_session: Session):
         """_upsert_output_datasource sets created_by='analysis'."""
+        rid = str(uuid.uuid4())
         ds = _upsert_output_datasource(
             session=test_db_session,
-            output_datasource_id=None,
+            result_id=rid,
             name='upserted',
             source_type='iceberg',
             config={'metadata_path': '/tmp/iceberg'},

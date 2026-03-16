@@ -48,20 +48,34 @@ class LiveSession:
         self._queue: asyncio.Queue[dict | None] = asyncio.Queue()
         self._closed = False
         self._busy = False
+        self._lock = asyncio.Lock()
 
     @property
     def busy(self) -> bool:
         return self._busy
 
-    def set_busy(self, value: bool) -> None:
-        self._busy = value
+    async def acquire_turn(self) -> bool:
+        """Atomically check and set busy. Returns True if acquired."""
+        async with self._lock:
+            if self._busy:
+                return False
+            self._busy = True
+            return True
+
+    async def set_busy(self, value: bool) -> None:
+        async with self._lock:
+            self._busy = value
 
     def add_message(self, role: str, content: str) -> None:
         self.messages.append({'role': role, 'content': content})
         if len(self.messages) > MAX_MESSAGES:
-            self.messages = self.messages[-MAX_MESSAGES:]
+            system = [m for m in self.messages if m.get('role') == 'system']
+            non_system = [m for m in self.messages if m.get('role') != 'system']
+            self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
 
     def push_event(self, event: dict) -> None:
+        if 'ts' not in event:
+            event = {**event, 'ts': time.time() * 1000}
         self._history.append(event)
         if len(self._history) > MAX_EVENTS:
             self._history = self._history[-MAX_EVENTS:]
@@ -74,7 +88,16 @@ class LiveSession:
 
     def reopen_stream(self) -> None:
         self._closed = False
-        self._queue = asyncio.Queue()
+        drained: list[dict] = []
+        while not self._queue.empty():
+            try:
+                item = self._queue.get_nowait()
+                if item is not None:
+                    drained.append(item)
+            except asyncio.QueueEmpty:
+                break
+        for item in drained:
+            self._queue.put_nowait(item)
 
     def get_history(self) -> list[dict[str, Any]]:
         return list(self._history)
@@ -151,6 +174,9 @@ class SessionStore:
             row = db.get(ChatSession, session_id)
             if not row:
                 return
+            row.model = live.model
+            row.api_key = live.api_key
+            row.system_prompt = live.system_prompt
             row.messages_json = json.dumps(live.messages)
             row.history_json = json.dumps(live._history)
             db.add(row)
@@ -167,6 +193,32 @@ class SessionStore:
             db.delete(row)
             db.commit()
         return True
+
+    def list_sessions(self) -> list[dict]:
+        """List all sessions with preview info."""
+        now = time.time()
+        sessions = []
+        with self._db() as db:
+            rows = db.exec(select(ChatSession)).all()
+            for row in rows:
+                if now - row.created_at > self.TTL:
+                    continue
+                messages: list[dict[str, Any]] = json.loads(row.messages_json)
+                preview = ''
+                for m in messages:
+                    if m.get('role') == 'user':
+                        preview = m.get('content', '')[:100]
+                        break
+                sessions.append(
+                    {
+                        'id': row.id,
+                        'model': row.model,
+                        'provider': row.provider,
+                        'created_at': row.created_at,
+                        'preview': preview,
+                    }
+                )
+        return sorted(sessions, key=lambda s: s['created_at'], reverse=True)
 
     def sweep(self) -> None:
         now = time.time()

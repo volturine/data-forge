@@ -69,7 +69,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'test_output',
@@ -87,7 +87,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'test_output_two',
@@ -418,7 +418,7 @@ class TestGetBuildOrder:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': str(uuid.uuid4()),
+                            'result_id': str(uuid.uuid4()),
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'scheduled_source',
@@ -451,7 +451,7 @@ class TestGetBuildOrder:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': str(uuid.uuid4()),
+                            'result_id': str(uuid.uuid4()),
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'scheduled_source',
@@ -598,7 +598,7 @@ class TestRunAnalysisBuild:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': output_a,
+                        'result_id': output_a,
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'tab_a',
@@ -616,7 +616,7 @@ class TestRunAnalysisBuild:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': output_b,
+                        'result_id': output_b,
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'tab_b',

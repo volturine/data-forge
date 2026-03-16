@@ -7,7 +7,7 @@
 	};
 
 	type TabOutput = {
-		output_datasource_id: string;
+		result_id: string;
 		format: string;
 		filename: string;
 		build_mode?: string;
@@ -134,7 +134,7 @@
 		enabled: !!datasource?.id
 	}));
 	const resolvedDatasource = $derived(datasourceQuery.data ?? datasource);
-	const outputId = $derived(activeTab?.output.output_datasource_id ?? null);
+	const outputId = $derived(activeTab?.output.result_id ?? null);
 	const isOutputSource = $derived(activeTab?.datasource?.id === outputId && !!outputId);
 	function ensureBranch(config: Record<string, unknown> | null | undefined, fallback: string) {
 		const branch = fallback.trim();

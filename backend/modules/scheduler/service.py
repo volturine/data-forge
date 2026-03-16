@@ -343,7 +343,7 @@ def execute_schedule(session: Session, manager: ProcessManager, schedule_id: str
         output = tab.get('output') if isinstance(tab, dict) else None
         if not isinstance(output, dict):
             continue
-        output_id = output.get('output_datasource_id')
+        output_id = output.get('result_id')
         if output_id == schedule.datasource_id:
             target_tab = tab
             break
@@ -395,7 +395,7 @@ def execute_schedule(session: Session, manager: ProcessManager, schedule_id: str
         iceberg_options=iceberg_options,
         analysis_id=analysis_id,
         triggered_by=triggered_by,
-        output_datasource_id=schedule.datasource_id,
+        result_id=schedule.datasource_id,
         tab_id=str(tab_id),
         build_mode=tab_build_mode,
     )
@@ -418,7 +418,7 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
     for tab in tabs:
         tid = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if output else None
+        output_id = output.get('result_id') if output else None
         datasource = tab.get('datasource') if isinstance(tab, dict) else None
         input_id = datasource.get('id') if datasource else None
         if tid and output_id:
@@ -487,7 +487,7 @@ def run_analysis_build(
         output = tab.get('output') if isinstance(tab, dict) else None
         if not isinstance(output, dict) or 'filename' not in output:
             output = None
-        tab_output_id = output.get('output_datasource_id') if output else None
+        tab_output_id = output.get('result_id') if output else None
         steps = tab.get('steps', [])
 
         if not tab_datasource_id:
@@ -530,7 +530,7 @@ def run_analysis_build(
                     iceberg_options=iceberg_options,
                     analysis_id=analysis_id,
                     triggered_by=triggered_by,
-                    output_datasource_id=output_config.get('output_datasource_id'),
+                    result_id=output_config.get('result_id'),
                     tab_id=str(current_tab_id),
                 )
             else:

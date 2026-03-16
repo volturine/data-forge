@@ -8,7 +8,7 @@ from core.config import Settings
 
 
 class TestSettings:
-    def test_default_settings(self, monkeypatch):
+    def test_default_settings(self, monkeypatch, tmp_path):
         keys = list(os.environ.keys())
         for key in keys:
             if key.startswith('POLARS_') or key in [
@@ -26,8 +26,8 @@ class TestSettings:
                 'WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
-        monkeypatch.delenv('ENV_FILE', raising=False)
-        monkeypatch.setenv('ENV_FILE', '')
+        # Point ENV_FILE to a non-existent path so .env is not loaded
+        monkeypatch.setenv('ENV_FILE', str(tmp_path / 'nonexistent.env'))
         monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'false')
 
         settings = Settings()
@@ -54,7 +54,8 @@ class TestSettings:
         settings = Settings()
 
         assert settings.debug is True
-        assert settings.database_url == 'sqlite:///./test.db'
+        # database_url is always derived from data_dir, ignoring the env var
+        assert settings.database_url == f'sqlite:///{data_dir / "app.db"}'
         assert settings.data_dir == data_dir
         assert settings.default_namespace == 'acme'
         assert settings.upload_chunk_size == 2000000
@@ -85,27 +86,30 @@ class TestSettings:
         assert settings.cors_origins is not None
         assert len(settings.cors_origins_list) > 0
 
-    def test_invalid_database_url(self, monkeypatch):
+    def test_database_url_always_derived_from_data_dir(self, monkeypatch, tmp_path):
+        """database_url is always derived from data_dir regardless of DATABASE_URL env var."""
+        data_dir = tmp_path / 'data'
         monkeypatch.setenv('DATABASE_URL', 'invalid-url')
-        with pytest.raises(ValidationError, match='database_url must be a valid SQLAlchemy URL'):
-            Settings()
+        monkeypatch.setenv('DATA_DIR', str(data_dir))
+        settings = Settings()
+        assert settings.database_url == f'sqlite:///{data_dir / "app.db"}'
 
     def test_negative_timeout_values(self, monkeypatch):
         monkeypatch.setenv('ENGINE_IDLE_TIMEOUT', '-100')
 
-        with pytest.raises(ValidationError, match='engine_idle_timeout must be positive'):
+        with pytest.raises(ValidationError, match='engine_idle_timeout must be >= 1'):
             Settings()
 
         monkeypatch.setenv('ENGINE_IDLE_TIMEOUT', '300')
         monkeypatch.setenv('JOB_TIMEOUT', '-50')
 
-        with pytest.raises(ValidationError, match='job_timeout must be positive'):
+        with pytest.raises(ValidationError, match='job_timeout must be >= 1'):
             Settings()
 
         monkeypatch.setenv('JOB_TIMEOUT', '300')
         monkeypatch.setenv('ENGINE_POOLING_INTERVAL', '0')
 
-        with pytest.raises(ValidationError, match='engine_pooling_interval must be positive'):
+        with pytest.raises(ValidationError, match='engine_pooling_interval must be >= 1'):
             Settings()
 
     def test_directory_paths_are_path_objects(self):

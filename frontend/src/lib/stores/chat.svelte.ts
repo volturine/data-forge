@@ -1,13 +1,14 @@
 import {
 	createSession,
 	sendMessage,
-	applyPending,
 	openEventStream,
 	getHistory,
 	closeSession,
-	listModels
+	updateSession,
+	listModels,
+	listSessions
 } from '$lib/api/chat';
-import type { ChatEvent, ApplyResult, OpenRouterModel } from '$lib/api/chat';
+import type { ChatEvent, OpenRouterModel, ChatSessionInfo } from '$lib/api/chat';
 import { getSettings } from '$lib/api/settings';
 import type { AppSettings } from '$lib/api/settings';
 import { listTools } from '$lib/api/mcp';
@@ -19,6 +20,26 @@ const PREFS_KEY = 'chat_prefs';
 const MAX_BACKOFF = 30_000;
 const BASE_BACKOFF = 1_000;
 
+export type AgentMode = 'plan' | 'execute';
+
+const PLAN_SYSTEM_PROMPT =
+	'You assist with a data pipeline platform (datasources, analyses, schedules, healthchecks, UDFs). ' +
+	'You only have read-only tools. Analyze the request, inspect existing resources, and propose a step-by-step plan. ' +
+	'Do NOT attempt to create or modify anything — only describe what you would do.';
+
+const EXECUTE_SYSTEM_PROMPT =
+	'You assist with a data pipeline platform (datasources, analyses, schedules, healthchecks, UDFs). ' +
+	'Execute actions directly using the available tools. Be concise. Do not ask the user for IDs — look them up yourself. ' +
+	'CRITICAL: Never invent IDs. Always GET existing resources first to obtain real IDs. ' +
+	'Domain model: An analysis has tabs. Each tab reads from a datasource (input) and writes to a result (output). ' +
+	'A "derived" tab reuses an existing tab\'s output result_id as its datasource.id (chaining tabs). ' +
+	'A "raw" tab uses a regular datasource from GET /datasource. ' +
+	'Workflow to add a derived tab to an existing analysis: ' +
+	'1) GET /analysis/{id} to see current tabs and their output.result_id values. ' +
+	"2) POST /analysis/{id}/tabs/{tab_id}/derive to create a new tab chained from an existing tab's output. " +
+	'3) POST /analysis/{id}/tabs/{tab_id}/steps to add steps to the new tab. ' +
+	'Do NOT use PUT /analysis/{id} — it requires a lock token.';
+
 export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
 
 export interface ChatMessage {
@@ -28,21 +49,12 @@ export interface ChatMessage {
 	ts: number;
 }
 
-export interface PendingAction {
-	token: string;
-	tool_id: string;
-	method: string;
-	path: string;
-	args: Record<string, unknown>;
-	confirm_required: boolean;
-}
-
 export interface ToolCall {
 	tool_id: string;
 	method: string;
 	path: string;
 	args: Record<string, unknown>;
-	status: 'running' | 'done' | 'pending' | 'error';
+	status: 'running' | 'done' | 'error';
 	result?: unknown;
 	errors?: { path: string; message: string }[];
 	expanded: boolean;
@@ -70,6 +82,7 @@ export class ChatStore {
 	model = $state('openai/gpt-4o-mini');
 	apiKey = $state('');
 	systemPrompt = $state('');
+	mode = $state<AgentMode>('plan');
 	settings = $state<AppSettings | null>(null);
 	tools = $state<MCPTool[]>([]);
 	models = $state<OpenRouterModel[]>([]);
@@ -79,7 +92,6 @@ export class ChatStore {
 	messages = $state<ChatMessage[]>([]);
 	toolCalls = $state<ToolCall[]>([]);
 	timeline = $state<TimelineEntry[]>([]);
-	pending = $state<PendingAction[]>([]);
 	toolDrafts = $state<SvelteMap<string, ToolDraft>>(new SvelteMap());
 	loading = $state(false);
 	error = $state<string | null>(null);
@@ -88,14 +100,25 @@ export class ChatStore {
 	confirmClose = $state(false);
 	sessionUsage = $state<UsageInfo>({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
 	lastTurnUsage = $state<UsageInfo | null>(null);
+	lastFailedContent = $state<string | null>(null);
+	sessions = $state<ChatSessionInfo[]>([]);
 
 	private _es: EventSource | null = null;
 	private _counter = 0;
 	private _retries = 0;
 	private _retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+	private _onUnload = () => {
+		this._clearRetry();
+		this._es?.close();
+		this._es = null;
+	};
+
 	constructor() {
 		this._loadPrefs();
+		if (typeof window !== 'undefined') {
+			window.addEventListener('beforeunload', this._onUnload);
+		}
 	}
 
 	private _loadPrefs(): void {
@@ -106,6 +129,7 @@ export class ChatStore {
 		if (typeof prefs.apiKey === 'string') this.apiKey = prefs.apiKey;
 		if (typeof prefs.model === 'string') this.model = prefs.model;
 		if (typeof prefs.systemPrompt === 'string') this.systemPrompt = prefs.systemPrompt;
+		if (prefs.mode === 'plan' || prefs.mode === 'execute') this.mode = prefs.mode;
 		if (Array.isArray(prefs.disabledTools)) {
 			this.disabledTools = new SvelteSet(prefs.disabledTools as string[]);
 		}
@@ -122,6 +146,7 @@ export class ChatStore {
 				apiKey: this.apiKey,
 				model: this.model,
 				systemPrompt: this.systemPrompt,
+				mode: this.mode,
 				disabledTools: [...this.disabledTools],
 				disabledTags: [...this.disabledTags]
 			})
@@ -131,6 +156,20 @@ export class ChatStore {
 	private _id(): string {
 		this._counter += 1;
 		return String(this._counter);
+	}
+
+	get effectiveSystemPrompt(): string {
+		if (this.systemPrompt) return this.systemPrompt;
+		return this.mode === 'plan' ? PLAN_SYSTEM_PROMPT : EXECUTE_SYSTEM_PROMPT;
+	}
+
+	/** In plan mode, only safe (GET) tools; in execute mode, all enabled tools. */
+	get modeFilteredTools(): MCPTool[] {
+		const enabled = this.enabledTools;
+		if (this.mode === 'plan') {
+			return enabled.filter((t) => t.safety === 'safe');
+		}
+		return enabled;
 	}
 
 	get enabledTools(): MCPTool[] {
@@ -155,6 +194,19 @@ export class ChatStore {
 			}
 		}
 		return groups;
+	}
+
+	setMode(mode: AgentMode): void {
+		this.mode = mode;
+		this._savePrefs();
+	}
+
+	async changeModel(modelId: string): Promise<void> {
+		this.model = modelId;
+		this._savePrefs();
+		if (this.sessionId) {
+			await updateSession(this.sessionId, { model: modelId });
+		}
 	}
 
 	toggleTool(id: string): void {
@@ -216,6 +268,16 @@ export class ChatStore {
 		this.modelsLoading = false;
 	}
 
+	async loadSessions(): Promise<void> {
+		const result = await listSessions();
+		result.match(
+			(s) => {
+				this.sessions = s;
+			},
+			() => {}
+		);
+	}
+
 	configure(apiKey: string): void {
 		this.apiKey = apiKey;
 		this.configured = true;
@@ -229,7 +291,7 @@ export class ChatStore {
 			this.provider,
 			this.model,
 			this.apiKey || undefined,
-			this.systemPrompt || undefined
+			this.effectiveSystemPrompt
 		);
 		result.match(
 			(s) => {
@@ -238,6 +300,7 @@ export class ChatStore {
 					localStorage.setItem(SESSION_KEY, s.session_id);
 				}
 				this._connectStream(s.session_id);
+				void this.loadSessions();
 			},
 			(e) => {
 				this.error = e.message;
@@ -253,7 +316,7 @@ export class ChatStore {
 				this.messages = [];
 				this.toolCalls = [];
 				this.timeline = [];
-				this.pending = [];
+
 				for (const event of data.history) {
 					this._handleEvent(event);
 				}
@@ -264,6 +327,7 @@ export class ChatStore {
 				if (typeof window !== 'undefined') {
 					localStorage.removeItem(SESSION_KEY);
 				}
+				this.error = null;
 				return false;
 			}
 		);
@@ -272,6 +336,10 @@ export class ChatStore {
 	async open_panel(): Promise<void> {
 		this.open = true;
 		await this.loadContext();
+		void this.loadSessions();
+		if (this.apiKey && this.models.length === 0) {
+			void this.loadModels();
+		}
 		if (this.sessionId) return;
 		if (!this.apiKey) {
 			if (typeof window !== 'undefined') localStorage.removeItem(SESSION_KEY);
@@ -295,23 +363,27 @@ export class ChatStore {
 			this.error = null;
 		};
 		this._es.onmessage = (ev) => {
-			const event: ChatEvent = JSON.parse(ev.data as string);
-			this._handleEvent(event);
+			try {
+				const event: ChatEvent = JSON.parse(ev.data as string);
+				this._handleEvent(event);
+			} catch {
+				console.error('[chat] failed to parse SSE event:', ev.data);
+			}
 		};
 		this._es.onerror = () => {
 			this.connection = 'reconnecting';
 			this._es?.close();
 			this._es = null;
-			this._scheduleReconnect(sid);
+			this._scheduleReconnect();
 		};
 	}
 
-	private _scheduleReconnect(sid: string): void {
+	private _scheduleReconnect(): void {
 		this._retries += 1;
 		const delay = Math.min(BASE_BACKOFF * Math.pow(2, this._retries - 1), MAX_BACKOFF);
 		this._retryTimer = setTimeout(() => {
 			if (!this.sessionId) return;
-			this._connectStream(sid);
+			this._connectStream(this.sessionId);
 		}, delay);
 	}
 
@@ -322,13 +394,21 @@ export class ChatStore {
 		}
 	}
 
+	private static _stripPageContext(content: string): string {
+		return content.replace(/^\[user is viewing [^\]]*\]\n?/, '');
+	}
+
 	private _handleEvent(event: ChatEvent): void {
 		if (event.type === 'message' && event.role && event.content !== undefined) {
+			const displayContent =
+				event.role === 'user'
+					? ChatStore._stripPageContext(event.content ?? '')
+					: (event.content ?? '');
 			const msg: ChatMessage = {
 				id: this._id(),
 				role: event.role,
-				content: event.content ?? '',
-				ts: Date.now()
+				content: displayContent,
+				ts: event.ts ?? Date.now()
 			};
 			this.messages.push(msg);
 			this.timeline.push({ kind: 'message', item: msg });
@@ -345,37 +425,12 @@ export class ChatStore {
 			this.toolCalls.push(tc);
 			this.timeline.push({ kind: 'tool', item: tc });
 		}
-		if (event.type === 'pending' && event.token && event.tool_id) {
-			const existing = this.toolCalls.find(
-				(t) => t.tool_id === event.tool_id && t.status === 'running'
-			);
-			if (existing) existing.status = 'pending';
-			this.pending.push({
-				token: event.token,
-				tool_id: event.tool_id,
-				method: event.method ?? '',
-				path: event.path ?? '',
-				args: event.args ?? {},
-				confirm_required: event.confirm_required ?? false
-			});
-		}
 		if (event.type === 'tool_result' && event.tool_id) {
-			const tc = this.toolCalls.find((t) => t.tool_id === event.tool_id && t.status !== 'done');
-			if (tc) {
-				tc.status = 'done';
-				tc.result = event.result;
-			}
-			this.pending = this.pending.filter((p) => p.tool_id !== event.tool_id);
+			this._updateToolStatus(event.tool_id, 'done', event.result);
 		}
 		if (event.type === 'tool_error' && event.tool_id) {
-			const tc = this.toolCalls.find(
-				(t) => t.tool_id === event.tool_id && t.status !== 'done' && t.status !== 'error'
-			);
-			if (tc) {
-				tc.status = 'error';
-				tc.errors = event.errors ?? [];
-			}
-			this.pending = this.pending.filter((p) => p.tool_id !== event.tool_id);
+			const errors = event.errors ?? [];
+			this._updateToolStatus(event.tool_id, 'error', undefined, errors);
 			const summary =
 				event.errors && event.errors.length > 0
 					? event.errors.map((e) => `${e.path}: ${e.message}`).join('\n')
@@ -384,7 +439,7 @@ export class ChatStore {
 				id: this._id(),
 				role: 'tool',
 				content: summary,
-				ts: Date.now()
+				ts: event.ts ?? Date.now()
 			};
 			this.messages.push(msg);
 			this.timeline.push({ kind: 'message', item: msg });
@@ -414,55 +469,92 @@ export class ChatStore {
 		}
 	}
 
+	private _updateToolStatus(
+		toolId: string,
+		status: 'done' | 'error',
+		result?: unknown,
+		errors?: { path: string; message: string }[]
+	): void {
+		// Update in toolCalls array
+		const tc = this.toolCalls.findLast((t) => t.tool_id === toolId && t.status === 'running');
+		if (tc) {
+			tc.status = status;
+			if (result !== undefined) tc.result = result;
+			if (errors) tc.errors = errors;
+		}
+		// Also update through timeline proxy to ensure reactivity in both arrays
+		for (let i = this.timeline.length - 1; i >= 0; i--) {
+			const entry = this.timeline[i];
+			if (
+				entry.kind === 'tool' &&
+				entry.item.tool_id === toolId &&
+				entry.item.status === 'running'
+			) {
+				entry.item.status = status;
+				if (result !== undefined) entry.item.result = result;
+				if (errors) entry.item.errors = errors;
+				break;
+			}
+		}
+	}
+
 	private _applyUiPatch(event: ChatEvent): void {
 		if (typeof window === 'undefined') return;
 		window.dispatchEvent(new CustomEvent('chat:ui_patch', { detail: event }));
 	}
 
-	async send(content: string): Promise<void> {
-		if (!this.sessionId) {
-			await this.startSession();
-			if (!this.sessionId) return;
-		}
-		this.loading = true;
-		this.error = null;
-		const ids = this.enabledTools.map((t) => t.id);
-		const result = await sendMessage(this.sessionId, content, ids);
-		result.mapErr((e) => {
-			this.error = e.message;
-			this.loading = false;
-		});
+	private _pageContext(): string {
+		if (typeof window === 'undefined') return '';
+		const path = window.location.pathname;
+		if (path === '/' || !path) return '';
+		return `[user is viewing ${path}]\n`;
 	}
 
-	async apply(token: string): Promise<ApplyResult | null> {
-		if (!this.sessionId) return null;
-		const entry = this.pending.find((p) => p.token === token);
-		const result = await applyPending(this.sessionId, token);
+	async send(content: string): Promise<boolean> {
+		this.loading = true;
+		this.error = null;
+		this.lastFailedContent = null;
+		if (!this.sessionId) {
+			await this.startSession();
+			if (!this.sessionId) {
+				this.loading = false;
+				this.lastFailedContent = content;
+				return false;
+			}
+		}
+		const ids = this.modeFilteredTools.map((t) => t.id);
+		const messageContent = this._pageContext() + content;
+		const result = await sendMessage(this.sessionId, messageContent, ids);
 		return result.match(
-			(r) => {
-				this.pending = this.pending.filter((p) => p.token !== token);
-				if (entry) {
-					const tc = this.toolCalls.find((t) => t.tool_id === entry.tool_id && t.status !== 'done');
-					if (tc) tc.status = 'done';
-				}
-				if (r.patch) {
-					this._applyUiPatch({ type: 'ui_patch', ...r.patch });
-				}
-				return r;
+			() => {
+				this.lastFailedContent = null;
+				return true;
 			},
 			(e) => {
 				this.error = e.message;
-				return null;
+				this.lastFailedContent = content;
+				this.loading = false;
+				return false;
 			}
 		);
 	}
 
-	dismiss(token: string): void {
-		this.pending = this.pending.filter((p) => p.token !== token);
+	dismissError(): void {
+		this.error = null;
 	}
 
-	removePendingByToolId(toolId: string): void {
-		this.pending = this.pending.filter((p) => p.tool_id !== toolId);
+	async retry(): Promise<boolean> {
+		if (!this.lastFailedContent) return false;
+		const content = this.lastFailedContent;
+		this.lastFailedContent = null;
+		return this.send(content);
+	}
+
+	get modelDisplayName(): string {
+		const found = this.models.find((m) => m.id === this.model);
+		if (found) return found.name;
+		const parts = this.model.split('/');
+		return parts[parts.length - 1];
 	}
 
 	ensureDraft(toolId: string, args: Record<string, unknown>): void {
@@ -505,21 +597,11 @@ export class ChatStore {
 	}
 
 	setLocalToolResult(toolId: string, result: unknown): void {
-		const tc = this.toolCalls.findLast(
-			(t) => t.tool_id === toolId && t.status !== 'done' && t.status !== 'error'
-		);
-		if (!tc) return;
-		tc.status = 'done';
-		tc.result = result;
+		this._updateToolStatus(toolId, 'done', result);
 	}
 
 	setLocalToolError(toolId: string, errors: { path: string; message: string }[]): void {
-		const tc = this.toolCalls.findLast(
-			(t) => t.tool_id === toolId && t.status !== 'done' && t.status !== 'error'
-		);
-		if (!tc) return;
-		tc.status = 'error';
-		tc.errors = errors;
+		this._updateToolStatus(toolId, 'error', undefined, errors);
 	}
 
 	requestCloseSession(): void {
@@ -546,15 +628,16 @@ export class ChatStore {
 		this.messages = [];
 		this.toolCalls = [];
 		this.timeline = [];
-		this.pending = [];
 		this.toolDrafts = new SvelteMap();
 		this.loading = false;
 		this.error = null;
+		this.lastFailedContent = null;
 		this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 		this.lastTurnUsage = null;
 		if (typeof window !== 'undefined') {
 			localStorage.removeItem(SESSION_KEY);
 		}
+		void this.loadSessions();
 	}
 
 	close(): void {
@@ -571,10 +654,10 @@ export class ChatStore {
 		this.messages = [];
 		this.toolCalls = [];
 		this.timeline = [];
-		this.pending = [];
 		this.toolDrafts = new SvelteMap();
 		this.loading = false;
 		this.error = null;
+		this.lastFailedContent = null;
 		this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 		this.lastTurnUsage = null;
 		if (typeof window !== 'undefined') {

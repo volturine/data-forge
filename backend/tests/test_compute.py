@@ -27,7 +27,7 @@ class TestComputePreview:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -104,7 +104,7 @@ class TestComputePreview:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -169,7 +169,7 @@ class TestComputePreview:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -209,7 +209,7 @@ class TestComputePreview:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -270,7 +270,7 @@ class TestComputePreview:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -354,7 +354,7 @@ class TestComputeExport:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -438,7 +438,7 @@ class TestComputeRowCount:
                             'config': {'branch': 'master'},
                         },
                         'output': {
-                            'output_datasource_id': 'out-1',
+                            'result_id': 'out-1',
                             'datasource_type': 'iceberg',
                             'format': 'parquet',
                             'filename': 'out',
@@ -535,9 +535,13 @@ def test_pipeline_cycle_detection(mock_apply_step: MagicMock, mock_load: MagicMo
 
 @patch('modules.compute.engine.load_datasource')
 @patch('modules.compute.engine.PolarsComputeEngine._apply_step')
-def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: MagicMock):
-    mock_load.return_value = MagicMock()
-    mock_apply_step.side_effect = lambda frame, _step, **kwargs: frame
+def test_pipeline_multiple_dependencies_collapsed(mock_apply_step: MagicMock, mock_load: MagicMock):
+    """Multi-dependency steps are collapsed to single-dep by apply_steps()."""
+    fake_lf = MagicMock()
+    fake_lf.collect_schema.return_value = {}
+
+    mock_load.return_value = fake_lf
+    mock_apply_step.return_value = fake_lf
 
     steps = [
         {
@@ -555,8 +559,10 @@ def test_pipeline_multiple_dependencies(mock_apply_step: MagicMock, mock_load: M
         {'id': 'step3', 'type': 'sort', 'config': {'columns': ['col'], 'descending': [False]}, 'depends_on': []},
     ]
 
-    with pytest.raises(PipelineValidationError, match='multiple dependencies'):
-        PolarsComputeEngine._build_pipeline({}, steps, 'job', MagicMock())
+    # apply_steps collapses multi-deps to single-dep (takes deps[0]),
+    # so _build_pipeline should succeed without raising
+    result = PolarsComputeEngine.build_pipeline({}, steps, 'job', MagicMock())
+    assert result == fake_lf
 
 
 @patch('modules.compute.engine.load_datasource')
