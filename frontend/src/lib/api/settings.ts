@@ -9,6 +9,7 @@ export interface AppSettings {
 	smtp_password: string;
 	telegram_bot_token: string;
 	telegram_bot_enabled: boolean;
+	openrouter_api_key: string;
 	public_idb_debug: boolean;
 }
 
@@ -21,7 +22,7 @@ export function getSettings(): ResultAsync<AppSettings, ApiError> {
 	return apiRequest<AppSettings>('/v1/settings');
 }
 
-export function updateSettings(data: AppSettings): ResultAsync<AppSettings, ApiError> {
+export function updateSettings(data: Partial<AppSettings>): ResultAsync<AppSettings, ApiError> {
 	return apiRequest<AppSettings>('/v1/settings', {
 		method: 'PUT',
 		body: JSON.stringify(data)

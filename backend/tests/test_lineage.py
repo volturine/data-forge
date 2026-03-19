@@ -32,7 +32,7 @@ def test_lineage_returns_nodes_and_edges(test_db_session, client):
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_lineage',

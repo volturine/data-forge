@@ -14,17 +14,16 @@ class UnionByNameHandler(OperationHandler):
         lf: pl.LazyFrame,
         params: dict,
         *,
-        right_lf: pl.LazyFrame | None = None,
         right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = UnionParams.model_validate(params)
-        sources = validated.sources
-        if not sources:
+        if not validated.sources:
             raise ValueError('Union by name requires at least one datasource')
 
         frames: list[pl.LazyFrame] = [lf]
         sources_map = right_sources or {}
-        for source_id in sources:
+        for source_id in validated.sources:
             frame = sources_map.get(source_id)
             if frame is None:
                 raise ValueError(f'Union by name requires datasource {source_id}')

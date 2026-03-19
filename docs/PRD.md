@@ -143,12 +143,12 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 ### 6.1 Analysis Model
 
 - Tabs are stored in `Analysis.pipeline_definition.tabs`.
-- Each tab owns `datasource` (id + analysis_tab_id + config), `output`, `output_datasource_id`, and `steps`.
+- Each tab owns `datasource` (id + analysis_tab_id + config), `output`, `output.result_id` (UUID v4), and `steps`.
 
 ### 6.2 Input vs Output Dataset Contract
 
 - `datasource.id` = tab input source.
-- `output_datasource_id` = tab export target dataset.
+- `output.result_id` = tab export target dataset (must be a valid UUID v4; required, no fallback).
 - Each buildable output is materialized as Iceberg.
 
 ### 6.3 Dependency Contract

@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlmodel import Session, col
 
 from modules.locks.models import Lock
@@ -15,14 +15,7 @@ HEARTBEAT_INTERVAL_SECONDS = 10  # Heartbeat every 10 seconds
 def cleanup_expired_locks(session: Session) -> None:
     """Remove all expired locks."""
     now = datetime.now(UTC).replace(tzinfo=None)
-    result = session.execute(select(Lock))
-    locks = result.scalars().all()
-
-    for lock in locks:
-        expires_at = lock.expires_at
-        if expires_at < now:
-            session.delete(lock)
-
+    session.execute(delete(Lock).where(Lock.expires_at < now))  # type: ignore[arg-type]
     session.commit()
 
 
@@ -54,30 +47,17 @@ def acquire_lock(
         session.add(lock)
         session.commit()
         session.refresh(lock)
-
-    if lock:
-        if lock.expires_at < now:
-            lock.client_id = client_id
-            lock.client_signature = client_signature
-            lock.lock_token = str(uuid.uuid4())
-            lock.acquired_at = now
-            lock.expires_at = expires_at
-            lock.last_heartbeat = now
-            session.commit()
-            session.refresh(lock)
-        elif lock.client_id != client_id:
-            raise ValueError(f'Resource is locked by another client until {lock.expires_at}')
-        else:
-            lock.lock_token = str(uuid.uuid4())
-            lock.client_signature = client_signature
-            lock.acquired_at = now
-            lock.expires_at = expires_at
-            lock.last_heartbeat = now
-            session.commit()
-            session.refresh(lock)
-
-    if not lock:
-        raise ValueError('Failed to acquire lock')
+    elif lock.client_id != client_id and lock.expires_at >= now:
+        raise ValueError(f'Resource is locked by another client until {lock.expires_at}')
+    else:
+        lock.client_id = client_id
+        lock.client_signature = client_signature
+        lock.lock_token = str(uuid.uuid4())
+        lock.acquired_at = now
+        lock.expires_at = expires_at
+        lock.last_heartbeat = now
+        session.commit()
+        session.refresh(lock)
 
     return LockResponse(
         resource_id=lock.resource_id,

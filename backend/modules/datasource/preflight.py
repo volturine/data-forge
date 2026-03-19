@@ -59,10 +59,10 @@ def clear_preflight(preflight_id: str, *, delete_file: bool = True) -> None:
 
 def _cleanup_expired() -> None:
     now = datetime.now(UTC).replace(tzinfo=None)
-    expired: list[str] = []
-    for preflight_id, preflight in _PREFLIGHTS.items():
-        if now - preflight.created_at > _PREFLIGHT_TTL:
-            expired.append(preflight_id)
-    for preflight_id in expired:
-        delete_file = _PREFLIGHTS[preflight_id].delete_file
+    expired = [
+        (preflight_id, preflight.delete_file)
+        for preflight_id, preflight in _PREFLIGHTS.items()
+        if now - preflight.created_at > _PREFLIGHT_TTL
+    ]
+    for preflight_id, delete_file in expired:
         clear_preflight(preflight_id, delete_file=delete_file)

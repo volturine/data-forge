@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { acquireLock, releaseLock, getLockState } from '$lib/stores/lockManager.svelte';
 	import { Lock, LockOpen } from 'lucide-svelte';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		resourceId: string;
@@ -32,20 +33,49 @@
 
 {#if isMine}
 	<button
-		class="lock-btn release flex cursor-pointer items-center gap-2 border px-3 py-2 text-sm font-medium"
+		class={css({
+			display: 'flex',
+			cursor: 'pointer',
+			alignItems: 'center',
+			gap: '2',
+			borderWidth: '1',
+			borderColor: 'warning.border',
+			backgroundColor: 'transparent',
+			color: 'fg.tertiary',
+			paddingX: '3',
+			paddingY: '2',
+			fontSize: 'sm',
+			fontWeight: 'medium',
+			_hover: { backgroundColor: 'warning.border' }
+		})}
 		onclick={handleRelease}
 		type="button"
-		class:callout-warning={true}
 	>
 		<Lock size={16} />
 		<span>Release</span>
 	</button>
 {:else}
 	<button
-		class="lock-btn acquire flex items-center gap-2 border border-transparent px-3 py-2 text-sm font-medium disabled:cursor-not-allowed {isLocked
-			? 'cursor-not-allowed'
-			: 'cursor-pointer hover:opacity-90'}"
-		class:locked={isLocked}
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			gap: '2',
+			borderWidth: '1',
+			borderColor: 'transparent',
+			paddingX: '3',
+			paddingY: '2',
+			fontSize: 'sm',
+			fontWeight: 'medium',
+			_disabled: { cursor: 'not-allowed' },
+			...(isLocked
+				? { backgroundColor: 'bg.tertiary', color: 'fg.muted', cursor: 'not-allowed' }
+				: {
+						backgroundColor: 'accent.primary',
+						color: 'warning.contrast',
+						cursor: 'pointer',
+						_hover: { opacity: '0.9' }
+					})
+		})}
 		onclick={handleAcquire}
 		disabled={isLocked}
 		type="button"

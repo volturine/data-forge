@@ -388,10 +388,6 @@ class TestAIClientBatch:
 
 
 class TestAIHandler:
-    def test_name(self):
-        handler = AIHandler()
-        assert handler.name == 'ai'
-
     def test_basic_execution(self):
         handler = AIHandler()
         df = pl.DataFrame({'text': ['Hello', 'World']})

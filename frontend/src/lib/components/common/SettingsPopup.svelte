@@ -22,6 +22,9 @@
 	} from '$lib/api/settings';
 	import { configStore } from '$lib/stores/config.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import { css, input, cx, label, row, rowBetween, divider } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -176,40 +179,82 @@
 	onClose={() => (open = false)}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
-	panelClass="w-full max-w-120 max-h-[90vh] overflow-y-auto border animate-slide-up bg-dialog border-tertiary focus:outline-none"
+	panelClass={css({
+		width: '100%',
+		maxWidth: 'modalSm',
+		maxHeight: '90vh',
+		overflowY: 'auto',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary',
+		outline: 'none'
+	})}
 	ariaLabelledby="settings-title"
 	{content}
 />
 
 {#snippet content()}
-	<div class="flex items-center justify-between border-b p-4 border-tertiary">
-		<h2 id="settings-title" class="m-0 text-sm font-semibold text-fg-primary">Settings</h2>
-		<button
-			class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
-			onclick={() => (open = false)}
-			aria-label="Close settings"
-			type="button"
-		>
-			<X size={16} />
-		</button>
-	</div>
+	<PanelHeader>
+		{#snippet title()}
+			<h2 id="settings-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
+				Settings
+			</h2>
+		{/snippet}
+		{#snippet actions()}
+			<button
+				class={css({
+					display: 'flex',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'center',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '1',
+					color: 'fg.muted',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
+				onclick={() => (open = false)}
+				aria-label="Close settings"
+				type="button"
+			>
+				<X size={16} />
+			</button>
+		{/snippet}
+	</PanelHeader>
 
 	{#if loading}
-		<div class="flex items-center justify-center gap-2 p-8 text-xs text-fg-muted">
-			<Loader2 size={14} class="animate-spin" />
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				gap: '2',
+				padding: '8',
+				fontSize: 'xs',
+				color: 'fg.muted'
+			})}
+		>
+			<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 			Loading settings...
 		</div>
 	{:else}
-		<div class="flex flex-col gap-4 p-4">
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '4', padding: '4' })}>
 			{#if feedback}
 				<div
-					class="flex items-center gap-2 border p-2 text-xs"
-					class:border-success={feedback.type === 'success'}
-					class:bg-success={feedback.type === 'success'}
-					class:text-success={feedback.type === 'success'}
-					class:border-error={feedback.type === 'error'}
-					class:bg-error={feedback.type === 'error'}
-					class:text-error={feedback.type === 'error'}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						borderWidth: '1',
+						padding: '2',
+						fontSize: 'xs',
+						...(feedback.type === 'success'
+							? {
+									borderColor: 'success.border',
+									backgroundColor: 'success.bg',
+									color: 'success.fg'
+								}
+							: { borderColor: 'error.border', backgroundColor: 'error.bg', color: 'error.fg' })
+					})}
 				>
 					{#if feedback.type === 'success'}
 						<CheckCircle size={12} />
@@ -220,49 +265,48 @@
 				</div>
 			{/if}
 
-			<span class="text-xs font-semibold uppercase tracking-wider text-fg-tertiary">
-				<Mail size={12} class="mr-1 inline" />
+			<SectionHeader>
+				<Mail size={12} class={css({ marginRight: '1', display: 'inline' })} />
 				SMTP
-			</span>
+			</SectionHeader>
 
-			<div class="grid grid-cols-2 gap-2">
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Host</span>
+			<div
+				class={css({ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '2' })}
+			>
+				<label class={label({ variant: 'wrapper' })}>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Host</span>
 					<input
 						type="text"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						class={input()}
 						id="smtp-host"
 						bind:value={smtp_host}
 						placeholder="smtp.example.com"
 					/>
 				</label>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Port</span>
-					<input
-						type="number"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-						id="smtp-port"
-						bind:value={smtp_port}
-					/>
+				<label class={label({ variant: 'wrapper' })}>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Port</span>
+					<input type="number" class={input()} id="smtp-port" bind:value={smtp_port} />
 				</label>
 			</div>
 
-			<div class="grid grid-cols-2 gap-2">
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">User</span>
+			<div
+				class={css({ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '2' })}
+			>
+				<label class={label({ variant: 'wrapper' })}>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>User</span>
 					<input
 						type="text"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						class={input()}
 						id="smtp-user"
 						bind:value={smtp_user}
 						placeholder="user@example.com"
 					/>
 				</label>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Password</span>
+				<label class={label({ variant: 'wrapper' })}>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Password</span>
 					<input
 						type="password"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						class={input()}
 						id="smtp-password"
 						bind:value={smtp_password}
 						placeholder="••••••••"
@@ -270,25 +314,40 @@
 				</label>
 			</div>
 
-			<div class="flex items-end gap-2">
-				<label class="flex flex-1 flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Test recipient</span>
+			<div class={css({ display: 'flex', alignItems: 'flex-end', gap: '2' })}>
+				<label class={cx(label({ variant: 'wrapper' }), css({ flex: '1' }))}>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Test recipient</span>
 					<input
 						type="email"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+						class={input()}
 						id="smtp-test-to"
 						bind:value={smtpTestTo}
 						placeholder="test@example.com"
 					/>
 				</label>
 				<button
-					class="flex shrink-0 cursor-pointer items-center gap-1 border px-3 py-1.5 text-xs font-medium border-tertiary bg-tertiary text-fg-secondary hover:bg-hover hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-50"
+					class={css({
+						display: 'flex',
+						flexShrink: '0',
+						cursor: 'pointer',
+						alignItems: 'center',
+						gap: '1',
+						borderWidth: '1',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						fontWeight: 'medium',
+						backgroundColor: 'bg.tertiary',
+						color: 'fg.secondary',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+						_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+					})}
 					onclick={handleTestSmtp}
 					disabled={testingSmtp || !smtpTestTo}
 					type="button"
 				>
 					{#if testingSmtp}
-						<Loader2 size={12} class="animate-spin" />
+						<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 					{:else}
 						<Send size={12} />
 					{/if}
@@ -296,43 +355,59 @@
 				</button>
 			</div>
 
-			<div class="border-b border-tertiary"></div>
+			<div
+				class={css({
+					borderBottomWidth: '1'
+				})}
+			></div>
 
-			<div class="flex items-center gap-2">
-				<span class="text-xs font-semibold uppercase tracking-wider text-fg-tertiary">
-					<MessageCircle size={12} class="mr-1 inline" />
+			<div class={cx(row, css({ gap: '2' }))}>
+				<SectionHeader>
+					<MessageCircle size={12} class={css({ marginRight: '1', display: 'inline' })} />
 					Telegram
-				</span>
+				</SectionHeader>
 				{#if statusQuery.data}
 					<span
-						class="inline-block h-2 w-2 shrink-0"
-						class:bg-success={botRunning}
-						class:bg-error={!botRunning}
+						class={css({
+							display: 'inline-block',
+							height: 'dot',
+							width: 'dot',
+							flexShrink: '0',
+							backgroundColor: botRunning ? 'success.fg' : 'error.fg'
+						})}
 						title={botRunning ? 'Bot running' : 'Bot stopped'}
 					></span>
 				{/if}
 			</div>
 
-			<label class="flex flex-col gap-1">
-				<span class="text-xs text-fg-tertiary">Bot token</span>
+			<label class={label({ variant: 'wrapper' })}>
+				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Bot token</span>
 				<input
 					type="password"
-					class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
+					class={input()}
 					id="telegram-bot-token"
 					bind:value={telegram_bot_token}
 					placeholder="123456:ABC-DEF..."
 				/>
 			</label>
 
-			<div class="flex items-center justify-between">
-				<div class="flex flex-col gap-0.5">
-					<span class="text-sm font-medium text-fg-primary">Enable Bot</span>
-					<span class="text-xs text-fg-tertiary">Start the Telegram bot listener on save</span>
+			<div class={rowBetween}>
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Enable Bot</span>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+						Start the Telegram bot listener on save
+					</span>
 				</div>
 				<button
-					class="relative h-5 w-9 cursor-pointer border-none transition-colors"
-					class:bg-accent-primary={telegram_bot_enabled}
-					class:bg-tertiary={!telegram_bot_enabled}
+					class={css({
+						position: 'relative',
+						height: 'iconMd',
+						width: 'rowXl',
+						cursor: 'pointer',
+						border: 'none',
+						transition: 'background-color 150ms',
+						backgroundColor: telegram_bot_enabled ? 'accent.primary' : 'bg.tertiary'
+					})}
 					onclick={() => (telegram_bot_enabled = !telegram_bot_enabled)}
 					type="button"
 					role="switch"
@@ -340,27 +415,48 @@
 					aria-label="Toggle Telegram bot"
 				>
 					<span
-						class="absolute top-0.5 left-0.5 h-4 w-4 bg-fg-primary transition-transform"
-						class:translate-x-4={telegram_bot_enabled}
+						class={css({
+							position: 'absolute',
+							top: '0.5',
+							left: '0.5',
+							height: 'iconSm',
+							width: 'iconSm',
+							backgroundColor: 'accent.primary',
+							transition: 'transform 150ms',
+							...(telegram_bot_enabled ? { transform: 'translateX(1rem)' } : {})
+						})}
 					></span>
 				</button>
 			</div>
 
 			{#if statusQuery.data}
 				<div
-					class="flex items-center justify-between border px-3 py-2 text-xs border-tertiary bg-tertiary"
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						borderWidth: '1',
+						paddingX: '3',
+						paddingY: '2',
+						fontSize: 'xs',
+						backgroundColor: 'bg.tertiary'
+					})}
 				>
-					<span class="flex items-center gap-1.5">
+					<span class={cx(row, css({ gap: '1.5' }))}>
 						<span
-							class="inline-block h-1.5 w-1.5 shrink-0"
-							class:bg-success={botRunning}
-							class:bg-error={!botRunning}
+							class={css({
+								display: 'inline-block',
+								height: 'barTall',
+								width: 'barTall',
+								flexShrink: '0',
+								backgroundColor: botRunning ? 'success.fg' : 'error.fg'
+							})}
 						></span>
-						<span class="text-fg-secondary">
+						<span class={css({ color: 'fg.secondary' })}>
 							{botRunning ? 'Bot running' : 'Bot stopped'}
 						</span>
 					</span>
-					<span class="text-fg-tertiary">
+					<span class={css({ color: 'fg.tertiary' })}>
 						{statusQuery.data.subscriber_count}
 						{statusQuery.data.subscriber_count === 1 ? 'subscriber' : 'subscribers'}
 					</span>
@@ -368,23 +464,52 @@
 			{/if}
 
 			{#if subscribers.length > 0}
-				<div class="flex flex-col border border-tertiary">
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						borderWidth: '1'
+					})}
+				>
 					{#each subscribers as sub (sub.id)}
 						<div
-							class="flex items-center justify-between border-b px-3 py-2 text-xs last:border-b-0 border-tertiary"
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								borderBottomWidth: '1',
+								paddingX: '3',
+								paddingY: '2',
+								fontSize: 'xs'
+							})}
 						>
-							<div class="flex items-center gap-2">
+							<div class={cx(row, css({ gap: '2' }))}>
 								<span
-									class="inline-block h-1.5 w-1.5 shrink-0"
-									class:bg-success={sub.is_active}
-									class:bg-tertiary={!sub.is_active}
+									class={css({
+										display: 'inline-block',
+										height: 'barTall',
+										width: 'barTall',
+										flexShrink: '0',
+										backgroundColor: sub.is_active ? 'success.fg' : 'bg.tertiary'
+									})}
 									title={sub.is_active ? 'Active' : 'Inactive'}
 								></span>
-								<span class="font-medium text-fg-primary">{sub.title}</span>
-								<span class="text-fg-tertiary">{sub.chat_id}</span>
+								<span class={css({ fontWeight: 'medium' })}>{sub.title}</span>
+								<span class={css({ color: 'fg.tertiary' })}>{sub.chat_id}</span>
 							</div>
 							<button
-								class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-tertiary transition-colors hover:text-error"
+								class={css({
+									display: 'flex',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									border: 'none',
+									backgroundColor: 'transparent',
+									padding: '1',
+									color: 'fg.tertiary',
+									transition: 'color 150ms',
+									_hover: { color: 'error' }
+								})}
 								onclick={() => deleteMut.mutate(sub.id)}
 								disabled={deleteMut.isPending}
 								type="button"
@@ -396,27 +521,39 @@
 					{/each}
 				</div>
 			{:else if statusQuery.data && !subscribersQuery.isFetching}
-				<p class="m-0 text-xs text-fg-tertiary">
+				<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
 					Subscribers appear here after users send /subscribe to your bot.
 				</p>
 			{/if}
 
-			<div class="border-b border-tertiary"></div>
+			<div
+				class={css({
+					borderBottomWidth: '1'
+				})}
+			></div>
 
-			<span class="text-xs font-semibold uppercase tracking-wider text-fg-tertiary">
-				<Database size={12} class="mr-1 inline" />
+			<SectionHeader>
+				<Database size={12} class={css({ marginRight: '1', display: 'inline' })} />
 				Debug
-			</span>
+			</SectionHeader>
 
-			<div class="flex items-center justify-between">
-				<div class="flex flex-col gap-0.5">
-					<span class="text-sm font-medium text-fg-primary">IndexedDB Inspector</span>
-					<span class="text-xs text-fg-tertiary">Show cache debug button in header</span>
+			<div class={rowBetween}>
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}> IndexedDB Inspector </span>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+						Show cache debug button in header
+					</span>
 				</div>
 				<button
-					class="relative h-5 w-9 cursor-pointer border-none transition-colors"
-					class:bg-accent-primary={idb}
-					class:bg-tertiary={!idb}
+					class={css({
+						position: 'relative',
+						height: 'iconMd',
+						width: 'rowXl',
+						cursor: 'pointer',
+						border: 'none',
+						transition: 'background-color 150ms',
+						backgroundColor: idb ? 'accent.primary' : 'bg.tertiary'
+					})}
 					onclick={() => (idb = !idb)}
 					type="button"
 					role="switch"
@@ -424,23 +561,57 @@
 					aria-label="Toggle IndexedDB inspector"
 				>
 					<span
-						class="absolute top-0.5 left-0.5 h-4 w-4 bg-fg-primary transition-transform"
-						class:translate-x-4={idb}
+						class={css({
+							position: 'absolute',
+							top: '0.5',
+							left: '0.5',
+							height: 'iconSm',
+							width: 'iconSm',
+							backgroundColor: 'accent.primary',
+							transition: 'transform 150ms',
+							...(idb ? { transform: 'translateX(1rem)' } : {})
+						})}
 					></span>
 				</button>
 			</div>
 		</div>
 
-		<div class="flex items-center justify-between border-t p-4 border-tertiary">
-			<p class="m-0 text-xs text-fg-tertiary">Settings are stored in the database.</p>
+		<div
+			class={cx(
+				divider,
+				css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					padding: '4'
+				})
+			)}
+		>
+			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
+				Settings are stored in the database.
+			</p>
 			<button
-				class="flex cursor-pointer items-center gap-1.5 border-none px-4 py-2 text-xs font-medium bg-accent text-bg-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class={css({
+					display: 'flex',
+					cursor: 'pointer',
+					alignItems: 'center',
+					gap: '1.5',
+					border: 'none',
+					paddingX: '4',
+					paddingY: '2',
+					fontSize: 'xs',
+					fontWeight: 'medium',
+					backgroundColor: 'accent.primary',
+					color: 'fg.inverse',
+					_hover: { opacity: 0.9 },
+					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+				})}
 				onclick={save}
 				disabled={saving}
 				type="button"
 			>
 				{#if saving}
-					<Loader2 size={12} class="animate-spin" />
+					<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 				{:else}
 					<Save size={12} />
 				{/if}

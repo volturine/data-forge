@@ -31,7 +31,11 @@ check:
 test:
     cd backend && uv run pytest --tb=short -q
 
-# Full verification gate — must pass before any task is declared done
+# Generate TypeScript types from Pydantic step schemas
+generate-step-types:
+    cd backend && uv run python scripts/generate_ts_step_types.py
+
+# Full verification gate -- must pass before any task is declared done
 verify: format check
 
 # Build for production

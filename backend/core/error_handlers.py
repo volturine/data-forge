@@ -1,9 +1,10 @@
 """Error handling utilities for FastAPI routes."""
 
+import inspect
 import logging
 from collections.abc import Callable
 from functools import wraps
-from typing import Any
+from typing import Any, Never
 
 from fastapi import HTTPException
 
@@ -68,7 +69,6 @@ EXCEPTION_STATUS_MAP = {
 def convert_exception_to_http(exc: Exception) -> HTTPException:
     """Convert a custom exception to an HTTPException."""
     if isinstance(exc, HTTPException):
-        # Already an HTTPException, return as-is
         return exc
 
     if isinstance(exc, AppError):
@@ -84,50 +84,38 @@ def convert_exception_to_http(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail='An internal error occurred')
 
 
+def _raise_http(exc: Exception, operation: str, value_error_status: int | None) -> Never:
+    if isinstance(exc, HTTPException):
+        raise exc
+    if isinstance(exc, AppError):
+        raise convert_exception_to_http(exc)
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=value_error_status or 400, detail=str(exc)) from exc
+    logger.error(f'Failed to {operation}: {str(exc)}', exc_info=True)
+    raise HTTPException(status_code=500, detail=f'Failed to {operation}: {str(exc)}') from exc
+
+
 def handle_errors(operation: str = 'operation', value_error_status: int | None = None) -> Callable:
     def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return await func(*args, **kwargs)
-            except HTTPException:
-                # Re-raise HTTPException as-is
-                raise
-            except AppError as e:
-                # Convert custom app errors to HTTP exceptions
-                raise convert_exception_to_http(e)
-            except ValueError as e:
-                status_code = value_error_status or 400
-                raise HTTPException(status_code=status_code, detail=str(e)) from e
-            except Exception as e:
-                # Convert generic exceptions
-                logger.error(f'Failed to {operation}: {str(e)}', exc_info=True)
-                raise HTTPException(status_code=500, detail=f'Failed to {operation}: {str(e)}') from e
-
-        @wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return func(*args, **kwargs)
-            except HTTPException:
-                # Re-raise HTTPException as-is
-                raise
-            except AppError as e:
-                # Convert custom app errors to HTTP exceptions
-                raise convert_exception_to_http(e)
-            except ValueError as e:
-                status_code = value_error_status or 400
-                raise HTTPException(status_code=status_code, detail=str(e)) from e
-            except Exception as e:
-                # Convert generic exceptions
-                logger.error(f'Failed to {operation}: {str(e)}', exc_info=True)
-                raise HTTPException(status_code=500, detail=f'Failed to {operation}: {str(e)}') from e
-
-        # Return the appropriate wrapper based on whether the function is async
-        import inspect
-
         if inspect.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    _raise_http(e, operation, value_error_status)
+
             return async_wrapper
         else:
+
+            @wraps(func)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    _raise_http(e, operation, value_error_status)
+
             return sync_wrapper
 
     return decorator

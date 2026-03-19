@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Concatenate, ParamSpec, TypeVar
 
@@ -27,7 +28,8 @@ settings_engine = create_engine(
 )
 _enable_sqlite_pragmas(settings_engine)
 
-_namespace_engines: dict[str, Engine] = {}
+_namespace_engines: OrderedDict[str, Engine] = OrderedDict()
+_MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
 _engine_override: Engine | None = None
@@ -74,13 +76,16 @@ def init_db() -> None:
     if not namespaces:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
+        namespace_paths(namespace)
         _init_namespace_db(namespace)
 
 
 def _init_settings_db() -> None:
+    from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
 
     AppSettings.metadata.create_all(settings_engine)
+    ChatSession.metadata.create_all(settings_engine)
     _run_settings_migrations(settings_engine)
 
 
@@ -88,16 +93,26 @@ def _run_settings_migrations(db_engine: Engine) -> None:
     from sqlalchemy import inspect, text as sa_text
 
     inspector = inspect(db_engine)
-    if not inspector.has_table('app_settings'):
-        return
+    pending: list[str] = []
 
-    settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
-    with db_engine.connect() as conn:
+    if inspector.has_table('app_settings'):
+        settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
         if 'telegram_bot_enabled' not in settings_columns:
-            conn.execute(sa_text('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0'))
-            conn.commit()
+            pending.append('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0')
         if 'smtp_password_encrypted' not in settings_columns:
-            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''"))
+            pending.append("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''")
+        if 'openrouter_api_key' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
+
+    if inspector.has_table('chat_sessions'):
+        chat_columns = {col['name'] for col in inspector.get_columns('chat_sessions')}
+        if 'system_prompt' not in chat_columns:
+            pending.append("ALTER TABLE chat_sessions ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''")
+
+    if pending:
+        with db_engine.connect() as conn:
+            for sql in pending:
+                conn.execute(sa_text(sql))
             conn.commit()
 
 
@@ -105,69 +120,68 @@ def _run_namespace_migrations(db_engine: Engine) -> None:
     from sqlalchemy import inspect, text as sa_text
 
     inspector = inspect(db_engine)
+    pending: list[str] = []
 
     if inspector.has_table('engine_runs'):
         columns = {col['name'] for col in inspector.get_columns('engine_runs')}
-        with db_engine.connect() as conn:
-            if 'triggered_by' not in columns:
-                conn.execute(sa_text('ALTER TABLE engine_runs ADD COLUMN triggered_by TEXT'))
-                conn.commit()
+        if 'triggered_by' not in columns:
+            pending.append('ALTER TABLE engine_runs ADD COLUMN triggered_by TEXT')
 
     if inspector.has_table('datasources'):
         ds_columns = {col['name'] for col in inspector.get_columns('datasources')}
-        with db_engine.connect() as conn:
-            if 'is_hidden' not in ds_columns:
-                conn.execute(sa_text('ALTER TABLE datasources ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT 0'))
-                conn.commit()
-            if 'created_by' not in ds_columns:
-                conn.execute(sa_text("ALTER TABLE datasources ADD COLUMN created_by TEXT NOT NULL DEFAULT 'import'"))
-                conn.commit()
+        if 'is_hidden' not in ds_columns:
+            pending.append('ALTER TABLE datasources ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT 0')
+        if 'created_by' not in ds_columns:
+            pending.append("ALTER TABLE datasources ADD COLUMN created_by TEXT NOT NULL DEFAULT 'import'")
 
     if inspector.has_table('schedules'):
         sched_columns = {col['name'] for col in inspector.get_columns('schedules')}
-        with db_engine.connect() as conn:
-            if 'datasource_id' not in sched_columns:
-                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN datasource_id TEXT'))
-                conn.commit()
-            if 'depends_on' not in sched_columns:
-                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN depends_on TEXT'))
-                conn.commit()
-            if 'trigger_on_datasource_id' not in sched_columns:
-                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN trigger_on_datasource_id TEXT'))
-                conn.commit()
+        if 'datasource_id' not in sched_columns:
+            pending.append('ALTER TABLE schedules ADD COLUMN datasource_id TEXT')
+        if 'depends_on' not in sched_columns:
+            pending.append('ALTER TABLE schedules ADD COLUMN depends_on TEXT')
+        if 'trigger_on_datasource_id' not in sched_columns:
+            pending.append('ALTER TABLE schedules ADD COLUMN trigger_on_datasource_id TEXT')
 
     if inspector.has_table('healthchecks'):
         hc_columns = {col['name'] for col in inspector.get_columns('healthchecks')}
+        if 'critical' not in hc_columns:
+            pending.append('ALTER TABLE healthchecks ADD COLUMN critical BOOLEAN NOT NULL DEFAULT 0')
+
+    if pending:
         with db_engine.connect() as conn:
-            if 'critical' not in hc_columns:
-                conn.execute(sa_text('ALTER TABLE healthchecks ADD COLUMN critical BOOLEAN NOT NULL DEFAULT 0'))
-                conn.commit()
+            for sql in pending:
+                conn.execute(sa_text(sql))
+            conn.commit()
 
 
 def _get_namespace_engine() -> Engine:
     namespace = get_namespace()
     if namespace in _namespace_engines:
+        _namespace_engines.move_to_end(namespace)
         return _namespace_engines[namespace]
+    if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
+        oldest = next(iter(_namespace_engines))
+        del _namespace_engines[oldest]
     paths = namespace_paths(namespace)
-    engine_to_use = create_engine(
-        f'sqlite:///{paths.db_path}',
-        echo=settings.debug,
-        connect_args={},
-    )
-    _enable_sqlite_pragmas(engine_to_use)
-    _namespace_engines[namespace] = engine_to_use
+    engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
+    _enable_sqlite_pragmas(engine)
+    _namespace_engines[namespace] = engine
     _init_namespace_db(namespace)
-    return engine_to_use
+    return engine
 
 
 def _init_namespace_db(namespace: str) -> None:
-    paths = namespace_paths(namespace)
-    namespace_engine = create_engine(
-        f'sqlite:///{paths.db_path}',
-        echo=settings.debug,
-        connect_args={},
-    )
-    _enable_sqlite_pragmas(namespace_engine)
+    namespace_engine = _namespace_engines.get(namespace)
+    if not namespace_engine:
+        paths = namespace_paths(namespace)
+        namespace_engine = create_engine(
+            f'sqlite:///{paths.db_path}',
+            echo=settings.debug,
+            connect_args={},
+        )
+        _enable_sqlite_pragmas(namespace_engine)
+        _namespace_engines[namespace] = namespace_engine
     from modules.analysis.models import Analysis, AnalysisDataSource
     from modules.analysis_versions.models import AnalysisVersion
     from modules.datasource.models import DataSource

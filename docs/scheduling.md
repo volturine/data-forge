@@ -154,7 +154,7 @@ The critical design: **schedules target datasources, not analyses directly**.
 1. User creates a schedule for an **output datasource** (one created by an analysis tab)
 2. At execution time, the scheduler resolves:
    - Which analysis produced this datasource (`created_by_analysis_id`)
-   - Which tab in that analysis produces it (`output_datasource_id` matches)
+   - Which tab in that analysis produces it (`output.result_id` matches the datasource id)
 3. Builds the **latest version** of the analysis (not a stored version)
 
 This means:

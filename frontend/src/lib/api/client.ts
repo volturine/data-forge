@@ -1,4 +1,4 @@
-import { err, ResultAsync } from 'neverthrow';
+import { err, okAsync, ResultAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { getNamespace } from '$lib/stores/namespace.svelte';
 import { track } from '$lib/utils/audit-log';
@@ -18,6 +18,16 @@ export interface ApiError {
 export interface ApiResponse<T> {
 	data: T;
 	headers: Headers;
+}
+
+function trackParseError(endpoint: string, method?: string): void {
+	track({
+		event: 'api_error',
+		action: method ?? 'GET',
+		page: typeof window !== 'undefined' ? window.location.pathname : undefined,
+		target: endpoint,
+		meta: { type: 'parse' }
+	});
 }
 
 function createApiError(
@@ -69,7 +79,11 @@ function handleErrorResponse(
 	);
 }
 
-export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
+function apiFetch<T>(
+	endpoint: string,
+	options: RequestInit | undefined,
+	parse: (response: Response) => ResultAsync<T, ApiError>
+): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
 	return ResultAsync.fromPromise(
 		fetch(`${BASE_URL}${endpoint}`, { ...options, headers }),
@@ -77,20 +91,15 @@ export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAs
 			createApiError('network', error instanceof Error ? error.message : 'Network error')
 	).andThen((response) => {
 		if (!response.ok) return handleErrorResponse(response, endpoint, options);
-		if (response.status === 204) {
-			return ResultAsync.fromPromise(
-				Promise.resolve(undefined as T),
-				(): ApiError => createApiError('parse', 'Failed to parse response JSON')
-			);
-		}
+		return parse(response);
+	});
+}
+
+export function apiRequest<T>(endpoint: string, options?: RequestInit): ResultAsync<T, ApiError> {
+	return apiFetch(endpoint, options, (response) => {
+		if (response.status === 204) return okAsync(undefined as T);
 		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-			track({
-				event: 'api_error',
-				action: options?.method ?? 'GET',
-				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-				target: endpoint,
-				meta: { type: 'parse' }
-			});
+			trackParseError(endpoint, options?.method);
 			return createApiError('parse', 'Failed to parse response JSON');
 		});
 	});
@@ -100,27 +109,11 @@ export function apiRequestWithHeaders<T>(
 	endpoint: string,
 	options?: RequestInit
 ): ResultAsync<ApiResponse<T>, ApiError> {
-	const headers = buildHeaders(options);
-	return ResultAsync.fromPromise(
-		fetch(`${BASE_URL}${endpoint}`, { ...options, headers }),
-		(error): ApiError =>
-			createApiError('network', error instanceof Error ? error.message : 'Network error')
-	).andThen((response) => {
-		if (!response.ok) return handleErrorResponse(response, endpoint, options);
-		if (response.status === 204) {
-			return ResultAsync.fromPromise(
-				Promise.resolve(undefined as T),
-				(): ApiError => createApiError('parse', 'Failed to parse response JSON')
-			).map((data) => ({ data, headers: response.headers }));
-		}
+	return apiFetch(endpoint, options, (response) => {
+		if (response.status === 204)
+			return okAsync({ data: undefined as T, headers: response.headers });
 		return ResultAsync.fromPromise(response.json() as Promise<T>, (): ApiError => {
-			track({
-				event: 'api_error',
-				action: options?.method ?? 'GET',
-				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-				target: endpoint,
-				meta: { type: 'parse' }
-			});
+			trackParseError(endpoint, options?.method);
 			return createApiError('parse', 'Failed to parse response JSON');
 		}).map((data) => ({ data, headers: response.headers }));
 	});
@@ -130,22 +123,10 @@ export function apiBlobRequest(
 	endpoint: string,
 	options?: RequestInit
 ): ResultAsync<Blob, ApiError> {
-	const headers = buildHeaders(options);
-	return ResultAsync.fromPromise(
-		fetch(`${BASE_URL}${endpoint}`, { ...options, headers }),
-		(error): ApiError =>
-			createApiError('network', error instanceof Error ? error.message : 'Network error')
-	).andThen((response) => {
-		if (!response.ok) return handleErrorResponse(response, endpoint, options);
-		return ResultAsync.fromPromise(response.blob(), (): ApiError => {
-			track({
-				event: 'api_error',
-				action: options?.method ?? 'GET',
-				page: typeof window !== 'undefined' ? window.location.pathname : undefined,
-				target: endpoint,
-				meta: { type: 'parse' }
-			});
+	return apiFetch(endpoint, options, (response) =>
+		ResultAsync.fromPromise(response.blob(), (): ApiError => {
+			trackParseError(endpoint, options?.method);
 			return createApiError('parse', 'Failed to read response');
-		});
-	});
+		})
+	);
 }

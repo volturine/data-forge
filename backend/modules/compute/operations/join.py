@@ -31,7 +31,7 @@ class JoinHandler(OperationHandler):
         params: dict,
         *,
         right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = JoinParams.model_validate(params)
         join_columns = validated.join_columns or []
@@ -69,14 +69,9 @@ class JoinHandler(OperationHandler):
 
         if right_columns and validated.how != 'cross':
             all_columns = joined.collect_schema().names()
-            final_columns: list[str] = []
-            for col in all_columns:
-                if col.endswith(validated.suffix):
-                    base_name = col[: -len(validated.suffix)]
-                    if base_name in right_columns:
-                        final_columns.append(col)
-                if not col.endswith(validated.suffix):
-                    final_columns.append(col)
+            final_columns = [
+                col for col in all_columns if not col.endswith(validated.suffix) or col[: -len(validated.suffix)] in right_columns
+            ]
             if final_columns != all_columns:
                 return joined.select(final_columns)
 

@@ -8,13 +8,12 @@ import { apiRequest } from './client';
 import { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
-function createApiError(
-	type: 'network' | 'http' | 'parse',
-	message: string,
-	status?: number,
-	statusText?: string
-): ApiError {
-	return { type, message, status, statusText };
+function appendCsvOptions(formData: FormData, csvOptions: CSVOptions): void {
+	formData.append('delimiter', csvOptions.delimiter);
+	formData.append('quote_char', csvOptions.quote_char);
+	formData.append('has_header', String(csvOptions.has_header));
+	formData.append('skip_rows', String(csvOptions.skip_rows));
+	formData.append('encoding', csvOptions.encoding);
 }
 
 export function uploadFile(
@@ -26,20 +25,14 @@ export function uploadFile(
 	formData.append('file', file);
 	formData.append('name', name);
 
-	if (csvOptions) {
-		formData.append('delimiter', csvOptions.delimiter);
-		formData.append('quote_char', csvOptions.quote_char);
-		formData.append('has_header', String(csvOptions.has_header));
-		formData.append('skip_rows', String(csvOptions.skip_rows));
-		formData.append('encoding', csvOptions.encoding);
-	}
+	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
 	return apiRequest<DataSource>('/v1/datasource/upload', {
 		method: 'POST',
 		body: formData
 	}).mapErr((error) => {
 		if (error.type === 'network') {
-			return createApiError('network', error.message || 'Upload failed');
+			return { type: 'network' as const, message: error.message || 'Upload failed' };
 		}
 		return error;
 	});
@@ -66,20 +59,14 @@ export function uploadBulkFiles(
 	const formData = new FormData();
 	files.forEach((file) => formData.append('files', file));
 
-	if (csvOptions) {
-		formData.append('delimiter', csvOptions.delimiter);
-		formData.append('quote_char', csvOptions.quote_char);
-		formData.append('has_header', String(csvOptions.has_header));
-		formData.append('skip_rows', String(csvOptions.skip_rows));
-		formData.append('encoding', csvOptions.encoding);
-	}
+	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
 	return apiRequest<BulkUploadResponse>('/v1/datasource/upload/bulk', {
 		method: 'POST',
 		body: formData
 	}).mapErr((error) => {
 		if (error.type === 'network') {
-			return createApiError('network', error.message || 'Bulk upload failed');
+			return { type: 'network' as const, message: error.message || 'Bulk upload failed' };
 		}
 		return error;
 	});

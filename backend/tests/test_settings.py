@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, create_engine, text
 
 
 class TestGetSettings:
@@ -324,6 +326,32 @@ class TestConfigEndpointWithDbSettings:
         assert data['public_idb_debug'] is False
 
 
+class TestGenerateUuid:
+    """GET /v1/config/uuid — generate UUID v4 values."""
+
+    def test_generates_single_uuid(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config/uuid')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data['uuids']) == 1
+        import uuid
+
+        uuid.UUID(data['uuids'][0], version=4)
+
+    def test_generates_multiple_uuids(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config/uuid?count=5')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data['uuids']) == 5
+        assert len(set(data['uuids'])) == 5  # all unique
+
+    def test_rejects_invalid_count(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config/uuid?count=0')
+        assert resp.status_code == 422
+        resp = client.get('/api/v1/config/uuid?count=21')
+        assert resp.status_code == 422
+
+
 class TestDetectTelegramChat:
     """POST /v1/settings/detect-telegram-chat — detect chat IDs via getUpdates."""
 
@@ -552,3 +580,93 @@ class TestDetectTelegramChat:
         assert resp.status_code == 502
         data = resp.json()
         assert 'refused' in data['detail'].lower()
+
+
+class TestSettingsMigrations:
+    """Regression tests for _run_settings_migrations on a legacy DB."""
+
+    def _make_legacy_engine(self):
+        engine = create_engine(
+            'sqlite:///:memory:',
+            connect_args={'check_same_thread': False},
+            poolclass=StaticPool,
+        )
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    'CREATE TABLE app_settings ('
+                    'id INTEGER PRIMARY KEY, '
+                    "smtp_host TEXT NOT NULL DEFAULT '', "
+                    'smtp_port INTEGER NOT NULL DEFAULT 587, '
+                    "smtp_user TEXT NOT NULL DEFAULT '', "
+                    "smtp_password TEXT NOT NULL DEFAULT '', "
+                    "telegram_bot_token TEXT NOT NULL DEFAULT '', "
+                    'public_idb_debug BOOLEAN NOT NULL DEFAULT 0'
+                    ')'
+                )
+            )
+            conn.execute(text('INSERT INTO app_settings (id) VALUES (1)'))
+            conn.commit()
+        return engine
+
+    def test_migrations_add_missing_columns(self):
+        from sqlalchemy import inspect
+
+        from core.database import _run_settings_migrations
+
+        engine = self._make_legacy_engine()
+        _run_settings_migrations(engine)
+
+        inspector = inspect(engine)
+        cols = {c['name'] for c in inspector.get_columns('app_settings')}
+        assert 'telegram_bot_enabled' in cols
+        assert 'smtp_password_encrypted' in cols
+        assert 'openrouter_api_key' in cols
+
+    def test_migrations_idempotent(self):
+        from core.database import _run_settings_migrations
+
+        engine = self._make_legacy_engine()
+        _run_settings_migrations(engine)
+        _run_settings_migrations(engine)
+
+    def test_migrations_defaults_readable(self):
+        from core.database import _run_settings_migrations
+
+        engine = self._make_legacy_engine()
+        _run_settings_migrations(engine)
+
+        with engine.connect() as conn:
+            row = conn.execute(text('SELECT openrouter_api_key FROM app_settings WHERE id=1')).fetchone()
+        assert row is not None
+        assert row[0] == ''
+
+    def test_lifespan_bot_check_uses_settings_db(self, monkeypatch):
+        from core import database
+        from modules.settings.models import AppSettings
+
+        engine = create_engine(
+            'sqlite:///:memory:',
+            connect_args={'check_same_thread': False},
+            poolclass=StaticPool,
+        )
+        AppSettings.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            row = AppSettings(id=1, telegram_bot_enabled=True, telegram_bot_token='bot:tok')
+            session.add(row)
+            session.commit()
+
+        monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
+
+        from core.database import run_settings_db
+
+        def _check(session: Session) -> tuple[bool, str]:
+            row = session.get(AppSettings, 1)
+            if row and row.telegram_bot_enabled and row.telegram_bot_token:
+                return True, row.telegram_bot_token
+            return False, ''
+
+        enabled, token = run_settings_db(_check)
+        assert enabled is True
+        assert token == 'bot:tok'

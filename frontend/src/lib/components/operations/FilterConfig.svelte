@@ -3,6 +3,9 @@
 	import { X, Plus } from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import DateTimeInput from '$lib/components/common/DateTimeInput.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
+	import { css, cx, label, input } from '$lib/styles/panda';
 
 	const uid = $props.id();
 
@@ -207,34 +210,53 @@
 	}
 </script>
 
-<div class="config-panel" role="region" aria-label="Filter configuration">
+<div
+	class={css({ padding: '0', border: 'none', backgroundColor: 'bg.primary' })}
+	role="region"
+	aria-label="Filter configuration"
+>
 	<div role="group" aria-labelledby="{uid}-conditions-heading">
-		<div class="mb-5 flex items-center justify-between">
-			<h4 id="{uid}-conditions-heading" class="mb-0">Conditions</h4>
-			<div class="flex items-center gap-2">
-				<div class="flex" role="radiogroup" aria-label="Condition logic">
-					<button
-						type="button"
-						class="logic-btn flex cursor-pointer items-center justify-center border border-tertiary bg-transparent px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg-secondary"
-						class:active={config.logic === 'AND'}
+		<div
+			class={css({
+				marginBottom: '5',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between'
+			})}
+		>
+			<SectionHeader>
+				<span id="{uid}-conditions-heading">Conditions</span>
+			</SectionHeader>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<div class={css({ display: 'flex' })} role="radiogroup" aria-label="Condition logic">
+					<ToggleButton
+						active={config.logic === 'AND'}
+						radius="left"
 						onclick={() => (config.logic = 'AND')}
-						aria-pressed={config.logic === 'AND'}
+						ariaPressed={config.logic === 'AND'}>AND</ToggleButton
 					>
-						AND
-					</button>
-					<button
-						type="button"
-						class="logic-btn flex cursor-pointer items-center justify-center border border-tertiary bg-transparent px-2 py-1 text-xs text-fg-muted hover:bg-hover hover:text-fg-secondary"
-						class:active={config.logic === 'OR'}
+					<ToggleButton
+						active={config.logic === 'OR'}
+						radius="right"
 						onclick={() => (config.logic = 'OR')}
-						aria-pressed={config.logic === 'OR'}
+						ariaPressed={config.logic === 'OR'}>OR</ToggleButton
 					>
-						OR
-					</button>
 				</div>
 				<button
 					type="button"
-					class="btn-add flex h-7 w-7 cursor-pointer items-center justify-center border border-tertiary bg-tertiary p-0 text-fg-secondary hover:bg-hover hover:text-fg-primary"
+					class={css({
+						display: 'flex',
+						height: 'row',
+						width: 'row',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'center',
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						padding: '0',
+						color: 'fg.secondary',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
 					onclick={addCondition}
 					aria-label="Add filter condition"
 				>
@@ -244,12 +266,21 @@
 		</div>
 
 		{#if conditions.length === 0}
-			<p class="empty-message" role="status">
+			<p
+				class={css({
+					color: 'fg.muted',
+					fontStyle: 'italic',
+					textAlign: 'center',
+					padding: '4',
+					margin: '0'
+				})}
+				role="status"
+			>
 				No conditions configured. Click "+ Add" to create one.
 			</p>
 		{:else}
 			<div
-				class="flex flex-col gap-4"
+				class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}
 				role="list"
 				aria-label="Filter conditions"
 				aria-live="polite"
@@ -263,17 +294,48 @@
 					{@const ops = getOperatorsForType(colType, isColumn)}
 
 					<div
-						class="condition-card filter-config border-l-2 border-l-tertiary pl-4 pb-2"
+						class={css({
+							borderLeftWidth: '2',
+							paddingLeft: '4',
+							paddingBottom: '2'
+						})}
 						role="listitem"
 					>
-						<div class="mb-3 flex items-center gap-2 pb-2">
-							<span class="text-xs font-semibold text-fg-muted">#{i + 1}</span>
+						<div
+							class={css({
+								marginBottom: '3',
+								display: 'flex',
+								alignItems: 'center',
+								gap: '2',
+								paddingBottom: '2'
+							})}
+						>
+							<span class={cx(label(), css({ fontWeight: 'semibold' }))}>#{i + 1}</span>
 							{#if cond.column}
-								<span class="text-sm font-medium text-fg-primary">{cond.column}</span>
+								<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>{cond.column}</span>
 							{/if}
 							<button
 								type="button"
-								class="btn-remove ml-auto flex h-6 w-6 cursor-pointer items-center justify-center border border-transparent bg-transparent p-0 text-fg-muted hover:border-error hover:bg-error hover:text-error disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-fg-muted"
+								class={css({
+									marginLeft: 'auto',
+									display: 'flex',
+									height: 'iconLg',
+									width: 'iconLg',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									borderColor: 'border.transparent',
+									backgroundColor: 'transparent',
+									padding: '0',
+									color: 'fg.muted',
+									_hover: {
+										borderColor: 'error.border',
+										backgroundColor: 'error.bg',
+										color: 'error.fg'
+									},
+									_disabled: { cursor: 'not-allowed', opacity: '0.3' }
+								})}
 								onclick={() => removeCondition(i)}
 								disabled={conditions.length === 1}
 								aria-label={`Remove condition ${i + 1}`}
@@ -282,24 +344,65 @@
 							</button>
 						</div>
 
-						<div class="relative flex flex-wrap items-start gap-4">
-							<div class="flex min-w-55 flex-2 flex-col gap-1">
-								<span class="mb-0 text-xs font-normal text-fg-muted">Column</span>
+						<div
+							class={css({
+								position: 'relative',
+								display: 'flex',
+								flexWrap: 'wrap',
+								alignItems: 'start',
+								gap: '4'
+							})}
+						>
+							<div
+								class={css({
+									display: 'flex',
+									flex: '2',
+									flexDirection: 'column',
+									gap: '1',
+									minWidth: 'dropdown'
+								})}
+							>
+								<span
+									class={css({
+										marginBottom: '0',
+										fontSize: 'xs',
+										fontWeight: 'normal',
+										color: 'fg.muted'
+									})}>Column</span
+								>
 								<ColumnDropdown
 									{schema}
 									value={cond.column}
 									onChange={(val) => handleColumnChange(i, val)}
 									placeholder="Select..."
+									containerClass={css({ position: 'static' })}
+									triggerClass={css({ width: '100%' })}
+									menuClass={css({ top: 'inherit', marginTop: '12' })}
 								/>
 							</div>
 
-							<div class="flex min-w-37.5 flex-1 flex-col gap-1">
-								<label class="text-xs font-normal mb-0 text-fg-muted" for="{uid}-operator-{i}"
-									>Operator</label
+							<div
+								class={css({
+									display: 'flex',
+									flex: '1',
+									flexDirection: 'column',
+									gap: '1',
+									minWidth: 'inputSm'
+								})}
+							>
+								<label
+									class={css({
+										fontSize: 'xs',
+										fontWeight: 'normal',
+										marginBottom: '0',
+										color: 'fg.muted'
+									})}
+									for="{uid}-operator-{i}">Operator</label
 								>
 								<select
 									id="{uid}-operator-{i}"
 									data-testid={`filter-operator-select-${i}`}
+									class={input()}
 									value={cond.operator}
 									onchange={(e) => handleOperatorChange(i, e.currentTarget.value)}
 								>
@@ -310,28 +413,37 @@
 							</div>
 
 							{#if !isNull}
-								<div class="flex min-w-60 flex-2 flex-col gap-1">
-									<div class="flex items-center justify-between gap-2">
-										<span class="text-xs font-normal text-fg-muted">Compare to</span>
-										<div class="flex" role="radiogroup" aria-label="Value mode">
-											<button
-												type="button"
-												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer border border-tertiary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-												class:active={!isColumn}
+								<div
+									class={css({
+										display: 'flex',
+										flex: '2',
+										flexDirection: 'column',
+										gap: '1',
+										minWidth: 'list'
+									})}
+								>
+									<div
+										class={css({
+											display: 'flex',
+											alignItems: 'center',
+											justifyContent: 'space-between',
+											gap: '2'
+										})}
+									>
+										<span class={cx(label(), css({ fontWeight: 'normal' }))}>Compare to</span>
+										<div class={css({ display: 'flex' })} role="radiogroup" aria-label="Value mode">
+											<ToggleButton
+												active={!isColumn}
+												radius="left"
 												onclick={() => handleModeChange(i, 'value')}
-												aria-pressed={!isColumn}
+												ariaPressed={!isColumn}>Value</ToggleButton
 											>
-												Value
-											</button>
-											<button
-												type="button"
-												class="mode-btn flex items-center justify-center px-2 py-1 text-xs cursor-pointer border border-tertiary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-												class:active={isColumn}
+											<ToggleButton
+												active={isColumn}
+												radius="right"
 												onclick={() => handleModeChange(i, 'column')}
-												aria-pressed={isColumn}
+												ariaPressed={isColumn}>Column</ToggleButton
 											>
-												Column
-											</button>
 										</div>
 									</div>
 
@@ -341,12 +453,16 @@
 											value={cond.compare_column ?? ''}
 											onChange={(val) => updateCondition(i, { compare_column: val })}
 											placeholder="Select..."
+											containerClass={css({ position: 'static' })}
+											triggerClass={css({ width: '100%' })}
+											menuClass={css({ top: 'inherit', marginTop: '12' })}
 										/>
 									{:else if colType === 'number'}
 										<input
 											id="{uid}-value-{i}"
 											data-testid={`filter-value-input-${i}`}
 											type="number"
+											class={input()}
 											step="any"
 											value={typeof cond.value === 'number'
 												? String(cond.value)
@@ -362,17 +478,17 @@
 											onChange={(val) => updateCondition(i, { value: val })}
 										/>
 									{:else if colType === 'date'}
-										<input
+										<DateTimeInput
 											id="{uid}-value-{i}"
-											data-testid={`filter-value-input-${i}`}
-											type="date"
 											value={formatDateForInput(cond.value)}
-											onchange={(e) => updateCondition(i, { value: e.currentTarget.value })}
+											onChange={(val) => updateCondition(i, { value: val })}
+											withTime={false}
 										/>
 									{:else if colType === 'boolean'}
 										<select
 											id="{uid}-value-{i}"
 											data-testid={`filter-value-input-${i}`}
+											class={input()}
 											value={String(cond.value ?? 'true')}
 											onchange={(e) =>
 												updateCondition(i, { value: e.currentTarget.value === 'true' })}
@@ -382,11 +498,12 @@
 										</select>
 									{:else if multiLiteral}
 										{@const tokens = getLiteralList(cond.value)}
-										<div class="filter-token-input">
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 											<input
 												id="{uid}-value-{i}"
 												data-testid={`filter-value-input-${i}`}
 												type="text"
+												class={input()}
 												value=""
 												onkeydown={(e) => {
 													if (e.key !== 'Enter') return;
@@ -398,12 +515,45 @@
 												placeholder="Type value and press Enter"
 											/>
 											{#if tokens.length > 0}
-												<div class="filter-token-list" role="list" aria-label="Filter values">
+												<div
+													class={css({ display: 'flex', flexWrap: 'wrap', gap: '2' })}
+													role="list"
+													aria-label="Filter values"
+												>
 													{#each tokens as token, tokenIndex (tokenIndex)}
-														<span class="filter-token" role="listitem">
-															<span class="filter-token__label">{token}</span>
+														<span
+															class={css({
+																display: 'inline-flex',
+																alignItems: 'center',
+																gap: '1',
+																borderWidth: '1',
+																backgroundColor: 'bg.tertiary',
+																fontSize: 'xs',
+																paddingY: '1',
+																paddingX: '2'
+															})}
+															role="listitem"
+														>
+															<span
+																class={css({
+																	maxWidth: 'dropdown',
+																	overflow: 'hidden',
+																	textOverflow: 'ellipsis',
+																	whiteSpace: 'nowrap'
+																})}>{token}</span
+															>
 															<button
-																class="filter-token__remove"
+																class={css({
+																	display: 'inline-flex',
+																	alignItems: 'center',
+																	justifyContent: 'center',
+																	padding: '0',
+																	border: 'none',
+																	background: 'transparent',
+																	color: 'fg.muted',
+																	cursor: 'pointer',
+																	_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+																})}
 																onclick={() => removeLiteralToken(i, tokenIndex)}
 																aria-label={`Remove ${token}`}
 																type="button"
@@ -420,6 +570,7 @@
 											id="{uid}-value-{i}"
 											data-testid={`filter-value-input-${i}`}
 											type="text"
+											class={input()}
 											value={cond.value ?? ''}
 											oninput={(e) => updateCondition(i, { value: e.currentTarget.value })}
 											placeholder={cond.operator === 'regex' ? 'pattern' : 'value'}
@@ -427,9 +578,27 @@
 									{/if}
 								</div>
 							{:else}
-								<div class="flex min-w-60 flex-2 flex-col gap-1">
-									<span class="text-xs font-normal text-fg-muted">Value</span>
-									<div class="flex items-center h-9 px-3 text-xs italic text-fg-muted">
+								<div
+									class={css({
+										display: 'flex',
+										flex: '2',
+										flexDirection: 'column',
+										gap: '1',
+										minWidth: 'list'
+									})}
+								>
+									<span class={cx(label(), css({ fontWeight: 'normal' }))}>Value</span>
+									<div
+										class={css({
+											display: 'flex',
+											alignItems: 'center',
+											height: 'rowXl',
+											paddingX: '3',
+											fontSize: 'xs',
+											fontStyle: 'italic',
+											color: 'fg.muted'
+										})}
+									>
 										<span>No value needed</span>
 									</div>
 								</div>

@@ -6,7 +6,10 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
 	import { Search } from 'lucide-svelte';
+	import { css, cx, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface Props {
 		config?: NotificationConfigData;
@@ -38,16 +41,12 @@
 	const canEmail = $derived(configFlags.smtpEnabled);
 	const canTelegram = $derived(configFlags.telegramEnabled);
 	const method = $derived(config?.method ?? 'email');
-	const inputColumns = $derived.by(() =>
-		Array.isArray(config?.input_columns) ? config.input_columns : []
-	);
-	const subscriberIds = $derived.by(() =>
+	const inputColumns = $derived(Array.isArray(config?.input_columns) ? config.input_columns : []);
+	const subscriberIds = $derived(
 		Array.isArray(config?.subscriber_ids) ? config.subscriber_ids : []
 	);
-	const recipientSource = $derived.by(() =>
-		config?.recipient_source === 'column' ? 'column' : 'manual'
-	);
-	const recipientColumn = $derived.by(() =>
+	const recipientSource = $derived(config?.recipient_source === 'column' ? 'column' : 'manual');
+	const recipientColumn = $derived(
 		typeof config?.recipient_column === 'string' ? config.recipient_column : ''
 	);
 	const isReady = $derived(
@@ -139,15 +138,16 @@
 	});
 </script>
 
-<div class="config-panel" role="region" aria-label="Notification configuration">
+<div class={stepConfig()} role="region" aria-label="Notification configuration">
 	{#if !isReady}
-		<div class="warning-box mb-5">Configure SMTP or Telegram in global settings first.</div>
+		<Callout tone="warn">Configure SMTP or Telegram in global settings first.</Callout>
 	{/if}
 
-	<div class="form-group mb-5">
-		<label for="notify-method">Method</label>
+	<div class={css({ marginBottom: '5' })}>
+		<label class={label()} for="notify-method">Method</label>
 		<select
 			id="notify-method"
+			class={input()}
 			value={config.method}
 			onchange={(e) => handleMethodChange(e.currentTarget.value as 'email' | 'telegram')}
 		>
@@ -156,42 +156,52 @@
 		</select>
 	</div>
 
-	<div class="form-group mb-5">
+	<div class={css({ marginBottom: '5' })}>
 		{#if method === 'email'}
-			<label for="notify-recipient">Email Address</label>
+			<label class={label()} for="notify-recipient">Email Address</label>
 			<input
 				id="notify-recipient"
 				type="text"
+				class={input()}
 				bind:value={config.recipient}
 				placeholder="user@example.com"
 			/>
 		{:else}
-			<div class="flex flex-col gap-3">
-				<div class="flex items-center justify-between gap-3">
-					<span class="text-[10px] uppercase text-fg-muted">Recipient Source</span>
-					<div class="flex" role="radiogroup" aria-label="Recipient source">
-						<button
-							type="button"
-							class="mode-btn flex items-center justify-center px-2 py-1 text-[10px] cursor-pointer border border-tertiary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-							class:active={recipientSource === 'manual'}
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						gap: '3'
+					})}
+				>
+					<span class={css({ fontSize: '2xs', textTransform: 'uppercase', color: 'fg.muted' })}>
+						Recipient Source
+					</span>
+					<div class={css({ display: 'flex' })} role="radiogroup" aria-label="Recipient source">
+						<ToggleButton
+							active={recipientSource === 'manual'}
+							radius="left"
 							onclick={() => handleRecipientSourceChange('manual')}
-							aria-pressed={recipientSource === 'manual'}
+							ariaPressed={recipientSource === 'manual'}
 						>
 							Subscribers
-						</button>
-						<button
-							type="button"
-							class="mode-btn flex items-center justify-center px-2 py-1 text-[10px] cursor-pointer border border-tertiary bg-transparent text-fg-muted hover:bg-hover hover:text-fg-secondary"
-							class:active={recipientSource === 'column'}
+						</ToggleButton>
+						<ToggleButton
+							active={recipientSource === 'column'}
+							radius="right"
 							onclick={() => handleRecipientSourceChange('column')}
-							aria-pressed={recipientSource === 'column'}
+							ariaPressed={recipientSource === 'column'}
 						>
 							Column
-						</button>
+						</ToggleButton>
 					</div>
 				</div>
 				{#if recipientSource === 'column'}
-					<span class="text-[10px] uppercase text-fg-muted">Recipient Column</span>
+					<span class={css({ fontSize: '2xs', textTransform: 'uppercase', color: 'fg.muted' })}>
+						Recipient Column
+					</span>
 					<ColumnDropdown
 						{schema}
 						value={recipientColumn}
@@ -201,40 +211,102 @@
 							col.dtype.toLowerCase().includes('string') ||
 							col.dtype.toLowerCase().includes('list')}
 					/>
-					<span class="text-[10px] text-fg-muted">
+					<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
 						Use string or list[string] columns. Comma-separated strings are supported.
 					</span>
 				{:else}
-					<span class="text-[10px] uppercase text-fg-muted">Recipients</span>
-					<div class="relative">
+					<span class={css({ fontSize: '2xs', textTransform: 'uppercase', color: 'fg.muted' })}>
+						Recipients
+					</span>
+					<div class={css({ position: 'relative' })}>
 						<Search
 							size={12}
-							class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-fg-muted"
+							class={css({
+								pointerEvents: 'none',
+								position: 'absolute',
+								left: '2',
+								top: '50%',
+								transform: 'translateY(-50%)',
+								color: 'fg.muted'
+							})}
 						/>
 						<input
 							id="notif-search"
 							aria-label="Search subscribers"
-							class="resource-input w-full border border-tertiary bg-secondary py-1 pl-7 pr-2 text-xs text-fg-primary"
+							class={cx(
+								input({ variant: 'searchCompact' }),
+								css({ paddingLeft: '7', paddingRight: '2' })
+							)}
 							placeholder="Search subscribers..."
 							value={search}
 							oninput={(e) => (search = e.currentTarget.value)}
 						/>
 					</div>
-					<div class="max-h-32 overflow-y-auto border border-tertiary bg-secondary">
+					<div
+						class={css({
+							maxHeight: 'colMd',
+							overflowY: 'auto',
+							borderWidth: '1',
+							backgroundColor: 'bg.secondary'
+						})}
+					>
 						{#if subscribersQuery.isPending}
-							<div class="p-2 text-center text-[10px] text-fg-muted">Loading...</div>
+							<div
+								class={css({
+									padding: '2',
+									textAlign: 'center',
+									fontSize: '2xs',
+									color: 'fg.muted'
+								})}
+							>
+								Loading...
+							</div>
 						{:else if subscribersQuery.isError}
-							<div class="p-2 text-center text-[10px] text-error">Failed to load subscribers</div>
+							<div
+								class={css({
+									padding: '2',
+									textAlign: 'center',
+									fontSize: '2xs',
+									color: 'error.fg'
+								})}
+							>
+								Failed to load subscribers
+							</div>
 						{:else if activeSubscribers.length === 0}
-							<div class="p-2 text-center text-[10px] text-fg-muted">
+							<div
+								class={css({
+									padding: '2',
+									textAlign: 'center',
+									fontSize: '2xs',
+									color: 'fg.muted'
+								})}
+							>
 								No subscribers. Users can subscribe via /subscribe in Telegram.
 							</div>
 						{:else if filtered.length === 0}
-							<div class="p-2 text-center text-[10px] text-fg-muted">No matches</div>
+							<div
+								class={css({
+									padding: '2',
+									textAlign: 'center',
+									fontSize: '2xs',
+									color: 'fg.muted'
+								})}
+							>
+								No matches
+							</div>
 						{:else}
 							{#each filtered as sub (sub.id)}
 								<label
-									class="flex cursor-pointer items-center gap-3 border-b border-tertiary px-2 py-1.5 last:border-b-0 hover:bg-tertiary"
+									class={cx(
+										label({ variant: 'checkbox' }),
+										css({
+											borderBottomWidth: '1',
+											paddingX: '2',
+											paddingY: '1.5',
+											_hover: { backgroundColor: 'bg.tertiary' },
+											_last: { borderBottomWidth: '0' }
+										})
+									)}
 								>
 									<input
 										id={`sub-${sub.id}`}
@@ -242,8 +314,24 @@
 										checked={isSelected(sub.chat_id)}
 										onchange={() => toggleSubscriber(sub.chat_id)}
 									/>
-									<span class="truncate text-xs text-fg-primary">{sub.title}</span>
-									<span class="ml-auto shrink-0 text-[10px] text-fg-muted">
+									<span
+										class={css({
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											fontSize: 'xs'
+										})}
+									>
+										{sub.title}
+									</span>
+									<span
+										class={css({
+											marginLeft: 'auto',
+											flexShrink: '0',
+											fontSize: '2xs',
+											color: 'fg.muted'
+										})}
+									>
 										{sub.chat_id}
 									</span>
 								</label>
@@ -256,8 +344,8 @@
 	</div>
 
 	<!-- svelte-ignore a11y_label_has_associated_control -->
-	<div class="form-group mb-5">
-		<label>Input Column(s)</label>
+	<div class={css({ marginBottom: '5' })}>
+		<label class={label()}>Input Column(s)</label>
 		<MultiSelectColumnDropdown
 			{schema}
 			value={inputColumns}
@@ -267,27 +355,29 @@
 		/>
 	</div>
 
-	<div class="form-group mb-5">
-		<label for="notify-output">Output Column</label>
+	<div class={css({ marginBottom: '5' })}>
+		<label class={label()} for="notify-output">Output Column</label>
 		<input
 			id="notify-output"
 			type="text"
+			class={input()}
 			bind:value={config.output_column}
 			placeholder="notification_status"
 		/>
 	</div>
 
 	{#if config.method === 'email'}
-		<div class="form-group mb-4">
-			<label for="notify-subject">Subject Template</label>
-			<input id="notify-subject" type="text" bind:value={config.subject_template} />
+		<div class={css({ marginBottom: '4' })}>
+			<label class={label()} for="notify-subject">Subject Template</label>
+			<input id="notify-subject" type="text" class={input()} bind:value={config.subject_template} />
 		</div>
 	{/if}
 
-	<div class="form-group mb-0">
-		<label for="notify-message">Message Template</label>
-		<textarea id="notify-message" rows="4" bind:value={config.message_template}></textarea>
-		<span class="hint mt-1 block text-xs text-fg-muted">
+	<div class={css({ marginBottom: '0' })}>
+		<label class={label()} for="notify-message">Message Template</label>
+		<textarea id="notify-message" class={input()} rows="4" bind:value={config.message_template}
+		></textarea>
+		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.muted' })}>
 			{placeholderHint}
 		</span>
 	</div>

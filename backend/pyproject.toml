@@ -28,6 +28,7 @@ dependencies = [
     "types-openpyxl>=3.1.5.20250919",
     "croniter",
     "pytest-timeout>=2.2.0",
+    "jsonschema>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -142,4 +143,9 @@ filterwarnings = [
 ]
 markers = [
     "asyncio: mark test as async",
+]
+
+[dependency-groups]
+dev = [
+    "types-jsonschema>=4.26.0.20260202",
 ]

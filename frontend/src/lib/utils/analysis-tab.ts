@@ -1,46 +1,37 @@
 import type { AnalysisTab, AnalysisTabDatasource, AnalysisTabOutput } from '$lib/types/analysis';
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: string | null | undefined): boolean {
+	return typeof value === 'string' && uuidPattern.test(value);
+}
+
 const defaultBranch = 'master';
 const defaultNamespace = 'outputs';
 const defaultBuildMode = 'full';
 const defaultFormat = 'parquet';
-const defaultDatasourceType = 'iceberg';
 const outputNameFallback = 'export';
 
-function makeId(): string {
-	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-		return crypto.randomUUID();
-	}
-	return `id-${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-}
-
 function cleanBranch(value: unknown): string {
-	if (typeof value !== 'string') return defaultBranch;
-	const trimmed = value.trim();
-	if (!trimmed) return defaultBranch;
-	return trimmed;
+	const trimmed = typeof value === 'string' ? value.trim() : '';
+	return trimmed || defaultBranch;
 }
 
 function toSlug(value: string): string {
-	const trimmed = value.trim();
-	if (!trimmed) return outputNameFallback;
-	const normalized = trimmed.replace(/\s+/g, '_').toLowerCase();
-	if (!normalized) return outputNameFallback;
-	return normalized;
+	return value.trim().replace(/\s+/g, '_').toLowerCase() || outputNameFallback;
 }
 
 export function buildOutputConfig(args: {
-	outputId?: string | null;
+	outputId: string;
 	name?: string | null;
 	branch?: string | null;
 }): AnalysisTabOutput {
-	const outputId = args.outputId && args.outputId.trim() ? args.outputId.trim() : makeId();
+	const outputId = args.outputId;
 	const name = args.name ?? outputNameFallback;
 	const tableName = toSlug(name);
 	const branch = cleanBranch(args.branch);
 	return {
-		output_datasource_id: outputId,
-		datasource_type: defaultDatasourceType,
+		result_id: outputId,
 		format: defaultFormat,
 		filename: tableName,
 		build_mode: defaultBuildMode,
@@ -67,9 +58,12 @@ export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab 
 	};
 	const output = (tab.output ?? {}) as AnalysisTabOutput;
 	const outputId =
-		typeof output.output_datasource_id === 'string' && output.output_datasource_id.trim()
-			? output.output_datasource_id
-			: null;
+		typeof output.result_id === 'string' && isUuid(output.result_id) ? output.result_id : null;
+	if (!outputId) {
+		throw new Error(
+			`Tab ${tab.id ?? index} has missing or invalid output.result_id — expected a UUID v4`
+		);
+	}
 	const name =
 		typeof tab.name === 'string' && tab.name.trim() ? tab.name.trim() : `Source ${index + 1}`;
 	const defaults = buildOutputConfig({ outputId, name, branch });
@@ -81,7 +75,7 @@ export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab 
 	const normalizedOutput: AnalysisTabOutput = {
 		...defaults,
 		...output,
-		output_datasource_id: defaults.output_datasource_id,
+		result_id: defaults.result_id,
 		iceberg
 	};
 	return {
@@ -101,7 +95,7 @@ export function validatePipelineTabs(tabs: AnalysisTab[]): PipelineValidationErr
 	const errors: PipelineValidationError[] = [];
 	const outputByTabId = new Map<string, string>();
 	for (const tab of tabs) {
-		const outputId = tab.output?.output_datasource_id;
+		const outputId = tab.output?.result_id;
 		if (!tab.id || !outputId) continue;
 		outputByTabId.set(String(tab.id), String(outputId));
 	}
@@ -134,35 +128,11 @@ export function validatePipelineTabs(tabs: AnalysisTab[]): PipelineValidationErr
 			});
 			continue;
 		}
-		if (!output.output_datasource_id) {
+		if (!output.result_id) {
 			errors.push({
 				tabId,
-				field: 'output.output_datasource_id',
-				message: `Tab ${tabId} missing output.output_datasource_id`
-			});
-		}
-		const filename = output.filename as string | undefined;
-		if (!filename) {
-			errors.push({
-				tabId,
-				field: 'output.filename',
-				message: `Tab ${tabId} missing output filename`
-			});
-		}
-		const format = output.format as string | undefined;
-		if (!format) {
-			errors.push({
-				tabId,
-				field: 'output.format',
-				message: `Tab ${tabId} missing output format`
-			});
-		}
-		const datasourceType = output.datasource_type as string | undefined;
-		if (!datasourceType) {
-			errors.push({
-				tabId,
-				field: 'output.datasource_type',
-				message: `Tab ${tabId} missing output datasource_type`
+				field: 'output.result_id',
+				message: `Tab ${tabId} missing output.result_id`
 			});
 		}
 
@@ -181,7 +151,7 @@ export function validatePipelineTabs(tabs: AnalysisTab[]): PipelineValidationErr
 			errors.push({
 				tabId,
 				field: 'datasource.id',
-				message: `Tab ${tabId} datasource.id must match upstream output_datasource_id`
+				message: `Tab ${tabId} datasource.id must match upstream result_id`
 			});
 		}
 	}
@@ -191,7 +161,6 @@ export function validatePipelineTabs(tabs: AnalysisTab[]): PipelineValidationErr
 export function formatPipelineErrors(errors: PipelineValidationError[]): string {
 	if (!errors.length) return '';
 	const [first, ...rest] = errors;
-	if (!first) return '';
 	const suffix = rest.length ? ` (+${rest.length} more)` : '';
 	return `${first.message}${suffix}`;
 }

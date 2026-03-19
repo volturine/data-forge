@@ -7,6 +7,7 @@
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
+	import { css, button, menuItem, cx } from '$lib/styles/panda';
 
 	interface PickerOption {
 		id: string;
@@ -178,7 +179,16 @@
 	showSelectAll={showBulkActions}
 	showSelectedList={false}
 	triggerType="input"
-	inputClass="w-full border border-tertiary bg-primary px-3 py-2 font-mono text-sm text-fg-primary focus:border-accent-primary focus:outline-none"
+	inputClass={css({
+		width: 'full',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary',
+		paddingX: '3',
+		paddingY: '2',
+		fontFamily: 'mono',
+		fontSize: 'sm',
+		_focus: { borderColor: 'accent.primary', outline: 'none' }
+	})}
 	{searchValue}
 	emptyLabel="No datasources found"
 	listAriaLabel={label ?? 'Available datasources'}
@@ -186,15 +196,38 @@
 />
 
 {#if mode === 'multi' && modeSource === 'datasource' && showChips && selectedDatasources.length > 0}
-	<div class="mt-2 flex flex-wrap gap-2">
+	<div class={css({ marginTop: '2', display: 'flex', flexWrap: 'wrap', gap: '2' })}>
 		{#each selectedDatasources as ds (ds.id)}
 			<span
-				class="chip inline-flex items-center gap-1 border border-tertiary bg-badge-bg px-2 py-1 text-xs text-badge-fg"
-				class:highlighted={ds.id === highlightId}
+				class={css({
+					display: 'inline-flex',
+					alignItems: 'center',
+					gap: '1',
+					borderWidth: '1',
+					borderColor: ds.id === highlightId ? 'accent.primary' : 'border.primary',
+					paddingX: '2',
+					paddingY: '1',
+					fontSize: 'xs',
+					...(ds.id === highlightId
+						? { backgroundColor: 'accent.bg', color: 'accent.primary' }
+						: {})
+				})}
 			>
 				{ds.name}
 				<button
-					class="chip-remove inline-flex h-4 w-4 cursor-pointer items-center justify-center border-none bg-transparent p-0 text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
+					class={css({
+						display: 'inline-flex',
+						height: 'iconSm',
+						width: 'iconSm',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'center',
+						borderStyle: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						color: 'fg.muted',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
 					onclick={() => deselect(ds.id)}
 					aria-label={`Remove ${ds.name}`}
 					type="button"
@@ -207,9 +240,13 @@
 {/if}
 
 {#if canSelectAll && showBulkActions}
-	<div class="mt-2 flex gap-2">
-		<button class="btn-secondary btn-sm" onclick={selectAll} type="button">Select All</button>
-		<button class="btn-secondary btn-sm" onclick={deselectAll} type="button">Deselect All</button>
+	<div class={css({ marginTop: '2', display: 'flex', gap: '2' })}>
+		<button class={button({ variant: 'secondary', size: 'sm' })} onclick={selectAll} type="button"
+			>Select All</button
+		>
+		<button class={button({ variant: 'secondary', size: 'sm' })} onclick={deselectAll} type="button"
+			>Deselect All</button
+		>
 	</div>
 {/if}
 
@@ -220,21 +257,42 @@
 })}
 	{@const option = payload.option as PickerOption}
 	<button
-		class="picker-option flex w-full cursor-pointer items-center justify-between border-b border-tertiary bg-transparent px-3 py-2 font-mono text-left text-sm text-fg-primary last:border-b-0 hover:bg-bg-hover"
-		class:selected={payload.selected}
-		class:highlighted={option.id === highlightId}
+		class={cx(
+			menuItem(),
+			css({
+				display: 'flex',
+				justifyContent: 'space-between',
+				fontFamily: 'mono',
+				fontSize: 'sm',
+				...(payload.selected ? { backgroundColor: 'accent.bg' } : {}),
+				...(option.id === highlightId
+					? { borderLeftWidth: '3', borderLeftColor: 'accent.secondary' }
+					: {})
+			})
+		)}
 		onclick={payload.onSelect}
 		role="option"
 		aria-selected={payload.selected}
 		type="button"
 	>
-		<span class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{option.label}</span>
+		<span
+			class={css({ flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}
+			>{option.label}</span
+		>
 		{#if option.kind === 'datasource'}
 			{@const ds = option.payload as DataSource}
 			{#if ds.id === highlightId}
 				<span
-					class="ml-2 border border-accent-primary bg-accent-bg px-2 py-1 text-xs text-accent-primary"
-					>current</span
+					class={css({
+						marginLeft: '2',
+						borderWidth: '1',
+						borderColor: 'accent.primary',
+						backgroundColor: 'accent.bg',
+						paddingX: '2',
+						paddingY: '1',
+						fontSize: 'xs',
+						color: 'accent.primary'
+					})}>current</span
 				>
 			{:else if ds.source_type === 'file'}
 				<FileTypeBadge path={(ds.config?.file_path as string) ?? ''} size="sm" showIcon={false} />
@@ -243,8 +301,16 @@
 				<FileTypeBadge sourceType={badgeSource} size="sm" showIcon={false} />
 			{/if}
 		{:else}
-			<span class="ml-2 border border-tertiary bg-tertiary px-2 py-1 text-xs text-fg-muted"
-				>analysis</span
+			<span
+				class={css({
+					marginLeft: '2',
+					borderWidth: '1',
+					backgroundColor: 'bg.tertiary',
+					paddingX: '2',
+					paddingY: '1',
+					fontSize: 'xs',
+					color: 'fg.muted'
+				})}>analysis</span
 			>
 		{/if}
 	</button>

@@ -37,18 +37,6 @@ async function initClientId(): Promise<void> {
 	await idbSet('lock_client_id', id);
 }
 
-function generateFingerprint(): Fingerprint {
-	if (!browser) {
-		return { screen: '', timezone: '', language: '', platform: '' };
-	}
-	return {
-		screen: `${screen.width}x${screen.height}`,
-		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-		language: navigator.language,
-		platform: navigator.platform
-	};
-}
-
 // Generate a hash from fingerprint for server storage
 export function hashFingerprint(fp: Fingerprint): string {
 	const str = `${fp.screen}|${fp.timezone}|${fp.language}|${fp.platform}`;
@@ -67,7 +55,12 @@ if (browser) {
 
 // Fingerprint
 const fingerprintValue: Fingerprint = browser
-	? generateFingerprint()
+	? {
+			screen: `${screen.width}x${screen.height}`,
+			timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+			language: navigator.language,
+			platform: navigator.platform
+		}
 	: { screen: '', timezone: '', language: '', platform: '' };
 
 // Get current client identity for API calls

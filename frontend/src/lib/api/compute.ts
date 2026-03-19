@@ -95,17 +95,13 @@ export interface ExportRequest {
 	tab_id?: string | null;
 	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'duckdb';
 	filename?: string;
-	destination: 'download' | 'filesystem' | 'datasource';
-	datasource_type?: 'iceberg' | 'duckdb' | 'file';
+	destination: 'download' | 'datasource';
 	iceberg_options?: {
 		table_name?: string;
 		namespace?: string;
 		branch: string;
 	};
-	duckdb_options?: {
-		table_name?: string;
-	};
-	output_datasource_id: string;
+	result_id: string;
 }
 
 export interface ExportResponse {
@@ -113,7 +109,6 @@ export interface ExportResponse {
 	filename: string;
 	format: string;
 	destination: string;
-	file_path: string | null;
 	message: string | null;
 	datasource_id: string | null;
 	datasource_name?: string | null;
@@ -126,12 +121,12 @@ export function exportData(request: ExportRequest): ResultAsync<Blob | ExportRes
 			body: JSON.stringify(request)
 		}).andThen((blob) => {
 			const filename = request.filename ?? 'export';
-			if (request.format) {
-				const ext = request.format.startsWith('.') ? request.format : `.${request.format}`;
-				downloadBlob(blob, `${filename}${ext}`);
-				return okAsync(blob);
-			}
-			downloadBlob(blob, filename);
+			const ext = request.format
+				? request.format.startsWith('.')
+					? request.format
+					: `.${request.format}`
+				: '';
+			downloadBlob(blob, `${filename}${ext}`);
 			return okAsync(blob);
 		});
 	}
@@ -196,12 +191,7 @@ export function getStepSchema(
 	});
 }
 
-export interface StepRowCountRequest {
-	analysis_id?: string;
-	target_step_id: string;
-	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
-}
+export type StepRowCountRequest = StepSchemaRequest;
 
 export interface StepRowCountResponse {
 	step_id: string;

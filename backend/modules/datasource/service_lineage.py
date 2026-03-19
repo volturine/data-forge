@@ -130,16 +130,14 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
     runs = session.execute(stmt).scalars().all()
     for run in runs:
         payload = run.request_json if isinstance(run.request_json, dict) else {}
-        opts = payload.get('iceberg_options') if isinstance(payload, dict) else None
-        branch_name = None
-        if isinstance(opts, dict):
-            branch_name = opts.get('branch')
+        opts = payload.get('iceberg_options')
+        branch_name = opts.get('branch') if isinstance(opts, dict) else None
         if run_branch and branch_name != run_branch:
             continue
-        pipeline_value = payload.get('analysis_pipeline') if isinstance(payload, dict) else None
+        pipeline_value = payload.get('analysis_pipeline')
         if isinstance(pipeline_value, dict):
             pipeline = pipeline_value
-            tab_override = payload.get('tab_id') if isinstance(payload, dict) else None
+            tab_override = payload.get('tab_id')
         break
 
     pipeline = pipeline or (analysis.pipeline_definition if isinstance(analysis.pipeline_definition, dict) else {})
@@ -152,7 +150,7 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
     if not target_tab_id:
         for tab in tabs:
             output = tab.get('output') if isinstance(tab, dict) else None
-            output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+            output_id = output.get('result_id') if isinstance(output, dict) else None
             if output_id == target_datasource_id:
                 target_tab_id = str(tab.get('id')) if tab.get('id') else None
                 break
@@ -165,7 +163,7 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
     for tab in tabs:
         tab_id = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         if tab_id and output_id:
             output_map[str(tab_id)] = str(output_id)
             output_to_tab[str(output_id)] = str(tab_id)
@@ -208,7 +206,7 @@ def build_lineage(session: Session, target_datasource_id: str | None = None, bra
             if isinstance(iceberg_cfg, dict):
                 output_branch = iceberg_cfg.get('branch') or run_branch
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         if output_id:
             branch_value = str(output_branch) if output_branch is not None else None
             branch_overrides[str(output_id)] = branch_value

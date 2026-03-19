@@ -7,8 +7,7 @@
 	};
 
 	type TabOutput = {
-		output_datasource_id: string;
-		datasource_type: string;
+		result_id: string;
 		format: string;
 		filename: string;
 		build_mode?: string;
@@ -38,6 +37,7 @@
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
+	import { css, cx, input, label, row, rowBetween, divider, muted } from '$lib/styles/panda';
 
 	type ActiveTab = {
 		id: string;
@@ -134,7 +134,7 @@
 		enabled: !!datasource?.id
 	}));
 	const resolvedDatasource = $derived(datasourceQuery.data ?? datasource);
-	const outputId = $derived(activeTab?.output.output_datasource_id ?? null);
+	const outputId = $derived(activeTab?.output.result_id ?? null);
 	const isOutputSource = $derived(activeTab?.datasource?.id === outputId && !!outputId);
 	function ensureBranch(config: Record<string, unknown> | null | undefined, fallback: string) {
 		const branch = fallback.trim();
@@ -217,12 +217,12 @@
 		(analysisSourceId ? 'analysis' : (resolvedDatasource?.source_type ?? 'file')) as string
 	);
 	const isDragActive = $derived(drag.active);
-	const snapshotConfig = $derived.by(() => activeTab?.datasource?.config ?? {});
+	const snapshotConfig = $derived(activeTab?.datasource?.config ?? {});
 	const snapshotBranch = $derived.by((): string | null => {
 		const branch = activeTab?.datasource?.config?.branch;
 		return typeof branch === 'string' ? branch : null;
 	});
-	const branchValue = $derived.by(() => activeTab?.datasource?.config?.branch ?? '');
+	const branchValue = $derived(activeTab?.datasource?.config?.branch ?? '');
 
 	function applyBranchValue(next: string) {
 		const active = activeTab;
@@ -240,12 +240,44 @@
 	}
 </script>
 
-<div class="datasource-node relative w-[60%]" class:drag-active={isDragActive}>
-	<div class="node-content bg-primary border-tertiary border hover:border-tertiary">
+<div class={cx('datasource-node', css({ position: 'relative', width: '60%' }))}>
+	<div
+		class={cx(
+			'node-content',
+			css({
+				backgroundColor: 'bg.primary',
+				borderWidth: '1'
+			}),
+			isDragActive &&
+				css({
+					borderStyle: 'dashed',
+					opacity: '0.85'
+				})
+		)}
+	>
 		<!-- Header with icon and badge -->
-		<div class="flex items-center justify-between px-4 py-3 border-b border-tertiary">
-			<div class="flex items-center gap-2">
-				<div class="flex h-5 w-5 items-center justify-center bg-accent text-bg-primary">
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				paddingX: '4',
+				paddingY: '3',
+				borderBottomWidth: '1'
+			})}
+		>
+			<div class={cx(row, css({ gap: '2' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						height: 'iconMd',
+						width: 'iconMd',
+						alignItems: 'center',
+						justifyContent: 'center',
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse'
+					})}
+				>
 					{#if sourceType === 'file'}
 						<FileText size={12} />
 					{:else if sourceType === 'database'}
@@ -258,29 +290,73 @@
 						<FileText size={12} />
 					{/if}
 				</div>
-				<span class="text-xs font-semibold uppercase tracking-wide">source</span>
+				<span
+					class={css({
+						fontSize: 'xs',
+						fontWeight: '600',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide'
+					})}
+				>
+					source
+				</span>
 			</div>
 			<span
-				class="border border-tertiary bg-tertiary text-fg-faint px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-widest"
-				>root</span
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'bg.tertiary',
+					color: 'fg.faint',
+					paddingX: '1.5',
+					paddingY: '0.5',
+					fontSize: '3xs',
+					textTransform: 'uppercase',
+					letterSpacing: 'widest'
+				})}>root</span
 			>
 		</div>
 
 		<!-- Tab Section -->
 		<div
-			class="mx-4 mt-4 mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
+			class={css({
+				marginX: '4',
+				marginTop: '4',
+				marginBottom: '3',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				borderWidth: '1',
+				backgroundColor: 'bg.secondary',
+				paddingY: '2',
+				paddingX: '3'
+			})}
 		>
 			<div
-				class="info-label flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint"
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '2',
+					fontSize: '2xs',
+					textTransform: 'uppercase',
+					letterSpacing: 'widest',
+					color: 'fg.faint'
+				})}
 			>
-				<PanelLeft size={11} class="opacity-50" />
+				<PanelLeft size={11} class={css({ opacity: '0.5' })} />
 				<span>Tab name</span>
 			</div>
-			<div class="flex items-center gap-2">
+			<div class={cx(row, css({ gap: '2' }))}>
 				{#if isEditing}
-					<div class="flex items-center gap-1">
+					<div class={cx(row, css({ gap: '1' }))}>
 						<input
-							class="min-w-25 border border-tertiary bg-primary px-2 py-0.5 text-sm outline-none"
+							class={cx(
+								input(),
+								css({
+									minWidth: 'fieldSm',
+									paddingX: '2',
+									paddingY: '0.5',
+									fontSize: 'sm'
+								})
+							)}
 							id="ds-node-name"
 							bind:value={draftName}
 							onkeydown={(e) => {
@@ -290,34 +366,80 @@
 							aria-label="Edit tab name"
 						/>
 						<button
-							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
+							class={css({
+								display: 'inline-flex',
+								height: 'iconMd',
+								width: 'iconMd',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								borderColor: 'accent.primary',
+								color: 'success.fg',
+								backgroundColor: 'bg.primary',
+								padding: '0',
+								lineHeight: '1',
+								_hover: { backgroundColor: 'success.bg', color: 'fg.primary' }
+							})}
 							onclick={commitEdit}
 							type="button"
 							aria-label="Save"
 						>
-							<Check size={12} class="shrink-0" />
+							<Check size={12} class={css({ flexShrink: '0' })} />
 						</button>
 						<button
-							class="icon-btn cancel inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-error text-error bg-primary p-0 leading-none hover:bg-error hover:text-fg-primary"
+							class={css({
+								display: 'inline-flex',
+								height: 'iconMd',
+								width: 'iconMd',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								borderColor: 'error.border',
+								color: 'error.fg',
+								backgroundColor: 'bg.primary',
+								padding: '0',
+								lineHeight: '1',
+								_hover: { backgroundColor: 'error.bg', color: 'fg.primary' }
+							})}
 							onclick={cancelEdit}
 							type="button"
 							aria-label="Cancel"
 						>
-							<X size={12} class="shrink-0" />
+							<X size={12} class={css({ flexShrink: '0' })} />
 						</button>
 					</div>
 				{:else}
-					<span class="text-sm font-medium"
+					<span class={css({ fontSize: 'sm', fontWeight: '500' })}
 						>{tabName ?? datasourceLabel ?? datasource?.name ?? 'Untitled'}</span
 					>
 					{#if onRenameTab}
 						<button
-							class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
+							class={css({
+								display: 'inline-flex',
+								height: 'iconMd',
+								width: 'iconMd',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								color: 'fg.muted',
+								backgroundColor: 'bg.primary',
+								padding: '0',
+								opacity: '0.5',
+								lineHeight: '1',
+								_hover: {
+									color: 'fg.primary',
+									backgroundColor: 'bg.tertiary',
+									opacity: '1'
+								}
+							})}
 							onclick={startEdit}
 							type="button"
 							aria-label="Edit tab name"
 						>
-							<Pencil size={12} class="shrink-0" />
+							<Pencil size={12} class={css({ flexShrink: '0' })} />
 						</button>
 					{/if}
 				{/if}
@@ -325,18 +447,38 @@
 		</div>
 
 		<!-- Dataset Section -->
-		<div class="mx-4 mb-3">
+		<div class={css({ marginX: '4', marginBottom: '3' })}>
 			<div
-				class="info-label mb-2 flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint"
+				class={css({
+					marginBottom: '2',
+					display: 'flex',
+					alignItems: 'center',
+					gap: '2',
+					fontSize: '2xs',
+					textTransform: 'uppercase',
+					letterSpacing: 'widest',
+					color: 'fg.faint'
+				})}
 			>
-				<Database size={11} class="opacity-50" />
+				<Database size={11} class={css({ opacity: '0.5' })} />
 				<span>Dataset</span>
 			</div>
 			{#if datasource || datasourceLabel}
-				<div class="flex flex-col gap-2 border border-tertiary bg-tertiary p-3">
-					<div class="flex items-center justify-between">
-						<div class="text-sm font-semibold">{datasourceLabel ?? datasource?.name}</div>
-						<div class="flex items-center gap-2">
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2',
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						padding: '3'
+					})}
+				>
+					<div class={rowBetween}>
+						<div class={css({ fontSize: 'sm', fontWeight: '600' })}>
+							{datasourceLabel ?? datasource?.name}
+						</div>
+						<div class={cx(row, css({ gap: '2' }))}>
 							{#if datasource}
 								{#if datasource.source_type === 'file'}
 									<FileTypeBadge
@@ -361,8 +503,18 @@
 						</div>
 					</div>
 					{#if isIceberg && datasource}
-						<div class="flex items-start gap-2 border-t border-tertiary pt-2">
-							<div class="min-w-0 flex-1">
+						<div
+							class={cx(
+								divider,
+								css({
+									display: 'flex',
+									alignItems: 'flex-start',
+									gap: '2',
+									paddingTop: '2'
+								})
+							)}
+						>
+							<div class={css({ minWidth: '0', flex: '1' })}>
 								<SnapshotPicker
 									datasourceId={datasource.id}
 									datasourceConfig={snapshotConfig}
@@ -375,7 +527,7 @@
 									onSelect={handleSnapshotSelect}
 								/>
 							</div>
-							<div class="min-w-32 shrink-0">
+							<div class={css({ minWidth: 'colMd', flexShrink: '0' })}>
 								<BranchPicker
 									branches={(resolvedDatasource?.config?.branches as string[] | undefined) ?? []}
 									value={branchValue}
@@ -387,41 +539,112 @@
 					{/if}
 				</div>
 			{:else}
-				<div class="border border-dashed border-tertiary p-3 text-center">
-					<span class="text-xs text-fg-muted">No datasource connected</span>
+				<div
+					class={css({
+						borderWidth: '1',
+						borderStyle: 'dashed',
+						padding: '3',
+						textAlign: 'center'
+					})}
+				>
+					<span class={css({ fontSize: 'xs', color: 'fg.muted' })}> No datasource connected </span>
 				</div>
 			{/if}
 		</div>
 
 		<!-- Engine Resources Section -->
 		{#if analysisId}
-			<div class="mx-4 mb-3 overflow-hidden border border-tertiary">
+			<div
+				class={css({
+					marginX: '4',
+					marginBottom: '3',
+					overflow: 'hidden',
+					borderWidth: '1'
+				})}
+			>
 				<button
-					class="engine-header flex w-full cursor-pointer items-center justify-between border-none bg-secondary p-2 px-3 hover:bg-tertiary"
+					class={cx(
+						'engine-header',
+						css({
+							display: 'flex',
+							width: '100%',
+							cursor: 'pointer',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							border: 'none',
+							backgroundColor: 'bg.secondary',
+							paddingY: '2',
+							paddingX: '3',
+							_hover: { backgroundColor: 'bg.tertiary' }
+						})
+					)}
 					onclick={() => (engineExpanded = !engineExpanded)}
 					type="button"
 				>
-					<div class="flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							gap: '2',
+							fontSize: 'xs',
+							textTransform: 'uppercase',
+							letterSpacing: 'wide',
+							color: 'fg.muted'
+						})}
+					>
 						<Cpu size={12} />
 						<span>Engine</span>
 					</div>
-					<div class="flex items-center gap-2">
-						<span class="font-mono text-[10px] text-fg-secondary">
+					<div class={cx(row, css({ gap: '2' }))}>
+						<span
+							class={css({
+								fontSize: '2xs',
+								color: 'fg.secondary'
+							})}
+						>
 							{effectiveThreads} threads, {effectiveMemoryGb}GB
 						</span>
-						<span class="chevron flex items-center text-fg-muted" class:expanded={engineExpanded}>
+						<span class={cx(muted, row, engineExpanded && css({ transform: 'rotate(180deg)' }))}>
 							<ChevronDown size={12} />
 						</span>
 					</div>
 				</button>
 
 				{#if engineExpanded}
-					<div class="flex flex-col gap-2 border-t border-tertiary bg-primary p-3">
-						<div class="flex items-center gap-3">
-							<label for="threads-input" class="min-w-15 text-xs text-fg-secondary">Threads</label>
+					<div
+						class={cx(
+							divider,
+							css({
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '2',
+								backgroundColor: 'bg.primary',
+								padding: '3'
+							})
+						)}
+					>
+						<div class={cx(row, css({ gap: '3' }))}>
+							<label
+								for="threads-input"
+								class={cx(
+									label({ variant: 'field' }),
+									css({ minWidth: 'labelSm', fontSize: 'xs' })
+								)}
+							>
+								Threads
+							</label>
 							<input
 								id="threads-input"
-								class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
+								class={cx(
+									input(),
+									css({
+										flex: '1',
+										backgroundColor: 'bg.secondary',
+										paddingY: '1',
+										paddingX: '2',
+										fontSize: 'xs'
+									})
+								)}
 								type="number"
 								min="1"
 								max="64"
@@ -429,14 +652,40 @@
 								onchange={(e) => setThreads(parseInt(e.currentTarget.value) || 0)}
 							/>
 							{#if isUsingDefaultThreads}
-								<span class="min-w-12.5 text-[9px] italic text-fg-tertiary">(default)</span>
+								<span
+									class={css({
+										minWidth: 'labelXs',
+										fontSize: '3xs',
+										fontStyle: 'italic',
+										color: 'fg.tertiary'
+									})}
+								>
+									(default)
+								</span>
 							{/if}
 						</div>
-						<div class="flex items-center gap-3">
-							<label for="memory-select" class="min-w-15 text-xs text-fg-secondary">Memory</label>
+						<div class={cx(row, css({ gap: '3' }))}>
+							<label
+								for="memory-select"
+								class={cx(
+									label({ variant: 'field' }),
+									css({ minWidth: 'labelSm', fontSize: 'xs' })
+								)}
+							>
+								Memory
+							</label>
 							<select
 								id="memory-select"
-								class="resource-input flex-1 border border-tertiary bg-secondary text-fg-primary p-1 px-2 font-mono text-xs focus:border-accent-primary focus:outline-none"
+								class={cx(
+									input(),
+									css({
+										flex: '1',
+										backgroundColor: 'bg.secondary',
+										paddingY: '1',
+										paddingX: '2',
+										fontSize: 'xs'
+									})
+								)}
 								value={effectiveMemoryGb}
 								onchange={(e) => setMemoryGb(parseInt(e.currentTarget.value) || 0)}
 							>
@@ -445,7 +694,16 @@
 								{/each}
 							</select>
 							{#if isUsingDefaultMemory}
-								<span class="min-w-12.5 text-[9px] italic text-fg-tertiary">(default)</span>
+								<span
+									class={css({
+										minWidth: 'labelXs',
+										fontSize: '3xs',
+										fontStyle: 'italic',
+										color: 'fg.tertiary'
+									})}
+								>
+									(default)
+								</span>
 							{/if}
 						</div>
 					</div>
@@ -456,17 +714,53 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class="change-source-btn mx-4 mb-4 flex w-[calc(100%-2rem)] cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary text-fg-muted p-2 px-3 text-[0.6875rem] font-medium hover:bg-tertiary hover:text-fg-primary hover:border-accent-primary [&:hover_svg]:opacity-100"
+				class={cx(
+					'change-source-btn',
+					css({
+						marginX: '4',
+						marginBottom: '4',
+						display: 'flex',
+						width: 'calc(100% - 2rem)',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'center',
+						gap: '2',
+						borderWidth: '1',
+						backgroundColor: 'bg.secondary',
+						color: 'fg.muted',
+						paddingY: '2',
+						paddingX: '3',
+						fontSize: 'xs2',
+						fontWeight: '500',
+						_hover: {
+							backgroundColor: 'bg.tertiary',
+							color: 'fg.primary',
+							borderColor: 'accent.primary',
+							'& svg': { opacity: '1' }
+						}
+					})
+				)}
 				onclick={onChangeDatasource}
 				type="button"
 			>
-				<RefreshCw size={14} class="opacity-70" />
+				<RefreshCw size={14} class={css({ opacity: '0.7' })} />
 				<span>change source</span>
 			</button>
 		{/if}
 	</div>
 
 	<div
-		class="absolute -bottom-1.25 left-1/2 z-2 h-2.5 w-2.5 -translate-x-1/2 bg-primary border-2 border-accent-primary"
+		class={css({
+			position: 'absolute',
+			bottom: '-5px',
+			left: '50%',
+			zIndex: '2',
+			height: 'dotLg',
+			width: 'dotLg',
+			transform: 'translateX(-50%)',
+			backgroundColor: 'bg.primary',
+			borderWidth: '2',
+			borderColor: 'accent.primary'
+		})}
 	></div>
 </div>

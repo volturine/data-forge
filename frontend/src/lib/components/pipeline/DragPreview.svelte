@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
+	import { css } from '$lib/styles/panda';
 	import {
 		ArrowUpDown,
 		BarChart3,
@@ -83,16 +84,38 @@
 
 {#if active && info && position}
 	<div
-		class="drag-preview pointer-events-none fixed z-9999 flex items-center gap-2 whitespace-nowrap border-2 px-3 py-2 text-sm"
-		class:reorder={isReorder}
+		class={css({
+			pointerEvents: 'none',
+			position: 'fixed',
+			zIndex: '9999',
+			display: 'flex',
+			alignItems: 'center',
+			gap: '2',
+			whiteSpace: 'nowrap',
+			borderWidth: '2',
+			paddingX: '3',
+			paddingY: '2',
+			fontSize: 'sm',
+			backgroundColor: isReorder ? 'warning.bg' : 'bg.primary',
+			borderColor: isReorder ? 'warning.border' : 'border.primary',
+			boxShadow: 'drag'
+		})}
 		style="left: {position.x + 12}px; top: {position.y + 12}px;"
 	>
-		<Icon size={16} class="text-base" />
-		<span class="font-semibold text-fg-primary">{info.label}</span>
+		<Icon size={16} class={css({ fontSize: 'md' })} />
+		<span class={css({ fontWeight: '600', color: 'fg.primary' })}>{info.label}</span>
 		{#if isReorder}
 			<span
-				class="px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide bg-warning-fg text-warning-contrast"
-				>Move</span
+				class={css({
+					paddingX: '1.5',
+					paddingY: '0.5',
+					fontSize: 'xs',
+					fontWeight: '500',
+					textTransform: 'uppercase',
+					letterSpacing: 'wide',
+					backgroundColor: 'warning.fg',
+					color: 'warning.contrast'
+				})}>Move</span
 			>
 		{/if}
 	</div>

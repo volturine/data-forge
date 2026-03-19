@@ -14,6 +14,7 @@ class SettingsResponse(BaseModel):
     smtp_password: str
     telegram_bot_token: str
     telegram_bot_enabled: bool
+    openrouter_api_key: str
     public_idb_debug: bool
 
 
@@ -26,6 +27,7 @@ class SettingsUpdate(BaseModel):
     smtp_password: str = ''
     telegram_bot_token: str = ''
     telegram_bot_enabled: bool = False
+    openrouter_api_key: str = ''
     public_idb_debug: bool = False
 
 

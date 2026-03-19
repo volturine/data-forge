@@ -54,6 +54,8 @@ def client(test_db_session):
     def override_get_db():
         yield test_db_session
 
+    if hasattr(app.state, 'mcp_registry'):
+        del app.state.mcp_registry
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as ac:
         yield ac
@@ -82,6 +84,7 @@ def isolate_data_dir(tmp_path: Path, monkeypatch):
 @pytest.fixture(autouse=True, scope='function')
 def isolate_settings_engine(isolate_data_dir, monkeypatch):
     from core import database
+    from core.database import _run_settings_migrations
     from modules.settings.models import AppSettings
 
     settings_db_path = settings.data_dir / 'app.db'
@@ -93,6 +96,11 @@ def isolate_settings_engine(isolate_data_dir, monkeypatch):
         poolclass=StaticPool,
     )
     AppSettings.metadata.create_all(engine)
+
+    from modules.chat.sessions import ChatSession
+
+    ChatSession.metadata.create_all(engine)
+    _run_settings_migrations(engine)
     monkeypatch.setattr(settings, 'database_url', settings_url, raising=False)
     monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
     yield engine
@@ -231,16 +239,9 @@ def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_p
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     analysis_id = str(uuid.uuid4())
+    tab1_result_id = str(uuid.uuid4())
 
     pipeline_definition = {
-        'steps': [
-            {
-                'id': 'step1',
-                'type': 'filter',
-                'config': {'column': 'age', 'operator': '>', 'value': 30},
-                'depends_on': [],
-            }
-        ],
         'tabs': [
             {
                 'id': 'tab1',
@@ -252,12 +253,19 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': tab1_result_id,
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'fixture_output',
                 },
-                'steps': [],
+                'steps': [
+                    {
+                        'id': 'step1',
+                        'type': 'filter',
+                        'config': {'column': 'age', 'operator': '>', 'value': 30},
+                        'depends_on': [],
+                    }
+                ],
             }
         ],
     }
@@ -295,14 +303,6 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
         analysis_id = str(uuid.uuid4())
 
         pipeline_definition = {
-            'steps': [
-                {
-                    'id': f'step{idx}',
-                    'type': 'filter',
-                    'config': {'column': 'id', 'operator': '>', 'value': idx},
-                    'depends_on': [],
-                }
-            ],
             'tabs': [
                 {
                     'id': f'tab-{idx}',
@@ -314,12 +314,19 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'fixture_output',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': f'step{idx}',
+                            'type': 'filter',
+                            'config': {'column': 'id', 'operator': '>', 'value': idx},
+                            'depends_on': [],
+                        }
+                    ],
                 }
             ],
         }

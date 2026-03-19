@@ -24,33 +24,17 @@ PreflightId = Annotated[str, Path(description='Preflight ID', examples=['b3b1a08
 LockResourceId = Annotated[str, Path(description='Lock resource ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]
 
 
-def parse_analysis_id(value: str) -> str:
-    return _parse_uuid(value)
+parse_analysis_id = _parse_uuid
 
 
 def parse_datasource_id(value: str) -> str:
-    return _parse_uuid(value)
+    """Datasource IDs may be UUIDs or slug strings — accept both."""
+    return value.strip()
 
 
-def parse_schedule_id(value: str) -> str:
-    return _parse_uuid(value)
-
-
-def parse_engine_run_id(value: str) -> str:
-    return _parse_uuid(value)
-
-
-def parse_healthcheck_id(value: str) -> str:
-    return _parse_uuid(value)
-
-
-def parse_udf_id(value: str) -> str:
-    return _parse_uuid(value)
-
-
-def parse_preflight_id(value: str) -> str:
-    return _parse_uuid(value)
-
-
-def parse_lock_resource_id(value: str) -> str:
-    return _parse_uuid(value)
+parse_schedule_id = _parse_uuid
+parse_engine_run_id = _parse_uuid
+parse_healthcheck_id = _parse_uuid
+parse_udf_id = _parse_uuid
+parse_preflight_id = _parse_uuid
+parse_lock_resource_id = _parse_uuid

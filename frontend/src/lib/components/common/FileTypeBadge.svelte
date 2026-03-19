@@ -6,21 +6,15 @@
 		type FileType,
 		type SourceType
 	} from '$lib/utils/fileTypes';
+	import { css, cx, badge } from '$lib/styles/panda';
 
 	interface Props {
-		/** File type (if known) */
 		fileType?: FileType;
-		/** Source type for non-file datasources (database, iceberg, etc.) */
 		sourceType?: SourceType;
-		/** File path (for auto-detection) */
 		path?: string;
-		/** Whether the path is a folder */
 		isFolder?: boolean;
-		/** Badge size */
 		size?: 'sm' | 'md' | 'lg';
-		/** Whether to show the icon */
 		showIcon?: boolean;
-		/** Visual variant */
 		variant?: 'default' | 'minimal' | 'outline';
 	}
 
@@ -34,46 +28,54 @@
 		variant = 'default'
 	}: Props = $props();
 
-	// Get configuration based on priority: sourceType > fileType > auto-detect from path
 	const config = $derived.by(() => {
-		if (sourceType) {
-			return getSourceTypeConfig(sourceType);
-		}
-		if (fileType) {
-			return getFileTypeConfig(fileType);
-		}
+		if (sourceType) return getSourceTypeConfig(sourceType);
+		if (fileType) return getFileTypeConfig(fileType);
 		if (path) {
-			const detectedType = detectFileType(path, isFolder);
-			return getFileTypeConfig(detectedType);
+			const detected = detectFileType(path, isFolder);
+			return getFileTypeConfig(detected);
 		}
 		return getFileTypeConfig('unknown');
 	});
 	const Icon = $derived(config.icon);
 
-	// Size configurations
-	const sizeConfig = {
-		sm: { iconSize: 12 },
-		md: { iconSize: 14 },
-		lg: { iconSize: 16 }
+	const sizes: Record<
+		string,
+		{ iconSize: number; fontSize: string; paddingX: string; paddingY: string }
+	> = {
+		sm: { iconSize: 12, fontSize: '2xs', paddingX: '1.5', paddingY: '0.5' },
+		md: { iconSize: 14, fontSize: 'xs', paddingX: '2', paddingY: '0.5' },
+		lg: { iconSize: 16, fontSize: 'xs', paddingX: '2.5', paddingY: '0.5' }
 	};
 
-	const sizeClass = $derived(`size-${size}`);
-	const variantClass = $derived(variant === 'default' ? '' : `variant-${variant}`);
-	const typeClass = $derived.by(() => {
-		if (sourceType) return `source-${sourceType}`;
-		const typed = config.type;
-		return `file-${typed}`;
-	});
+	const variants: Record<string, Record<string, string>> = {
+		default: {},
+		minimal: { border: 'none', padding: '0', backgroundColor: 'transparent' },
+		outline: { backgroundColor: 'transparent' }
+	};
 </script>
 
 <span
-	class="file-badge {typeClass} {sizeClass} {variantClass}"
+	class={cx(
+		badge({ tone: 'file' }),
+		css({
+			flexShrink: '0',
+			gap: '1',
+			whiteSpace: 'nowrap',
+			fontWeight: '600',
+			transition: 'color 150ms, background-color 150ms, border-color 150ms',
+			fontSize: sizes[size].fontSize,
+			paddingX: sizes[size].paddingX,
+			paddingY: sizes[size].paddingY,
+			...variants[variant]
+		})
+	)}
 	role="img"
 	aria-label="{config.label} file type"
 	title={config.description}
 >
 	{#if showIcon}
-		<Icon size={sizeConfig[size].iconSize} />
+		<Icon size={sizes[size].iconSize} />
 	{/if}
 	{config.label}
 </span>

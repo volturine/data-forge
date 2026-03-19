@@ -17,8 +17,18 @@ from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 from modules.datasource.source_types import DataSourceType
+from modules.mcp.decorators import deterministic_tool
 
 router = APIRouter(prefix='/datasource', tags=['datasource'])
+
+_FILE_TYPE_MAPPING: dict[str, str] = {
+    '.csv': 'csv',
+    '.parquet': 'parquet',
+    '.json': 'json',
+    '.ndjson': 'ndjson',
+    '.jsonl': 'ndjson',
+    '.xlsx': 'excel',
+}
 
 
 def _list_export_branches(metadata_path: str) -> list[str]:
@@ -70,24 +80,15 @@ async def upload_file(
         raise HTTPException(status_code=400, detail='No filename provided')
 
     file_extension = Path(file.filename).suffix.lower()
-    file_type_mapping = {
-        '.csv': 'csv',
-        '.parquet': 'parquet',
-        '.json': 'json',
-        '.ndjson': 'ndjson',
-        '.jsonl': 'ndjson',
-        '.xlsx': 'excel',
-    }
-
-    if file_extension not in file_type_mapping:
+    if file_extension not in _FILE_TYPE_MAPPING:
         raise HTTPException(
             status_code=400,
-            detail=f'Unsupported file type: {file_extension}. Supported types: {", ".join(file_type_mapping.keys())}',
+            detail=f'Unsupported file type: {file_extension}. Supported types: {", ".join(_FILE_TYPE_MAPPING.keys())}',
         )
 
     if not _matches_magic_number(file_extension, file):
         raise HTTPException(status_code=400, detail='File content does not match extension')
-    file_type = file_type_mapping[file_extension]
+    file_type = _FILE_TYPE_MAPPING[file_extension]
     unique_filename = f'{uuid.uuid4()}{file_extension}'
     file_path = namespace_paths().upload_dir / unique_filename
 
@@ -150,15 +151,6 @@ async def upload_bulk(
     if not files:
         raise HTTPException(status_code=400, detail='No files provided')
 
-    file_type_mapping = {
-        '.csv': 'csv',
-        '.parquet': 'parquet',
-        '.json': 'json',
-        '.ndjson': 'ndjson',
-        '.jsonl': 'ndjson',
-        '.xlsx': 'excel',
-    }
-
     csv_options = schemas.CSVOptions(
         delimiter=delimiter,
         quote_char=quote_char,
@@ -182,7 +174,7 @@ async def upload_bulk(
 
         file_extension = Path(file.filename).suffix.lower()
 
-        if file_extension not in file_type_mapping:
+        if file_extension not in _FILE_TYPE_MAPPING:
             results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=f'Unsupported file type: {file_extension}'))
             continue
 
@@ -195,7 +187,7 @@ async def upload_bulk(
                 )
             )
             continue
-        file_type = file_type_mapping[file_extension]
+        file_type = _FILE_TYPE_MAPPING[file_extension]
         unique_filename = f'{uuid.uuid4()}{file_extension}'
         file_path = namespace_paths().upload_dir / unique_filename
         name = Path(file.filename).stem
@@ -487,10 +479,18 @@ async def confirm_excel(
 
 @router.post('/connect', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='connect datasource', value_error_status=400)
+@deterministic_tool
 def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: Session = Depends(get_db),
 ):
+    """Connect a new datasource (database, Iceberg, or analysis type).
+
+    For database: config needs {connection_string, query, branch}.
+    For Iceberg: config needs {metadata_path} and optionally snapshot/catalog settings.
+    File datasources must use the /upload endpoint instead.
+    Use GET /datasource to verify creation.
+    """
     if datasource.source_type == DataSourceType.FILE:
         raise HTTPException(
             status_code=400,
@@ -560,18 +560,29 @@ def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session) ->
 
 @router.get('', response_model=list[schemas.DataSourceResponse])
 @handle_errors(operation='list datasources')
+@deterministic_tool
 def list_datasources(include_hidden: bool = False, session: Session = Depends(get_db)):
-    """List all data sources. Set include_hidden=true to include auto-generated hidden datasources."""
+    """List all datasources with their type, config, and metadata.
+
+    Set include_hidden=true to include auto-generated output datasources created by analyses.
+    Each datasource has an id, name, source_type, and config dict.
+    """
     return service.list_datasources(session, include_hidden=include_hidden)
 
 
 @router.get('/lineage')
 @handle_errors(operation='get lineage')
+@deterministic_tool
 def get_lineage(
     target_datasource_id: DataSourceId | None = None,
     branch: str | None = None,
     session: Session = Depends(get_db),
 ):
+    """Get the dependency lineage graph for datasources.
+
+    Returns nodes (datasources and analyses) and edges showing data flow.
+    Optionally filter by target_datasource_id or branch to scope the graph.
+    """
     from modules.datasource.service_lineage import build_lineage
 
     datasource_id = None
@@ -589,10 +600,12 @@ def get_lineage(
 
 @router.get('/{datasource_id}', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='get datasource')
+@deterministic_tool
 def get_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
 ):
+    """Get a single datasource by ID with full config and metadata. Use GET /datasource to find IDs."""
     try:
         response = service.get_datasource(session, parse_datasource_id(datasource_id))
         if response.source_type == DataSourceType.ICEBERG:
@@ -608,12 +621,18 @@ def get_datasource(
 
 @router.get('/{datasource_id}/schema', response_model=schemas.SchemaInfo)
 @handle_errors(operation='get datasource schema')
+@deterministic_tool
 def get_datasource_schema(
     datasource_id: DataSourceId,
     sheet_name: str | None = None,
     refresh: bool = False,
     session: Session = Depends(get_db),
 ):
+    """Get the column schema of a datasource (column names, types, nullability).
+
+    For Excel files, pass sheet_name to select a specific sheet.
+    Set refresh=true to re-read the schema from the source file.
+    """
     try:
         return service.get_datasource_schema(session, parse_datasource_id(datasource_id), sheet_name=sheet_name, refresh=refresh)
     except DataSourceNotFoundError as exc:
@@ -624,11 +643,17 @@ def get_datasource_schema(
 
 @router.post('/{datasource_id}/compare-snapshots', response_model=schemas.SnapshotCompareResponse)
 @handle_errors(operation='compare datasource snapshots')
+@deterministic_tool
 def compare_snapshots(
     datasource_id: DataSourceId,
     payload: schemas.SnapshotCompareRequest,
     session: Session = Depends(get_db),
 ):
+    """Compare two Iceberg snapshots of a datasource.
+
+    Returns row count deltas, schema differences, column stats, and data previews for both snapshots.
+    Use GET /compute/iceberg/{id}/snapshots to find snapshot IDs.
+    """
     try:
         return service.compare_iceberg_snapshots(
             session,
@@ -665,12 +690,17 @@ def _handle_column_stats(
 
 @router.get('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse)
 @handle_errors(operation='get column stats')
+@deterministic_tool
 def get_column_stats(
     datasource_id: DataSourceId,
     column_name: str,
     sample: bool = True,
     session: Session = Depends(get_db),
 ):
+    """Get statistics for a single column: count, nulls, unique values, min/max, mean, histogram.
+
+    Set sample=false for exact stats (slower on large datasets).
+    """
     try:
         return _handle_column_stats(datasource_id, column_name, sample, None, session)
     except DataSourceNotFoundError as exc:
@@ -681,6 +711,7 @@ def get_column_stats(
 
 @router.post('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse)
 @handle_errors(operation='get column stats')
+@deterministic_tool
 def get_column_stats_with_config(
     datasource_id: DataSourceId,
     column_name: str,
@@ -688,6 +719,7 @@ def get_column_stats_with_config(
     sample: bool = True,
     session: Session = Depends(get_db),
 ):
+    """Get column statistics with custom datasource config (e.g., different branch or snapshot)."""
     try:
         return _handle_column_stats(datasource_id, column_name, sample, payload, session)
     except DataSourceNotFoundError as exc:
@@ -698,24 +730,30 @@ def get_column_stats_with_config(
 
 @router.get('/iceberg/resolve')
 @handle_errors(operation='resolve iceberg metadata', value_error_status=400)
+@deterministic_tool
 async def resolve_iceberg(metadata_path: str):
+    """Resolve an Iceberg metadata path to its canonical form. Used to validate Iceberg table locations."""
     resolved = resolve_iceberg_metadata_path(metadata_path)
     return {'metadata_path': resolved}
 
 
 @router.get('/file/list', response_model=schemas.FileListResponse)
 @handle_errors(operation='list data files', value_error_status=400)
+@deterministic_tool
 async def list_files(path: str | None = None):
+    """List data files in the upload/data directory. Optionally pass path to list a subdirectory."""
     return service.list_data_files(path)
 
 
 @router.put('/{datasource_id}', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='update datasource')
+@deterministic_tool
 def update_datasource(
     datasource_id: DataSourceId,
     update: schemas.DataSourceUpdate,
     session: Session = Depends(get_db),
 ):
+    """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
     try:
         return service.update_datasource(session, parse_datasource_id(datasource_id), update)
     except DataSourceNotFoundError as exc:
@@ -726,10 +764,12 @@ def update_datasource(
 
 @router.post('/{datasource_id}/refresh', response_model=schemas.DataSourceResponse)
 @handle_errors(operation='refresh datasource')
+@deterministic_tool
 def refresh_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
 ):
+    """Refresh an external datasource (re-read schema from source). Useful after upstream data changes."""
     try:
         return service.refresh_external_datasource(session, parse_datasource_id(datasource_id))
     except DataSourceNotFoundError as exc:
@@ -740,10 +780,12 @@ def refresh_datasource(
 
 @router.delete('/{datasource_id}', status_code=204)
 @handle_errors(operation='delete datasource')
+@deterministic_tool
 def delete_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
 ):
+    """Delete a datasource and its associated files. Use GET /datasource to find IDs."""
     datasource_id_value = parse_datasource_id(datasource_id)
     try:
         service.delete_datasource(session, datasource_id_value)

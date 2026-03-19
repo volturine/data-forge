@@ -17,9 +17,8 @@ export function applySteps(steps: PipelineStep[]): PipelineStep[] {
 		if (!parentId) return null;
 		if (appliedIds.has(parentId)) return parentId;
 		if (seen.has(parentId)) return null;
-		const nextSeen = new Set(seen);
-		nextSeen.add(parentId);
-		return resolve(parentId, nextSeen);
+		seen.add(parentId);
+		return resolve(parentId, seen);
 	};
 
 	return applied.map((step) => {

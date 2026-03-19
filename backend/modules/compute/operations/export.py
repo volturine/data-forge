@@ -9,9 +9,7 @@ class ExportParams(OperationParams):
     format: str = 'csv'
     filename: str = 'export'
     destination: str = 'download'
-    datasource_type: str | None = None
     iceberg_options: dict | None = None
-    duckdb_options: dict | None = None
 
 
 class ExportHandler(OperationHandler):
@@ -19,9 +17,7 @@ class ExportHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         ExportParams.model_validate(params)
         return lf

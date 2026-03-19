@@ -2,6 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
+	import { css, cx } from '$lib/styles/panda';
 
 	interface ColumnOption {
 		id: string;
@@ -15,6 +16,10 @@
 		onChange: (value: string) => void;
 		placeholder?: string;
 		filter?: (column: { name: string; dtype: string }) => boolean;
+		clearable?: boolean;
+		containerClass?: string;
+		triggerClass?: string;
+		menuClass?: string;
 	}
 
 	let {
@@ -22,7 +27,11 @@
 		value = $bindable(),
 		onChange,
 		placeholder = 'Select column...',
-		filter
+		filter,
+		clearable = false,
+		containerClass = '',
+		triggerClass = '',
+		menuClass = ''
 	}: Props = $props();
 
 	const columns = $derived(filter ? schema.columns.filter(filter) : schema.columns);
@@ -40,7 +49,11 @@
 	{value}
 	onChange={(next) => onChange(next as string)}
 	{placeholder}
+	{clearable}
 	searchPlaceholder="Search columns..."
+	{containerClass}
+	{triggerClass}
+	{menuClass}
 	{renderOption}
 />
 
@@ -54,8 +67,27 @@
 	{@const onPick = payload.onSelect}
 	<button
 		type="button"
-		class="column-option"
-		class:selected={isSelected}
+		class={cx(
+			css({
+				minWidth: '0',
+				width: '100%',
+				paddingX: '3',
+				paddingY: '2',
+				borderWidth: '1',
+				borderColor: 'transparent',
+				background: 'transparent',
+				textAlign: 'left',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'flex-start',
+				gap: '2',
+				cursor: 'pointer',
+				fontSize: 'sm',
+				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
+				_hover: { backgroundColor: 'bg.hover' }
+			}),
+			isSelected && css({ backgroundColor: 'bg.hover' })
+		)}
 		onclick={onPick}
 		role="option"
 		aria-selected={isSelected}

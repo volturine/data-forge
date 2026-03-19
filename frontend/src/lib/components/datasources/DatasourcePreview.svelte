@@ -9,10 +9,12 @@
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourcePipelinePayload
 	} from '$lib/utils/analysis-pipeline';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -52,7 +54,7 @@
 		page = 1;
 	});
 
-	const resolvedDatasource = $derived.by(() => datasource ?? null);
+	const resolvedDatasource = $derived(datasource ?? null);
 	const analysisSourceId = $derived.by(() => {
 		return (
 			(datasourceConfig?.analysis_id as string | null | undefined) ??
@@ -69,7 +71,7 @@
 			return buildAnalysisPipelinePayload(
 				activeId,
 				analysisStore.tabs,
-				resolvedDatasource ? [resolvedDatasource] : []
+				datasourceStore.datasources
 			);
 		}
 		if (!resolvedDatasource) return null;
@@ -128,8 +130,15 @@
 	}
 </script>
 
-<div class="relative h-full flex flex-col">
-	<div class="overflow-hidden h-full">
+<div
+	class={css({
+		position: 'relative',
+		height: 'full',
+		display: 'flex',
+		flexDirection: 'column'
+	})}
+>
+	<div class={css({ overflow: 'hidden', height: 'full' })}>
 		<DataTable
 			columns={data?.columns ?? []}
 			data={data?.data ?? []}

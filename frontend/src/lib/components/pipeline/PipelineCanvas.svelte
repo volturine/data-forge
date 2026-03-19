@@ -2,11 +2,11 @@
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
-	import { LayoutGrid } from 'lucide-svelte';
 	import StepNode from './StepNode.svelte';
 	import OutputNode from './OutputNode.svelte';
 	import ConnectionLine from './ConnectionLine.svelte';
 	import DatasourceNode from './DatasourceNode.svelte';
+	import { css, cx } from '$lib/styles/panda';
 
 	interface Props {
 		steps: PipelineStep[];
@@ -61,19 +61,12 @@
 		drag.clearTarget();
 	});
 
-	function getParentId(index: number): string | null {
-		if (index <= 0) return null;
-		return steps[index - 1]?.id ?? null;
-	}
-
-	function getNextId(index: number): string | null {
-		return steps[index]?.id ?? null;
-	}
-
 	function buildTarget(index: number): DropTarget {
-		const parentId = index === 0 ? null : getParentId(index);
-		const nextId = index < steps.length ? getNextId(index) : null;
-		return { index, parentId, nextId };
+		return {
+			index,
+			parentId: index === 0 ? null : (steps[index - 1]?.id ?? null),
+			nextId: steps[index]?.id ?? null
+		};
 	}
 
 	function shouldShowInsert(index: number): boolean {
@@ -97,7 +90,7 @@
 			return true;
 		}
 
-		const nextId = index < steps.length ? getNextId(index) : null;
+		const nextId = steps[index]?.id ?? null;
 		if (!nextId) return true;
 
 		// For reorder, the next step might be the one we're moving
@@ -111,7 +104,7 @@
 		// Valid if no dependencies or single dependency matching expected parent
 		if (deps.length === 0) return true;
 		if (deps.length > 1) return false;
-		const parentId = index === 0 ? null : getParentId(index);
+		const parentId = index === 0 ? null : (steps[index - 1]?.id ?? null);
 		return deps[0] === parentId;
 	}
 
@@ -208,7 +201,6 @@
 	const scrollSpeed = 15;
 
 	function autoScroll(canvasEl: HTMLElement, pointerY: number) {
-		canvasEl.getBoundingClientRect();
 		const viewportHeight = window.innerHeight;
 
 		if (pointerY > viewportHeight - scrollThreshold) {
@@ -238,19 +230,52 @@
 	});
 </script>
 
-<div class="pipeline-canvas flex-1 overflow-y-auto p-8 bg-secondary min-h-100">
-	{#if steps.length === 0}
-		<div
-			class="empty-state flex min-h-100 h-full flex-col items-center justify-center text-center text-fg-muted"
-		>
-			<LayoutGrid size={28} strokeWidth={1.2} class="mb-5 text-fg-faint opacity-40" />
-			<h3 class="m-0 mb-2 text-sm font-semibold text-fg-secondary">No pipeline steps</h3>
-			<p class="m-0 text-xs text-fg-muted">Drag operations from the library and drop here</p>
+<div
+	class={cx(
+		'pipeline-canvas',
+		css({
+			flex: '1',
+			overflowY: 'auto',
+			padding: '8',
+			backgroundColor: 'bg.secondary',
+			minHeight: 'panel'
+		})
+	)}
+>
+	<div
+		class={css({
+			marginX: 'auto',
+			display: 'flex',
+			width: '100%',
+			maxWidth: '100%',
+			flexDirection: 'column',
+			alignItems: 'center'
+		})}
+		role="list"
+	>
+		<DatasourceNode
+			{datasource}
+			{datasourceLabel}
+			{analysisId}
+			tabName={_tabName}
+			{activeTab}
+			onChangeDatasource={_onChangeDatasource}
+			onRenameTab={_onRenameTab}
+		/>
+		{#if shouldShowInsert(0)}
 			<div
-				class="insert-zone empty-drop flex w-full cursor-default flex-col items-center py-2"
+				class={cx(
+					'insert-zone',
+					css({
+						display: 'flex',
+						width: '100%',
+						cursor: canDrop ? 'pointer' : 'default',
+						flexDirection: 'column',
+						alignItems: 'center',
+						paddingY: '2'
+					})
+				)}
 				class:ready={canDrop}
-				class:active={hoverIndex === 0}
-				class:invalid={hoverIndex === 0 && !drag.valid}
 				role="button"
 				tabindex="0"
 				data-index="0"
@@ -259,123 +284,152 @@
 				ondragleave={handleDragLeave}
 				ondrop={(e) => handleDrop(e, 0)}
 			>
-				{#if steps.length > 0 || canDrop}
-					<ConnectionLine
-						fromStepIndex={-1}
-						toStepIndex={0}
-						totalSteps={steps.length + 1}
-						highlighted={hoverIndex === 0}
-					/>
-				{/if}
-
+				<ConnectionLine
+					fromStepIndex={-1}
+					toStepIndex={0}
+					totalSteps={steps.length + 1}
+					highlighted={hoverIndex === 0}
+				/>
 				{#if canDrop}
 					<div
-						class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center"
-						class:active={hoverIndex === 0}
-						class:invalid={hoverIndex === 0 && !drag.valid}
+						class={css({
+							marginY: '2',
+							display: 'flex',
+							minHeight: 'row',
+							width: 'min(55%, 480px)',
+							flexShrink: '0',
+							alignItems: 'center',
+							justifyContent: 'center',
+							borderWidth: '2',
+							borderStyle: 'dashed',
+							paddingX: '4',
+							paddingY: '2',
+							textAlign: 'center',
+							borderColor: hoverIndex === 0 && !drag.valid ? 'error.border' : 'border.primary',
+							backgroundColor:
+								hoverIndex === 0 && !drag.valid
+									? 'error.bg'
+									: hoverIndex === 0
+										? 'bg.tertiary'
+										: 'transparent',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 					>
 						{#if hoverIndex === 0}
-							<span class="insert-label font-mono text-sm font-medium lowercase"
-								>{drag.type ?? 'step'}</span
+							<span
+								class={css({
+									fontFamily: 'mono',
+									fontSize: 'sm',
+									fontWeight: '500',
+									textTransform: 'lowercase'
+								})}>{drag.type ?? 'step'}</span
 							>
 						{/if}
 					</div>
-					<ConnectionLine
-						fromStepIndex={-1}
-						toStepIndex={0}
-						totalSteps={steps.length + 1}
-						highlighted={hoverIndex === 0}
-					/>
+					{#if steps.length > 0}
+						<ConnectionLine
+							fromStepIndex={-1}
+							toStepIndex={0}
+							totalSteps={steps.length + 1}
+							highlighted={hoverIndex === 0}
+						/>
+					{/if}
 				{/if}
 			</div>
-		</div>
-	{:else}
-		<div class="steps-container mx-auto flex w-full max-w-full flex-col items-center" role="list">
-			<DatasourceNode
-				{datasource}
-				{datasourceLabel}
+		{:else if steps.length > 0}
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					paddingY: '2'
+				})}
+				aria-hidden="true"
+			>
+				<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
+			</div>
+		{/if}
+		{#each steps as step, i (step.id)}
+			<StepNode
+				{step}
+				index={i}
 				{analysisId}
-				tabName={_tabName}
-				{activeTab}
-				onChangeDatasource={_onChangeDatasource}
-				onRenameTab={_onRenameTab}
+				{datasourceId}
+				allSteps={steps}
+				onEdit={onStepClick}
+				onDelete={onStepDelete}
+				onToggleApply={onStepToggle}
+				onTouchMove={onMoveStep}
 			/>
-			{#if shouldShowInsert(0) && (steps.length > 0 || canDrop)}
-				<div
-					class="insert-zone flex w-full cursor-default flex-col items-center py-2"
-					class:ready={canDrop}
-					class:active={hoverIndex === 0}
-					class:invalid={hoverIndex === 0 && !drag.valid}
-					role="button"
-					tabindex="0"
-					data-index="0"
-					ondragenter={(e) => handleDragEnter(e, 0)}
-					ondragover={handleDragOver}
-					ondragleave={handleDragLeave}
-					ondrop={(e) => handleDrop(e, 0)}
-				>
-					<ConnectionLine
-						fromStepIndex={-1}
-						toStepIndex={0}
-						totalSteps={steps.length + 1}
-						highlighted={hoverIndex === 0}
-					/>
-					{#if canDrop}
-						<div
-							class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center"
-							class:active={hoverIndex === 0}
-							class:invalid={hoverIndex === 0 && !drag.valid}
-						>
-							{#if hoverIndex === 0}
-								<span class="insert-label font-mono text-sm font-medium lowercase"
-									>{drag.type ?? 'step'}</span
-								>
-							{/if}
-						</div>
-						{#if steps.length > 0}
+			{#if i < steps.length - 1 || canDrop}
+				{#if shouldShowInsert(i + 1)}
+					<div
+						class={cx(
+							'insert-zone',
+							css({
+								display: 'flex',
+								width: '100%',
+								cursor: canDrop ? 'pointer' : 'default',
+								flexDirection: 'column',
+								alignItems: 'center',
+								paddingY: '2'
+							})
+						)}
+						class:ready={canDrop}
+						role="button"
+						tabindex="0"
+						data-index={i + 1}
+						ondragenter={(e) => handleDragEnter(e, i + 1)}
+						ondragover={handleDragOver}
+						ondragleave={handleDragLeave}
+						ondrop={(e) => handleDrop(e, i + 1)}
+					>
+						{#if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
 							<ConnectionLine
-								fromStepIndex={-1}
-								toStepIndex={0}
-								totalSteps={steps.length + 1}
-								highlighted={hoverIndex === 0}
+								fromStepIndex={i}
+								toStepIndex={i + 1}
+								totalSteps={steps.length}
+								highlighted={hoverIndex === i + 1}
 							/>
 						{/if}
-					{/if}
-				</div>
-			{:else if steps.length > 0}
-				<div class="insert-spacer flex items-center justify-center py-2" aria-hidden="true">
-					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
-				</div>
-			{/if}
-			{#each steps as step, i (step.id)}
-				<StepNode
-					{step}
-					index={i}
-					{analysisId}
-					{datasourceId}
-					allSteps={steps}
-					onEdit={onStepClick}
-					onDelete={onStepDelete}
-					onToggleApply={onStepToggle}
-					onTouchMove={onMoveStep}
-				/>
-				<!-- Connection + Drop zone after each step -->
-				{#if i < steps.length - 1 || canDrop}
-					{#if shouldShowInsert(i + 1)}
-						<div
-							class="insert-zone flex w-full cursor-default flex-col items-center py-2"
-							class:ready={canDrop}
-							class:active={hoverIndex === i + 1}
-							class:invalid={hoverIndex === i + 1 && !drag.valid}
-							role="button"
-							tabindex="0"
-							data-index={i + 1}
-							ondragenter={(e) => handleDragEnter(e, i + 1)}
-							ondragover={handleDragOver}
-							ondragleave={handleDragLeave}
-							ondrop={(e) => handleDrop(e, i + 1)}
-						>
-							{#if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
+						{#if canDrop}
+							<div
+								class={css({
+									marginY: '2',
+									display: 'flex',
+									minHeight: 'row',
+									width: 'min(55%, 480px)',
+									flexShrink: '0',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '2',
+									borderStyle: 'dashed',
+									paddingX: '4',
+									paddingY: '2',
+									textAlign: 'center',
+									borderColor:
+										hoverIndex === i + 1 && !drag.valid ? 'error.border' : 'border.primary',
+									backgroundColor:
+										hoverIndex === i + 1 && !drag.valid
+											? 'error.bg'
+											: hoverIndex === i + 1
+												? 'bg.tertiary'
+												: 'transparent',
+									_hover: { backgroundColor: 'bg.hover' }
+								})}
+							>
+								{#if hoverIndex === i + 1}
+									<span
+										class={css({
+											fontFamily: 'mono',
+											fontSize: 'sm',
+											fontWeight: '500',
+											textTransform: 'lowercase'
+										})}>{drag.type ?? 'step'}</span
+									>
+								{/if}
+							</div>
+							{#if i < steps.length - 1}
 								<ConnectionLine
 									fromStepIndex={i}
 									toStepIndex={i + 1}
@@ -383,49 +437,44 @@
 									highlighted={hoverIndex === i + 1}
 								/>
 							{/if}
-							{#if canDrop}
-								<div
-									class="insert-pill my-2 flex min-h-7 w-[min(55%,480px)] shrink-0 items-center justify-center border-2 border-dashed px-4 py-2 text-center"
-									class:active={hoverIndex === i + 1}
-									class:invalid={hoverIndex === i + 1 && !drag.valid}
-								>
-									{#if hoverIndex === i + 1}
-										<span class="insert-label font-mono text-sm font-medium lowercase"
-											>{drag.type ?? 'step'}</span
-										>
-									{/if}
-								</div>
-								{#if i < steps.length - 1}
-									<ConnectionLine
-										fromStepIndex={i}
-										toStepIndex={i + 1}
-										totalSteps={steps.length}
-										highlighted={hoverIndex === i + 1}
-									/>
-								{/if}
-							{/if}
-						</div>
-					{:else if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
-						<div class="insert-spacer flex items-center justify-center py-2" aria-hidden="true">
-							<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
-						</div>
-					{/if}
+						{/if}
+					</div>
+				{:else if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							paddingY: '2'
+						})}
+						aria-hidden="true"
+					>
+						<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
+					</div>
 				{/if}
-			{/each}
-			{#if steps.length > 0}
-				<div class="insert-spacer flex items-center justify-center py-2" aria-hidden="true">
-					<ConnectionLine
-						fromStepIndex={steps.length - 1}
-						toStepIndex={steps.length}
-						totalSteps={steps.length + 1}
-					/>
-				</div>
-			{:else}
-				<div class="insert-spacer flex items-center justify-center py-2" aria-hidden="true">
-					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
-				</div>
 			{/if}
-			<OutputNode {analysisId} {datasourceId} {activeTab} />
+		{/each}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				paddingY: '2'
+			})}
+			aria-hidden="true"
+		>
+			<ConnectionLine
+				fromStepIndex={steps.length > 0 ? steps.length - 1 : -1}
+				toStepIndex={steps.length > 0 ? steps.length : 0}
+				totalSteps={steps.length > 0 ? steps.length + 1 : 1}
+			/>
 		</div>
-	{/if}
+		<OutputNode {analysisId} {datasourceId} {activeTab} />
+	</div>
 </div>
+
+<style>
+	.insert-zone.ready:hover :global(.connection-line) {
+		color: var(--colors-accent-primary);
+	}
+</style>

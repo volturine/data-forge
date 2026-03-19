@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { ChartBar, Trash2 } from 'lucide-svelte';
 	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		analysis: AnalysisGalleryItem;
@@ -40,17 +41,37 @@
 </script>
 
 <div
-	class="analysis-card group relative cursor-pointer overflow-hidden bg-primary"
-	class:selected
+	class={css({
+		position: 'relative',
+		cursor: 'pointer',
+		overflow: 'hidden',
+		backgroundColor: 'bg.primary'
+	})}
 	onclick={handleClick}
 	onkeypress={handleKeyPress}
 	role="button"
 	tabindex="0"
 >
-	<div class="relative flex aspect-video w-full items-center justify-center bg-tertiary">
+	<div
+		class={css({
+			position: 'relative',
+			display: 'flex',
+			aspectRatio: '16 / 9',
+			width: '100%',
+			alignItems: 'center',
+			justifyContent: 'center',
+			backgroundColor: 'bg.tertiary'
+		})}
+	>
 		<input
 			type="checkbox"
-			class="absolute left-5 top-5 h-4.5 w-4.5"
+			class={css({
+				position: 'absolute',
+				left: '5',
+				top: '5',
+				height: 'icon',
+				width: 'icon'
+			})}
 			id="analysis-{analysis.id}-select"
 			checked={selected}
 			onchange={(e) => {
@@ -61,15 +82,40 @@
 			aria-label={`Select ${analysis.name}`}
 		/>
 		{#if analysis.thumbnail}
-			<img src={analysis.thumbnail} alt={analysis.name} class="h-full w-full object-cover" />
+			<img
+				src={analysis.thumbnail}
+				alt={analysis.name}
+				class={css({ height: '100%', width: '100%', objectFit: 'cover' })}
+			/>
 		{:else}
-			<ChartBar size={32} class="text-fg-faint" />
+			<ChartBar size={32} class={css({ color: 'fg.faint' })} />
 		{/if}
 	</div>
 
-	<div class="p-4">
-		<div class="mb-2 flex items-start justify-between gap-3">
-			<h3 class="m-0 min-w-0 flex-1 truncate text-sm font-semibold">{analysis.name}</h3>
+	<div class={css({ padding: '4' })}>
+		<div
+			class={css({
+				marginBottom: '2',
+				display: 'flex',
+				alignItems: 'flex-start',
+				justifyContent: 'space-between',
+				gap: '3'
+			})}
+		>
+			<h3
+				class={css({
+					margin: '0',
+					minWidth: '0',
+					flex: '1',
+					textOverflow: 'ellipsis',
+					overflow: 'hidden',
+					whiteSpace: 'nowrap',
+					fontSize: 'sm',
+					fontWeight: 'semibold'
+				})}
+			>
+				{analysis.name}
+			</h3>
 			<Trash2
 				size={16}
 				onclick={(e) => {
@@ -79,7 +125,7 @@
 			/>
 		</div>
 
-		<div class="text-xs text-fg-muted">
+		<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 			<span>{formatDate(analysis.updated_at)}</span>
 		</div>
 	</div>

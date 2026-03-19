@@ -51,13 +51,7 @@ function ensureSessionId(): string {
 }
 
 function shouldSkipTarget(el: Element | null): boolean {
-	if (!el) return true;
-	if (el.closest('[data-audit="off"]')) return true;
-	return false;
-}
-
-function redactValue(value: string): { value: string; redacted: boolean } {
-	return { value, redacted: false };
+	return !el || !!el.closest('[data-audit="off"]');
 }
 
 function getTargetLabel(el: Element | null): string | undefined {
@@ -92,11 +86,17 @@ function extractFields(form: HTMLFormElement): AuditField[] {
 			element.id ||
 			element.getAttribute('data-audit-label') ||
 			element.tagName.toLowerCase();
-		const raw = element.value ?? '';
-		const result = redactValue(raw);
-		fields.push({ name, value: result.value, redacted: result.redacted });
+		fields.push({ name, value: element.value ?? '' });
 	}
 	return fields;
+}
+
+function scheduleFlush(flushIntervalMs: number) {
+	if (state.timer) return;
+	state.timer = window.setTimeout(() => {
+		state.timer = null;
+		flush();
+	}, flushIntervalMs);
 }
 
 function pushLog(item: AuditLogItem) {
@@ -117,25 +117,14 @@ function pushLog(item: AuditLogItem) {
 	const maxBuffer = config.log_queue_max_size;
 	if (buffer.length > maxBuffer) {
 		buffer.splice(0, buffer.length - maxBuffer);
-		if (state.timer) return;
-		const flushIntervalMs = config.log_client_flush_interval_ms;
-		state.timer = window.setTimeout(() => {
-			state.timer = null;
-			flush();
-		}, flushIntervalMs);
+		scheduleFlush(config.log_client_flush_interval_ms);
 		return;
 	}
-	const batchSize = config.log_client_batch_size;
-	if (buffer.length >= batchSize) {
+	if (buffer.length >= config.log_client_batch_size) {
 		flush();
 		return;
 	}
-	if (state.timer) return;
-	const flushIntervalMs = config.log_client_flush_interval_ms;
-	state.timer = window.setTimeout(() => {
-		state.timer = null;
-		flush();
-	}, flushIntervalMs);
+	scheduleFlush(config.log_client_flush_interval_ms);
 }
 
 function recordFlushFailure(error: string, payload: AuditLogItem[]) {
@@ -155,12 +144,7 @@ function recordFlushFailure(error: string, payload: AuditLogItem[]) {
 		},
 		...payload
 	);
-	if (state.timer) return;
-	const flushIntervalMs = config.log_client_flush_interval_ms;
-	state.timer = window.setTimeout(() => {
-		state.timer = null;
-		flush();
-	}, flushIntervalMs);
+	scheduleFlush(config.log_client_flush_interval_ms);
 }
 
 export function flush() {
@@ -248,12 +232,11 @@ export function installAuditListeners() {
 		if (shouldSkipTarget(target)) return;
 		if (target instanceof HTMLInputElement && target.type === 'text') return;
 		const name = target.name || target.id || target.tagName.toLowerCase();
-		const result = redactValue(target.value ?? '');
 		pushLog({
 			event: 'change',
 			action: target.type || target.tagName.toLowerCase(),
 			target: name,
-			fields: [{ name, value: result.value, redacted: result.redacted }],
+			fields: [{ name, value: target.value ?? '' }],
 			page: state.page,
 			session_id: state.session
 		});

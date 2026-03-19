@@ -5,37 +5,30 @@
  * Compress data using gzip and encode to base64
  * Returns null if compression fails
  */
+async function collectStream(readable: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+	const chunks: Uint8Array[] = [];
+	const reader = readable.getReader();
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		chunks.push(value);
+	}
+	const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+	let offset = 0;
+	for (const chunk of chunks) {
+		out.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return out;
+}
+
 export async function compress(data: unknown): Promise<string | null> {
 	try {
-		const jsonString = JSON.stringify(data);
-		const encoder = new TextEncoder();
-		const uint8Array = encoder.encode(jsonString);
-
-		const compressedStream = new CompressionStream('gzip');
-		const writer = compressedStream.writable.getWriter();
-		writer.write(uint8Array);
+		const stream = new CompressionStream('gzip');
+		const writer = stream.writable.getWriter();
+		writer.write(new TextEncoder().encode(JSON.stringify(data)));
 		writer.close();
-
-		const reader = compressedStream.readable.getReader();
-		const chunks: Uint8Array[] = [];
-
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(value);
-		}
-
-		// Combine chunks
-		const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-		const result = new Uint8Array(totalLength);
-		let offset = 0;
-		for (const chunk of chunks) {
-			result.set(chunk, offset);
-			offset += chunk.length;
-		}
-
-		// Convert to base64
-		return arrayBufferToBase64(result);
+		return arrayBufferToBase64(await collectStream(stream.readable));
 	} catch (err) {
 		void err;
 		return null;
@@ -48,35 +41,12 @@ export async function compress(data: unknown): Promise<string | null> {
  */
 export async function decompress<T>(compressed: string): Promise<T | null> {
 	try {
-		const uint8Array = base64ToArrayBuffer(compressed);
-
-		const decompressedStream = new DecompressionStream('gzip');
-		const writer = decompressedStream.writable.getWriter();
-		await writer.write(uint8Array as unknown as BufferSource);
+		const stream = new DecompressionStream('gzip');
+		const writer = stream.writable.getWriter();
+		await writer.write(base64ToArrayBuffer(compressed) as unknown as BufferSource);
 		await writer.close();
-
-		const reader = decompressedStream.readable.getReader();
-		const chunks: Uint8Array[] = [];
-
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(value);
-		}
-
-		// Combine chunks
-		const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-		const result = new Uint8Array(totalLength);
-		let offset = 0;
-		for (const chunk of chunks) {
-			result.set(chunk, offset);
-			offset += chunk.length;
-		}
-
-		// Decode and parse
-		const decoder = new TextDecoder();
-		const jsonString = decoder.decode(result);
-		return JSON.parse(jsonString) as T;
+		const result = await collectStream(stream.readable);
+		return JSON.parse(new TextDecoder().decode(result)) as T;
 	} catch (err) {
 		void err;
 		return null;
@@ -98,11 +68,8 @@ export function formatBytes(bytes: number): string {
  * Convert Uint8Array to base64 string
  */
 function arrayBufferToBase64(buffer: Uint8Array): string {
-	const bytes = new Uint8Array(buffer);
 	let binary = '';
-	for (let i = 0; i < bytes.byteLength; i++) {
-		binary += String.fromCharCode(bytes[i]);
-	}
+	for (let i = 0; i < buffer.byteLength; i++) binary += String.fromCharCode(buffer[i]);
 	return btoa(binary);
 }
 
@@ -110,10 +77,5 @@ function arrayBufferToBase64(buffer: Uint8Array): string {
  * Convert base64 string to Uint8Array
  */
 function base64ToArrayBuffer(base64: string): Uint8Array {
-	const binary = atob(base64);
-	const bytes = new Uint8Array(binary.length);
-	for (let i = 0; i < binary.length; i++) {
-		bytes[i] = binary.charCodeAt(i);
-	}
-	return bytes;
+	return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 }

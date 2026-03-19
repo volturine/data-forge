@@ -23,6 +23,18 @@
 		Search
 	} from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
+	import {
+		css,
+		cx,
+		spinner,
+		emptyText,
+		label,
+		row,
+		rowBetween,
+		divider,
+		muted,
+		input
+	} from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -77,21 +89,17 @@
 		staleTime: 60_000
 	}));
 
-	const datasourceMap = $derived.by(() => {
-		const map = new SvelteMap<string, DataSource>();
-		for (const ds of datasourcesQuery.data ?? []) {
-			map.set(ds.id, ds);
-		}
-		return map;
-	});
+	const datasourceMap = $derived(
+		new SvelteMap((datasourcesQuery.data ?? []).map((ds) => [ds.id, ds] as [string, DataSource]))
+	);
 
-	const analysisOutputs = $derived.by(() => {
-		return (datasourcesQuery.data ?? []).filter((ds) => ds.created_by === 'analysis');
-	});
+	const analysisOutputs = $derived(
+		(datasourcesQuery.data ?? []).filter((ds) => ds.created_by === 'analysis')
+	);
 
-	const triggerables = $derived.by(() => {
-		return (datasourcesQuery.data ?? []).filter((ds) => ds.source_type === 'iceberg');
-	});
+	const triggerables = $derived(
+		(datasourcesQuery.data ?? []).filter((ds) => ds.source_type === 'iceberg')
+	);
 
 	const schedules = $derived(schedulesQuery.data ?? []);
 	const allSchedules = $derived(allSchedulesQuery.data ?? []);
@@ -121,32 +129,27 @@
 		});
 	});
 
-	const targetDatasource = $derived.by(() => {
-		if (!datasourceId) return null;
-		return datasourceMap.get(datasourceId) ?? null;
-	});
+	const targetDatasource = $derived(
+		datasourceId ? (datasourceMap.get(datasourceId) ?? null) : null
+	);
 
-	const scheduleBlocked = $derived.by(() => {
-		if (!datasourceId) return false;
-		if (!targetDatasource) return true;
-		return targetDatasource.created_by !== 'analysis';
-	});
+	const scheduleBlocked = $derived(
+		!!datasourceId && (!targetDatasource || targetDatasource.created_by !== 'analysis')
+	);
 
-	const showBlockedMessage = $derived.by(() => {
-		if (!datasourceId) return false;
-		if (!targetDatasource) return false;
-		return targetDatasource.created_by !== 'analysis';
-	});
+	const showBlockedMessage = $derived(
+		!!datasourceId && !!targetDatasource && targetDatasource.created_by !== 'analysis'
+	);
 
-	const currentTarget = $derived.by(() => {
-		const ds = targetDatasource;
-		if (!ds) return null;
-		return {
-			datasourceName: ds.name,
-			analysisName: ds.created_by_analysis_id ? 'Analysis' : 'Unknown',
-			tabName: ds.output_of_tab_id ? 'Tab' : null
-		};
-	});
+	const currentTarget = $derived(
+		targetDatasource
+			? {
+					datasourceName: targetDatasource.name,
+					analysisName: targetDatasource.created_by_analysis_id ? 'Analysis' : 'Unknown',
+					tabName: targetDatasource.output_of_tab_id ? 'Tab' : null
+				}
+			: null
+	);
 
 	const selectedDatasource = $derived.by(() => {
 		if (!newDatasourceId) return null;
@@ -396,19 +399,36 @@
 	});
 </script>
 
-<div class="flex flex-col h-full w-full">
+<div class={css({ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' })}>
 	{#if !compact}
-		<header class="mb-6 border-b border-tertiary pb-5">
-			<div class="flex items-center justify-between">
+		<header
+			class={css({
+				marginBottom: '6',
+				borderBottomWidth: '1',
+				paddingBottom: '5'
+			})}
+		>
+			<div class={rowBetween}>
 				<div>
-					<h1 class="m-0 mb-2 text-2xl">Schedules</h1>
-					<p class="m-0 text-fg-tertiary">
+					<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>Schedules</h1>
+					<p class={css({ margin: '0', color: 'fg.tertiary' })}>
 						Manage automated dataset rebuilds via cron expressions, dependencies, or datasource
 						events
 					</p>
 				</div>
 				<button
-					class="inline-flex items-center gap-1.5 border border-tertiary bg-accent-bg px-3 py-1.5 text-sm text-accent-primary hover:bg-accent-bg/80"
+					class={css({
+						display: 'inline-flex',
+						alignItems: 'center',
+						gap: '1.5',
+						borderWidth: '1',
+						backgroundColor: 'accent.bg',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'sm',
+						color: 'accent.primary',
+						_hover: { backgroundColor: 'accent.bg' }
+					})}
 					onclick={openCreate}
 					disabled={scheduleBlocked}
 				>
@@ -417,15 +437,40 @@
 				</button>
 			</div>
 			{#if externalSearch === undefined}
-				<div class="mt-4 flex flex-wrap items-center gap-3">
-					<div class="relative min-w-60 max-w-100 flex-1">
-						<Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+				<div class={cx(row, css({ marginTop: '4', flexWrap: 'wrap', gap: '3' }))}>
+					<div
+						class={css({
+							position: 'relative',
+							minWidth: 'list',
+							maxWidth: 'panel',
+							flex: '1'
+						})}
+					>
+						<Search
+							size={14}
+							class={css({
+								position: 'absolute',
+								left: '2.5',
+								top: '50%',
+								transform: 'translateY(-50%)',
+								color: 'fg.muted'
+							})}
+						/>
 						<input
 							type="text"
 							id="sched-search"
 							aria-label="Search schedules"
 							placeholder="Search schedules, datasources, or IDs..."
-							class="w-full border border-tertiary bg-transparent px-3 py-1.5 pl-8 text-sm"
+							class={cx(
+								input(),
+								css({
+									backgroundColor: 'transparent',
+									paddingX: '3',
+									paddingY: '1.5',
+									paddingLeft: '8',
+									fontSize: 'sm'
+								})
+							)}
 							bind:value={searchQuery}
 						/>
 					</div>
@@ -433,16 +478,35 @@
 			{/if}
 		</header>
 	{:else}
-		<div class="mb-3 flex items-center justify-between">
-			<span class="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+		<div class={cx(row, css({ marginBottom: '3', justifyContent: 'space-between' }))}>
+			<span
+				class={css({
+					fontSize: 'xs',
+					fontWeight: '600',
+					textTransform: 'uppercase',
+					letterSpacing: 'wide',
+					color: 'fg.muted'
+				})}
+			>
 				Schedules
 				{#if schedules.length > 0}
-					<span class="text-fg-tertiary">({schedules.length})</span>
+					<span class={css({ color: 'fg.tertiary' })}>({schedules.length})</span>
 				{/if}
 			</span>
-			<div class="flex items-center gap-1">
+			<div class={cx(row, css({ gap: '1' }))}>
 				<button
-					class="inline-flex items-center gap-1 border border-tertiary bg-accent-bg px-2 py-1 text-xs text-accent-primary hover:bg-accent-bg/80"
+					class={css({
+						display: 'inline-flex',
+						alignItems: 'center',
+						gap: '1',
+						borderWidth: '1',
+						backgroundColor: 'accent.bg',
+						paddingX: '2',
+						paddingY: '1',
+						fontSize: 'xs',
+						color: 'accent.primary',
+						_hover: { backgroundColor: 'accent.bg' }
+					})}
 					onclick={openCreate}
 					disabled={scheduleBlocked}
 				>
@@ -450,7 +514,16 @@
 					Add
 				</button>
 				<button
-					class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+					class={css({
+						display: 'inline-flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0.5',
+						color: 'fg.muted',
+						_hover: { color: 'fg.primary' }
+					})}
 					onclick={() => (showHelp = !showHelp)}
 					title="Show help"
 				>
@@ -459,20 +532,37 @@
 			</div>
 		</div>
 		{#if showHelp}
-			<div class="mb-3 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
-				<p class="m-0 mb-1 font-medium">Schedule Triggers:</p>
-				<ul class="m-0 list-none space-y-1 p-0">
-					<li class="flex items-center gap-1">
-						<Clock size={10} class="text-fg-muted" /> <strong>On a Schedule</strong> — runs on a cron
-						interval
+			<div
+				class={css({
+					marginBottom: '3',
+					borderWidth: '1',
+					backgroundColor: 'bg.secondary',
+					padding: '2',
+					fontSize: 'xs',
+					color: 'fg.secondary'
+				})}
+			>
+				<p class={css({ margin: '0', marginBottom: '1', fontWeight: '500' })}>Schedule Triggers:</p>
+				<ul
+					class={css({
+						margin: '0',
+						listStyle: 'none',
+						padding: '0',
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '1'
+					})}
+				>
+					<li class={cx(row, css({ gap: '1' }))}>
+						<Clock size={10} class={muted} /> <strong>On a Schedule</strong> — runs on a cron interval
 					</li>
-					<li class="flex items-center gap-1">
-						<Link size={10} class="text-fg-muted" /> <strong>After Another Schedule</strong> — runs when
-						a dependency completes
+					<li class={cx(row, css({ gap: '1' }))}>
+						<Link size={10} class={muted} />
+						<strong>After Another Schedule</strong> — runs when a dependency completes
 					</li>
-					<li class="flex items-center gap-1">
-						<Database size={10} class="text-fg-muted" /> <strong>When Dataset Updates</strong> — runs
-						on datasource change
+					<li class={cx(row, css({ gap: '1' }))}>
+						<Database size={10} class={muted} />
+						<strong>When Dataset Updates</strong> — runs on datasource change
 					</li>
 				</ul>
 			</div>
@@ -480,47 +570,102 @@
 	{/if}
 
 	{#if showBlockedMessage}
-		<div class="mb-3 border border-info bg-info-bg/50 p-2 text-xs text-fg-secondary">
+		<div
+			class={css({
+				marginBottom: '3',
+				borderWidth: '1',
+				backgroundColor: 'bg.secondary',
+				padding: '2',
+				fontSize: 'xs',
+				color: 'fg.secondary'
+			})}
+		>
 			Scheduling is only available for analysis outputs. This datasource was created by
-			<span class="font-medium">{targetDatasource?.created_by}</span>.
+			<span class={css({ fontWeight: '500' })}>{targetDatasource?.created_by}</span>.
 		</div>
 	{/if}
 
 	{#if creating}
-		<div class="mb-4 border border-tertiary bg-bg-primary p-4" class:mb-6={!compact}>
-			<h3 class="m-0 mb-4 text-sm font-medium">Create Schedule</h3>
+		<div
+			class={cx(
+				css({
+					marginBottom: '4',
+					borderWidth: '1',
+					backgroundColor: 'bg.primary',
+					padding: '4'
+				}),
+				!compact && css({ marginBottom: '6' })
+			)}
+		>
+			<h3 class={css({ margin: '0', marginBottom: '4', fontSize: 'sm', fontWeight: '500' })}>
+				Create Schedule
+			</h3>
 
 			<!-- Target Section -->
-			<div class="mb-5">
-				<div class="mb-3 flex items-center gap-2 border-b border-tertiary pb-2">
-					<Database size={14} class="text-accent-primary" />
-					<span class="text-xs font-medium">Target Dataset — What gets rebuilt</span>
+			<div class={css({ marginBottom: '5' })}>
+				<div
+					class={cx(
+						row,
+						css({
+							marginBottom: '3',
+							gap: '2',
+							borderBottomWidth: '1',
+							paddingBottom: '2'
+						})
+					)}
+				>
+					<Database size={14} class={css({ color: 'accent.primary' })} />
+					<span class={css({ fontSize: 'xs', fontWeight: '500' })}>
+						Target Dataset — What gets rebuilt
+					</span>
 				</div>
 
 				{#if currentTarget}
-					<div class="bg-bg-secondary p-3 text-sm">
-						<div class="flex items-center gap-2">
-							<BarChart3 size={14} class="text-accent-primary" />
-							<span class="font-medium">{currentTarget.datasourceName}</span>
+					<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
+						<div class={cx(row, css({ gap: '2' }))}>
+							<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
+							<span class={css({ fontWeight: '500' })}>
+								{currentTarget.datasourceName}
+							</span>
 						</div>
-						<div class="mt-1 flex items-center gap-1 text-xs text-fg-muted">
+						<div
+							class={cx(row, css({ marginTop: '1', gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
+						>
 							<span>└─ Produced by:</span>
-							<span class="text-fg-secondary">{currentTarget.analysisName}</span>
+							<span class={css({ color: 'fg.secondary' })}>
+								{currentTarget.analysisName}
+							</span>
 							{#if currentTarget.tabName}
 								<ArrowRight size={10} />
-								<span class="text-fg-secondary">Tab "{currentTarget.tabName}"</span>
+								<span class={css({ color: 'fg.secondary' })}>
+									Tab "{currentTarget.tabName}"
+								</span>
 							{/if}
 						</div>
 					</div>
 				{:else}
-					<div class="flex flex-col gap-3">
-						<div class="flex min-w-64 flex-1 flex-col gap-1.5">
-							<label for="schedule-datasource" class="text-xs text-fg-muted">
-								Select output dataset
-							</label>
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
+						<div
+							class={css({
+								display: 'flex',
+								minWidth: 'previewLg',
+								flex: '1',
+								flexDirection: 'column',
+								gap: '1.5'
+							})}
+						>
+							<label for="schedule-datasource" class={label()}> Select output dataset </label>
 							<select
 								id="schedule-datasource"
-								class="border border-tertiary bg-transparent px-2 py-1.5 text-xs"
+								class={cx(
+									input(),
+									css({
+										backgroundColor: 'transparent',
+										paddingX: '2',
+										paddingY: '1.5',
+										fontSize: 'xs'
+									})
+								)}
 								bind:value={newDatasourceId}
 								disabled={scheduleBlocked}
 							>
@@ -532,21 +677,26 @@
 						</div>
 
 						{#if selectedDatasource}
-							<div class="bg-bg-secondary p-3 text-sm">
-								<div class="flex items-center gap-2">
-									<BarChart3 size={14} class="text-accent-primary" />
-									<span class="font-medium">{selectedDatasource.name}</span>
+							<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
+								<div class={cx(row, css({ gap: '2' }))}>
+									<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
+									<span class={css({ fontWeight: '500' })}>{selectedDatasource.name}</span>
 								</div>
-								<div class="mt-1 flex items-center gap-1 text-xs text-fg-muted">
+								<div
+									class={cx(
+										row,
+										css({ marginTop: '1', gap: '1', fontSize: 'xs', color: 'fg.muted' })
+									)}
+								>
 									<span>└─ Produced by:</span>
 									{#if selectedDatasource.created_by_analysis_id}
-										<span class="text-fg-secondary">Analysis</span>
+										<span class={css({ color: 'fg.secondary' })}>Analysis</span>
 										{#if selectedDatasource.output_of_tab_id}
 											<ArrowRight size={10} />
-											<span class="text-fg-secondary">Tab</span>
+											<span class={css({ color: 'fg.secondary' })}>Tab</span>
 										{/if}
 									{:else}
-										<span class="text-fg-secondary">Unknown</span>
+										<span class={css({ color: 'fg.secondary' })}>Unknown</span>
 									{/if}
 								</div>
 							</div>
@@ -557,38 +707,74 @@
 
 			<!-- Trigger Section -->
 			<div>
-				<div class="mb-3 flex items-center gap-2 border-b border-tertiary pb-2">
-					<Clock size={14} class="text-accent-primary" />
-					<span class="text-xs font-medium">When to Run — What triggers the build</span>
+				<div
+					class={cx(
+						row,
+						css({
+							marginBottom: '3',
+							gap: '2',
+							borderBottomWidth: '1',
+							paddingBottom: '2'
+						})
+					)}
+				>
+					<Clock size={14} class={css({ color: 'accent.primary' })} />
+					<span class={css({ fontSize: 'xs', fontWeight: '500' })}>
+						When to Run — What triggers the build
+					</span>
 				</div>
 
-				<div class="space-y-3">
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
 					<!-- Cron Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class={css({
+							display: 'flex',
+							cursor: 'pointer',
+							alignItems: 'flex-start',
+							gap: '3',
+							borderWidth: '1',
+							backgroundColor: 'bg.secondary',
+							padding: '3',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 					>
 						<input
 							type="radio"
 							name="triggerType"
 							value="cron"
 							bind:group={triggerType}
-							class="mt-0.5"
+							class={css({ marginTop: '0.5' })}
 							disabled={scheduleBlocked}
 						/>
-						<div class="flex-1">
-							<div class="mb-1 text-xs font-medium">On a Schedule</div>
-							<p class="m-0 text-xs text-fg-tertiary">Run on a recurring cron interval</p>
+						<div class={css({ flex: '1' })}>
+							<div class={css({ marginBottom: '1', fontSize: 'xs', fontWeight: '500' })}>
+								On a Schedule
+							</div>
+							<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
+								Run on a recurring cron interval
+							</p>
 							{#if triggerType === 'cron'}
-								<div class="mt-2 flex items-center gap-2">
+								<div class={cx(row, css({ marginTop: '2', gap: '2' }))}>
 									<input
 										type="text"
-										class="w-32 border border-tertiary bg-transparent px-2 py-1 font-mono text-xs"
+										class={cx(
+											input(),
+											css({
+												width: 'colMd',
+												backgroundColor: 'transparent',
+												paddingX: '2',
+												paddingY: '1',
+												fontSize: 'xs'
+											})
+										)}
 										name="cron"
 										bind:value={newCron}
 										placeholder="0 * * * *"
 										disabled={scheduleBlocked}
 									/>
-									<span class="text-xs text-fg-muted">{getCronDescription(newCron)}</span>
+									<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+										{getCronDescription(newCron)}
+									</span>
 								</div>
 							{/if}
 						</div>
@@ -596,28 +782,50 @@
 
 					<!-- Depends Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class={css({
+							display: 'flex',
+							cursor: 'pointer',
+							alignItems: 'flex-start',
+							gap: '3',
+							borderWidth: '1',
+							backgroundColor: 'bg.secondary',
+							padding: '3',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 					>
 						<input
 							type="radio"
 							name="triggerType"
 							value="depends"
 							bind:group={triggerType}
-							class="mt-0.5"
+							class={css({ marginTop: '0.5' })}
 							disabled={scheduleBlocked}
 						/>
-						<div class="flex-1">
-							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
-								<Link size={12} class="text-fg-muted" />
+						<div class={css({ flex: '1' })}>
+							<div
+								class={cx(
+									row,
+									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: '500' })
+								)}
+							>
+								<Link size={12} class={muted} />
 								After Another Schedule
 							</div>
-							<p class="m-0 text-xs text-fg-tertiary">
+							<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
 								Run after another schedule completes successfully
 							</p>
 							{#if triggerType === 'depends'}
-								<div class="mt-2">
+								<div class={css({ marginTop: '2' })}>
 									<select
-										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
+										class={cx(
+											input(),
+											css({
+												backgroundColor: 'transparent',
+												paddingX: '2',
+												paddingY: '1',
+												fontSize: 'xs'
+											})
+										)}
 										name="depends_on"
 										bind:value={newDependsOn}
 										disabled={scheduleBlocked}
@@ -634,26 +842,50 @@
 
 					<!-- Event Option -->
 					<label
-						class="flex cursor-pointer items-start gap-3 border border-tertiary bg-bg-secondary p-3 hover:bg-bg-hover"
+						class={css({
+							display: 'flex',
+							cursor: 'pointer',
+							alignItems: 'flex-start',
+							gap: '3',
+							borderWidth: '1',
+							backgroundColor: 'bg.secondary',
+							padding: '3',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 					>
 						<input
 							type="radio"
 							name="triggerType"
 							value="event"
 							bind:group={triggerType}
-							class="mt-0.5"
+							class={css({ marginTop: '0.5' })}
 							disabled={scheduleBlocked}
 						/>
-						<div class="flex-1">
-							<div class="mb-1 flex items-center gap-1 text-xs font-medium">
-								<Database size={12} class="text-fg-muted" />
+						<div class={css({ flex: '1' })}>
+							<div
+								class={cx(
+									row,
+									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: '500' })
+								)}
+							>
+								<Database size={12} class={muted} />
 								When Dataset Updates
 							</div>
-							<p class="m-0 text-xs text-fg-tertiary">Run when a specific datasource is updated</p>
+							<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
+								Run when a specific datasource is updated
+							</p>
 							{#if triggerType === 'event'}
-								<div class="mt-2">
+								<div class={css({ marginTop: '2' })}>
 									<select
-										class="w-full border border-tertiary bg-transparent px-2 py-1 text-xs"
+										class={cx(
+											input(),
+											css({
+												backgroundColor: 'transparent',
+												paddingX: '2',
+												paddingY: '1',
+												fontSize: 'xs'
+											})
+										)}
 										name="trigger_datasource"
 										bind:value={newTrigger}
 										disabled={scheduleBlocked}
@@ -670,9 +902,27 @@
 				</div>
 			</div>
 
-			<div class="mt-4 flex gap-2 border-t border-tertiary pt-4">
+			<div
+				class={cx(
+					divider,
+					css({
+						marginTop: '4',
+						display: 'flex',
+						gap: '2',
+						paddingTop: '4'
+					})
+				)}
+			>
 				<button
-					class="border border-tertiary bg-accent-bg px-3 py-1.5 text-xs text-accent-primary hover:bg-accent-bg/80"
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'accent.bg',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						color: 'accent.primary',
+						_hover: { backgroundColor: 'accent.bg' }
+					})}
 					onclick={handleCreate}
 					disabled={(!datasourceId && !newDatasourceId) ||
 						(triggerType === 'cron' && !newCron) ||
@@ -684,7 +934,15 @@
 					{createMut.isPending ? 'Creating...' : 'Create Schedule'}
 				</button>
 				<button
-					class="border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-tertiary hover:text-fg-primary"
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'transparent',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
 					onclick={() => (creating = false)}
 				>
 					Cancel
@@ -692,7 +950,7 @@
 			</div>
 
 			{#if createMut.isError}
-				<p class="mt-3 text-xs text-error-fg">
+				<p class={css({ marginTop: '3', fontSize: 'xs', color: 'error.fg' })}>
 					{createMut.error instanceof Error ? createMut.error.message : 'Failed to create schedule'}
 				</p>
 			{/if}
@@ -700,39 +958,90 @@
 	{/if}
 
 	{#if schedulesQuery.isLoading}
-		<div class="flex items-center justify-center py-6">
-			<div class="spinner"></div>
+		<div class={cx(row, css({ justifyContent: 'center', paddingY: '6' }))}>
+			<div class={spinner()}></div>
 		</div>
 	{:else if schedulesQuery.isError}
-		<div class="error-box">
+		<div
+			class={css({
+				paddingX: '3',
+				paddingY: '2.5',
+				border: 'none',
+				borderLeftWidth: '2',
+
+				marginTop: '3',
+				marginBottom: '0',
+				fontSize: 'xs',
+				lineHeight: '1.5',
+				backgroundColor: 'transparent',
+				borderLeftColor: 'error.border',
+				color: 'error.fg'
+			})}
+		>
 			{schedulesQuery.error instanceof Error
 				? schedulesQuery.error.message
 				: 'Error loading schedules.'}
 		</div>
 	{:else if schedules.length === 0 && !creating}
-		<div class="border border-dashed border-tertiary p-6 text-center" class:p-8={!compact}>
-			<Calendar class="mx-auto mb-2 text-fg-muted" size={compact ? 20 : 32} />
-			<p class="text-sm text-fg-muted">No schedules configured.</p>
+		<div
+			class={cx(
+				css({
+					borderWidth: '1',
+					borderStyle: 'dashed',
+					padding: '6',
+					textAlign: 'center'
+				}),
+				!compact && css({ padding: '8' })
+			)}
+		>
+			<Calendar
+				class={css({ marginX: 'auto', marginBottom: '2', color: 'fg.muted' })}
+				size={compact ? 20 : 32}
+			/>
+			<p class={emptyText({ size: 'panel' })}>No schedules configured.</p>
 			{#if !compact}
-				<p class="text-xs text-fg-tertiary">
+				<p class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 					Create a schedule to automatically rebuild datasets on a trigger.
 				</p>
 			{/if}
 		</div>
 	{:else if visibleSchedules.length === 0 && hasSearch}
-		<div class="border border-dashed border-tertiary px-6 py-8 text-center">
-			<p class="text-sm text-fg-tertiary">No schedules match your search.</p>
+		<div
+			class={css({
+				borderWidth: '1',
+				borderStyle: 'dashed',
+				paddingX: '6',
+				paddingY: '8',
+				textAlign: 'center'
+			})}
+		>
+			<p class={emptyText({ size: 'panel' })}>No schedules match your search.</p>
 		</div>
 	{:else if visibleSchedules.length > 0}
 		{#if compact}
 			<!-- Compact card list -->
-			<div class="flex flex-col gap-1">
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 				{#each visibleSchedules as schedule (schedule.id)}
 					{@const triggerTypeValue = getTriggerType(schedule)}
 					{@const triggerDesc = getTriggerDescription(schedule)}
-					<div class="group border border-tertiary bg-bg-primary">
+					<div
+						class={cx(
+							'group',
+							css({
+								borderWidth: '1',
+								backgroundColor: 'bg.primary'
+							})
+						)}
+					>
 						<div
-							class="flex cursor-pointer items-center gap-2 p-2 hover:bg-bg-secondary/50"
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								gap: '2',
+								padding: '2',
+								_hover: { backgroundColor: 'bg.secondary' }
+							})}
 							role="button"
 							tabindex="0"
 							onclick={() => toggleExpand(schedule.id)}
@@ -745,20 +1054,43 @@
 						>
 							<ChevronDown
 								size={10}
-								class="shrink-0 text-fg-muted {expandedId === schedule.id ? '' : '-rotate-90'}"
+								class={cx(
+									css({ flexShrink: '0', color: 'fg.muted' }),
+									expandedId === schedule.id ? '' : css({ transform: 'rotate(-90deg)' })
+								)}
 							/>
 							{#if triggerTypeValue === 'cron'}
-								<Clock size={12} class="shrink-0 text-fg-muted" />
+								<Clock size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 							{:else if triggerTypeValue === 'depends'}
-								<Link size={12} class="shrink-0 text-fg-muted" />
+								<Link size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 							{:else}
-								<Database size={12} class="shrink-0 text-fg-muted" />
+								<Database size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 							{/if}
-							<span class="min-w-0 flex-1 truncate text-xs text-fg-secondary" title={triggerDesc}>
+							<span
+								class={css({
+									minWidth: '0',
+									flex: '1',
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+									fontSize: 'xs',
+									color: 'fg.secondary'
+								})}
+								title={triggerDesc}
+							>
 								{triggerDesc}
 							</span>
 							<button
-								class="inline-flex shrink-0 items-center gap-0.5 border-none bg-transparent p-0 text-[10px]"
+								class={css({
+									display: 'inline-flex',
+									flexShrink: '0',
+									alignItems: 'center',
+									gap: '0.5',
+									border: 'none',
+									backgroundColor: 'transparent',
+									padding: '0',
+									fontSize: '2xs'
+								})}
 								onclick={(e) => {
 									e.stopPropagation();
 									handleToggle(schedule);
@@ -767,13 +1099,22 @@
 								title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
 							>
 								{#if schedule.enabled}
-									<Power size={10} class="text-success-fg" />
+									<Power size={10} class={css({ color: 'success.fg' })} />
 								{:else}
-									<PowerOff size={10} class="text-fg-muted" />
+									<PowerOff size={10} class={muted} />
 								{/if}
 							</button>
 							<button
-								class="shrink-0 border-none bg-transparent p-0 text-fg-tertiary opacity-0 group-hover:opacity-100 hover:text-error-fg"
+								class={css({
+									flexShrink: '0',
+									border: 'none',
+									backgroundColor: 'transparent',
+									padding: '0',
+									color: 'fg.tertiary',
+									opacity: '0',
+									'&:hover': { color: 'error.fg' },
+									'.group:hover &': { opacity: '1' }
+								})}
 								onclick={(e) => {
 									e.stopPropagation();
 									handleDelete(schedule.id);
@@ -785,16 +1126,34 @@
 							</button>
 						</div>
 						{#if expandedId === schedule.id}
-							<div class="border-t border-tertiary px-3 py-2">
-								<div class="flex flex-col gap-2">
+							<div
+								class={cx(
+									divider,
+									css({
+										paddingX: '3',
+										paddingY: '2'
+									})
+								)}
+							>
+								<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 									{#if triggerTypeValue === 'cron'}
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Cron Expression</span>
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+												Cron Expression
+											</span>
 											{#if editingCron === schedule.id}
-												<div class="flex items-center gap-1">
+												<div class={cx(row, css({ gap: '1' }))}>
 													<input
 														type="text"
-														class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+														class={cx(
+															input(),
+															css({
+																backgroundColor: 'transparent',
+																paddingX: '1.5',
+																paddingY: '0.5',
+																fontSize: '2xs'
+															})
+														)}
 														id="sched-{schedule.id}-cron"
 														aria-label="Cron expression"
 														bind:value={editCronValue}
@@ -805,7 +1164,13 @@
 														disabled={scheduleBlocked}
 													/>
 													<button
-														class="shrink-0 border-none bg-transparent p-0.5 text-success-fg"
+														class={css({
+															flexShrink: '0',
+															border: 'none',
+															backgroundColor: 'transparent',
+															padding: '0.5',
+															color: 'success.fg'
+														})}
 														onclick={() => saveCron(schedule.id)}
 														disabled={cronMut.isPending || scheduleBlocked}
 														title="Save"
@@ -813,7 +1178,14 @@
 														<Check size={12} />
 													</button>
 													<button
-														class="shrink-0 border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+														class={css({
+															flexShrink: '0',
+															border: 'none',
+															backgroundColor: 'transparent',
+															padding: '0.5',
+															color: 'fg.muted',
+															_hover: { color: 'fg.primary' }
+														})}
 														onclick={cancelEditCron}
 														title="Cancel"
 													>
@@ -821,12 +1193,25 @@
 													</button>
 												</div>
 											{:else}
-												<div class="flex items-center gap-1">
-													<code class="bg-bg-tertiary px-1 py-0.5 text-[10px]">
+												<div class={cx(row, css({ gap: '1' }))}>
+													<code
+														class={css({
+															backgroundColor: 'bg.tertiary',
+															paddingX: '1',
+															paddingY: '0.5',
+															fontSize: '2xs'
+														})}
+													>
 														{schedule.cron_expression}
 													</code>
 													<button
-														class="border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+														class={css({
+															border: 'none',
+															backgroundColor: 'transparent',
+															padding: '0.5',
+															color: 'fg.muted',
+															_hover: { color: 'fg.primary' }
+														})}
 														onclick={() => startEditCron(schedule)}
 														title="Edit"
 														disabled={scheduleBlocked}
@@ -837,10 +1222,18 @@
 											{/if}
 										</div>
 									{:else if triggerTypeValue === 'depends'}
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">Depends On</span>
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Depends On</span>
 											<select
-												class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+												class={cx(
+													input(),
+													css({
+														backgroundColor: 'transparent',
+														paddingX: '1.5',
+														paddingY: '0.5',
+														fontSize: '2xs'
+													})
+												)}
 												id="sched-{schedule.id}-depends"
 												aria-label="Depends on schedule"
 												value={schedule.depends_on ?? ''}
@@ -855,10 +1248,20 @@
 											</select>
 										</div>
 									{:else}
-										<div class="flex flex-col gap-1">
-											<span class="text-[10px] text-fg-muted">On Datasource Update</span>
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
+												>On Datasource Update</span
+											>
 											<select
-												class="w-full border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+												class={cx(
+													input(),
+													css({
+														backgroundColor: 'transparent',
+														paddingX: '1.5',
+														paddingY: '0.5',
+														fontSize: '2xs'
+													})
+												)}
 												id="sched-{schedule.id}-trigger"
 												aria-label="Trigger datasource"
 												value={schedule.trigger_on_datasource_id ?? ''}
@@ -874,7 +1277,7 @@
 										</div>
 									{/if}
 									{#if schedule.next_run}
-										<div class="text-[10px] text-fg-muted">
+										<div class={css({ fontSize: '2xs', color: 'fg.muted' })}>
 											Next: {formatDate(schedule.next_run)}
 										</div>
 									{/if}
@@ -886,23 +1289,103 @@
 			</div>
 		{:else}
 			<!-- Full table view -->
-			<div class="overflow-x-auto border border-tertiary">
-				<table class="w-full border-collapse text-xs">
+			<div
+				class={css({
+					overflowX: 'auto',
+					borderWidth: '1'
+				})}
+			>
+				<table class={css({ width: '100%', borderCollapse: 'collapse', fontSize: 'xs' })}>
 					<thead>
-						<tr class="bg-bg-tertiary">
-							<th class="w-6 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
+						<tr class={css({ backgroundColor: 'bg.tertiary' })}>
+							<th
+								class={css({
+									width: 'iconLg',
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
+							></th>
 							{#if !datasourceId}
-								<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Target</th>
+								<th
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5',
+										textAlign: 'left',
+										fontWeight: '500'
+									})}
+								>
+									Target
+								</th>
 							{/if}
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Produced By</th
+							<th
+								class={css({
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
 							>
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium"
-								>Trigger Type</th
+								Produced By
+							</th>
+							<th
+								class={css({
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
 							>
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Trigger</th>
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Status</th>
-							<th class="border-b border-tertiary px-2 py-1.5 text-left font-medium">Next Run</th>
-							<th class="w-16 border-b border-tertiary px-2 py-1.5 text-left font-medium"></th>
+								Trigger Type
+							</th>
+							<th
+								class={css({
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
+							>
+								Trigger
+							</th>
+							<th
+								class={css({
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
+							>
+								Status
+							</th>
+							<th
+								class={css({
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
+							>
+								Next Run
+							</th>
+							<th
+								class={css({
+									width: 'logoXl',
+									borderBottomWidth: '1',
+									paddingX: '2',
+									paddingY: '1.5',
+									textAlign: 'left',
+									fontWeight: '500'
+								})}
+							></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -911,52 +1394,130 @@
 							{@const triggerDesc = getTriggerDescription(schedule)}
 							{@const provenanceDisplay = getProvenanceDisplay(schedule)}
 							<tr
-								class="cursor-pointer hover:bg-bg-hover"
-								class:bg-bg-secondary={expandedId === schedule.id}
+								class={css({
+									cursor: 'pointer',
+									_hover: { backgroundColor: 'bg.hover' },
+									...(expandedId === schedule.id ? { backgroundColor: 'bg.secondary' } : {})
+								})}
 								onclick={() => toggleExpand(schedule.id)}
 							>
-								<td class="border-b border-tertiary px-2 py-1.5">
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5'
+									})}
+								>
 									<ChevronDown
 										size={12}
-										class="transition-transform {expandedId === schedule.id ? '' : '-rotate-90'}"
+										class={cx(
+											css({ transition: 'transform 160ms' }),
+											expandedId === schedule.id ? '' : css({ transform: 'rotate(-90deg)' })
+										)}
 									/>
 								</td>
 								{#if !datasourceId}
-									<td class="border-b border-tertiary px-2 py-1.5">
+									<td
+										class={css({
+											borderBottomWidth: '1',
+											paddingX: '2',
+											paddingY: '1.5'
+										})}
+									>
 										<span
-											class="inline-flex max-w-40 items-center gap-1 truncate text-fg-secondary"
+											class={css({
+												display: 'inline-flex',
+												maxWidth: 'inputSm',
+												alignItems: 'center',
+												gap: '1',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap',
+												color: 'fg.secondary'
+											})}
 											title={resolveDatasource(schedule.datasource_id)}
 										>
-											<BarChart3 size={10} class="shrink-0 text-fg-muted" />
+											<BarChart3 size={10} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 											{resolveDatasource(schedule.datasource_id)}
 										</span>
 									</td>
 								{/if}
-								<td class="border-b border-tertiary px-2 py-1.5">
-									<span class="block max-w-48 truncate text-fg-secondary" title={provenanceDisplay}>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5'
+									})}
+								>
+									<span
+										class={css({
+											display: 'block',
+											maxWidth: 'colXl',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											color: 'fg.secondary'
+										})}
+										title={provenanceDisplay}
+									>
 										{provenanceDisplay}
 									</span>
 								</td>
-								<td class="border-b border-tertiary px-2 py-1.5">
-									<span class="text-fg-secondary">{getTriggerLabel(triggerTypeValue)}</span>
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5'
+									})}
+								>
+									<span class={css({ color: 'fg.secondary' })}>
+										{getTriggerLabel(triggerTypeValue)}
+									</span>
 								</td>
-								<td class="border-b border-tertiary px-2 py-1.5">
-									<div class="flex items-center gap-1.5">
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5'
+									})}
+								>
+									<div class={cx(row, css({ gap: '1.5' }))}>
 										{#if triggerTypeValue === 'cron'}
-											<Clock size={12} class="shrink-0 text-fg-muted" />
+											<Clock size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 										{:else if triggerTypeValue === 'depends'}
-											<Link size={12} class="shrink-0 text-fg-muted" />
+											<Link size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 										{:else}
-											<Database size={12} class="shrink-0 text-fg-muted" />
+											<Database size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 										{/if}
-										<span class="truncate" title={triggerDesc}>
+										<span
+											class={css({
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap'
+											})}
+											title={triggerDesc}
+										>
 											{triggerDesc}
 										</span>
 									</div>
 								</td>
-								<td class="border-b border-tertiary px-2 py-1.5">
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5'
+									})}
+								>
 									<button
-										class="inline-flex items-center gap-1 border-none bg-transparent p-0 text-xs"
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											gap: '1',
+											border: 'none',
+											backgroundColor: 'transparent',
+											padding: '0',
+											fontSize: 'xs'
+										})}
 										onclick={(e) => {
 											e.stopPropagation();
 											handleToggle(schedule);
@@ -965,20 +1526,42 @@
 										title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
 									>
 										{#if schedule.enabled}
-											<Power size={12} class="text-success-fg" />
-											<span class="text-success-fg">On</span>
+											<Power size={12} class={css({ color: 'success.fg' })} />
+											<span class={css({ color: 'success.fg' })}>On</span>
 										{:else}
-											<PowerOff size={12} class="text-fg-muted" />
-											<span class="text-fg-muted">Off</span>
+											<PowerOff size={12} class={muted} />
+											<span class={muted}>Off</span>
 										{/if}
 									</button>
 								</td>
-								<td class="border-b border-tertiary px-2 py-1.5 text-fg-secondary">
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5',
+										color: 'fg.secondary'
+									})}
+								>
 									{formatDate(schedule.next_run)}
 								</td>
-								<td class="border-b border-tertiary px-2 py-1.5">
+								<td
+									class={css({
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5'
+									})}
+								>
 									<button
-										class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-error-fg"
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											justifyContent: 'center',
+											border: 'none',
+											backgroundColor: 'transparent',
+											padding: '0.5',
+											color: 'fg.muted',
+											_hover: { color: 'error.fg' }
+										})}
 										onclick={(e) => {
 											e.stopPropagation();
 											handleDelete(schedule.id);
@@ -992,31 +1575,60 @@
 							</tr>
 							{#if expandedId === schedule.id}
 								<tr>
-									<td colspan={colCount} class="border-b border-tertiary bg-bg-primary p-0">
-										<div class="flex flex-wrap items-start gap-4 px-4 py-3">
-											<div class="flex flex-col gap-1">
-												<span class="text-[10px] text-fg-muted">Target Datasource</span>
-												<div class="flex items-center gap-1">
-													<BarChart3 size={10} class="text-fg-muted" />
-													<span class="text-[10px] text-fg-secondary">
+									<td
+										colspan={colCount}
+										class={css({
+											borderBottomWidth: '1',
+											backgroundColor: 'bg.primary',
+											padding: '0'
+										})}
+									>
+										<div
+											class={css({
+												display: 'flex',
+												flexWrap: 'wrap',
+												alignItems: 'flex-start',
+												gap: '4',
+												paddingX: '4',
+												paddingY: '3'
+											})}
+										>
+											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
+													>Target Datasource</span
+												>
+												<div class={cx(row, css({ gap: '1' }))}>
+													<BarChart3 size={10} class={muted} />
+													<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 														{resolveDatasource(schedule.datasource_id)}
 													</span>
 												</div>
 											</div>
-											<div class="flex flex-col gap-1">
-												<span class="text-[10px] text-fg-muted">Produced By</span>
-												<span class="text-[10px] text-fg-secondary">
+											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Produced By</span>
+												<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 													{provenanceDisplay}
 												</span>
 											</div>
 											{#if triggerTypeValue === 'cron'}
-												<div class="flex flex-col gap-1">
-													<span class="text-[10px] text-fg-muted">Cron Expression</span>
+												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
+														>Cron Expression</span
+													>
 													{#if editingCron === schedule.id}
-														<div class="flex items-center gap-1">
+														<div class={cx(row, css({ gap: '1' }))}>
 															<input
 																type="text"
-																class="w-32 border border-tertiary bg-transparent px-1.5 py-0.5 font-mono text-[10px]"
+																class={cx(
+																	input(),
+																	css({
+																		width: 'colMd',
+																		backgroundColor: 'transparent',
+																		paddingX: '1.5',
+																		paddingY: '0.5',
+																		fontSize: '2xs'
+																	})
+																)}
 																id="sched-{schedule.id}-cron"
 																aria-label="Cron expression"
 																bind:value={editCronValue}
@@ -1027,7 +1639,16 @@
 																disabled={scheduleBlocked}
 															/>
 															<button
-																class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-success-fg hover:text-success-fg/80"
+																class={css({
+																	display: 'inline-flex',
+																	alignItems: 'center',
+																	justifyContent: 'center',
+																	border: 'none',
+																	backgroundColor: 'transparent',
+																	padding: '0.5',
+																	color: 'success.fg',
+																	_hover: { color: 'success.fgMuted' }
+																})}
 																onclick={() => saveCron(schedule.id)}
 																disabled={cronMut.isPending || scheduleBlocked}
 																title="Save"
@@ -1035,7 +1656,16 @@
 																<Check size={12} />
 															</button>
 															<button
-																class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+																class={css({
+																	display: 'inline-flex',
+																	alignItems: 'center',
+																	justifyContent: 'center',
+																	border: 'none',
+																	backgroundColor: 'transparent',
+																	padding: '0.5',
+																	color: 'fg.muted',
+																	_hover: { color: 'fg.primary' }
+																})}
 																onclick={cancelEditCron}
 																title="Cancel"
 															>
@@ -1043,12 +1673,28 @@
 															</button>
 														</div>
 													{:else}
-														<div class="flex items-center gap-1">
-															<code class="bg-bg-tertiary px-1 py-0.5 text-[10px]">
+														<div class={cx(row, css({ gap: '1' }))}>
+															<code
+																class={css({
+																	backgroundColor: 'bg.tertiary',
+																	paddingX: '1',
+																	paddingY: '0.5',
+																	fontSize: '2xs'
+																})}
+															>
 																{schedule.cron_expression}
 															</code>
 															<button
-																class="inline-flex items-center justify-center border-none bg-transparent p-0.5 text-fg-muted hover:text-fg-primary"
+																class={css({
+																	display: 'inline-flex',
+																	alignItems: 'center',
+																	justifyContent: 'center',
+																	border: 'none',
+																	backgroundColor: 'transparent',
+																	padding: '0.5',
+																	color: 'fg.muted',
+																	_hover: { color: 'fg.primary' }
+																})}
 																onclick={() => startEditCron(schedule)}
 																title="Edit cron expression"
 																disabled={scheduleBlocked}
@@ -1059,11 +1705,20 @@
 													{/if}
 												</div>
 											{:else if triggerTypeValue === 'depends'}
-												<div class="flex flex-col gap-1">
-													<span class="text-[10px] text-fg-muted">Depends On</span>
-													<div class="flex items-center gap-1">
+												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Depends On</span
+													>
+													<div class={cx(row, css({ gap: '1' }))}>
 														<select
-															class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+															class={cx(
+																input(),
+																css({
+																	backgroundColor: 'transparent',
+																	paddingX: '1.5',
+																	paddingY: '0.5',
+																	fontSize: '2xs'
+																})
+															)}
 															id="sched-{schedule.id}-depends"
 															aria-label="Depends on schedule"
 															value={schedule.depends_on ?? ''}
@@ -1077,16 +1732,26 @@
 															{/each}
 														</select>
 														{#if schedule.depends_on}
-															<Link size={10} class="text-fg-muted" />
+															<Link size={10} class={muted} />
 														{/if}
 													</div>
 												</div>
 											{:else}
-												<div class="flex flex-col gap-1">
-													<span class="text-[10px] text-fg-muted">On Datasource Update</span>
-													<div class="flex items-center gap-1">
+												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
+														>On Datasource Update</span
+													>
+													<div class={cx(row, css({ gap: '1' }))}>
 														<select
-															class="border border-tertiary bg-transparent px-1.5 py-0.5 text-[10px]"
+															class={cx(
+																input(),
+																css({
+																	backgroundColor: 'transparent',
+																	paddingX: '1.5',
+																	paddingY: '0.5',
+																	fontSize: '2xs'
+																})
+															)}
 															id="sched-{schedule.id}-trigger"
 															aria-label="Trigger datasource"
 															value={schedule.trigger_on_datasource_id ?? ''}
@@ -1101,20 +1766,26 @@
 															{/each}
 														</select>
 														{#if schedule.trigger_on_datasource_id}
-															<Database size={10} class="text-fg-muted" />
+															<Database size={10} class={muted} />
 														{/if}
 													</div>
 												</div>
 											{/if}
-											<div class="flex flex-col gap-1">
-												<span class="text-[10px] text-fg-muted">Created</span>
-												<span class="text-[10px] text-fg-secondary">
+											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Created</span>
+												<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 													{formatDate(schedule.created_at)}
 												</span>
 											</div>
-											<div class="flex flex-col gap-1">
-												<span class="text-[10px] text-fg-muted">Schedule ID</span>
-												<span class="font-mono text-[10px] text-fg-secondary">
+											<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Schedule ID</span>
+												<span
+													class={css({
+														fontFamily: 'mono',
+														fontSize: '2xs',
+														color: 'fg.secondary'
+													})}
+												>
 													{schedule.id}
 												</span>
 											</div>

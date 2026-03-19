@@ -628,7 +628,7 @@ class TestIsHidden:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_datasource',
@@ -636,7 +636,6 @@ class TestIsHidden:
                     'steps': [],
                 },
             ],
-            'pipeline_steps': [],
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)

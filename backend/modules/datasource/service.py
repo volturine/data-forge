@@ -142,8 +142,7 @@ def create_file_datasource(
     if file_type == 'parquet' and not (resolved_path.is_file() or resolved_path.is_dir()):
         raise ValueError('Parquet path must be a file or directory')
 
-    config = {
-        'source_type': DataSourceType.FILE,
+    file_config = {
         'file_path': str(resolved_path),
         'file_type': file_type,
         'options': options or {},
@@ -158,6 +157,7 @@ def create_file_datasource(
         'named_range': named_range,
         'cell_range': cell_range,
     }
+    config = {'source_type': DataSourceType.FILE, **file_config}
     try:
         lazy = load_datasource(config)
     except Exception as exc:
@@ -174,22 +174,6 @@ def create_file_datasource(
         snapshot_ts = current_snapshot.timestamp_ms
         iceberg_config['snapshot_id'] = str(snapshot_id)
         iceberg_config['snapshot_timestamp_ms'] = int(snapshot_ts)
-
-    file_config = {
-        'file_path': str(resolved_path),
-        'file_type': file_type,
-        'options': options or {},
-        'csv_options': csv_options.model_dump() if csv_options else None,
-        'sheet_name': sheet_name,
-        'start_row': start_row,
-        'start_col': start_col,
-        'end_col': end_col,
-        'end_row': end_row,
-        'has_header': has_header,
-        'table_name': table_name,
-        'named_range': named_range,
-        'cell_range': cell_range,
-    }
     datasource = DataSource(
         id=datasource_id,
         name=name,
@@ -222,6 +206,33 @@ def create_file_datasource(
     response.config['source'] = file_config
     response.config.update(file_config)
     return response
+
+
+def create_placeholder_output_datasource(
+    session: Session,
+    result_id: str,
+    analysis_id: str,
+    analysis_tab_id: str,
+) -> None:
+    try:
+        uuid.UUID(result_id)
+    except ValueError:
+        raise ValueError(f'result_id must be a valid UUID, got: {result_id!r}') from None
+    existing = session.get(DataSource, result_id)
+    if existing:
+        return
+    datasource = DataSource(
+        id=result_id,
+        name=result_id,
+        source_type=DataSourceType.ANALYSIS,
+        config={'analysis_tab_id': analysis_tab_id},
+        created_by_analysis_id=analysis_id,
+        created_by='analysis',
+        is_hidden=False,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    session.add(datasource)
+    session.flush()
 
 
 def create_analysis_datasource(
@@ -496,7 +507,6 @@ def _detect_end_row(sheet, start_row: int, start_col: int, end_col: int) -> int:
     if max_row <= start_row:
         return start_row
     for row_index in range(start_row + 1, max_row + 1):
-        values = []
         for cell in sheet.iter_rows(min_row=row_index, max_row=row_index, min_col=start_col + 1, max_col=end_col + 1):
             values = [c.value for c in cell]
         if all(value is None or str(value).strip() == '' for value in values):
@@ -613,7 +623,6 @@ def create_iceberg_datasource(
     except ValueError as exc:
         raise DataSourceValidationError(str(exc), details={'metadata_path': metadata_path}) from exc
 
-    snapshot_value = snapshot_id
     if snapshot_id:
         try:
             int(snapshot_id)
@@ -622,7 +631,7 @@ def create_iceberg_datasource(
 
     config = {
         'metadata_path': normalized_path,
-        'snapshot_id': snapshot_value,
+        'snapshot_id': snapshot_id,
         'snapshot_timestamp_ms': snapshot_timestamp_ms,
         'storage_options': storage_options,
         'reader': reader,
@@ -855,38 +864,12 @@ def get_datasource_schema(
 
 
 def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dict[str, str | None]:
-    sample_values: dict[str, str | None] = {}
     columns = lazy.collect_schema().names()
-
-    # Build expressions to get first non-null for each column
     exprs = [pl.col(col).drop_nulls().first().alias(col) for col in columns]
-
-    # Limit scan to max_rows for performance
     result = lazy.head(max_rows).select(exprs).collect()
-
-    if result.height > 0:
-        for col in columns:
-            val = result[col][0]
-            sample_values[col] = str(val) if val is not None else None
-
-    return sample_values
-
-
-def _get_first_non_null_samples_eager(frame: pl.DataFrame, max_rows: int = 1000) -> dict[str, str | None]:
-    sample_values: dict[str, str | None] = {}
-    columns = frame.columns
-
-    # Limit to max_rows for performance
-    subset = frame.head(max_rows)
-
-    for name in columns:
-        non_null = subset[name].drop_nulls()
-        if non_null.len() > 0:
-            sample_values[name] = str(non_null[0])
-        else:
-            sample_values[name] = None
-
-    return sample_values
+    if result.height == 0:
+        return {col: None for col in columns}
+    return {col: (str(result[col][0]) if result[col][0] is not None else None) for col in columns}
 
 
 def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
@@ -897,28 +880,13 @@ def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> Sc
             'Unsupported datasource type for schema extraction',
             details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
         ) from exc
-    handlers = _schema_handlers()
-    handler = handlers.get(source_type)
+    handler = _SCHEMA_HANDLERS.get(source_type)
     if not handler:
         raise DataSourceConnectionError(
             'Unsupported datasource type for schema extraction',
             details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
         )
     return handler(datasource, sheet_name)
-
-
-def _schema_handlers() -> dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]]:
-    handlers: dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]] = {
-        DataSourceType.ANALYSIS: _schema_from_analysis,
-        DataSourceType.DATABASE: _schema_from_database,
-    }
-    file_handler = _schema_from_file
-    for source_type in SOURCE_TYPE_CATEGORY:
-        if source_type in handlers:
-            continue
-        if SOURCE_TYPE_CATEGORY[source_type] in FILE_BASED_CATEGORIES:
-            handlers[source_type] = file_handler
-    return handlers
 
 
 def _schema_from_analysis(datasource: DataSource, sheet_name: str | None) -> SchemaInfo:
@@ -951,7 +919,7 @@ def _schema_from_database(datasource: DataSource, sheet_name: str | None) -> Sch
     schema = frame.schema
     row_count = frame.height
 
-    sample_values = _get_first_non_null_samples_eager(frame)
+    sample_values = _get_first_non_null_samples(frame.lazy())
 
     columns = [
         ColumnSchema(
@@ -985,10 +953,7 @@ def _schema_from_file(datasource: DataSource, sheet_name: str | None) -> SchemaI
 
     schema = lazy.collect_schema()
     row_count = lazy.select(pl.len()).collect().item()
-    sheet_names = None
-
     sample_values = _get_first_non_null_samples(lazy)
-
     columns = [
         ColumnSchema(
             name=name,
@@ -998,8 +963,19 @@ def _schema_from_file(datasource: DataSource, sheet_name: str | None) -> SchemaI
         )
         for name, dtype in schema.items()
     ]
+    return SchemaInfo(columns=columns, row_count=row_count)
 
-    return SchemaInfo(columns=columns, row_count=row_count, sheet_names=sheet_names)
+
+_SCHEMA_HANDLERS: dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]] = {
+    DataSourceType.ANALYSIS: _schema_from_analysis,
+    DataSourceType.DATABASE: _schema_from_database,
+    **{
+        source_type: _schema_from_file
+        for source_type in SOURCE_TYPE_CATEGORY
+        if SOURCE_TYPE_CATEGORY[source_type] in FILE_BASED_CATEGORIES
+        and source_type not in {DataSourceType.ANALYSIS, DataSourceType.DATABASE}
+    },
+}
 
 
 def list_data_files(path: str | None) -> FileListResponse:

@@ -1,8 +1,7 @@
 ---
 description: Skilled coder for complex changes, optimizations, and expert-level implementations
 mode: subagent
-model: anthropic/claude-opus-4.6
-variant: max
+model: github-copilot/claude-opus-4.6
 name: senior
 ---
 
@@ -19,7 +18,7 @@ agent with write access.
 ## How to work
 
 1. **Read first** — understand the files you're about to change and their
-   surrounding context
+   surrounding contexit
 2. **Check for AGENTS.md** — look for project or directory-level guidance before
    writing code
 3. **Implement** — make the changes as specified

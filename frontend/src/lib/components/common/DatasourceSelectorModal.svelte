@@ -5,6 +5,7 @@
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/fileTypes';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import { css, cx, row, input } from '$lib/styles/panda';
 
 	interface Props {
 		show: boolean;
@@ -90,19 +91,48 @@
 	onClose={handleClose}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
-	panelClass="flex max-h-[80vh] w-full max-w-120 flex-col border focus:outline-none max-sm:max-w-full bg-panel border-tertiary animate-slide-up"
+	panelClass={cx(
+		css({
+			display: 'flex',
+			maxHeight: '80vh',
+			width: '100%',
+			maxWidth: 'modalSm',
+			flexDirection: 'column',
+			borderWidth: '1',
+			backgroundColor: 'bg.primary',
+			outline: 'none'
+		})
+	)}
 	ariaLabelledby="modal-title"
 	onBackdropKeydown={handleBackdropKeydown}
 	{content}
 />
 
 {#snippet content()}
-	<div class="flex items-center justify-between border-b p-4 border-tertiary">
-		<h2 id="modal-title" class="m-0 text-sm font-semibold text-fg-primary">
+	<div
+		class={cx(
+			row,
+			css({
+				justifyContent: 'space-between',
+				padding: '4'
+			})
+		)}
+	>
+		<h2 id="modal-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
 			{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}
 		</h2>
 		<button
-			class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
+			class={css({
+				display: 'flex',
+				cursor: 'pointer',
+				alignItems: 'center',
+				justifyContent: 'center',
+				border: 'none',
+				backgroundColor: 'transparent',
+				padding: '1',
+				color: 'fg.muted',
+				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+			})}
 			onclick={handleClose}
 			aria-label="Close"
 			type="button"
@@ -110,24 +140,58 @@
 			<X size={20} />
 		</button>
 	</div>
-	<div class="flex flex-col gap-4 overflow-y-auto p-4">
+	<div
+		class={css({
+			display: 'flex',
+			flexDirection: 'column',
+			gap: '4',
+			overflowY: 'auto',
+			padding: '4'
+		})}
+	>
 		{#if allowAnalysis}
-			<div class="flex items-center gap-1 border border-tertiary bg-tertiary p-1">
+			<div
+				class={cx(
+					row,
+					css({
+						gap: '1',
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						padding: '1'
+					})
+				)}
+			>
 				<button
-					class="flex-1 border-none bg-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em]"
-					class:text-fg-primary={activeSource === 'datasource'}
-					class:text-fg-muted={activeSource !== 'datasource'}
-					class:bg-panel={activeSource === 'datasource'}
+					class={css({
+						flex: '1',
+						border: 'none',
+						paddingX: '3',
+						paddingY: '2',
+						fontSize: 'xs',
+						fontWeight: 'semibold',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide3',
+						color: activeSource === 'datasource' ? 'fg.primary' : 'fg.muted',
+						backgroundColor: activeSource === 'datasource' ? 'bg.primary' : 'transparent'
+					})}
 					onclick={() => (activeOverride = 'datasource')}
 					type="button"
 				>
 					Datasources
 				</button>
 				<button
-					class="flex-1 border-none bg-transparent px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em]"
-					class:text-fg-primary={activeSource === 'analysis'}
-					class:text-fg-muted={activeSource !== 'analysis'}
-					class:bg-panel={activeSource === 'analysis'}
+					class={css({
+						flex: '1',
+						border: 'none',
+						paddingX: '3',
+						paddingY: '2',
+						fontSize: 'xs',
+						fontWeight: 'semibold',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide3',
+						color: activeSource === 'analysis' ? 'fg.primary' : 'fg.muted',
+						backgroundColor: activeSource === 'analysis' ? 'bg.primary' : 'transparent'
+					})}
 					onclick={() => (activeOverride = 'analysis')}
 					type="button"
 				>
@@ -136,7 +200,15 @@
 			</div>
 		{/if}
 		<input
-			class="w-full border px-3 py-3 text-sm focus:outline-none border-tertiary text-fg-primary bg-primary focus:border-accent-primary"
+			class={cx(
+				input(),
+				css({
+					paddingX: '3',
+					paddingY: '3',
+					fontSize: 'sm',
+					_focus: { borderColor: 'accent.primary' }
+				})
+			)}
 			type="text"
 			bind:this={searchInput}
 			id="dsm-search"
@@ -144,39 +216,88 @@
 			bind:value={searchQuery}
 			placeholder={activeSource === 'analysis' ? 'Search analyses...' : 'Search datasources...'}
 		/>
-		<div class="flex max-h-75 flex-col gap-1 overflow-y-auto">
+		<div
+			class={css({
+				display: 'flex',
+				maxHeight: 'dropdownTall',
+				flexDirection: 'column',
+				gap: '1',
+				overflowY: 'auto'
+			})}
+		>
 			{#if isLoading}
-				<div class="flex items-center justify-center p-8 text-sm text-fg-muted">Loading...</div>
+				<div
+					class={cx(
+						row,
+						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
+					)}
+				>
+					Loading...
+				</div>
 			{:else if activeSource === 'analysis' && allowAnalysis && filteredTabs.length === 0}
-				<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
+				<div
+					class={cx(
+						row,
+						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
+					)}
+				>
 					{searchQuery ? 'No matching analysis tabs' : 'No analysis tabs available'}
 				</div>
 			{:else if activeSource === 'datasource' && filteredDatasources.length === 0}
-				<div class="flex items-center justify-center p-8 text-sm text-fg-muted">
+				<div
+					class={cx(
+						row,
+						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
+					)}
+				>
 					{searchQuery ? 'No matching datasources' : 'No datasources available'}
 				</div>
 			{:else if activeSource === 'analysis' && allowAnalysis}
 				{#each filteredTabs as entry (entry.id)}
 					<button
-						class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left hover:bg-hover hover:border-tertiary"
+						class={css({
+							display: 'flex',
+							cursor: 'pointer',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							borderWidth: '1',
+							borderColor: 'transparent',
+							backgroundColor: 'transparent',
+							padding: '3',
+							textAlign: 'left',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 						onclick={() => handleAnalysisTabSelect(entry)}
 						type="button"
 					>
-						<span class="text-sm font-medium text-fg-primary">
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>
 							{entry.name}
 						</span>
-						<span class="text-xs text-fg-muted">analysis tab</span>
+						<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>analysis tab</span>
 					</button>
 				{/each}
 			{:else}
 				{#each filteredDatasources as ds (ds.id)}
 					<button
-						class="flex cursor-pointer items-center justify-between border border-transparent bg-transparent p-3 text-left hover:bg-hover hover:border-tertiary"
+						class={css({
+							display: 'flex',
+							cursor: 'pointer',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							borderWidth: '1',
+							borderColor: 'transparent',
+							backgroundColor: 'transparent',
+							padding: '3',
+							textAlign: 'left',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 						onclick={() => handleSelect(ds.id, ds.name)}
 						type="button"
 					>
-						<span class="text-sm font-medium text-fg-primary">{ds.name}</span>
-						<span class="flex items-center gap-1 text-fg-muted">
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>
+							{ds.name}
+						</span>
+						<span class={cx(row, css({ gap: '1', color: 'fg.muted' }))}>
 							{#if ds.source_type === 'file'}
 								<FileTypeBadge path={ds.config.file_path as string} size="sm" showIcon={true} />
 							{:else}

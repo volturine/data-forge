@@ -6,10 +6,10 @@ from core.config import settings
 from core.exceptions import EngineTimeoutError, StepNotFoundError
 
 
-def find_step_index(pipeline_steps: list[dict], target_step_id: str) -> int:
+def find_step_index(steps: list[dict], target_step_id: str) -> int:
     if target_step_id == 'source':
         return -1
-    for idx, step in enumerate(pipeline_steps):
+    for idx, step in enumerate(steps):
         if step.get('id') == target_step_id:
             return idx
     raise StepNotFoundError(target_step_id)
@@ -19,24 +19,18 @@ def is_step_applied(step: dict) -> bool:
     return step.get('is_applied') is not False
 
 
-def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
-    applied = [step for step in pipeline_steps if is_step_applied(step)]
+def _build_step_map(steps: list[dict]) -> dict[str, dict]:
+    return {str(s['id']): s for s in steps if s.get('id')}
+
+
+def apply_steps(steps: list[dict]) -> list[dict]:
+    applied = [step for step in steps if is_step_applied(step)]
     if not applied:
         return []
 
-    step_map: dict[str, dict] = {}
-    for step in pipeline_steps:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        step_map[str(step_id)] = step
+    step_map = _build_step_map(steps)
 
-    applied_ids: set[str] = set()
-    for step in applied:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        applied_ids.add(str(step_id))
+    applied_ids = {str(s['id']) for s in applied if s.get('id')}
 
     def resolve_parent(step_id: str, seen: set[str] | None = None) -> str | None:
         step = step_map.get(step_id)
@@ -54,9 +48,7 @@ def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
         visited = seen or set()
         if parent_id in visited:
             return None
-        next_seen = set(visited)
-        next_seen.add(parent_id)
-        return resolve_parent(parent_id, next_seen)
+        return resolve_parent(parent_id, visited | {parent_id})
 
     next_steps: list[dict] = []
     for step in applied:
@@ -73,16 +65,11 @@ def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
     return next_steps
 
 
-def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> str:
+def resolve_applied_target(steps: list[dict], target_step_id: str) -> str:
     if target_step_id == 'source':
         return 'source'
 
-    step_map: dict[str, dict] = {}
-    for step in pipeline_steps:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        step_map[str(step_id)] = step
+    step_map = _build_step_map(steps)
 
     if target_step_id not in step_map:
         return 'source'
@@ -95,7 +82,7 @@ def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> s
     while True:
         if current is None:
             return 'source'
-        step = step_map.get(current) or {}
+        step = step_map.get(current)
         if not step:
             return 'source'
         deps = step.get('depends_on') or []
@@ -134,13 +121,7 @@ def await_engine_result(engine, timeout: int, job_id: str | None = None) -> dict
 
 
 def build_datasource_config(datasource, overrides: dict | None = None) -> dict:
-    base = {
-        'source_type': datasource.source_type,
-        **datasource.config,
-    }
-    if not overrides:
-        return base
-    return {**base, **overrides}
+    return {'source_type': datasource.source_type, **datasource.config, **(overrides or {})}
 
 
 def normalize_timezones(lf: pl.LazyFrame, schema: pl.Schema | None = None) -> pl.LazyFrame:
@@ -154,10 +135,8 @@ def normalize_timezones(lf: pl.LazyFrame, schema: pl.Schema | None = None) -> pl
         if not isinstance(dtype, pl.Datetime):
             continue
         tz = dtype.time_zone
-        if tz is None:
-            exprs.append(pl.col(name).dt.replace_time_zone(settings.timezone).alias(name))
-            continue
-        exprs.append(pl.col(name).dt.convert_time_zone(settings.timezone).alias(name))
+        expr = pl.col(name).dt.replace_time_zone(settings.timezone) if tz is None else pl.col(name).dt.convert_time_zone(settings.timezone)
+        exprs.append(expr.alias(name))
 
     if not exprs:
         return lf

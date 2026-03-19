@@ -12,10 +12,7 @@ export function hashPipeline(
 		depends_on?: string[];
 	}>
 ): string {
-	// Sort by ID to ensure consistent hashing
 	const sorted = [...steps].sort((a, b) => a.id.localeCompare(b.id));
-
-	// Create a minimal representation for hashing
 	const hashable = sorted.map((step) => ({
 		id: step.id,
 		type: step.type,
@@ -64,15 +61,7 @@ function cyrb53(str: string): string {
 	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
 	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
 
-	// Convert to hex string
 	return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
-}
-
-/**
- * Simple hash comparison
- */
-export function hashesEqual(hash1: string, hash2: string): boolean {
-	return hash1 === hash2;
 }
 
 /**
@@ -87,6 +76,5 @@ export function isCacheStale(
 		depends_on?: string[];
 	}>
 ): boolean {
-	const currentHash = hashPipeline(currentSteps);
-	return !hashesEqual(cachedHash, currentHash);
+	return hashPipeline(currentSteps) !== cachedHash;
 }

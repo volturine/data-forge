@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sqlite3
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -57,9 +58,7 @@ class DatasourceHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
         loader = self.SOURCE_LOADERS.get(validated.source_type)
@@ -151,12 +150,7 @@ class DatasourceHandler(OperationHandler):
             if snapshot is None:
                 raise ValueError('Iceberg snapshot not found for the selected timestamp')
             snapshot_value = snapshot.snapshot_id
-        reader = config.reader
-        reader_override: Literal['native', 'pyiceberg'] = 'pyiceberg'
-        if reader == 'native':
-            reader_override = 'native'
-        if reader == 'pyiceberg':
-            reader_override = 'pyiceberg'
+        reader_override: Literal['native', 'pyiceberg'] = 'native' if config.reader == 'native' else 'pyiceberg'
         if snapshot_value is not None:
             return scan_iceberg_snapshot(metadata_path, snapshot_value, config.storage_options)
         return pl.scan_iceberg(
@@ -171,15 +165,13 @@ class DatasourceHandler(OperationHandler):
         if isinstance(pipeline, dict):
             pipeline_id = pipeline.get('analysis_id')
             if pipeline_id:
-                pipeline_id = str(pipeline_id)
-            if pipeline_id:
-                return _load_analysis_pipeline(pipeline, pipeline_id, config.analysis_tab_id)
+                return _load_analysis_pipeline(pipeline, str(pipeline_id), config.analysis_tab_id)
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
 
 
 _ANALYSIS_STACK: list[tuple[str, str | None]] = []
 _ANALYSIS_CACHE: dict[str, pl.LazyFrame] = {}
-_ANALYSIS_CACHE_KEYS: list[str] = []
+_ANALYSIS_CACHE_KEYS: deque[str] = deque()
 _ANALYSIS_CACHE_MAX = 20
 
 
@@ -218,7 +210,7 @@ def _store_analysis_cache(key: str, frame: pl.LazyFrame) -> None:
     _ANALYSIS_CACHE_KEYS.append(key)
     if len(_ANALYSIS_CACHE_KEYS) <= _ANALYSIS_CACHE_MAX:
         return
-    oldest = _ANALYSIS_CACHE_KEYS.pop(0)
+    oldest = _ANALYSIS_CACHE_KEYS.popleft()
     _ANALYSIS_CACHE.pop(oldest, None)
 
 
@@ -240,14 +232,14 @@ def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     for tab in tabs:
         tab_id = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         if not tab_id or not output_id:
             continue
         output_map[str(tab_id)] = str(output_id)
     for tab in tabs:
         tid = tab.get('id')
         output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
         datasource = tab.get('datasource') if isinstance(tab, dict) else None
         input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
@@ -303,11 +295,7 @@ def _build_tab_pipeline(
         if not isinstance(branch, str) or not branch.strip():
             raise ValueError('Analysis tab datasource.config.branch is required')
 
-        base_config = datasource_config if isinstance(datasource_config, dict) else {}
-        merged = {**base_config, **overrides}
-        output_override = tab.get('output')
-        if isinstance(output_override, dict):
-            merged = {**merged, **output_override}
+        merged = {**datasource_config, **overrides}
         analysis_id = pipeline.get('analysis_id')
         analysis_id = str(analysis_id) if analysis_id is not None else None
         if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
@@ -319,9 +307,9 @@ def _build_tab_pipeline(
     if not isinstance(steps, list):
         raise ValueError('Analysis tab steps must be a list')
 
-    from modules.compute.utils import apply_pipeline_steps
+    from modules.compute.utils import apply_steps
 
-    steps = apply_pipeline_steps(steps)
+    steps = apply_steps(steps)
     additional = _collect_analysis_sources(steps, sources, pipeline, cache)
 
     from modules.compute.engine import PolarsComputeEngine
@@ -340,7 +328,7 @@ def _build_tab_pipeline(
         cache[step_id] = base_frame
 
     output = tab.get('output') if isinstance(tab, dict) else None
-    output_id = output.get('output_datasource_id') if isinstance(output, dict) else None
+    output_id = output.get('result_id') if isinstance(output, dict) else None
     if output_id:
         cache[str(output_id)] = base_frame
 
@@ -392,11 +380,7 @@ def _collect_analysis_sources(
         if isinstance(union_sources, str):
             union_sources = [union_sources]
 
-        source_ids = []
-        if right_source_id:
-            source_ids.append(right_source_id)
-        if isinstance(union_sources, list):
-            source_ids.extend(union_sources)
+        source_ids = ([right_source_id] if right_source_id else []) + union_sources
 
         for source_id in source_ids:
             if not source_id:

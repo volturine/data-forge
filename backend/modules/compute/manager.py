@@ -7,6 +7,8 @@ from modules.compute.schemas import EngineStatus
 
 logger = logging.getLogger(__name__)
 
+_RESOURCE_KEYS = frozenset({'max_threads', 'max_memory_mb', 'streaming_chunk_size'})
+
 
 class EngineInfo:
     """Tracks engine and activity timestamp."""
@@ -55,20 +57,12 @@ class ProcessManager:
         with self._engines_lock:
             if analysis_id in self._engines:
                 info = self._engines[analysis_id]
-                existing_config = self._normalize_config(info.engine.resource_config)
-                new_config = normalized_config
-
-                # Check if config changed (compare non-None values)
-                config_changed = self._configs_differ(existing_config, new_config)
-
-                if not config_changed:
+                if not self._configs_differ(self._normalize_config(info.engine.resource_config), normalized_config):
                     info.touch()
                     logger.debug(f'Reusing existing engine for analysis {analysis_id}')
                     return info
 
-                # Config changed - need to restart
                 logger.info(f'Resource config changed for analysis {analysis_id}, restarting engine')
-                logger.debug(f'Old config: {existing_config}, new config: {new_config}')
 
         # Shutdown outside lock to avoid deadlock
         if analysis_id in self._engines:
@@ -97,31 +91,13 @@ class ProcessManager:
             return info
 
     def _configs_differ(self, old_config: dict, new_config: dict) -> bool:
-        """Check if two resource configs differ in meaningful ways."""
-        keys = {'max_threads', 'max_memory_mb', 'streaming_chunk_size'}
-        for key in keys:
-            old_val = old_config.get(key)
-            new_val = new_config.get(key)
-            if old_val != new_val:
-                return True
-        return False
+        return any(old_config.get(k) != new_config.get(k) for k in _RESOURCE_KEYS)
 
     def _normalize_config(self, config: dict | None) -> dict:
-        """Normalize resource config by stripping default values."""
         if not config:
             return {}
-
         defaults = self._get_defaults()
-        normalized: dict = {}
-        keys = {'max_threads', 'max_memory_mb', 'streaming_chunk_size'}
-        for key in keys:
-            value = config.get(key)
-            if value is None:
-                continue
-            if value == defaults.get(key):
-                continue
-            normalized[key] = value
-        return normalized
+        return {k: v for k in _RESOURCE_KEYS if (v := config.get(k)) is not None and v != defaults.get(k)}
 
     def get_or_create_engine(self, analysis_id: str, resource_config: dict | None = None) -> PolarsComputeEngine:
         """Get existing engine or create a new one for the analysis."""
@@ -174,9 +150,10 @@ class ProcessManager:
             'streaming_chunk_size': settings.polars_streaming_chunk_size,
         }
 
-    def get_engine_status(self, analysis_id: str) -> dict:
+    def get_engine_status(self, analysis_id: str, *, defaults: dict | None = None) -> dict:
         """Get status info for an engine - non-blocking."""
-        defaults = self._get_defaults()
+        if defaults is None:
+            defaults = self._get_defaults()
 
         with self._engines_lock:
             info = self._engines.get(analysis_id)
@@ -196,16 +173,8 @@ class ProcessManager:
             engine.check_health()
 
             is_alive = engine.is_process_alive()
-
-            # Build resource config dict (only overrides vs defaults)
-            resource_config = None
-            if engine.resource_config:
-                resource_config = self._normalize_config(engine.resource_config) or None
-
-            # Build effective resources dict
-            effective_resources = None
-            if engine.effective_resources:
-                effective_resources = engine.effective_resources
+            resource_config = (self._normalize_config(engine.resource_config) or None) if engine.resource_config else None
+            effective_resources = engine.effective_resources or None
 
             return {
                 'analysis_id': analysis_id,
@@ -270,14 +239,7 @@ class ProcessManager:
 
     def list_all_engine_statuses(self) -> list[dict]:
         """Get status info for all engines."""
+        defaults = self._get_defaults()
         with self._engines_lock:
             analysis_ids = list(self._engines.keys())
-        return [self.get_engine_status(aid) for aid in analysis_ids]
-
-
-_manager = ProcessManager()
-
-
-def get_manager() -> ProcessManager:
-    """Get the singleton ProcessManager instance."""
-    return _manager
+        return [self.get_engine_status(aid, defaults=defaults) for aid in analysis_ids]

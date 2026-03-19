@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from core.database import get_settings_db
 from core.error_handlers import handle_errors
+from modules.mcp.decorators import deterministic_tool
 from modules.settings.schemas import (
     DetectCustomBotRequest,
     DetectTelegramResponse,
@@ -34,13 +35,17 @@ router = APIRouter(prefix='/settings', tags=['settings'])
 
 @router.get('', response_model=SettingsResponse)
 @handle_errors(operation='get settings')
+@deterministic_tool
 def read_settings(session: Session = Depends(get_settings_db)) -> SettingsResponse:
+    """Get application settings including SMTP config, Telegram token, OpenRouter API key, and feature flags."""
     return get_settings(session)
 
 
 @router.put('', response_model=SettingsResponse)
 @handle_errors(operation='update settings')
+@deterministic_tool
 def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings_db)) -> SettingsResponse:
+    """Update application settings. Only provided fields are changed; omitted fields keep current values."""
     from modules.telegram.bot import telegram_bot
 
     result = update_settings(session, data)
@@ -58,7 +63,9 @@ def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings
 
 @router.post('/test-smtp', response_model=TestResult)
 @handle_errors(operation='test smtp')
+@deterministic_tool
 def test_smtp(body: TestSmtpRequest) -> TestResult:
+    """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
     smtp = get_resolved_smtp()
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
@@ -87,7 +94,9 @@ def test_smtp(body: TestSmtpRequest) -> TestResult:
 
 @router.post('/test-telegram', response_model=TestResult)
 @handle_errors(operation='test telegram')
+@deterministic_tool
 def test_telegram(body: TestTelegramRequest) -> TestResult:
+    """Send a test message to a Telegram chat to verify bot settings. Requires chat_id in body."""
     resolved = get_resolved_telegram_settings()
     token = str(resolved.get('token', ''))
     if not resolved.get('enabled'):
@@ -113,7 +122,13 @@ def test_telegram(body: TestTelegramRequest) -> TestResult:
 
 @router.post('/detect-telegram-chat', response_model=DetectTelegramResponse)
 @handle_errors(operation='detect telegram chat')
+@deterministic_tool
 def detect_telegram_chat() -> DetectTelegramResponse:
+    """Detect Telegram chats that have messaged the configured bot.
+
+    Send a message to your bot first, then call this to discover the chat_id.
+    Returns a list of detected chats with their IDs and titles.
+    """
     from modules.telegram.bot import telegram_bot
 
     resolved = get_resolved_telegram_settings()
@@ -162,7 +177,12 @@ def detect_telegram_chat() -> DetectTelegramResponse:
 
 @router.post('/detect-chat-custom', response_model=DetectTelegramResponse)
 @handle_errors(operation='detect custom telegram chat')
+@deterministic_tool
 def detect_custom_bot_chat(body: DetectCustomBotRequest) -> DetectTelegramResponse:
+    """Detect chats for a custom Telegram bot token (not the one saved in settings).
+
+    Use this to test a new bot token before saving it. Requires bot_token in body.
+    """
     from modules.telegram.bot import telegram_bot
 
     if not body.bot_token:

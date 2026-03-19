@@ -23,7 +23,7 @@ def test_list_versions_returns_versions(test_db_session, client, sample_datasour
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -77,7 +77,7 @@ def test_restore_version_updates_analysis(test_db_session, client, sample_dataso
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -114,7 +114,7 @@ def test_restore_version_updates_analysis(test_db_session, client, sample_dataso
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'version_output',
@@ -151,7 +151,7 @@ def test_rename_version(test_db_session, client, sample_datasource: DataSource):
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -208,7 +208,7 @@ def test_rename_version_not_found(test_db_session, client, sample_datasource: Da
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -252,7 +252,7 @@ def test_create_version_increments(test_db_session, sample_datasource: DataSourc
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -294,7 +294,7 @@ def test_get_version_returns_none(test_db_session, sample_datasource: DataSource
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -347,7 +347,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -400,7 +400,7 @@ def test_restore_version_requires_datasource(test_db_session, client):
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',
@@ -462,7 +462,7 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
                     'config': {'branch': 'master'},
                 },
                 'output': {
-                    'output_datasource_id': str(uuid.uuid4()),
+                    'result_id': str(uuid.uuid4()),
                     'datasource_type': 'iceberg',
                     'format': 'parquet',
                     'filename': 'version_output',

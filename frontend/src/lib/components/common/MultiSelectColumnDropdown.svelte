@@ -2,6 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
+	import { css, cx, label } from '$lib/styles/panda';
 
 	interface ColumnOption {
 		id: string;
@@ -56,7 +57,15 @@
 })}
 	{@const item = payload.option as ColumnOption}
 	<label
-		class="multi-select-option flex cursor-pointer items-center gap-2 px-3 py-2 text-fg-primary"
+		class={cx(
+			label({ variant: 'checkbox' }),
+			css({
+				gap: '2',
+				paddingX: '3',
+				paddingY: '2',
+				_hover: { backgroundColor: 'bg.hover' }
+			})
+		)}
 	>
 		<input
 			type="checkbox"
@@ -64,11 +73,19 @@
 			checked={payload.selected}
 			onchange={payload.onSelect}
 			onclick={(event) => event.stopPropagation()}
-			class="m-0 cursor-pointer accent-primary"
+			class={css({ margin: '0', cursor: 'pointer' })}
 		/>
-		<span class="flex flex-1 items-center justify-start gap-2">
+		<span
+			class={css({
+				display: 'flex',
+				flex: '1',
+				alignItems: 'center',
+				justifyContent: 'flex-start',
+				gap: '2'
+			})}
+		>
 			<ColumnTypeBadge columnType={item.dtype} size="xs" variant="compact" />
-			<span class="text-left text-sm text-fg-primary">{item.label}</span>
+			<span class={css({ textAlign: 'left', fontSize: 'sm' })}>{item.label}</span>
 		</span>
 	</label>
 {/snippet}

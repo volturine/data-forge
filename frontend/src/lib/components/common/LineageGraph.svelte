@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { LineageNode, LineageResponse } from '$lib/api/lineage';
 	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from 'lucide-svelte';
+	import { css, cx, button } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 
@@ -373,60 +374,102 @@
 </script>
 
 {#if nodes.length === 0}
-	<div class="flex h-full items-center justify-center">
-		<p class="text-sm text-fg-tertiary">No lineage data available.</p>
+	<div
+		class={css({
+			display: 'flex',
+			height: '100%',
+			alignItems: 'center',
+			justifyContent: 'center'
+		})}
+	>
+		<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>No lineage data available.</p>
 	</div>
 {:else}
-	<div class="flex h-full flex-col">
+	<div class={css({ display: 'flex', height: '100%', flexDirection: 'column' })}>
 		{#if showToolbar}
 			<!-- Toolbar -->
-			<div class="flex items-center gap-1 border-b border-tertiary bg-bg-primary px-3 py-1.5">
-				<span class="mr-2 text-xs text-fg-muted">Layout</span>
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					borderBottomWidth: '1',
+					backgroundColor: 'bg.primary',
+					paddingX: '3',
+					paddingY: '1.5'
+				})}
+			>
+				<span class={css({ marginRight: '2', fontSize: 'xs', color: 'fg.muted' })}> Layout </span>
 				<button
-					class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"
+					class={layoutMode === 'horizontal'
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
 					onclick={() => setLayout('horizontal')}
 					title="Horizontal tree layout"
 				>
 					<ArrowRight size={14} />
-					<span class="text-xs">Horizontal</span>
+					<span class={css({ fontSize: 'xs' })}>Horizontal</span>
 				</button>
 				<button
-					class="btn-sm {layoutMode === 'vertical' ? 'btn-primary' : 'btn-ghost'}"
+					class={layoutMode === 'vertical'
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
 					onclick={() => setLayout('vertical')}
 					title="Vertical tree layout"
 				>
 					<ArrowDown size={14} />
-					<span class="text-xs">Vertical</span>
+					<span class={css({ fontSize: 'xs' })}>Vertical</span>
 				</button>
 				<button
-					class="btn-sm {layoutMode === 'grid' ? 'btn-primary' : 'btn-ghost'}"
+					class={layoutMode === 'grid'
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
 					onclick={() => setLayout('grid')}
 					title="Grid layout"
 				>
 					<LayoutGrid size={14} />
-					<span class="text-xs">Grid</span>
+					<span class={css({ fontSize: 'xs' })}>Grid</span>
 				</button>
 
-				<div class="mx-2 h-4 w-px bg-border-primary"></div>
+				<div
+					class={css({
+						marginX: '2',
+						height: 'iconSm',
+						width: 'px',
+						backgroundColor: 'bg.muted'
+					})}
+				></div>
 
-				<button class="btn-sm btn-ghost" onclick={zoomIn} title="Zoom in">
+				<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomIn} title="Zoom in">
 					<ZoomIn size={14} />
 				</button>
-				<button class="btn-sm btn-ghost" onclick={zoomOut} title="Zoom out">
+				<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomOut} title="Zoom out">
 					<ZoomOut size={14} />
 				</button>
-				<button class="btn-sm btn-ghost" onclick={resetView} title="Reset view">
+				<button
+					class={button({ variant: 'ghost', size: 'sm' })}
+					onclick={resetView}
+					title="Reset view"
+				>
 					<RotateCcw size={14} />
 				</button>
 
-				<span class="ml-auto text-xs text-fg-muted">{zoomPercent}%</span>
+				<span class={css({ marginLeft: 'auto', fontSize: 'xs', color: 'fg.muted' })}>
+					{zoomPercent}%
+				</span>
 			</div>
 		{/if}
 
 		<!-- Canvas -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="isolate relative flex-1 overflow-hidden bg-bg-secondary"
+			class={css({
+				isolation: 'isolate',
+				position: 'relative',
+				flex: '1',
+				overflow: 'hidden',
+				backgroundColor: 'bg.secondary'
+			})}
 			bind:clientWidth={viewWidth}
 			bind:clientHeight={viewHeight}
 			onpointerdown={startPan}
@@ -437,7 +480,11 @@
 			oncontextmenu={(e) => e.preventDefault()}
 		>
 			<!-- Transformed layer -->
-			<svg class="pointer-events-none absolute inset-0" width={canvasWidth} height={canvasHeight}>
+			<svg
+				class={css({ pointerEvents: 'none', position: 'absolute', inset: '0' })}
+				width={canvasWidth}
+				height={canvasHeight}
+			>
 				<defs>
 					<marker
 						id="lineage-arrow"
@@ -447,7 +494,7 @@
 						refY="5"
 						orient="auto"
 					>
-						<path d="M0,0 L10,5 L0,10 Z" fill="var(--lineage-edge)" />
+						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-primary)" />
 					</marker>
 				</defs>
 				{#each edges as edge (edge.from + edge.to)}
@@ -457,7 +504,7 @@
 						<path
 							d={`M ${from.x + nodeWidth} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth + 60} ${from.y + nodeHeight / 2} ${to.x - 60} ${to.y + nodeHeight / 2} ${to.x} ${to.y + nodeHeight / 2}`}
 							fill="none"
-							stroke="var(--lineage-edge)"
+							stroke="var(--colors-fg-primary)"
 							stroke-width="1.5"
 							marker-end="url(#lineage-arrow)"
 						/>
@@ -469,7 +516,28 @@
 				{@const pos = positionSnapshot[node.id]}
 				{#if pos}
 					<div
-						class="absolute flex flex-col gap-1 border px-4 py-3 shadow-sm lineage-node"
+						class={cx(
+							'lineage-node',
+							css({
+								width: '240px',
+								background: 'canvas.lineageNode',
+								borderColor: 'canvas.lineageNodeBorder',
+								cursor: 'grab',
+								transition: 'box-shadow 160ms ease, transform 160ms ease',
+								_active: {
+									cursor: 'grabbing',
+									boxShadow: 'panel'
+								},
+								position: 'absolute',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '1',
+								borderWidth: '1',
+								paddingX: '4',
+								paddingY: '3',
+								boxShadow: 'sm'
+							})
+						)}
 						use:setPosition={pos}
 						onpointerdown={(event) => {
 							if (event.button === 0) startDrag(event, node.id);
@@ -481,14 +549,29 @@
 						tabindex="0"
 						aria-label={`${node.type} ${node.label}`}
 					>
-						<div class="text-xs uppercase tracking-wide text-fg-muted">
+						<div
+							class={css({
+								fontSize: 'xs',
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: 'fg.muted'
+							})}
+						>
 							{node.type === 'datasource' ? 'Datasource' : 'Analysis'}
 						</div>
-						<div class="truncate text-sm font-semibold text-fg-primary">
+						<div
+							class={css({
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap',
+								fontSize: 'sm',
+								fontWeight: '600'
+							})}
+						>
 							{node.label}
 						</div>
 						{#if node.meta}
-							<div class="text-xs text-fg-tertiary">{node.meta}</div>
+							<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>{node.meta}</div>
 						{/if}
 					</div>
 				{/if}

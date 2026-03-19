@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Literal
 
 import polars as pl
 
@@ -18,14 +18,10 @@ class PivotHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = PivotParams.model_validate(params)
-        on_columns = validated.on_columns or params.get('onColumns')
-        if not on_columns:
-            on_columns = lf.collect_schema().names()
+        on_columns = validated.on_columns or params.get('onColumns') or lf.collect_schema().names()
 
         if not validated.columns:
             raise ValueError('Pivot requires a pivot column')
@@ -34,18 +30,10 @@ class PivotHandler(OperationHandler):
             raise ValueError('Pivot requires at least one index column')
 
         agg = None if validated.aggregate_function == 'count' else validated.aggregate_function
-        agg_value: Any = agg
-        if validated.values:
-            return lf.pivot(
-                on=validated.columns,
-                on_columns=on_columns,
-                index=validated.index,
-                values=validated.values,
-                aggregate_function=agg_value,
-            )
         return lf.pivot(
             on=validated.columns,
             on_columns=on_columns,
             index=validated.index,
-            aggregate_function=agg_value,
+            aggregate_function=agg,
+            values=validated.values,
         )

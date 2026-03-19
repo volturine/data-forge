@@ -14,7 +14,6 @@ class TestAnalysisValidation:
         """Test creating analysis without a name."""
         payload = {
             'description': 'Test analysis',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -26,7 +25,7 @@ class TestAnalysisValidation:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_a',
@@ -45,7 +44,6 @@ class TestAnalysisValidation:
         payload = {
             'name': '',
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -57,7 +55,7 @@ class TestAnalysisValidation:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_b',
@@ -76,7 +74,6 @@ class TestAnalysisValidation:
         payload = {
             'name': 'A' * 1000,
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -88,7 +85,7 @@ class TestAnalysisValidation:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_c',
@@ -108,7 +105,6 @@ class TestAnalysisValidation:
         payload = {
             'name': 'Test <script>alert("xss")</script>',
             'description': 'Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -120,7 +116,7 @@ class TestAnalysisValidation:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_d',
@@ -153,7 +149,7 @@ class TestAnalysisValidation:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_e',
@@ -193,7 +189,6 @@ class TestAnalysisPipeline:
         """Test creating analysis with empty pipeline."""
         payload = {
             'name': 'Empty Pipeline Analysis',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -205,7 +200,7 @@ class TestAnalysisPipeline:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_f',
@@ -223,26 +218,6 @@ class TestAnalysisPipeline:
         """Test creating analysis with complex pipeline."""
         payload = {
             'name': 'Complex Pipeline',
-            'pipeline_steps': [
-                {
-                    'id': 'step1',
-                    'type': 'filter',
-                    'config': {'column': 'age', 'operator': '>', 'value': 30},
-                    'depends_on': [],
-                },
-                {
-                    'id': 'step2',
-                    'type': 'select',
-                    'config': {'columns': ['name', 'age']},
-                    'depends_on': ['step1'],
-                },
-                {
-                    'id': 'step3',
-                    'type': 'sort',
-                    'config': {'column': 'age', 'descending': True},
-                    'depends_on': ['step2'],
-                },
-            ],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -254,12 +229,31 @@ class TestAnalysisPipeline:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_g',
                     },
-                    'steps': [],
+                    'steps': [
+                        {
+                            'id': 'step1',
+                            'type': 'filter',
+                            'config': {'column': 'age', 'operator': '>', 'value': 30},
+                            'depends_on': [],
+                        },
+                        {
+                            'id': 'step2',
+                            'type': 'select',
+                            'config': {'columns': ['name', 'age']},
+                            'depends_on': ['step1'],
+                        },
+                        {
+                            'id': 'step3',
+                            'type': 'sort',
+                            'config': {'columns': ['age'], 'descending': [True]},
+                            'depends_on': ['step2'],
+                        },
+                    ],
                 }
             ],
         }
@@ -268,7 +262,7 @@ class TestAnalysisPipeline:
 
         assert response.status_code in [200, 201]
         data = response.json()
-        assert len(data['pipeline_definition']['steps']) == 3
+        assert len(data['pipeline_definition']['tabs'][0]['steps']) == 3
 
     def test_update_analysis_pipeline(self, client, sample_analysis: Analysis):
         """Test updating analysis pipeline."""
@@ -281,10 +275,11 @@ class TestAnalysisPipeline:
                 'depends_on': [],
             }
         ]
+        tabs = sample_analysis.pipeline_definition['tabs']
+        tabs[0]['steps'] = new_steps
 
         payload = {
-            'pipeline_steps': new_steps,
-            'tabs': sample_analysis.pipeline_definition['tabs'],
+            'tabs': tabs,
             'client_id': client_id,
             'lock_token': lock_token,
         }
@@ -293,17 +288,12 @@ class TestAnalysisPipeline:
 
         assert response.status_code == 200
         data = response.json()
-        # Check that the pipeline was updated
-        assert len(data['pipeline_definition']['steps']) >= 1
+        assert len(data['pipeline_definition']['tabs'][0]['steps']) >= 1
 
     def test_analysis_with_circular_dependencies(self, client, sample_datasource: DataSource):
         """Test creating analysis with circular dependencies."""
         payload = {
             'name': 'Circular Deps',
-            'pipeline_steps': [
-                {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': ['step2']},
-                {'id': 'step2', 'type': 'filter', 'config': {}, 'depends_on': ['step1']},
-            ],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -315,12 +305,15 @@ class TestAnalysisPipeline:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_h',
                     },
-                    'steps': [],
+                    'steps': [
+                        {'id': 'step1', 'type': 'filter', 'config': {}, 'depends_on': ['step2']},
+                        {'id': 'step2', 'type': 'filter', 'config': {}, 'depends_on': ['step1']},
+                    ],
                 }
             ],
         }
@@ -329,59 +322,6 @@ class TestAnalysisPipeline:
 
         # Should either reject or accept (validation depends on implementation)
         assert response.status_code in [200, 201, 400, 422]
-
-
-class TestAnalysisDataSourceLinking:
-    """Test analysis-datasource linking."""
-
-    def test_link_datasource_to_analysis(self, client, sample_analysis: Analysis, sample_datasources: list[DataSource]):
-        """Test linking a new datasource to analysis."""
-        new_datasource = sample_datasources[1]
-
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{new_datasource.id}')
-
-        assert response.status_code in [200, 201]
-
-    def test_link_nonexistent_datasource(self, client, sample_analysis: Analysis):
-        """Test linking non-existent datasource."""
-        fake_id = str(uuid.uuid4())
-
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{fake_id}')
-
-        assert response.status_code == 404
-
-    def test_link_datasource_to_nonexistent_analysis(self, client, sample_datasource: DataSource):
-        """Test linking datasource to non-existent analysis."""
-        fake_id = str(uuid.uuid4())
-
-        response = client.post(f'/api/v1/analysis/{fake_id}/datasource/{sample_datasource.id}')
-
-        assert response.status_code == 404
-
-    def test_unlink_datasource(self, client, sample_analysis: Analysis):
-        """Test unlinking datasource from analysis."""
-        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
-
-        response = client.delete(f'/api/v1/analysis/{sample_analysis.id}/datasources/{datasource_id}')
-
-        assert response.status_code == 204
-
-    def test_unlink_nonexistent_datasource(self, client, sample_analysis: Analysis):
-        """Test unlinking non-existent datasource."""
-        fake_id = str(uuid.uuid4())
-
-        response = client.delete(f'/api/v1/analysis/{sample_analysis.id}/datasources/{fake_id}')
-
-        assert response.status_code == 404
-
-    def test_link_same_datasource_twice(self, client, sample_analysis: Analysis):
-        """Test linking the same datasource twice."""
-        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
-
-        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/datasource/{datasource_id}')
-
-        # Should either succeed (idempotent) or fail with conflict
-        assert response.status_code in [200, 201, 409]
 
 
 class TestAnalysisStatus:
@@ -507,7 +447,6 @@ class TestAnalysisMetadata:
         """Test that analysis has proper timestamps."""
         payload = {
             'name': 'Timestamp Test',
-            'pipeline_steps': [],
             'tabs': [
                 {
                     'id': 'tab1',
@@ -519,7 +458,7 @@ class TestAnalysisMetadata:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': str(uuid.uuid4()),
+                        'result_id': str(uuid.uuid4()),
                         'datasource_type': 'iceberg',
                         'format': 'parquet',
                         'filename': 'source_i',
@@ -556,3 +495,113 @@ class TestAnalysisMetadata:
         # updated_at should change (if granular enough)
         # This might fail if updates happen too quickly
         assert 'updated_at' in updated
+
+
+class TestDeriveTab:
+    """Tests for POST /api/v1/analysis/{id}/tabs/{tab_id}/derive."""
+
+    def test_derive_tab_creates_new_tab(self, client, sample_analysis: Analysis):
+        """Derive creates a new tab chaining from the source tab's result_id."""
+        tab_id = 'tab1'
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/derive', json={})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['id'] != tab_id
+        assert data['parent_id'] == tab_id
+        assert data['datasource']['analysis_tab_id'] == tab_id
+        assert len(data['steps']) == 1
+        assert data['steps'][0]['type'] == 'view'
+
+    def test_derive_tab_datasource_is_source_result_id(self, client, sample_analysis: Analysis):
+        """Derived tab's datasource.id equals source tab's output.result_id."""
+        tab_id = 'tab1'
+        source_result_id = sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
+
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/derive', json={})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['datasource']['id'] == source_result_id
+
+    def test_derive_tab_custom_name(self, client, sample_analysis: Analysis):
+        """Derived tab uses the provided name."""
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'My Derived Tab'},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['name'] == 'My Derived Tab'
+
+    def test_derive_tab_default_name(self, client, sample_analysis: Analysis):
+        """Derived tab gets a default name when none is provided."""
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['name'].startswith('Derived')
+
+    def test_derive_tab_appears_in_analysis(self, client, sample_analysis: Analysis):
+        """Derived tab is persisted and appears in GET /analysis/{id}."""
+        client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive', json={'name': 'D1'})
+
+        response = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        assert response.status_code == 200
+        tabs = response.json()['pipeline_definition']['tabs']
+        assert any(t['name'] == 'D1' for t in tabs)
+
+    def test_derive_tab_nonexistent_analysis(self, client):
+        """Returns 404 for nonexistent analysis."""
+        response = client.post(f'/api/v1/analysis/{uuid.uuid4()}/tabs/tab1/derive', json={})
+
+        assert response.status_code == 404
+
+    def test_derive_tab_nonexistent_tab(self, client, sample_analysis: Analysis):
+        """Returns 400 for nonexistent tab_id."""
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/nonexistent/derive',
+            json={},
+        )
+
+        assert response.status_code == 400
+
+    def test_derive_tab_output_has_new_result_id(self, client, sample_analysis: Analysis):
+        """Derived tab gets a fresh result_id distinct from source."""
+        source_result_id = sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
+
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['output']['result_id'] != source_result_id
+
+    def test_update_analysis_with_derived_tab(self, client, sample_analysis: Analysis):
+        """Updating an analysis that has a derived tab (intra-analysis chain) should succeed."""
+        # First derive a tab
+        derive_resp = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'Derived'},
+        )
+        assert derive_resp.status_code == 200
+
+        # Get full analysis with both tabs
+        get_resp = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        analysis_data = get_resp.json()
+        tabs = analysis_data['pipeline_definition']['tabs']
+        assert len(tabs) == 2
+
+        # Acquire lock and update with both tabs (derived tab references same analysis)
+        client_id, lock_token = acquire_lock(client, sample_analysis.id)
+        update_resp = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'tabs': tabs, 'client_id': client_id, 'lock_token': lock_token},
+        )
+        assert update_resp.status_code == 200

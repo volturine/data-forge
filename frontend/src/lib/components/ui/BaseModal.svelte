@@ -8,6 +8,7 @@
 	};
 
 	import type { Snippet } from 'svelte';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -38,8 +39,21 @@
 		onClose,
 		closeOnEscape = true,
 		closeOnBackdrop = true,
-		overlayClass = 'fixed inset-0 z-1000 flex items-center justify-center p-4 bg-overlay animate-fade-in',
-		panelClass = 'w-full max-h-[90vh] overflow-y-auto border bg-dialog border-tertiary animate-slide-up focus:outline-none',
+		overlayClass = css({
+			position: 'fixed',
+			inset: '0',
+			zIndex: 'modal',
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: 'center',
+			padding: '4'
+		}),
+		panelClass = css({
+			width: '100%',
+			maxHeight: '90vh',
+			overflowY: 'auto',
+			borderWidth: '1'
+		}),
 		panelAction = noopAction,
 		panelActionValue,
 		role = 'dialog',

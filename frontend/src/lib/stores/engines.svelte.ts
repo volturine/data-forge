@@ -18,13 +18,12 @@ export class EnginesStore {
 		await listEngines().match(
 			(response) => {
 				this.engines = response.engines;
-				this.loading = false;
 			},
 			(err) => {
 				this.error = err.message;
-				this.loading = false;
 			}
 		);
+		this.loading = false;
 	}
 
 	async shutdownEngine(analysisId: string): Promise<void> {

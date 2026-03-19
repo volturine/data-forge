@@ -6,6 +6,10 @@
 	import type { UdfExport } from '$lib/types/udf';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil } from 'lucide-svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import { css, spinner, button, chip, cx, input, label, row } from '$lib/styles/panda';
 
 	const queryClient = useQueryClient();
 
@@ -116,95 +120,141 @@
 	}
 </script>
 
-<div class="udfs-page mx-auto max-w-275 px-6 py-7">
+<div class={css({ marginX: 'auto', maxWidth: 'pageWide', paddingX: '6', paddingY: '7' })}>
 	<header
-		class="mb-6 flex flex-col items-stretch justify-between gap-6 border-b border-tertiary pb-5 md:flex-row md:items-start"
+		class={css({
+			marginBottom: '6',
+			display: 'flex',
+			flexDirection: 'column',
+			alignItems: 'stretch',
+			justifyContent: 'space-between',
+			gap: '6',
+			borderBottomWidth: '1',
+			paddingBottom: '5',
+			md: { flexDirection: 'row', alignItems: 'flex-start' }
+		})}
 	>
 		<div>
-			<h1 class="m-0 mb-2 text-2xl">UDF Library</h1>
-			<p class="m-0 text-fg-tertiary">Reusable Python transforms stored globally</p>
+			<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>UDF Library</h1>
+			<p class={css({ margin: '0', color: 'fg.tertiary' })}>
+				Reusable Python transforms stored globally
+			</p>
 		</div>
-		<div class="flex flex-wrap gap-2">
-			<button class="btn-secondary" onclick={() => (importOpen = true)}>
+		<div class={css({ display: 'flex', flexWrap: 'wrap', gap: '2' })}>
+			<button class={button({ variant: 'secondary' })} onclick={() => (importOpen = true)}>
 				<Upload size={16} />
 				Import
 			</button>
-			<button class="btn-secondary" onclick={handleExport}>
+			<button class={button({ variant: 'secondary' })} onclick={handleExport}>
 				<Download size={16} />
 				Export
 			</button>
-			<button class="btn-primary" onclick={openNew}>
+			<button class={button({ variant: 'primary' })} onclick={openNew}>
 				<Plus size={16} />
 				New UDF
 			</button>
 		</div>
 	</header>
 
-	<div class="mb-4 flex items-center gap-3">
+	<div class={cx(row, css({ marginBottom: '4', gap: '3' }))}>
 		<input
 			id="udf-search"
 			aria-label="Search UDFs"
 			type="text"
 			placeholder="Search UDFs..."
 			bind:value={search}
-			class="max-w-90"
+			class={cx(input(), css({ maxWidth: 'popover' }))}
 		/>
 	</div>
 
 	{#if query.isLoading}
-		<div class="flex h-full items-center justify-center">
-			<div class="spinner"></div>
+		<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+			<div class={spinner()}></div>
 		</div>
 	{:else if query.isError}
-		<div class="error-box">
+		<Callout tone="error">
 			{query.error instanceof Error ? query.error.message : 'Error loading UDFs.'}
-		</div>
+		</Callout>
 	{:else if query.data}
 		{#if query.data.length === 0}
-			<div class="border border-dashed border-tertiary p-8 text-center">
+			<div
+				class={css({
+					borderWidth: '1',
+					borderStyle: 'dashed',
+					padding: '8',
+					textAlign: 'center'
+				})}
+			>
 				<p>No UDFs yet.</p>
-				<button class="btn-primary" onclick={openNew}>Create your first UDF</button>
+				<button class={button({ variant: 'primary' })} onclick={openNew}
+					>Create your first UDF</button
+				>
 			</div>
 		{:else}
-			<div class="flex flex-col gap-3">
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
 				{#each query.data as udf (udf.id)}
 					<div
-						class="row flex flex-col justify-between gap-4 border border-tertiary bg-bg-primary p-4 md:flex-row"
+						class={css({
+							display: 'flex',
+							flexDirection: 'column',
+							justifyContent: 'space-between',
+							gap: '4',
+							borderWidth: '1',
+							backgroundColor: 'bg.primary',
+							padding: '4',
+							md: { flexDirection: 'row' }
+						})}
 					>
-						<div class="flex flex-col gap-2">
-							<div class="flex items-center gap-3">
-								<h3 class="m-0 text-base">{udf.name}</h3>
-								<div class="flex flex-wrap items-center gap-1">
+						<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+							<div class={cx(row, css({ gap: '3' }))}>
+								<h3 class={css({ margin: '0', fontSize: 'md' })}>{udf.name}</h3>
+								<div class={cx(row, css({ flexWrap: 'wrap', gap: '1' }))}>
 									{#if udf.signature?.inputs?.length}
 										{#each udf.signature.inputs as input, i (i)}
 											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
 											{#if i < udf.signature.inputs.length - 1}
-												<span class="mx-0.5 text-xs text-fg-muted">,</span>
+												<span class={css({ marginX: '0.5', fontSize: 'xs', color: 'fg.muted' })}
+													>,</span
+												>
 											{/if}
 										{/each}
 									{:else}
-										<span class="text-xs uppercase tracking-wide text-fg-muted">No inputs</span>
+										<span
+											class={css({
+												fontSize: 'xs',
+												textTransform: 'uppercase',
+												letterSpacing: 'wide',
+												color: 'fg.muted'
+											})}
+										>
+											No inputs
+										</span>
 									{/if}
 								</div>
 							</div>
 							{#if udf.description}
-								<p class="m-0 text-fg-tertiary">{udf.description}</p>
+								<p class={css({ margin: '0', color: 'fg.tertiary' })}>{udf.description}</p>
 							{/if}
 							{#if udf.tags?.length}
-								<div class="flex flex-wrap gap-2">
+								<div class={css({ display: 'flex', flexWrap: 'wrap', gap: '2' })}>
 									{#each udf.tags as tag (tag)}
-										<span class="bg-bg-tertiary px-1.5 py-0.5 text-xs text-fg-muted">{tag}</span>
+										<span class={chip({ tone: 'neutral' })}>
+											{tag}
+										</span>
 									{/each}
 								</div>
 							{/if}
 						</div>
-						<div class="flex items-center gap-2">
-							<button class="btn-ghost btn-sm" onclick={() => editUdf(udf.id)}>
+						<div class={cx(row, css({ gap: '2' }))}>
+							<button
+								class={button({ variant: 'ghost', size: 'sm' })}
+								onclick={() => editUdf(udf.id)}
+							>
 								<Pencil size={14} />
 								Edit
 							</button>
 							<button
-								class="btn-ghost btn-sm"
+								class={button({ variant: 'ghost', size: 'sm' })}
 								onclick={() => handleClone(udf.id)}
 								disabled={cloningId === udf.id}
 							>
@@ -212,12 +262,18 @@
 								Clone
 							</button>
 							{#if deletingId === udf.id}
-								<button class="btn-danger btn-sm" onclick={() => confirmDelete(udf.id)}
-									>Confirm</button
+								<button
+									class={button({ variant: 'danger', size: 'sm' })}
+									onclick={() => confirmDelete(udf.id)}>Confirm</button
 								>
-								<button class="btn-secondary btn-sm" onclick={cancelDelete}>Cancel</button>
+								<button class={button({ variant: 'secondary', size: 'sm' })} onclick={cancelDelete}
+									>Cancel</button
+								>
 							{:else}
-								<button class="btn-ghost btn-sm" onclick={() => handleDelete(udf.id)}>
+								<button
+									class={button({ variant: 'ghost', size: 'sm' })}
+									onclick={() => handleDelete(udf.id)}
+								>
 									<Trash2 size={14} />
 									Delete
 								</button>
@@ -230,33 +286,86 @@
 	{/if}
 
 	{#if importOpen}
-		<div class="modal-backdrop"></div>
-		<div class="modal">
-			<div class="modal-header">
-				<h2>Import UDFs</h2>
-				<button class="modal-close" onclick={() => (importOpen = false)}>x</button>
-			</div>
-			<div class="modal-body">
-				<label for="udf-import-json">Import JSON</label>
+		<div
+			class={css({
+				position: 'fixed',
+				inset: '0',
+				background: 'bg.overlay',
+				zIndex: 'modal'
+			})}
+		></div>
+		<div
+			class={css({
+				position: 'fixed',
+				left: '50%',
+				top: '50%',
+				transform: 'translate(-50%, -50%)',
+				width: 'min(720px, 92vw)',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				zIndex: '1001',
+				display: 'flex',
+				flexDirection: 'column',
+				_focus: { outline: 'none' }
+			})}
+		>
+			<PanelHeader>
+				{#snippet title()}<h2 class={css({ margin: '0', fontSize: 'md' })}>
+						Import UDFs
+					</h2>{/snippet}
+				{#snippet actions()}
+					<button
+						class={css({
+							background: 'transparent',
+							border: 'none',
+							color: 'fg.muted',
+							cursor: 'pointer',
+							fontSize: 'xl',
+							padding: '1',
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							transitionProperty: 'color, background-color',
+							transitionDuration: 'normal',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+						})}
+						onclick={() => (importOpen = false)}>x</button
+					>
+				{/snippet}
+			</PanelHeader>
+			<div
+				class={css({
+					padding: '4',
+					overflowY: 'auto',
+					display: 'flex',
+					flexDirection: 'column',
+					gap: '3'
+				})}
+			>
+				<label class={label()} for="udf-import-json">Import JSON</label>
 				<textarea
 					rows="10"
 					id="udf-import-json"
 					placeholder="Paste exported JSON here..."
 					bind:value={importText}
-					class="font-mono"
+					class={input()}
 				></textarea>
-				<label class="flex items-center gap-2 text-fg-secondary">
+				<label class={label({ variant: 'inline' })}>
 					<input id="udf-overwrite-import" type="checkbox" bind:checked={overwriteImport} />
 					Overwrite existing by name
 				</label>
 				{#if importError}
-					<div class="error-box">{importError}</div>
+					<Callout tone="error">
+						{importError}
+					</Callout>
 				{/if}
 			</div>
-			<div class="modal-footer">
-				<button class="btn-secondary" onclick={() => (importOpen = false)}>Cancel</button>
-				<button class="btn-primary" onclick={handleImport}>Import</button>
-			</div>
+			<PanelFooter>
+				<button class={button({ variant: 'secondary' })} onclick={() => (importOpen = false)}
+					>Cancel</button
+				>
+				<button class={button({ variant: 'primary' })} onclick={handleImport}>Import</button>
+			</PanelFooter>
 		</div>
 	{/if}
 </div>

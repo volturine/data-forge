@@ -29,13 +29,12 @@ def convert_step_format(frontend_step: dict) -> dict:
         raise ValueError('Step must have a type field')
 
     config = frontend_step.get('config', {})
-    config = _normalize_chart_config(step_type, config)
-    normalized_type = _normalize_chart_type(step_type)
-
-    step_id = frontend_step.get('id', 'Unknown Step')
+    if step_type in _CHART_TYPES:
+        config = {**config, 'chart_type': _CHART_TYPES[step_type]}
+    normalized_type = 'chart' if step_type.startswith('plot_') else step_type
 
     return {
-        'name': step_id,
+        'name': frontend_step.get('id', 'Unknown Step'),
         'operation': normalized_type,
         'params': convert_config_to_params(normalized_type, config),
     }
@@ -147,12 +146,10 @@ def convert_rename_config(config: dict) -> dict:
     Frontend: {column_mapping: {oldName: newName}}
     Backend: {mapping: {oldName: newName}}
     """
-    # Support both column_mapping (frontend) and mapping (backend format)
     mapping = config.get('column_mapping') or config.get('mapping', {})
-    normalized = mapping
     if isinstance(mapping, list):
-        normalized = {item.get('from'): item.get('to') for item in mapping if item.get('from') and item.get('to')}
-    return {'mapping': normalized}
+        mapping = {item.get('from'): item.get('to') for item in mapping if item.get('from') and item.get('to')}
+    return {'mapping': mapping}
 
 
 def convert_sort_config(config: dict) -> dict:
@@ -161,17 +158,14 @@ def convert_sort_config(config: dict) -> dict:
     Frontend: [{column: 'col1', descending: false}, {column: 'col2', descending: true}]
     Backend: {columns: ['col1', 'col2'], descending: [false, true]}
     """
-    # If config is already a list (frontend format)
     if isinstance(config, list):
         columns = [rule.get('column') for rule in config if rule.get('column')]
         descending = [rule.get('descending', False) for rule in config if rule.get('column')]
         return {'columns': columns, 'descending': descending}
 
-    # If config is a dict, check if it has the 'columns' key (already backend format)
     if 'columns' in config:
         return config
 
-    # Empty or invalid config
     return {'columns': [], 'descending': []}
 
 
@@ -227,16 +221,14 @@ def convert_string_transform_config(config: dict) -> dict:
 def convert_export_config(config: dict) -> dict:
     """Convert export config from frontend to backend format.
 
-    Frontend: {format, filename, destination, datasource_type, iceberg_options, duckdb_options}
-    Backend: {format, filename, destination, datasource_type, iceberg_options, duckdb_options}
+    Frontend: {format, filename, destination, iceberg_options}
+    Backend: {format, filename, destination, iceberg_options}
     """
     return {
         'format': config.get('format', 'csv'),
         'filename': config.get('filename', 'export'),
         'destination': config.get('destination', 'download'),
-        'datasource_type': config.get('datasource_type', 'iceberg'),
         'iceberg_options': config.get('iceberg_options'),
-        'duckdb_options': config.get('duckdb_options'),
     }
 
 
@@ -288,25 +280,17 @@ def convert_plot_config(config: dict) -> dict:
     }
 
 
-def _normalize_chart_type(step_type: str) -> str:
-    return 'chart' if step_type.startswith('plot_') else step_type
-
-
-def _normalize_chart_config(step_type: str, config: dict) -> dict:
-    chart_map = {
-        'plot_bar': 'bar',
-        'plot_horizontal_bar': 'horizontal_bar',
-        'plot_area': 'area',
-        'plot_heatgrid': 'heatgrid',
-        'plot_histogram': 'histogram',
-        'plot_scatter': 'scatter',
-        'plot_line': 'line',
-        'plot_pie': 'pie',
-        'plot_boxplot': 'boxplot',
-    }
-    if step_type not in chart_map:
-        return config
-    return {**config, 'chart_type': chart_map[step_type]}
+_CHART_TYPES: dict[str, str] = {
+    'plot_bar': 'bar',
+    'plot_horizontal_bar': 'horizontal_bar',
+    'plot_area': 'area',
+    'plot_heatgrid': 'heatgrid',
+    'plot_histogram': 'histogram',
+    'plot_scatter': 'scatter',
+    'plot_line': 'line',
+    'plot_pie': 'pie',
+    'plot_boxplot': 'boxplot',
+}
 
 
 def convert_ai_config(config: dict) -> dict:
@@ -317,8 +301,7 @@ def convert_ai_config(config: dict) -> dict:
 
     # Support both legacy input_column (singular) and input_columns (plural)
     input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
-    legacy_col = config.get('input_column') or config.get('inputColumn')
-    if legacy_col and legacy_col not in input_columns:
+    if (legacy_col := config.get('input_column') or config.get('inputColumn')) and legacy_col not in input_columns:
         input_columns = [legacy_col, *input_columns]
 
     result: dict[str, object] = {
@@ -339,11 +322,8 @@ def convert_notification_config(config: dict) -> dict:
     """Convert notification config — per-row UDF with column inputs."""
     input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
 
-    recipients = config.get('recipient', '')
-    if not recipients:
-        selected = config.get('subscriber_ids')
-        if isinstance(selected, list):
-            recipients = ','.join(str(cid) for cid in selected)
+    selected = config.get('subscriber_ids')
+    recipients = config.get('recipient', '') or (','.join(str(cid) for cid in selected) if isinstance(selected, list) else '')
 
     return {
         'method': config.get('method', 'email'),

@@ -2,6 +2,7 @@
 	import { Debounced } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { ChevronDown } from 'lucide-svelte';
+	import { css, cx, emptyText, input, muted } from '$lib/styles/panda';
 
 	import type { Snippet } from 'svelte';
 
@@ -66,6 +67,7 @@
 		menuActionValue?: MenuActionValue;
 		searchValue?: string;
 		closeOnOutside?: boolean;
+		clearable?: boolean;
 		onOpen?: (trigger: HTMLButtonElement | HTMLInputElement | undefined) => void;
 		onClose?: () => void;
 	}
@@ -94,6 +96,7 @@
 		menuActionValue = { left: 0, top: 0, width: 0 },
 		searchValue = $bindable(''),
 		closeOnOutside = true,
+		clearable = false,
 		onOpen,
 		onClose,
 		renderTrigger
@@ -202,7 +205,7 @@
 		};
 	};
 
-	const triggerPayload = $derived.by(() => ({
+	const triggerPayload = $derived({
 		open: menuOpen,
 		selectedCount,
 		selectedOption: options.find((option) => option.id === value),
@@ -210,7 +213,7 @@
 		disabled,
 		onOpen: openMenu,
 		triggerAction: setTriggerRef
-	}));
+	});
 
 	// DOM: $derived can't detect outside clicks.
 	$effect(() => {
@@ -231,7 +234,19 @@
 	});
 </script>
 
-<div class={`column-select ${containerClass}`.trim()} bind:this={menuRef}>
+<div
+	class={cx(
+		css({
+			position: 'relative',
+			display: 'flex',
+			flexDirection: 'column',
+			gap: '2',
+			minWidth: 'inputSm'
+		}),
+		containerClass
+	)}
+	bind:this={menuRef}
+>
 	{#if triggerType === 'input'}
 		<input
 			type="text"
@@ -250,19 +265,97 @@
 	{:else}
 		<button
 			type="button"
-			class={`column-trigger ${triggerClass}`.trim()}
+			class={cx(
+				css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '2',
+					paddingX: '3',
+					paddingY: '2.5',
+					borderWidth: '1',
+					backgroundColor: 'bg.secondary',
+					cursor: 'pointer',
+					justifyContent: 'space-between',
+					fontSize: 'sm',
+					_focusVisible: {
+						outline: '2px solid {colors.accent.secondary}',
+						outlineOffset: 'px'
+					}
+				}),
+				triggerClass
+			)}
 			onclick={openMenu}
 			aria-expanded={menuOpen}
 			use:setTriggerRef={undefined}
 			{disabled}
 		>
-			<span class={selectedCount > 0 ? 'column-label' : 'column-placeholder'}>{displayLabel}</span>
-			<ChevronDown size={14} class="chevron" />
+			<span
+				class={selectedCount > 0
+					? css({
+							flex: '1',
+							textAlign: 'left',
+							minWidth: '0',
+							overflow: 'hidden',
+							textOverflow: 'ellipsis',
+							whiteSpace: 'nowrap'
+						})
+					: muted}>{displayLabel}</span
+			>
+			{#if clearable && selectedCount > 0}
+				<span
+					role="button"
+					tabindex="0"
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						width: 'iconSm',
+						height: 'iconSm',
+						flexShrink: '0',
+						color: 'fg.muted',
+						fontSize: '2xs',
+						lineHeight: 'none',
+						cursor: 'pointer',
+						_hover: { color: 'fg.primary', backgroundColor: 'bg.tertiary' }
+					})}
+					onclick={(e) => {
+						e.stopPropagation();
+						updateValue(mode === 'multi' ? [] : '');
+						onClose?.();
+					}}
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.stopPropagation();
+							updateValue(mode === 'multi' ? [] : '');
+							onClose?.();
+						}
+					}}
+					aria-label="Clear selection">✕</span
+				>
+			{:else}
+				<ChevronDown size={14} class={muted} />
+			{/if}
 		</button>
 	{/if}
 	{#if menuOpen}
 		<div
-			class={`column-menu ${menuClass}`.trim()}
+			class={cx(
+				css({
+					position: 'absolute',
+					zIndex: 'dropdown',
+					left: '0',
+					minWidth: '100%',
+					width: '100%',
+					maxWidth: '100%',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					padding: '2',
+					display: 'flex',
+					flexDirection: 'column',
+					gap: '2'
+				}),
+				menuClass
+			)}
 			role="listbox"
 			aria-multiselectable={mode === 'multi'}
 			aria-label={listAriaLabel}
@@ -270,7 +363,7 @@
 			bind:this={menuContainerRef}
 		>
 			{#if triggerType === 'button'}
-				<div class="column-search">
+				<div class={css({ paddingX: '2', paddingY: '0' })}>
 					<input
 						bind:this={searchInputRef}
 						id="{uid}-menu-search"
@@ -278,15 +371,36 @@
 						bind:value={searchValue}
 						type="text"
 						placeholder={searchPlaceholder}
-						class="column-search-input"
+						class={input({ variant: 'menu' })}
 					/>
 				</div>
 			{/if}
 			{#if mode === 'multi' && showSelectAll}
-				<div class="flex gap-2 border-b p-2 bg-secondary border-tertiary">
+				<div
+					class={css({
+						display: 'flex',
+						gap: '2',
+						borderBottomWidth: '1',
+						padding: '2',
+						backgroundColor: 'bg.secondary'
+					})}
+				>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs border-tertiary text-fg-secondary"
+						class={css({
+							flex: '1',
+							cursor: 'pointer',
+							borderWidth: '1',
+							backgroundColor: 'transparent',
+							paddingX: '2',
+							paddingY: '1',
+							fontSize: 'xs',
+							color: 'fg.secondary',
+							_hover: {
+								backgroundColor: 'bg.hover',
+								color: 'accent.secondary'
+							}
+						})}
 						onclick={(event) => {
 							event.stopPropagation();
 							selectAll();
@@ -296,7 +410,20 @@
 					</button>
 					<button
 						type="button"
-						class="select-action-btn flex-1 cursor-pointer border bg-transparent px-2 py-1 text-xs border-tertiary text-fg-secondary"
+						class={css({
+							flex: '1',
+							cursor: 'pointer',
+							borderWidth: '1',
+							backgroundColor: 'transparent',
+							paddingX: '2',
+							paddingY: '1',
+							fontSize: 'xs',
+							color: 'fg.secondary',
+							_hover: {
+								backgroundColor: 'bg.hover',
+								color: 'accent.secondary'
+							}
+						})}
 						onclick={(event) => {
 							event.stopPropagation();
 							deselectAll();
@@ -306,9 +433,23 @@
 					</button>
 				</div>
 			{/if}
-			<div class="column-options">
+			<div
+				class={css({
+					display: 'flex',
+					flexDirection: 'column',
+					gap: '2',
+					maxHeight: 'dropdown',
+					overflowY: 'auto',
+					overflowX: 'hidden',
+					padding: '2',
+					scrollbarWidth: 'thin',
+					scrollbarColor: '{colors.border.primary} transparent'
+				})}
+			>
 				{#if filteredOptions.length === 0}
-					<div class="no-results">{emptyLabel}</div>
+					<div class={emptyText({ size: 'panel' })}>
+						{emptyLabel}
+					</div>
 				{:else}
 					{#each filteredOptions as option (option.id)}
 						{@render renderOption({
@@ -324,7 +465,25 @@
 </div>
 
 {#if showSelectedList && mode === 'multi' && Array.isArray(value) && value.length > 0}
-	<div class="column-selected-list mt-2 max-h-15 overflow-y-auto border p-2 text-xs select-mono">
+	<div
+		class={cx(
+			css({
+				maxWidth: '100%',
+				overflowWrap: 'anywhere',
+				wordBreak: 'break-word',
+				whiteSpace: 'normal'
+			}),
+			css({ fontFamily: 'mono' }),
+			css({
+				marginTop: '2',
+				maxHeight: 'labelSm',
+				overflowY: 'auto',
+				borderWidth: '1',
+				padding: '2',
+				fontSize: 'xs'
+			})
+		)}
+	>
 		{value.join(', ')}
 	</div>
 {/if}

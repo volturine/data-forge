@@ -9,6 +9,7 @@
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import type { Udf, UdfInput, UdfSignature } from '$lib/types/udf';
 	import { ArrowLeft, Save } from 'lucide-svelte';
+	import { css, button, cx, input, label, row, rowBetween } from '$lib/styles/panda';
 
 	interface Props {
 		mode: 'create' | 'edit';
@@ -131,48 +132,134 @@
 	const canSave = $derived(name.trim().length > 0 && code.trim().length > 0);
 </script>
 
-<div class="max-w-240 mx-auto p-6 h-full overflow-auto">
+<div
+	class={css({
+		maxWidth: 'modalLg',
+		marginX: 'auto',
+		padding: '6',
+		height: 'full',
+		overflowY: 'auto'
+	})}
+>
 	<header
-		class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 pb-5 border-b border-tertiary"
+		class={css({
+			display: 'flex',
+			flexDirection: 'column',
+			justifyContent: 'space-between',
+			alignItems: 'stretch',
+			gap: '4',
+			marginBottom: '6',
+			paddingBottom: '5',
+			borderBottomWidth: '1',
+			sm: { flexDirection: 'row', alignItems: 'center' }
+		})}
 	>
-		<div class="flex items-center gap-3">
-			<button class="btn-back" onclick={handleBack} type="button">
+		<div class={cx(row, css({ gap: '3' }))}>
+			<button
+				class={css({
+					width: 'rowXl',
+					height: 'rowXl',
+					padding: '0',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					backgroundColor: 'bg.tertiary',
+					borderWidth: '1',
+
+					color: 'fg.secondary',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
+				onclick={handleBack}
+				type="button"
+			>
 				<ArrowLeft size={18} />
 			</button>
 			<div>
 				<h1>{mode === 'create' ? 'New UDF' : 'Edit UDF'}</h1>
-				<p class="m-0 text-fg-tertiary">Reusable Python transforms for your pipelines</p>
+				<p class={css({ margin: '0', color: 'fg.tertiary' })}>
+					Reusable Python transforms for your pipelines
+				</p>
 			</div>
 		</div>
-		<button class="btn-primary" onclick={() => saveMutation.mutate()} disabled={!canSave || saving}>
+		<button
+			class={button({ variant: 'primary' })}
+			onclick={() => saveMutation.mutate()}
+			disabled={!canSave || saving}
+		>
 			<Save size={16} />
 			{saving ? 'Saving...' : 'Save UDF'}
 		</button>
 	</header>
 
 	{#if query.isLoading}
-		<div class="info-box">Loading UDF...</div>
+		<div
+			class={css({
+				paddingX: '3',
+				paddingY: '2.5',
+				border: 'none',
+				borderLeftWidth: '2',
+
+				marginTop: '3',
+				marginBottom: '0',
+				fontSize: 'xs',
+				lineHeight: 'normal',
+				backgroundColor: 'transparent',
+				borderLeftColor: 'accent.secondary',
+				color: 'fg.tertiary'
+			})}
+		>
+			Loading UDF...
+		</div>
 	{:else}
-		<div class="flex flex-col gap-5">
-			<div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4">
-				<div class="flex flex-col gap-2">
-					<label for="udf-name" class="text-sm text-fg-secondary">Name</label>
-					<input id="udf-name" type="text" bind:value={name} placeholder="UDF name" />
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '5' })}>
+			<div
+				class={css({
+					display: 'grid',
+					gridTemplateColumns: '1fr',
+					gap: '4',
+					sm: { gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }
+				})}
+			>
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+					<label for="udf-name" class={label({ variant: 'field' })}>Name</label>
+					<input
+						id="udf-name"
+						type="text"
+						bind:value={name}
+						placeholder="UDF name"
+						class={input()}
+					/>
 				</div>
-				<div class="flex flex-col gap-2">
-					<label for="udf-description" class="text-sm text-fg-secondary">Description</label>
-					<textarea id="udf-description" rows="3" bind:value={description}></textarea>
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+					<label for="udf-description" class={label({ variant: 'field' })}>Description</label>
+					<textarea id="udf-description" rows="3" bind:value={description} class={input()}
+					></textarea>
 				</div>
-				<div class="flex flex-col gap-2">
-					<label for="udf-tags" class="text-sm text-fg-secondary">Tags (comma-separated)</label>
-					<input id="udf-tags" type="text" bind:value={tags} placeholder="math, text, date" />
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+					<label for="udf-tags" class={label({ variant: 'field' })}>Tags (comma-separated)</label>
+					<input
+						id="udf-tags"
+						type="text"
+						bind:value={tags}
+						placeholder="math, text, date"
+						class={input()}
+					/>
 				</div>
 			</div>
 
-			<div class="flex flex-col gap-3 p-4 border bg-primary border-tertiary">
+			<div
+				class={css({
+					display: 'flex',
+					flexDirection: 'column',
+					gap: '3',
+					padding: '4',
+					borderWidth: '1',
+					backgroundColor: 'bg.primary'
+				})}
+			>
 				<UdfSignatureBuilder {inputs} onChange={updateInputs} />
-				<div class="flex flex-col gap-2">
-					<label for="udf-output">Output dtype</label>
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+					<label class={label()} for="udf-output">Output dtype</label>
 					<ColumnTypeDropdown
 						value={outputDtype}
 						onChange={(val) => (outputDtype = val)}
@@ -181,16 +268,44 @@
 				</div>
 			</div>
 
-			<div class="flex flex-col gap-3 p-4 border bg-primary border-tertiary">
-				<div class="flex justify-between items-center">
-					<h4 class="m-0 text-sm text-fg-secondary">Code</h4>
-					<span class="text-xs text-fg-muted">Define a function named <code>udf</code></span>
+			<div
+				class={css({
+					display: 'flex',
+					flexDirection: 'column',
+					gap: '3',
+					padding: '4',
+					borderWidth: '1',
+					backgroundColor: 'bg.primary'
+				})}
+			>
+				<div class={rowBetween}>
+					<h4 class={css({ margin: '0', fontSize: 'sm', color: 'fg.secondary' })}>Code</h4>
+					<span class={css({ fontSize: 'xs', color: 'fg.muted' })}
+						>Define a function named <code>udf</code></span
+					>
 				</div>
 				<CodeEditor bind:value={code} height="360px" />
 			</div>
 
 			{#if error}
-				<div class="error-box">{error}</div>
+				<div
+					class={css({
+						paddingX: '3',
+						paddingY: '2.5',
+						border: 'none',
+						borderLeftWidth: '2',
+
+						marginTop: '3',
+						marginBottom: '0',
+						fontSize: 'xs',
+						lineHeight: 'normal',
+						backgroundColor: 'transparent',
+						borderLeftColor: 'error.border',
+						color: 'error.fg'
+					})}
+				>
+					{error}
+				</div>
 			{/if}
 		</div>
 	{/if}

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,7 +17,7 @@ from core.config import settings
 from core.database import get_db, get_settings_db, init_db
 from core.logging import RequestLoggingMiddleware, configure_logging
 from core.namespace import list_namespaces, namespace_paths, reset_namespace, set_namespace_context
-from modules.compute.manager import get_manager
+from modules.compute.manager import ProcessManager
 from modules.scheduler import service as scheduler_service
 from modules.udf.seed import ensure_udf_seeds
 
@@ -25,7 +26,22 @@ logger = logging.getLogger(__name__)
 frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 
-async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
+async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
+    """Periodically sweep expired chat sessions."""
+    from modules.chat.sessions import session_store
+
+    while not stop_event.is_set():
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=300)
+        if stop_event.is_set():
+            break
+        try:
+            session_store.sweep()
+        except Exception as e:
+            logger.error('Chat sweep error: %s', e, exc_info=True)
+
+
+async def engine_cleanup_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     """Periodically check and clean up idle engines."""
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
@@ -33,7 +49,6 @@ async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
         if stop_event.is_set():
             break
         try:
-            manager = get_manager()
             cleaned = manager.cleanup_idle_engines()
             if cleaned:
                 for analysis_id in cleaned:
@@ -44,7 +59,7 @@ async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
             logger.error(f'Error in engine cleanup: {e}', exc_info=True)
 
 
-async def scheduler_loop(stop_event: asyncio.Event) -> None:
+async def scheduler_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=settings.scheduler_check_interval)
@@ -103,11 +118,12 @@ async def scheduler_loop(stop_event: asyncio.Event) -> None:
                                     logger.warning(
                                         f'Scheduler: skipping schedule {sched.id} — dependency {sched.depends_on} did not complete'
                                     )
-                                    scheduler_service.mark_schedule_run(session, sched.id)
                                     continue
 
                                 try:
-                                    result = scheduler_service.run_analysis_build(session, aid, datasource_id=sched.datasource_id)
+                                    result = scheduler_service.run_analysis_build(
+                                        session, aid, manager=manager, datasource_id=sched.datasource_id
+                                    )
                                     scheduler_service.mark_schedule_run(session, sched.id)
                                     completed_schedule_ids.add(sched.id)
                                     logger.info(
@@ -140,10 +156,10 @@ def _topo_sort_schedules(
             graph[s.depends_on].append(s.id)
             in_degree[s.id] += 1
 
-    queue = [sid for sid, deg in in_degree.items() if deg == 0]
+    queue = deque(sid for sid, deg in in_degree.items() if deg == 0)
     ordered: list[str] = []
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         ordered.append(node)
         for neighbor in graph.get(node, []):
             in_degree[neighbor] -= 1
@@ -163,6 +179,7 @@ def _topo_sort_schedules(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info('Starting application...')
+    app.state.manager = ProcessManager()
     init_db()
     for session in get_db():
         ensure_udf_seeds(session)
@@ -170,8 +187,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Start background cleanup task
     stop_event = asyncio.Event()
-    cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event))
-    scheduler_task = asyncio.create_task(scheduler_loop(stop_event))
+    cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event, app.state.manager))
+    scheduler_task = asyncio.create_task(scheduler_loop(stop_event, app.state.manager))
+    chat_sweep_task = asyncio.create_task(chat_sweep_loop(stop_event))
 
     # Start Telegram bot only if explicitly enabled in settings
     from modules.telegram.bot import telegram_bot
@@ -184,11 +202,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             return True, row.telegram_bot_token
         return False, ''
 
-    from core.database import run_db as _run_db
+    from core.database import run_settings_db
 
-    enabled, token = _run_db(_check_bot_enabled)
+    enabled, token = run_settings_db(_check_bot_enabled)
     if enabled:
         telegram_bot.start(token)
+
+    from modules.mcp.routes import get_registry
+
+    get_registry(app)
 
     yield
 
@@ -200,11 +222,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.wait_for(cleanup_task, timeout=5)
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(scheduler_task, timeout=5)
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(chat_sweep_task, timeout=5)
 
     # Cleanup compute processes on shutdown
     logger.info('Shutting down compute processes...')
-    manager = get_manager()
-    manager.shutdown_all()
+    app.state.manager.shutdown_all()
     logger.info('Application shutdown complete')
 
 
@@ -231,7 +254,7 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 # Include API Routers (prefix already defined in api/router.py)
-app.include_router(router, tags=['api'])
+app.include_router(router)
 
 
 @app.get('/')
@@ -253,7 +276,7 @@ async def health():
 
 
 @app.get('/health/ready')
-def readiness(session: Session = Depends(get_settings_db)):
+def readiness(request: Request, session: Session = Depends(get_settings_db)):
     """
     Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
@@ -273,7 +296,7 @@ def readiness(session: Session = Depends(get_settings_db)):
 
     # Check engine manager
     try:
-        manager = get_manager()
+        manager = request.app.state.manager
         engine_count = len(manager.list_engines())
         checks['engine_manager'] = 'ok'
         checks['active_engines'] = str(engine_count)

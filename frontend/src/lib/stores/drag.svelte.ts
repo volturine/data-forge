@@ -116,7 +116,6 @@ export class DragState {
 
 	/** Cancel the drag operation (e.g., via Escape key) */
 	cancel() {
-		this.releaseCapture();
 		this.end();
 	}
 

@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from modules.locks import service as lock_service
@@ -96,6 +97,40 @@ def test_validate_lock_rejects_invalid_token(test_db_session):
         assert 'Invalid lock token' in str(exc)
     else:
         raise AssertionError('Expected ValueError for invalid lock token')
+
+
+def test_acquire_lock_single_commit_token_stability(test_db_session):
+    """Verify that creating a new lock writes a single token (no double-write)."""
+    resource_id = str(uuid.uuid4())
+    response = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+
+    lock = test_db_session.get(Lock, resource_id)
+    assert lock is not None
+    # The token returned must match the one stored in the DB exactly.
+    # Before the fix, a second commit would overwrite the first token.
+    assert response.lock_token == lock.lock_token
+    assert response.expires_at == lock.expires_at.isoformat()
+
+
+def test_acquire_lock_same_client_returns_new_token(test_db_session):
+    """Re-acquiring a lock by the same client issues a fresh token."""
+    resource_id = str(uuid.uuid4())
+    first = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+    second = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+
+    assert first.lock_token != second.lock_token
+    lock = test_db_session.get(Lock, resource_id)
+    assert lock is not None
+    assert lock.lock_token == second.lock_token
+
+
+def test_acquire_lock_different_client_raises(test_db_session):
+    """A different client cannot acquire a lock held by another client."""
+    resource_id = str(uuid.uuid4())
+    lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+
+    with pytest.raises(ValueError, match='locked by another client'):
+        lock_service.acquire_lock(test_db_session, resource_id, 'client-b', 'sig-b')
 
 
 def test_locks_endpoints_smoke(client: TestClient):

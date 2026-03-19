@@ -1,0 +1,78 @@
+"""OpenRouter client — OpenAI-compatible provider for chat with tool calls."""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+_OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
+_TIMEOUT = httpx.Timeout(connect=10, read=120, write=10, pool=10)
+
+
+class OpenRouterError(Exception):
+    """Raised on OpenRouter API failures."""
+
+
+def _headers(api_key: str) -> dict[str, str]:
+    return {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://data-forge.local',
+    }
+
+
+def _mcp_tool_to_openai(tool: dict) -> dict:
+    return {
+        'type': 'function',
+        'function': {
+            'name': tool['id'],
+            'description': tool['description'],
+            'parameters': tool['input_schema'],
+        },
+    }
+
+
+async def chat_with_tools(
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict],
+) -> dict[str, Any]:
+    """Send a chat completion request with tool definitions."""
+    logger.debug('chat_with_tools model=%s messages=%d tools=%d', model, len(messages), len(tools))
+    payload: dict[str, Any] = {
+        'model': model,
+        'messages': messages,
+    }
+    if tools:
+        payload['tools'] = [_mcp_tool_to_openai(t) for t in tools]
+        payload['tool_choice'] = 'auto'
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.post(
+            f'{_OPENROUTER_BASE}/chat/completions',
+            headers=_headers(api_key),
+            content=json.dumps(payload),
+        )
+        if not resp.is_success:
+            raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
+        return resp.json()  # type: ignore[no-any-return]
+
+
+async def list_models(api_key: str) -> list[dict]:
+    """List models available on OpenRouter."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.get(f'{_OPENROUTER_BASE}/models', headers=_headers(api_key))
+        if not resp.is_success:
+            logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
+            raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
+        data = resp.json()
+        return [
+            {'id': m.get('id', ''), 'name': m.get('name', m.get('id', '')), 'context_length': m.get('context_length', 0)}
+            for m in data.get('data', [])
+        ]

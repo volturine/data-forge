@@ -2,6 +2,8 @@
 	import type { Schema } from '$lib/types/schema';
 	import { AlertTriangle } from 'lucide-svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import { css, stepConfig } from '$lib/styles/panda';
 
 	interface DropConfigData {
 		columns: string[];
@@ -17,13 +19,43 @@
 	const safeColumns = $derived(Array.isArray(config.columns) ? config.columns : []);
 </script>
 
-<div class="config-panel" role="region" aria-label="Drop columns configuration">
-	<h3 class="mb-2">Drop Columns</h3>
+<div class={stepConfig()} role="region" aria-label="Drop columns configuration">
+	<h3 class={css({ marginBottom: '2' })}>Drop Columns</h3>
 
-	<p class="description">Select the columns you want to drop (remove) from the dataset.</p>
+	<p
+		class={css({
+			marginTop: '0',
+			marginBottom: '3',
+			color: 'fg.tertiary',
+			fontSize: 'xs',
+			lineHeight: '1.6'
+		})}
+	>
+		Select the columns you want to drop (remove) from the dataset.
+	</p>
 
-	<div class="form-section">
-		<div class="form-label">Columns to drop</div>
+	<div
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
+
+			border: 'none'
+		})}
+	>
+		<div
+			class={css({
+				display: 'block',
+				fontSize: 'xs',
+				fontWeight: '600',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider'
+			})}
+		>
+			Columns to drop
+		</div>
 		<MultiSelectColumnDropdown
 			{schema}
 			value={safeColumns}
@@ -33,16 +65,16 @@
 	</div>
 
 	{#if safeColumns.length > 0}
-		<div class="warning-box" aria-live="polite">
-			<strong class="inline-flex items-center gap-2">
+		<Callout tone="warn">
+			<strong class={css({ display: 'inline-flex', alignItems: 'center', gap: '2' })}>
 				<AlertTriangle size={14} />
 				Columns to Drop ({safeColumns.length}):
 			</strong>
 			<p>These columns will be removed from the dataset.</p>
-		</div>
+		</Callout>
 	{:else}
-		<div class="warning-box" role="alert">
+		<Callout tone="warn">
 			<strong>Warning:</strong> No columns selected. This operation will have no effect.
-		</div>
+		</Callout>
 	{/if}
 </div>

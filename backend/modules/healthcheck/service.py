@@ -55,8 +55,7 @@ def update_healthcheck(
     check_type = payload.check_type or check.check_type
     if check_type == 'row_count':
         _ensure_unique_row_count(session, check.datasource_id, check_type, exclude_id=healthcheck_id)
-    update_data = payload.model_dump(exclude_none=True)
-    for key, value in update_data.items():
+    for key, value in payload.model_dump(exclude_none=True).items():
         setattr(check, key, value)
     session.add(check)
     session.commit()
@@ -80,7 +79,7 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
     checks = session.execute(
         select(HealthCheck.id).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type, call-overload]
     )
-    check_ids = [row[0] for row in checks.all()]
+    check_ids = checks.scalars().all()
     if not check_ids:
         return []
     results = session.execute(

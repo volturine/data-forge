@@ -20,7 +20,9 @@ export default {
 			precompress: false,
 			strict: true
 		}),
-
+		alias: {
+			'styled-system': './styled-system/*'
+		},
 		// Ensure the app is served from the root path
 		paths: {
 			base: ''

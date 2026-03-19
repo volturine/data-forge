@@ -17,8 +17,7 @@ export interface AnalysisTabDatasource {
 }
 
 export interface AnalysisTabOutput {
-	output_datasource_id: string;
-	datasource_type: string;
+	result_id: string;
 	format: string;
 	filename: string;
 	build_mode?: string;
@@ -40,7 +39,6 @@ export type AnalysisTab = AnalysisTabInput;
 export interface AnalysisCreate {
 	name: string;
 	description?: string | null;
-	pipeline_steps: PipelineStep[];
 	tabs: AnalysisTabInput[];
 }
 
@@ -49,7 +47,6 @@ export type AnalysisCreateInput = AnalysisCreate;
 export interface AnalysisUpdate {
 	name?: string | null;
 	description?: string | null;
-	pipeline_steps?: PipelineStep[] | null;
 	status?: string | null;
 	tabs: AnalysisTabInput[];
 	client_id?: string | null;
@@ -66,7 +63,6 @@ export interface Analysis {
 	updated_at: string;
 	result_path: string | null;
 	thumbnail: string | null;
-	tabs: AnalysisTabInput[];
 	version?: string | null;
 }
 

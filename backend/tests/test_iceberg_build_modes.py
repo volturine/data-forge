@@ -118,8 +118,7 @@ class TestBuildModeWiring:
                         'config': {'branch': 'master'},
                     },
                     'output': {
-                        'output_datasource_id': output_ds_id,
-                        'datasource_type': 'iceberg',
+                        'result_id': output_ds_id,
                         'format': 'parquet',
                         'filename': 'test_out',
                         'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
@@ -135,6 +134,24 @@ class TestBuildModeWiring:
                 }
             },
         }
+
+    def _make_engine_mock(self) -> MagicMock:
+        engine = MagicMock()
+        engine.is_process_alive.return_value = True
+        engine.export.return_value = 'job-1'
+        engine.get_result.return_value = {
+            'data': {'row_count': 1},
+            'error': None,
+            'step_timings': {},
+        }
+        return engine
+
+    def _make_manager_mock(self) -> MagicMock:
+        manager = MagicMock()
+        engine = self._make_engine_mock()
+        manager.get_engine.return_value = engine
+        manager.get_or_create_engine.return_value = engine
+        return manager
 
     def _setup_mocks(self, table_exists: bool = True):
         mock_catalog = MagicMock()
@@ -156,18 +173,17 @@ class TestBuildModeWiring:
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
             patch('modules.compute.service._sync_iceberg_schema', return_value=False) as mock_sync,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
                 build_mode='full',
             )
 
@@ -184,18 +200,17 @@ class TestBuildModeWiring:
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
             patch('modules.compute.service._sync_iceberg_schema') as mock_sync,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
                 build_mode='incremental',
             )
 
@@ -211,18 +226,17 @@ class TestBuildModeWiring:
         with (
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
                 build_mode='full',
             )
 
@@ -238,18 +252,17 @@ class TestBuildModeWiring:
         with (
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
                 build_mode='recreate',
             )
 
@@ -266,18 +279,17 @@ class TestBuildModeWiring:
         with (
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
                 build_mode='recreate',
             )
 
@@ -299,18 +311,17 @@ class TestBuildModeWiring:
                 return_value='/tmp/iceberg/warehouse/ns/tbl/metadata/v1.metadata.json',
             ),
             patch('modules.compute.service._sync_iceberg_schema', return_value=False) as mock_sync,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = mock_arrow
             export_data(
                 session=test_db_session,
+                manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
             )
 
         mock_sync.assert_called_once()

@@ -100,17 +100,13 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
         output = tab.get('output') if isinstance(tab, dict) else None
         if not isinstance(output, dict):
             raise AnalysisValidationError('Analysis tab missing output configuration')
-        output_id = output.get('output_datasource_id')
+        output_id = output.get('result_id')
         if not output_id:
-            raise AnalysisValidationError('Analysis tab missing output.output_datasource_id')
+            raise AnalysisValidationError('Analysis tab missing output.result_id')
 
     stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)  # type: ignore[arg-type]
     session.execute(stmt)
-    datasource_ids = [
-        tab.get('datasource', {}).get('id')
-        for tab in tabs
-        if isinstance(tab.get('datasource'), dict) and tab.get('datasource', {}).get('id')
-    ]
+    datasource_ids = [ds_id for tab in tabs if isinstance(tab.get('datasource'), dict) and (ds_id := tab['datasource'].get('id'))]
     for datasource_id in datasource_ids:
         ds: DataSource | None = session.get(DataSource, datasource_id)
         if not ds:

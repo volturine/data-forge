@@ -19,9 +19,7 @@ class UnpivotHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = UnpivotParams.model_validate(params)
         index = validated.index or validated.id_vars or []

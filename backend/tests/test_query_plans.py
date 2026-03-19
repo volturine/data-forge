@@ -34,7 +34,7 @@ def test_query_plan_merges_eager_segments(test_db_session, tmp_path):
 
     result = PolarsComputeEngine._execute_preview(
         datasource_config=datasource_config,
-        pipeline_steps=steps,
+        steps=steps,
         row_limit=10,
         offset=0,
         job_id='job-plan',
@@ -77,7 +77,7 @@ def test_chart_preview_metadata_includes_overlays_and_reference_lines(test_db_se
 
     result = PolarsComputeEngine._execute_preview(
         datasource_config=datasource_config,
-        pipeline_steps=steps,
+        steps=steps,
         row_limit=10,
         offset=0,
         job_id='job-chart',

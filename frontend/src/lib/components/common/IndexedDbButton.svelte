@@ -3,6 +3,7 @@
 	import { onClickOutside } from 'runed';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
+	import { css, emptyText, cx, row } from '$lib/styles/panda';
 
 	let open = $state(false);
 	let entries = $state<Array<{ key: string; value: unknown }>>([]);
@@ -76,11 +77,22 @@
 </script>
 
 {#if configStore.publicIdbDebug}
-	<div class="relative" bind:this={dropdownRef}>
+	<div class={css({ position: 'relative' })} bind:this={dropdownRef}>
 		<button
-			class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs text-fg-tertiary hover:text-fg-primary"
-			class:!bg-bg-hover={open}
-			class:!text-fg-primary={open}
+			class={css({
+				display: 'flex',
+				cursor: 'pointer',
+				alignItems: 'center',
+				gap: '2',
+				borderWidth: '1',
+				borderColor: 'transparent',
+				paddingX: '3',
+				paddingY: '2',
+				fontSize: 'xs',
+				color: open ? 'fg.primary' : 'fg.tertiary',
+				backgroundColor: open ? 'bg.hover' : undefined,
+				_hover: { color: 'fg.primary' }
+			})}
 			onclick={toggle}
 			title="IndexedDB"
 			type="button"
@@ -90,27 +102,81 @@
 
 		{#if open}
 			<div
-				class="absolute right-0 top-full mt-2 z-engine w-90 overflow-hidden border bg-primary border-tertiary"
+				class={css({
+					position: 'absolute',
+					right: '0',
+					top: '100%',
+					marginTop: '2',
+					zIndex: 'engine',
+					width: 'popover',
+					overflow: 'hidden',
+					borderWidth: '1',
+					backgroundColor: 'bg.primary'
+				})}
 			>
-				<div class="flex items-center justify-between border-b p-3 bg-secondary border-tertiary">
-					<span class="text-sm font-semibold text-fg-primary">IndexedDB</span>
-					<div class="flex items-center gap-2">
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						borderBottomWidth: '1',
+						padding: '3',
+						backgroundColor: 'bg.secondary'
+					})}
+				>
+					<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> IndexedDB </span>
+					<div class={cx(row, css({ gap: '2' }))}>
 						<button
-							class="flex cursor-pointer items-center justify-center border border-tertiary bg-transparent px-2 py-1 text-xs text-fg-secondary hover:bg-hover"
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'transparent',
+								paddingX: '2',
+								paddingY: '1',
+								fontSize: 'xs',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.hover' }
+							})}
 							onclick={refresh}
 							type="button"
 						>
 							Refresh
 						</button>
 						<button
-							class="flex cursor-pointer items-center justify-center border border-error bg-transparent px-2 py-1 text-xs text-error-fg hover:bg-error"
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								borderColor: 'border.error',
+								backgroundColor: 'transparent',
+								paddingX: '2',
+								paddingY: '1',
+								fontSize: 'xs',
+								color: 'error.fg',
+								_hover: { backgroundColor: 'error.bg' }
+							})}
 							onclick={clearAll}
 							type="button"
 						>
 							Clear
 						</button>
 						<button
-							class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								border: 'none',
+								backgroundColor: 'transparent',
+								padding: '1',
+								color: 'fg.muted',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							})}
 							onclick={() => (open = false)}
 							type="button"
 						>
@@ -119,28 +185,67 @@
 					</div>
 				</div>
 
-				<div class="max-h-75 overflow-y-auto">
+				<div class={css({ maxHeight: 'dropdownTall', overflowY: 'auto' })}>
 					{#if loading}
 						<div
-							class="flex items-center justify-center gap-2 p-6 text-center text-sm text-fg-muted"
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								gap: '2',
+								padding: '6',
+								textAlign: 'center',
+								fontSize: 'sm',
+								color: 'fg.muted'
+							})}
 						>
-							<LoaderCircle size={16} class="animate-spin" />
+							<LoaderCircle size={16} class={css({ animation: 'spin 1s linear infinite' })} />
 							<span>Loading...</span>
 						</div>
 					{:else if entries.length === 0}
-						<div class="p-6 text-center text-sm text-fg-muted">
+						<div class={emptyText({ size: 'panel' })}>
 							<span>No entries</span>
 						</div>
 					{:else}
-						<ul class="m-0 list-none p-0">
+						<ul class={css({ margin: '0', listStyle: 'none', padding: '0' })}>
 							{#each entries as entry (entry.key)}
-								<li class="border-b p-3 last:border-b-0 border-tertiary">
-									<div class="flex items-start gap-3">
-										<div class="min-w-0 flex-1">
-											<div class="flex items-center justify-between gap-2">
-												<span class="font-mono text-xs text-fg-primary">{entry.key}</span>
+								<li
+									class={css({
+										borderBottomWidth: '1',
+										padding: '3'
+									})}
+								>
+									<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
+										<div class={css({ minWidth: '0', flex: '1' })}>
+											<div
+												class={css({
+													display: 'flex',
+													alignItems: 'center',
+													justifyContent: 'space-between',
+													gap: '2'
+												})}
+											>
+												<span
+													class={css({
+														fontFamily: 'mono',
+														fontSize: 'xs'
+													})}
+												>
+													{entry.key}
+												</span>
 												<button
-													class="flex items-center gap-1 border border-tertiary bg-transparent px-2 py-0.5 text-[11px] text-fg-secondary hover:bg-hover"
+													class={css({
+														display: 'flex',
+														alignItems: 'center',
+														gap: '1',
+														borderWidth: '1',
+														backgroundColor: 'transparent',
+														paddingX: '2',
+														paddingY: '0.5',
+														fontSize: 'xs',
+														color: 'fg.secondary',
+														_hover: { backgroundColor: 'bg.hover' }
+													})}
 													onclick={() => copyValue(entry.key, entry.value)}
 													type="button"
 												>
@@ -154,21 +259,46 @@
 												</button>
 											</div>
 											<button
-												class="mt-1 w-full text-left text-xs text-fg-muted break-words"
+												class={css({
+													marginTop: '1',
+													width: '100%',
+													textAlign: 'left',
+													fontSize: 'xs',
+													color: 'fg.muted',
+													backgroundColor: 'bg.primary',
+													wordBreak: 'break-word'
+												})}
 												onclick={() => toggleExpand(entry.key)}
 												type="button"
 											>
 												{#if expandedKey === entry.key}
-													<pre class="whitespace-pre-wrap text-xs text-fg-primary">{formatValue(
-															entry.value
-														)}</pre>
+													<pre
+														class={css({
+															whiteSpace: 'pre-wrap',
+															fontSize: 'xs'
+														})}>
+													{formatValue(entry.value)}
+												</pre>
 												{:else}
 													{truncateValue(formatValue(entry.value))}
 												{/if}
 											</button>
 										</div>
 										<button
-											class="flex cursor-pointer items-center justify-center border border-error bg-transparent px-2 py-1 text-xs text-error-fg hover:bg-error"
+											class={css({
+												display: 'flex',
+												cursor: 'pointer',
+												alignItems: 'center',
+												justifyContent: 'center',
+												borderWidth: '1',
+												borderColor: 'border.error',
+												backgroundColor: 'transparent',
+												paddingX: '2',
+												paddingY: '1',
+												fontSize: 'xs',
+												color: 'error.fg',
+												_hover: { backgroundColor: 'error.bg' }
+											})}
 											onclick={() => removeKey(entry.key)}
 											type="button"
 										>

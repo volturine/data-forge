@@ -1,8 +1,7 @@
 ---
 description: Makes code changes — the only agent that edits files
 mode: subagent
-model: github-copilot/gpt-5.2-codex
-variant: medium
+model: github-copilot/claude-sonnet-4.6
 name: implementer
 ---
 

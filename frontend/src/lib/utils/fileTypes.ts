@@ -58,18 +58,6 @@ export const SOURCE_TYPE_CATEGORY: Record<SourceType, SourceCategory> = {
 };
 
 /**
- * Color scheme for a file type (CSS-in-JS format)
- */
-export interface FileTypeColors {
-	/** Main foreground color */
-	color: string;
-	/** Border color with transparency */
-	borderColor: string;
-	/** Background color with transparency */
-	backgroundColor: string;
-}
-
-/**
  * Complete configuration for a file type
  */
 export interface FileTypeConfig {
@@ -79,8 +67,6 @@ export interface FileTypeConfig {
 	label: string;
 	/** File extensions (including the dot) */
 	extensions: string[];
-	/** Color scheme */
-	colors: FileTypeColors;
 	/** Lucide icon component */
 	icon: ComponentType;
 	/** Human-readable description */
@@ -96,11 +82,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'csv',
 		label: 'CSV',
 		extensions: ['.csv', '.tsv'],
-		colors: {
-			color: 'var(--file-csv-fg)',
-			borderColor: 'var(--file-csv-border)',
-			backgroundColor: 'var(--file-csv-bg)'
-		},
 		icon: FileSpreadsheet,
 		description: 'Comma-separated or Tab-separated values'
 	},
@@ -108,11 +89,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'parquet',
 		label: 'Parquet',
 		extensions: ['.parquet'],
-		colors: {
-			color: 'var(--file-parquet-fg)',
-			borderColor: 'var(--file-parquet-border)',
-			backgroundColor: 'var(--file-parquet-bg)'
-		},
 		icon: FileTypeIcon,
 		description: 'Apache Parquet columnar storage format'
 	},
@@ -120,11 +96,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'json',
 		label: 'JSON',
 		extensions: ['.json'],
-		colors: {
-			color: 'var(--file-json-fg)',
-			borderColor: 'var(--file-json-border)',
-			backgroundColor: 'var(--file-json-bg)'
-		},
 		icon: FileBracesCorner,
 		description: 'JavaScript Object Notation'
 	},
@@ -132,11 +103,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'ndjson',
 		label: 'NDJSON',
 		extensions: ['.ndjson', '.jsonl'],
-		colors: {
-			color: 'var(--file-ndjson-fg)',
-			borderColor: 'var(--file-ndjson-border)',
-			backgroundColor: 'var(--file-ndjson-bg)'
-		},
 		icon: FileBracesCorner,
 		description: 'Newline-delimited JSON'
 	},
@@ -144,11 +110,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'excel',
 		label: 'Excel',
 		extensions: ['.xlsx', '.xls', '.xlsm', '.xlsb'],
-		colors: {
-			color: 'var(--file-excel-fg)',
-			borderColor: 'var(--file-excel-border)',
-			backgroundColor: 'var(--file-excel-bg)'
-		},
 		icon: FileSpreadsheet,
 		description: 'Microsoft Excel workbook'
 	},
@@ -156,11 +117,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'arrow',
 		label: 'Arrow',
 		extensions: ['.arrow', '.ipc', '.feather'],
-		colors: {
-			color: 'var(--file-arrow-fg)',
-			borderColor: 'var(--file-arrow-border)',
-			backgroundColor: 'var(--file-arrow-bg)'
-		},
 		icon: Database,
 		description: 'Apache Arrow IPC format'
 	},
@@ -168,11 +124,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'avro',
 		label: 'Avro',
 		extensions: ['.avro'],
-		colors: {
-			color: 'var(--file-avro-fg)',
-			borderColor: 'var(--file-avro-border)',
-			backgroundColor: 'var(--file-avro-bg)'
-		},
 		icon: FileCode,
 		description: 'Apache Avro binary format'
 	},
@@ -180,11 +131,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'delta',
 		label: 'Delta',
 		extensions: ['_delta_log'],
-		colors: {
-			color: 'var(--file-delta-fg)',
-			borderColor: 'var(--file-delta-border)',
-			backgroundColor: 'var(--file-delta-bg)'
-		},
 		icon: Layers,
 		description: 'Delta Lake table format'
 	},
@@ -192,11 +138,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'iceberg',
 		label: 'Iceberg',
 		extensions: ['metadata'],
-		colors: {
-			color: 'var(--file-iceberg-fg)',
-			borderColor: 'var(--file-iceberg-border)',
-			backgroundColor: 'var(--file-iceberg-bg)'
-		},
 		icon: Snowflake,
 		description: 'Apache Iceberg table format'
 	},
@@ -204,11 +145,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'folder',
 		label: 'Folder',
 		extensions: [],
-		colors: {
-			color: 'var(--file-folder-fg)',
-			borderColor: 'var(--file-folder-border)',
-			backgroundColor: 'var(--file-folder-bg)'
-		},
 		icon: FolderIcon,
 		description: 'Directory or Parquet dataset'
 	},
@@ -216,11 +152,6 @@ export const FILE_TYPE_REGISTRY: Record<FileType, FileTypeConfig> = {
 		type: 'unknown',
 		label: 'File',
 		extensions: [],
-		colors: {
-			color: 'var(--file-unknown-fg)',
-			borderColor: 'var(--file-unknown-border)',
-			backgroundColor: 'var(--file-unknown-bg)'
-		},
 		icon: File,
 		description: 'Unknown file type'
 	}
@@ -235,11 +166,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		type: 'unknown',
 		label: 'File',
 		extensions: [],
-		colors: {
-			color: 'var(--source-file-fg)',
-			borderColor: 'var(--source-file-border)',
-			backgroundColor: 'var(--source-file-bg)'
-		},
 		icon: File,
 		description: 'File-based datasource'
 	},
@@ -247,11 +173,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		type: 'unknown',
 		label: 'Database',
 		extensions: [],
-		colors: {
-			color: 'var(--source-database-fg)',
-			borderColor: 'var(--source-database-border)',
-			backgroundColor: 'var(--source-database-bg)'
-		},
 		icon: Database,
 		description: 'Database connection'
 	},
@@ -259,11 +180,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		type: 'iceberg',
 		label: 'Iceberg',
 		extensions: [],
-		colors: {
-			color: 'var(--source-iceberg-fg)',
-			borderColor: 'var(--source-iceberg-border)',
-			backgroundColor: 'var(--source-iceberg-bg)'
-		},
 		icon: Snowflake,
 		description: 'Apache Iceberg table'
 	},
@@ -271,11 +187,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		type: 'unknown',
 		label: 'Analysis',
 		extensions: [],
-		colors: {
-			color: 'var(--source-analysis-fg)',
-			borderColor: 'var(--source-analysis-border)',
-			backgroundColor: 'var(--source-analysis-bg)'
-		},
 		icon: Layers,
 		description: 'Derived analysis output'
 	},
@@ -283,11 +194,6 @@ export const SOURCE_TYPE_REGISTRY: Record<SourceType, FileTypeConfig> = {
 		type: 'unknown',
 		label: 'DuckDB',
 		extensions: [],
-		colors: {
-			color: 'var(--source-duckdb-fg)',
-			borderColor: 'var(--source-duckdb-border)',
-			backgroundColor: 'var(--source-duckdb-bg)'
-		},
 		icon: Database,
 		description: 'DuckDB export'
 	}
@@ -356,54 +262,6 @@ export function detectFileType(path: string, isFolder: boolean = false): FileTyp
  */
 export function getFileTypeConfig(fileType: FileType): FileTypeConfig {
 	return FILE_TYPE_REGISTRY[fileType];
-}
-
-/**
- * Get the color scheme for a file type
- *
- * @param fileType - The file type
- * @returns The color scheme
- *
- * @example
- * ```typescript
- * const colors = getFileTypeColors('csv');
- * // Returns { color: 'var(--file-csv-fg)', borderColor: '...', backgroundColor: '...' }
- * ```
- */
-export function getFileTypeColors(fileType: FileType): FileTypeColors {
-	return FILE_TYPE_REGISTRY[fileType].colors;
-}
-
-/**
- * Get the Lucide icon component for a file type
- *
- * @param fileType - The file type
- * @returns The Lucide icon component
- *
- * @example
- * ```typescript
- * const Icon = getFileTypeIcon('json');
- * // Use in Svelte: <Icon size={16} />
- * ```
- */
-export function getFileTypeIcon(fileType: FileType): ComponentType {
-	return FILE_TYPE_REGISTRY[fileType].icon;
-}
-
-/**
- * Get the display label for a file type
- *
- * @param fileType - The file type
- * @returns The display label
- *
- * @example
- * ```typescript
- * getFileTypeLabel('parquet') // 'Parquet'
- * getFileTypeLabel('ndjson') // 'NDJSON'
- * ```
- */
-export function getFileTypeLabel(fileType: FileType): string {
-	return FILE_TYPE_REGISTRY[fileType].label;
 }
 
 /**

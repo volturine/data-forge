@@ -3,6 +3,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listNamespaces } from '$lib/api/namespaces';
 	import { normalizeNamespace } from '$lib/utils/namespace';
+	import { css, cx, input } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -147,7 +148,12 @@
 
 {#if open}
 	<div
-		class="fixed inset-0 z-popover bg-transparent"
+		class={css({
+			position: 'fixed',
+			inset: '0',
+			zIndex: 'popover',
+			backgroundColor: 'transparent'
+		})}
 		onclick={handleClose}
 		onkeydown={handleBackdropKeydown}
 		role="button"
@@ -155,7 +161,17 @@
 		aria-label="Close namespace menu"
 	></div>
 	<div
-		class="fixed z-overlay flex flex-col border border-tertiary bg-panel shadow-drag focus:outline-none max-h-[60vh]"
+		class={css({
+			position: 'fixed',
+			zIndex: 'overlay',
+			display: 'flex',
+			flexDirection: 'column',
+			borderWidth: '1',
+			backgroundColor: 'bg.primary',
+			boxShadow: 'drag',
+			outline: 'none',
+			maxHeight: '60vh'
+		})}
 		role="dialog"
 		aria-modal="false"
 		aria-labelledby="namespace-picker-search"
@@ -164,10 +180,18 @@
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => e.stopPropagation()}
 	>
-		<div class="flex flex-col gap-2 p-2">
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '2', padding: '2' })}>
 			<input
 				id="namespace-picker-search"
-				class="w-full border border-tertiary bg-primary px-2 py-1.5 text-sm text-fg-primary placeholder:text-fg-muted focus:border-accent-primary focus:outline-none"
+				class={cx(
+					input(),
+					css({
+						paddingX: '2',
+						paddingY: '1.5',
+						fontSize: 'sm',
+						_focus: { borderColor: 'accent.primary' }
+					})
+				)}
 				type="text"
 				bind:this={searchInput}
 				bind:value={searchQuery}
@@ -176,36 +200,90 @@
 				autocomplete="off"
 			/>
 
-			<div class="flex max-h-60 flex-col overflow-y-auto">
+			<div
+				class={css({
+					display: 'flex',
+					maxHeight: 'list',
+					flexDirection: 'column',
+					overflowY: 'auto'
+				})}
+			>
 				{#if namespacesQuery.isLoading}
-					<div class="p-2 text-xs text-fg-muted">Loading...</div>
+					<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.muted' })}>Loading...</div>
 				{:else if namespacesQuery.isError}
-					<div class="p-2 text-xs text-error">Error loading namespaces</div>
+					<div class={css({ padding: '2', fontSize: 'xs', color: 'error' })}>
+						Error loading namespaces
+					</div>
 				{:else if filteredNamespaces.length === 0 && !canCreate}
-					<div class="p-2 text-xs text-fg-muted">No results</div>
+					<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.muted' })}>No results</div>
 				{:else}
 					{#if canCreate}
 						<button
-							class="flex w-full cursor-pointer items-center justify-between border-b border-tertiary px-2 py-1.5 text-left text-fg-secondary hover:bg-hover hover:text-fg-primary transition-colors"
+							class={css({
+								display: 'flex',
+								width: '100%',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								borderBottomWidth: '1',
+								paddingX: '2',
+								paddingY: '1.5',
+								textAlign: 'left',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color',
+								transitionDuration: '150ms',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							})}
 							onclick={handleCreate}
 							type="button"
 						>
-							<span class="text-xs">Create "{normalizedCandidate}"</span>
-							<span class="text-[10px] text-fg-muted uppercase tracking-wider">New</span>
+							<span class={css({ fontSize: 'xs' })}>Create "{normalizedCandidate}"</span>
+							<span
+								class={css({
+									fontSize: '2xs',
+									color: 'fg.muted',
+									textTransform: 'uppercase',
+									letterSpacing: 'wider'
+								})}
+							>
+								New
+							</span>
 						</button>
 					{/if}
 
 					{#each filteredNamespaces as name (name)}
 						<button
-							class="flex w-full cursor-pointer items-center justify-between border-l-2 border-transparent px-2 py-1.5 text-left hover:bg-hover transition-colors"
-							class:border-l-accent-primary={name === selected}
-							class:bg-accent-bg={name === selected}
-							class:text-fg-primary={name === selected}
-							class:text-fg-secondary={name !== selected}
+							class={css({
+								display: 'flex',
+								width: '100%',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								borderLeftWidth: '2',
+								borderLeftColor: name === selected ? 'accent.primary' : 'transparent',
+								backgroundColor: name === selected ? 'accent.bg' : 'transparent',
+								color: name === selected ? 'fg.primary' : 'fg.secondary',
+								paddingX: '2',
+								paddingY: '1.5',
+								textAlign: 'left',
+								transitionProperty: 'background-color',
+								transitionDuration: '150ms',
+								_hover: { backgroundColor: 'bg.hover' }
+							})}
 							onclick={() => handleSelect(name)}
 							type="button"
 						>
-							<span class="truncate text-sm font-medium">{name}</span>
+							<span
+								class={css({
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+									fontSize: 'sm',
+									fontWeight: 'medium'
+								})}
+							>
+								{name}
+							</span>
 						</button>
 					{/each}
 				{/if}

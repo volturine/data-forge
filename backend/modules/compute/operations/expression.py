@@ -36,9 +36,8 @@ def parse_expression(expr_str: str) -> pl.Expr:
         'os.system',
         'os.popen',
     ]
-    for pattern in dangerous:
-        if pattern in expr_str:
-            raise ValueError(f'Expression contains forbidden pattern: {pattern}')
+    if found := next((p for p in dangerous if p in expr_str), None):
+        raise ValueError(f'Expression contains forbidden pattern: {found}')
 
     try:
         result = eval(expr_str, {'__builtins__': {}, 'pl': pl})  # noqa: S307
@@ -60,13 +59,8 @@ class ExpressionHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = ExpressionParams.model_validate(params)
 
-        expr = parse_expression(validated.expression)
-        aliased = expr.alias(validated.column_name)
-
-        return lf.with_columns(aliased)
+        return lf.with_columns(parse_expression(validated.expression).alias(validated.column_name))

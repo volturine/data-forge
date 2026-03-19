@@ -70,7 +70,6 @@ def list_udfs(
 ) -> list[UdfResponseSchema]:
     stmt = select(Udf)
 
-    # Apply SQL-level text search filtering
     if query:
         q = f'%{query.lower()}%'
         stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))  # type: ignore[arg-type, attr-defined, union-attr]
@@ -78,21 +77,7 @@ def list_udfs(
     result = session.execute(stmt)
     udfs = result.scalars().all()
 
-    # Apply Python-side filters for complex JSON fields
-    filtered_udfs = []
-    for u in udfs:
-        # Signature dtype key filter (requires parsing JSON signature)
-        if dtype_key and _signature_key(u.signature) != dtype_key:
-            continue
-
-        # Tag filter (requires parsing JSON tags array)
-        if tag:
-            tags = u.tags or []
-            if tag not in tags:
-                continue
-
-        filtered_udfs.append(u)
-
+    filtered_udfs = [u for u in udfs if (not dtype_key or _signature_key(u.signature) == dtype_key) and (not tag or tag in (u.tags or []))]
     return [UdfResponseSchema.model_validate(u) for u in filtered_udfs]
 
 
@@ -276,7 +261,4 @@ def seed_defaults(session: Session) -> list[UdfResponseSchema]:
         ),
     ]
 
-    created: list[UdfResponseSchema] = []
-    for item in defaults:
-        created.append(create_udf(session, item))
-    return created
+    return [create_udf(session, item) for item in defaults]

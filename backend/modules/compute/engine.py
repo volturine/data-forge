@@ -6,6 +6,7 @@ import resource
 import threading
 import time
 import uuid
+from collections import deque
 from multiprocessing.process import BaseProcess
 from queue import Empty
 
@@ -13,11 +14,11 @@ import polars as pl
 
 from core.exceptions import PipelineValidationError
 from modules.compute.core.exports import get_export_format
-from modules.compute.operations import get_operation_handlers
+from modules.compute.operations import HANDLERS
 from modules.compute.operations.datasource import load_datasource
 from modules.compute.operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
 from modules.compute.step_converter import convert_config_to_params, convert_step_format
-from modules.compute.utils import apply_pipeline_steps, normalize_timezones
+from modules.compute.utils import apply_steps, normalize_timezones
 
 logger = logging.getLogger(__name__)
 
@@ -72,19 +73,7 @@ class PolarsComputeEngine:
             with contextlib.suppress(Exception):
                 self.process.join(timeout=1.0)
             self.process = None
-        # Close old queues before creating new ones (old ones may be corrupted)
-        if hasattr(self, 'command_queue'):
-            with contextlib.suppress(Exception):
-                self.command_queue.cancel_join_thread()
-                self.command_queue.close()
-            with contextlib.suppress(Exception):
-                self.command_queue.join_thread()
-        if hasattr(self, 'result_queue'):
-            with contextlib.suppress(Exception):
-                self.result_queue.cancel_join_thread()
-                self.result_queue.close()
-            with contextlib.suppress(Exception):
-                self.result_queue.join_thread()
+        self._close_queues()
         self.command_queue = self._mp_context.Queue()
         self.result_queue = self._mp_context.Queue()
 
@@ -95,19 +84,9 @@ class PolarsComputeEngine:
 
         from core.config import settings
 
-        # Determine effective resource values (override > settings)
-        # None in resource_config means use settings default
-        max_threads = self.resource_config.get('max_threads')
-        if max_threads is None:
-            max_threads = settings.polars_max_threads
-
-        max_memory_mb = self.resource_config.get('max_memory_mb')
-        if max_memory_mb is None:
-            max_memory_mb = settings.polars_max_memory_mb
-
-        streaming_chunk_size = self.resource_config.get('streaming_chunk_size')
-        if streaming_chunk_size is None:
-            streaming_chunk_size = settings.polars_streaming_chunk_size
+        max_threads = self.resource_config.get('max_threads', settings.polars_max_threads)
+        max_memory_mb = self.resource_config.get('max_memory_mb', settings.polars_max_memory_mb)
+        streaming_chunk_size = self.resource_config.get('streaming_chunk_size', settings.polars_streaming_chunk_size)
 
         # Store effective resources for status reporting
         self.effective_resources = {
@@ -160,7 +139,7 @@ class PolarsComputeEngine:
     def preview(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         row_limit: int = 1000,
         offset: int = 0,
         additional_datasources: dict[str, dict] | None = None,
@@ -168,7 +147,7 @@ class PolarsComputeEngine:
         return self._enqueue(
             'preview',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             row_limit=row_limit,
             offset=offset,
             additional_datasources=additional_datasources or {},
@@ -177,7 +156,7 @@ class PolarsComputeEngine:
     def export(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         output_path: str,
         export_format: str = 'csv',
         additional_datasources: dict[str, dict] | None = None,
@@ -185,7 +164,7 @@ class PolarsComputeEngine:
         return self._enqueue(
             'export',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             output_path=output_path,
             export_format=export_format,
             additional_datasources=additional_datasources or {},
@@ -194,26 +173,26 @@ class PolarsComputeEngine:
     def get_schema(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
         return self._enqueue(
             'schema',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             additional_datasources=additional_datasources or {},
         )
 
     def get_row_count(
         self,
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         additional_datasources: dict[str, dict] | None = None,
     ) -> str:
         return self._enqueue(
             'row_count',
             datasource_config=datasource_config,
-            pipeline_steps=pipeline_steps,
+            steps=steps,
             additional_datasources=additional_datasources or {},
         )
 
@@ -278,8 +257,21 @@ class PolarsComputeEngine:
                 self.process.kill()
                 self.process.join(timeout=1)
 
+        self._close_queues()
         self.is_running = False
         self.process = None
+
+    def _close_queues(self) -> None:
+        """Close queues to properly unregister semaphores from resource tracker."""
+        for queue in (self.command_queue, self.result_queue):
+            if queue is None:
+                continue
+            with contextlib.suppress(Exception):
+                queue.cancel_join_thread()
+            with contextlib.suppress(Exception):
+                queue.close()
+            with contextlib.suppress(Exception):
+                queue.join_thread()
 
     @staticmethod
     def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue, max_memory_mb: int = 0) -> None:
@@ -306,7 +298,7 @@ class PolarsComputeEngine:
 
                 job_id = command['job_id']
                 datasource_config = command['datasource_config']
-                pipeline_steps = command['pipeline_steps']
+                steps = command['steps']
                 additional_datasources = command.get('additional_datasources', {})
 
                 logger.debug(f'Job {job_id}: Starting {command["type"]} operation')
@@ -319,7 +311,7 @@ class PolarsComputeEngine:
                         offset = command.get('offset', 0)
                         result_data = PolarsComputeEngine._execute_preview(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             row_limit,
                             offset,
                             job_id,
@@ -330,7 +322,7 @@ class PolarsComputeEngine:
                         export_format = command.get('export_format', 'csv')
                         result_data = PolarsComputeEngine._execute_export(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             output_path,
                             export_format,
                             job_id,
@@ -339,14 +331,14 @@ class PolarsComputeEngine:
                     elif command['type'] == 'schema':
                         result_data = PolarsComputeEngine._execute_schema(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             job_id,
                             additional_datasources,
                         )
                     elif command['type'] == 'row_count':
                         result_data = PolarsComputeEngine._execute_row_count(
                             datasource_config,
-                            pipeline_steps,
+                            steps,
                             job_id,
                             additional_datasources,
                         )
@@ -395,13 +387,13 @@ class PolarsComputeEngine:
     @staticmethod
     def build_pipeline(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> pl.LazyFrame:
         lf, _step_timings, _plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -410,31 +402,30 @@ class PolarsComputeEngine:
     @staticmethod
     def _build_pipeline(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> tuple[pl.LazyFrame, dict[str, float], list[pl.LazyFrame]]:
         lf = load_datasource(datasource_config)
 
         right_sources: dict[str, pl.LazyFrame] = {}
-        if additional_datasources:
-            for ds_id, ds_config in additional_datasources.items():
-                try:
-                    right_sources[ds_id] = load_datasource(ds_config)
-                except Exception as e:
-                    logger.error(f'Failed to load additional datasource {ds_id}: {e}', exc_info=True)
-                    raise PipelineValidationError(
-                        f'Failed to load datasource {ds_id}: {e}',
-                        details={'datasource_id': ds_id},
-                    ) from e
+        for ds_id, ds_config in (additional_datasources or {}).items():
+            try:
+                right_sources[ds_id] = load_datasource(ds_config)
+            except Exception as e:
+                logger.error(f'Failed to load additional datasource {ds_id}: {e}', exc_info=True)
+                raise PipelineValidationError(
+                    f'Failed to load datasource {ds_id}: {e}',
+                    details={'datasource_id': ds_id},
+                ) from e
 
-        pipeline_steps = apply_pipeline_steps(pipeline_steps)
+        steps = apply_steps(steps)
 
-        if not pipeline_steps:
+        if not steps:
             return lf, {}, [lf]
 
         step_map: dict[str, dict] = {}
-        for step in pipeline_steps:
+        for step in steps:
             step_id = step.get('id')
             if not step_id:
                 raise ValueError('Each pipeline step must include an id')
@@ -468,10 +459,10 @@ class PolarsComputeEngine:
             dependents.setdefault(dep_id, []).append(step_id)
             in_degree[step_id] = in_degree.get(step_id, 0) + 1
 
-        queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
+        queue = deque(step_id for step_id, degree in in_degree.items() if degree == 0)
         ordered_steps: list[dict] = []
         while queue:
-            current_id = queue.pop(0)
+            current_id = queue.popleft()
             ordered_steps.append(step_map[current_id])
             for child_id in dependents.get(current_id, []):
                 in_degree[child_id] = in_degree.get(child_id, 0) - 1
@@ -593,7 +584,7 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_preview(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         row_limit: int,
         offset: int,
         job_id: str,
@@ -602,7 +593,7 @@ class PolarsComputeEngine:
         """Execute pipeline and return limited rows for preview."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -610,14 +601,13 @@ class PolarsComputeEngine:
 
         preview_lf = lf
         metadata: dict | None = None
-        if pipeline_steps:
-            last_step = pipeline_steps[-1]
+        if steps:
+            last_step = steps[-1]
             last_type = str(last_step.get('type', ''))
             if last_type == 'chart' or last_type.startswith('plot_'):
                 chart_config = last_step.get('config', {})
                 if last_type.startswith('plot_'):
-                    chart_sub = last_type.replace('plot_', '')
-                    chart_config = {**chart_config, 'chart_type': chart_sub}
+                    chart_config = {**chart_config, 'chart_type': last_type.replace('plot_', '')}
                 try:
                     chart_params = convert_config_to_params('chart', chart_config)
                 except ValueError:
@@ -666,7 +656,7 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_export(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         output_path: str,
         export_format: str,
         job_id: str,
@@ -675,7 +665,7 @@ class PolarsComputeEngine:
         """Execute pipeline and write full results to file."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -704,14 +694,14 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_schema(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and return schema without collecting full data."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -733,14 +723,14 @@ class PolarsComputeEngine:
     @staticmethod
     def _execute_row_count(
         datasource_config: dict,
-        pipeline_steps: list[dict],
+        steps: list[dict],
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
     ) -> dict:
         """Execute pipeline and return row count without collecting full data."""
         lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
             datasource_config,
-            pipeline_steps,
+            steps,
             job_id,
             additional_datasources,
         )
@@ -769,8 +759,7 @@ class PolarsComputeEngine:
             raise ValueError('Step operation is required')
         params = step.get('params', {})
 
-        handlers = get_operation_handlers()
-        handler = handlers.get(operation)
+        handler = HANDLERS.get(operation)
 
         if not handler:
             raise ValueError(f'Unsupported operation: {operation}')

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import * as d3 from 'd3';
+	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { css, cx, button, divider } from '$lib/styles/panda';
 	import { downloadBlob } from '$lib/api/compute';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
@@ -20,9 +22,10 @@
 		chartType: ChartType;
 		config: Record<string, unknown>;
 		metadata?: Record<string, unknown> | null;
+		height?: number;
 	}
 
-	const { data, chartType, config, metadata }: Props = $props();
+	const { data, chartType, config, metadata, height = 300 }: Props = $props();
 
 	/* ── Enterprise color palette (Contour-inspired) ── */
 	const PALETTE = [
@@ -45,11 +48,20 @@
 	/* ── Tooltip state (reactive, avoids direct DOM manipulation) ── */
 	let tipTitle = $state('');
 	let tipLines: Array<{ label: string; value: string }> = $state([]);
-	let tipX = $state(0);
-	let tipY = $state(0);
+	let _tipX = $state(0);
+	let _tipY = $state(0);
 	let tipVisible = $state(false);
 	const selectedKeys = new SvelteSet<string>();
 	const hiddenSeries = new SvelteSet<string>();
+	type HtmlLegend = {
+		labels: string[];
+		getColor: (l: string) => string;
+		onClick: (label: string, event: MouseEvent | KeyboardEvent) => void;
+		position: 'top' | 'bottom' | 'left' | 'right';
+	};
+	let htmlLegend = $state<HtmlLegend | null>(null);
+	let legendCollapsed = $state(false);
+	const legendPosition = $derived((config.legend_position as string) || 'right');
 	let zoomTransform = $state<d3.ZoomTransform | null>(null);
 	let zoomBehavior = $state<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
 	let zoomTarget = $state<SVGSVGElement | null>(null);
@@ -439,8 +451,8 @@
 		if (top < 4) top = event.clientY - rect.top + 14;
 		tipTitle = title;
 		tipLines = lines;
-		tipX = left;
-		tipY = top;
+		_tipX = left;
+		_tipY = top;
 		tipVisible = true;
 	}
 	function hideTip() {
@@ -515,7 +527,7 @@
 			);
 		grid
 			.selectAll('line')
-			.attr('stroke', 'var(--border-primary)')
+			.attr('stroke', 'var(--colors-border-primary)')
 			.attr('stroke-opacity', 0.15)
 			.attr('stroke-dasharray', '3,3');
 		grid.select('.domain').remove();
@@ -536,7 +548,7 @@
 		grid.attr('transform', `translate(0,${h})`);
 		grid
 			.selectAll('line')
-			.attr('stroke', 'var(--border-primary)')
+			.attr('stroke', 'var(--colors-border-primary)')
 			.attr('stroke-opacity', 0.15)
 			.attr('stroke-dasharray', '3,3');
 		grid.select('.domain').remove();
@@ -549,9 +561,9 @@
 			.attr('x', w / 2)
 			.attr('y', h + 44)
 			.attr('text-anchor', 'middle')
-			.attr('fill', 'var(--fg-muted)')
+			.attr('fill', 'var(--colors-fg-muted)')
 			.style('font-size', '11px')
-			.style('font-family', 'var(--font-mono)')
+			.style('font-family', 'var(--fonts-mono)')
 			.text(xLabel);
 		svg
 			.append('text')
@@ -559,9 +571,9 @@
 			.attr('x', -h / 2)
 			.attr('y', -48)
 			.attr('text-anchor', 'middle')
-			.attr('fill', 'var(--fg-muted)')
+			.attr('fill', 'var(--colors-fg-muted)')
 			.style('font-size', '11px')
-			.style('font-family', 'var(--font-mono)')
+			.style('font-family', 'var(--fonts-mono)')
 			.text(yLabel);
 	}
 
@@ -573,75 +585,33 @@
 			.attr('x', width / 2)
 			.attr('y', 18)
 			.attr('text-anchor', 'middle')
-			.attr('fill', 'var(--fg-primary)')
+			.attr('fill', 'var(--colors-fg-primary)')
 			.style('font-size', '12px')
-			.style('font-family', 'var(--font-mono)')
+			.style('font-family', 'var(--fonts-mono)')
 			.text(label);
 	}
 
 	function addLegend(
-		svg: Svg,
+		_svg: Svg,
 		labels: string[],
 		color: (l: string) => string,
-		w: number,
-		h: number,
+		_w: number,
+		_h: number,
 		options?: { onClick?: (label: string, event: MouseEvent | KeyboardEvent) => void }
 	) {
 		const position = str(config.legend_position) || 'right';
-		if (position === 'none') return;
-		const g = svg.append('g').attr('class', 'legend');
-		const isVertical = position === 'left' || position === 'right';
-		let xOff = 0;
-		let yOff = 0;
-		let maxWidth = 0;
-		for (const label of labels) {
-			const truncated = label.length > 14 ? label.slice(0, 14) + '…' : label;
-			const item = g
-				.append('g')
-				.attr('class', 'legend-item')
-				.attr('data-legend', label)
-				.attr('transform', isVertical ? `translate(0, ${yOff})` : `translate(${xOff}, 0)`);
-			if (options?.onClick) {
-				item
-					.attr('role', 'button')
-					.attr('tabindex', 0)
-					.attr('aria-label', `Toggle ${label}`)
-					.style('cursor', 'pointer')
-					.on('click', function (event: MouseEvent) {
-						options.onClick?.(label, event);
-					})
-					.on('keydown', function (event: KeyboardEvent) {
-						if (event.key !== 'Enter' && event.key !== ' ') return;
-						event.preventDefault();
-						options.onClick?.(label, event);
-					});
-			}
-			item
-				.append('rect')
-				.attr('width', 8)
-				.attr('height', 8)
-				.attr('y', -8)
-				.attr('fill', color(label))
-				.attr('rx', 1);
-			item
-				.append('text')
-				.attr('x', 12)
-				.attr('fill', 'var(--fg-muted)')
-				.style('font-size', '10px')
-				.style('font-family', 'var(--font-mono)')
-				.text(truncated);
-			const itemWidth = truncated.length * 6.2 + 24;
-			if (itemWidth > maxWidth) maxWidth = itemWidth;
-			if (isVertical) yOff += 16;
-			if (!isVertical) xOff += itemWidth;
+		if (position === 'none') {
+			htmlLegend = null;
+			return;
 		}
-		const baseY = position === 'top' ? -24 : -8;
-		const y = position === 'bottom' ? h + 12 : baseY;
-		let x = 0;
-		if (position === 'right') x = w - maxWidth;
-		if (position === 'top' || position === 'bottom') x = (w - xOff) / 2;
-		g.attr('transform', `translate(${x}, ${y})`);
-		updateLegend(svg);
+		htmlLegend = {
+			labels,
+			getColor: color,
+			position: position as 'top' | 'bottom' | 'left' | 'right',
+			onClick: (label: string, event: MouseEvent | KeyboardEvent) => {
+				options?.onClick?.(label, event);
+			}
+		};
 	}
 
 	function addRightYAxis(svg: Svg, y: AxisScale, w: number) {
@@ -657,11 +627,11 @@
 			);
 		axis
 			.selectAll('.tick text')
-			.attr('fill', 'var(--fg-tertiary)')
+			.attr('fill', 'var(--colors-fg-tertiary)')
 			.style('font-size', '10px')
-			.style('font-family', 'var(--font-mono)');
-		axis.selectAll('.domain').attr('stroke', 'var(--border-primary)');
-		axis.selectAll('.tick line').attr('stroke', 'var(--border-primary)');
+			.style('font-family', 'var(--fonts-mono)');
+		axis.selectAll('.domain').attr('stroke', 'var(--colors-border-primary)');
+		axis.selectAll('.tick line').attr('stroke', 'var(--colors-border-primary)');
 		return axis;
 	}
 
@@ -683,7 +653,7 @@
 			const axis = referenceLineAxisValue(line);
 			const value = getOptionalNumber(line.value);
 			if (value == null) continue;
-			const color = str(line.color) || 'var(--border-primary)';
+			const color = str(line.color) || 'var(--colors-border-primary)';
 			const label = str(line.label);
 			if (axis === 'x') {
 				let xPos: number | null = null;
@@ -718,7 +688,7 @@
 						.attr('y', 12)
 						.attr('fill', color)
 						.style('font-size', '10px')
-						.style('font-family', 'var(--font-mono)')
+						.style('font-family', 'var(--fonts-mono)')
 						.text(label);
 				}
 				continue;
@@ -759,7 +729,7 @@
 					.attr('text-anchor', 'end')
 					.attr('fill', color)
 					.style('font-size', '10px')
-					.style('font-family', 'var(--font-mono)')
+					.style('font-family', 'var(--fonts-mono)')
 					.text(label);
 			}
 		}
@@ -784,13 +754,13 @@
 	}
 
 	function styleChart(svg: Svg) {
-		svg.selectAll('.domain').attr('stroke', 'var(--border-primary)');
-		svg.selectAll('.tick line:not(.grid line)').attr('stroke', 'var(--border-primary)');
+		svg.selectAll('.domain').attr('stroke', 'var(--colors-border-primary)');
+		svg.selectAll('.tick line:not(.grid line)').attr('stroke', 'var(--colors-border-primary)');
 		svg
 			.selectAll('.tick text')
-			.attr('fill', 'var(--fg-tertiary)')
+			.attr('fill', 'var(--colors-fg-tertiary)')
 			.style('font-size', '10px')
-			.style('font-family', 'var(--font-mono)');
+			.style('font-family', 'var(--fonts-mono)');
 	}
 
 	function makeXAxis(
@@ -1034,6 +1004,7 @@
 
 		function draw() {
 			if (!chartEl) return;
+			htmlLegend = null;
 			d3.select(chartEl).selectAll('svg').remove();
 			const rect = chartEl.getBoundingClientRect();
 			const w = rect.width || 400;
@@ -1161,7 +1132,7 @@
 			const series = d3.stack<StackRow>().keys(groups)(stackData.rows);
 
 			const maxValue = normalized ? 1 : (d3.max(stackData.totals) ?? 0);
-			const y = buildYScale([maxValue], 0, h);
+			const y = buildYScale([0, maxValue], 0, h);
 
 			refX = x;
 			refY = y;
@@ -1393,9 +1364,9 @@
 						.attr('x', (r) => (x0(str(r.x)) ?? 0) + (x1(group) ?? 0) + x1.bandwidth() / 2)
 						.attr('y', (r) => y(num(r.y)) - 5)
 						.attr('text-anchor', 'middle')
-						.attr('fill', 'var(--fg-tertiary)')
+						.attr('fill', 'var(--colors-fg-tertiary)')
 						.style('font-size', '9px')
-						.style('font-family', 'var(--font-mono)')
+						.style('font-family', 'var(--fonts-mono)')
 						.style('pointer-events', 'none')
 						.text((r) => fmtFull(num(r.y)));
 				}
@@ -1531,9 +1502,9 @@
 				.attr('x', (r) => (x(str(r.x)) ?? 0) + x.bandwidth() / 2)
 				.attr('y', (r) => y(num(r.y)) - 6)
 				.attr('text-anchor', 'middle')
-				.attr('fill', 'var(--fg-secondary)')
+				.attr('fill', 'var(--colors-fg-secondary)')
 				.style('font-size', '10px')
-				.style('font-family', 'var(--font-mono)')
+				.style('font-family', 'var(--fonts-mono)')
 				.style('pointer-events', 'none')
 				.text((r) => fmtFull(num(r.y)));
 
@@ -2084,7 +2055,7 @@
 			const normalized = stackMode === '100%';
 			const stackData = buildStackRows(labels, groups, groupCol);
 			const maxValue = normalized ? 1 : (d3.max(stackData.totals) ?? 0);
-			const y = buildYScale([maxValue], 0, h);
+			const y = buildYScale([0, maxValue], 0, h);
 
 			addGrid(svg, y, w);
 			makeXAxis(svg, x, h, labels);
@@ -2406,7 +2377,7 @@
 			.attr('height', y.bandwidth())
 			.attr('rx', 2)
 			.attr('fill', (r) => color(num(r.value)))
-			.attr('stroke', 'var(--border-primary)')
+			.attr('stroke', 'var(--colors-border-primary)')
 			.attr('stroke-opacity', 0.3)
 			.style('cursor', 'pointer')
 			.on('mouseover', function (event: MouseEvent, r: Row) {
@@ -2612,7 +2583,7 @@
 					.attr('cy', (r) => y(num(r.y)))
 					.attr('r', 3.5)
 					.attr('fill', color(group))
-					.attr('stroke', 'var(--bg-primary)')
+					.attr('stroke', 'var(--colors-bg-primary)')
 					.attr('stroke-width', 1.5)
 					.style('cursor', 'pointer')
 					.on('mouseover', function (event: MouseEvent, r: Row) {
@@ -2676,7 +2647,7 @@
 				.attr('cy', (r) => y(num(r.y)))
 				.attr('r', 3.5)
 				.attr('fill', getPrimaryColor())
-				.attr('stroke', 'var(--bg-primary)')
+				.attr('stroke', 'var(--colors-bg-primary)')
 				.attr('stroke-width', 1.5)
 				.style('cursor', 'pointer')
 				.on('mouseover', function (event: MouseEvent, r: Row) {
@@ -2809,7 +2780,7 @@
 					);
 					grid
 						.selectAll('line')
-						.attr('stroke', 'var(--border-primary)')
+						.attr('stroke', 'var(--colors-border-primary)')
 						.attr('stroke-opacity', 0.15)
 						.attr('stroke-dasharray', '3,3');
 					grid.select('.domain').remove();
@@ -2949,9 +2920,9 @@
 					.attr('x', cx)
 					.attr('y', margin + 8)
 					.attr('text-anchor', 'middle')
-					.attr('fill', 'var(--fg-muted)')
+					.attr('fill', 'var(--colors-fg-muted)')
 					.style('font-size', '10px')
-					.style('font-family', 'var(--font-mono)')
+					.style('font-family', 'var(--fonts-mono)')
 					.text(groupName || 'Group');
 			}
 
@@ -2961,7 +2932,7 @@
 				.append('path')
 				.attr('d', groupArc)
 				.attr('fill', (_, i) => color(labels[i] ?? ''))
-				.attr('stroke', 'var(--bg-primary)')
+				.attr('stroke', 'var(--colors-bg-primary)')
 				.attr('stroke-width', 2)
 				.style('cursor', 'pointer')
 				.on('mouseover', function (event: MouseEvent, d) {
@@ -2984,9 +2955,9 @@
 				.attr('transform', (d) => `translate(${groupLabelArc.centroid(d)})`)
 				.attr('text-anchor', 'middle')
 				.attr('dominant-baseline', 'central')
-				.attr('fill', 'var(--fg-primary)')
+				.attr('fill', 'var(--colors-fg-primary)')
 				.style('font-size', '10px')
-				.style('font-family', 'var(--font-mono)')
+				.style('font-family', 'var(--fonts-mono)')
 				.style('pointer-events', 'none')
 				.text((_, i) => {
 					const pct = total ? ((values[i] / total) * 100).toFixed(0) : '0';
@@ -3143,7 +3114,7 @@
 		vGrid.attr('transform', `translate(0,${h})`);
 		vGrid
 			.selectAll('line')
-			.attr('stroke', 'var(--border-primary)')
+			.attr('stroke', 'var(--colors-border-primary)')
 			.attr('stroke-opacity', 0.15)
 			.attr('stroke-dasharray', '3,3');
 		vGrid.select('.domain').remove();
@@ -3374,7 +3345,7 @@
 					);
 					grid
 						.selectAll('line')
-						.attr('stroke', 'var(--border-primary)')
+						.attr('stroke', 'var(--colors-border-primary)')
 						.attr('stroke-opacity', 0.15)
 						.attr('stroke-dasharray', '3,3');
 					grid.select('.domain').remove();
@@ -3510,7 +3481,7 @@
 		vGrid.attr('transform', `translate(0,${h})`);
 		vGrid
 			.selectAll('line')
-			.attr('stroke', 'var(--border-primary)')
+			.attr('stroke', 'var(--colors-border-primary)')
 			.attr('stroke-opacity', 0.15)
 			.attr('stroke-dasharray', '3,3');
 		vGrid.select('.domain').remove();
@@ -3614,118 +3585,425 @@
 
 		styleChart(svg);
 	}
+
+	const outerCss = css({ width: '100%', backgroundColor: 'bg.primary' });
+
+	const toolbarCss = css({
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+		paddingY: '1.5',
+		paddingX: '2.5',
+		borderBottomWidth: '1'
+	});
+
+	const controlsCss = css({ display: 'flex', gap: '1.5' });
+
+	const wrapperCss = css({
+		position: 'relative',
+		width: '100%',
+		overflow: 'hidden',
+		contain: 'content'
+	});
+
+	const areaCss = css({ width: '100%', height: '100%' });
+
+	const emptyCss = css({
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		height: '100%',
+		color: 'fg.muted',
+		fontSize: 'xs'
+	});
+
+	const tooltipCss = css({
+		position: 'absolute',
+		pointerEvents: 'none',
+		paddingX: '3',
+		paddingY: '2',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		fontSize: 'sm',
+		boxShadow: 'lg',
+		wordBreak: 'break-word',
+		zIndex: 'tooltip',
+		transition: 'opacity 75ms'
+	});
+
+	const tooltipVisibleCss = css({ opacity: '1' });
+	const tooltipHiddenCss = css({ opacity: '0' });
+
+	const legendBaseCss = css({
+		display: 'flex',
+		flexWrap: 'wrap',
+		alignItems: 'center',
+		rowGap: '1',
+		columnGap: '2',
+		backgroundColor: 'bg.secondary',
+		borderBottomWidth: '1'
+	});
+
+	const legendCollapsedCss = css({
+		background: 'transparent',
+		border: 'none',
+		justifyContent: 'flex-end'
+	});
+
+	const legendBottomCss = cx(
+		divider,
+		css({
+			borderBottom: 'none'
+		})
+	);
+
+	const legendBottomCollapsedCss = css({ justifyContent: 'flex-start' });
+
+	const pillCss = css({
+		display: 'flex',
+		alignItems: 'center',
+		gap: 'px',
+		paddingY: '1',
+		paddingX: '2',
+		background: 'color-mix(in srgb, {colors.bg.primary} 90%, transparent)',
+		borderWidth: '1',
+		borderRadius: 'pill',
+		cursor: 'pointer',
+		transition: 'background 120ms ease, border-color 120ms ease',
+		_hover: {
+			background: 'bg.secondary'
+		}
+	});
+
+	const dotCss = css({
+		width: 'barTall',
+		height: 'barTall',
+		borderRadius: '50%',
+		flexShrink: '0',
+		transition: 'opacity 120ms ease'
+	});
+
+	const dotFadedCss = css({ opacity: '0.3' });
+
+	const handleCss = css({
+		flexShrink: '0',
+		alignSelf: 'stretch',
+		width: 'bar',
+		borderRadius: 'xs',
+		marginLeft: 'px',
+		cursor: 'pointer',
+		opacity: '0',
+		backgroundColor: 'bg.indicator',
+		transition: 'opacity 150ms ease',
+		'.group:hover &': { opacity: '0.15' },
+		_hover: { opacity: '0.5' }
+	});
+
+	const sideCss = css({
+		position: 'absolute',
+		top: '7',
+		maxHeight: 'calc(100% - 44px)',
+		display: 'flex',
+		flexDirection: 'row',
+		alignItems: 'flex-start',
+		zIndex: '5'
+	});
+
+	const sideRightCss = css({ right: '6' });
+	const sideLeftCss = css({ left: '16' });
+
+	const tabCss = css({
+		flexShrink: '0',
+		alignSelf: 'center',
+		width: 'icon',
+		height: 'rowXl',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		cursor: 'pointer',
+		background: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+		borderWidth: '1',
+		color: 'fg.muted',
+		transition: 'background-color 120ms ease, color 120ms ease',
+		_hover: {
+			background: 'bg.tertiary',
+			color: 'fg.primary'
+		},
+		'& :global(svg)': { stroke: 'currentColor' }
+	});
+
+	const tabRightCss = css({
+		borderRadius: '6px 0 0 6px',
+		borderRightWidth: '0'
+	});
+
+	const tabLeftCss = css({
+		borderRadius: '0 6px 6px 0',
+		borderLeftWidth: '0'
+	});
+
+	const tabCollapsedCss = css({
+		borderRadius: 'sm2',
+		borderWidth: '1'
+	});
+
+	const itemsCss = css({
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 'px',
+		paddingX: '1.5',
+		paddingTop: '1.5',
+		paddingBottom: '2',
+		maxHeight: 'calc(100vh - 200px)',
+		overflowY: 'auto',
+		backgroundColor: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+		borderWidth: '1'
+	});
+
+	const itemsRightCss = css({ borderRadius: '0 4px 4px 0' });
+	const itemsLeftCss = css({ borderRadius: '4px 0 0 4px' });
+
+	const legendItemCss = css({
+		display: 'flex',
+		alignItems: 'center',
+		gap: '1',
+		background: 'none',
+		border: 'none',
+		paddingY: '0.5',
+		paddingX: '1',
+		cursor: 'pointer',
+		fontSize: '2xs',
+		fontFamily: 'mono',
+		color: 'fg.muted',
+
+		transition: 'opacity 120ms ease',
+		whiteSpace: 'nowrap',
+		_hover: {
+			color: 'fg.primary',
+			backgroundColor: 'bg.tertiary'
+		}
+	});
+
+	const legendItemDimmedCss = css({ opacity: '0.35' });
+
+	const swatchCss = css({
+		width: 'dot',
+		height: 'dot',
+		borderRadius: 'xxs',
+		flexShrink: '0'
+	});
+
+	const legendTopCss = $derived(cx(legendBaseCss, legendCollapsed ? legendCollapsedCss : ''));
+
+	const legendBottomFullCss = $derived(
+		cx(
+			legendBaseCss,
+			legendBottomCss,
+			legendCollapsed ? cx(legendCollapsedCss, legendBottomCollapsedCss) : ''
+		)
+	);
+
+	const sidePanelCss = $derived(
+		cx(sideCss, legendPosition === 'right' ? sideRightCss : sideLeftCss)
+	);
+
+	const sideTabCss = $derived(
+		cx(
+			tabCss,
+			legendPosition === 'right' ? tabRightCss : tabLeftCss,
+			legendCollapsed ? tabCollapsedCss : ''
+		)
+	);
+
+	const sideItemsCss = $derived(
+		cx(itemsCss, legendPosition === 'right' ? itemsRightCss : itemsLeftCss)
+	);
 </script>
 
-<div class="chart-wrapper" bind:this={wrapperEl}>
-	<div class="chart-controls">
-		<button
-			type="button"
-			class="btn-ghost btn-sm border border-tertiary text-xs"
-			aria-label="Export chart as PNG"
-			onclick={exportChartPng}
-		>
-			Export PNG
-		</button>
-		<button
-			type="button"
-			class="btn-ghost btn-sm border border-tertiary text-xs"
-			aria-label="Export chart data as CSV"
-			onclick={exportChartCsv}
-		>
-			Export CSV
-		</button>
-	</div>
-	<div class="chart-area" bind:this={chartEl}>
-		{#if data.length === 0}
-			<div class="chart-empty">
-				<span>No data to display</span>
-			</div>
-		{/if}
-	</div>
-	{#if zoomEnabled && zoomActive}
-		<div class="chart-reset">
+<div class={outerCss}>
+	{#if htmlLegend && legendPosition === 'top'}
+		<div class={cx('group', legendTopCss)}>
+			{#if legendCollapsed}
+				<button
+					type="button"
+					class={pillCss}
+					onclick={() => (legendCollapsed = false)}
+					title="Show legend"
+				>
+					{#each htmlLegend.labels.slice(0, 12) as label (label)}
+						<span
+							class={cx(dotCss, !isSeriesVisible(label) ? dotFadedCss : '')}
+							style:background={htmlLegend.getColor(label)}
+						></span>
+					{/each}
+				</button>
+			{:else}
+				{#each htmlLegend.labels as label (label)}
+					<button
+						type="button"
+						class={cx(legendItemCss, !isSeriesVisible(label) ? legendItemDimmedCss : '')}
+						onclick={(e) => htmlLegend?.onClick(label, e)}
+					>
+						<span class={swatchCss} style:background={htmlLegend.getColor(label)}></span>
+						{label.length > 14 ? label.slice(0, 14) + '…' : label}
+					</button>
+				{/each}
+				<div
+					role="button"
+					tabindex="0"
+					class={handleCss}
+					onclick={() => (legendCollapsed = true)}
+					onkeydown={(e) => e.key === 'Enter' && (legendCollapsed = true)}
+					title="Minimize legend"
+				></div>
+			{/if}
+		</div>
+	{/if}
+	<div class={toolbarCss}>
+		<div class={controlsCss}>
 			<button
 				type="button"
-				class="btn-ghost btn-sm border border-tertiary text-xs"
+				class={cx(
+					button({ variant: 'ghost', size: 'sm' }),
+					css({
+						borderWidth: '1',
+						fontSize: 'xs'
+					})
+				)}
+				aria-label="Export chart as PNG"
+				onclick={exportChartPng}
+			>
+				Export PNG
+			</button>
+			<button
+				type="button"
+				class={cx(
+					button({ variant: 'ghost', size: 'sm' }),
+					css({
+						borderWidth: '1',
+						fontSize: 'xs'
+					})
+				)}
+				aria-label="Export chart data as CSV"
+				onclick={exportChartCsv}
+			>
+				Export CSV
+			</button>
+		</div>
+		{#if zoomEnabled && zoomActive}
+			<button
+				type="button"
+				class={cx(
+					button({ variant: 'ghost', size: 'sm' }),
+					css({
+						borderWidth: '1',
+						fontSize: 'xs'
+					})
+				)}
 				aria-label="Reset chart zoom"
 				onclick={resetZoom}
 			>
 				Reset zoom
 			</button>
+		{/if}
+	</div>
+	<div class={wrapperCss} bind:this={wrapperEl} style="height: {height}px">
+		<div class={areaCss} bind:this={chartEl}>
+			{#if data.length === 0}
+				<div class={emptyCss}>
+					<span>No data to display</span>
+				</div>
+			{/if}
+		</div>
+		<div class={cx(tooltipCss, tipVisible ? tooltipVisibleCss : tooltipHiddenCss)}>
+			{#if tipTitle}<strong>{tipTitle}</strong>{/if}
+			{#each tipLines as line, i (i)}
+				{#if tipTitle || tipLines.length > 1}<br />{/if}
+				{#if line.label}{line.label}:
+				{/if}{line.value}
+			{/each}
+		</div>
+		{#if htmlLegend && (legendPosition === 'left' || legendPosition === 'right')}
+			<div class={sidePanelCss}>
+				{#if legendPosition === 'right'}
+					<button
+						class={cx(css({ padding: '0' }), sideTabCss)}
+						onclick={() => (legendCollapsed = !legendCollapsed)}
+						title={legendCollapsed ? 'Show legend' : 'Hide legend'}
+					>
+						{#if legendCollapsed}
+							<ChevronLeft size={11} />
+						{:else}
+							<ChevronRight size={11} />
+						{/if}
+					</button>
+				{/if}
+				{#if !legendCollapsed}
+					<div class={sideItemsCss}>
+						{#each htmlLegend.labels as label (label)}
+							<button
+								type="button"
+								class={cx(legendItemCss, !isSeriesVisible(label) ? legendItemDimmedCss : '')}
+								onclick={(e) => htmlLegend?.onClick(label, e)}
+							>
+								<span class={swatchCss} style:background={htmlLegend.getColor(label)}></span>
+								{label.length > 14 ? label.slice(0, 14) + '…' : label}
+							</button>
+						{/each}
+					</div>
+				{/if}
+				{#if legendPosition === 'left'}
+					<button
+						class={cx(css({ padding: '0' }), sideTabCss)}
+						onclick={() => (legendCollapsed = !legendCollapsed)}
+						title={legendCollapsed ? 'Show legend' : 'Hide legend'}
+					>
+						{#if legendCollapsed}
+							<ChevronRight size={11} />
+						{:else}
+							<ChevronLeft size={11} />
+						{/if}
+					</button>
+				{/if}
+			</div>
+		{/if}
+	</div>
+	{#if htmlLegend && legendPosition === 'bottom'}
+		<div class={cx('group', legendBottomFullCss)}>
+			{#if legendCollapsed}
+				<button
+					type="button"
+					class={pillCss}
+					onclick={() => (legendCollapsed = false)}
+					title="Show legend"
+				>
+					{#each htmlLegend.labels.slice(0, 12) as label (label)}
+						<span
+							class={cx(dotCss, !isSeriesVisible(label) ? dotFadedCss : '')}
+							style:background={htmlLegend.getColor(label)}
+						></span>
+					{/each}
+				</button>
+			{:else}
+				{#each htmlLegend.labels as label (label)}
+					<button
+						type="button"
+						class={cx(legendItemCss, !isSeriesVisible(label) ? legendItemDimmedCss : '')}
+						onclick={(e) => htmlLegend?.onClick(label, e)}
+					>
+						<span class={swatchCss} style:background={htmlLegend.getColor(label)}></span>
+						{label.length > 14 ? label.slice(0, 14) + '…' : label}
+					</button>
+				{/each}
+				<div
+					role="button"
+					tabindex="0"
+					class={handleCss}
+					onclick={() => (legendCollapsed = true)}
+					onkeydown={(e) => e.key === 'Enter' && (legendCollapsed = true)}
+					title="Minimize legend"
+				></div>
+			{/if}
 		</div>
 	{/if}
-	<div
-		class="chart-tooltip"
-		class:tip-visible={tipVisible}
-		style:left="{tipX}px"
-		style:top="{tipY}px"
-	>
-		{#if tipTitle}<strong>{tipTitle}</strong>{/if}
-		{#each tipLines as line, i (i)}
-			{#if tipTitle || tipLines.length > 1}<br />{/if}
-			{#if line.label}{line.label}:
-			{/if}{line.value}
-		{/each}
-	</div>
 </div>
-
-<style>
-	.chart-wrapper {
-		position: relative;
-		width: 100%;
-		height: 300px;
-		background-color: var(--bg-primary);
-		overflow: hidden;
-		contain: content;
-	}
-
-	.chart-area {
-		width: 100%;
-		height: 100%;
-	}
-
-	.chart-controls {
-		position: absolute;
-		top: 10px;
-		left: 12px;
-		display: flex;
-		gap: 8px;
-		z-index: var(--z-overlay);
-	}
-
-	.chart-reset {
-		position: absolute;
-		top: 10px;
-		right: 12px;
-		z-index: var(--z-overlay);
-	}
-
-	.chart-empty {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 100%;
-		color: var(--fg-muted);
-		font-size: 0.75rem;
-	}
-
-	.chart-tooltip {
-		position: absolute;
-		pointer-events: none;
-		opacity: 0;
-		padding: 8px 12px;
-		background-color: var(--bg-tertiary);
-		border: 1px solid var(--border-primary);
-		color: var(--fg-primary);
-		font-family: var(--font-mono);
-		font-size: 0.6875rem;
-		line-height: 1.6;
-		white-space: nowrap;
-		z-index: var(--z-tooltip);
-		transition: opacity 80ms ease;
-	}
-
-	.chart-tooltip.tip-visible {
-		opacity: 1;
-	}
-</style>

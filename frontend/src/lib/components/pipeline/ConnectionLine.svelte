@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
+	import { css, cx } from '$lib/styles/panda';
 
 	interface Props {
 		fromStepIndex: number;
@@ -32,17 +33,35 @@
 
 	const isDragActive = $derived(drag.active);
 	const lineClass = $derived(
-		`connection-line flex w-full shrink-0 items-center justify-center h-pipeline-connection${
-			isDragActive ? ' drag-active' : ''
-		}${highlighted ? ' highlighted' : ''}`
+		cx(
+			'connection-line',
+			css({
+				display: 'flex',
+				width: 'full',
+				flexShrink: '0',
+				alignItems: 'center',
+				justifyContent: 'center',
+				position: 'relative',
+				zIndex: '1',
+				height: 'pipelineConnection',
+				color: isDragActive ? (highlighted ? 'fg.primary' : 'fg.faint') : 'fg.muted',
+				_hover: { color: 'fg.primary' }
+			})
+		)
 	);
 </script>
 
 <div class={lineClass}>
-	<svg class="overflow-visible" {width} {height} xmlns="http://www.w3.org/2000/svg">
+	<svg class={css({ overflow: 'visible' })} {width} {height} xmlns="http://www.w3.org/2000/svg">
 		<!-- Dotted vertical line -->
 		{#each dots as y (y)}
-			<circle cx={width / 2} cy={y} r={dotRadius} fill="currentColor" class="opacity-80" />
+			<circle
+				cx={width / 2}
+				cy={y}
+				r={dotRadius}
+				fill="currentColor"
+				class={css({ opacity: '0.8' })}
+			/>
 		{/each}
 
 		<!-- Arrow triangle pointing down -->

@@ -103,14 +103,11 @@ def list_engine_runs(
         stmt = stmt.where(EngineRun.status == status)  # type: ignore[arg-type]
 
     stmt = stmt.order_by(desc(EngineRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
-    result = session.execute(stmt)
-    runs = result.scalars().all()
-    response: list[EngineRunResponseSchema] = []
-    for run in runs:
-        payload = run.model_dump()
-        payload['step_timings'] = normalize_step_timings(run.step_timings)
-        response.append(EngineRunResponseSchema.model_validate(payload))
-    return response
+    runs = session.execute(stmt).scalars().all()
+    return [
+        EngineRunResponseSchema.model_validate({**run.model_dump(), 'step_timings': normalize_step_timings(run.step_timings)})
+        for run in runs
+    ]
 
 
 def compare_engine_runs(

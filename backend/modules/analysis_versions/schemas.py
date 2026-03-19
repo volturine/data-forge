@@ -3,7 +3,9 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class AnalysisVersionResponse(BaseModel):
+class AnalysisVersionSummary(BaseModel):
+    """Lightweight version info for list endpoints (excludes pipeline_definition)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -11,8 +13,13 @@ class AnalysisVersionResponse(BaseModel):
     version: int
     name: str
     description: str | None
-    pipeline_definition: dict
     created_at: datetime
+
+
+class AnalysisVersionResponse(AnalysisVersionSummary):
+    """Full version response including pipeline_definition."""
+
+    pipeline_definition: dict
 
 
 class AnalysisVersionUpdate(BaseModel):

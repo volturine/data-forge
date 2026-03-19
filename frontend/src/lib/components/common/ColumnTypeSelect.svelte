@@ -2,6 +2,7 @@
 	import { getColumnTypesByCategory, CATEGORY_REGISTRY } from '$lib/utils/columnTypes';
 	import type { ColumnTypeCategory } from '$lib/utils/columnTypes';
 	import ColumnTypeBadge from './ColumnTypeBadge.svelte';
+	import { css, cx, input } from '$lib/styles/panda';
 
 	interface Props {
 		/** Selected column type value */
@@ -59,20 +60,32 @@
 </script>
 
 <div
-	class="inline-flex flex-wrap items-center gap-2 max-[480px]s:flex-col max-[480px]:items-stretch"
+	class={css({
+		display: 'inline-flex',
+		flexWrap: 'wrap',
+		alignItems: 'center',
+		gap: '2',
+		smDown: { alignItems: 'stretch' }
+	})}
 >
 	<select
 		{id}
 		{value}
 		onchange={handleChange}
 		{disabled}
-		class="cursor-pointer border disabled:cursor-not-allowed disabled:opacity-60 hover:not-disabled:border-tertiary hover:not-disabled:bg-primary focus:outline-2 focus:outline-offset-2 focus:outline-accent-primary focus:border-accent-primary max-[480px]:w-full {size ===
-		'sm'
-			? 'px-2 py-1 text-xs select-width-sm'
-			: size === 'lg'
-				? 'px-3 py-2 text-[0.9375rem] select-width-lg'
-				: 'px-2.5 py-1.5 text-sm select-width-md'}"
-		class:select-mono={true}
+		class={cx(
+			input(),
+			css({
+				cursor: 'pointer',
+				backgroundColor: 'bg.secondary',
+				smDown: { width: '100%' }
+			}),
+			size === 'sm'
+				? css({ paddingX: '2', paddingY: '1', fontSize: 'xs', minWidth: 'inputSm' })
+				: size === 'lg'
+					? css({ paddingX: '3', paddingY: '2', fontSize: 'sm', minWidth: 'listSm' })
+					: css({ paddingX: '2.5', paddingY: '1.5', fontSize: 'sm', minWidth: 'inputSm' })
+		)}
 	>
 		{#if placeholder}
 			<option value="">{placeholder}</option>
@@ -90,7 +103,13 @@
 	</select>
 
 	{#if showBadge && value}
-		<div class="inline-flex items-center max-[480px]:justify-start">
+		<div
+			class={css({
+				display: 'inline-flex',
+				alignItems: 'center',
+				smDown: { justifyContent: 'flex-start' }
+			})}
+		>
 			<ColumnTypeBadge columnType={value} size={size === 'lg' ? 'md' : 'sm'} />
 		</div>
 	{/if}

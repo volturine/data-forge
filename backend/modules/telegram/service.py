@@ -57,14 +57,13 @@ def deactivate_subscriber(session: Session, subscriber_id: int) -> None:
     if not sub:
         return
     sub.is_active = False
-    listeners = (
+    for listener in (
         session.execute(
             select(TelegramListener).where(TelegramListener.subscriber_id == subscriber_id)  # type: ignore[arg-type]
         )
         .scalars()
         .all()
-    )
-    for listener in listeners:
+    ):
         session.delete(listener)
     session.add(sub)
     session.commit()

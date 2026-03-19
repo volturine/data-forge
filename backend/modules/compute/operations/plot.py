@@ -94,13 +94,9 @@ def compute_chart_data(lf: pl.LazyFrame, params: dict) -> pl.LazyFrame:
     """
     p = ChartParams.model_validate(params)
 
-    if p.chart_type == 'bar':
+    if p.chart_type in ('bar', 'horizontal_bar'):
         return _aggregate_bar(lf, p)
-    if p.chart_type == 'horizontal_bar':
-        return _aggregate_bar(lf, p)
-    if p.chart_type == 'line':
-        return _aggregate_line(lf, p)
-    if p.chart_type == 'area':
+    if p.chart_type in ('line', 'area'):
         return _aggregate_line(lf, p)
     if p.chart_type == 'pie':
         return _aggregate_pie(lf, p)
@@ -173,9 +169,7 @@ class ChartHandler(OperationHandler):
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         # Validate params but return input unchanged — chart is pass-through
         ChartParams.model_validate(params)
@@ -240,8 +234,7 @@ def _apply_date_bucket(lf: pl.LazyFrame, column: str, p: ChartParams) -> pl.Lazy
             'day': '1d',
             'hour': '1h',
         }
-        duration = bucket_map.get(p.date_bucket)
-        if duration is None:
+        if (duration := bucket_map.get(p.date_bucket)) is None:
             return lf
         return lf.with_columns(pl.col(column).dt.truncate(duration).alias(column))
 
@@ -324,9 +317,7 @@ def _apply_group_sort(
 
 def _aggregate_bar(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     lf = _apply_date_bucket(lf, p.x_column, p)
-    group_cols = [p.x_column]
-    if p.group_column:
-        group_cols.append(p.group_column)
+    group_cols = [p.x_column] + ([p.group_column] if p.group_column else [])
 
     group_order_lf: pl.LazyFrame | None = None
     if p.group_sort_by == 'custom' and p.group_sort_column and p.group_column:
@@ -341,9 +332,7 @@ def _aggregate_bar(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
 
 def _aggregate_line(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     lf = _apply_date_bucket(lf, p.x_column, p)
-    group_cols = [p.x_column]
-    if p.group_column:
-        group_cols.append(p.group_column)
+    group_cols = [p.x_column] + ([p.group_column] if p.group_column else [])
 
     group_order_lf: pl.LazyFrame | None = None
     if p.group_sort_by == 'custom' and p.group_sort_column and p.group_column:
@@ -360,9 +349,7 @@ def _aggregate_pie(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     lf = _apply_date_bucket(lf, p.x_column, p)
     agg_expr = _agg_expr(p.y_column, p.aggregation) if p.y_column else pl.len().alias('y')
 
-    group_cols = [p.x_column]
-    if p.group_column:
-        group_cols.append(p.group_column)
+    group_cols = [p.x_column] + ([p.group_column] if p.group_column else [])
 
     result = lf.group_by(group_cols).agg(agg_expr).rename({p.x_column: 'label'})
     if p.group_column:
@@ -372,13 +359,14 @@ def _aggregate_pie(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
         group_sorted = _apply_group_sort(result.rename({'label': 'x'}), p)
         result = group_sorted.rename({'x': 'label'})
 
-    sorted_result = result.sort('y', descending=True)
     if p.sort_by == 'x':
         sorted_result = result.sort('label', descending=p.sort_order == 'desc')
-    if p.sort_by == 'y':
+    elif p.sort_by == 'y':
         sorted_result = result.sort('y', descending=p.sort_order == 'desc')
-    if p.sort_by == 'custom' and p.sort_column:
+    elif p.sort_by == 'custom' and p.sort_column:
         sorted_result = result.sort(p.sort_column, descending=p.sort_order == 'desc')
+    else:
+        sorted_result = result.sort('y', descending=True)
 
     if p.group_column:
         group_order_lf = None
@@ -387,7 +375,7 @@ def _aggregate_pie(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
                 pl.col(p.group_column).alias('group'),
                 pl.col(p.group_sort_column).alias(p.group_sort_column),
             )
-        if p.group_sort_by == 'value':
+        elif p.group_sort_by == 'value':
             group_order_lf = result.sort('label').select('group', 'y')
         return _apply_group_sort(sorted_result, p, group_col='group', order_lf=group_order_lf)
     return sorted_result
@@ -426,15 +414,12 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
     bin_starts = [fmin + i * bin_width for i in range(bins)]
     bin_ends = [fmin + (i + 1) * bin_width for i in range(bins)]
 
-    counts = []
-    for i in range(bins):
-        start = bin_starts[i]
-        end = bin_ends[i]
-        if i < bins - 1:
-            count = df.filter((pl.col('value') >= start) & (pl.col('value') < end)).height
-        else:
-            count = df.filter((pl.col('value') >= start) & (pl.col('value') <= end)).height
-        counts.append(count)
+    counts = [
+        df.filter((pl.col('value') >= bin_starts[i]) & (pl.col('value') < bin_ends[i])).height
+        if i < bins - 1
+        else df.filter((pl.col('value') >= bin_starts[i]) & (pl.col('value') <= bin_ends[i])).height
+        for i in range(bins)
+    ]
 
     result = pl.LazyFrame(
         {
@@ -453,13 +438,11 @@ def _build_histogram(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
 
 
 def _build_scatter(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:
-    cols = [pl.col(p.x_column).alias('x')]
-    if p.y_column:
-        cols.append(pl.col(p.y_column).alias('y'))
-    if p.group_column:
-        cols.append(pl.col(p.group_column).alias('group'))
-
-    return lf.select(cols).limit(5000)
+    return lf.select(
+        [pl.col(p.x_column).alias('x')]
+        + ([pl.col(p.y_column).alias('y')] if p.y_column else [])
+        + ([pl.col(p.group_column).alias('group')] if p.group_column else [])
+    ).limit(5000)
 
 
 def _build_boxplot(lf: pl.LazyFrame, p: ChartParams) -> pl.LazyFrame:

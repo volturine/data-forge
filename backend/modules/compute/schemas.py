@@ -86,18 +86,15 @@ class AnalysisPipelineTab(BaseModel):
     def validate_output(cls, value: dict) -> dict:
         if not isinstance(value, dict):
             raise ValueError('Analysis pipeline tab output must be a dict')
-        output_id = value.get('output_datasource_id')
+        output_id = value.get('result_id')
         if not isinstance(output_id, str) or not output_id.strip():
-            raise ValueError('Analysis pipeline tab output.output_datasource_id is required')
+            raise ValueError('Analysis pipeline tab output.result_id is required')
         filename = value.get('filename')
         if not isinstance(filename, str) or not filename.strip():
             raise ValueError('Analysis pipeline tab output.filename is required')
         export_format = value.get('format')
         if not isinstance(export_format, str) or not export_format.strip():
             raise ValueError('Analysis pipeline tab output.format is required')
-        datasource_type = value.get('datasource_type')
-        if not isinstance(datasource_type, str) or not datasource_type.strip():
-            raise ValueError('Analysis pipeline tab output.datasource_type is required')
         return value
 
 
@@ -144,9 +141,6 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
-EngineDefaultsResponse = EngineDefaults  # Alias for backwards compatibility
-
-
 class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -186,14 +180,7 @@ class ExportFormat(StrEnum):
 
 class ExportDestination(StrEnum):
     DOWNLOAD = 'download'
-    FILESYSTEM = 'filesystem'
     DATASOURCE = 'datasource'
-
-
-class ExportDatasourceType(StrEnum):
-    ICEBERG = 'iceberg'
-    DUCKDB = 'duckdb'
-    FILE = 'file'
 
 
 class IcebergExportOptions(BaseModel):
@@ -202,14 +189,6 @@ class IcebergExportOptions(BaseModel):
     table_name: str = 'exported_data'
     namespace: str = 'outputs'
     branch: str = 'master'
-
-
-class DuckDBExportOptions(BaseModel):
-    """Options for DuckDB export when destination is 'datasource'."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    table_name: str = 'data'
 
 
 class ExportRequest(BaseModel):
@@ -222,27 +201,17 @@ class ExportRequest(BaseModel):
     format: ExportFormat = ExportFormat.CSV
     filename: str = 'export'
     destination: ExportDestination = ExportDestination.DOWNLOAD
-    datasource_type: ExportDatasourceType = ExportDatasourceType.ICEBERG
     iceberg_options: IcebergExportOptions | None = None
-    duckdb_options: DuckDBExportOptions | None = None
-    output_datasource_id: str | None = None
+    result_id: str | None = None
 
-    @field_validator('output_datasource_id')
+    @field_validator('result_id')
     @classmethod
-    def validate_output_datasource_id(cls, value: str | None, info):
+    def validate_result_id(cls, value: str | None, info):
         if not info.data:
             return value
         destination = info.data.get('destination')
         if destination == ExportDestination.DATASOURCE and (not isinstance(value, str) or not value.strip()):
-            raise ValueError('Output exports require output_datasource_id')
-        return value
-
-    @field_validator('datasource_type')
-    @classmethod
-    def validate_datasource_type_for_output(cls, value: ExportDatasourceType, info):
-        destination = info.data.get('destination') if info.data else None
-        if destination == ExportDestination.DATASOURCE and value != ExportDatasourceType.ICEBERG:
-            raise ValueError('Output exports must use Iceberg datasources')
+            raise ValueError('Output exports require result_id')
         return value
 
 
@@ -253,7 +222,6 @@ class ExportResponse(BaseModel):
     filename: str
     format: str
     destination: str
-    file_path: str | None = None
     message: str | None = None
     datasource_id: str | None = None
     datasource_name: str | None = None

@@ -22,10 +22,9 @@ _TELEGRAM_BASE_URL: Final[str] = 'https://api.telegram.org'
 
 
 def render_template(template: str, context: dict[str, object]) -> str:
-    output = template
     for key, value in context.items():
-        output = output.replace(f'{{{{{key}}}}}', str(value))
-    return output
+        template = template.replace(f'{{{{{key}}}}}', str(value))
+    return template
 
 
 class NotificationService:

@@ -9,11 +9,13 @@
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { schemaStore } from '$lib/stores/schema.svelte';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import DataTable from '$lib/components/common/DataTable.svelte';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		analysisId: string;
@@ -34,7 +36,7 @@
 
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
-	const pipelineKey = $derived.by(() => hashPipeline(activePipeline));
+	const pipelineKey = $derived(hashPipeline(activePipeline));
 	const datasourceConfig = $derived.by(() => {
 		const config = buildDatasourceConfig({
 			analysisId,
@@ -137,6 +139,13 @@
 		analysisStore.setPreviewRun(runKey, true);
 	});
 
+	// Schema sync: $derived can't write to an external store reactively.
+	$effect(() => {
+		const response = query.data;
+		if (!response) return;
+		schemaStore.syncPreviewSchema(stepId, response, pipelineKey);
+	});
+
 	function runPreview() {
 		if (!isActiveStep) return;
 		if (!hasRun) analysisStore.setPreviewRun(runKey, true);
@@ -154,7 +163,7 @@
 	}
 </script>
 
-<div class="inline-preview-table w-full h-100 overflow-hidden">
+<div class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}>
 	<DataTable
 		columns={data?.columns ?? []}
 		data={data?.data ?? []}
