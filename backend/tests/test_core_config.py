@@ -54,8 +54,7 @@ class TestSettings:
         settings = Settings()
 
         assert settings.debug is True
-        # database_url is always derived from data_dir, ignoring the env var
-        assert settings.database_url == f'sqlite:///{data_dir / "app.db"}'
+        assert settings.database_url == 'sqlite:///./test.db'
         assert settings.data_dir == data_dir
         assert settings.default_namespace == 'acme'
         assert settings.upload_chunk_size == 2000000
@@ -86,13 +85,12 @@ class TestSettings:
         assert settings.cors_origins is not None
         assert len(settings.cors_origins_list) > 0
 
-    def test_database_url_always_derived_from_data_dir(self, monkeypatch, tmp_path):
-        """database_url is always derived from data_dir regardless of DATABASE_URL env var."""
+    def test_invalid_database_url(self, monkeypatch, tmp_path):
         data_dir = tmp_path / 'data'
         monkeypatch.setenv('DATABASE_URL', 'invalid-url')
         monkeypatch.setenv('DATA_DIR', str(data_dir))
-        settings = Settings()
-        assert settings.database_url == f'sqlite:///{data_dir / "app.db"}'
+        with pytest.raises(ValidationError, match='database_url must be a valid SQLAlchemy URL'):
+            Settings()
 
     def test_negative_timeout_values(self, monkeypatch):
         monkeypatch.setenv('ENGINE_IDLE_TIMEOUT', '-100')

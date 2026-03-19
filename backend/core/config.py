@@ -6,6 +6,7 @@ from zoneinfo import available_timezones
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import DotEnvSettingsSource
+from sqlalchemy.engine.url import make_url
 
 # (field_name, min_inclusive, max_inclusive) — None means no bound
 _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
@@ -85,7 +86,7 @@ class Settings(BaseSettings):
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
 
     data_dir: Path = Field(default_factory=lambda: Path(tempfile.TemporaryDirectory().name), alias='DATA_DIR')
-    database_url: str = ''
+    database_url: str = Field(default='', alias='DATABASE_URL')
     default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 
     upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
@@ -217,9 +218,13 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_database_url(cls, value: str, info) -> str:
         data_dir = info.data.get('data_dir')
-        if data_dir:
-            return f'sqlite:///{Path(data_dir) / "app.db"}'
-        raise ValueError('data_dir is required to generate database_url')
+        if not value and data_dir:
+            value = f'sqlite:///{Path(data_dir) / "app.db"}'
+        try:
+            make_url(value)
+        except Exception as exc:
+            raise ValueError(f'database_url must be a valid SQLAlchemy URL, got {value}') from exc
+        return value
 
     @field_validator('timezone')
     @classmethod

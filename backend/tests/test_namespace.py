@@ -1,8 +1,10 @@
+from collections import OrderedDict
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from core import database
 from core.config import settings
 from core.namespace import get_namespace, list_namespaces, namespace_paths, normalize_namespace, set_namespace_context
 
@@ -73,3 +75,28 @@ def test_list_namespaces_endpoint(tmp_path: Path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {'namespaces': ['alpha', 'beta']}
+
+
+def test_cache_namespace_engine_disposes_evicted_engine(monkeypatch):
+    class DummyEngine:
+        def __init__(self):
+            self.disposed = False
+
+        def dispose(self):
+            self.disposed = True
+
+    monkeypatch.setattr(database, '_namespace_engines', OrderedDict(), raising=False)
+    monkeypatch.setattr(database, '_MAX_NAMESPACE_ENGINES', 2, raising=False)
+
+    alpha = DummyEngine()
+    beta = DummyEngine()
+    gamma = DummyEngine()
+
+    database._cache_namespace_engine('alpha', alpha)
+    database._cache_namespace_engine('beta', beta)
+    database._cache_namespace_engine('gamma', gamma)
+
+    assert list(database._namespace_engines) == ['beta', 'gamma']
+    assert alpha.disposed is True
+    assert beta.disposed is False
+    assert gamma.disposed is False

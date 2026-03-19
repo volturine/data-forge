@@ -48,6 +48,17 @@ def clear_engine_override():
     _engine_override = None
 
 
+def _cache_namespace_engine(namespace: str, engine: Engine) -> Engine:
+    existing_engine = _namespace_engines.pop(namespace, None)
+    if existing_engine is not None and existing_engine is not engine:
+        existing_engine.dispose()
+    if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
+        _, evicted_engine = _namespace_engines.popitem(last=False)
+        evicted_engine.dispose()
+    _namespace_engines[namespace] = engine
+    return engine
+
+
 def get_db():
     engine_to_use = _engine_override or _get_namespace_engine()
     with Session(engine_to_use) as session:
@@ -160,13 +171,10 @@ def _get_namespace_engine() -> Engine:
     if namespace in _namespace_engines:
         _namespace_engines.move_to_end(namespace)
         return _namespace_engines[namespace]
-    if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
-        oldest = next(iter(_namespace_engines))
-        del _namespace_engines[oldest]
     paths = namespace_paths(namespace)
     engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
     _enable_sqlite_pragmas(engine)
-    _namespace_engines[namespace] = engine
+    _cache_namespace_engine(namespace, engine)
     _init_namespace_db(namespace)
     return engine
 
@@ -181,7 +189,7 @@ def _init_namespace_db(namespace: str) -> None:
             connect_args={},
         )
         _enable_sqlite_pragmas(namespace_engine)
-        _namespace_engines[namespace] = namespace_engine
+        _cache_namespace_engine(namespace, namespace_engine)
     from modules.analysis.models import Analysis, AnalysisDataSource
     from modules.analysis_versions.models import AnalysisVersion
     from modules.datasource.models import DataSource
