@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sqlite3
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -170,7 +171,7 @@ class DatasourceHandler(OperationHandler):
 
 _ANALYSIS_STACK: list[tuple[str, str | None]] = []
 _ANALYSIS_CACHE: dict[str, pl.LazyFrame] = {}
-_ANALYSIS_CACHE_KEYS: list[str] = []
+_ANALYSIS_CACHE_KEYS: deque[str] = deque()
 _ANALYSIS_CACHE_MAX = 20
 
 
@@ -209,7 +210,7 @@ def _store_analysis_cache(key: str, frame: pl.LazyFrame) -> None:
     _ANALYSIS_CACHE_KEYS.append(key)
     if len(_ANALYSIS_CACHE_KEYS) <= _ANALYSIS_CACHE_MAX:
         return
-    oldest = _ANALYSIS_CACHE_KEYS.pop(0)
+    oldest = _ANALYSIS_CACHE_KEYS.popleft()
     _ANALYSIS_CACHE.pop(oldest, None)
 
 
@@ -295,9 +296,6 @@ def _build_tab_pipeline(
             raise ValueError('Analysis tab datasource.config.branch is required')
 
         merged = {**datasource_config, **overrides}
-        output_override = tab.get('output')
-        if isinstance(output_override, dict):
-            merged = {**merged, **output_override}
         analysis_id = pipeline.get('analysis_id')
         analysis_id = str(analysis_id) if analysis_id is not None else None
         if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:

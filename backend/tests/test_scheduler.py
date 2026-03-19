@@ -794,3 +794,83 @@ class TestScheduleRoutes:
         data = response.json()
         assert len(data) == 1
         assert data[0]['datasource_id'] == ds_id
+
+
+# ---------------------------------------------------------------------------
+# Bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestSkippedScheduleDoesNotAdvanceLastRun:
+    """Bug 5: skipping a schedule due to unmet dependency must not call mark_schedule_run."""
+
+    def test_skipped_schedule_last_run_unchanged(self, test_db_session: Session, output_datasource: DataSource) -> None:
+        """A schedule skipped for unmet dependency keeps last_run=None."""
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        assert created.last_run is None
+
+        row = test_db_session.get(Schedule, created.id)
+        assert row is not None
+        assert row.last_run is None
+
+
+class TestGetBuildOrderNoDuplicateInDegree:
+    """Bug 6: in_degree must not be double-incremented when two datasources from the
+    same upstream analysis link to the same downstream analysis.
+    """
+
+    def test_two_datasources_same_upstream_no_double_in_degree(self, test_db_session: Session, sample_csv_file) -> None:
+        """Downstream linked to two datasources both created by the same upstream.
+        Before the fix, each datasource link incremented in_degree unconditionally,
+        raising it to 2 and stalling BFS so downstream never appeared in the order.
+        After the fix, the set-based dedup prevents the second increment.
+        """
+        upstream_id = str(uuid.uuid4())
+        ds_a_id = str(uuid.uuid4())
+        ds_b_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+
+        for ds_id in (ds_a_id, ds_b_id):
+            ds = DataSource(
+                id=ds_id,
+                name=f'Output {ds_id[:8]}',
+                source_type='file',
+                config={'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+                created_at=now,
+                created_by_analysis_id=upstream_id,
+            )
+            test_db_session.add(ds)
+
+        upstream = Analysis(
+            id=upstream_id,
+            name='Upstream',
+            description='',
+            pipeline_definition={'tabs': []},
+            status='draft',
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(upstream)
+
+        downstream_id = str(uuid.uuid4())
+        downstream = Analysis(
+            id=downstream_id,
+            name='Downstream',
+            description='',
+            pipeline_definition={'tabs': []},
+            status='draft',
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(downstream)
+
+        link_a = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_a_id)
+        link_b = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_b_id)
+        test_db_session.add(link_a)
+        test_db_session.add(link_b)
+        test_db_session.commit()
+
+        order = get_build_order(test_db_session, downstream_id)
+        assert downstream_id in order
+        assert upstream_id in order
+        assert order.index(upstream_id) < order.index(downstream_id)

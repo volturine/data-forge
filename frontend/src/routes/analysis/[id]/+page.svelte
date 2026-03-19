@@ -411,6 +411,9 @@
 		}
 
 		if (!datasourcesQuery.data || !datasourceIdValue) return;
+		if (!isUuid(datasourceIdValue)) return;
+		const ds = datasourcesQuery.data.find((d) => d.id === datasourceIdValue);
+		if (ds?.source_type === 'analysis') return;
 		isLoadingSchema = true;
 		getDatasourceSchema(datasourceIdValue).match(
 			(schema) => {

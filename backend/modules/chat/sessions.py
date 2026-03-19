@@ -44,11 +44,13 @@ class LiveSession:
         self.system_prompt = row.system_prompt
         self.messages: list[dict[str, Any]] = json.loads(row.messages_json)
         self.created_at = row.created_at
+        self.last_activity = time.time()
         self._history: list[dict[str, Any]] = json.loads(row.history_json)
         self._queue: asyncio.Queue[dict | None] = asyncio.Queue()
         self._closed = False
         self._busy = False
         self._lock = asyncio.Lock()
+        self._task: asyncio.Task[None] | None = None
 
     @property
     def busy(self) -> bool:
@@ -66,14 +68,32 @@ class LiveSession:
         async with self._lock:
             self._busy = value
 
+    def set_task(self, task: asyncio.Task[None]) -> None:
+        self._task = task
+
+    def cancel_task(self) -> None:
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            self._task = None
+
     def add_message(self, role: str, content: str) -> None:
+        self.last_activity = time.time()
         self.messages.append({'role': role, 'content': content})
         if len(self.messages) > MAX_MESSAGES:
             system = [m for m in self.messages if m.get('role') == 'system']
             non_system = [m for m in self.messages if m.get('role') != 'system']
             self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
 
+    def append_message(self, msg: dict[str, Any]) -> None:
+        self.last_activity = time.time()
+        self.messages.append(msg)
+        if len(self.messages) > MAX_MESSAGES:
+            system = [m for m in self.messages if m.get('role') == 'system']
+            non_system = [m for m in self.messages if m.get('role') != 'system']
+            self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
+
     def push_event(self, event: dict) -> None:
+        self.last_activity = time.time()
         if 'ts' not in event:
             event = {**event, 'ts': time.time() * 1000}
         self._history.append(event)
@@ -113,7 +133,7 @@ class LiveSession:
 class SessionStore:
     """DB-persisted session store with in-memory live sessions."""
 
-    TTL = 3600
+    MEMORY_TTL = 3600  # evict idle in-memory wrappers after 1 hour
 
     def __init__(self) -> None:
         self._live: dict[str, LiveSession] = {}
@@ -150,17 +170,10 @@ class SessionStore:
     def get(self, session_id: str) -> LiveSession | None:
         live = self._live.get(session_id)
         if live:
-            if time.time() - live.created_at > self.TTL:
-                self.delete(session_id)
-                return None
             return live
         with self._db() as db:
             row = db.exec(select(ChatSession).where(ChatSession.id == session_id)).first()
             if not row:
-                return None
-            if time.time() - row.created_at > self.TTL:
-                db.delete(row)
-                db.commit()
                 return None
             live = LiveSession(row)
             self._live[session_id] = live
@@ -196,13 +209,10 @@ class SessionStore:
 
     def list_sessions(self) -> list[dict]:
         """List all sessions with preview info."""
-        now = time.time()
         sessions = []
         with self._db() as db:
             rows = db.exec(select(ChatSession)).all()
             for row in rows:
-                if now - row.created_at > self.TTL:
-                    continue
                 messages: list[dict[str, Any]] = json.loads(row.messages_json)
                 preview = ''
                 for m in messages:
@@ -221,10 +231,13 @@ class SessionStore:
         return sorted(sessions, key=lambda s: s['created_at'], reverse=True)
 
     def sweep(self) -> None:
+        """Evict idle in-memory wrappers to free resources. DB rows are preserved."""
         now = time.time()
-        expired = [k for k, v in self._live.items() if now - v.created_at > self.TTL]
+        expired = [k for k, v in self._live.items() if now - v.last_activity > self.MEMORY_TTL and not v.busy]
         for k in expired:
-            self.delete(k)
+            live = self._live.pop(k, None)
+            if live:
+                live.close_stream()
 
 
 session_store = SessionStore()

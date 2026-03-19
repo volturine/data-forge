@@ -85,6 +85,12 @@ export function updateSession(
 	});
 }
 
+export function stopGeneration(
+	sessionId: string
+): ResultAsync<{ status: string; session_id: string }, ApiError> {
+	return apiRequest(`/v1/ai/chat/sessions/${sessionId}/stop`, { method: 'POST' });
+}
+
 export function closeSession(
 	sessionId: string
 ): ResultAsync<{ status: string; session_id: string }, ApiError> {

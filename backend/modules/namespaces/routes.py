@@ -14,4 +14,5 @@ class NamespaceListResponse(BaseModel):
 @router.get('', response_model=NamespaceListResponse)
 @deterministic_tool
 def list_namespaces_endpoint() -> NamespaceListResponse:
+    """List all available namespaces. Namespaces isolate data directories and databases."""
     return NamespaceListResponse(namespaces=list_namespaces())

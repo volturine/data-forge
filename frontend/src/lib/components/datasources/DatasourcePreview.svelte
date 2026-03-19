@@ -9,6 +9,7 @@
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourcePipelinePayload
@@ -70,7 +71,7 @@
 			return buildAnalysisPipelinePayload(
 				activeId,
 				analysisStore.tabs,
-				resolvedDatasource ? [resolvedDatasource] : []
+				datasourceStore.datasources
 			);
 		}
 		if (!resolvedDatasource) return null;

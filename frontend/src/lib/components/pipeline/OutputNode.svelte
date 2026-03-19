@@ -139,6 +139,22 @@
 	});
 	const canQueryOutput = $derived(isUuid(outputDatasourceId));
 
+	const outputDatasourceQuery = createQuery(() => ({
+		queryKey: ['datasource', outputDatasourceId],
+		queryFn: async () => {
+			if (!outputDatasourceId) return null;
+			const result = await getDatasource(outputDatasourceId);
+			if (result.isErr()) {
+				if (result.error.status === 404) return null;
+				throw new Error(result.error.message);
+			}
+			return result.value;
+		},
+		enabled: canQueryOutput
+	}));
+	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
+	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
+
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['healthchecks', outputDatasourceId],
 		queryFn: async () => {
@@ -147,7 +163,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const healthResultsQuery = createQuery(() => ({
@@ -158,7 +174,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const healthCount = $derived(healthChecksQuery.data?.length ?? 0);
@@ -185,23 +201,11 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const scheduleCount = $derived(schedulesQuery.data?.length ?? 0);
 	const enabledSchedules = $derived((schedulesQuery.data ?? []).filter((s) => s.enabled).length);
-
-	const outputDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', outputDatasourceId],
-		queryFn: async () => {
-			if (!outputDatasourceId) return null;
-			const result = await getDatasource(outputDatasourceId);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: canQueryOutput
-	}));
-	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
 
 	const canTelegram = $derived(configStore.telegramEnabled);
 

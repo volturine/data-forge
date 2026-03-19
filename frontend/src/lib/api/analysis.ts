@@ -62,7 +62,7 @@ export type AnalysisVersion = {
 	version: number;
 	name: string;
 	description: string | null;
-	pipeline_definition: Record<string, unknown>;
+	pipeline_definition?: Record<string, unknown>;
 	created_at: string;
 };
 

@@ -21,8 +21,7 @@
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
 	import {
 		buildAnalysisPipelinePayload,
-		buildDatasourceConfig,
-		buildTabPipelinePayload
+		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, cx, spinner, button, divider } from '$lib/styles/panda';
@@ -185,14 +184,7 @@
 	});
 
 	async function calculateRowCount() {
-		if (!analysisId || !datasourceId) return;
-		const tabPayload = buildTabPipelinePayload({
-			analysisId,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
-		if (!tabPayload) return;
+		if (!analysisId || !analysisPipeline) return;
 		if (isLoadingRowCount) return;
 		rowCountLoads.set(rowCountKey, true);
 		rowCountErrors.delete(rowCountKey);
@@ -233,20 +225,12 @@
 	}
 
 	async function handleDownload() {
-		if (!datasourceId || !analysisId) return;
-
-		const tabPayload = buildTabPipelinePayload({
-			analysisId,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
-		if (!tabPayload) return;
+		if (!analysisId || !analysisPipeline) return;
 
 		downloadStep({
 			analysis_id: analysisId,
 			target_step_id: step.id,
-			analysis_pipeline: tabPayload,
+			analysis_pipeline: analysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
 			format:
 				(step.config?.format as 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel' | 'duckdb') ??

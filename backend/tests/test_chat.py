@@ -119,18 +119,25 @@ class TestSessionStore:
         store = SessionStore()
         assert store.get('nonexistent') is None
 
-    def test_get_expired_returns_none(self) -> None:
+    def test_get_old_session_still_returns(self) -> None:
+        """Sessions persist in DB regardless of age — only memory cache is evicted."""
         store = SessionStore()
         s = store.create('openrouter', 'gpt-4o-mini', 'key')
-        s.created_at -= SessionStore.TTL + 1
-        assert store.get(s.id) is None
+        s.created_at -= SessionStore.MEMORY_TTL + 1
+        assert store.get(s.id) is not None
 
-    def test_sweep_removes_expired(self) -> None:
+    def test_sweep_evicts_memory_preserves_db(self) -> None:
+        """Sweep removes in-memory wrappers but DB rows survive."""
         store = SessionStore()
         s = store.create('openrouter', 'gpt-4o-mini', 'key')
-        s.created_at -= SessionStore.TTL + 1
+        sid = s.id
+        s.created_at -= SessionStore.MEMORY_TTL + 1
+        s.last_activity -= SessionStore.MEMORY_TTL + 1
         store.sweep()
-        assert s.id not in store._live
+        assert sid not in store._live
+        # But DB row still exists — get() reloads it
+        reloaded = store.get(sid)
+        assert reloaded is not None
 
     def test_delete_removes_session_and_closes_stream(self) -> None:
         store = SessionStore()
@@ -1163,3 +1170,113 @@ class TestMalformedToolArgs:
             assert 'ts' in event, f'Event missing ts: {event}'
             assert isinstance(event['ts'], float)
             assert event['ts'] > 0
+
+
+class TestBugFixes:
+    """Tests for the 8 production bug fixes."""
+
+    def test_append_message_enforces_truncation(self) -> None:
+        """append_message helper respects MAX_MESSAGES and preserves system message."""
+        row = ChatSession(id='sid', provider='openrouter', model='m', api_key='k')
+        s = LiveSession(row)
+        s.append_message({'role': 'system', 'content': 'system'})
+        for i in range(120):
+            s.append_message({'role': 'user', 'content': f'msg-{i}'})
+        assert len(s.messages) == 100
+        assert s.messages[0] == {'role': 'system', 'content': 'system'}
+
+    def test_assistant_message_omits_tool_calls_key_when_empty(self) -> None:
+        """Assistant messages without tool_calls must not include the key."""
+        row = ChatSession(id='sid', provider='openrouter', model='m', api_key='k')
+        s = LiveSession(row)
+        msg: dict = {'role': 'assistant', 'content': 'hello'}
+        s.append_message(msg)
+        stored = s.messages[-1]
+        assert 'tool_calls' not in stored
+
+    async def test_agent_loop_continues_when_finish_stop_but_has_tool_calls(self, client: TestClient) -> None:
+        """Agent loop must not break when finish_reason='stop' if tool_calls were present."""
+        resp = client.post(
+            '/api/v1/ai/chat/sessions',
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'test-key'},
+        )
+        sid = resp.json()['session_id']
+
+        call_count = 0
+
+        async def mock_chat(api_key, model, messages, tools):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {
+                    'choices': [
+                        {
+                            'message': {
+                                'content': None,
+                                'tool_calls': [{'id': 'tc1', 'function': {'name': 'safe_tool', 'arguments': '{}'}}],
+                            },
+                            'finish_reason': 'stop',
+                        }
+                    ],
+                    'usage': {'prompt_tokens': 5, 'completion_tokens': 3, 'total_tokens': 8},
+                }
+            return STOP_RESPONSE
+
+        with (
+            patch('modules.chat.routes.chat_with_tools', side_effect=mock_chat),
+            patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
+        ):
+            client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
+            await asyncio.sleep(0.2)
+
+        from modules.chat.sessions import session_store
+
+        live = session_store.get(sid)
+        assert live is not None
+        history = live.get_history()
+        result_events = [e for e in history if e.get('type') == 'tool_result']
+        assert len(result_events) >= 1
+        assert call_count == 2
+
+
+class TestInferPatch:
+    """Test _infer_patch extracts the correct resource name from API paths."""
+
+    def test_simple_resource_path(self) -> None:
+        from modules.chat.routes import _infer_patch
+
+        patch = _infer_patch('post_analysis', 'POST', '/api/v1/analysis', {'ok': True, 'body': {'id': '123'}})
+        assert patch is not None
+        assert patch['resource'] == 'analysis'
+        assert patch['action'] == 'created'
+        assert patch['id'] == '123'
+
+    def test_resource_with_id(self) -> None:
+        from modules.chat.routes import _infer_patch
+
+        patch = _infer_patch('get_analysis', 'GET', '/api/v1/analysis/abc-123', {'ok': True, 'body': {'id': 'abc-123'}})
+        assert patch is not None
+        assert patch['resource'] == 'analysis'
+        assert patch['action'] == 'refresh'
+
+    def test_nested_resource_path(self) -> None:
+        from modules.chat.routes import _infer_patch
+
+        patch = _infer_patch('post_step', 'POST', '/api/v1/analysis/abc/tabs/t1/steps', {'ok': True, 'body': {'id': 's1'}})
+        assert patch is not None
+        assert patch['resource'] == 'analysis'
+        assert patch['action'] == 'created'
+
+    def test_failed_result_returns_none(self) -> None:
+        from modules.chat.routes import _infer_patch
+
+        patch = _infer_patch('post_analysis', 'POST', '/api/v1/analysis', {'ok': False, 'status': 422})
+        assert patch is None
+
+    def test_datasource_path(self) -> None:
+        from modules.chat.routes import _infer_patch
+
+        patch = _infer_patch('delete_ds', 'DELETE', '/api/v1/datasource/xyz', {'ok': True, 'body': None})
+        assert patch is not None
+        assert patch['resource'] == 'datasource'
+        assert patch['action'] == 'deleted'

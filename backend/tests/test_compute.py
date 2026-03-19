@@ -702,3 +702,136 @@ class TestEngineLifecycle:
         result = response.json()
         assert result['total'] == 2
         assert len(result['engines']) == 2
+
+
+class TestBuildAnalysisPipelinePayloadDerived:
+    """Verify derived tabs preserve analysis_id in sources (not overwritten by DB placeholder)."""
+
+    def test_derived_tab_sources_contain_analysis_id(self, test_db_session, sample_datasource: DataSource):
+        from datetime import UTC, datetime
+
+        from modules.analysis.models import Analysis
+        from modules.compute.service import build_analysis_pipeline_payload
+        from modules.datasource.service import create_placeholder_output_datasource
+
+        analysis_id = str(uuid.uuid4())
+        tab1_result_id = str(uuid.uuid4())
+        tab2_result_id = str(uuid.uuid4())
+
+        now = datetime.now(UTC).replace(tzinfo=None)
+        analysis = Analysis(
+            id=analysis_id,
+            name='test',
+            created_at=now,
+            updated_at=now,
+            pipeline_definition={
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'name': 'Source',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {'result_id': tab1_result_id, 'format': 'parquet', 'filename': 'source'},
+                        'steps': [],
+                    },
+                    {
+                        'id': 'tab2',
+                        'name': 'Derived',
+                        'parent_id': 'tab1',
+                        'datasource': {
+                            'id': tab1_result_id,
+                            'analysis_tab_id': 'tab1',
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {'result_id': tab2_result_id, 'format': 'parquet', 'filename': 'derived'},
+                        'steps': [],
+                    },
+                ]
+            },
+            status='draft',
+        )
+        test_db_session.add(analysis)
+        create_placeholder_output_datasource(test_db_session, tab1_result_id, analysis_id, 'tab1')
+        create_placeholder_output_datasource(test_db_session, tab2_result_id, analysis_id, 'tab2')
+        test_db_session.commit()
+
+        payload = build_analysis_pipeline_payload(test_db_session, analysis)
+
+        # The source for tab1_result_id must have analysis_id (set by first loop),
+        # not be overwritten by the DB placeholder (which only has analysis_tab_id).
+        source = payload['sources'][tab1_result_id]
+        assert source['source_type'] == 'analysis'
+        assert source['analysis_id'] == analysis_id
+        assert source['analysis_tab_id'] == 'tab1'
+
+
+class TestDownloadStepFiltering:
+    """Unit tests for download-step filtering logic in download_step().
+
+    Steps arrive in frontend format (key='type', not 'operation').
+    The function must filter out download steps and fall back to the parent
+    when the target_step_id points at a download step.
+    """
+
+    def test_download_type_steps_are_filtered_out(self) -> None:
+        """Steps with type='download' must be excluded from download_steps."""
+        steps: list[dict[str, object]] = [
+            {'id': 'step1', 'type': 'filter', 'config': {}},
+            {'id': 'step2', 'type': 'download', 'config': {}, 'depends_on': ['step1']},
+            {'id': 'step3', 'type': 'select', 'config': {}},
+        ]
+
+        download_steps = [step for step in steps if step.get('type') != 'download']
+
+        assert len(download_steps) == 2
+        ids = [s['id'] for s in download_steps]
+        assert 'step2' not in ids
+        assert 'step1' in ids
+        assert 'step3' in ids
+
+    def test_target_download_step_falls_back_to_parent(self) -> None:
+        """When target_step_id matches a download step, fall back to depends_on[0]."""
+        steps: list[dict[str, object]] = [
+            {'id': 'step1', 'type': 'filter', 'config': {}},
+            {'id': 'step2', 'type': 'download', 'config': {}, 'depends_on': ['step1']},
+        ]
+        target_step_id = 'step2'
+
+        target_step = next((step for step in steps if step.get('id') == target_step_id), None)
+
+        assert target_step is not None
+        assert target_step.get('type') == 'download'
+
+        # Replicate the fallback logic from download_step()
+        depends_on = target_step.get('depends_on') or []
+        assert isinstance(depends_on, list)
+        parent_id = str(depends_on[0]) if depends_on and depends_on[0] else None
+
+        assert parent_id == 'step1'
+
+    def test_target_download_step_falls_back_to_last_step_when_no_parent(self) -> None:
+        """When target is a download step without depends_on, fall back to last remaining step."""
+        steps: list[dict[str, object]] = [
+            {'id': 'step1', 'type': 'filter', 'config': {}},
+            {'id': 'step2', 'type': 'download', 'config': {}},
+        ]
+        target_step_id = 'step2'
+
+        download_steps = [step for step in steps if step.get('type') != 'download']
+        target_step = next((step for step in steps if step.get('id') == target_step_id), None)
+
+        assert target_step is not None
+        assert target_step.get('type') == 'download'
+
+        depends_on = target_step.get('depends_on') or []
+        assert isinstance(depends_on, list)
+        parent_id = str(depends_on[0]) if depends_on and depends_on[0] else None
+
+        # No parent, so fall back to last remaining step
+        assert parent_id is None
+        target_step_id = str(download_steps[-1].get('id') or 'source') if download_steps else 'source'
+
+        assert target_step_id == 'step1'

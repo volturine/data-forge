@@ -289,18 +289,6 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
     )
     test_db_session.add(link)
 
-    placeholder = DataSource(
-        id=tab1_result_id,
-        name=tab1_result_id,
-        source_type='analysis',
-        config={'analysis_tab_id': 'tab1'},
-        created_by_analysis_id=analysis_id,
-        created_by='analysis',
-        is_hidden=False,
-        created_at=now.replace(tzinfo=None),
-    )
-    test_db_session.add(placeholder)
-
     test_db_session.commit()
     test_db_session.refresh(analysis)
 

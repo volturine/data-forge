@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,14 +28,14 @@ frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
     """Periodically sweep expired chat sessions."""
+    from modules.chat.sessions import session_store
+
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=300)
         if stop_event.is_set():
             break
         try:
-            from modules.chat.sessions import session_store
-
             session_store.sweep()
         except Exception as e:
             logger.error('Chat sweep error: %s', e, exc_info=True)
@@ -117,7 +118,6 @@ async def scheduler_loop(stop_event: asyncio.Event, manager: ProcessManager) -> 
                                     logger.warning(
                                         f'Scheduler: skipping schedule {sched.id} — dependency {sched.depends_on} did not complete'
                                     )
-                                    scheduler_service.mark_schedule_run(session, sched.id)
                                     continue
 
                                 try:
@@ -156,10 +156,10 @@ def _topo_sort_schedules(
             graph[s.depends_on].append(s.id)
             in_degree[s.id] += 1
 
-    queue = [sid for sid, deg in in_degree.items() if deg == 0]
+    queue = deque(sid for sid, deg in in_degree.items() if deg == 0)
     ordered: list[str] = []
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         ordered.append(node)
         for neighbor in graph.get(node, []):
             in_degree[neighbor] -= 1
@@ -254,7 +254,7 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 # Include API Routers (prefix already defined in api/router.py)
-app.include_router(router, tags=['api'])
+app.include_router(router)
 
 
 @app.get('/')

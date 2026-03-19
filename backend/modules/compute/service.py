@@ -4,6 +4,7 @@ import re
 import tempfile
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -485,9 +486,6 @@ def _resolve_pipeline_request(
         raise ValueError('analysis_pipeline tab datasource.config.branch is required')
 
     merged = {**datasource_config, **overrides}
-    output_override = selected.get('output')
-    if isinstance(output_override, dict):
-        merged = {**merged, **output_override}
     analysis_id = pipeline.get('analysis_id')
     analysis_id = str(analysis_id) if analysis_id is not None else None
     if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
@@ -553,12 +551,13 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
         if datasource_id and str(datasource_id) != output_id and str(datasource_id) != str(tab_datasource_id):
             next_tabs.append({**tab, 'datasource': {**datasource, 'id': tab_datasource_id, 'config': config}})
             continue
-        datasource_model = session.get(DataSource, str(tab_datasource_id))
-        if datasource_model:
-            sources[str(tab_datasource_id)] = {
-                'source_type': datasource_model.source_type,
-                **datasource_model.config,
-            }
+        if str(tab_datasource_id) not in sources:
+            datasource_model = session.get(DataSource, str(tab_datasource_id))
+            if datasource_model:
+                sources[str(tab_datasource_id)] = {
+                    'source_type': datasource_model.source_type,
+                    **datasource_model.config,
+                }
         next_tabs.append({**tab, 'datasource': {**datasource, 'id': tab_datasource_id, 'config': config}})
 
     return {
@@ -1252,9 +1251,9 @@ def download_step(
     if not analysis_id_value:
         analysis_id_value = f'__download__{datasource_id}'
 
-    download_steps = [step for step in steps if step.get('operation') != 'download']
+    download_steps = [step for step in steps if step.get('type') != 'download']
     target_step = next((step for step in steps if step.get('id') == target_step_id), None)
-    if target_step and target_step.get('operation') == 'download':
+    if target_step and target_step.get('type') == 'download':
         depends_on = target_step.get('depends_on') or []
         parent_id = str(depends_on[0]) if depends_on and depends_on[0] else None
         if parent_id:
@@ -1394,9 +1393,9 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
             tab_input[str(tid)] = str(input_id)
 
     required: set[str] = set()
-    queue = [target_tab_id]
+    queue: deque[str] = deque([target_tab_id])
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in required:
             continue
         required.add(current)

@@ -1,5 +1,6 @@
 import logging
 import uuid
+from collections import deque
 from datetime import UTC, datetime
 
 import croniter  # type: ignore[import-untyped]
@@ -210,27 +211,33 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
         .scalars()
         .all()
     )
+    dep_ds_ids = [dep.datasource_id for dep in deps]
+    datasources_by_id: dict[str, DataSource] = {}
+    if dep_ds_ids:
+        ds_rows = session.execute(select(DataSource).where(col(DataSource.id).in_(dep_ds_ids))).scalars().all()
+        datasources_by_id = {str(ds.id): ds for ds in ds_rows}
     for dep in deps:
-        datasource = session.get(DataSource, dep.datasource_id)
+        datasource = datasources_by_id.get(dep.datasource_id)
         if not datasource or not datasource.created_by_analysis_id:
             continue
         upstream = datasource.created_by_analysis_id
         if upstream not in graph or dep.analysis_id not in graph:
             continue
-        graph.setdefault(upstream, set()).add(dep.analysis_id)
-        in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
+        edges = graph.setdefault(upstream, set())
+        is_new = dep.analysis_id not in edges
+        edges.add(dep.analysis_id)
+        if is_new:
+            in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
 
-    queue = [aid for aid, degree in in_degree.items() if degree == 0]
+    queue = deque(aid for aid, degree in in_degree.items() if degree == 0)
     ordered: list[str] = []
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         ordered.append(node)
         for neighbor in graph.get(node, set()):
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)
-    if analysis_id in ordered:
-        return ordered
     return ordered
 
 
@@ -278,10 +285,14 @@ def get_due_schedules(session: Session) -> list[Schedule]:
         select(Schedule).where(col(Schedule.enabled) == True)  # type: ignore[arg-type]  # noqa: E712
     )
     schedules = result.scalars().all()
+    ds_ids = [sched.datasource_id for sched in schedules]
+    valid_ds_ids: set[str] = set()
+    if ds_ids:
+        id_rows = session.execute(select(col(DataSource.id)).where(col(DataSource.id).in_(ds_ids))).all()
+        valid_ds_ids = {str(row[0]) for row in id_rows}
     due: list[Schedule] = []
     for sched in schedules:
-        datasource = session.get(DataSource, sched.datasource_id)
-        if not datasource:
+        if sched.datasource_id not in valid_ds_ids:
             continue
         if should_run(sched.cron_expression, sched.last_run):
             due.append(sched)
@@ -427,9 +438,9 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
             tab_input[str(tid)] = str(input_id)
 
     required: set[str] = set()
-    queue = [target_tab_id]
+    queue: deque[str] = deque([target_tab_id])
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in required:
             continue
         required.add(current)

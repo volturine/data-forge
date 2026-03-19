@@ -17,7 +17,7 @@ export class DatasourceStore {
 		this.loading = true;
 		this.error = null;
 
-		listDatasources(includeHidden).match(
+		await listDatasources(includeHidden).match(
 			(datasources) => {
 				this.datasources = datasources;
 				this.loading = false;
@@ -74,7 +74,7 @@ export class DatasourceStore {
 		this.loading = true;
 		this.error = null;
 
-		deleteDatasourceApi(id).match(
+		await deleteDatasourceApi(id).match(
 			() => {
 				this.datasources = this.datasources.filter((ds) => ds.id !== id);
 				this.schemas.delete(id);

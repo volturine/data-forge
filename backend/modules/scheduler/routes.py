@@ -17,6 +17,10 @@ def list_schedules(
     datasource_id: DataSourceId | None = None,
     session: Session = Depends(get_db),
 ):
+    """List all schedules. Optionally filter by datasource_id to see schedules for a specific output.
+
+    Returns schedule details including resolved analysis name and tab name.
+    """
     return service.list_schedules(session, parse_datasource_id(datasource_id) if datasource_id else None)
 
 
@@ -24,6 +28,13 @@ def list_schedules(
 @handle_errors(operation='create schedule')
 @deterministic_tool
 def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(get_db)):
+    """Create a build schedule for an analysis output datasource.
+
+    Requires datasource_id (must be an analysis-output datasource from GET /datasource)
+    and cron_expression (e.g., '0 6 * * *' for daily at 6am).
+    Optional: depends_on (another schedule ID to run after), trigger_on_datasource_id
+    (run when that datasource is updated instead of on cron).
+    """
     return service.create_schedule(session, payload)
 
 
@@ -31,6 +42,7 @@ def create_schedule(payload: schemas.ScheduleCreate, session: Session = Depends(
 @handle_errors(operation='update schedule')
 @deterministic_tool
 def update_schedule(schedule_id: ScheduleId, payload: schemas.ScheduleUpdate, session: Session = Depends(get_db)):
+    """Update a schedule's cron expression, enabled state, or dependencies. Use GET /schedules to find schedule IDs."""
     return service.update_schedule(session, parse_schedule_id(schedule_id), payload)
 
 
@@ -38,5 +50,6 @@ def update_schedule(schedule_id: ScheduleId, payload: schemas.ScheduleUpdate, se
 @handle_errors(operation='delete schedule')
 @deterministic_tool
 def delete_schedule(schedule_id: ScheduleId, session: Session = Depends(get_db)):
+    """Delete a schedule by ID. Use GET /schedules to find schedule IDs."""
     service.delete_schedule(session, parse_schedule_id(schedule_id))
     return None

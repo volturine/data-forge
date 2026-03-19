@@ -261,6 +261,56 @@ class TestAnalysisCreate:
 
         assert response.status_code == 422
 
+    def test_create_analysis_with_derived_tab_no_datasource_row(self, client, sample_datasource: DataSource):
+        tab1_result_id = str(uuid.uuid4())
+        payload = {
+            'name': 'Derived Tab Analysis',
+            'description': 'Tab-2 derives from tab-1 output',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': tab1_result_id,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'derived_source',
+                    },
+                    'steps': [],
+                },
+                {
+                    'id': 'tab2',
+                    'name': 'Derived',
+                    'parent_id': 'tab1',
+                    'datasource': {
+                        'id': tab1_result_id,
+                        'analysis_tab_id': 'tab1',
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'derived_output',
+                    },
+                    'steps': [],
+                },
+            ],
+        }
+
+        response = client.post('/api/v1/analysis', json=payload)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result['pipeline_definition']['tabs']) == 2
+        assert result['pipeline_definition']['tabs'][1]['datasource']['id'] == tab1_result_id
+
 
 class TestAnalysisGet:
     def test_get_analysis_success(self, client, sample_analysis: Analysis):
@@ -477,6 +527,65 @@ class TestAnalysisUpdate:
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
         assert response.status_code == 422
+
+    def test_update_analysis_derived_tab_no_new_datasource_rows(self, client, sample_analysis: Analysis, test_db_session):
+        from sqlalchemy import select as sa_select
+
+        from modules.datasource.models import DataSource as DS
+
+        tab1_result_id = str(uuid.uuid4())
+        tab2_result_id = str(uuid.uuid4())
+        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
+
+        before = test_db_session.execute(sa_select(DS)).scalars().all()
+
+        client_id, lock_token = acquire_lock(client, sample_analysis.id)
+        payload = {
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': datasource_id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': tab1_result_id,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'upd_source',
+                    },
+                    'steps': [],
+                },
+                {
+                    'id': 'tab2',
+                    'name': 'Derived',
+                    'parent_id': 'tab1',
+                    'datasource': {
+                        'id': tab1_result_id,
+                        'analysis_tab_id': 'tab1',
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': tab2_result_id,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'upd_derived',
+                    },
+                    'steps': [],
+                },
+            ],
+            'client_id': client_id,
+            'lock_token': lock_token,
+        }
+
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
+
+        assert response.status_code == 200
+        after = test_db_session.execute(sa_select(DS)).scalars().all()
+        assert len(after) == len(before)
 
 
 class TestAnalysisDelete:

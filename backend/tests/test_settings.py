@@ -326,6 +326,32 @@ class TestConfigEndpointWithDbSettings:
         assert data['public_idb_debug'] is False
 
 
+class TestGenerateUuid:
+    """GET /v1/config/uuid — generate UUID v4 values."""
+
+    def test_generates_single_uuid(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config/uuid')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data['uuids']) == 1
+        import uuid
+
+        uuid.UUID(data['uuids'][0], version=4)
+
+    def test_generates_multiple_uuids(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config/uuid?count=5')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data['uuids']) == 5
+        assert len(set(data['uuids'])) == 5  # all unique
+
+    def test_rejects_invalid_count(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config/uuid?count=0')
+        assert resp.status_code == 422
+        resp = client.get('/api/v1/config/uuid?count=21')
+        assert resp.status_code == 422
+
+
 class TestDetectTelegramChat:
     """POST /v1/settings/detect-telegram-chat — detect chat IDs via getUpdates."""
 

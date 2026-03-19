@@ -26,6 +26,11 @@ def list_models(
     endpoint_url: str | None = Query(None),
     api_key: str | None = Query(None),
 ) -> list[AIModelResponse]:
+    """List available AI models from the configured provider.
+
+    Returns model names and details. Use provider='ollama' for local models
+    or provider='openrouter' with an api_key for cloud models.
+    """
     client = get_ai_client(provider, endpoint_url=endpoint_url, api_key=api_key)
     raw = client.list_models()
     return [AIModelResponse(name=m.get('name', ''), detail=str({k: v for k, v in m.items() if k != 'name'})) for m in raw]
@@ -39,6 +44,11 @@ def test_connection(
     endpoint_url: str | None = Query(None),
     api_key: str | None = Query(None),
 ) -> AIConnectionResponse:
+    """Test connectivity to an AI provider.
+
+    Returns {ok: true/false, detail: message}. Use this to verify
+    provider/endpoint_url/api_key settings before using AI features.
+    """
     client = get_ai_client(provider, endpoint_url=endpoint_url, api_key=api_key)
     result = client.test_connection()
     return AIConnectionResponse(**result)

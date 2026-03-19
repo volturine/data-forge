@@ -6,6 +6,7 @@ import resource
 import threading
 import time
 import uuid
+from collections import deque
 from multiprocessing.process import BaseProcess
 from queue import Empty
 
@@ -457,10 +458,10 @@ class PolarsComputeEngine:
             dependents.setdefault(dep_id, []).append(step_id)
             in_degree[step_id] = in_degree.get(step_id, 0) + 1
 
-        queue = [step_id for step_id, degree in in_degree.items() if degree == 0]
+        queue = deque(step_id for step_id, degree in in_degree.items() if degree == 0)
         ordered_steps: list[dict] = []
         while queue:
-            current_id = queue.pop(0)
+            current_id = queue.popleft()
             ordered_steps.append(step_map[current_id])
             for child_id in dependents.get(current_id, []):
                 in_degree[child_id] = in_degree.get(child_id, 0) - 1

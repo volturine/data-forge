@@ -48,8 +48,8 @@ class TabOutputSchema(BaseModel):
         StringConstraints(min_length=1, strip_whitespace=True),
         Field(
             description=(
-                "A new UUID v4 identifier for this tab's result output. Generate a new UUID (uuid4) for each tab. "
-                'This is NOT a datasource reference — it is a brand-new ID where the computed output will be stored.'
+                "UUID v4 for this tab's output. When creating a new analysis, call generate_uuid to get one. "
+                'When updating an existing analysis, reuse the current result_id from the analysis response.'
             )
         ),
     ]

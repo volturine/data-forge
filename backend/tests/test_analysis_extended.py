@@ -582,3 +582,26 @@ class TestDeriveTab:
         assert response.status_code == 200
         data = response.json()
         assert data['output']['result_id'] != source_result_id
+
+    def test_update_analysis_with_derived_tab(self, client, sample_analysis: Analysis):
+        """Updating an analysis that has a derived tab (intra-analysis chain) should succeed."""
+        # First derive a tab
+        derive_resp = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive',
+            json={'name': 'Derived'},
+        )
+        assert derive_resp.status_code == 200
+
+        # Get full analysis with both tabs
+        get_resp = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        analysis_data = get_resp.json()
+        tabs = analysis_data['pipeline_definition']['tabs']
+        assert len(tabs) == 2
+
+        # Acquire lock and update with both tabs (derived tab references same analysis)
+        client_id, lock_token = acquire_lock(client, sample_analysis.id)
+        update_resp = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json={'tabs': tabs, 'client_id': client_id, 'lock_token': lock_token},
+        )
+        assert update_resp.status_code == 200

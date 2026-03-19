@@ -1,6 +1,8 @@
-"""Configuration endpoints for frontend."""
+"""Configuration and utility endpoints."""
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -31,10 +33,26 @@ class FrontendConfig(BaseModel):
     default_namespace: str
 
 
+class UuidResponse(BaseModel):
+    """One or more generated UUID v4 values."""
+
+    uuids: list[str]
+
+
+@router.get('/uuid', response_model=UuidResponse)
+@deterministic_tool
+def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
+    """Generate UUID v4 values for use in analysis creation (output.result_id) or any UUID field.
+
+    Pass count=N to generate multiple UUIDs in one call (max 20).
+    """
+    return UuidResponse(uuids=[str(uuid.uuid4()) for _ in range(count)])
+
+
 @router.get('', response_model=FrontendConfig)
 @deterministic_tool
 def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
-    """Get configuration values for frontend."""
+    """Get application configuration: timeouts, logging settings, feature flags, and default namespace."""
     db_settings = get_settings(session)
     return FrontendConfig(
         engine_pooling_interval=settings.engine_pooling_interval * 1000,  # Convert to ms

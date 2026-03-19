@@ -47,10 +47,9 @@ def acquire_lock(
         session.add(lock)
         session.commit()
         session.refresh(lock)
-
-    if lock:
-        if lock.client_id != client_id and lock.expires_at >= now:
-            raise ValueError(f'Resource is locked by another client until {lock.expires_at}')
+    elif lock.client_id != client_id and lock.expires_at >= now:
+        raise ValueError(f'Resource is locked by another client until {lock.expires_at}')
+    else:
         lock.client_id = client_id
         lock.client_signature = client_signature
         lock.lock_token = str(uuid.uuid4())
@@ -59,9 +58,6 @@ def acquire_lock(
         lock.last_heartbeat = now
         session.commit()
         session.refresh(lock)
-
-    if not lock:
-        raise ValueError('Failed to acquire lock')
 
     return LockResponse(
         resource_id=lock.resource_id,

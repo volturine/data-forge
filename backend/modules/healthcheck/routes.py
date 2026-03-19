@@ -16,6 +16,7 @@ router = APIRouter(prefix='/healthchecks', tags=['healthchecks'])
 @handle_errors(operation='list healthchecks')
 @deterministic_tool
 def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
+    """List all healthchecks for a datasource. Requires datasource_id (from GET /datasource)."""
     return service.list_healthchecks(session, parse_datasource_id(datasource_id))
 
 
@@ -23,6 +24,7 @@ def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
 @handle_errors(operation='list healthcheck results')
 @deterministic_tool
 def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
+    """List recent healthcheck results for a datasource. Returns the last N results (default 10)."""
     parsed_id = parse_datasource_id(datasource_id)
     if parsed_id == datasource_id and datasource_id != str(uuid.UUID(datasource_id)):
         raise HTTPException(status_code=400, detail='Invalid UUID')
@@ -33,6 +35,12 @@ def list_results(datasource_id: str, limit: int = 10, session: Session = Depends
 @handle_errors(operation='create healthcheck')
 @deterministic_tool
 def create_healthcheck(payload: schemas.HealthCheckCreate, session: Session = Depends(get_db)):
+    """Create a healthcheck for a datasource.
+
+    Requires: datasource_id, name, check_type (one of: row_count, null_check, schema_check,
+    value_range, custom_query), and config (varies by check_type).
+    Use GET /datasource to find datasource IDs.
+    """
     return service.create_healthcheck(session, payload)
 
 
@@ -44,6 +52,7 @@ def update_healthcheck(
     payload: schemas.HealthCheckUpdate,
     session: Session = Depends(get_db),
 ):
+    """Update a healthcheck's name, config, enabled state, or critical flag. Use GET /healthchecks to find IDs."""
     try:
         return service.update_healthcheck(session, parse_healthcheck_id(healthcheck_id), payload)
     except ValueError as exc:
@@ -55,6 +64,7 @@ def update_healthcheck(
 @handle_errors(operation='delete healthcheck')
 @deterministic_tool
 def delete_healthcheck(healthcheck_id: HealthcheckId, session: Session = Depends(get_db)):
+    """Delete a healthcheck by ID. Use GET /healthchecks?datasource_id=... to find healthcheck IDs."""
     try:
         service.delete_healthcheck(session, parse_healthcheck_id(healthcheck_id))
         return None

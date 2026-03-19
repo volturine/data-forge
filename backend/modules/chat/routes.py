@@ -66,8 +66,9 @@ def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | N
     """Infer a ui_patch event from tool method/path and response body."""
     if not result.get('ok'):
         return None
+    # Path is /api/v1/{resource}/... — resource is always parts[2]
     parts = [p for p in path.split('/') if p]
-    resource = parts[3] if len(parts) > 3 else (parts[2] if len(parts) > 2 else 'unknown')
+    resource = parts[2] if len(parts) > 2 else 'unknown'
     action_map = {'GET': 'refresh', 'POST': 'created', 'PUT': 'updated', 'PATCH': 'updated', 'DELETE': 'deleted'}
     action = action_map.get(method, 'refresh')
     body = result.get('body')
@@ -79,6 +80,37 @@ def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | N
 
 _TOOL_CALL_RE = re.compile(r'TOOLCALL>\s*(\[.*\])', re.DOTALL)
 _TOOL_CALL_OBJ_RE = re.compile(r'TOOLCALL>\s*(\{.*\})', re.DOTALL)
+
+
+def _build_tool_system_message(tools: list[dict]) -> str:
+    """Build a system message describing available tools and how to call them."""
+    lines = [
+        'You have access to the following tools. To call a tool, output EXACTLY this format on its own line:',
+        'TOOLCALL>[{"name": "tool_name", "arguments": {"arg1": "value1"}}]',
+        '',
+        'CRITICAL RULES:',
+        '- NEVER fabricate or guess tool results. After outputting a TOOLCALL, STOP and wait.',
+        '- The system will execute the tool and provide the result in the next message.',
+        '- Only then should you continue your response based on the actual result.',
+        '- You may call multiple tools in one TOOLCALL by passing an array.',
+        '- Always use generate_uuid to get UUIDs — never invent them.',
+        '',
+        'Available tools:',
+    ]
+    for t in tools:
+        desc = t.get('description', '')
+        schema = t.get('input_schema', {})
+        props = schema.get('properties', {})
+        required = schema.get('required', [])
+        param_parts = []
+        for name, prop in props.items():
+            ptype = prop.get('type', 'any')
+            req = ' (required)' if name in required else ''
+            param_parts.append(f'    {name}: {ptype}{req}')
+        params_str = '\n'.join(param_parts) if param_parts else '    (no parameters)'
+        lines.append(f'- {t["id"]} [{t["method"]}]: {desc}')
+        lines.append(f'  Parameters:\n{params_str}')
+    return '\n'.join(lines)
 
 
 def _try_parse_json(text: str) -> list[dict] | None:
@@ -155,17 +187,26 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
     mutating_tools = [t for t in registry if t['safety'] == 'mutating']
     all_tools = safe_tools + mutating_tools
 
+    tool_system_msg = {'role': 'system', 'content': _build_tool_system_message(all_tools)} if all_tools else None
+
     try:
         max_turns = 5
         for _ in range(max_turns):
+            # Inject tool instructions into messages sent to API (not persisted)
+            api_messages = list(session.messages)
+            if tool_system_msg:
+                # Insert after the user's system prompt (index 0) if present
+                insert_idx = 1 if api_messages and api_messages[0].get('role') == 'system' else 0
+                api_messages.insert(insert_idx, tool_system_msg)
+
             response = await chat_with_tools(
                 api_key,
                 session.model,
-                session.messages,
+                api_messages,
                 all_tools,
             )
             choice = response.get('choices', [{}])[0]
-            msg = choice.get('message', {})
+            raw = choice.get('message', {})
             finish = choice.get('finish_reason', '')
 
             usage = response.get('usage', {})
@@ -173,8 +214,8 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
             turn_usage['completion_tokens'] += usage.get('completion_tokens', 0)
             turn_usage['total_tokens'] += usage.get('total_tokens', 0)
 
-            assistant_content = msg.get('content') or ''
-            tool_calls = msg.get('tool_calls') or []
+            assistant_content = raw.get('content') or ''
+            tool_calls = raw.get('tool_calls') or []
 
             # Fallback: parse tool calls from text when model doesn't support function calling
             if not tool_calls and assistant_content:
@@ -184,7 +225,10 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                     assistant_content = cleaned
                     finish = 'tool_calls'
 
-            session.messages.append({'role': 'assistant', 'content': assistant_content, 'tool_calls': tool_calls or None})
+            msg: dict = {'role': 'assistant', 'content': assistant_content}
+            if tool_calls:
+                msg['tool_calls'] = tool_calls
+            session.append_message(msg)
 
             if assistant_content:
                 session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
@@ -199,6 +243,24 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
 
                 tool = next((t for t in all_tools if t['id'] == tool_id), None)
                 if tool is None:
+                    logger.warning('Unknown tool_id session=%s tool=%s', session.id, tool_id)
+                    session.push_event(
+                        {
+                            'type': 'tool_error',
+                            'tool_id': tool_id,
+                            'method': '',
+                            'path': '',
+                            'args': {},
+                            'errors': [{'path': '$', 'message': f"Unknown tool '{tool_id}'"}],
+                        }
+                    )
+                    session.append_message(
+                        {
+                            'role': 'tool',
+                            'tool_call_id': tc.get('id', tool_id),
+                            'content': json.dumps({'status': 'error', 'message': f"Unknown tool '{tool_id}'"}),
+                        }
+                    )
                     continue
 
                 method = tool['method']
@@ -218,7 +280,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                             'errors': [{'path': '$', 'message': f'Malformed arguments: {exc}'}],
                         }
                     )
-                    session.messages.append(
+                    session.append_message(
                         {
                             'role': 'tool',
                             'tool_call_id': tc.get('id', tool_id),
@@ -236,7 +298,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                         {'type': 'tool_error', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args, 'errors': errors}
                     )
                     tool_result_str = json.dumps({'status': 'validation_error', 'errors': errors})
-                    session.messages.append(
+                    session.append_message(
                         {
                             'role': 'tool',
                             'tool_call_id': tc.get('id', tool_id),
@@ -253,7 +315,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                     session.push_event({'type': 'ui_patch', **patch})
 
                 tool_result_str = json.dumps(result.get('body', ''))
-                session.messages.append(
+                session.append_message(
                     {
                         'role': 'tool',
                         'tool_call_id': tc.get('id', tool_id),
@@ -261,13 +323,16 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                     }
                 )
 
-            if finish not in ('tool_calls',):
+            if finish not in ('tool_calls', 'stop', None, ''):
                 break
 
         session.push_event({'type': 'usage', **turn_usage})
     except OpenRouterError as exc:
         logger.error('OpenRouter error session=%s: %s', session.id, exc)
         session.push_event({'type': 'error', 'content': f'AI provider error: {exc}'})
+    except asyncio.CancelledError:
+        logger.info('Agent turn cancelled session=%s', session.id)
+        session.push_event({'type': 'error', 'content': 'Generation stopped'})
     except httpx.TimeoutException as exc:
         logger.error('Timeout session=%s: %s', session.id, exc)
         session.push_event({'type': 'error', 'content': 'Request timed out'})
@@ -327,8 +392,20 @@ async def send_message(request: Request, body: MessageRequest) -> dict:
     if not acquired:
         session.push_event({'type': 'error', 'content': 'Agent is busy — wait for the current turn to finish'})
         raise HTTPException(status_code=409, detail='Agent busy')
-    asyncio.create_task(_run_agent_turn(session, request.app, body.content, body.tool_ids or None))
+    task = asyncio.create_task(_run_agent_turn(session, request.app, body.content, body.tool_ids or None))
+    session.set_task(task)
     return {'status': 'processing', 'session_id': body.session_id}
+
+
+@router.post('/sessions/{session_id}/stop')
+async def stop_generation(session_id: str) -> dict:
+    """Cancel the running agent turn for a session."""
+    session = session_store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail='Session not found')
+    session.cancel_task()
+    await session.set_busy(False)
+    return {'status': 'stopped', 'session_id': session_id}
 
 
 @router.get('/history/{session_id}')

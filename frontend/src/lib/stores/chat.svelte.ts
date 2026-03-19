@@ -9,7 +9,7 @@ import {
 	listSessions
 } from '$lib/api/chat';
 import type { ChatEvent, OpenRouterModel, ChatSessionInfo } from '$lib/api/chat';
-import { getSettings } from '$lib/api/settings';
+import { getSettings, updateSettings } from '$lib/api/settings';
 import type { AppSettings } from '$lib/api/settings';
 import { listTools } from '$lib/api/mcp';
 import type { MCPTool } from '$lib/api/mcp';
@@ -19,6 +19,7 @@ const SESSION_KEY = 'chat_session_id';
 const PREFS_KEY = 'chat_prefs';
 const MAX_BACKOFF = 30_000;
 const BASE_BACKOFF = 1_000;
+const MAX_RETRIES = 10;
 
 export type AgentMode = 'plan' | 'execute';
 
@@ -126,7 +127,6 @@ export class ChatStore {
 		const raw = localStorage.getItem(PREFS_KEY);
 		if (!raw) return;
 		const prefs = JSON.parse(raw) as Record<string, unknown>;
-		if (typeof prefs.apiKey === 'string') this.apiKey = prefs.apiKey;
 		if (typeof prefs.model === 'string') this.model = prefs.model;
 		if (typeof prefs.systemPrompt === 'string') this.systemPrompt = prefs.systemPrompt;
 		if (prefs.mode === 'plan' || prefs.mode === 'execute') this.mode = prefs.mode;
@@ -143,7 +143,6 @@ export class ChatStore {
 		localStorage.setItem(
 			PREFS_KEY,
 			JSON.stringify({
-				apiKey: this.apiKey,
 				model: this.model,
 				systemPrompt: this.systemPrompt,
 				mode: this.mode,
@@ -173,9 +172,11 @@ export class ChatStore {
 	}
 
 	get enabledTools(): MCPTool[] {
-		return this.tools.filter(
-			(t) => !this.disabledTools.has(t.id) && !t.tags.some((tag) => this.disabledTags.has(tag))
-		);
+		return this.tools.filter((t) => {
+			if (this.disabledTools.has(t.id)) return false;
+			const tag = t.tags.length ? t.tags[0] : 'uncategorized';
+			return !this.disabledTags.has(tag);
+		});
 	}
 
 	get contextLimit(): number {
@@ -186,12 +187,23 @@ export class ChatStore {
 	get tagGroups(): SvelteMap<string, MCPTool[]> {
 		const groups = new SvelteMap<string, MCPTool[]>();
 		for (const tool of this.tools) {
-			const tags = tool.tags.length ? tool.tags : ['uncategorized'];
-			for (const tag of tags) {
-				const list = groups.get(tag) ?? [];
-				list.push(tool);
-				groups.set(tag, list);
-			}
+			const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
+			const list = groups.get(tag) ?? [];
+			list.push(tool);
+			groups.set(tag, list);
+		}
+		return groups;
+	}
+
+	get modeFilteredTagGroups(): SvelteMap<string, MCPTool[]> {
+		const source =
+			this.mode === 'plan' ? this.tools.filter((t) => t.safety === 'safe') : this.tools;
+		const groups = new SvelteMap<string, MCPTool[]>();
+		for (const tool of source) {
+			const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
+			const list = groups.get(tag) ?? [];
+			list.push(tool);
+			groups.set(tag, list);
 		}
 		return groups;
 	}
@@ -219,12 +231,22 @@ export class ChatStore {
 	}
 
 	toggleTag(tag: string): void {
-		if (this.disabledTags.has(tag)) {
-			this.disabledTags.delete(tag);
-		} else {
+		const group = this.tagGroups.get(tag) ?? [];
+		const allEnabled = group.every((t) => this.isToolEnabled(t.id));
+		if (allEnabled) {
 			this.disabledTags.add(tag);
+		} else {
+			this.disabledTags.delete(tag);
+			for (const tool of group) {
+				this.disabledTools.delete(tool.id);
+			}
 		}
 		this._savePrefs();
+	}
+
+	isTagFullyEnabled(tag: string): boolean {
+		const group = this.tagGroups.get(tag) ?? [];
+		return group.length > 0 && group.every((t) => this.isToolEnabled(t.id));
 	}
 
 	isTagEnabled(tag: string): boolean {
@@ -235,7 +257,8 @@ export class ChatStore {
 		const tool = this.tools.find((t) => t.id === id);
 		if (!tool) return false;
 		if (this.disabledTools.has(id)) return false;
-		return !tool.tags.some((t) => this.disabledTags.has(t));
+		const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
+		return !this.disabledTags.has(tag);
 	}
 
 	async loadContext(): Promise<void> {
@@ -243,7 +266,7 @@ export class ChatStore {
 		settingsResult.match(
 			(s) => {
 				this.settings = s;
-				if (!this.apiKey && s.openrouter_api_key) this.apiKey = s.openrouter_api_key;
+				if (s.openrouter_api_key) this.apiKey = s.openrouter_api_key;
 				this.configured = true;
 			},
 			() => {}
@@ -278,11 +301,12 @@ export class ChatStore {
 		);
 	}
 
-	configure(apiKey: string): void {
+	async configure(apiKey: string): Promise<void> {
 		this.apiKey = apiKey;
 		this.configured = true;
 		this.error = null;
 		this._savePrefs();
+		await updateSettings({ openrouter_api_key: apiKey });
 	}
 
 	async startSession(): Promise<void> {
@@ -316,6 +340,8 @@ export class ChatStore {
 				this.messages = [];
 				this.toolCalls = [];
 				this.timeline = [];
+				this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+				this.lastTurnUsage = null;
 
 				for (const event of data.history) {
 					this._handleEvent(event);
@@ -380,6 +406,11 @@ export class ChatStore {
 
 	private _scheduleReconnect(): void {
 		this._retries += 1;
+		if (this._retries > MAX_RETRIES) {
+			this.connection = 'disconnected';
+			this.error = 'Connection lost. Please refresh or start a new session.';
+			return;
+		}
 		const delay = Math.min(BASE_BACKOFF * Math.pow(2, this._retries - 1), MAX_BACKOFF);
 		this._retryTimer = setTimeout(() => {
 			if (!this.sessionId) return;
@@ -611,6 +642,39 @@ export class ChatStore {
 
 	cancelCloseSession(): void {
 		this.confirmClose = false;
+	}
+
+	/** Start a fresh session without deleting the current one. */
+	async newSession(): Promise<void> {
+		this._clearRetry();
+		if (this._es) {
+			this._es.close();
+			this._es = null;
+		}
+		this.connection = 'disconnected';
+		this.sessionId = null;
+		this.messages = [];
+		this.toolCalls = [];
+		this.timeline = [];
+		this.toolDrafts = new SvelteMap();
+		this.loading = false;
+		this.error = null;
+		this.lastFailedContent = null;
+		this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+		this.lastTurnUsage = null;
+		if (typeof window !== 'undefined') {
+			localStorage.removeItem(SESSION_KEY);
+		}
+		void this.loadSessions();
+	}
+
+	/** Delete a session by ID (from session history). */
+	async deleteSession(sessionId: string): Promise<void> {
+		await closeSession(sessionId);
+		if (this.sessionId === sessionId) {
+			await this.newSession();
+		}
+		this.sessions = this.sessions.filter((s) => s.id !== sessionId);
 	}
 
 	async closeSession(): Promise<void> {

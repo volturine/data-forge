@@ -52,6 +52,14 @@ class TestTabSchemaOutputDatasourceId:
         with pytest.raises(ValidationError):
             TabOutputSchema(result_id='not-a-uuid', format='parquet', filename='tab_output')
 
+    def test_rejects_non_v4_uuid(self):
+        """Only v4 UUIDs are accepted — AI agents should use the generate_uuid tool."""
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            TabOutputSchema(result_id='f9a8b2c4-e5d6-7f8a-9b0c-1d2e3f4a5b6c', format='parquet', filename='tab_output')
+
     def test_round_trips_through_model_dump(self):
         rid = str(uuid.uuid4())
         tab = TabSchema(

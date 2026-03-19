@@ -24,7 +24,12 @@ def preview_step(
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
-    """Preview the result of a pipeline step with pagination."""
+    """Preview the result of a pipeline step with pagination.
+
+    Requires analysis_pipeline (full pipeline payload with tabs and steps) and target_step_id
+    (the step to preview, or 'source' for raw data). Returns column names, types, data rows,
+    and total row count. Use row_limit and page for pagination.
+    """
     analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
 
     return service.preview_step(
@@ -49,7 +54,11 @@ def get_step_schema(
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
-    """Get the output schema of a pipeline step (for pivot/unpivot dynamic columns)."""
+    """Get the output column schema of a pipeline step without fetching data.
+
+    Useful for configuring downstream steps that need to know available columns
+    (e.g., pivot, unpivot, select). Returns column names and their Polars dtypes.
+    """
     analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
 
     return service.get_step_schema(
@@ -70,7 +79,7 @@ def get_step_row_count(
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
-    """Get the row count of a pipeline step."""
+    """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
     analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
 
     return service.get_step_row_count(
@@ -92,7 +101,11 @@ def list_iceberg_snapshots(
     branch: str | None = None,
     session: Session = Depends(get_db),
 ):
-    """List snapshots for an Iceberg datasource (for time travel selection)."""
+    """List Iceberg table snapshots for time-travel selection.
+
+    Each snapshot has a snapshot_id, timestamp, and operation type.
+    Optionally filter by branch. Use snapshot_id with compare-snapshots.
+    """
     return service.list_iceberg_snapshots(session, parse_datasource_id(datasource_id), branch=branch)
 
 
@@ -107,7 +120,10 @@ def delete_iceberg_snapshot(
     snapshot_id: int,
     session: Session = Depends(get_db),
 ):
-    """Delete an Iceberg snapshot by ID."""
+    """Delete an Iceberg snapshot by ID. Use GET /compute/iceberg/{id}/snapshots to find snapshot IDs.
+
+    Warning: deleting snapshots removes the ability to time-travel to that point.
+    """
     return service.delete_iceberg_snapshot(session, parse_datasource_id(datasource_id), str(snapshot_id))
 
 
@@ -119,6 +135,11 @@ def build_analysis_from_payload(
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
+    """Build (export) an analysis from a pipeline payload.
+
+    Executes the pipeline and writes results to output datasources.
+    Requires analysis_pipeline with tabs and optionally tab_id to build a specific tab.
+    """
     pipeline = request.analysis_pipeline.model_dump(mode='json') if request.analysis_pipeline else None
     if not isinstance(pipeline, dict):
         raise ValueError('analysis_pipeline is required')
@@ -231,7 +252,11 @@ def export_data(
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
-    """Export pipeline result to download or output datasource."""
+    """Export pipeline results to a file download or output datasource.
+
+    For destination='download': returns file bytes in the requested format (csv, parquet, json, etc.).
+    For destination='datasource': writes to an Iceberg output datasource (requires result_id and iceberg_options).
+    """
     if request.destination == schemas.ExportDestination.DOWNLOAD:
         file_bytes, filename, content_type = service.download_step(
             session=session,
@@ -281,7 +306,11 @@ def download_step(
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
-    """Download the result of a pipeline step in a specified format."""
+    """Download pipeline step result as a file.
+
+    Returns the file bytes with appropriate Content-Type header.
+    Supported formats: csv, parquet, json, ndjson, duckdb, excel.
+    """
     file_bytes, filename, content_type = service.download_step(
         session=session,
         manager=manager,

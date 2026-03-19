@@ -16,12 +16,19 @@ from modules.analysis.schemas import (
 from modules.analysis.step_schemas import validate_step
 from modules.analysis_versions import service as version_service
 from modules.datasource.models import DataSource
-from modules.datasource.service import create_placeholder_output_datasource
 from modules.locks import service as lock_service
 
 
 def _to_response(analysis: Analysis) -> AnalysisResponseSchema:
     return AnalysisResponseSchema.model_validate(analysis)
+
+
+def _find_tab(tabs: list[dict], tab_id: str) -> dict:
+    """Find a tab by ID or raise ValueError."""
+    tab = next((t for t in tabs if t.get('id') == tab_id), None)
+    if not tab:
+        raise ValueError(f'Tab {tab_id} not found')
+    return tab
 
 
 def _validate_analysis_payload(
@@ -44,6 +51,12 @@ def _validate_analysis_payload(
         if not output.get('format'):
             raise ValueError('Analysis tab missing output.format')
 
+    tab_output_map = {
+        str(tab.get('id')): str((tab.get('output') or {}).get('result_id') or '')
+        for tab in tabs_payload
+        if tab.get('id') and (tab.get('output') or {}).get('result_id')
+    }
+
     datasource_ids = []
     for tab in tabs_payload:
         datasource = tab.get('datasource')
@@ -61,6 +74,13 @@ def _validate_analysis_payload(
         datasource_id = datasource.get('id')
         if not datasource_id:
             raise ValueError('Analysis tab missing datasource.id')
+        analysis_tab_id = datasource.get('analysis_tab_id')
+        if analysis_tab_id is not None:
+            expected = tab_output_map.get(str(analysis_tab_id))
+            if expected != str(datasource_id):
+                raise ValueError(f"Datasource id '{datasource_id}' does not match output.result_id of tab '{analysis_tab_id}'")
+            datasource_ids.append(str(datasource_id))
+            continue
         datasource_row = session.get(DataSource, datasource_id)
         if datasource_row:
             datasource_ids.append(str(datasource_id))
@@ -150,13 +170,6 @@ def create_analysis(
                 datasource_id=datasource_id,
             )
             session.add(link)
-
-        for tab in tabs_payload:
-            output = tab.get('output') or {}
-            result_id = output.get('result_id')
-            tab_id = tab.get('id')
-            if result_id and tab_id:
-                create_placeholder_output_datasource(session, str(result_id), analysis_id, str(tab_id))
 
         version_service.create_version(session, analysis, commit=False)
 
@@ -317,9 +330,7 @@ def add_step(
     version_service.create_version(session, analysis, commit=False)
 
     tabs = analysis.pipeline_definition.get('tabs', [])
-    tab = next((t for t in tabs if t.get('id') == tab_id), None)
-    if not tab:
-        raise ValueError(f'Tab {tab_id} not found')
+    tab = _find_tab(tabs, tab_id)
 
     existing_step_ids = {str(s.get('id')) for s in tab.get('steps', []) if s.get('id')}
     for dep_id in depends_on or []:
@@ -370,9 +381,7 @@ def get_step(
     if not analysis:
         raise AnalysisNotFoundError(analysis_id)
     tabs = analysis.pipeline_definition.get('tabs', [])
-    tab = next((t for t in tabs if t.get('id') == tab_id), None)
-    if not tab:
-        raise ValueError(f'Tab {tab_id} not found')
+    tab = _find_tab(tabs, tab_id)
     step = next((s for s in tab.get('steps', []) if s.get('id') == step_id), None)
     if not step:
         raise ValueError(f'Step {step_id} not found')
@@ -394,9 +403,7 @@ def update_step(
     version_service.create_version(session, analysis, commit=False)
 
     tabs = analysis.pipeline_definition.get('tabs', [])
-    tab = next((t for t in tabs if t.get('id') == tab_id), None)
-    if not tab:
-        raise ValueError(f'Tab {tab_id} not found')
+    tab = _find_tab(tabs, tab_id)
 
     step = next((s for s in tab.get('steps', []) if s.get('id') == step_id), None)
     if not step:
@@ -427,9 +434,7 @@ def remove_step(
     version_service.create_version(session, analysis, commit=False)
 
     tabs = analysis.pipeline_definition.get('tabs', [])
-    tab = next((t for t in tabs if t.get('id') == tab_id), None)
-    if not tab:
-        raise ValueError(f'Tab {tab_id} not found')
+    tab = _find_tab(tabs, tab_id)
 
     steps = tab.get('steps', [])
     idx = next((i for i, s in enumerate(steps) if s.get('id') == step_id), None)
@@ -460,17 +465,12 @@ def derive_tab(
         raise AnalysisNotFoundError(analysis_id)
 
     tabs = analysis.pipeline_definition.get('tabs', [])
-    source = next((t for t in tabs if t.get('id') == tab_id), None)
-    if not source:
-        raise ValueError(f'Tab {tab_id} not found')
+    source = _find_tab(tabs, tab_id)
 
     output = source.get('output') or {}
     result_id = output.get('result_id')
     if not result_id:
         raise ValueError(f'Tab {tab_id} has no output.result_id')
-
-    if not session.get(DataSource, result_id):
-        raise DataSourceNotFoundError(str(result_id))
 
     tab_name = name or f'Derived {len(tabs) + 1}'
     new_tab_id = f'tab-{str(uuid.uuid4())}'
@@ -504,7 +504,6 @@ def derive_tab(
     analysis.pipeline_definition['tabs'] = tabs
     flag_modified(analysis, 'pipeline_definition')
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    create_placeholder_output_datasource(session, new_result_id, analysis_id, new_tab_id)
     session.commit()
     session.refresh(analysis)
     return new_tab
