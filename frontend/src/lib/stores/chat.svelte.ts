@@ -184,9 +184,9 @@ export class ChatStore {
 		return found?.context_length ?? 0;
 	}
 
-	get tagGroups(): SvelteMap<string, MCPTool[]> {
+	private _groupByTag(tools: MCPTool[]): SvelteMap<string, MCPTool[]> {
 		const groups = new SvelteMap<string, MCPTool[]>();
-		for (const tool of this.tools) {
+		for (const tool of tools) {
 			const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
 			const list = groups.get(tag) ?? [];
 			list.push(tool);
@@ -195,17 +195,14 @@ export class ChatStore {
 		return groups;
 	}
 
+	get tagGroups(): SvelteMap<string, MCPTool[]> {
+		return this._groupByTag(this.tools);
+	}
+
 	get modeFilteredTagGroups(): SvelteMap<string, MCPTool[]> {
 		const source =
 			this.mode === 'plan' ? this.tools.filter((t) => t.safety === 'safe') : this.tools;
-		const groups = new SvelteMap<string, MCPTool[]>();
-		for (const tool of source) {
-			const tag = tool.tags.length ? tool.tags[0] : 'uncategorized';
-			const list = groups.get(tag) ?? [];
-			list.push(tool);
-			groups.set(tag, list);
-		}
-		return groups;
+		return this._groupByTag(source);
 	}
 
 	setMode(mode: AgentMode): void {
@@ -644,14 +641,16 @@ export class ChatStore {
 		this.confirmClose = false;
 	}
 
-	/** Start a fresh session without deleting the current one. */
-	async newSession(): Promise<void> {
+	private _disconnectStream(): void {
 		this._clearRetry();
 		if (this._es) {
 			this._es.close();
 			this._es = null;
 		}
 		this.connection = 'disconnected';
+	}
+
+	private _resetState(): void {
 		this.sessionId = null;
 		this.messages = [];
 		this.toolCalls = [];
@@ -665,6 +664,12 @@ export class ChatStore {
 		if (typeof window !== 'undefined') {
 			localStorage.removeItem(SESSION_KEY);
 		}
+	}
+
+	/** Start a fresh session without deleting the current one. */
+	async newSession(): Promise<void> {
+		this._disconnectStream();
+		this._resetState();
 		void this.loadSessions();
 	}
 
@@ -679,54 +684,22 @@ export class ChatStore {
 
 	async closeSession(): Promise<void> {
 		this.confirmClose = false;
-		this._clearRetry();
-		if (this._es) {
-			this._es.close();
-			this._es = null;
-		}
-		this.connection = 'disconnected';
+		this._disconnectStream();
 		if (this.sessionId) {
 			await closeSession(this.sessionId);
 		}
-		this.sessionId = null;
-		this.messages = [];
-		this.toolCalls = [];
-		this.timeline = [];
-		this.toolDrafts = new SvelteMap();
-		this.loading = false;
-		this.error = null;
-		this.lastFailedContent = null;
-		this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-		this.lastTurnUsage = null;
-		if (typeof window !== 'undefined') {
-			localStorage.removeItem(SESSION_KEY);
-		}
+		this._resetState();
 		void this.loadSessions();
 	}
 
 	close(): void {
-		this._clearRetry();
-		this._es?.close();
-		this._es = null;
+		this._disconnectStream();
 		this.open = false;
-		this.connection = 'disconnected';
 	}
 
 	reset(): void {
 		this.close();
-		this.sessionId = null;
-		this.messages = [];
-		this.toolCalls = [];
-		this.timeline = [];
-		this.toolDrafts = new SvelteMap();
-		this.loading = false;
-		this.error = null;
-		this.lastFailedContent = null;
-		this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-		this.lastTurnUsage = null;
-		if (typeof window !== 'undefined') {
-			localStorage.removeItem(SESSION_KEY);
-		}
+		this._resetState();
 	}
 }
 

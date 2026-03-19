@@ -113,6 +113,31 @@ def _build_tool_system_message(tools: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _push_tool_error(
+    session: LiveSession,
+    tc: dict,
+    tool_id: str,
+    method: str,
+    path: str,
+    args: dict,
+    message: str,
+) -> None:
+    """Push tool_error event and append tool-role message for the LLM context."""
+    session.push_event(
+        {
+            'type': 'tool_error',
+            'tool_id': tool_id,
+            'method': method,
+            'path': path,
+            'args': args,
+            'errors': [{'path': '$', 'message': message}],
+        }
+    )
+    session.append_message(
+        {'role': 'tool', 'tool_call_id': tc.get('id', tool_id), 'content': json.dumps({'status': 'error', 'message': message})}
+    )
+
+
 def _try_parse_json(text: str) -> list[dict] | None:
     """Try to parse JSON, progressively trimming trailing garbage on failure."""
     for end in range(len(text), 0, -1):
@@ -244,23 +269,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                 tool = next((t for t in all_tools if t['id'] == tool_id), None)
                 if tool is None:
                     logger.warning('Unknown tool_id session=%s tool=%s', session.id, tool_id)
-                    session.push_event(
-                        {
-                            'type': 'tool_error',
-                            'tool_id': tool_id,
-                            'method': '',
-                            'path': '',
-                            'args': {},
-                            'errors': [{'path': '$', 'message': f"Unknown tool '{tool_id}'"}],
-                        }
-                    )
-                    session.append_message(
-                        {
-                            'role': 'tool',
-                            'tool_call_id': tc.get('id', tool_id),
-                            'content': json.dumps({'status': 'error', 'message': f"Unknown tool '{tool_id}'"}),
-                        }
-                    )
+                    _push_tool_error(session, tc, tool_id, '', '', {}, f"Unknown tool '{tool_id}'")
                     continue
 
                 method = tool['method']
@@ -270,23 +279,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                     args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                 except json.JSONDecodeError as exc:
                     logger.warning('Malformed tool args session=%s tool=%s: %s', session.id, tool_id, exc)
-                    session.push_event(
-                        {
-                            'type': 'tool_error',
-                            'tool_id': tool_id,
-                            'method': method,
-                            'path': path,
-                            'args': {},
-                            'errors': [{'path': '$', 'message': f'Malformed arguments: {exc}'}],
-                        }
-                    )
-                    session.append_message(
-                        {
-                            'role': 'tool',
-                            'tool_call_id': tc.get('id', tool_id),
-                            'content': json.dumps({'status': 'error', 'message': f'Malformed arguments: {exc}'}),
-                        }
-                    )
+                    _push_tool_error(session, tc, tool_id, method, path, {}, f'Malformed arguments: {exc}')
                     continue
                 tool_count += 1
 
@@ -297,12 +290,11 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                     session.push_event(
                         {'type': 'tool_error', 'tool_id': tool_id, 'method': method, 'path': path, 'args': args, 'errors': errors}
                     )
-                    tool_result_str = json.dumps({'status': 'validation_error', 'errors': errors})
                     session.append_message(
                         {
                             'role': 'tool',
                             'tool_call_id': tc.get('id', tool_id),
-                            'content': tool_result_str,
+                            'content': json.dumps({'status': 'validation_error', 'errors': errors}),
                         }
                     )
                     continue
@@ -322,9 +314,6 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                         'content': tool_result_str,
                     }
                 )
-
-            if finish not in ('tool_calls', 'stop', None, ''):
-                break
 
         session.push_event({'type': 'usage', **turn_usage})
     except OpenRouterError as exc:

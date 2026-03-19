@@ -76,21 +76,22 @@ class LiveSession:
             self._task.cancel()
             self._task = None
 
+    def _trim_messages(self) -> None:
+        if len(self.messages) <= MAX_MESSAGES:
+            return
+        system = [m for m in self.messages if m.get('role') == 'system']
+        non_system = [m for m in self.messages if m.get('role') != 'system']
+        self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
+
     def add_message(self, role: str, content: str) -> None:
         self.last_activity = time.time()
         self.messages.append({'role': role, 'content': content})
-        if len(self.messages) > MAX_MESSAGES:
-            system = [m for m in self.messages if m.get('role') == 'system']
-            non_system = [m for m in self.messages if m.get('role') != 'system']
-            self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
+        self._trim_messages()
 
     def append_message(self, msg: dict[str, Any]) -> None:
         self.last_activity = time.time()
         self.messages.append(msg)
-        if len(self.messages) > MAX_MESSAGES:
-            system = [m for m in self.messages if m.get('role') == 'system']
-            non_system = [m for m in self.messages if m.get('role') != 'system']
-            self.messages = system + non_system[-(MAX_MESSAGES - len(system)) :]
+        self._trim_messages()
 
     def push_event(self, event: dict) -> None:
         self.last_activity = time.time()
