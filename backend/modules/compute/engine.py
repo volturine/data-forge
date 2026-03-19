@@ -73,19 +73,7 @@ class PolarsComputeEngine:
             with contextlib.suppress(Exception):
                 self.process.join(timeout=1.0)
             self.process = None
-        # Close old queues before creating new ones (old ones may be corrupted)
-        if hasattr(self, 'command_queue'):
-            with contextlib.suppress(Exception):
-                self.command_queue.cancel_join_thread()
-                self.command_queue.close()
-            with contextlib.suppress(Exception):
-                self.command_queue.join_thread()
-        if hasattr(self, 'result_queue'):
-            with contextlib.suppress(Exception):
-                self.result_queue.cancel_join_thread()
-                self.result_queue.close()
-            with contextlib.suppress(Exception):
-                self.result_queue.join_thread()
+        self._close_queues()
         self.command_queue = self._mp_context.Queue()
         self.result_queue = self._mp_context.Queue()
 
@@ -269,8 +257,21 @@ class PolarsComputeEngine:
                 self.process.kill()
                 self.process.join(timeout=1)
 
+        self._close_queues()
         self.is_running = False
         self.process = None
+
+    def _close_queues(self) -> None:
+        """Close queues to properly unregister semaphores from resource tracker."""
+        for queue in (self.command_queue, self.result_queue):
+            if queue is None:
+                continue
+            with contextlib.suppress(Exception):
+                queue.cancel_join_thread()
+            with contextlib.suppress(Exception):
+                queue.close()
+            with contextlib.suppress(Exception):
+                queue.join_thread()
 
     @staticmethod
     def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue, max_memory_mb: int = 0) -> None:
