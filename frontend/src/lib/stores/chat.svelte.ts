@@ -6,7 +6,8 @@ import {
 	closeSession,
 	updateSession,
 	listModels,
-	listSessions
+	listSessions,
+	confirmTool
 } from '$lib/api/chat';
 import type { ChatEvent, OpenRouterModel, ChatSessionInfo } from '$lib/api/chat';
 import { getSettings, updateSettings } from '$lib/api/settings';
@@ -55,10 +56,12 @@ export interface ToolCall {
 	method: string;
 	path: string;
 	args: Record<string, unknown>;
-	status: 'running' | 'done' | 'error';
+	status: 'running' | 'done' | 'error' | 'confirming';
 	result?: unknown;
 	errors?: { path: string; message: string }[];
 	expanded: boolean;
+	startedAt?: number;
+	duration_ms?: number;
 }
 
 export interface UsageInfo {
@@ -103,6 +106,14 @@ export class ChatStore {
 	lastTurnUsage = $state<UsageInfo | null>(null);
 	lastFailedContent = $state<string | null>(null);
 	sessions = $state<ChatSessionInfo[]>([]);
+	currentTurn = $state(0);
+	maxTurns = $state(0);
+	pendingConfirm = $state<{
+		tool_id: string;
+		method: string;
+		path: string;
+		args: Record<string, unknown>;
+	} | null>(null);
 
 	private _es: EventSource | null = null;
 	private _counter = 0;
@@ -454,7 +465,7 @@ export class ChatStore {
 			this.timeline.push({ kind: 'tool', item: tc });
 		}
 		if (event.type === 'tool_result' && event.tool_id) {
-			this._updateToolStatus(event.tool_id, 'done', event.result);
+			this._updateToolStatus(event.tool_id, 'done', event.result, undefined, event.duration_ms);
 		}
 		if (event.type === 'tool_error' && event.tool_id) {
 			const errors = event.errors ?? [];
@@ -472,6 +483,54 @@ export class ChatStore {
 			this.messages.push(msg);
 			this.timeline.push({ kind: 'message', item: msg });
 			this.loading = false;
+		}
+		if (event.type === 'turn_start') {
+			this.currentTurn = event.turn ?? 0;
+			this.maxTurns = event.max_turns ?? 0;
+		}
+		if (event.type === 'tool_start' && event.tool_id) {
+			// Update the matching running tool call with start timestamp
+			const tc = this.toolCalls.findLast(
+				(t) => t.tool_id === event.tool_id && t.status === 'running'
+			);
+			if (tc) {
+				tc.startedAt = Date.now();
+			}
+			for (let i = this.timeline.length - 1; i >= 0; i--) {
+				const entry = this.timeline[i];
+				if (
+					entry.kind === 'tool' &&
+					entry.item.tool_id === event.tool_id &&
+					entry.item.status === 'running'
+				) {
+					entry.item.startedAt = Date.now();
+					break;
+				}
+			}
+		}
+		if (event.type === 'tool_confirm' && event.tool_id) {
+			this.pendingConfirm = {
+				tool_id: event.tool_id,
+				method: event.method ?? '',
+				path: event.path ?? '',
+				args: event.args ?? {}
+			};
+			// Update tool status to confirming
+			const tc = this.toolCalls.findLast(
+				(t) => t.tool_id === event.tool_id && t.status === 'running'
+			);
+			if (tc) tc.status = 'confirming';
+			for (let i = this.timeline.length - 1; i >= 0; i--) {
+				const entry = this.timeline[i];
+				if (
+					entry.kind === 'tool' &&
+					entry.item.tool_id === event.tool_id &&
+					entry.item.status === 'running'
+				) {
+					entry.item.status = 'confirming';
+					break;
+				}
+			}
 		}
 		if (event.type === 'ui_patch') {
 			this._applyUiPatch(event);
@@ -494,6 +553,9 @@ export class ChatStore {
 		}
 		if (event.type === 'done') {
 			this.loading = false;
+			this.currentTurn = 0;
+			this.maxTurns = 0;
+			this.pendingConfirm = null;
 		}
 	}
 
@@ -501,14 +563,18 @@ export class ChatStore {
 		toolId: string,
 		status: 'done' | 'error',
 		result?: unknown,
-		errors?: { path: string; message: string }[]
+		errors?: { path: string; message: string }[],
+		duration_ms?: number
 	): void {
 		// Update in toolCalls array
-		const tc = this.toolCalls.findLast((t) => t.tool_id === toolId && t.status === 'running');
+		const tc = this.toolCalls.findLast(
+			(t) => t.tool_id === toolId && (t.status === 'running' || t.status === 'confirming')
+		);
 		if (tc) {
 			tc.status = status;
 			if (result !== undefined) tc.result = result;
 			if (errors) tc.errors = errors;
+			if (duration_ms !== undefined) tc.duration_ms = duration_ms;
 		}
 		// Also update through timeline proxy to ensure reactivity in both arrays
 		for (let i = this.timeline.length - 1; i >= 0; i--) {
@@ -516,11 +582,12 @@ export class ChatStore {
 			if (
 				entry.kind === 'tool' &&
 				entry.item.tool_id === toolId &&
-				entry.item.status === 'running'
+				(entry.item.status === 'running' || entry.item.status === 'confirming')
 			) {
 				entry.item.status = status;
 				if (result !== undefined) entry.item.result = result;
 				if (errors) entry.item.errors = errors;
+				if (duration_ms !== undefined) entry.item.duration_ms = duration_ms;
 				break;
 			}
 		}
@@ -576,6 +643,24 @@ export class ChatStore {
 		const content = this.lastFailedContent;
 		this.lastFailedContent = null;
 		return this.send(content);
+	}
+
+	async approveConfirm(): Promise<void> {
+		if (!this.sessionId || !this.pendingConfirm) return;
+		this.pendingConfirm = null;
+		await confirmTool(this.sessionId, true);
+	}
+
+	async denyConfirm(): Promise<void> {
+		if (!this.sessionId || !this.pendingConfirm) return;
+		this.pendingConfirm = null;
+		await confirmTool(this.sessionId, false);
+	}
+
+	reconnectNow(): void {
+		if (!this.sessionId) return;
+		this._clearRetry();
+		this._connectStream(this.sessionId);
 	}
 
 	get modelDisplayName(): string {
@@ -661,6 +746,9 @@ export class ChatStore {
 		this.lastFailedContent = null;
 		this.sessionUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 		this.lastTurnUsage = null;
+		this.currentTurn = 0;
+		this.maxTurns = 0;
+		this.pendingConfirm = null;
 		if (typeof window !== 'undefined') {
 			localStorage.removeItem(SESSION_KEY);
 		}

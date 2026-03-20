@@ -17,8 +17,11 @@ export interface ChatEvent {
 	type:
 		| 'message'
 		| 'tool_call'
+		| 'tool_start'
 		| 'tool_result'
 		| 'tool_error'
+		| 'tool_confirm'
+		| 'turn_start'
 		| 'ui_patch'
 		| 'usage'
 		| 'done'
@@ -41,6 +44,9 @@ export interface ChatEvent {
 	completion_tokens?: number;
 	total_tokens?: number;
 	ts?: number;
+	turn?: number;
+	max_turns?: number;
+	duration_ms?: number;
 }
 
 export function createSession(
@@ -89,6 +95,16 @@ export function stopGeneration(
 	sessionId: string
 ): ResultAsync<{ status: string; session_id: string }, ApiError> {
 	return apiRequest(`/v1/ai/chat/sessions/${sessionId}/stop`, { method: 'POST' });
+}
+
+export function confirmTool(
+	sessionId: string,
+	approved: boolean
+): ResultAsync<{ status: string; approved: boolean }, ApiError> {
+	return apiRequest(`/v1/ai/chat/sessions/${sessionId}/confirm`, {
+		method: 'POST',
+		body: JSON.stringify({ approved })
+	});
 }
 
 export function closeSession(

@@ -51,6 +51,8 @@ class LiveSession:
         self._busy = False
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
+        self._confirm_event: asyncio.Event | None = None
+        self._confirm_approved: bool = False
 
     @property
     def busy(self) -> bool:
@@ -75,6 +77,20 @@ class LiveSession:
         if self._task is not None and not self._task.done():
             self._task.cancel()
             self._task = None
+
+    async def wait_for_confirm(self) -> bool:
+        """Block until user confirms or denies. Returns True if approved."""
+        self._confirm_event = asyncio.Event()
+        self._confirm_approved = False
+        await self._confirm_event.wait()
+        self._confirm_event = None
+        return self._confirm_approved
+
+    def resolve_confirm(self, approved: bool) -> None:
+        """Resolve a pending confirmation."""
+        self._confirm_approved = approved
+        if self._confirm_event:
+            self._confirm_event.set()
 
     def _trim_messages(self) -> None:
         if len(self.messages) <= MAX_MESSAGES:

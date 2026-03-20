@@ -220,7 +220,8 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
 
     try:
         max_turns = 5
-        for _ in range(max_turns):
+        for turn in range(1, max_turns + 1):
+            session.push_event({'type': 'turn_start', 'turn': turn, 'max_turns': max_turns})
             # Inject tool instructions into messages sent to API (not persisted)
             api_messages = list(session.messages)
             if tool_system_msg:
@@ -303,10 +304,28 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                     )
                     continue
 
+                if tool.get('confirm_required'):
+                    session.push_event(
+                        {
+                            'type': 'tool_confirm',
+                            'tool_id': tool_id,
+                            'method': method,
+                            'path': path,
+                            'args': normalized,
+                        }
+                    )
+                    approved = await session.wait_for_confirm()
+                    if not approved:
+                        _push_tool_error(session, tc, tool_id, method, path, normalized, 'User denied tool execution')
+                        continue
+
+                session.push_event({'type': 'tool_start', 'tool_id': tool_id, 'method': method, 'path': path})
+                t0 = time.monotonic()
                 result = await call_tool(app, method, path, normalized)
+                duration_ms = round((time.monotonic() - t0) * 1000)
                 patch = _infer_patch(tool_id, method, path, result)
 
-                session.push_event({'type': 'tool_result', 'tool_id': tool_id, 'result': result})
+                session.push_event({'type': 'tool_result', 'tool_id': tool_id, 'result': result, 'duration_ms': duration_ms})
                 if patch:
                     session.push_event({'type': 'ui_patch', **patch})
 
@@ -318,6 +337,22 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                         'content': tool_result_str,
                     }
                 )
+
+        else:
+            # for/else — loop exhausted max_turns without breaking
+            session.push_event(
+                {
+                    'type': 'message',
+                    'role': 'assistant',
+                    'content': f'Reached the maximum of {max_turns} tool-calling turns. You can send another message to continue.',
+                }
+            )
+            session.append_message(
+                {
+                    'role': 'assistant',
+                    'content': f'Reached the maximum of {max_turns} tool-calling turns. You can send another message to continue.',
+                }
+            )
 
         session.push_event({'type': 'usage', **turn_usage})
     except OpenRouterError as exc:
@@ -399,6 +434,22 @@ async def stop_generation(session_id: str) -> dict:
     session.cancel_task()
     await session.set_busy(False)
     return {'status': 'stopped', 'session_id': session_id}
+
+
+class ConfirmRequest(BaseModel):
+    """Request body for tool confirmation."""
+
+    approved: bool
+
+
+@router.post('/sessions/{session_id}/confirm')
+def confirm_tool(session_id: str, body: ConfirmRequest) -> dict:
+    """Confirm or deny a pending tool execution."""
+    session = session_store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail='Session not found')
+    session.resolve_confirm(body.approved)
+    return {'status': 'resolved', 'approved': body.approved}
 
 
 @router.get('/history/{session_id}')

@@ -23,7 +23,12 @@
 		CheckCircle2,
 		XCircle,
 		History,
-		RefreshCw
+		RefreshCw,
+		ShieldAlert,
+		Check,
+		Ban,
+		Timer,
+		WifiOff
 	} from 'lucide-svelte';
 	import { css, cx, iconButton, button, input, label } from '$lib/styles/panda';
 	import { useQueryClient } from '@tanstack/svelte-query';
@@ -51,6 +56,8 @@
 	let modelPickerOpen = $state(false);
 	let modelPickerSearch = $state('');
 	let panelHeight = $state(500);
+	let panelWidth = $state(420);
+	let expandedHeight = $state(typeof window !== 'undefined' ? Math.round(window.innerHeight * 0.95) : 800);
 	let isResizing = $state(false);
 
 	async function stopGeneration() {
@@ -272,9 +279,25 @@
 		chatStore.connection === 'connected'
 			? 'Connected'
 			: chatStore.connection === 'reconnecting'
-				? 'Reconnecting…'
+				? `Reconnecting\u2026`
 				: 'Disconnected'
 	);
+
+	function formatDuration(ms: number): string {
+		if (ms < 1000) return `${ms}ms`;
+		return `${(ms / 1000).toFixed(1)}s`;
+	}
+
+	/** Reactive elapsed timer — ticks every second while a tool is running. */
+	let elapsedTick = $state(Date.now());
+	$effect(() => {
+		const hasRunning = chatStore.toolCalls.some((tc) => tc.status === 'running' && tc.startedAt);
+		if (!hasRunning) return;
+		const iv = setInterval(() => {
+			elapsedTick = Date.now();
+		}, 1000);
+		return () => clearInterval(iv);
+	});
 
 	const filteredModels = $derived(
 		modelSearch
@@ -311,19 +334,92 @@
 		}
 	}
 
+	const PANEL_HEIGHT_KEY = 'chat_panel_height';
+	const PANEL_WIDTH_KEY = 'chat_panel_width';
+	const EXPANDED_HEIGHT_KEY = 'chat_expanded_height';
+
+	// Restore persisted panel dimensions
+	if (typeof window !== 'undefined') {
+		const stored = localStorage.getItem(PANEL_HEIGHT_KEY);
+		if (stored) panelHeight = Math.max(300, Number(stored));
+		const storedW = localStorage.getItem(PANEL_WIDTH_KEY);
+		if (storedW) panelWidth = Math.max(320, Number(storedW));
+		const storedExpanded = localStorage.getItem(EXPANDED_HEIGHT_KEY);
+		if (storedExpanded) expandedHeight = Math.max(400, Number(storedExpanded));
+	}
+
+	const activeHeight = $derived(maximized ? expandedHeight : panelHeight);
+
+	function persistDimensions() {
+		localStorage.setItem(maximized ? EXPANDED_HEIGHT_KEY : PANEL_HEIGHT_KEY, String(activeHeight));
+		localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth));
+	}
+
 	function startResize(e: PointerEvent) {
 		e.preventDefault();
 		isResizing = true;
 		const startY = e.clientY;
-		const startH = panelHeight;
+		const startH = activeHeight;
+		const minH = maximized ? 400 : 300;
 		function onMove(ev: PointerEvent) {
 			const delta = startY - ev.clientY;
-			panelHeight = Math.max(300, Math.min(window.innerHeight * 0.95, startH + delta));
+			const clamped = Math.max(minH, Math.min(window.innerHeight * 0.95, startH + delta));
+			if (maximized) {
+				expandedHeight = clamped;
+			} else {
+				panelHeight = clamped;
+			}
 		}
 		function onUp() {
 			isResizing = false;
 			window.removeEventListener('pointermove', onMove);
 			window.removeEventListener('pointerup', onUp);
+			persistDimensions();
+		}
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp);
+	}
+
+	function startResizeWidth(e: PointerEvent) {
+		e.preventDefault();
+		isResizing = true;
+		const startX = e.clientX;
+		const startW = panelWidth;
+		function onMove(ev: PointerEvent) {
+			panelWidth = Math.max(320, Math.min(window.innerWidth * 0.9, startW + (startX - ev.clientX)));
+		}
+		function onUp() {
+			isResizing = false;
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+			persistDimensions();
+		}
+		window.addEventListener('pointermove', onMove);
+		window.addEventListener('pointerup', onUp);
+	}
+
+	function startResizeCorner(e: PointerEvent) {
+		e.preventDefault();
+		isResizing = true;
+		const startX = e.clientX;
+		const startY = e.clientY;
+		const startW = panelWidth;
+		const startH = activeHeight;
+		const minH = maximized ? 400 : 300;
+		function onMove(ev: PointerEvent) {
+			panelWidth = Math.max(320, Math.min(window.innerWidth * 0.9, startW + (startX - ev.clientX)));
+			const dh = Math.max(minH, Math.min(window.innerHeight * 0.95, startH + (startY - ev.clientY)));
+			if (maximized) {
+				expandedHeight = dh;
+			} else {
+				panelHeight = dh;
+			}
+		}
+		function onUp() {
+			isResizing = false;
+			window.removeEventListener('pointermove', onMove);
+			window.removeEventListener('pointerup', onUp);
+			persistDimensions();
 		}
 		window.addEventListener('pointermove', onMove);
 		window.addEventListener('pointerup', onUp);
@@ -410,7 +506,36 @@
 			e.preventDefault();
 			void handleSend();
 		}
+		if (e.key === 'Escape') {
+			chatStore.close();
+		}
 	}
+
+	function handlePaste() {
+		requestAnimationFrame(autoResize);
+	}
+
+	function collapseAllTools() {
+		for (const tc of chatStore.toolCalls) {
+			tc.expanded = false;
+		}
+	}
+
+	function expandAllTools() {
+		for (const tc of chatStore.toolCalls) {
+			tc.expanded = true;
+		}
+	}
+
+	const hasToolCalls = $derived(chatStore.toolCalls.length > 0);
+
+	const inputPlaceholder = $derived(
+		!chatStore.configured
+			? 'Loading\u2026'
+			: chatStore.mode === 'plan'
+				? 'Describe what you want to analyze\u2026'
+				: 'Tell me what to do\u2026'
+	);
 
 	async function copyToClipboard(text: string, id: string) {
 		await navigator.clipboard.writeText(text);
@@ -484,20 +609,65 @@
 			userSelect: isResizing ? 'none' : 'auto',
 			overflow: 'hidden'
 		})}
-		style="width: {maximized ? '640px' : '420px'}; height: {maximized
-			? '95vh'
-			: panelHeight + 'px'}"
+		style="width: {panelWidth}px; height: {activeHeight}px"
 	>
-		<!-- Resize handle -->
+		<!-- Corner resize handle (top-left) -->
+		<div
+			role="separator"
+			tabindex="-1"
+			class={css({
+				position: 'absolute',
+				top: '0',
+				left: '0',
+				width: '12px',
+				height: '12px',
+				cursor: 'nwse-resize',
+				zIndex: '1',
+				borderTopLeftRadius: 'lg'
+			})}
+			style="touch-action: none"
+			onpointerdown={startResizeCorner}
+		></div>
+
+		<!-- Left edge resize handle -->
+		<div
+			role="separator"
+			aria-orientation="vertical"
+			tabindex="-1"
+			class={css({
+				position: 'absolute',
+				top: '12px',
+				left: '0',
+				bottom: '0',
+				width: '6px',
+				cursor: 'ew-resize',
+				zIndex: '1',
+				_hover: { backgroundColor: 'border.default' }
+			})}
+			style="touch-action: none"
+			onpointerdown={startResizeWidth}
+		></div>
+
+		<!-- Top edge resize handle -->
 		<div
 			role="separator"
 			aria-orientation="horizontal"
+			tabindex="-1"
 			class={css({
-				height: '4px',
+				height: '6px',
 				cursor: 'ns-resize',
 				flexShrink: '0',
 				borderTopRadius: 'lg',
-				_hover: { backgroundColor: 'accent.primary' }
+				position: 'relative',
+				_before: {
+					content: '""',
+					position: 'absolute',
+					top: '-4px',
+					left: '12px',
+					right: '0',
+					bottom: '-4px'
+				},
+				_hover: { backgroundColor: 'border.default' }
 			})}
 			style="touch-action: none"
 			onpointerdown={startResize}
@@ -1287,6 +1457,41 @@
 					</div>
 				{/if}
 
+				<!-- Timeline controls -->
+				{#if hasToolCalls}
+					<div
+						class={css({
+							display: 'flex',
+							justifyContent: 'flex-end',
+							paddingX: '2',
+							paddingY: '0.5'
+						})}
+					>
+						<button
+							class={css({
+								border: 'none',
+								background: 'none',
+								padding: '0',
+								cursor: 'pointer',
+								color: 'fg.muted',
+								fontSize: '10px',
+								fontFamily: 'mono',
+								_hover: { color: 'fg.default' }
+							})}
+							onclick={() => {
+								const anyExpanded = chatStore.toolCalls.some((tc) => tc.expanded);
+								if (anyExpanded) collapseAllTools();
+								else expandAllTools();
+							}}
+							type="button"
+						>
+							{chatStore.toolCalls.some((tc) => tc.expanded)
+								? 'Collapse all tools'
+								: 'Expand all tools'}
+						</button>
+					</div>
+				{/if}
+
 				<!-- Timeline -->
 				{#each chatStore.timeline as entry, idx (entry.kind === 'message' ? entry.item.id : entry.item.tool_id + idx)}
 					{@const dateLabel = dateSeparator(idx)}
@@ -1456,6 +1661,8 @@
 						<!-- Tool call card -->
 						{@const tc = entry.item}
 						{@const summary = resultSummary(tc.result)}
+						{@const elapsed =
+							tc.startedAt && tc.status === 'running' ? elapsedTick - tc.startedAt : undefined}
 						<div
 							class={css({
 								borderRadius: 'md',
@@ -1470,9 +1677,11 @@
 								borderColor:
 									tc.status === 'error'
 										? 'border.error'
-										: tc.status === 'done'
-											? 'border.subtle'
-											: 'border.default'
+										: tc.status === 'confirming'
+											? 'fg.warning'
+											: tc.status === 'done'
+												? 'border.subtle'
+												: 'border.default'
 							})}
 						>
 							<button
@@ -1502,6 +1711,8 @@
 											color: 'accent.primary'
 										})}
 									/>
+								{:else if tc.status === 'confirming'}
+									<ShieldAlert size={11} class={css({ flexShrink: '0', color: 'fg.warning' })} />
 								{:else if tc.status === 'done'}
 									<CheckCircle2 size={11} class={css({ flexShrink: '0', color: 'fg.success' })} />
 								{:else}
@@ -1519,6 +1730,34 @@
 								>
 									{toolDisplayName(tc.tool_id, tc.method)}
 								</span>
+								{#if tc.status === 'confirming'}
+									<span
+										class={css({
+											fontSize: '10px',
+											color: 'fg.warning',
+											fontWeight: 'medium',
+											flexShrink: '0'
+										})}>Confirm?</span
+									>
+								{:else if elapsed !== undefined}
+									<span
+										class={css({
+											fontSize: '10px',
+											color: elapsed > 5000 ? 'fg.warning' : 'fg.muted',
+											fontFamily: 'mono',
+											flexShrink: '0'
+										})}>{formatDuration(elapsed)}</span
+									>
+								{:else if tc.duration_ms !== undefined}
+									<span
+										class={css({
+											fontSize: '10px',
+											color: 'fg.muted',
+											fontFamily: 'mono',
+											flexShrink: '0'
+										})}>{formatDuration(tc.duration_ms)}</span
+									>
+								{/if}
 								{#if summary}
 									<span
 										class={css({
@@ -1531,6 +1770,73 @@
 								{/if}
 								{#if tc.expanded}<ChevronUp size={10} />{:else}<ChevronDown size={10} />{/if}
 							</button>
+							{#if tc.status === 'confirming'}
+								<!-- Confirmation actions -->
+								<div
+									class={css({
+										display: 'flex',
+										alignItems: 'center',
+										gap: '2',
+										padding: '2',
+										borderTopWidth: '1',
+										borderColor: 'fg.warning',
+										backgroundColor: 'bg.subtle'
+									})}
+								>
+									<ShieldAlert size={12} class={css({ flexShrink: '0', color: 'fg.warning' })} />
+									<span
+										class={css({
+											flex: '1',
+											fontSize: '11px',
+											color: 'fg.default'
+										})}
+									>
+										This action will modify data. Allow?
+									</span>
+									<button
+										class={css({
+											display: 'flex',
+											alignItems: 'center',
+											gap: '1',
+											paddingX: '2',
+											paddingY: '1',
+											borderRadius: 'sm',
+											border: 'none',
+											backgroundColor: 'fg.success',
+											color: 'white',
+											fontSize: '11px',
+											fontWeight: 'medium',
+											cursor: 'pointer'
+										})}
+										onclick={() => void chatStore.approveConfirm()}
+										type="button"
+									>
+										<Check size={10} />
+										Allow
+									</button>
+									<button
+										class={css({
+											display: 'flex',
+											alignItems: 'center',
+											gap: '1',
+											paddingX: '2',
+											paddingY: '1',
+											borderRadius: 'sm',
+											border: 'none',
+											backgroundColor: 'fg.error',
+											color: 'white',
+											fontSize: '11px',
+											fontWeight: 'medium',
+											cursor: 'pointer'
+										})}
+										onclick={() => void chatStore.denyConfirm()}
+										type="button"
+									>
+										<Ban size={10} />
+										Deny
+									</button>
+								</div>
+							{/if}
 							{#if tc.expanded}
 								<div
 									class={css({
@@ -1555,8 +1861,38 @@
 										{tc.path}
 									</div>
 									{#if Object.keys(tc.args).length > 0}
-										<div class={css({ color: 'fg.muted', marginTop: '1', marginBottom: '0.5' })}>
+										<div
+											class={css({
+												display: 'flex',
+												alignItems: 'center',
+												justifyContent: 'space-between',
+												color: 'fg.muted',
+												marginTop: '1',
+												marginBottom: '0.5'
+											})}
+										>
 											Arguments
+											<button
+												class={css({
+													border: 'none',
+													background: 'none',
+													padding: '0',
+													cursor: 'pointer',
+													color: 'fg.muted',
+													_hover: { color: 'fg.default' }
+												})}
+												onclick={() =>
+													void copyToClipboard(
+														JSON.stringify(tc.args, null, 2),
+														`args-${tc.tool_id}`
+													)}
+												type="button"
+												title="Copy arguments"
+											>
+												{#if copiedId === `args-${tc.tool_id}`}<ClipboardCheck
+														size={9}
+													/>{:else}<Copy size={9} />{/if}
+											</button>
 										</div>
 										<pre
 											class={css({
@@ -1577,8 +1913,40 @@
 										{/each}
 									{/if}
 									{#if tc.result !== undefined}
-										<div class={css({ color: 'fg.muted', marginTop: '1', marginBottom: '0.5' })}>
+										<div
+											class={css({
+												display: 'flex',
+												alignItems: 'center',
+												justifyContent: 'space-between',
+												color: 'fg.muted',
+												marginTop: '1',
+												marginBottom: '0.5'
+											})}
+										>
 											Response
+											<button
+												class={css({
+													border: 'none',
+													background: 'none',
+													padding: '0',
+													cursor: 'pointer',
+													color: 'fg.muted',
+													_hover: { color: 'fg.default' }
+												})}
+												onclick={() =>
+													void copyToClipboard(
+														JSON.stringify(tc.result, null, 2),
+														`result-${tc.tool_id}`
+													)}
+												type="button"
+												title="Copy response"
+											>
+												{#if copiedId === `result-${tc.tool_id}`}
+													<ClipboardCheck size={9} />
+												{:else}
+													<Copy size={9} />
+												{/if}
+											</button>
 										</div>
 										<pre
 											class={css({
@@ -1833,11 +2201,52 @@
 						})}
 						title={connectionLabel}
 					></span>
+					{#if chatStore.connection === 'disconnected'}
+						<button
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '0.5',
+								border: 'none',
+								background: 'none',
+								padding: '0',
+								cursor: 'pointer',
+								color: 'fg.muted',
+								fontSize: '10px',
+								fontFamily: 'mono',
+								flexShrink: '0',
+								_hover: { color: 'fg.default' }
+							})}
+							onclick={() => chatStore.reconnectNow()}
+							type="button"
+							title="Reconnect now"
+						>
+							<WifiOff size={8} />
+							Reconnect
+						</button>
+					{/if}
+					{#if chatStore.currentTurn > 0}
+						<span
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '0.5',
+								flexShrink: '0',
+								color: 'accent.primary',
+								fontSize: '10px',
+								fontFamily: 'mono'
+							})}
+							title={`Agent turn ${chatStore.currentTurn} of ${chatStore.maxTurns}`}
+						>
+							<Timer size={8} />
+							Turn {chatStore.currentTurn}/{chatStore.maxTurns}
+						</span>
+					{/if}
 				{/if}
 				{#if chatStore.sessionId && chatStore.sessionUsage.total_tokens > 0}
 					<span
 						class={css({ flexShrink: '0' })}
-						title={`Context: ${formatTokens(lastPromptTokens)} / ${formatTokens(chatStore.contextLimit)} | Session total: ${formatTokens(chatStore.sessionUsage.total_tokens)}`}
+						title={`Prompt: ${formatTokens(lastPromptTokens)} | Completion: ${formatTokens(chatStore.lastTurnUsage?.completion_tokens ?? 0)} | Session: ${formatTokens(chatStore.sessionUsage.prompt_tokens)} in / ${formatTokens(chatStore.sessionUsage.completion_tokens)} out / ${formatTokens(chatStore.sessionUsage.total_tokens)} total`}
 					>
 						{formatTokens(lastPromptTokens)}{chatStore.contextLimit > 0
 							? ` / ${formatTokens(chatStore.contextLimit)}`
@@ -1981,7 +2390,8 @@
 					bind:this={inputEl}
 					onkeydown={handleKeydown}
 					oninput={autoResize}
-					placeholder={chatStore.configured ? 'Message… (Enter to send)' : 'Loading…'}
+					onpaste={handlePaste}
+					placeholder={inputPlaceholder}
 					disabled={!chatStore.configured || chatStore.loading}
 					rows={1}
 				></textarea>
