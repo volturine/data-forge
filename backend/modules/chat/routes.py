@@ -134,7 +134,11 @@ def _push_tool_error(
         }
     )
     session.append_message(
-        {'role': 'tool', 'tool_call_id': tc.get('id', tool_id), 'content': json.dumps({'status': 'error', 'message': message})}
+        {
+            'role': 'tool',
+            'tool_call_id': tc.get('id', tool_id),
+            'content': json.dumps({'status': 'error', 'message': message}),
+        }
     )
 
 
