@@ -25,7 +25,7 @@ export interface AnalysisTabOutput {
 	[key: string]: unknown;
 }
 
-export interface AnalysisTabInput {
+export interface AnalysisTab {
 	id: string;
 	name: string;
 	parent_id: string | null;
@@ -34,21 +34,17 @@ export interface AnalysisTabInput {
 	steps: PipelineStep[];
 }
 
-export type AnalysisTab = AnalysisTabInput;
-
 export interface AnalysisCreate {
 	name: string;
 	description?: string | null;
-	tabs: AnalysisTabInput[];
+	tabs: AnalysisTab[];
 }
-
-export type AnalysisCreateInput = AnalysisCreate;
 
 export interface AnalysisUpdate {
 	name?: string | null;
 	description?: string | null;
 	status?: string | null;
-	tabs: AnalysisTabInput[];
+	tabs: AnalysisTab[];
 }
 
 export interface Analysis {

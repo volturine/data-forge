@@ -22,22 +22,6 @@ import type {
 	AIConfig
 } from '$lib/types/step-schemas.generated';
 
-// Re-export generated types under the legacy names used by components.
-export type { SelectConfig as SelectConfigData } from '$lib/types/step-schemas.generated';
-export type { DropConfig as DropConfigData } from '$lib/types/step-schemas.generated';
-export type { FilterConfig as FilterConfigData } from '$lib/types/step-schemas.generated';
-export type { GroupByConfig as GroupByConfigData } from '$lib/types/step-schemas.generated';
-export type { UnionByNameConfig as UnionByNameConfigData } from '$lib/types/step-schemas.generated';
-
-export type { UnpivotConfig as UnpivotConfigData } from '$lib/types/step-schemas.generated';
-export type { ExplodeConfig as ExplodeConfigData } from '$lib/types/step-schemas.generated';
-export type { PivotConfig as PivotConfigData } from '$lib/types/step-schemas.generated';
-export type { SampleConfig as SampleConfigData } from '$lib/types/step-schemas.generated';
-export type { LimitConfig as LimitConfigData } from '$lib/types/step-schemas.generated';
-export type { ViewConfig as ViewConfigData } from '$lib/types/step-schemas.generated';
-export type { ExportConfig as ExportConfigData } from '$lib/types/step-schemas.generated';
-export type { DownloadConfig as DownloadConfigData } from '$lib/types/step-schemas.generated';
-
 // Frontend-only type: TopK uses different field names than the Pydantic model.
 // The backend uses `column`/`descending`; the frontend UI uses `by`/`reverse`.
 export interface TopKConfigData {

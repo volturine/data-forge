@@ -81,27 +81,24 @@ def _reject_pipeline_steps(data: Any) -> Any:
     return data
 
 
-class AnalysisCreateSchema(BaseModel):
+class _RejectPipelineStepsModel(BaseModel):
+    @model_validator(mode='before')
+    @classmethod
+    def reject_pipeline_steps(cls, data: Any) -> Any:
+        return _reject_pipeline_steps(data)
+
+
+class AnalysisCreateSchema(_RejectPipelineStepsModel):
     name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     description: str | None = None
     tabs: list[TabSchema]
 
-    @model_validator(mode='before')
-    @classmethod
-    def reject_pipeline_steps(cls, data: Any) -> Any:
-        return _reject_pipeline_steps(data)
 
-
-class AnalysisUpdateSchema(BaseModel):
+class AnalysisUpdateSchema(_RejectPipelineStepsModel):
     name: str | None = None
     description: str | None = None
     status: str | None = None
     tabs: list[TabSchema]
-
-    @model_validator(mode='before')
-    @classmethod
-    def reject_pipeline_steps(cls, data: Any) -> Any:
-        return _reject_pipeline_steps(data)
 
 
 class AnalysisResponseSchema(BaseModel):

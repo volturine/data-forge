@@ -1,6 +1,6 @@
 import type {
 	Analysis,
-	AnalysisCreateInput,
+	AnalysisCreate,
 	AnalysisGalleryItem,
 	AnalysisUpdate
 } from '$lib/types/analysis';
@@ -8,7 +8,7 @@ import { apiRequest, apiRequestWithHeaders } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
-export const createAnalysis = (data: AnalysisCreateInput): ResultAsync<Analysis, ApiError> =>
+export const createAnalysis = (data: AnalysisCreate): ResultAsync<Analysis, ApiError> =>
 	apiRequest<Analysis>('/v1/analysis', { method: 'POST', body: JSON.stringify(data) });
 
 export const listAnalyses = (): ResultAsync<AnalysisGalleryItem[], ApiError> =>

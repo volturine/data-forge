@@ -22,6 +22,23 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+CHART_STEP_TYPES: dict[str, str] = {
+    'plot_bar': 'bar',
+    'plot_horizontal_bar': 'horizontal_bar',
+    'plot_area': 'area',
+    'plot_heatgrid': 'heatgrid',
+    'plot_histogram': 'histogram',
+    'plot_scatter': 'scatter',
+    'plot_line': 'line',
+    'plot_pie': 'pie',
+    'plot_boxplot': 'boxplot',
+}
+
+
+def get_chart_type_for_step(step_type: str) -> str | None:
+    return CHART_STEP_TYPES.get(step_type)
+
+
 def convert_step_format(frontend_step: dict) -> dict:
     """Convert frontend step format to backend engine format."""
     step_type = frontend_step.get('type')
@@ -29,8 +46,9 @@ def convert_step_format(frontend_step: dict) -> dict:
         raise ValueError('Step must have a type field')
 
     config = frontend_step.get('config', {})
-    if step_type in _CHART_TYPES:
-        config = {**config, 'chart_type': _CHART_TYPES[step_type]}
+    chart_type = get_chart_type_for_step(step_type)
+    if chart_type:
+        config = {**config, 'chart_type': chart_type}
     normalized_type = 'chart' if step_type.startswith('plot_') else step_type
 
     return {
@@ -111,8 +129,10 @@ def convert_join_config(config: dict) -> dict:
 def convert_fillnull_config(config: dict) -> dict:
     """Convert fill_null config from frontend to backend format.
 
-    Frontend: {strategy, value, columns}
-    Backend: {strategy, value, columns}
+    Frontend: {strategy, value, value_type, columns}
+    Backend: {strategy, value, value_type, columns}
+
+    Normalizes frontend strategy "value" to backend strategy "literal".
     """
     strategy = config.get('strategy', 'literal')
     if strategy == 'value':
@@ -278,19 +298,6 @@ def convert_plot_config(config: dict) -> dict:
         'selection_enabled': config.get('selection_enabled', False),
         'area_selection_enabled': config.get('area_selection_enabled', False),
     }
-
-
-_CHART_TYPES: dict[str, str] = {
-    'plot_bar': 'bar',
-    'plot_horizontal_bar': 'horizontal_bar',
-    'plot_area': 'area',
-    'plot_heatgrid': 'heatgrid',
-    'plot_histogram': 'histogram',
-    'plot_scatter': 'scatter',
-    'plot_line': 'line',
-    'plot_pie': 'pie',
-    'plot_boxplot': 'boxplot',
-}
 
 
 def convert_ai_config(config: dict) -> dict:

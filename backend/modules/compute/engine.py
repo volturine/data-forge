@@ -17,7 +17,7 @@ from modules.compute.core.exports import get_export_format
 from modules.compute.operations import HANDLERS
 from modules.compute.operations.datasource import load_datasource
 from modules.compute.operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
-from modules.compute.step_converter import convert_config_to_params, convert_step_format
+from modules.compute.step_converter import convert_config_to_params, convert_step_format, get_chart_type_for_step
 from modules.compute.utils import apply_steps, normalize_timezones
 
 logger = logging.getLogger(__name__)
@@ -481,7 +481,6 @@ class PolarsComputeEngine:
             # Convert frontend format to backend format
             step_type = step.get('type') or ''
             try:
-                convert_config_to_params(step_type, step.get('config', {}))
                 backend_step = convert_step_format(step)
             except Exception as e:
                 logger.error(f'Failed to convert step {idx}: {e}', exc_info=True)
@@ -606,8 +605,9 @@ class PolarsComputeEngine:
             last_type = str(last_step.get('type', ''))
             if last_type == 'chart' or last_type.startswith('plot_'):
                 chart_config = last_step.get('config', {})
-                if last_type.startswith('plot_'):
-                    chart_config = {**chart_config, 'chart_type': last_type.replace('plot_', '')}
+                chart_type = get_chart_type_for_step(last_type)
+                if chart_type:
+                    chart_config = {**chart_config, 'chart_type': chart_type}
                 try:
                     chart_params = convert_config_to_params('chart', chart_config)
                 except ValueError:

@@ -468,7 +468,3 @@ export function getColumnTypesByCategory(): Record<ColumnTypeCategory, ColumnTyp
 export function getAllColumnTypes(): ColumnTypeConfig[] {
 	return canonicalTypes();
 }
-
-export function isValidColumnType(type: string): boolean {
-	return normalizeColumnType(type) in COLUMN_TYPE_REGISTRY;
-}
