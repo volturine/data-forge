@@ -7,7 +7,7 @@
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, button, menuItem, cx } from '$lib/styles/panda';
+	import { css, menuItem, cx } from '$lib/styles/panda';
 
 	interface PickerOption {
 		id: string;
@@ -117,10 +117,6 @@
 		});
 	});
 
-	const canSelectAll = $derived(
-		mode === 'multi' && modeSource === 'datasource' && options.length > 0
-	);
-
 	function handleChange(next: string | string[]) {
 		if (mode === 'single') {
 			const id = next as string;
@@ -143,22 +139,6 @@
 			onSelect?.(id, match.label);
 		});
 		removed.forEach((id) => onDeselect?.(id));
-	}
-
-	function selectAll() {
-		if (!canSelectAll) return;
-		const ids = options.map((option) => option.id);
-		const current = new SvelteSet((selected as string[]) ?? []);
-		ids.forEach((id) => current.add(id));
-		const next = Array.from(current);
-		handleChange(next);
-	}
-
-	function deselectAll() {
-		if (!canSelectAll) return;
-		const current = (selected as string[]) ?? [];
-		current.forEach((id) => onDeselect?.(id));
-		selected = [];
 	}
 
 	function deselect(id: string) {
@@ -236,17 +216,6 @@
 				</button>
 			</span>
 		{/each}
-	</div>
-{/if}
-
-{#if canSelectAll && showBulkActions}
-	<div class={css({ marginTop: '2', display: 'flex', gap: '2' })}>
-		<button class={button({ variant: 'secondary', size: 'sm' })} onclick={selectAll} type="button"
-			>Select All</button
-		>
-		<button class={button({ variant: 'secondary', size: 'sm' })} onclick={deselectAll} type="button"
-			>Deselect All</button
-		>
 	</div>
 {/if}
 

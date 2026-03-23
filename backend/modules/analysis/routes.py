@@ -117,15 +117,15 @@ def delete_analysis(
     return None
 
 
-@router.post('/{analysis_id}/execute', mcp=True)
-@handle_errors(operation='execute analysis', value_error_status=400)
-async def execute_analysis(
+@router.post('/{analysis_id}/preview', mcp=True)
+@handle_errors(operation='preview analysis', value_error_status=400)
+async def preview_analysis(
     analysis_id: AnalysisId,
     request: Request,
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
-    """Execute the analysis pipeline and return preview results with schema, rows, and row count."""
+    """Preview the analysis pipeline and return results with schema, rows, and row count."""
     analysis_payload = None
     body = None
     with contextlib.suppress(ValueError):

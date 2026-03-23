@@ -38,6 +38,10 @@ generate-step-types:
 # Full verification gate -- must pass before any task is declared done
 verify: format check
 
+# Run frontend e2e tests (requires both servers running: just dev)
+test-e2e:
+    cd frontend && bun run test:e2e
+
 # Build for production
 prod:
     @echo "Building frontend..."

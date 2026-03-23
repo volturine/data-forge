@@ -6,6 +6,7 @@
 	import type { UdfExport } from '$lib/types/udf';
 	import { Plus, Upload, Download, Copy, Trash2, Pencil } from 'lucide-svelte';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
@@ -18,8 +19,17 @@
 	let importText = $state('');
 	let overwriteImport = $state(false);
 	let importError = $state('');
+	let importing = $state(false);
+	let exportError = $state('');
 	let cloningId = $state<string | null>(null);
 	let deletingId = $state<string | null>(null);
+
+	function closeImport() {
+		importOpen = false;
+		importText = '';
+		importError = '';
+		overwriteImport = false;
+	}
 
 	const query = createQuery(() => ({
 		queryKey: ['udfs', search],
@@ -53,9 +63,10 @@
 	}));
 
 	async function handleExport() {
+		exportError = '';
 		const result = await exportUdfs();
 		if (result.isErr()) {
-			alert(result.error.message);
+			exportError = result.error.message;
 			return;
 		}
 		const payload = JSON.stringify(result.value, null, 2);
@@ -82,15 +93,18 @@
 			importError = 'Payload must include a udfs array';
 			return;
 		}
-		const result = await importUdfs({ udfs: payload.udfs, overwrite: overwriteImport });
-		if (result.isErr()) {
-			importError = result.error.message;
-			return;
+		importing = true;
+		try {
+			const result = await importUdfs({ udfs: payload.udfs, overwrite: overwriteImport });
+			if (result.isErr()) {
+				importError = result.error.message;
+				return;
+			}
+			closeImport();
+			queryClient.invalidateQueries({ queryKey: ['udfs'] });
+		} finally {
+			importing = false;
 		}
-		importOpen = false;
-		importText = '';
-		overwriteImport = false;
-		queryClient.invalidateQueries({ queryKey: ['udfs'] });
 	}
 
 	function handleDelete(id: string) {
@@ -140,19 +154,28 @@
 				Reusable Python transforms stored globally
 			</p>
 		</div>
-		<div class={css({ display: 'flex', flexWrap: 'wrap', gap: '2' })}>
-			<button class={button({ variant: 'secondary' })} onclick={() => (importOpen = true)}>
-				<Upload size={16} />
-				Import
-			</button>
-			<button class={button({ variant: 'secondary' })} onclick={handleExport}>
-				<Download size={16} />
-				Export
-			</button>
-			<button class={button({ variant: 'primary' })} onclick={openNew}>
-				<Plus size={16} />
-				New UDF
-			</button>
+		<div
+			class={css({ display: 'flex', flexDirection: 'column', gap: '2', alignItems: 'flex-end' })}
+		>
+			<div class={css({ display: 'flex', flexWrap: 'wrap', gap: '2' })}>
+				<button class={button({ variant: 'secondary' })} onclick={() => (importOpen = true)}>
+					<Upload size={16} />
+					Import
+				</button>
+				<button class={button({ variant: 'secondary' })} onclick={handleExport}>
+					<Download size={16} />
+					Export
+				</button>
+				<button class={button({ variant: 'primary' })} onclick={openNew}>
+					<Plus size={16} />
+					New UDF
+				</button>
+			</div>
+			{#if exportError}
+				<Callout tone="error">
+					{exportError}
+				</Callout>
+			{/if}
 		</div>
 	</header>
 
@@ -284,88 +307,78 @@
 			</div>
 		{/if}
 	{/if}
+</div>
 
-	{#if importOpen}
+<BaseModal
+	open={importOpen}
+	onClose={closeImport}
+	ariaLabelledby="import-heading"
+	panelClass={css({
+		width: 'min(720px, 92vw)',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		display: 'flex',
+		flexDirection: 'column',
+		_focus: { outline: 'none' }
+	})}
+>
+	{#snippet content()}
+		<PanelHeader>
+			{#snippet title()}<h2 id="import-heading" class={css({ margin: '0', fontSize: 'md' })}>
+					Import UDFs
+				</h2>{/snippet}
+			{#snippet actions()}
+				<button
+					class={css({
+						background: 'transparent',
+						border: 'none',
+						color: 'fg.muted',
+						cursor: 'pointer',
+						fontSize: 'xl',
+						padding: '1',
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						transitionProperty: 'color, background-color',
+						transitionDuration: 'normal',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
+					onclick={closeImport}>x</button
+				>
+			{/snippet}
+		</PanelHeader>
 		<div
 			class={css({
-				position: 'fixed',
-				inset: '0',
-				background: 'bg.overlay',
-				zIndex: 'modal'
-			})}
-		></div>
-		<div
-			class={css({
-				position: 'fixed',
-				left: '50%',
-				top: '50%',
-				transform: 'translate(-50%, -50%)',
-				width: 'min(720px, 92vw)',
-				backgroundColor: 'bg.primary',
-				borderWidth: '1',
-				zIndex: '1001',
+				padding: '4',
+				overflowY: 'auto',
 				display: 'flex',
 				flexDirection: 'column',
-				_focus: { outline: 'none' }
+				gap: '3'
 			})}
 		>
-			<PanelHeader>
-				{#snippet title()}<h2 class={css({ margin: '0', fontSize: 'md' })}>
-						Import UDFs
-					</h2>{/snippet}
-				{#snippet actions()}
-					<button
-						class={css({
-							background: 'transparent',
-							border: 'none',
-							color: 'fg.muted',
-							cursor: 'pointer',
-							fontSize: 'xl',
-							padding: '1',
-							display: 'flex',
-							alignItems: 'center',
-							justifyContent: 'center',
-							transitionProperty: 'color, background-color',
-							transitionDuration: 'normal',
-							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-						})}
-						onclick={() => (importOpen = false)}>x</button
-					>
-				{/snippet}
-			</PanelHeader>
-			<div
-				class={css({
-					padding: '4',
-					overflowY: 'auto',
-					display: 'flex',
-					flexDirection: 'column',
-					gap: '3'
-				})}
-			>
-				<label class={label()} for="udf-import-json">Import JSON</label>
-				<textarea
-					rows="10"
-					id="udf-import-json"
-					placeholder="Paste exported JSON here..."
-					bind:value={importText}
-					class={input()}
-				></textarea>
-				<label class={label({ variant: 'inline' })}>
-					<input id="udf-overwrite-import" type="checkbox" bind:checked={overwriteImport} />
-					Overwrite existing by name
-				</label>
-				{#if importError}
-					<Callout tone="error">
-						{importError}
-					</Callout>
-				{/if}
-			</div>
-			<PanelFooter>
-				<button class={button({ variant: 'secondary' })} onclick={() => (importOpen = false)}
-					>Cancel</button
-				>
-				<button class={button({ variant: 'primary' })} onclick={handleImport}>Import</button>
-			</PanelFooter>
+			<label class={label()} for="udf-import-json">Import JSON</label>
+			<textarea
+				rows="10"
+				id="udf-import-json"
+				placeholder="Paste exported JSON here..."
+				bind:value={importText}
+				class={input()}
+			></textarea>
+			<label class={label({ variant: 'inline' })}>
+				<input id="udf-overwrite-import" type="checkbox" bind:checked={overwriteImport} />
+				Overwrite existing by name
+			</label>
+			{#if importError}
+				<Callout tone="error">
+					{importError}
+				</Callout>
+			{/if}
 		</div>
-	{/if}
-</div>
+		<PanelFooter>
+			<button class={button({ variant: 'secondary' })} onclick={closeImport}>Cancel</button>
+			<button class={button({ variant: 'primary' })} disabled={importing} onclick={handleImport}
+				>Import</button
+			>
+		</PanelFooter>
+	{/snippet}
+</BaseModal>

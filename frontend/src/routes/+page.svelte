@@ -12,6 +12,7 @@
 	import { Plus } from 'lucide-svelte';
 	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
+	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner } from '$lib/styles/panda';
 
 	const queryClient = useQueryClient();
@@ -40,6 +41,7 @@
 	}
 
 	// Selection state
+	let deleteError = $state('');
 	const selectedIds = new SvelteSet<string>();
 	let deleteConfirmId = $state<string | null>(null);
 	let bulkDeleteConfirm = $state(false);
@@ -114,6 +116,7 @@
 
 	function confirmDelete() {
 		if (!deleteConfirmId) return;
+		deleteError = '';
 
 		deleteAnalysis(deleteConfirmId).match(
 			() => {
@@ -124,7 +127,7 @@
 				deleteConfirmId = null;
 			},
 			(error) => {
-				alert(`Failed to delete: ${error.message}`);
+				deleteError = `Failed to delete: ${error.message}`;
 				deleteConfirmId = null;
 			}
 		);
@@ -139,6 +142,7 @@
 	}
 
 	async function confirmBulkDelete() {
+		deleteError = '';
 		const idsToDelete = Array.from(selectedIds);
 		let failed = 0;
 
@@ -152,7 +156,7 @@
 		bulkDeleteConfirm = false;
 
 		if (failed > 0) {
-			alert(`Failed to delete ${failed} analysis${failed > 1 ? 'es' : ''}.`);
+			deleteError = `Failed to delete ${failed} analysis${failed > 1 ? 'es' : ''}.`;
 		}
 	}
 
@@ -218,6 +222,12 @@
 			New Analysis
 		</button>
 	</header>
+
+	{#if deleteError}
+		<div class={css({ marginBottom: '4' })}>
+			<Callout tone="error">{deleteError}</Callout>
+		</div>
+	{/if}
 
 	<main>
 		{#if query.isPending}

@@ -674,17 +674,24 @@
 												height: 'rowXl',
 												borderWidth: '1',
 												backgroundColor: 'transparent',
-												fontSize: 'xs',
+												fontSize: 'xs'
 											}),
-											day.count > 0 ? css({ backgroundColor: 'bg.muted', _hover: { backgroundColor: 'bg.hover' } }) : css({ cursor: 'default', opacity: '0.4' }),
+											day.count > 0
+												? css({
+														backgroundColor: 'bg.muted',
+														_hover: { backgroundColor: 'bg.hover' }
+													})
+												: css({ cursor: 'default', opacity: '0.4' }),
 											selectedDay === day.key ? css({ backgroundColor: 'bg.tertiary' }) : ''
 										)}
 										onclick={() => day.count > 0 && selectDay(day.key)}
 										type="button"
 									>
 										<span
-											class={day.count > 0 ? css({ color: 'fg.secondary' }) : css({ color: 'fg.tertiary' })}
-										>{day.day}</span>
+											class={day.count > 0
+												? css({ color: 'fg.secondary' })
+												: css({ color: 'fg.tertiary' })}>{day.day}</span
+										>
 										{#if day.count > 0}
 											<span
 												class={css({

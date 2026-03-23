@@ -152,51 +152,46 @@ def export_udfs(session: Session) -> list[UdfResponseSchema]:
 
 
 def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseSchema]:
-    """Import UDFs with atomic transaction - either all succeed or all fail."""
-    created: list[UdfResponseSchema] = []
-    udfs_to_refresh: list[Udf] = []
+    """Import UDFs - validate all first, then persist."""
+    for item in payload.udfs:
+        _validate_code(item.code)
 
-    # Use a single transaction to guarantee atomicity
-    transaction = session.begin_nested() if session.in_transaction() else session.begin()
-    with transaction:
-        for item in payload.udfs:
-            _validate_code(item.code)
+    imported: list[Udf] = []
+    for item in payload.udfs:
+        existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
+        udf = existing_result.scalar_one_or_none()
 
-            existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
-            udf = existing_result.scalar_one_or_none()
+        if udf and not payload.overwrite:
+            continue
 
-            if udf and not payload.overwrite:
-                continue
+        if udf:
+            udf.description = item.description
+            udf.signature = item.signature.model_dump()
+            udf.code = item.code
+            udf.tags = item.tags
+            udf.source = item.source or 'user'
+            udf.updated_at = datetime.now(UTC)
+            imported.append(udf)
+        else:
+            now = datetime.now(UTC)
+            new_udf = Udf(
+                id=str(uuid.uuid4()),
+                name=item.name,
+                description=item.description,
+                signature=item.signature.model_dump(),
+                code=item.code,
+                tags=item.tags,
+                source=item.source or 'user',
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(new_udf)
+            imported.append(new_udf)
 
-            if udf and payload.overwrite:
-                udf.description = item.description
-                udf.signature = item.signature.model_dump()
-                udf.code = item.code
-                udf.tags = item.tags
-                udf.source = item.source or 'user'
-                udf.updated_at = datetime.now(UTC)
-                udfs_to_refresh.append(udf)
-            else:
-                now = datetime.now(UTC)
-                new_udf = Udf(
-                    id=str(uuid.uuid4()),
-                    name=item.name,
-                    description=item.description,
-                    signature=item.signature.model_dump(),
-                    code=item.code,
-                    tags=item.tags,
-                    source=item.source or 'user',
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(new_udf)
-                udfs_to_refresh.append(new_udf)
-
-    for udf in udfs_to_refresh:
+    session.commit()
+    for udf in imported:
         session.refresh(udf)
-        created.append(UdfResponseSchema.model_validate(udf))
-
-    return created
+    return [UdfResponseSchema.model_validate(udf) for udf in imported]
 
 
 def seed_defaults(session: Session) -> list[UdfResponseSchema]:

@@ -460,6 +460,30 @@
 					{/each}
 				{/if}
 			</div>
+			{#if mode === 'multi'}
+				<button
+					type="button"
+					class={css({
+						width: '100%',
+						cursor: 'pointer',
+						borderWidth: '1',
+						borderColor: 'border.primary',
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						_hover: { opacity: '0.9' }
+					})}
+					onclick={(e) => {
+						e.stopPropagation();
+						closeMenu();
+					}}
+				>
+					Done{selectedCount > 0 ? ` (${selectedCount})` : ''}
+				</button>
+			{/if}
 		</div>
 	{/if}
 </div>

@@ -38,6 +38,7 @@
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { css, cx, spinner, button, input, row } from '$lib/styles/panda';
 	import {
@@ -62,6 +63,15 @@
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
 	});
 	let isSaving = $state(false);
+	let saveError = $state('');
+	let tabError = $state('');
+
+	function flashTabError(msg: string) {
+		tabError = msg;
+		setTimeout(() => {
+			tabError = '';
+		}, 5000);
+	}
 	let draftLoaded = $state(false);
 	let isDirty = $state(false);
 	let draftTimer: number | null = null;
@@ -509,10 +519,11 @@
 		if (isSaving) return;
 
 		isSaving = true;
+		saveError = '';
 
 		const errors = validatePipelineTabs(analysisStore.tabs);
 		if (errors.length) {
-			alert(`Failed to save pipeline: ${formatPipelineErrors(errors)}`);
+			saveError = `Failed to save pipeline: ${formatPipelineErrors(errors)}`;
 			isSaving = false;
 			return;
 		}
@@ -528,7 +539,7 @@
 				}
 			},
 			(error) => {
-				alert(`Failed to save pipeline: ${error.message}`);
+				saveError = `Failed to save pipeline: ${error.message}`;
 				isSaving = false;
 			}
 		);
@@ -622,7 +633,7 @@
 			sourceAnalysisId === analysisId &&
 			sourceTabId === analysisStore.activeTabId
 		) {
-			alert('Select a different tab to avoid using the current tab as its own source.');
+			flashTabError('Select a different tab to avoid using the current tab as its own source.');
 			return;
 		}
 		const tabId = `tab-analysis-${datasourceId}-${Date.now()}`;
@@ -678,7 +689,7 @@
 			const outputId =
 				typeof sourceTab?.output.result_id === 'string' ? sourceTab.output.result_id : null;
 			if (!outputId) {
-				alert('Selected analysis tab is missing an output datasource.');
+				flashTabError('Selected analysis tab is missing an output datasource.');
 				return;
 			}
 			if (modalMode === 'change') {
@@ -737,6 +748,7 @@
 
 	function closeDatasourceModal() {
 		showDatasourceModal = false;
+		tabError = '';
 	}
 
 	function openVersionModal() {
@@ -1214,6 +1226,12 @@
 			</div>
 		</header>
 
+		{#if saveError}
+			<div class={css({ paddingX: '4', paddingY: '2' })}>
+				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
+
 		<div
 			class={css({
 				display: 'flex',
@@ -1360,6 +1378,21 @@
 {/if}
 
 <svelte:window onkeydown={handleVersionKeydown} />
+
+{#if tabError}
+	<div
+		class={css({
+			position: 'fixed',
+			bottom: '4',
+			left: '50%',
+			transform: 'translateX(-50%)',
+			zIndex: '1002',
+			width: 'min(480px, 90vw)'
+		})}
+	>
+		<Callout tone="error">{tabError}</Callout>
+	</div>
+{/if}
 
 <DatasourceSelectorModal
 	show={showDatasourceModal}

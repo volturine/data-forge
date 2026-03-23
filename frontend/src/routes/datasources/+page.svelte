@@ -12,6 +12,7 @@
 		Upload,
 		GitBranch
 	} from 'lucide-svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import DatasourcePreview from '$lib/components/datasources/DatasourcePreview.svelte';
 	import DatasourceConfigPanel from '$lib/components/datasources/DatasourceConfigPanel.svelte';
@@ -29,6 +30,7 @@
 	let selectedId = $state<string | null>(page.url.searchParams.get('id'));
 	let showConfig = $state<string | null>(page.url.searchParams.get('id'));
 	let deletingId = $state<string | null>(null);
+	let mutatingId = $state<string | null>(null);
 	let searchQuery = $state('');
 	let showComparison = $state(false);
 
@@ -62,9 +64,10 @@
 		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
-			if (selectedId === deletingId) {
+			if (selectedId === mutatingId) {
 				selectDatasource(null);
 			}
+			mutatingId = null;
 		}
 	}));
 
@@ -102,8 +105,24 @@
 
 	function handleDelete(id: string) {
 		deletingId = id;
-		deleteMutation.mutate(id);
 	}
+
+	function confirmDelete() {
+		if (!deletingId) return;
+		mutatingId = deletingId;
+		deleteMutation.mutate(deletingId);
+		deletingId = null;
+	}
+
+	function cancelDelete() {
+		deletingId = null;
+	}
+
+	const deleteConfirmName = $derived.by(() => {
+		if (!deletingId || !query.data) return '';
+		const ds = query.data.find((d) => d.id === deletingId);
+		return ds?.name ?? '';
+	});
 
 	function handleConfigSaved() {
 		queryClient.invalidateQueries({ queryKey: ['datasources'] });
@@ -352,9 +371,9 @@
 									})}
 									title="Delete"
 									onclick={() => handleDelete(datasource.id)}
-									disabled={deleteMutation.isPending && deletingId === datasource.id}
+									disabled={deleteMutation.isPending && mutatingId === datasource.id}
 								>
-									{#if deleteMutation.isPending && deletingId === datasource.id}
+									{#if deleteMutation.isPending && mutatingId === datasource.id}
 										<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 									{:else}
 										<Trash2 size={14} />
@@ -477,3 +496,15 @@
 		{/if}
 	</main>
 </div>
+
+<ConfirmDialog
+	show={deletingId !== null}
+	heading="Delete Datasource"
+	message={deleteConfirmName
+		? `Are you sure you want to delete "${deleteConfirmName}"? This action cannot be undone.`
+		: 'Are you sure you want to delete this datasource? This action cannot be undone.'}
+	confirmText="Delete"
+	cancelText="Cancel"
+	onConfirm={confirmDelete}
+	onCancel={cancelDelete}
+/>

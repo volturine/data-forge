@@ -72,17 +72,17 @@ export type AnalysisVersion = {
 	created_at: string;
 };
 
-export type AnalysisExecuteResponse = {
+export type AnalysisPreviewResponse = {
 	schema: Record<string, string>;
 	rows: Array<Record<string, unknown>>;
 	row_count?: number;
 };
 
-export const executeAnalysis = (
+export const previewAnalysis = (
 	analysisId: string,
 	pipeline: Record<string, unknown>
-): ResultAsync<AnalysisExecuteResponse, ApiError> =>
-	apiRequest<AnalysisExecuteResponse>(`/v1/analysis/${analysisId}/execute`, {
+): ResultAsync<AnalysisPreviewResponse, ApiError> =>
+	apiRequest<AnalysisPreviewResponse>(`/v1/analysis/${analysisId}/preview`, {
 		method: 'POST',
 		body: JSON.stringify({ pipeline })
 	});

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from modules.datasource.models import DataSource
 
 
-def test_execute_analysis_uses_pipeline_payload(client, sample_datasource: DataSource):
+def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataSource):
     pipeline = {
         'analysis_id': 'analysis-payload',
         'tabs': [
@@ -50,7 +50,7 @@ def test_execute_analysis_uses_pipeline_payload(client, sample_datasource: DataS
         mock_preview.side_effect = fake_preview_step
         analysis_id = str(uuid.uuid4())
         response = client.post(
-            f'/api/v1/analysis/{analysis_id}/execute',
+            f'/api/v1/analysis/{analysis_id}/preview',
             json={'pipeline': {**pipeline, 'analysis_id': analysis_id}},
         )
 
