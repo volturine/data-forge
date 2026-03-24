@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createDatasource } from './utils/api.js';
+import { createDatasource, createLargeDatasource } from './utils/api.js';
 import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 
@@ -228,5 +228,158 @@ test.describe('Datasources – detail view', () => {
 		await expect(page.getByText('Alice', { exact: true }).first()).toBeVisible();
 		await expect(page.getByText('London', { exact: true }).first()).toBeVisible();
 		await expect(page.getByText('Berlin', { exact: true }).first()).toBeVisible();
+	});
+});
+
+test.describe('Datasources – preview pagination', () => {
+	test.setTimeout(60_000);
+
+	test('pagination navigates between pages', async ({ page, request }) => {
+		const dsId = await createLargeDatasource(request, 'e2e-pagination-ds', 150);
+		try {
+			await page.goto(`/datasources?id=${dsId}`);
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+
+			const pageLabel = page.locator('[data-testid="pagination-page"]');
+			await expect(pageLabel).toHaveText('Page 1');
+
+			const nextBtn = page.locator('[data-testid="pagination-next"]');
+			const prevBtn = page.locator('[data-testid="pagination-prev"]');
+
+			// Prev should be disabled on page 1
+			await expect(prevBtn).toBeDisabled();
+			// Next should be enabled (150 rows > 100 row limit)
+			await expect(nextBtn).toBeEnabled();
+
+			await nextBtn.click();
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+			await expect(pageLabel).toHaveText('Page 2');
+			await expect(prevBtn).toBeEnabled();
+
+			await screenshot(page, 'datasources', 'preview-pagination-page2');
+
+			await prevBtn.click();
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+			await expect(pageLabel).toHaveText('Page 1');
+			await expect(prevBtn).toBeDisabled();
+		} finally {
+			await deleteDatasourceViaUI(page, 'e2e-pagination-ds');
+		}
+	});
+});
+
+test.describe('Datasources – column stats panel', () => {
+	test.setTimeout(60_000);
+
+	test('column stats panel opens, shows content, and closes', async ({ page, request }) => {
+		await createDatasource(request, 'e2e-stats-ds');
+		try {
+			await page.goto('/datasources');
+			await page.getByText('e2e-stats-ds').click();
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+
+			// Open column menu for "age" column
+			const ageHeader = page.locator('[data-column-id="age"]');
+			await ageHeader.locator('button[aria-label="Column options"]').click();
+			await page.getByText('Column stats').click();
+
+			// Column stats panel should appear
+			const panel = page.locator('[data-testid="column-stats-panel"]');
+			await expect(panel).toBeVisible({ timeout: 10_000 });
+
+			// Panel should show "Column Stats" heading and the column name
+			await expect(panel.getByText('Column Stats')).toBeVisible();
+			await expect(panel.getByText('age')).toBeVisible();
+
+			// Panel should show stats content (Overview section with Rows)
+			await expect(panel.getByText('Overview')).toBeVisible({ timeout: 10_000 });
+			await expect(panel.getByText('Rows')).toBeVisible();
+
+			await screenshot(page, 'datasources', 'column-stats-panel-open');
+
+			// Close the panel
+			await page.locator('[data-testid="column-stats-close"]').click();
+			await expect(panel).not.toBeVisible();
+		} finally {
+			await deleteDatasourceViaUI(page, 'e2e-stats-ds');
+		}
+	});
+});
+
+test.describe('Datasources – preview error state', () => {
+	test.setTimeout(45_000);
+
+	test('shows error UI when preview API fails', async ({ page, request }) => {
+		await createDatasource(request, 'e2e-error-ds');
+		try {
+			// Intercept the compute preview API to return a 500 error
+			await page.route('**/api/v1/compute/preview', (route) =>
+				route.fulfill({
+					status: 500,
+					contentType: 'application/json',
+					body: JSON.stringify({ detail: 'Simulated preview failure' })
+				})
+			);
+
+			await page.goto('/datasources');
+			await page.getByText('e2e-error-ds').click();
+
+			// The error state should be visible
+			const errorEl = page.locator('[data-testid="preview-error"]');
+			await expect(errorEl).toBeVisible({ timeout: 15_000 });
+			await expect(errorEl.getByText('Failed')).toBeVisible();
+
+			await screenshot(page, 'datasources', 'preview-error-state');
+		} finally {
+			await page.unrouteAll({ behavior: 'ignoreErrors' });
+			await deleteDatasourceViaUI(page, 'e2e-error-ds');
+		}
+	});
+});
+
+test.describe('Datasources – config tab interactions', () => {
+	test.setTimeout(45_000);
+
+	test('Runs tab shows empty state for fresh datasource', async ({ page, request }) => {
+		await createDatasource(request, 'e2e-runs-tab-ds');
+		try {
+			await page.goto('/datasources');
+			await page.getByText('e2e-runs-tab-ds').click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 8_000 });
+
+			await config.getByRole('tab', { name: 'Runs' }).click();
+			await expect(config.getByText(/No engine runs/i)).toBeVisible({ timeout: 10_000 });
+
+			await screenshot(page, 'datasources', 'runs-tab-empty');
+		} finally {
+			await deleteDatasourceViaUI(page, 'e2e-runs-tab-ds');
+		}
+	});
+
+	test('rename datasource shows Save button and persists', async ({ page, request }) => {
+		await createDatasource(request, 'e2e-rename-ds');
+		try {
+			await page.goto('/datasources');
+			await page.getByText('e2e-rename-ds').click();
+
+			const config = page.locator('[data-ds-config]');
+			await expect(config).toBeVisible({ timeout: 8_000 });
+
+			const nameInput = config.locator('input[type="text"]').first();
+			await nameInput.fill('e2e-renamed-ds');
+
+			await expect(config.getByRole('button', { name: 'Save Changes' })).toBeVisible({
+				timeout: 5_000
+			});
+			await config.getByRole('button', { name: 'Save Changes' }).click();
+
+			// After save, reload page and verify renamed datasource appears
+			await page.reload();
+			await expect(page.getByText('e2e-renamed-ds')).toBeVisible({ timeout: 10_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, 'e2e-renamed-ds');
+		}
 	});
 });

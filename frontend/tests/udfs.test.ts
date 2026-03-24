@@ -342,3 +342,71 @@ test.describe('UDFs – editor functional flows', () => {
 		await expect(page.locator('[data-testid="udf-save-button"]')).toBeDisabled();
 	});
 });
+
+// ────────────────────────────────────────────────────────────────────────────────
+// UDF error-state regression tests
+// ────────────────────────────────────────────────────────────────────────────────
+
+test.describe('UDFs – error states', () => {
+	test('save error displays inline error message', async ({ page }) => {
+		test.setTimeout(60_000);
+		await page.goto('/udfs/new');
+		await expect(page.locator('[data-testid="udf-save-button"]')).toBeVisible({ timeout: 8_000 });
+
+		await page.locator('#udf-name').fill('e2e_save_error_udf');
+
+		// Intercept the UDF create endpoint to return 500
+		await page.route('**/api/v1/udf', (route) => {
+			if (route.request().method() === 'POST') {
+				return route.fulfill({
+					status: 500,
+					contentType: 'application/json',
+					body: JSON.stringify({ detail: 'Simulated save failure' })
+				});
+			}
+			return route.continue();
+		});
+
+		await page.locator('[data-testid="udf-save-button"]').click();
+
+		// Error should appear inline
+		await expect(page.locator('[data-testid="udf-save-error"]')).toBeVisible({ timeout: 10_000 });
+
+		await screenshot(page, 'udfs', 'save-error-state');
+	});
+
+	test('load error displays error state for bad UDF ID', async ({ page }) => {
+		// Intercept the UDF get endpoint to return 500
+		await page.route('**/api/v1/udf/bad-udf-id*', (route) => {
+			if (route.request().method() === 'GET') {
+				return route.fulfill({ status: 500, body: 'Internal Server Error' });
+			}
+			return route.continue();
+		});
+
+		await page.goto('/udfs/bad-udf-id');
+
+		// The error state should render
+		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 15_000 });
+		await expect(page.getByText('Failed to load UDF.')).toBeVisible();
+
+		await screenshot(page, 'udfs', 'load-error-state');
+	});
+
+	test('load error does not crash navigation', async ({ page }) => {
+		await page.route('**/api/v1/udf/bad-udf-nav*', (route) => {
+			if (route.request().method() === 'GET') {
+				return route.fulfill({ status: 500, body: 'Internal Server Error' });
+			}
+			return route.continue();
+		});
+
+		await page.goto('/udfs/bad-udf-nav');
+		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 15_000 });
+
+		// Navigate to UDF list — shell should still work
+		await page.locator('a[href="/udfs"]').first().click();
+		await expect(page).toHaveURL('/udfs');
+		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible();
+	});
+});

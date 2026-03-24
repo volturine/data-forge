@@ -123,6 +123,34 @@ test.describe('Monitoring – Schedules tab', () => {
 		// Cleanup the datasource
 		await deleteDatasourceViaUI(page, 'e2e-sched-del-ds');
 	});
+
+	test('schedule enable/disable toggle works', async ({ page, request }) => {
+		test.setTimeout(60_000);
+		const dsId = await createDatasource(request, 'e2e-sched-toggle-ds');
+		await createSchedule(request, dsId, '0 8 * * *');
+		try {
+			await page.goto('/monitoring?tab=schedules');
+			await expect(page.getByText('e2e-sched-toggle-ds')).toBeVisible({ timeout: 10_000 });
+
+			// Find the toggle button in the schedule row
+			const toggleBtn = page
+				.locator('[role="button"]', { has: page.getByText('e2e-sched-toggle-ds') })
+				.first()
+				.locator('button[title="Click to disable"]');
+			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
+			await toggleBtn.click({ timeout: 5_000 });
+
+			// After toggle, the button title should change to "Click to enable"
+			const disabledBtn = page
+				.locator('[role="button"]', { has: page.getByText('e2e-sched-toggle-ds') })
+				.first()
+				.locator('button[title="Click to enable"]');
+			await expect(disabledBtn).toBeAttached({ timeout: 8_000 });
+		} finally {
+			await deleteScheduleViaUI(page, 'e2e-sched-toggle-ds');
+			await deleteDatasourceViaUI(page, 'e2e-sched-toggle-ds');
+		}
+	});
 });
 
 test.describe('Monitoring – Schedule create flow', () => {
@@ -174,6 +202,87 @@ test.describe('Monitoring – Schedule create flow', () => {
 			await expect(page.locator('#schedule-datasource')).not.toBeVisible({ timeout: 5_000 });
 		} finally {
 			await deleteDatasourceViaUI(page, 'e2e-sched-cancel-ds');
+		}
+	});
+});
+
+test.describe('Monitoring – Schedule inline cron edit', () => {
+	test('inline cron edit: pencil → input → Enter saves new expression', async ({
+		page,
+		request
+	}) => {
+		test.setTimeout(60_000);
+		const dsId = await createDatasource(request, 'e2e-sched-cron-ds');
+		await createSchedule(request, dsId, '0 6 * * *');
+		try {
+			await page.goto('/monitoring?tab=schedules');
+			await expect(page.getByText('e2e-sched-cron-ds')).toBeVisible({ timeout: 10_000 });
+
+			// Expand the schedule row by clicking on it
+			const schedRow = page
+				.locator('[role="button"]', { has: page.getByText('e2e-sched-cron-ds') })
+				.first();
+			await schedRow.click();
+
+			// Wait for expanded section to show cron expression
+			await expect(page.getByText('Cron Expression')).toBeVisible({ timeout: 5_000 });
+
+			// Click the pencil/edit button
+			const editBtn = page.locator('button[title="Edit"]').first();
+			await expect(editBtn).toBeVisible({ timeout: 5_000 });
+			await editBtn.click();
+
+			// Cron input should appear
+			const cronInput = page.locator('input[aria-label="Cron expression"]').first();
+			await expect(cronInput).toBeVisible({ timeout: 3_000 });
+
+			// Clear and type new expression, then press Enter
+			await cronInput.fill('30 12 * * 1');
+			await cronInput.press('Enter');
+
+			// After save, the input should disappear and new expression should show
+			await expect(cronInput).not.toBeVisible({ timeout: 5_000 });
+			await expect(page.getByText('30 12 * * 1')).toBeVisible({ timeout: 5_000 });
+
+			await screenshot(page, 'monitoring', 'schedule-cron-edited');
+		} finally {
+			await deleteScheduleViaUI(page, 'e2e-sched-cron-ds');
+			await deleteDatasourceViaUI(page, 'e2e-sched-cron-ds');
+		}
+	});
+
+	test('inline cron edit: Escape cancels without saving', async ({ page, request }) => {
+		test.setTimeout(60_000);
+		const dsId = await createDatasource(request, 'e2e-sched-cron-esc-ds');
+		await createSchedule(request, dsId, '0 6 * * *');
+		try {
+			await page.goto('/monitoring?tab=schedules');
+			await expect(page.getByText('e2e-sched-cron-esc-ds')).toBeVisible({ timeout: 10_000 });
+
+			// Expand
+			const schedRow = page
+				.locator('[role="button"]', { has: page.getByText('e2e-sched-cron-esc-ds') })
+				.first();
+			await schedRow.click();
+			await expect(page.getByText('Cron Expression')).toBeVisible({ timeout: 5_000 });
+
+			// Enter edit mode
+			await page.locator('button[title="Edit"]').first().click();
+			const cronInput = page.locator('input[aria-label="Cron expression"]').first();
+			await expect(cronInput).toBeVisible({ timeout: 3_000 });
+
+			// Type a different value then Escape
+			await cronInput.fill('59 23 * * *');
+			await cronInput.press('Escape');
+
+			// Input should disappear, original expression should remain
+			await expect(cronInput).not.toBeVisible({ timeout: 3_000 });
+			await expect(page.locator('code', { hasText: '0 6 * * *' })).toBeVisible({
+				timeout: 5_000
+			});
+		} finally {
+			await deleteScheduleViaUI(page, 'e2e-sched-cron-esc-ds');
+			await deleteDatasourceViaUI(page, 'e2e-sched-cron-esc-ds');
 		}
 	});
 });
@@ -230,6 +339,35 @@ test.describe('Monitoring – Health Checks tab', () => {
 
 		// Cleanup the datasource
 		await deleteDatasourceViaUI(page, 'e2e-hc-del-ds');
+	});
+
+	test('health check enable/disable toggle works', async ({ page, request }) => {
+		test.setTimeout(60_000);
+		const dsId = await createDatasource(request, 'e2e-hc-toggle-ds');
+		await createHealthCheck(request, dsId, 'e2e Toggle Health Check');
+		try {
+			await page.goto('/monitoring?tab=health');
+			await expect(page.getByText('e2e Toggle Health Check').first()).toBeVisible({
+				timeout: 8_000
+			});
+
+			// Find the toggle button in the health check row — starts enabled (title "Click to disable")
+			const row = page.locator('tr', { has: page.getByText('e2e Toggle Health Check') }).first();
+			const toggleBtn = row.locator('button[title="Click to disable"]');
+			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
+			await toggleBtn.click({ timeout: 5_000 });
+
+			// After toggle, the button should change to "Click to enable" and show "Off"
+			await expect(row.locator('button[title="Click to enable"]')).toBeAttached({
+				timeout: 8_000
+			});
+			await expect(row.getByText('Off')).toBeVisible({ timeout: 5_000 });
+
+			await screenshot(page, 'monitoring', 'health-check-toggled-off');
+		} finally {
+			await deleteHealthCheckViaUI(page, 'e2e Toggle Health Check');
+			await deleteDatasourceViaUI(page, 'e2e-hc-toggle-ds');
+		}
 	});
 });
 

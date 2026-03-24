@@ -1033,6 +1033,8 @@
 									})}
 									onclick={() => handleSelectTab(tab.id)}
 									type="button"
+									data-testid={`tab-button-${tab.id}`}
+									data-tab-name={tab.name}
 								>
 									<span
 										class={css({
@@ -1229,7 +1231,7 @@
 		</header>
 
 		{#if saveError}
-			<div class={css({ paddingX: '4', paddingY: '2' })}>
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
 			</div>
 		{/if}
@@ -1467,7 +1469,7 @@
 					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 				})}
 				onclick={closeVersionModal}
-				aria-label="Close"
+				aria-label="Close version history"
 			>
 				<X size={16} />
 			</button>
@@ -1483,6 +1485,7 @@
 		>
 			{#if versionError}
 				<div
+					data-testid="version-error"
 					class={css({
 						paddingX: '2.5',
 						paddingY: '3',
@@ -1513,6 +1516,7 @@
 				</div>
 			{:else if versionsQuery.isError}
 				<div
+					data-testid="version-load-error"
 					class={css({
 						paddingX: '2.5',
 						paddingY: '3',

@@ -163,7 +163,10 @@
 	}
 </script>
 
-<div class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}>
+<div
+	class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}
+	data-testid="inline-data-table"
+>
 	<DataTable
 		columns={data?.columns ?? []}
 		data={data?.data ?? []}

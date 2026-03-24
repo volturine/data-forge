@@ -407,7 +407,10 @@
 					Loading lineage...
 				</div>
 			{:else if query.isError}
-				<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+				<div
+					data-testid="lineage-load-error"
+					class={cx(row, css({ height: '100%', justifyContent: 'center' }))}
+				>
 					<p class={css({ fontSize: 'sm', color: 'error.fg' })}>Failed to load lineage.</p>
 				</div>
 			{:else}

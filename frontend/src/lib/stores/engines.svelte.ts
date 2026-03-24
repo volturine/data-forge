@@ -7,7 +7,7 @@ export class EnginesStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 
-	private interval: number | null = null;
+	private interval: ReturnType<typeof setInterval> | null = null;
 
 	count = $derived(this.engines.length);
 
@@ -48,7 +48,7 @@ export class EnginesStore {
 
 		this.fetch();
 
-		this.interval = window.setInterval(() => {
+		this.interval = setInterval(() => {
 			this.fetch();
 		}, configStore.enginePoolingInterval);
 	}

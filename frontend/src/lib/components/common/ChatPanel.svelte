@@ -632,6 +632,7 @@
 
 {#if chatStore.open}
 	<div
+		id="chat-panel"
 		class={css({
 			position: 'fixed',
 			bottom: '0',

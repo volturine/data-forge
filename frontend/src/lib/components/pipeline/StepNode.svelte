@@ -671,6 +671,7 @@
 							fontSize: '2xs',
 							color: 'fg.faint'
 						})}
+						data-testid="step-row-count"
 					>
 						<Hash size={9} />
 						{rowCountLabel}
@@ -719,6 +720,7 @@
 					fontSize: 'xs',
 					color: 'error.fg'
 				})}
+				data-testid="step-row-count-error"
 			>
 				{rowCountError}
 			</div>

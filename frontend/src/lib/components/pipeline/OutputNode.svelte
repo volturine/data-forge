@@ -631,6 +631,7 @@
 						})}
 						onclick={toggleHidden}
 						disabled={toggling}
+						data-testid="output-visibility-toggle"
 						title={hidden
 							? 'Hidden from other analyses — click to make visible'
 							: 'Visible to other analyses — click to hide'}
@@ -816,7 +817,7 @@
 			>
 				{#if building}
 					<Loader size={14} class={css({ opacity: '0.7' })} />
-					<span>building...</span>
+					<span data-testid="output-building">building...</span>
 				{:else}
 					<Play size={14} class={css({ opacity: '0.7' })} />
 					<span>build</span>
@@ -855,6 +856,7 @@
 						_hover: { color: 'fg.primary' }
 					})}
 					onclick={() => (notifyOpen = !notifyOpen)}
+					data-testid="output-notify-toggle"
 				>
 					<span class={cx(row, css({ gap: '2' }))}>
 						{#if notifyOpen}
@@ -1058,6 +1060,7 @@
 						_hover: { color: 'fg.primary' }
 					})}
 					onclick={() => (healthOpen = !healthOpen)}
+					data-testid="output-health-toggle"
 				>
 					<span class={cx(row, css({ gap: '2' }))}>
 						{#if healthOpen}
@@ -1134,6 +1137,7 @@
 						_hover: { color: 'fg.primary' }
 					})}
 					onclick={() => (scheduleOpen = !scheduleOpen)}
+					data-testid="output-schedule-toggle"
 				>
 					<span class={cx(row, css({ gap: '2' }))}>
 						{#if scheduleOpen}
@@ -1177,6 +1181,7 @@
 					fontSize: 'xs',
 					color: 'error.fg'
 				})}
+				data-testid="output-build-error"
 			>
 				{error}
 			</div>

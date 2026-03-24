@@ -220,6 +220,26 @@
 		>
 			Loading UDF...
 		</div>
+	{:else if query.isError}
+		<div
+			data-testid="udf-load-error"
+			class={css({
+				paddingX: '3',
+				paddingY: '2.5',
+				border: 'none',
+				borderLeftWidth: '2',
+
+				marginTop: '3',
+				marginBottom: '0',
+				fontSize: 'xs',
+				lineHeight: 'normal',
+				backgroundColor: 'transparent',
+				borderLeftColor: 'error.border',
+				color: 'error.fg'
+			})}
+		>
+			Failed to load UDF.
+		</div>
 	{:else}
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '5' })}>
 			<div

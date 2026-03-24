@@ -6,6 +6,16 @@ const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charl
 
 const E2E_PREFIX_RE = /^e2e[^a-z]/i;
 
+function generateLargeCsv(rows: number): string {
+	const names = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank', 'Grace', 'Hank'];
+	const cities = ['London', 'Paris', 'Berlin', 'Tokyo', 'Sydney', 'Oslo', 'Rome', 'Madrid'];
+	const lines = ['id,name,age,city'];
+	for (let i = 1; i <= rows; i++) {
+		lines.push(`${i},${names[i % names.length]},${20 + (i % 50)},${cities[i % cities.length]}`);
+	}
+	return lines.join('\n') + '\n';
+}
+
 /**
  * Purge all resources whose names match the e2e prefix.
  * Safe to call before/after a run to ensure a clean slate.
@@ -87,7 +97,32 @@ export async function purgeE2eResources(request: APIRequestContext): Promise<voi
 	await Promise.all(phase3);
 }
 
+const DATE_CSV =
+	'id,name,event_date,amount\n1,Alice,2024-01-15,100\n2,Bob,2024-03-22,250\n3,Charlie,2024-06-10,75\n';
+
 // ── Datasource ────────────────────────────────────────────────────────────────
+
+export async function createDatasourceWithDates(
+	request: APIRequestContext,
+	name: string
+): Promise<string> {
+	const response = await request.post(`${API_BASE}/datasource/upload`, {
+		multipart: {
+			file: {
+				name: `${name}.csv`,
+				mimeType: 'text/csv',
+				buffer: Buffer.from(DATE_CSV)
+			},
+			name
+		}
+	});
+	if (!response.ok()) {
+		throw new Error(
+			`createDatasourceWithDates failed: ${response.status()} ${await response.text()}`
+		);
+	}
+	return ((await response.json()) as { id: string }).id;
+}
 
 export async function createDatasource(request: APIRequestContext, name: string): Promise<string> {
 	const response = await request.post(`${API_BASE}/datasource/upload`, {
@@ -102,6 +137,28 @@ export async function createDatasource(request: APIRequestContext, name: string)
 	});
 	if (!response.ok()) {
 		throw new Error(`createDatasource failed: ${response.status()} ${await response.text()}`);
+	}
+	return ((await response.json()) as { id: string }).id;
+}
+
+export async function createLargeDatasource(
+	request: APIRequestContext,
+	name: string,
+	rows: number
+): Promise<string> {
+	const csv = generateLargeCsv(rows);
+	const response = await request.post(`${API_BASE}/datasource/upload`, {
+		multipart: {
+			file: {
+				name: `${name}.csv`,
+				mimeType: 'text/csv',
+				buffer: Buffer.from(csv)
+			},
+			name
+		}
+	});
+	if (!response.ok()) {
+		throw new Error(`createLargeDatasource failed: ${response.status()} ${await response.text()}`);
 	}
 	return ((await response.json()) as { id: string }).id;
 }

@@ -60,7 +60,10 @@
 </script>
 
 {#if open}
-	<div class={css({ position: 'absolute', insetInline: '0', bottom: '0', zIndex: '40' })}>
+	<div
+		class={css({ position: 'absolute', insetInline: '0', bottom: '0', zIndex: '40' })}
+		data-testid="column-stats-panel"
+	>
 		<div
 			class={css({
 				borderTopWidth: '1',
@@ -101,6 +104,7 @@
 						})}
 						onclick={onClose}
 						type="button"
+						data-testid="column-stats-close"
 					>
 						<X size={14} />
 					</button>

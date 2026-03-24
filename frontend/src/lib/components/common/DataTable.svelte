@@ -505,10 +505,13 @@
 					})}
 					onclick={pagination.onPrev}
 					disabled={!pagination.canPrev || !!pagination.loading}
+					data-testid="pagination-prev"
 				>
 					Prev
 				</button>
-				<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>Page {pagination.page}</span>
+				<span class={css({ fontSize: 'xs', color: 'fg.muted' })} data-testid="pagination-page"
+					>Page {pagination.page}</span
+				>
 				<button
 					class={css({
 						paddingY: '1',
@@ -520,6 +523,7 @@
 					})}
 					onclick={pagination.onNext}
 					disabled={!pagination.canNext || !!pagination.loading}
+					data-testid="pagination-next"
 				>
 					Next
 				</button>
@@ -566,6 +570,7 @@
 				gap: '3',
 				color: 'fg.tertiary'
 			})}
+			data-testid="preview-error"
 		>
 			<Bug size={18} />
 			<p class={css({ margin: '0', color: 'fg.tertiary' })}>Failed</p>

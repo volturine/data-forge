@@ -4082,7 +4082,7 @@
 	);
 </script>
 
-<div class={outerCss}>
+<div class={outerCss} data-testid="chart-preview">
 	{#if htmlLegend && legendPosition === 'top'}
 		<div class={cx('group', legendTopCss)}>
 			{#if legendCollapsed}
