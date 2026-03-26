@@ -171,7 +171,7 @@
 						backgroundColor: 'error.bg',
 						color: 'error.fg',
 						borderWidth: '1',
-						borderColor: 'error.border',
+						borderColor: 'border.error',
 						paddingX: '3',
 						paddingY: '2'
 					})

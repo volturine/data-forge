@@ -205,9 +205,12 @@ test.describe('Analyses – detail page', () => {
 
 	test('Save button is present', async ({ page }) => {
 		await page.goto(`/analysis/${aId}`);
-		await expect(
-			page.getByRole('button', { name: /Save/i }).or(page.getByTitle(/Save/i))
-		).toBeVisible({ timeout: 10_000 });
+		await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
+			timeout: 15_000
+		});
+		await expect(page.getByRole('button', { name: /^(Save|Saved|Saving\.\.\.)$/ })).toBeVisible({
+			timeout: 10_000
+		});
 	});
 
 	test('analysis name is shown in the detail page', async ({ page }) => {

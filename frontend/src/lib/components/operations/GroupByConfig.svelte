@@ -206,7 +206,7 @@
 								backgroundColor: 'error.bg',
 								color: 'error.fg',
 								borderWidth: '1',
-								borderColor: 'error.border'
+								borderColor: 'border.error'
 							})}
 							onclick={() => removeAggregation(i)}
 							aria-label={`Remove aggregation ${agg.alias}`}

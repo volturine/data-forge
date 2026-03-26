@@ -467,7 +467,6 @@
 						width: '100%',
 						cursor: 'pointer',
 						borderWidth: '1',
-						borderColor: 'border.primary',
 						backgroundColor: 'accent.primary',
 						color: 'fg.inverse',
 						paddingX: '3',

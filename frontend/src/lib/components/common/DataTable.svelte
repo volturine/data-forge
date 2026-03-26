@@ -648,7 +648,6 @@
 										css({
 											position: 'relative',
 											borderRightWidth: '1',
-											borderRightColor: 'bg.tertiary',
 											_last: { borderRight: 'none' },
 											padding: '0',
 											textAlign: 'left',
@@ -896,9 +895,7 @@
 									class={css({
 										padding: '0',
 										borderRightWidth: '1',
-										borderRightColor: 'bg.tertiary',
 										borderBottomWidth: '1',
-										borderBottomColor: 'bg.tertiary',
 										_last: { borderRight: 'none' }
 									})}
 								>

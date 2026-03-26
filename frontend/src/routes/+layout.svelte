@@ -157,7 +157,8 @@
 				position: 'sticky',
 				top: '0',
 				zIndex: 'nav',
-				backgroundColor: 'bg.panel'
+				backgroundColor: 'bg.panel',
+				borderBottomWidth: '1'
 			})}
 		>
 			<div

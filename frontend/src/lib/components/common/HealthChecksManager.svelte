@@ -349,7 +349,7 @@
 							paddingX: '2',
 							paddingY: '1.5',
 							fontSize: 'xs',
-							_focus: { borderColor: 'accent.primary' }
+							_focus: { borderColor: 'border.accent' }
 						})
 					)}
 					bind:value={targetDatasourceId}
@@ -381,7 +381,7 @@
 							paddingX: '2',
 							paddingY: '1.5',
 							fontSize: 'xs',
-							_focus: { borderColor: 'accent.primary' }
+							_focus: { borderColor: 'border.accent' }
 						})
 					)}
 					bind:value={name}
@@ -401,7 +401,7 @@
 								paddingX: '2',
 								paddingY: '1.5',
 								fontSize: 'xs',
-								_focus: { borderColor: 'accent.primary' }
+								_focus: { borderColor: 'border.accent' }
 							})
 						)}
 						bind:value={checkType}
@@ -459,7 +459,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('min_rows', parseInt(e.currentTarget.value) || 0)}
@@ -476,7 +476,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('max_rows', parseInt(e.currentTarget.value) || 0)}
@@ -507,7 +507,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('min_columns', parseInt(e.currentTarget.value) || 0)}
@@ -524,7 +524,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('max_columns', parseInt(e.currentTarget.value) || 0)}
@@ -550,7 +550,7 @@
 								paddingX: '2',
 								paddingY: '1.5',
 								fontSize: 'xs',
-								_focus: { borderColor: 'accent.primary' }
+								_focus: { borderColor: 'border.accent' }
 							})
 						)}
 						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
@@ -581,7 +581,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
@@ -600,7 +600,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							value={duplicateColumns}
@@ -633,7 +633,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
@@ -650,7 +650,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
@@ -681,7 +681,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
@@ -700,7 +700,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('expected_unique', parseInt(e.currentTarget.value) || 0)}
@@ -731,7 +731,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
@@ -748,7 +748,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('min', parseFloat(e.currentTarget.value) || 0)}
@@ -765,7 +765,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									fontSize: 'xs',
-									_focus: { borderColor: 'accent.primary' }
+									_focus: { borderColor: 'border.accent' }
 								})
 							)}
 							oninput={(e) => updateConfig('max', parseFloat(e.currentTarget.value) || 0)}
@@ -1024,7 +1024,7 @@
 		<div
 			class={css({
 				borderWidth: '1',
-				borderColor: 'error.border',
+				borderColor: 'border.error',
 				backgroundColor: 'color-mix(in srgb, {colors.error.bg} 10%, transparent)',
 				padding: '4',
 				textAlign: 'center',
@@ -1290,7 +1290,7 @@
 											class={css({
 												display: 'inline-flex',
 												borderWidth: '1',
-												borderColor: 'accent.primary',
+												borderColor: 'border.accent',
 												backgroundColor: 'accent.bg',
 												paddingX: '1.5',
 												paddingY: '0.5',

@@ -436,7 +436,7 @@
 						css({
 							backgroundColor: 'warning.bg',
 							color: 'warning.fg',
-							borderColor: 'warning.border'
+							borderColor: 'border.warning'
 						})
 					)
 				: button({ variant: 'secondary' })}
@@ -460,7 +460,7 @@
 				fontSize: 'xs',
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
-				borderLeftColor: 'error.border',
+				borderLeftColor: 'border.error',
 				color: 'error.fg'
 			})}
 		>

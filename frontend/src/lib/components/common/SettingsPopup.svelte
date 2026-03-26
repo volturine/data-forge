@@ -249,11 +249,11 @@
 						fontSize: 'xs',
 						...(feedback.type === 'success'
 							? {
-									borderColor: 'success.border',
+									borderColor: 'border.success',
 									backgroundColor: 'success.bg',
 									color: 'success.fg'
 								}
-							: { borderColor: 'error.border', backgroundColor: 'error.bg', color: 'error.fg' })
+							: { borderColor: 'border.error', backgroundColor: 'error.bg', color: 'error.fg' })
 					})}
 				>
 					{#if feedback.type === 'success'}

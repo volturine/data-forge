@@ -533,10 +533,10 @@
 					fontSize: 'xs',
 					lineHeight: 'normal',
 					backgroundColor: 'transparent',
-					borderLeftColor: 'success.fg',
+					borderLeftColor: 'border.success',
 					color: 'success.fg',
 					borderWidth: '1',
-					borderColor: 'success.border'
+					borderColor: 'border.success'
 				})
 			)}
 		>

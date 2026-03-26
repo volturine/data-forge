@@ -839,7 +839,7 @@
 				fontSize: 'xs',
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
-				borderLeftColor: 'error.border',
+				borderLeftColor: 'border.error',
 				color: 'error.fg',
 				height: '100%',
 				flexDirection: 'column',
@@ -894,7 +894,6 @@
 				top: '0',
 				height: 'headerSm',
 				backgroundColor: 'bg.primary',
-				borderBottomWidth: '1',
 				zIndex: 'header'
 			})}
 		>
@@ -1494,7 +1493,7 @@
 						fontSize: 'xs',
 						lineHeight: '1.5',
 						backgroundColor: 'transparent',
-						borderLeftColor: 'error.border',
+						borderLeftColor: 'border.error',
 						color: 'error.fg',
 						margin: '0'
 					})}
@@ -1525,7 +1524,7 @@
 						fontSize: 'xs',
 						lineHeight: '1.5',
 						backgroundColor: 'transparent',
-						borderLeftColor: 'error.border',
+						borderLeftColor: 'border.error',
 						color: 'error.fg',
 						margin: '0'
 					})}

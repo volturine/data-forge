@@ -641,7 +641,6 @@
 			flexDirection: 'column',
 			backgroundColor: 'bg.panel',
 			borderWidth: '1',
-			borderColor: 'border.default',
 			borderTopRadius: 'lg',
 			boxShadow: 'lg',
 			zIndex: 'overlay',
@@ -716,7 +715,6 @@
 		<div
 			class={css({
 				borderBottomWidth: '1',
-				borderColor: 'border.default',
 				flexShrink: '0'
 			})}
 		>
@@ -738,7 +736,6 @@
 							borderRadius: 'md',
 							overflow: 'hidden',
 							borderWidth: '1',
-							borderColor: 'border.default',
 							flexShrink: '0'
 						})}
 					>
@@ -775,7 +772,6 @@
 								fontWeight: 'medium',
 								border: 'none',
 								borderLeftWidth: '1',
-								borderColor: 'border.default',
 								cursor: 'pointer',
 								backgroundColor: chatStore.mode === 'execute' ? 'fg.default' : 'transparent',
 								color: chatStore.mode === 'execute' ? 'bg.panel' : 'fg.muted',
@@ -855,7 +851,6 @@
 				class={css({
 					padding: '3',
 					borderBottomWidth: '1',
-					borderColor: 'border.default',
 					display: 'flex',
 					flexDirection: 'column',
 					gap: '2',
@@ -914,7 +909,6 @@
 										overflowY: 'auto',
 										backgroundColor: 'bg.panel',
 										borderWidth: '1',
-										borderColor: 'border.default',
 										borderRadius: 'sm',
 										zIndex: 'dropdown',
 										boxShadow: 'md'
@@ -1053,7 +1047,6 @@
 										height: '14px',
 										borderRadius: 'sm',
 										borderWidth: '1',
-										borderColor: 'border.default',
 										backgroundColor: 'transparent',
 										flexShrink: '0',
 										display: 'flex',
@@ -1119,7 +1112,6 @@
 												height: '12px',
 												borderRadius: 'xs',
 												borderWidth: '1',
-												borderColor: 'border.default',
 												backgroundColor: 'transparent',
 												flexShrink: '0',
 												display: 'flex',
@@ -1195,7 +1187,6 @@
 				class={css({
 					padding: '3',
 					borderBottomWidth: '1',
-					borderColor: 'border.default',
 					display: 'flex',
 					flexDirection: 'column',
 					gap: '2',
@@ -1388,12 +1379,11 @@
 											paddingX: '3',
 											fontSize: 'xs',
 											borderWidth: '1',
-											borderColor: 'border.default',
 											borderRadius: 'md',
 											backgroundColor: 'transparent',
 											color: 'fg.secondary',
 											cursor: 'pointer',
-											_hover: { backgroundColor: 'bg.subtle', borderColor: 'border.primary' }
+											_hover: { backgroundColor: 'bg.subtle' }
 										})}
 										onclick={() => void handleSendPrompt(prompt)}
 										type="button"
@@ -1836,7 +1826,7 @@
 										gap: '2',
 										padding: '2',
 										borderTopWidth: '1',
-										borderColor: 'fg.warning',
+										borderColor: 'border.warning',
 										backgroundColor: 'bg.subtle'
 									})}
 								>
@@ -1903,7 +1893,6 @@
 										overflow: 'auto',
 										maxHeight: '200px',
 										borderTopWidth: '1',
-										borderColor: 'border.subtle',
 										backgroundColor: 'bg.subtle',
 										wordBreak: 'break-word'
 									})}
@@ -2098,7 +2087,7 @@
 								paddingY: '1',
 								borderRadius: 'full',
 								borderWidth: '1',
-								borderColor: 'accent.primary',
+								borderColor: 'border.accent',
 								backgroundColor: 'transparent',
 								color: 'accent.primary',
 								fontSize: '11px',
@@ -2117,7 +2106,6 @@
 								paddingY: '1',
 								borderRadius: 'full',
 								borderWidth: '1',
-								borderColor: 'border.default',
 								backgroundColor: 'transparent',
 								color: 'fg.muted',
 								fontSize: '11px',
@@ -2149,7 +2137,6 @@
 							paddingY: '1',
 							borderRadius: 'full',
 							borderWidth: '1',
-							borderColor: 'border.default',
 							backgroundColor: 'bg.panel',
 							color: 'fg.muted',
 							fontSize: '11px',
@@ -2249,7 +2236,6 @@
 				paddingX: '3',
 				paddingBottom: '2',
 				borderTopWidth: '1',
-				borderColor: 'border.default',
 				flexShrink: '0'
 			})}
 		>
@@ -2396,7 +2382,6 @@
 							overflowY: 'auto',
 							backgroundColor: 'bg.panel',
 							borderWidth: '1',
-							borderColor: 'border.default',
 							borderRadius: 'sm',
 							zIndex: 'dropdown',
 							boxShadow: 'md',

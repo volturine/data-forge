@@ -620,7 +620,7 @@
 					<div
 						class={css({
 							borderTopWidth: '1',
-							borderTopColor: 'error.border',
+							borderTopColor: 'border.error',
 							backgroundColor: 'error.bg',
 							padding: '3',
 							fontSize: 'xs',
@@ -713,7 +713,7 @@
 			<div
 				class={css({
 					borderTopWidth: '1',
-					borderTopColor: 'error.border',
+					borderTopColor: 'border.error',
 					backgroundColor: 'error.bg',
 					paddingX: '4',
 					paddingY: '2',

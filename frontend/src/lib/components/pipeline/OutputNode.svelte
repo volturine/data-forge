@@ -537,7 +537,7 @@
 								alignItems: 'center',
 								justifyContent: 'center',
 								borderWidth: '1',
-								borderColor: 'error.border',
+								borderColor: 'border.error',
 								color: 'error.fg',
 								backgroundColor: 'bg.primary',
 								padding: '0',
@@ -900,7 +900,7 @@
 									<div
 										class={css({
 											borderWidth: '1',
-											borderColor: 'warning.border',
+											borderColor: 'border.warning',
 											backgroundColor: 'warning.bg',
 											padding: '2',
 											fontSize: '2xs',
@@ -1175,7 +1175,7 @@
 				class={css({
 					marginTop: '3',
 					borderWidth: '1',
-					borderColor: 'error.border',
+					borderColor: 'border.error',
 					backgroundColor: 'error.bg',
 					padding: '2',
 					fontSize: 'xs',

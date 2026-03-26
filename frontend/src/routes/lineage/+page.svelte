@@ -119,7 +119,6 @@
 <div class={css({ display: 'flex', height: '100%', flexDirection: 'column' })}>
 	<header
 		class={css({
-			borderBottomWidth: '1',
 			backgroundColor: 'bg.primary',
 			paddingX: '6',
 			paddingY: '3'

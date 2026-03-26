@@ -137,6 +137,7 @@ test.describe('Datasources – upload page', () => {
 	test('CSV upload creates datasource', async ({ page }) => {
 		test.setTimeout(60_000);
 		await page.goto('/datasources/new');
+		await page.waitForLoadState('networkidle');
 
 		// Use setInputFiles directly on the file input
 		const fileInput = page.locator('#file-input');
@@ -347,7 +348,7 @@ test.describe('Datasources – preview error state', () => {
 test.describe('Datasources – config tab interactions', () => {
 	test.setTimeout(45_000);
 
-	test('Runs tab shows empty state for fresh datasource', async ({ page, request }) => {
+	test('Runs tab shows datasource_create run for fresh datasource', async ({ page, request }) => {
 		await createDatasource(request, 'e2e-runs-tab-ds');
 		try {
 			await page.goto('/datasources');
@@ -357,9 +358,10 @@ test.describe('Datasources – config tab interactions', () => {
 			await expect(config).toBeVisible({ timeout: 8_000 });
 
 			await config.getByRole('tab', { name: 'Runs' }).click();
-			await expect(config.getByText(/No engine runs/i)).toBeVisible({ timeout: 10_000 });
+			// Creating a datasource via API upload triggers a datasource_create engine run
+			await expect(config.getByText('Create', { exact: true })).toBeVisible({ timeout: 10_000 });
 
-			await screenshot(page, 'datasources', 'runs-tab-empty');
+			await screenshot(page, 'datasources', 'runs-tab-with-create-run');
 		} finally {
 			await deleteDatasourceViaUI(page, 'e2e-runs-tab-ds');
 		}

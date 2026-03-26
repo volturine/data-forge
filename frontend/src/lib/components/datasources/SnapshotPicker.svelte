@@ -485,7 +485,7 @@
 				<span
 					class={css({
 						borderWidth: '1',
-						borderColor: 'accent.primary',
+						borderColor: 'border.accent',
 						backgroundColor: 'accent.bg',
 						paddingX: '1.5',
 						paddingY: '0.5',
@@ -565,7 +565,7 @@
 				<div
 					class={css({
 						borderWidth: '1',
-						borderColor: 'warning.border',
+						borderColor: 'border.warning',
 						backgroundColor: 'warning.bg',
 						paddingX: '2',
 						paddingY: '1',
@@ -578,7 +578,7 @@
 						class={css({
 							marginLeft: '2',
 							borderWidth: '1',
-							borderColor: 'warning.border',
+							borderColor: 'border.warning',
 							backgroundColor: 'bg.primary',
 							paddingX: '1.5',
 							paddingY: '0.5'

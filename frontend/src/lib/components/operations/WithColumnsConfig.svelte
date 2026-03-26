@@ -438,7 +438,7 @@
 								paddingY: '2',
 								borderBottomWidth: '1',
 								borderLeftWidth: '2',
-								borderLeftColor: 'accent.primary',
+								borderLeftColor: 'border.accent',
 								backgroundColor: 'bg.hover',
 								'&:last-child': { borderBottomWidth: '0' }
 							})
@@ -514,7 +514,7 @@
 								_hover: {
 									color: 'error.fg',
 									backgroundColor: 'error.bg',
-									borderColor: 'error.border'
+									borderColor: 'border.error'
 								}
 							})}
 							onclick={() => removeExpression(index)}

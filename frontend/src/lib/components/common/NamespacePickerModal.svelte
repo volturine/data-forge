@@ -189,7 +189,7 @@
 						paddingX: '2',
 						paddingY: '1.5',
 						fontSize: 'sm',
-						_focus: { borderColor: 'accent.primary' }
+						_focus: { borderColor: 'border.accent' }
 					})
 				)}
 				type="text"

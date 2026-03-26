@@ -150,8 +150,6 @@
 
 <div
 	class={css({
-		borderTopWidth: '1',
-		borderColor: 'border.primary',
 		display: 'flex',
 		height: '100%'
 	})}
@@ -175,7 +173,6 @@
 				gap: '2',
 				paddingX: '4',
 				paddingY: '3',
-				borderBottomWidth: '1',
 				height: 'fieldSm',
 				boxSizing: 'border-box'
 			})}
@@ -221,7 +218,7 @@
 							backgroundColor: 'accent.primary',
 							color: 'fg.inverse',
 							borderWidth: '1',
-							borderColor: 'accent.primary'
+							borderColor: 'border.accent'
 						})}
 						data-sveltekit-reload
 					>
@@ -300,8 +297,7 @@
 							...(selectedId === datasource.id
 								? {
 										backgroundColor: 'accent.bg',
-										borderLeftWidth: '2',
-										borderLeftColor: 'border.primary'
+										borderLeftWidth: '2'
 									}
 								: {})
 						})}

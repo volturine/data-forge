@@ -291,7 +291,7 @@
 							cursor: 'pointer',
 							color: 'error.fg',
 							borderWidth: '1',
-							borderColor: 'error.border',
+							borderColor: 'border.error',
 							_hover: { backgroundColor: 'error.bg' }
 						})}
 						onclick={() => removeJoinColumn(joinCol.id)}

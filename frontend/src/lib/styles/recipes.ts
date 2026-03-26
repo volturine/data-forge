@@ -134,9 +134,9 @@ export const callout = defineRecipe({
 	},
 	variants: {
 		tone: {
-			info: { borderLeftColor: 'accent.secondary', backgroundColor: 'transparent' },
-			warn: { borderLeftColor: 'warning.border', backgroundColor: 'warning.bg' },
-			error: { borderLeftColor: 'error.border', backgroundColor: 'error.bg', color: 'error.fg' }
+			info: { borderLeftColor: 'border.accent', backgroundColor: 'transparent' },
+			warn: { borderLeftColor: 'border.warning', backgroundColor: 'warning.bg' },
+			error: { borderLeftColor: 'border.error', backgroundColor: 'error.bg', color: 'error.fg' }
 		}
 	},
 	defaultVariants: { tone: 'info' }
@@ -170,7 +170,7 @@ export const button = defineRecipe({
 			danger: {
 				backgroundColor: 'error.bg',
 				color: 'error.fg',
-				borderColor: 'error.border',
+				borderColor: 'border.error',
 				_hover: { _notDisabled: { opacity: '0.85' } }
 			}
 		},
@@ -186,7 +186,7 @@ export const spinner = defineRecipe({
 	className: 'spinner',
 	base: {
 		borderRadius: 'full',
-		borderTopColor: 'accent.secondary',
+		borderTopColor: 'border.accent',
 		animation: 'spin 0.8s linear infinite',
 		flexShrink: '0'
 	},
@@ -257,7 +257,7 @@ export const tabButton = defineRecipe({
 	},
 	variants: {
 		active: {
-			true: { color: 'accent.primary', borderBottomColor: 'accent.secondary' }
+			true: { color: 'accent.primary', borderBottomColor: 'border.accent' }
 		},
 		size: {
 			default: { paddingX: '3', paddingY: '1.5', fontSize: 'xs' },

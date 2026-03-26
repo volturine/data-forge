@@ -167,7 +167,7 @@
 		paddingY: '2',
 		fontFamily: 'mono',
 		fontSize: 'sm',
-		_focus: { borderColor: 'accent.primary', outline: 'none' }
+		_focus: { borderColor: 'border.accent', outline: 'none' }
 	})}
 	{searchValue}
 	emptyLabel="No datasources found"
@@ -234,9 +234,7 @@
 				fontFamily: 'mono',
 				fontSize: 'sm',
 				...(payload.selected ? { backgroundColor: 'accent.bg' } : {}),
-				...(option.id === highlightId
-					? { borderLeftWidth: '3', borderLeftColor: 'accent.secondary' }
-					: {})
+				...(option.id === highlightId ? { borderLeftWidth: '3', borderColor: 'border.accent' } : {})
 			})
 		)}
 		onclick={payload.onSelect}
@@ -255,7 +253,7 @@
 					class={css({
 						marginLeft: '2',
 						borderWidth: '1',
-						borderColor: 'accent.primary',
+						borderColor: 'border.accent',
 						backgroundColor: 'accent.bg',
 						paddingX: '2',
 						paddingY: '1',

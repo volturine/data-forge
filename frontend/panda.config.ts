@@ -299,23 +299,24 @@ export default defineConfig({
 					bg: { value: { base: '#f4f4f5', _dark: '#1f1f1f' } }
 				},
 				border: {
-					primary: { value: { base: '#e0e0e0', _dark: 'rgba(43, 43, 43, 0.663)' } }
+					primary: { value: { base: '#e0e0e0', _dark: 'rgba(43, 43, 43, 0.663)' } },
+					error: { value: { base: '#dc2626', _dark: '#991b1b' } },
+					accent: { value: { base: '#09090b', _dark: '#fafafa' } },
+					success: { value: { base: '#16a34a', _dark: '#86efac' } },
+					warning: { value: { base: '#d97706', _dark: '#854d0e' } }
 				},
 				success: {
-					fg: { value: { base: '#86efac', _dark: '#86efac' } },
-					bg: { value: { base: '#14532d', _dark: '#14532d' } },
-					border: { value: { base: '#86efac', _dark: '#86efac' } }
+					fg: { value: { base: '#166534', _dark: '#86efac' } },
+					bg: { value: { base: '#dcfce7', _dark: '#14532d' } }
 				},
 				warning: {
-					fg: { value: { base: '#fde047', _dark: '#fde047' } },
-					bg: { value: { base: '#713f12', _dark: '#713f12' } },
-					border: { value: { base: '#854d0e', _dark: '#854d0e' } },
+					fg: { value: { base: '#92400e', _dark: '#fde047' } },
+					bg: { value: { base: '#fef3c7', _dark: '#713f12' } },
 					contrast: { value: { base: '#ffffff', _dark: '#ffffff' } }
 				},
 				error: {
-					fg: { value: { base: '#fca5a5', _dark: '#fca5a5' } },
-					bg: { value: { base: '#7f1d1d', _dark: '#7f1d1d' } },
-					border: { value: { base: '#991b1b', _dark: '#991b1b' } }
+					fg: { value: { base: '#991b1b', _dark: '#fca5a5' } },
+					bg: { value: { base: '#fee2e2', _dark: '#7f1d1d' } }
 				},
 				canvas: {
 					gridLine: {

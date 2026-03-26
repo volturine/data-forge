@@ -105,7 +105,9 @@ test.describe('Navigation – settings popup', () => {
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
-		await expect(dialog).toBeVisible({ timeout: 5_000 });
+		await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible({
+			timeout: 5_000
+		});
 
 		await dialog.getByRole('button', { name: /Close settings/i }).click();
 		await expect(dialog).not.toBeVisible({ timeout: 3_000 });
@@ -329,7 +331,7 @@ test.describe('Navigation – error state regression', () => {
 
 	test('monitoring page handles API failure without crash', async ({ page }) => {
 		// Intercept all monitoring-related APIs to simulate failure
-		await page.route('**/api/v1/engine/runs**', (route) =>
+		await page.route('**/api/v1/engine-runs**', (route) =>
 			route.fulfill({ status: 500, body: 'Internal Server Error' })
 		);
 
@@ -344,8 +346,14 @@ test.describe('Navigation – error state regression', () => {
 		await expect(page.getByRole('tab', { name: 'Health Checks' })).toBeVisible();
 
 		// The builds panel should show error or empty state — not silently succeed
+		// Scope to visible, non-select text to avoid matching <option> values like "Failed"
 		const panel = page.locator('#panel-builds');
-		await expect(panel.getByText(/error|fail|No engine runs/i).first()).toBeVisible({
+		await expect(
+			panel
+				.locator(':not(select):not(option)')
+				.getByText(/error|No engine runs/i)
+				.first()
+		).toBeVisible({
 			timeout: 10_000
 		});
 	});

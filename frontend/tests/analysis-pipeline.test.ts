@@ -78,9 +78,10 @@ interface PreviewData {
  */
 async function navigateAndGetPreview(page: Page, analysisId: string): Promise<PreviewData> {
 	const previewPromise = page.waitForResponse(
-		(resp) => resp.url().includes('/api/v1/compute/preview') && resp.request().method() === 'POST'
+		(resp) => resp.url().includes('/api/v1/compute/preview') && resp.request().method() === 'POST',
+		{ timeout: 45_000 }
 	);
-	await page.goto(`/analysis/${analysisId}`);
+	await page.goto(`/analysis/${analysisId}`, { waitUntil: 'networkidle' });
 	const resp = await previewPromise;
 	const body = await resp.json();
 	if (!resp.ok()) {
@@ -670,17 +671,52 @@ test.describe('Pipeline data – pass-through operations', () => {
 	});
 
 	test('chart (plot_bar) computes aggregated visualization data', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Chart', dsId, [
-			{
-				type: 'plot_bar',
-				config: {
-					chart_type: 'bar',
-					x_column: 'city',
-					y_column: 'age',
-					aggregation: 'sum'
-				}
+		// Chart steps produce x/y visualization columns. The trailing view step
+		// added by createPipelineAnalysis would override the chart preview with
+		// the original schema, so we build the pipeline without a trailing view.
+		const chartStepId = crypto.randomUUID();
+		const response = await request.post(`${API_BASE}/analysis`, {
+			data: {
+				name: 'E2E Pipe Chart',
+				description: null,
+				tabs: [
+					{
+						id: crypto.randomUUID(),
+						name: 'Source 1',
+						parent_id: null,
+						datasource: {
+							id: dsId,
+							analysis_tab_id: null,
+							config: { branch: 'master' }
+						},
+						output: {
+							result_id: crypto.randomUUID(),
+							datasource_type: 'iceberg',
+							format: 'parquet',
+							filename: 'source_1'
+						},
+						steps: [
+							{
+								id: chartStepId,
+								type: 'plot_bar',
+								config: {
+									chart_type: 'bar',
+									x_column: 'city',
+									y_column: 'age',
+									aggregation: 'sum'
+								},
+								depends_on: [],
+								is_applied: true
+							}
+						]
+					}
+				]
 			}
-		]);
+		});
+		if (!response.ok()) {
+			throw new Error(`createPipelineAnalysis: ${response.status()} ${await response.text()}`);
+		}
+		const aId = ((await response.json()) as { id: string }).id;
 		try {
 			const preview = await navigateAndGetPreview(page, aId);
 

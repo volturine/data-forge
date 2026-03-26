@@ -515,7 +515,6 @@
 							css({
 								width: '240px',
 								background: 'canvas.lineageNode',
-								borderColor: 'canvas.lineageNodeBorder',
 								cursor: 'grab',
 								transition: 'box-shadow 160ms ease, transform 160ms ease',
 								_active: {

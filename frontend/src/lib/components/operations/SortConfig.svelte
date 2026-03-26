@@ -212,7 +212,7 @@
 								_hover: {
 									backgroundColor: 'error.bg!',
 									color: 'error.fg!',
-									borderColor: 'error.border!'
+									borderColor: 'border.error'
 								}
 							})}
 							onclick={() => removeSortRule(i)}

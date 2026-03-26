@@ -596,7 +596,7 @@
 						class={css({
 							paddingLeft: '3',
 							borderLeftWidth: '2',
-							borderColor: 'border.subtle',
+
 							display: 'flex',
 							flexDirection: 'column',
 							gap: '1.5'
@@ -658,8 +658,7 @@
 								gap: '1',
 								padding: '2',
 								alignItems: 'center',
-								borderBottomWidth: '1',
-								borderColor: 'border.subtle'
+								borderBottomWidth: '1'
 							})}
 						>
 							<input
@@ -668,7 +667,6 @@
 									fontSize: 'xs',
 									padding: '1',
 									borderWidth: '1',
-									borderColor: 'border.default',
 									borderRadius: 'sm',
 									backgroundColor: 'bg.canvas',
 									color: 'fg.default'
@@ -698,7 +696,6 @@
 										fontSize: 'xs',
 										padding: '1',
 										borderWidth: '1',
-										borderColor: 'border.default',
 										borderRadius: 'sm',
 										backgroundColor: 'bg.canvas',
 										color: 'fg.default'
@@ -715,7 +712,7 @@
 								type="button"
 								onclick={() => removePatternRow(key, idx)}
 							>
-								−
+								-
 							</button>
 						</div>
 					{/each}
@@ -762,7 +759,7 @@
 							class={css({
 								padding: '2',
 								borderBottomWidth: '1',
-								borderColor: 'border.subtle',
+
 								backgroundColor: 'bg.subtle'
 							})}
 						>
@@ -824,8 +821,7 @@
 								gap: '1',
 								padding: '2',
 								alignItems: 'center',
-								borderBottomWidth: '1',
-								borderColor: 'border.subtle'
+								borderBottomWidth: '1'
 							})}
 						>
 							<select
@@ -872,8 +868,7 @@
 								gap: '1',
 								padding: '2',
 								alignItems: 'center',
-								borderBottomWidth: '1',
-								borderColor: 'border.subtle'
+								borderBottomWidth: '1'
 							})}
 						>
 							<span class={css({ fontSize: 'xs', color: 'fg.muted', flexShrink: '0' })}
@@ -885,7 +880,6 @@
 									fontSize: 'xs',
 									padding: '1',
 									borderWidth: '1',
-									borderColor: 'border.default',
 									borderRadius: 'sm',
 									backgroundColor: 'bg.canvas',
 									color: 'fg.default'
@@ -970,7 +964,6 @@
 											fontSize: 'xs',
 											padding: '1',
 											borderWidth: '1',
-											borderColor: 'border.default',
 											borderRadius: 'sm',
 											backgroundColor: 'bg.canvas',
 											color: 'fg.default'
@@ -1000,7 +993,6 @@
 												fontSize: 'xs',
 												padding: '1',
 												borderWidth: '1',
-												borderColor: 'border.default',
 												borderRadius: 'sm',
 												backgroundColor: 'bg.canvas',
 												color: 'fg.default'
@@ -1054,8 +1046,7 @@
 								gap: '1',
 								padding: '2',
 								alignItems: 'center',
-								borderBottomWidth: '1',
-								borderColor: 'border.subtle'
+								borderBottomWidth: '1'
 							})}
 						>
 							<input
@@ -1064,7 +1055,6 @@
 									fontSize: 'xs',
 									padding: '1',
 									borderWidth: '1',
-									borderColor: 'border.default',
 									borderRadius: 'sm',
 									backgroundColor: 'bg.canvas',
 									color: 'fg.default'
@@ -1094,7 +1084,6 @@
 										fontSize: 'xs',
 										padding: '1',
 										borderWidth: '1',
-										borderColor: 'border.default',
 										borderRadius: 'sm',
 										backgroundColor: 'bg.canvas',
 										color: 'fg.default'

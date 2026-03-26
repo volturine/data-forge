@@ -214,7 +214,7 @@
 				fontSize: 'xs',
 				lineHeight: 'normal',
 				backgroundColor: 'transparent',
-				borderLeftColor: 'accent.secondary',
+				borderLeftColor: 'border.accent',
 				color: 'fg.tertiary'
 			})}
 		>
@@ -234,7 +234,7 @@
 				fontSize: 'xs',
 				lineHeight: 'normal',
 				backgroundColor: 'transparent',
-				borderLeftColor: 'error.border',
+				borderLeftColor: 'border.error',
 				color: 'error.fg'
 			})}
 		>
@@ -331,7 +331,7 @@
 						fontSize: 'xs',
 						lineHeight: 'normal',
 						backgroundColor: 'transparent',
-						borderLeftColor: 'error.border',
+						borderLeftColor: 'border.error',
 						color: 'error.fg'
 					})}
 				>

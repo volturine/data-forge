@@ -483,7 +483,7 @@
 						marginBottom: '-1px',
 						backgroundColor: 'transparent',
 						borderBottomWidth: '2',
-						borderBottomColor: 'accent.secondary',
+						borderBottomColor: 'border.accent',
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
@@ -514,7 +514,7 @@
 						marginBottom: '-1px',
 						backgroundColor: 'transparent',
 						borderBottomWidth: '2',
-						borderBottomColor: 'accent.secondary',
+						borderBottomColor: 'border.accent',
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
@@ -1095,7 +1095,7 @@
 										_hover: {
 											backgroundColor: 'error.bg',
 											color: 'error.fg',
-											borderColor: 'error.border'
+											borderColor: 'border.error'
 										}
 									})}
 									onclick={() => removeOverlay(index)}
@@ -1292,7 +1292,7 @@
 										_hover: {
 											backgroundColor: 'error.bg',
 											color: 'error.fg',
-											borderColor: 'error.border'
+											borderColor: 'border.error'
 										}
 									})}
 									onclick={() => removeReferenceLine(index)}

@@ -382,7 +382,7 @@
 								alignItems: 'center',
 								justifyContent: 'center',
 								borderWidth: '1',
-								borderColor: 'accent.primary',
+								borderColor: 'border.accent',
 								color: 'success.fg',
 								backgroundColor: 'bg.primary',
 								padding: '0',
@@ -404,7 +404,7 @@
 								alignItems: 'center',
 								justifyContent: 'center',
 								borderWidth: '1',
-								borderColor: 'error.border',
+								borderColor: 'border.error',
 								color: 'error.fg',
 								backgroundColor: 'bg.primary',
 								padding: '0',
@@ -745,7 +745,7 @@
 						_hover: {
 							backgroundColor: 'bg.tertiary',
 							color: 'fg.primary',
-							borderColor: 'accent.primary',
+							borderColor: 'border.accent',
 							'& svg': { opacity: '1' }
 						}
 					})

@@ -326,7 +326,7 @@
 									padding: '0',
 									color: 'fg.muted',
 									_hover: {
-										borderColor: 'error.border',
+										borderColor: 'border.error',
 										backgroundColor: 'error.bg',
 										color: 'error.fg'
 									},

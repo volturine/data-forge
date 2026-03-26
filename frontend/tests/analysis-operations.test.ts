@@ -158,6 +158,7 @@ test.describe('Analyses – sort config editing', () => {
 			await screenshot(page, 'analysis/operations', 'sort-config-with-rule');
 
 			// Remove the sort rule
+			await configPanel.locator('[data-testid="sort-remove-rule-0"]').waitFor({ state: 'visible' });
 			const removeBtn = configPanel.locator('[data-testid="sort-remove-rule-0"]');
 			await removeBtn.click();
 

@@ -118,7 +118,7 @@
 					fontSize: 'xs',
 					lineHeight: '1.5',
 					backgroundColor: 'transparent',
-					borderLeftColor: 'warning.border',
+					borderLeftColor: 'border.warning',
 					color: 'fg.tertiary'
 				})}
 				role="alert"

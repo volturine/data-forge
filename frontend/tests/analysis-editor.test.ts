@@ -472,6 +472,9 @@ test.describe('Analyses – step reorder persistence', () => {
 		const aId = await createAnalysis(request, 'E2E Reorder Persist', dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
+			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
+				timeout: 15_000
+			});
 			await expect(page.locator('button[data-step="filter"]')).toBeVisible({ timeout: 15_000 });
 
 			// Add filter then limit steps

@@ -641,7 +641,7 @@
 				transform: 'translateX(-50%)',
 				backgroundColor: 'error.bg',
 				borderWidth: '1',
-				borderColor: 'error.border',
+				borderColor: 'border.error',
 				color: 'error.fg',
 				paddingX: '4',
 				paddingY: '2',

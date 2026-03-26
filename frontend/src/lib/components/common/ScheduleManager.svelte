@@ -949,7 +949,7 @@
 				fontSize: 'xs',
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
-				borderLeftColor: 'error.border',
+				borderLeftColor: 'border.error',
 				color: 'error.fg'
 			})}
 		>

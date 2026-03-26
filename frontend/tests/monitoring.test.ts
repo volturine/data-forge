@@ -132,20 +132,16 @@ test.describe('Monitoring – Schedules tab', () => {
 			await page.goto('/monitoring?tab=schedules');
 			await expect(page.getByText('e2e-sched-toggle-ds')).toBeVisible({ timeout: 10_000 });
 
-			// Find the toggle button in the schedule row
-			const toggleBtn = page
-				.locator('[role="button"]', { has: page.getByText('e2e-sched-toggle-ds') })
-				.first()
-				.locator('button[title="Click to disable"]');
+			// Find the toggle button in the schedule table row
+			const schedRow = page.locator('tr', { has: page.getByText('e2e-sched-toggle-ds') }).first();
+			const toggleBtn = schedRow.locator('button[title="Click to disable"]');
 			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
 			await toggleBtn.click({ timeout: 5_000 });
 
 			// After toggle, the button title should change to "Click to enable"
-			const disabledBtn = page
-				.locator('[role="button"]', { has: page.getByText('e2e-sched-toggle-ds') })
-				.first()
-				.locator('button[title="Click to enable"]');
-			await expect(disabledBtn).toBeAttached({ timeout: 8_000 });
+			await expect(schedRow.locator('button[title="Click to enable"]')).toBeAttached({
+				timeout: 8_000
+			});
 		} finally {
 			await deleteScheduleViaUI(page, 'e2e-sched-toggle-ds');
 			await deleteDatasourceViaUI(page, 'e2e-sched-toggle-ds');
@@ -158,7 +154,7 @@ test.describe('Monitoring – Schedule create flow', () => {
 		test.setTimeout(60_000);
 		await createDatasource(request, 'e2e-sched-create-ds');
 		try {
-			await page.goto('/monitoring?tab=schedules');
+			await page.goto('/monitoring?tab=schedules', { waitUntil: 'networkidle' });
 			await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
 				timeout: 10_000
 			});
@@ -218,17 +214,16 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await page.goto('/monitoring?tab=schedules');
 			await expect(page.getByText('e2e-sched-cron-ds')).toBeVisible({ timeout: 10_000 });
 
-			// Expand the schedule row by clicking on it
-			const schedRow = page
-				.locator('[role="button"]', { has: page.getByText('e2e-sched-cron-ds') })
-				.first();
+			// Expand the schedule row by clicking on it (table view uses <tr>)
+			const schedRow = page.locator('tr', { has: page.getByText('e2e-sched-cron-ds') }).first();
 			await schedRow.click();
 
-			// Wait for expanded section to show cron expression
-			await expect(page.getByText('Cron Expression')).toBeVisible({ timeout: 5_000 });
+			// Wait for expanded detail row (sibling <tr> with cron section)
+			const detailRow = schedRow.locator('+ tr');
+			await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
 
-			// Click the pencil/edit button
-			const editBtn = page.locator('button[title="Edit"]').first();
+			// Click the pencil/edit button scoped to the expanded row
+			const editBtn = detailRow.locator('button[title="Edit cron expression"]');
 			await expect(editBtn).toBeVisible({ timeout: 5_000 });
 			await editBtn.click();
 
@@ -242,7 +237,9 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 
 			// After save, the input should disappear and new expression should show
 			await expect(cronInput).not.toBeVisible({ timeout: 5_000 });
-			await expect(page.getByText('30 12 * * 1')).toBeVisible({ timeout: 5_000 });
+			await expect(detailRow.locator('code', { hasText: '30 12 * * 1' })).toBeVisible({
+				timeout: 5_000
+			});
 
 			await screenshot(page, 'monitoring', 'schedule-cron-edited');
 		} finally {
@@ -259,15 +256,14 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await page.goto('/monitoring?tab=schedules');
 			await expect(page.getByText('e2e-sched-cron-esc-ds')).toBeVisible({ timeout: 10_000 });
 
-			// Expand
-			const schedRow = page
-				.locator('[role="button"]', { has: page.getByText('e2e-sched-cron-esc-ds') })
-				.first();
+			// Expand (table view)
+			const schedRow = page.locator('tr', { has: page.getByText('e2e-sched-cron-esc-ds') }).first();
 			await schedRow.click();
-			await expect(page.getByText('Cron Expression')).toBeVisible({ timeout: 5_000 });
+			const detailRow = schedRow.locator('+ tr');
+			await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
 
-			// Enter edit mode
-			await page.locator('button[title="Edit"]').first().click();
+			// Enter edit mode scoped to expanded row
+			await detailRow.locator('button[title="Edit cron expression"]').click();
 			const cronInput = page.locator('input[aria-label="Cron expression"]').first();
 			await expect(cronInput).toBeVisible({ timeout: 3_000 });
 
@@ -409,7 +405,8 @@ test.describe('Monitoring – Health Check create flow', () => {
 
 test.describe('Monitoring – Builds tab', () => {
 	test('Builds tab shows empty state when no runs exist', async ({ page }) => {
-		await page.route('**/api/v1/engine/runs**', (route) => {
+		// Set up route mock before navigation to ensure the first request is intercepted
+		await page.route('**/api/v1/engine-runs**', (route) => {
 			if (route.request().method() === 'GET') {
 				return route.fulfill({
 					status: 200,
@@ -426,7 +423,8 @@ test.describe('Monitoring – Builds tab', () => {
 			'true'
 		);
 		const panel = page.locator('#panel-builds');
-		await expect(panel.getByText('No engine runs yet.')).toBeVisible({ timeout: 10_000 });
+		await expect(panel).toBeVisible({ timeout: 5_000 });
+		await expect(panel.getByText('No engine runs yet.')).toBeVisible({ timeout: 15_000 });
 	});
 
 	test('Builds search filters by text', async ({ page, request }) => {
