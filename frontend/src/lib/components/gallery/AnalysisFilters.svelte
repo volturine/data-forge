@@ -168,8 +168,8 @@
 					row,
 					css({
 						gap: '1',
-						backgroundColor: 'error.bg',
-						color: 'error.fg',
+						backgroundColor: 'bg.error',
+						color: 'fg.error',
 						borderWidth: '1',
 						borderColor: 'border.error',
 						paddingX: '3',

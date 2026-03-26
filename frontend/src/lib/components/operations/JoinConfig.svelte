@@ -219,7 +219,7 @@
 						border: 'none',
 						cursor: 'pointer',
 						fontSize: 'sm',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						color: 'fg.inverse',
 						_hover: { backgroundColor: 'accent.primary' }
 					})}
@@ -289,10 +289,10 @@
 							padding: '2',
 							backgroundColor: 'transparent',
 							cursor: 'pointer',
-							color: 'error.fg',
+							color: 'fg.error',
 							borderWidth: '1',
 							borderColor: 'border.error',
-							_hover: { backgroundColor: 'error.bg' }
+							_hover: { backgroundColor: 'bg.error' }
 						})}
 						onclick={() => removeJoinColumn(joinCol.id)}
 						aria-label={`Remove join column pair ${_index + 1}`}

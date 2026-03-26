@@ -296,7 +296,7 @@
 							borderBottomWidth: '1',
 							...(selectedId === datasource.id
 								? {
-										backgroundColor: 'accent.bg',
+										backgroundColor: 'bg.accent',
 										borderLeftWidth: '2'
 									}
 								: {})
@@ -364,7 +364,7 @@
 										transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
 										transitionDuration: '150ms',
 										color: 'fg.muted',
-										_hover: { color: 'error.fg', backgroundColor: 'bg.hover' }
+										_hover: { color: 'fg.error', backgroundColor: 'bg.hover' }
 									})}
 									title="Delete"
 									onclick={() => handleDelete(datasource.id)}

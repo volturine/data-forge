@@ -157,8 +157,8 @@
 								paddingX: '2',
 								paddingY: '1',
 								fontSize: 'xs',
-								color: 'error.fg',
-								_hover: { backgroundColor: 'error.bg' }
+								color: 'fg.error',
+								_hover: { backgroundColor: 'bg.error' }
 							})}
 							onclick={clearAll}
 							type="button"
@@ -296,8 +296,8 @@
 												paddingX: '2',
 												paddingY: '1',
 												fontSize: 'xs',
-												color: 'error.fg',
-												_hover: { backgroundColor: 'error.bg' }
+												color: 'fg.error',
+												_hover: { backgroundColor: 'bg.error' }
 											})}
 											onclick={() => removeKey(entry.key)}
 											type="button"

@@ -304,7 +304,7 @@
 
 	const connectionColor = $derived(
 		chatStore.connection === 'connected'
-			? 'success.fg'
+			? 'fg.success'
 			: chatStore.connection === 'reconnecting'
 				? 'fg.warning'
 				: 'fg.muted'

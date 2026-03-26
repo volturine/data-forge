@@ -261,7 +261,7 @@
 								justifyContent: 'space-between',
 								borderLeftWidth: '2',
 								borderLeftColor: name === selected ? 'accent.primary' : 'transparent',
-								backgroundColor: name === selected ? 'accent.bg' : 'transparent',
+								backgroundColor: name === selected ? 'bg.accent' : 'transparent',
 								color: name === selected ? 'fg.primary' : 'fg.secondary',
 								paddingX: '2',
 								paddingY: '1.5',

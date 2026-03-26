@@ -283,7 +283,11 @@ export default defineConfig({
 					panel: { value: { base: '#ffffff', _dark: '#0e0e0e' } },
 					overlay: { value: { base: 'rgba(0, 0, 0, 0.55)', _dark: 'rgba(0, 0, 0, 0.55)' } },
 					overlaySoft: { value: { base: 'rgba(0, 0, 0, 0.4)', _dark: 'rgba(0, 0, 0, 0.4)' } },
-					indicator: { value: { base: '#71717a', _dark: '#737373' } }
+					indicator: { value: { base: '#71717a', _dark: '#737373' } },
+					warning: { value: { base: '#fef3c7', _dark: '#713f12' } },
+					error: { value: { base: '#fee2e2', _dark: '#7f1d1d' } },
+					success: { value: { base: '#dcfce7', _dark: '#14532d' } },
+					accent: { value: { base: '#f4f4f5', _dark: '#1f1f1f' } }
 				},
 				fg: {
 					primary: { value: { base: '#09090b', _dark: '#fafafa' } },
@@ -291,12 +295,14 @@ export default defineConfig({
 					tertiary: { value: { base: '#52525b', _dark: '#a3a3a3' } },
 					muted: { value: { base: '#71717a', _dark: '#737373' } },
 					faint: { value: { base: '#a1a1aa', _dark: '#525252' } },
-					inverse: { value: { base: '#ffffff', _dark: '#0e0e0e' } }
+					inverse: { value: { base: '#ffffff', _dark: '#0e0e0e' } },
+					error: { value: { base: '#991b1b', _dark: '#fca5a5' } },
+					warning: { value: { base: '#92400e', _dark: '#fde047' } },
+					success: { value: { base: '#166534', _dark: '#86efac' } }
 				},
 				accent: {
 					primary: { value: { base: '#09090b', _dark: '#fafafa' } },
-					secondary: { value: { base: '#27272a', _dark: '#d4d4d4' } },
-					bg: { value: { base: '#f4f4f5', _dark: '#1f1f1f' } }
+					secondary: { value: { base: '#27272a', _dark: '#d4d4d4' } }
 				},
 				border: {
 					primary: { value: { base: '#e0e0e0', _dark: 'rgba(43, 43, 43, 0.663)' } },
@@ -304,19 +310,6 @@ export default defineConfig({
 					accent: { value: { base: '#09090b', _dark: '#fafafa' } },
 					success: { value: { base: '#16a34a', _dark: '#86efac' } },
 					warning: { value: { base: '#d97706', _dark: '#854d0e' } }
-				},
-				success: {
-					fg: { value: { base: '#166534', _dark: '#86efac' } },
-					bg: { value: { base: '#dcfce7', _dark: '#14532d' } }
-				},
-				warning: {
-					fg: { value: { base: '#92400e', _dark: '#fde047' } },
-					bg: { value: { base: '#fef3c7', _dark: '#713f12' } },
-					contrast: { value: { base: '#ffffff', _dark: '#ffffff' } }
-				},
-				error: {
-					fg: { value: { base: '#991b1b', _dark: '#fca5a5' } },
-					bg: { value: { base: '#fee2e2', _dark: '#7f1d1d' } }
 				},
 				canvas: {
 					gridLine: {

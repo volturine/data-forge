@@ -429,7 +429,7 @@
 					/>
 				</div>
 				{#if rowCountExists && checkType === 'row_count'}
-					<p class={css({ marginTop: '0.5', fontSize: '2xs', color: 'error.fg' })}>
+					<p class={css({ marginTop: '0.5', fontSize: '2xs', color: 'fg.error' })}>
 						Row count check already exists.
 					</p>
 				{/if}
@@ -885,12 +885,12 @@
 							alignItems: 'center',
 							gap: '1.5',
 							borderWidth: '1',
-							backgroundColor: 'accent.bg',
+							backgroundColor: 'bg.accent',
 							paddingX: '3',
 							paddingY: '1.5',
 							fontSize: 'sm',
 							color: 'accent.primary',
-							_hover: { backgroundColor: 'accent.bg/80' }
+							_hover: { backgroundColor: 'bg.accent/80' }
 						})}
 						onclick={() => (creating = true)}
 					>
@@ -972,13 +972,13 @@
 						alignItems: 'center',
 						gap: '1',
 						borderWidth: '1',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						paddingX: '2',
 						paddingY: '1',
 						fontSize: '2xs',
 						fontWeight: 'medium',
 						color: 'accent.primary',
-						_hover: { backgroundColor: 'accent.bg/80' },
+						_hover: { backgroundColor: 'bg.accent/80' },
 						transition: 'color 160ms, background-color 160ms'
 					})}
 					onclick={() => (creating = true)}
@@ -1025,11 +1025,11 @@
 			class={css({
 				borderWidth: '1',
 				borderColor: 'border.error',
-				backgroundColor: 'color-mix(in srgb, {colors.error.bg} 10%, transparent)',
+				backgroundColor: 'color-mix(in srgb, {colors.bg.error} 10%, transparent)',
 				padding: '4',
 				textAlign: 'center',
 				fontSize: 'sm',
-				color: 'error.fg'
+				color: 'fg.error'
 			})}
 		>
 			Failed to load health checks.
@@ -1203,10 +1203,10 @@
 													width: 'iconMd',
 													alignItems: 'center',
 													justifyContent: 'center',
-													backgroundColor: 'success.bg/20'
+													backgroundColor: 'bg.success/20'
 												})}
 											>
-												<Check size={12} class={css({ color: 'success.fg' })} />
+												<Check size={12} class={css({ color: 'fg.success' })} />
 											</div>
 										{:else}
 											<div
@@ -1216,10 +1216,10 @@
 													width: 'iconMd',
 													alignItems: 'center',
 													justifyContent: 'center',
-													backgroundColor: 'error.bg/20'
+													backgroundColor: 'bg.error/20'
 												})}
 											>
-												<X size={12} class={css({ color: 'error.fg' })} />
+												<X size={12} class={css({ color: 'fg.error' })} />
 											</div>
 										{/if}
 									{:else}
@@ -1291,7 +1291,7 @@
 												display: 'inline-flex',
 												borderWidth: '1',
 												borderColor: 'border.accent',
-												backgroundColor: 'accent.bg',
+												backgroundColor: 'bg.accent',
 												paddingX: '1.5',
 												paddingY: '0.5',
 												fontSize: '2xs',
@@ -1331,8 +1331,8 @@
 										title={check.enabled ? 'Click to disable' : 'Click to enable'}
 									>
 										{#if check.enabled}
-											<Power size={12} class={css({ color: 'success.fg' })} />
-											<span class={css({ color: 'success.fg' })}>On</span>
+											<Power size={12} class={css({ color: 'fg.success' })} />
+											<span class={css({ color: 'fg.success' })}>On</span>
 										{:else}
 											<PowerOff size={12} class={muted} />
 											<span class={muted}>Off</span>
@@ -1355,9 +1355,9 @@
 											backgroundColor: 'transparent',
 											padding: '0.5',
 											color: 'fg.muted',
-											_hover: { color: 'error.fg' },
+											_hover: { color: 'fg.error' },
 											_focusVisible: {
-												color: 'error.fg',
+												color: 'fg.error',
 												outline: '2px solid',
 												outlineColor: 'accent.primary',
 												outlineOffset: '1px'
@@ -1424,13 +1424,13 @@
 													>
 													<div class={cx(row, css({ gap: '1' }))}>
 														{#if latest.passed}
-															<Check size={10} class={css({ color: 'success.fg' })} />
-															<span class={css({ fontSize: '2xs', color: 'success.fg' })}
+															<Check size={10} class={css({ color: 'fg.success' })} />
+															<span class={css({ fontSize: '2xs', color: 'fg.success' })}
 																>Passed</span
 															>
 														{:else}
-															<X size={10} class={css({ color: 'error.fg' })} />
-															<span class={css({ fontSize: '2xs', color: 'error.fg' })}>Failed</span
+															<X size={10} class={css({ color: 'fg.error' })} />
+															<span class={css({ fontSize: '2xs', color: 'fg.error' })}>Failed</span
 															>
 														{/if}
 													</div>
@@ -1487,11 +1487,11 @@
 							{#if latest}
 								{#if latest.passed}
 									<div
-										class={css({ height: 'dot', width: 'dot', backgroundColor: 'success.fg' })}
+										class={css({ height: 'dot', width: 'dot', backgroundColor: 'fg.success' })}
 									></div>
 								{:else}
 									<div
-										class={css({ height: 'dot', width: 'dot', backgroundColor: 'error.fg' })}
+										class={css({ height: 'dot', width: 'dot', backgroundColor: 'fg.error' })}
 									></div>
 								{/if}
 							{:else}
@@ -1540,7 +1540,7 @@
 								<span
 									class={css({
 										flexShrink: '0',
-										backgroundColor: 'accent.bg',
+										backgroundColor: 'bg.accent',
 										paddingX: '1',
 										paddingY: '0.5',
 										fontSize: '2xs',
@@ -1568,7 +1568,7 @@
 									class={css({
 										height: 'iconTiny',
 										width: 'iconTiny',
-										color: 'success.fg'
+										color: 'fg.success'
 									})}
 									id="check-{check.id}-enabled"
 									aria-label="Enable check"
@@ -1580,9 +1580,9 @@
 								class={css({
 									backgroundColor: 'bg.primary',
 									color: 'fg.tertiary',
-									_hover: { color: 'error.fg' },
+									_hover: { color: 'fg.error' },
 									_focusVisible: {
-										color: 'error.fg',
+										color: 'fg.error',
 										outline: '2px solid',
 										outlineColor: 'accent.primary',
 										outlineOffset: '1px'

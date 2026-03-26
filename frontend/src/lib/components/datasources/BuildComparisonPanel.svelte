@@ -128,17 +128,17 @@
 
 	function rowDeltaClass(val: number): string {
 		if (val === 0) return muted;
-		return val > 0 ? css({ color: 'success.fg' }) : css({ color: 'error.fg' });
+		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
 
 	function nullDeltaClass(val: number): string {
 		if (val === 0) return muted;
-		return val > 0 ? css({ color: 'error.fg' }) : css({ color: 'success.fg' });
+		return val > 0 ? css({ color: 'fg.error' }) : css({ color: 'fg.success' });
 	}
 
 	function uniqueDeltaClass(val: number): string {
 		if (val === 0) return muted;
-		return val > 0 ? css({ color: 'success.fg' }) : css({ color: 'error.fg' });
+		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
 
 	function previewColumns(preview: SnapshotCompareResponse['preview_a'] | null) {
@@ -284,7 +284,7 @@
 					{#if runsQuery.isLoading}
 						<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>Loading runs...</div>
 					{:else if runsQuery.isError}
-						<div class={css({ fontSize: 'sm', color: 'error.fg' })}>
+						<div class={css({ fontSize: 'sm', color: 'fg.error' })}>
 							{runsQuery.error instanceof Error ? runsQuery.error.message : 'Failed to load runs'}
 						</div>
 					{:else if runs.length === 0}
@@ -348,7 +348,7 @@
 													_hover: { backgroundColor: 'bg.hover' }
 												}),
 												selected.has(run.id)
-													? css({ backgroundColor: 'accent.bg', color: 'accent.primary' })
+													? css({ backgroundColor: 'bg.accent', color: 'accent.primary' })
 													: ''
 											)}
 											onclick={() => toggleSelect(run.id)}
@@ -458,10 +458,10 @@
 								Compare snapshots
 							</button>
 							{#if compareError}
-								<div class={css({ fontSize: 'xs', color: 'error.fg' })}>{compareError}</div>
+								<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{compareError}</div>
 							{/if}
 							{#if !snapshotA || !snapshotB}
-								<div class={css({ fontSize: 'xs', color: 'warning.fg' })}>
+								<div class={css({ fontSize: 'xs', color: 'fg.warning' })}>
 									Snapshot mapping missing for one or both builds.
 								</div>
 							{/if}
@@ -607,7 +607,7 @@
 																alignItems: 'center',
 																gap: '1',
 																fontSize: 'xs',
-																color: 'success.fg'
+																color: 'fg.success'
 															})}
 														>
 															<Plus size={12} /> Added
@@ -619,7 +619,7 @@
 																alignItems: 'center',
 																gap: '1',
 																fontSize: 'xs',
-																color: 'error.fg'
+																color: 'fg.error'
 															})}
 														>
 															<Minus size={12} /> Removed
@@ -631,7 +631,7 @@
 																alignItems: 'center',
 																gap: '1',
 																fontSize: 'xs',
-																color: 'warning.fg'
+																color: 'fg.warning'
 															})}
 														>
 															<RefreshCw size={12} /> Changed

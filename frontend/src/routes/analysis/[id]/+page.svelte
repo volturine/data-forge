@@ -840,7 +840,7 @@
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
 				borderLeftColor: 'border.error',
-				color: 'error.fg',
+				color: 'fg.error',
 				height: '100%',
 				flexDirection: 'column',
 				justifyContent: 'center',
@@ -1051,7 +1051,7 @@
 											marginLeft: '1',
 											backgroundColor: 'transparent',
 											opacity: '0.4',
-											_hover: { opacity: '1', color: 'error.fg' }
+											_hover: { opacity: '1', color: 'fg.error' }
 										})}
 										onclick={() => handleRemoveTab(tab.id)}
 										type="button"
@@ -1178,7 +1178,7 @@
 							flex: '1',
 							borderRadius: 'xs',
 							overflow: 'hidden',
-							...(isDirty ? { backgroundColor: 'warning.bg' } : { backgroundColor: 'bg.tertiary' })
+							...(isDirty ? { backgroundColor: 'bg.warning' } : { backgroundColor: 'bg.tertiary' })
 						})}
 					>
 						<button
@@ -1191,7 +1191,7 @@
 								fontWeight: 'medium',
 								cursor: 'pointer',
 								_disabled: { opacity: '0.5', cursor: 'not-allowed' },
-								...(isDirty ? { color: 'warning.fg' } : { color: 'success.fg' })
+								...(isDirty ? { color: 'fg.warning' } : { color: 'fg.success' })
 							})}
 							onclick={handleSave}
 							disabled={isSaving || analysisStore.loading}
@@ -1207,10 +1207,10 @@
 								backgroundColor: 'transparent',
 								border: 'none',
 								borderLeftWidth: '1',
-								borderLeftColor: isDirty ? 'warning.border' : 'border.secondary',
+								borderLeftColor: isDirty ? 'border.warning' : 'border.primary',
 								cursor: 'pointer',
 								paddingX: '1.5',
-								color: isDirty ? 'warning.fg' : 'fg.faint',
+								color: isDirty ? 'fg.warning' : 'fg.faint',
 								opacity: '0.6',
 								_hover: { opacity: '1' }
 							})}
@@ -1494,7 +1494,7 @@
 						lineHeight: '1.5',
 						backgroundColor: 'transparent',
 						borderLeftColor: 'border.error',
-						color: 'error.fg',
+						color: 'fg.error',
 						margin: '0'
 					})}
 				>
@@ -1525,7 +1525,7 @@
 						lineHeight: '1.5',
 						backgroundColor: 'transparent',
 						borderLeftColor: 'border.error',
-						color: 'error.fg',
+						color: 'fg.error',
 						margin: '0'
 					})}
 				>
@@ -1628,7 +1628,7 @@
 										border: 'none',
 										color: 'fg.muted',
 										cursor: 'pointer',
-										_hover: { color: 'error.fg' }
+										_hover: { color: 'fg.error' }
 									})}
 									title="Delete version"
 									data-testid="version-delete-{version.version}"

@@ -250,10 +250,10 @@
 						...(feedback.type === 'success'
 							? {
 									borderColor: 'border.success',
-									backgroundColor: 'success.bg',
-									color: 'success.fg'
+									backgroundColor: 'bg.success',
+									color: 'fg.success'
 								}
-							: { borderColor: 'border.error', backgroundColor: 'error.bg', color: 'error.fg' })
+							: { borderColor: 'border.error', backgroundColor: 'bg.error', color: 'fg.error' })
 					})}
 				>
 					{#if feedback.type === 'success'}
@@ -373,7 +373,7 @@
 							height: 'dot',
 							width: 'dot',
 							flexShrink: '0',
-							backgroundColor: botRunning ? 'success.fg' : 'error.fg'
+							backgroundColor: botRunning ? 'fg.success' : 'fg.error'
 						})}
 						title={botRunning ? 'Bot running' : 'Bot stopped'}
 					></span>
@@ -449,7 +449,7 @@
 								height: 'barTall',
 								width: 'barTall',
 								flexShrink: '0',
-								backgroundColor: botRunning ? 'success.fg' : 'error.fg'
+								backgroundColor: botRunning ? 'fg.success' : 'fg.error'
 							})}
 						></span>
 						<span class={css({ color: 'fg.secondary' })}>
@@ -490,7 +490,7 @@
 										height: 'barTall',
 										width: 'barTall',
 										flexShrink: '0',
-										backgroundColor: sub.is_active ? 'success.fg' : 'bg.tertiary'
+										backgroundColor: sub.is_active ? 'fg.success' : 'bg.tertiary'
 									})}
 									title={sub.is_active ? 'Active' : 'Inactive'}
 								></span>

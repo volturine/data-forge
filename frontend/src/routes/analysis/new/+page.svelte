@@ -133,7 +133,7 @@
 						...(step === 1
 							? { backgroundColor: 'accent.secondary', color: 'fg.inverse' }
 							: step > 1
-								? { backgroundColor: 'success.bg', color: 'success.fg' }
+								? { backgroundColor: 'bg.success', color: 'fg.success' }
 								: { color: 'fg.muted', backgroundColor: 'bg.primary' })
 					})}
 				>
@@ -182,7 +182,7 @@
 						...(step === 2
 							? { backgroundColor: 'accent.secondary', color: 'fg.inverse' }
 							: step > 2
-								? { backgroundColor: 'success.bg', color: 'success.fg' }
+								? { backgroundColor: 'bg.success', color: 'fg.success' }
 								: { color: 'fg.muted', backgroundColor: 'bg.primary' })
 					})}
 				>
@@ -262,7 +262,7 @@
 
 				<div class={css({ marginBottom: '5', display: 'flex', flexDirection: 'column', gap: '2' })}>
 					<label for="name" class={label({ variant: 'field' })}>
-						Name <span class={css({ color: 'error.fg' })}>*</span>
+						Name <span class={css({ color: 'fg.error' })}>*</span>
 					</label>
 					<input
 						id="name"

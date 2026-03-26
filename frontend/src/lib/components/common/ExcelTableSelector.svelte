@@ -434,8 +434,8 @@
 				? cx(
 						button({ variant: 'secondary' }),
 						css({
-							backgroundColor: 'warning.bg',
-							color: 'warning.fg',
+							backgroundColor: 'bg.warning',
+							color: 'fg.warning',
 							borderColor: 'border.warning'
 						})
 					)
@@ -461,7 +461,7 @@
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
 				borderLeftColor: 'border.error',
-				color: 'error.fg'
+				color: 'fg.error'
 			})}
 		>
 			{error}

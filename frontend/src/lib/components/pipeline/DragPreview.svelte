@@ -93,8 +93,8 @@
 			paddingX: '3',
 			paddingY: '2',
 			fontSize: 'sm',
-			backgroundColor: isReorder ? 'warning.bg' : 'bg.primary',
-			borderColor: isReorder ? 'warning.border' : 'border.primary',
+			backgroundColor: isReorder ? 'bg.warning' : 'bg.primary',
+			borderColor: isReorder ? 'border.warning' : 'border.primary',
 			boxShadow: 'drag'
 		})}
 		style="left: {position.x + 12}px; top: {position.y + 12}px;"
@@ -110,8 +110,8 @@
 					fontWeight: '500',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide',
-					backgroundColor: 'warning.fg',
-					color: 'warning.contrast'
+					backgroundColor: 'fg.warning',
+					color: 'fg.inverse'
 				})}>Move</span
 			>
 		{/if}

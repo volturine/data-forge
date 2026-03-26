@@ -435,7 +435,7 @@
 								paddingY: '2',
 								paddingX: '1',
 								borderWidth: '1',
-								backgroundColor: 'accent.bg',
+								backgroundColor: 'bg.accent',
 								color: 'accent.primary',
 								fontSize: '2xs',
 								fontFamily: 'mono',
@@ -997,7 +997,7 @@
 							border: 'none',
 							cursor: 'pointer',
 							whiteSpace: 'nowrap',
-							backgroundColor: 'accent.bg',
+							backgroundColor: 'bg.accent',
 							color: 'accent.primary',
 							_disabled: {
 								backgroundColor: 'bg.muted',
@@ -1093,8 +1093,8 @@
 										borderWidth: '1',
 										borderColor: 'transparent',
 										_hover: {
-											backgroundColor: 'error.bg',
-											color: 'error.fg',
+											backgroundColor: 'bg.error',
+											color: 'fg.error',
 											borderColor: 'border.error'
 										}
 									})}
@@ -1195,7 +1195,7 @@
 							border: 'none',
 							cursor: 'pointer',
 							whiteSpace: 'nowrap',
-							backgroundColor: 'accent.bg',
+							backgroundColor: 'bg.accent',
 							color: 'accent.primary',
 							_disabled: {
 								backgroundColor: 'bg.muted',
@@ -1290,8 +1290,8 @@
 										borderWidth: '1',
 										borderColor: 'transparent',
 										_hover: {
-											backgroundColor: 'error.bg',
-											color: 'error.fg',
+											backgroundColor: 'bg.error',
+											color: 'fg.error',
 											borderColor: 'border.error'
 										}
 									})}
@@ -1572,7 +1572,7 @@
 										paddingY: '1.5',
 										paddingX: '2',
 										borderWidth: '1',
-										backgroundColor: 'accent.bg',
+										backgroundColor: 'bg.accent',
 										color: 'accent.primary',
 										fontSize: 'xs',
 										fontFamily: 'mono',

@@ -489,7 +489,7 @@
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
 				borderLeftColor: 'border.error',
-				color: 'error.fg'
+				color: 'fg.error'
 			})}
 		>
 			{query.error instanceof Error ? query.error.message : 'Error loading runs.'}
@@ -601,10 +601,10 @@
 										<Database size={14} class={css({ color: 'accent.primary' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'datasource_update'}
-										<RefreshCw size={14} class={css({ color: 'warning.fg' })} />
+										<RefreshCw size={14} class={css({ color: 'fg.warning' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'download' || run.kind === 'export'}
-										<Download size={14} class={css({ color: 'success.fg' })} />
+										<Download size={14} class={css({ color: 'fg.success' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'row_count'}
 										<Hash size={14} class={muted} />
@@ -620,7 +620,7 @@
 												display: 'inline-flex',
 												alignItems: 'center',
 												gap: '0.5',
-												backgroundColor: 'accent.bg',
+												backgroundColor: 'bg.accent',
 												paddingX: '1',
 												paddingY: '0.5',
 												fontSize: 'xs',
@@ -642,11 +642,11 @@
 							>
 								<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
 									{#if run.status === 'success'}
-										<CircleCheck size={14} class={css({ color: 'success.fg' })} />
-										<span class={css({ color: 'success.fg' })}>Success</span>
+										<CircleCheck size={14} class={css({ color: 'fg.success' })} />
+										<span class={css({ color: 'fg.success' })}>Success</span>
 									{:else}
-										<CircleX size={14} class={css({ color: 'error.fg' })} />
-										<span class={css({ color: 'error.fg' })}>Failed</span>
+										<CircleX size={14} class={css({ color: 'fg.error' })} />
+										<span class={css({ color: 'fg.error' })}>Failed</span>
 									{/if}
 								</span>
 							</td>
@@ -883,7 +883,7 @@
 															lineHeight: '1.5',
 															backgroundColor: 'transparent',
 															borderLeftColor: 'border.error',
-															color: 'error.fg'
+															color: 'fg.error'
 														})}
 													>
 														<h4
@@ -1043,7 +1043,7 @@
 																	top: '0',
 																	bottom: '0',
 																	left: '0',
-																	backgroundColor: 'accent.bg'
+																	backgroundColor: 'bg.accent'
 																})}
 																style={`width: ${Math.max(entry.pct, 1)}%`}
 															></div>

@@ -189,7 +189,7 @@
 					paddingY: '1',
 					fontSize: 'xs',
 					...(ds.id === highlightId
-						? { backgroundColor: 'accent.bg', color: 'accent.primary' }
+						? { backgroundColor: 'bg.accent', color: 'accent.primary' }
 						: {})
 				})}
 			>
@@ -233,7 +233,7 @@
 				justifyContent: 'space-between',
 				fontFamily: 'mono',
 				fontSize: 'sm',
-				...(payload.selected ? { backgroundColor: 'accent.bg' } : {}),
+				...(payload.selected ? { backgroundColor: 'bg.accent' } : {}),
 				...(option.id === highlightId ? { borderLeftWidth: '3', borderColor: 'border.accent' } : {})
 			})
 		)}
@@ -254,7 +254,7 @@
 						marginLeft: '2',
 						borderWidth: '1',
 						borderColor: 'border.accent',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						paddingX: '2',
 						paddingY: '1',
 						fontSize: 'xs',

@@ -530,7 +530,7 @@
 					flex: '1',
 					cursor: 'pointer',
 					borderWidth: '1',
-					backgroundColor: 'accent.bg',
+					backgroundColor: 'bg.accent',
 					paddingX: '4',
 					paddingY: '2.5',
 					fontFamily: 'mono',

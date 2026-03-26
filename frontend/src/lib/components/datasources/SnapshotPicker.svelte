@@ -486,7 +486,7 @@
 					class={css({
 						borderWidth: '1',
 						borderColor: 'border.accent',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						paddingX: '1.5',
 						paddingY: '0.5',
 						fontSize: '2xs',
@@ -566,11 +566,11 @@
 					class={css({
 						borderWidth: '1',
 						borderColor: 'border.warning',
-						backgroundColor: 'warning.bg',
+						backgroundColor: 'bg.warning',
 						paddingX: '2',
 						paddingY: '1',
 						fontSize: '2xs',
-						color: 'warning.fg'
+						color: 'fg.warning'
 					})}
 				>
 					Selected snapshot #{missingSnapshotId} no longer exists.
@@ -592,7 +592,7 @@
 			{/if}
 
 			{#if deleteError}
-				<div class={css({ fontSize: 'xs', color: 'error.fg' })}>{deleteError}</div>
+				<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{deleteError}</div>
 			{/if}
 
 			{#if snapshotsLoading}
@@ -609,7 +609,7 @@
 					Loading snapshots...
 				</div>
 			{:else if snapshotsError}
-				<div class={css({ fontSize: 'xs', color: 'error.fg' })}>{snapshotsError}</div>
+				<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{snapshotsError}</div>
 			{:else if snapshotList.length === 0}
 				<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>No snapshots found.</div>
 			{:else}
@@ -698,7 +698,7 @@
 													position: 'absolute',
 													right: '1',
 													top: '1',
-													backgroundColor: 'accent.bg',
+													backgroundColor: 'bg.accent',
 													paddingX: '1',
 													fontSize: '2xs',
 													color: 'accent.primary'
@@ -811,7 +811,7 @@
 													backgroundColor: 'bg.primary',
 													padding: '1',
 													color: 'fg.tertiary',
-													_hover: { color: 'error.fg' }
+													_hover: { color: 'fg.error' }
 												})}
 												onclick={() => (deleteConfirmId = snap.id)}
 												type="button"

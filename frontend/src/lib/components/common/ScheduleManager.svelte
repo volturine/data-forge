@@ -423,12 +423,12 @@
 						alignItems: 'center',
 						gap: '1.5',
 						borderWidth: '1',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'sm',
 						color: 'accent.primary',
-						_hover: { backgroundColor: 'accent.bg' }
+						_hover: { backgroundColor: 'bg.accent' }
 					})}
 					onclick={openCreate}
 				>
@@ -500,12 +500,12 @@
 						alignItems: 'center',
 						gap: '1',
 						borderWidth: '1',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						paddingX: '2',
 						paddingY: '1',
 						fontSize: 'xs',
 						color: 'accent.primary',
-						_hover: { backgroundColor: 'accent.bg' }
+						_hover: { backgroundColor: 'bg.accent' }
 					})}
 					onclick={openCreate}
 				>
@@ -892,12 +892,12 @@
 				<button
 					class={css({
 						borderWidth: '1',
-						backgroundColor: 'accent.bg',
+						backgroundColor: 'bg.accent',
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
 						color: 'accent.primary',
-						_hover: { backgroundColor: 'accent.bg' }
+						_hover: { backgroundColor: 'bg.accent' }
 					})}
 					onclick={handleCreate}
 					disabled={(!datasourceId && !newDatasourceId) ||
@@ -925,7 +925,7 @@
 			</div>
 
 			{#if createMut.isError}
-				<p class={css({ marginTop: '3', fontSize: 'xs', color: 'error.fg' })}>
+				<p class={css({ marginTop: '3', fontSize: 'xs', color: 'fg.error' })}>
 					{createMut.error instanceof Error ? createMut.error.message : 'Failed to create schedule'}
 				</p>
 			{/if}
@@ -950,7 +950,7 @@
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
 				borderLeftColor: 'border.error',
-				color: 'error.fg'
+				color: 'fg.error'
 			})}
 		>
 			{schedulesQuery.error instanceof Error
@@ -1074,7 +1074,7 @@
 								title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
 							>
 								{#if schedule.enabled}
-									<Power size={10} class={css({ color: 'success.fg' })} />
+									<Power size={10} class={css({ color: 'fg.success' })} />
 								{:else}
 									<PowerOff size={10} class={muted} />
 								{/if}
@@ -1086,9 +1086,9 @@
 									backgroundColor: 'transparent',
 									padding: '0',
 									color: 'fg.tertiary',
-									_hover: { color: 'error.fg' },
+									_hover: { color: 'fg.error' },
 									_focusVisible: {
-										color: 'error.fg',
+										color: 'fg.error',
 										outline: '2px solid',
 										outlineColor: 'accent.primary',
 										outlineOffset: '1px'
@@ -1147,7 +1147,7 @@
 															border: 'none',
 															backgroundColor: 'transparent',
 															padding: '0.5',
-															color: 'success.fg'
+															color: 'fg.success'
 														})}
 														onclick={() => saveCron(schedule.id)}
 														disabled={cronMut.isPending}
@@ -1501,8 +1501,8 @@
 										title={schedule.enabled ? 'Click to disable' : 'Click to enable'}
 									>
 										{#if schedule.enabled}
-											<Power size={12} class={css({ color: 'success.fg' })} />
-											<span class={css({ color: 'success.fg' })}>On</span>
+											<Power size={12} class={css({ color: 'fg.success' })} />
+											<span class={css({ color: 'fg.success' })}>On</span>
 										{:else}
 											<PowerOff size={12} class={muted} />
 											<span class={muted}>Off</span>
@@ -1535,9 +1535,9 @@
 											backgroundColor: 'transparent',
 											padding: '0.5',
 											color: 'fg.muted',
-											_hover: { color: 'error.fg' },
+											_hover: { color: 'fg.error' },
 											_focusVisible: {
-												color: 'error.fg',
+												color: 'fg.error',
 												outline: '2px solid',
 												outlineColor: 'accent.primary',
 												outlineOffset: '1px'
@@ -1626,8 +1626,8 @@
 																	border: 'none',
 																	backgroundColor: 'transparent',
 																	padding: '0.5',
-																	color: 'success.fg',
-																	_hover: { color: 'success.fgMuted' }
+																	color: 'fg.success',
+																	_hover: { color: 'fg.successMuted' }
 																})}
 																onclick={() => saveCron(schedule.id)}
 																disabled={cronMut.isPending}

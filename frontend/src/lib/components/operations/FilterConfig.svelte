@@ -327,8 +327,8 @@
 									color: 'fg.muted',
 									_hover: {
 										borderColor: 'border.error',
-										backgroundColor: 'error.bg',
-										color: 'error.fg'
+										backgroundColor: 'bg.error',
+										color: 'fg.error'
 									},
 									_disabled: { cursor: 'not-allowed', opacity: '0.3' }
 								})}

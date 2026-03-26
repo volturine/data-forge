@@ -202,7 +202,7 @@
 												fontSize: 'xs',
 												fontWeight: 'medium',
 												textTransform: 'uppercase',
-												backgroundColor: engine.status === 'healthy' ? 'accent.bg' : 'bg.tertiary',
+												backgroundColor: engine.status === 'healthy' ? 'bg.accent' : 'bg.tertiary',
 												color: engine.status === 'healthy' ? 'accent.primary' : 'fg.muted'
 											})}
 										>
@@ -237,9 +237,9 @@
 										backgroundColor: 'transparent',
 										color: 'fg.muted',
 										_hover: {
-											backgroundColor: 'error.bg',
+											backgroundColor: 'bg.error',
 											borderColor: 'border.error',
-											color: 'error.fg'
+											color: 'fg.error'
 										},
 										_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 									})}
@@ -266,8 +266,8 @@
 						borderTopColor: 'border.error',
 						padding: '2',
 						fontSize: 'xs',
-						backgroundColor: 'error.bg',
-						color: 'error.fg'
+						backgroundColor: 'bg.error',
+						color: 'fg.error'
 					})}
 				>
 					{enginesStore.error}

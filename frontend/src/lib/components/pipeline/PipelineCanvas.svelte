@@ -399,7 +399,7 @@
 							borderColor: hoverIndex === 0 && !drag.valid ? 'error.border' : 'border.primary',
 							backgroundColor:
 								hoverIndex === 0 && !drag.valid
-									? 'error.bg'
+									? 'bg.error'
 									: hoverIndex === 0
 										? 'bg.tertiary'
 										: 'transparent',
@@ -538,7 +538,7 @@
 									hoverIndex === i + 1 && !drag.valid ? 'error.border' : 'border.primary',
 								backgroundColor:
 									hoverIndex === i + 1 && !drag.valid
-										? 'error.bg'
+										? 'bg.error'
 										: hoverIndex === i + 1
 											? 'bg.tertiary'
 											: 'transparent',
@@ -639,10 +639,10 @@
 				bottom: '4',
 				left: '50%',
 				transform: 'translateX(-50%)',
-				backgroundColor: 'error.bg',
+				backgroundColor: 'bg.error',
 				borderWidth: '1',
 				borderColor: 'border.error',
-				color: 'error.fg',
+				color: 'fg.error',
 				paddingX: '4',
 				paddingY: '2',
 				fontSize: 'sm',

@@ -203,8 +203,8 @@
 							data-testid={`agg-remove-button-${i}`}
 							type="button"
 							class={css({
-								backgroundColor: 'error.bg',
-								color: 'error.fg',
+								backgroundColor: 'bg.error',
+								color: 'fg.error',
 								borderWidth: '1',
 								borderColor: 'border.error'
 							})}

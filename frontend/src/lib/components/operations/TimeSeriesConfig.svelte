@@ -106,7 +106,7 @@
 		{#if dateColumns.length === 0}
 			<p
 				id="ts-no-columns-warning"
-				class={css({ fontSize: 'sm', marginTop: '2', marginBottom: '0', color: 'error.fg' })}
+				class={css({ fontSize: 'sm', marginTop: '2', marginBottom: '0', color: 'fg.error' })}
 				role="alert"
 			>
 				No date/time columns detected in schema

@@ -92,7 +92,7 @@ export const toggleButton = defineRecipe({
 	variants: {
 		active: {
 			true: {
-				backgroundColor: 'accent.bg',
+				backgroundColor: 'bg.accent',
 				color: 'accent.primary',
 				boxShadow: 'inset 0 0 0 1px {colors.accent.primary}',
 				position: 'relative',
@@ -135,8 +135,8 @@ export const callout = defineRecipe({
 	variants: {
 		tone: {
 			info: { borderLeftColor: 'border.accent', backgroundColor: 'transparent' },
-			warn: { borderLeftColor: 'border.warning', backgroundColor: 'warning.bg' },
-			error: { borderLeftColor: 'border.error', backgroundColor: 'error.bg', color: 'error.fg' }
+			warn: { borderLeftColor: 'border.warning', backgroundColor: 'bg.warning' },
+			error: { borderLeftColor: 'border.error', backgroundColor: 'bg.error', color: 'fg.error' }
 		}
 	},
 	defaultVariants: { tone: 'info' }
@@ -168,8 +168,8 @@ export const button = defineRecipe({
 				_hover: { _notDisabled: { backgroundColor: 'bg.hover', color: 'fg.primary' } }
 			},
 			danger: {
-				backgroundColor: 'error.bg',
-				color: 'error.fg',
+				backgroundColor: 'bg.error',
+				color: 'fg.error',
 				borderColor: 'border.error',
 				_hover: { _notDisabled: { opacity: '0.85' } }
 			}
@@ -281,11 +281,11 @@ export const chip = defineRecipe({
 	},
 	variants: {
 		tone: {
-			accent: { backgroundColor: 'accent.bg', color: 'accent.primary' },
+			accent: { backgroundColor: 'bg.accent', color: 'accent.primary' },
 			neutral: { backgroundColor: 'bg.tertiary', color: 'fg.muted' },
-			warning: { backgroundColor: 'warning.bg', color: 'warning.fg' },
-			success: { backgroundColor: 'success.bg', color: 'success.fg' },
-			error: { backgroundColor: 'error.bg', color: 'error.fg' }
+			warning: { backgroundColor: 'bg.warning', color: 'fg.warning' },
+			success: { backgroundColor: 'bg.success', color: 'fg.success' },
+			error: { backgroundColor: 'bg.error', color: 'fg.error' }
 		}
 	},
 	defaultVariants: { tone: 'neutral' }
@@ -447,7 +447,7 @@ export const badge = defineRecipe({
 		display: 'inline-flex',
 		alignItems: 'center',
 		borderWidth: '1',
-		backgroundColor: 'accent.bg',
+		backgroundColor: 'bg.accent',
 		color: 'accent.primary'
 	},
 	variants: {

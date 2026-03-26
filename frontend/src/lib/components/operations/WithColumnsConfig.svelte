@@ -512,8 +512,8 @@
 								borderWidth: '1',
 								borderColor: 'border.transparent',
 								_hover: {
-									color: 'error.fg',
-									backgroundColor: 'error.bg',
+									color: 'fg.error',
+									backgroundColor: 'bg.error',
 									borderColor: 'border.error'
 								}
 							})}

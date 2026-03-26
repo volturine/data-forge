@@ -267,7 +267,7 @@
 									padding: '2',
 									textAlign: 'center',
 									fontSize: '2xs',
-									color: 'error.fg'
+									color: 'fg.error'
 								})}
 							>
 								Failed to load subscribers

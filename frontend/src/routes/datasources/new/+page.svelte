@@ -317,7 +317,7 @@
 				lineHeight: '1.5',
 				backgroundColor: 'transparent',
 				borderLeftColor: 'border.error',
-				color: 'error.fg'
+				color: 'fg.error'
 			})}
 		>
 			{error}
@@ -433,7 +433,7 @@
 											fontSize: 'lg',
 											lineHeight: 'none',
 											color: 'fg.muted',
-											_hover: { color: 'error.fg' }
+											_hover: { color: 'fg.error' }
 										})}
 										onclick={() => removeBulkFile(index)}
 										disabled={loading}
@@ -609,7 +609,7 @@
 									borderBottomWidth: '1',
 									padding: '2',
 									fontSize: 'sm',
-									color: result.success ? 'success.fg' : 'error.fg'
+									color: result.success ? 'fg.success' : 'fg.error'
 								})}
 							>
 								<span class={css({ width: 'iconMd', textAlign: 'center', fontWeight: 'bold' })}>

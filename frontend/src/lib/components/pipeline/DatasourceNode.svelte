@@ -383,11 +383,11 @@
 								justifyContent: 'center',
 								borderWidth: '1',
 								borderColor: 'border.accent',
-								color: 'success.fg',
+								color: 'fg.success',
 								backgroundColor: 'bg.primary',
 								padding: '0',
 								lineHeight: '1',
-								_hover: { backgroundColor: 'success.bg', color: 'fg.primary' }
+								_hover: { backgroundColor: 'bg.success', color: 'fg.primary' }
 							})}
 							onclick={commitEdit}
 							type="button"
@@ -405,11 +405,11 @@
 								justifyContent: 'center',
 								borderWidth: '1',
 								borderColor: 'border.error',
-								color: 'error.fg',
+								color: 'fg.error',
 								backgroundColor: 'bg.primary',
 								padding: '0',
 								lineHeight: '1',
-								_hover: { backgroundColor: 'error.bg', color: 'fg.primary' }
+								_hover: { backgroundColor: 'bg.error', color: 'fg.primary' }
 							})}
 							onclick={cancelEdit}
 							type="button"

@@ -134,9 +134,9 @@
 					padding: '1',
 					color: 'fg.muted',
 					cursor: 'pointer',
-					_hover: { color: 'error.fg' },
+					_hover: { color: 'fg.error' },
 					_focusVisible: {
-						color: 'error.fg',
+						color: 'fg.error',
 						outline: '2px solid',
 						outlineColor: 'accent.primary',
 						outlineOffset: '1px'

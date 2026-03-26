@@ -235,7 +235,7 @@
 				lineHeight: 'normal',
 				backgroundColor: 'transparent',
 				borderLeftColor: 'border.error',
-				color: 'error.fg'
+				color: 'fg.error'
 			})}
 		>
 			Failed to load UDF.
@@ -332,7 +332,7 @@
 						lineHeight: 'normal',
 						backgroundColor: 'transparent',
 						borderLeftColor: 'border.error',
-						color: 'error.fg'
+						color: 'fg.error'
 					})}
 				>
 					{error}

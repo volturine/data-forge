@@ -828,7 +828,7 @@ def _log_datasource_update(
             'config': config,
             'iceberg_options': {'branch': branch},
         },
-        result_json={'datasource_id': datasource_id, 'datasource_name': name},
+        result_json=_build_datasource_result_json(datasource_id, name, DataSourceType.ICEBERG, config),
     )
     engine_run_service.create_engine_run(session, payload)
 
@@ -852,9 +852,31 @@ def _log_datasource_create(
             'config': config,
             'iceberg_options': {'branch': branch},
         },
-        result_json={'datasource_id': datasource_id, 'datasource_name': name},
+        result_json=_build_datasource_result_json(datasource_id, name, source_type, config),
     )
     engine_run_service.create_engine_run(session, payload)
+
+
+def _build_datasource_result_json(
+    datasource_id: str,
+    name: str,
+    source_type: DataSourceType,
+    config: dict,
+) -> dict[str, str]:
+    result = {'datasource_id': datasource_id, 'datasource_name': name}
+    if source_type != DataSourceType.ICEBERG:
+        return result
+    source = config.get('source')
+    if not isinstance(source, dict):
+        return result
+    source_type_value = source.get('source_type')
+    if source_type_value not in {DataSourceType.FILE, DataSourceType.FILE.value, DataSourceType.DATABASE, DataSourceType.DATABASE.value}:
+        return result
+    snapshot_id = config.get('snapshot_id')
+    if snapshot_id is None:
+        return result
+    result['snapshot_id'] = str(snapshot_id)
+    return result
 
 
 def get_datasource_schema(
@@ -1393,13 +1415,15 @@ def update_datasource(
         branch = datasource.config.get('branch', 'master') if isinstance(datasource.config, dict) else 'master'
         update_request = update.model_dump(exclude_none=True)
         update_request['iceberg_options'] = {'branch': branch}
+        source_type = DataSourceType(datasource.source_type)
+        result_json = _build_datasource_result_json(datasource_id, datasource.name, source_type, datasource.config)
         run_payload = engine_run_service.create_engine_run_payload(
             analysis_id=None,
             datasource_id=datasource_id,
             kind='datasource_update',
             status='success',
             request_json=update_request,
-            result_json={'datasource_id': datasource_id, 'datasource_name': datasource.name},
+            result_json=result_json,
         )
         engine_run_service.create_engine_run(session, run_payload)
 

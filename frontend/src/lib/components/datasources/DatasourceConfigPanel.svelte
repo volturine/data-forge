@@ -407,13 +407,16 @@
 		try {
 			const config = datasource.config as Record<string, unknown> | null;
 			const source = config?.source as Record<string, unknown> | undefined;
-			if (datasource.source_type === 'iceberg' && source?.source_type === 'database') {
+			const reingested =
+				datasource.source_type === 'iceberg' &&
+				(source?.source_type === 'database' || source?.source_type === 'file');
+			if (reingested) {
 				const refreshResult = await refreshDatasource(datasource.id);
 				if (refreshResult.isErr()) {
 					throw new Error(refreshResult.error.message);
 				}
 			}
-			const result = await getDatasourceSchema(datasource.id, { refresh: true });
+			const result = await getDatasourceSchema(datasource.id, { refresh: !reingested });
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
@@ -437,6 +440,7 @@
 			setSchema(nextSchema);
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
+			queryClient.invalidateQueries({ queryKey: ['datasource-runs', datasource.id] });
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Failed to refresh schema';
 		} finally {
@@ -534,7 +538,7 @@
 					lineHeight: 'normal',
 					backgroundColor: 'transparent',
 					borderLeftColor: 'border.success',
-					color: 'success.fg',
+					color: 'fg.success',
 					borderWidth: '1',
 					borderColor: 'border.success'
 				})
@@ -619,7 +623,7 @@
 							display: 'inline-block',
 							height: 'dot',
 							width: 'dot',
-							backgroundColor: 'success.fg'
+							backgroundColor: 'fg.success'
 						})}
 						title="All checks passing"
 					></span>
@@ -630,7 +634,7 @@
 							display: 'inline-block',
 							height: 'dot',
 							width: 'dot',
-							backgroundColor: 'error.fg'
+							backgroundColor: 'fg.error'
 						})}
 						title="Some checks failing"
 					></span>
@@ -1354,10 +1358,10 @@
 										<Save size={14} class={css({ flexShrink: '0', color: 'accent.primary' })} />
 										<span>Create</span>
 									{:else if (run.kind as string) === 'datasource_update'}
-										<RefreshCw size={14} class={css({ flexShrink: '0', color: 'warning.fg' })} />
+										<RefreshCw size={14} class={css({ flexShrink: '0', color: 'fg.warning' })} />
 										<span>Update</span>
 									{:else}
-										<Download size={14} class={css({ flexShrink: '0', color: 'success.fg' })} />
+										<Download size={14} class={css({ flexShrink: '0', color: 'fg.success' })} />
 										<span>Export</span>
 									{/if}
 									{#if dsTag === 'created'}
@@ -1378,11 +1382,11 @@
 								</div>
 								<div class={cx(row, css({ gap: '1.5', fontSize: 'xs' }))}>
 									{#if run.status === 'success'}
-										<CircleCheck size={14} class={css({ color: 'success.fg' })} />
-										<span class={css({ color: 'success.fg' })}>Success</span>
+										<CircleCheck size={14} class={css({ color: 'fg.success' })} />
+										<span class={css({ color: 'fg.success' })}>Success</span>
 									{:else}
-										<CircleX size={14} class={css({ color: 'error.fg' })} />
-										<span class={css({ color: 'error.fg' })}>Failed</span>
+										<CircleX size={14} class={css({ color: 'fg.error' })} />
+										<span class={css({ color: 'fg.error' })}>Failed</span>
 									{/if}
 								</div>
 								<span

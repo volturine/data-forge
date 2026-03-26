@@ -133,7 +133,7 @@
 				border: 'none',
 				cursor: 'pointer',
 				whiteSpace: 'nowrap',
-				backgroundColor: 'accent.bg',
+				backgroundColor: 'bg.accent',
 				color: 'accent.primary',
 				_disabled: { backgroundColor: 'bg.muted', cursor: 'not-allowed', color: 'fg.muted' }
 			})}
@@ -210,8 +210,8 @@
 								borderWidth: '1',
 								borderColor: 'border.transparent',
 								_hover: {
-									backgroundColor: 'error.bg!',
-									color: 'error.fg!',
+									backgroundColor: 'bg.error!',
+									color: 'fg.error!',
 									borderColor: 'border.error'
 								}
 							})}

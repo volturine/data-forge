@@ -6,10 +6,12 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 from openpyxl import Workbook
+from sqlmodel import select
 
 from modules.analysis.models import Analysis
 from modules.datasource.models import DataSource
 from modules.datasource.service import _compute_histogram, create_analysis_datasource
+from modules.engine_runs.models import EngineRun
 
 
 class TestDataSourceValidation:
@@ -696,3 +698,45 @@ class TestDatasourceRefresh:
         assert out.config['snapshot_id'] == '222'
         assert out.config['snapshot_timestamp_ms'] == 654321
         assert out.config['refresh'] is not None
+
+        runs = (
+            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
+            .scalars()
+            .all()
+        )
+        latest = sorted(runs, key=lambda row: row.created_at)[-1]
+        assert latest.kind == 'datasource_update'
+        assert latest.result_json is not None
+        assert latest.result_json['snapshot_id'] == '222'
+
+
+class TestDatasourceUpdateRunLogging:
+    def test_update_raw_iceberg_logs_snapshot_id(self, client, test_db_session, sample_csv_file: Path):
+        ds = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'snapshot_id': '500',
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds)
+        test_db_session.commit()
+
+        response = client.put(f'/api/v1/datasource/{ds.id}', json={'name': 'Renamed Raw'})
+        assert response.status_code == 200
+
+        runs = (
+            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
+            .scalars()
+            .all()
+        )
+        latest = sorted(runs, key=lambda row: row.created_at)[-1]
+        assert latest.kind == 'datasource_update'
+        assert latest.result_json is not None
+        assert latest.result_json['snapshot_id'] == '500'

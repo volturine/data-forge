@@ -419,7 +419,7 @@
 					border: 'none',
 					backgroundColor: 'transparent',
 					padding: '0.5',
-					color: copyFeedback ? 'success.fg' : 'fg.faint',
+					color: copyFeedback ? 'fg.success' : 'fg.faint',
 					_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
 				})}
 				onclick={copyStepToClipboard}
@@ -537,7 +537,7 @@
 						textTransform: 'uppercase',
 						letterSpacing: 'widest',
 						color: 'fg.muted',
-						_hover: { backgroundColor: 'error.bg', color: 'error.fg' }
+						_hover: { backgroundColor: 'bg.error', color: 'fg.error' }
 					})
 				)}
 				onclick={() => onDelete(step.id)}
@@ -621,10 +621,10 @@
 						class={css({
 							borderTopWidth: '1',
 							borderTopColor: 'border.error',
-							backgroundColor: 'error.bg',
+							backgroundColor: 'bg.error',
 							padding: '3',
 							fontSize: 'xs',
-							color: 'error.fg'
+							color: 'fg.error'
 						})}
 					>
 						{chartQuery.error.message}
@@ -714,11 +714,11 @@
 				class={css({
 					borderTopWidth: '1',
 					borderTopColor: 'border.error',
-					backgroundColor: 'error.bg',
+					backgroundColor: 'bg.error',
 					paddingX: '4',
 					paddingY: '2',
 					fontSize: 'xs',
-					color: 'error.fg'
+					color: 'fg.error'
 				})}
 				data-testid="step-row-count-error"
 			>

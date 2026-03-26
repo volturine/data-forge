@@ -516,11 +516,11 @@
 								alignItems: 'center',
 								justifyContent: 'center',
 								borderWidth: '1',
-								color: 'success.fg',
+								color: 'fg.success',
 								backgroundColor: 'bg.primary',
 								padding: '0',
 								lineHeight: '1',
-								_hover: { backgroundColor: 'success.bg', color: 'fg.primary' }
+								_hover: { backgroundColor: 'bg.success', color: 'fg.primary' }
 							})}
 							onclick={commitNameEdit}
 							type="button"
@@ -538,11 +538,11 @@
 								justifyContent: 'center',
 								borderWidth: '1',
 								borderColor: 'border.error',
-								color: 'error.fg',
+								color: 'fg.error',
 								backgroundColor: 'bg.primary',
 								padding: '0',
 								lineHeight: '1',
-								_hover: { backgroundColor: 'error.bg', color: 'fg.primary' }
+								_hover: { backgroundColor: 'bg.error', color: 'fg.primary' }
 							})}
 							onclick={cancelNameEdit}
 							type="button"
@@ -626,7 +626,7 @@
 							paddingX: '2',
 							paddingY: '0.5',
 							fontSize: '2xs',
-							color: hidden ? 'fg.muted' : 'success.fg',
+							color: hidden ? 'fg.muted' : 'fg.success',
 							_hover: { color: 'fg.primary' }
 						})}
 						onclick={toggleHidden}
@@ -901,10 +901,10 @@
 										class={css({
 											borderWidth: '1',
 											borderColor: 'border.warning',
-											backgroundColor: 'warning.bg',
+											backgroundColor: 'bg.warning',
 											padding: '2',
 											fontSize: '2xs',
-											color: 'warning.fg'
+											color: 'fg.warning'
 										})}
 									>
 										Telegram not enabled. Enable bot in global settings.
@@ -945,7 +945,7 @@
 														padding: '2',
 														textAlign: 'center',
 														fontSize: '2xs',
-														color: 'error.fg'
+														color: 'fg.error'
 													})}
 												>
 													Failed to load subscribers
@@ -1076,11 +1076,11 @@
 							class={cx(
 								css({ paddingX: '1.5', paddingY: '0.5', fontSize: '2xs' }),
 								healthPassed === true &&
-									css({ backgroundColor: 'success.bg', color: 'success.fg' }),
-								healthPassed === false && css({ backgroundColor: 'error.bg', color: 'error.fg' }),
+									css({ backgroundColor: 'bg.success', color: 'fg.success' }),
+								healthPassed === false && css({ backgroundColor: 'bg.error', color: 'fg.error' }),
 								healthPassed !== true &&
 									healthPassed !== false &&
-									css({ backgroundColor: 'accent.bg', color: 'accent.primary' })
+									css({ backgroundColor: 'bg.accent', color: 'accent.primary' })
 							)}
 						>
 							{healthCount}
@@ -1176,10 +1176,10 @@
 					marginTop: '3',
 					borderWidth: '1',
 					borderColor: 'border.error',
-					backgroundColor: 'error.bg',
+					backgroundColor: 'bg.error',
 					padding: '2',
 					fontSize: 'xs',
-					color: 'error.fg'
+					color: 'fg.error'
 				})}
 				data-testid="output-build-error"
 			>
