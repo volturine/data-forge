@@ -57,7 +57,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Codegen
-        run: bun run panda:codegen
+        run: svelte-kit sync && panda codegen"
 
       - name: Svelte check
         run: bun run check
