@@ -91,7 +91,7 @@
 		goto(resolve(url as '/'), { replaceState: true });
 	}
 
-	// $derived cannot write to $state or express the circular snapshotConfig guard — must imperatively assign snapshotConfig and selectedBranch together
+	// $derived cannot write to $state — must imperatively merge server config while preserving active time-travel selection
 	$effect(() => {
 		const selected = selectedDatasource;
 		if (!selectedId) return;
@@ -99,7 +99,14 @@
 		if (snapshotConfig?.branch) return;
 		const nextConfig = (selected.config ?? {}) as Record<string, unknown>;
 		const nextBranch = selectedBranch ?? 'master';
-		snapshotConfig = { ...nextConfig, branch: nextBranch };
+		const travelId = snapshotConfig?.time_travel_snapshot_id as string | undefined;
+		const travelTs = snapshotConfig?.time_travel_snapshot_timestamp_ms as number | undefined;
+		const travelUi = snapshotConfig?.time_travel_ui as Record<string, unknown> | undefined;
+		const merged = { ...nextConfig, branch: nextBranch } as Record<string, unknown>;
+		if (travelId) merged.time_travel_snapshot_id = travelId;
+		if (travelTs) merged.time_travel_snapshot_timestamp_ms = travelTs;
+		if (travelUi) merged.time_travel_ui = travelUi;
+		snapshotConfig = merged;
 		selectedBranch = nextBranch;
 	});
 
@@ -415,7 +422,7 @@
 										label="Time Travel"
 										branch={selectedBranch}
 										showDelete
-										showBuildPreviews
+										showBuildPreviews={selectedDatasource.created_by === 'analysis'}
 										onConfigChange={handleSnapshotConfigChange}
 									/>
 								</div>

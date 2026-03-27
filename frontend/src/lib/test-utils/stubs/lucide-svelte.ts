@@ -27,6 +27,7 @@ export const Play = IconStub;
 export const Trash2 = IconStub;
 export const Clock = IconStub;
 export const GitCompareArrows = IconStub;
+export const GitMerge = IconStub;
 export const RefreshCw = IconStub;
 export const X = IconStub;
 export const Plus = IconStub;

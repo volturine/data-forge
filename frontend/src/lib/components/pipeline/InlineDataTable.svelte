@@ -54,20 +54,21 @@
 		const {
 			time_travel_ui: _ui,
 			output: _output,
-			snapshot_id,
-			snapshot_timestamp_ms,
+			time_travel_snapshot_id,
+			time_travel_snapshot_timestamp_ms,
 			...rest
 		} = config;
 		return JSON.stringify({
 			...rest,
-			snapshot_id: snapshot_id ?? null,
-			snapshot_timestamp_ms: snapshot_timestamp_ms ?? null
+			snapshot_id: time_travel_snapshot_id ?? null,
+			snapshot_timestamp_ms: time_travel_snapshot_timestamp_ms ?? null
 		});
 	});
 	const snapshotKey = $derived.by(() => {
 		const config = datasourceConfig as Record<string, unknown>;
-		const snapshotId = (config.snapshot_id as string | null | undefined) ?? null;
-		const snapshotMs = (config.snapshot_timestamp_ms as number | null | undefined) ?? null;
+		const snapshotId = (config.time_travel_snapshot_id as string | null | undefined) ?? null;
+		const snapshotMs =
+			(config.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
 		return `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
 	});
 	const runKey = $derived(`${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${stepId}`);

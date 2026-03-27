@@ -69,13 +69,22 @@ describe('SnapshotPicker', () => {
 			expect(screen.getByText('Latest')).toBeInTheDocument();
 		});
 
-		test('shows snapshot id badge when snapshot selected via config', () => {
+		test('shows snapshot id badge when snapshot selected via config', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(
+					makeSnapshots([
+						{ id: 'snap-current', ts: JUN15, current: true },
+						{ id: 'snap-abc', ts: JUN15 - 86400000, current: false }
+					])
+				)
+			);
 			renderPicker({
 				datasourceConfig: {
-					snapshot_id: 'snap-abc',
-					snapshot_timestamp_ms: 1700000000000
+					time_travel_snapshot_id: 'snap-abc',
+					time_travel_snapshot_timestamp_ms: 1700000000000
 				}
 			});
+			await fireEvent.click(screen.getByRole('button'));
 			expect(screen.getByText('snap-abc')).toBeInTheDocument();
 		});
 	});
@@ -84,7 +93,7 @@ describe('SnapshotPicker', () => {
 		test('popover is closed by default', () => {
 			renderPicker();
 			expect(screen.queryByText('Loading snapshots...')).not.toBeInTheDocument();
-			expect(screen.queryByText('Current: Latest')).not.toBeInTheDocument();
+			expect(screen.queryByText('Selected: Latest')).not.toBeInTheDocument();
 		});
 
 		test('opens popover on trigger click and loads snapshots', async () => {
@@ -122,45 +131,64 @@ describe('SnapshotPicker', () => {
 	});
 
 	describe('latest reset', () => {
-		test('shows Latest reset button when snapshot is selected', async () => {
+		test('shows Latest reset button when non-current snapshot is selected', async () => {
 			mockApiRequest.mockReturnValue(
-				okAsync({
-					snapshots: [
-						{
-							snapshot_id: 'snap-1',
-							timestamp_ms: 1700000000000,
-							operation: 'append',
-							is_current: true
-						}
-					]
-				})
+				okAsync(
+					makeSnapshots([
+						{ id: 'snap-1', ts: JUN15, current: true },
+						{ id: 'snap-old', ts: JUN15 - 86400000, current: false }
+					])
+				)
 			);
 			const onConfigChange = vi.fn();
 			renderPicker({
 				datasourceConfig: {
-					snapshot_id: 'snap-1',
-					snapshot_timestamp_ms: 1700000000000
+					time_travel_snapshot_id: 'snap-old',
+					time_travel_snapshot_timestamp_ms: JUN15 - 86400000
 				},
 				onConfigChange
 			});
 			await fireEvent.click(screen.getByRole('button'));
 			const latestButtons = screen.getAllByText('Latest');
 			const resetButton = latestButtons.find(
-				(el) => el.tagName === 'BUTTON' && el.closest('[role="presentation"]') === null
+				(el) => el.tagName === 'BUTTON' && el.closest('.engine-header') === null
 			);
 			expect(resetButton).toBeDefined();
 		});
 
-		test('clicking Latest reset fires onConfigChange and onSelect with null', async () => {
+		test('no reset button when selected snapshot is current', async () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-1', ts: JUN15, current: true }]))
+			);
+			renderPicker({
+				datasourceConfig: {
+					time_travel_snapshot_id: 'snap-1',
+					time_travel_snapshot_timestamp_ms: JUN15
+				}
+			});
+			await fireEvent.click(screen.getByRole('button'));
+			const latestButtons = screen.getAllByText('Latest');
+			const resetButtons = latestButtons.filter(
+				(el) => el.tagName === 'BUTTON' && el.closest('.engine-header') === null
+			);
+			expect(resetButtons.length).toBe(0);
+		});
+
+		test('clicking Latest reset fires onConfigChange and onSelect with null', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(
+					makeSnapshots([
+						{ id: 'snap-1', ts: JUN15, current: true },
+						{ id: 'snap-old', ts: JUN15 - 86400000, current: false }
+					])
+				)
 			);
 			const onConfigChange = vi.fn();
 			const onSelect = vi.fn();
 			renderPicker({
 				datasourceConfig: {
-					snapshot_id: 'snap-1',
-					snapshot_timestamp_ms: JUN15
+					time_travel_snapshot_id: 'snap-old',
+					time_travel_snapshot_timestamp_ms: JUN15 - 86400000
 				},
 				onConfigChange,
 				onSelect
@@ -174,19 +202,43 @@ describe('SnapshotPicker', () => {
 			await fireEvent.click(resetButton!);
 			expect(onConfigChange).toHaveBeenCalledOnce();
 			const config = onConfigChange.mock.calls[0][0];
-			expect(config.snapshot_id).toBeUndefined();
-			expect(config.snapshot_timestamp_ms).toBeUndefined();
+			expect(config.time_travel_snapshot_id).toBeUndefined();
+			expect(config.time_travel_snapshot_timestamp_ms).toBeUndefined();
 			expect(onSelect).toHaveBeenCalledWith(null, undefined);
 		});
 	});
 
 	describe('missing snapshot warning', () => {
+		test('no false warning before snapshot list loads', () => {
+			renderPicker({
+				datasourceConfig: {
+					time_travel_snapshot_id: 'snap-abc',
+					time_travel_snapshot_timestamp_ms: 1700000000000
+				}
+			});
+			expect(screen.queryByText(/no longer exists/)).not.toBeInTheDocument();
+		});
+
+		test('no warning when selected snapshot exists in loaded list', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(makeSnapshots([{ id: 'snap-abc', ts: JUN15, current: true }]))
+			);
+			renderPicker({
+				datasourceConfig: {
+					time_travel_snapshot_id: 'snap-abc',
+					time_travel_snapshot_timestamp_ms: JUN15
+				}
+			});
+			await fireEvent.click(screen.getByRole('button'));
+			expect(screen.queryByText(/no longer exists/)).not.toBeInTheDocument();
+		});
+
 		test('shows warning when selected snapshot is not in list', async () => {
 			mockApiRequest.mockReturnValue(okAsync({ snapshots: [] }));
 			renderPicker({
 				datasourceConfig: {
-					snapshot_id: 'snap-gone',
-					snapshot_timestamp_ms: 1700000000000
+					time_travel_snapshot_id: 'snap-gone',
+					time_travel_snapshot_timestamp_ms: 1700000000000
 				}
 			});
 			await fireEvent.click(screen.getByRole('button'));
@@ -197,8 +249,8 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(okAsync({ snapshots: [] }));
 			renderPicker({
 				datasourceConfig: {
-					snapshot_id: 'snap-gone',
-					snapshot_timestamp_ms: 1700000000000
+					time_travel_snapshot_id: 'snap-gone',
+					time_travel_snapshot_timestamp_ms: 1700000000000
 				}
 			});
 			await fireEvent.click(screen.getByRole('button'));
@@ -211,8 +263,8 @@ describe('SnapshotPicker', () => {
 			const onSelect = vi.fn();
 			renderPicker({
 				datasourceConfig: {
-					snapshot_id: 'snap-gone',
-					snapshot_timestamp_ms: 1700000000000
+					time_travel_snapshot_id: 'snap-gone',
+					time_travel_snapshot_timestamp_ms: 1700000000000
 				},
 				onConfigChange,
 				onSelect
@@ -221,7 +273,7 @@ describe('SnapshotPicker', () => {
 			await fireEvent.click(screen.getByText('Switch to latest'));
 			expect(onConfigChange).toHaveBeenCalled();
 			const config = onConfigChange.mock.calls[0][0];
-			expect(config.snapshot_id).toBeUndefined();
+			expect(config.time_travel_snapshot_id).toBeUndefined();
 			expect(onSelect).toHaveBeenCalledWith(null, undefined);
 		});
 	});
@@ -405,9 +457,9 @@ describe('SnapshotPicker', () => {
 
 			expect(onConfigChange).toHaveBeenCalledOnce();
 			const config = onConfigChange.mock.calls[0][0];
-			expect(typeof config.snapshot_id).toBe('string');
-			expect(config.snapshot_id).toMatch(/^snap-/);
-			expect(typeof config.snapshot_timestamp_ms).toBe('number');
+			expect(typeof config.time_travel_snapshot_id).toBe('string');
+			expect(config.time_travel_snapshot_id).toMatch(/^snap-/);
+			expect(typeof config.time_travel_snapshot_timestamp_ms).toBe('number');
 
 			expect(onSelect).toHaveBeenCalledOnce();
 			expect(onSelect.mock.calls[0][0]).toMatch(/^snap-/);
@@ -514,7 +566,7 @@ describe('SnapshotPicker', () => {
 					time_travel_ui: { open: true }
 				}
 			});
-			expect(screen.getByText('Current: Latest')).toBeInTheDocument();
+			expect(screen.getByText('Selected: Latest')).toBeInTheDocument();
 		});
 
 		test('persistOpen false does not auto-open', () => {
@@ -522,7 +574,7 @@ describe('SnapshotPicker', () => {
 				persistOpen: false,
 				datasourceConfig: {}
 			});
-			expect(screen.queryByText('Current: Latest')).not.toBeInTheDocument();
+			expect(screen.queryByText('Selected: Latest')).not.toBeInTheDocument();
 		});
 
 		test('toggle fires onUiChange with open flag when persistOpen', async () => {
@@ -534,6 +586,152 @@ describe('SnapshotPicker', () => {
 				(c: Array<Record<string, unknown>>) => c[0].open === true
 			);
 			expect(openCall).toBeDefined();
+		});
+	});
+
+	describe('showBuildPreviews fallback', () => {
+		function makeRun(overrides: Record<string, unknown> = {}) {
+			return {
+				id: 'run-1',
+				analysis_id: null,
+				datasource_id: 'ds-1',
+				kind: 'datasource_update',
+				status: 'success',
+				request_json: {},
+				result_json: null,
+				error_message: null,
+				created_at: '2024-06-15T12:00:00Z',
+				completed_at: '2024-06-15T12:01:00Z',
+				duration_ms: 60000,
+				step_timings: {},
+				query_plan: null,
+				progress: 100,
+				current_step: null,
+				triggered_by: null,
+				...overrides
+			};
+		}
+
+		test('shows all snapshots when build runs exist but map is empty', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(
+					makeSnapshots([
+						{ id: 'snap-a', ts: JUN15, current: true },
+						{ id: 'snap-b', ts: JUN15_LATE, current: false }
+					])
+				)
+			);
+			mockListEngineRuns.mockReturnValue({
+				match: (onOk: (v: unknown) => void) => {
+					onOk([makeRun({ id: 'run-1', result_json: null })]);
+				}
+			});
+			renderPicker({ showBuildPreviews: true });
+			await fireEvent.click(screen.getByRole('button'));
+			await tick();
+
+			expect(screen.getByText('2024-06')).toBeInTheDocument();
+			const dayButton = screen.getByText('15').closest('button');
+			expect(dayButton).toBeTruthy();
+			await fireEvent.click(dayButton!);
+
+			const buttons = screen.getAllByRole('button');
+			const timeButtons = buttons.filter((btn) => btn.textContent?.match(/\d{2}:\d{2}:\d{2}/));
+			expect(timeButtons.length).toBe(2);
+		});
+
+		test('shows all snapshots when no build runs loaded', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
+			);
+			mockListEngineRuns.mockReturnValue({
+				match: (onOk: (v: unknown) => void) => {
+					onOk([]);
+				}
+			});
+			renderPicker({ showBuildPreviews: true });
+			await fireEvent.click(screen.getByRole('button'));
+			await tick();
+
+			expect(screen.getByText('2024-06')).toBeInTheDocument();
+			const dayButton = screen.getByText('15').closest('button');
+			expect(dayButton).toBeTruthy();
+		});
+
+		test('filters to matched snapshots when map has entries', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(
+					makeSnapshots([
+						{ id: 'snap-a', ts: JUN15, current: true },
+						{ id: 'snap-b', ts: JUN15_LATE, current: false },
+						{ id: 'snap-c', ts: JUN20, current: false }
+					])
+				)
+			);
+			mockListEngineRuns.mockReturnValue({
+				match: (onOk: (v: unknown) => void) => {
+					onOk([makeRun({ id: 'run-1', result_json: { snapshot_id: 'snap-a' } })]);
+				}
+			});
+			renderPicker({ showBuildPreviews: true });
+			await fireEvent.click(screen.getByRole('button'));
+			await tick();
+
+			const dayButton = screen.getByText('15').closest('button');
+			expect(dayButton).toBeTruthy();
+			await fireEvent.click(dayButton!);
+
+			const buttons = screen.getAllByRole('button');
+			const timeButtons = buttons.filter((btn) => btn.textContent?.match(/\d{2}:\d{2}:\d{2}/));
+			expect(timeButtons.length).toBe(1);
+		});
+
+		test('day selection works when map is empty', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN20, current: true }]))
+			);
+			mockListEngineRuns.mockReturnValue({
+				match: (onOk: (v: unknown) => void) => {
+					onOk([makeRun({ id: 'run-1', result_json: {} })]);
+				}
+			});
+			const onUiChange = vi.fn();
+			renderPicker({ showBuildPreviews: true, onUiChange });
+			await fireEvent.click(screen.getByRole('button'));
+			await tick();
+
+			const dayButton = screen.getByText('20').closest('button');
+			expect(dayButton).toBeTruthy();
+			await fireEvent.click(dayButton!);
+
+			const dayCalls = onUiChange.mock.calls.filter(
+				(c: Array<Record<string, unknown>>) => c[0].day === '2024-06-20'
+			);
+			expect(dayCalls.length).toBeGreaterThanOrEqual(1);
+		});
+
+		test('month navigation works when map is empty', async () => {
+			mockApiRequest.mockReturnValue(
+				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
+			);
+			mockListEngineRuns.mockReturnValue({
+				match: (onOk: (v: unknown) => void) => {
+					onOk([makeRun({ id: 'run-1', result_json: null })]);
+				}
+			});
+			const onUiChange = vi.fn();
+			renderPicker({ showBuildPreviews: true, onUiChange });
+			await fireEvent.click(screen.getByRole('button'));
+			await tick();
+
+			expect(screen.getByText('2024-06')).toBeInTheDocument();
+			await fireEvent.click(screen.getByText('→'));
+			await tick();
+
+			const monthCall = onUiChange.mock.calls.find(
+				(c: Array<Record<string, unknown>>) => c[0].month === '2024-07'
+			);
+			expect(monthCall).toBeDefined();
 		});
 	});
 });

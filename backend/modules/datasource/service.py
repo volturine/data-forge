@@ -69,6 +69,7 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
         if build_mode == 'incremental':
             table.append(arrow_table)
         else:
+            _sync_iceberg_schema(table, arrow_table.schema)
             table.overwrite(arrow_table)
         return table
     table = catalog.create_table(identifier, schema=arrow_table.schema, location=str(table_path))
@@ -90,6 +91,23 @@ def _build_iceberg_config(paths, target_path: Path, branch: str, source_config: 
         'namespace_name': get_namespace(),
         'refresh': None,
     }
+
+
+def _sync_iceberg_schema(table: Table, new_schema: Any) -> None:
+    from modules.compute.iceberg_reader import sync_iceberg_schema
+
+    sync_iceberg_schema(table, new_schema)
+
+
+def _set_snapshot_metadata(config: dict[str, Any], snapshot: Any | None) -> None:
+    if snapshot is None:
+        return
+    snapshot_id = str(snapshot.snapshot_id)
+    snapshot_timestamp_ms = int(snapshot.timestamp_ms)
+    config['current_snapshot_id'] = snapshot_id
+    config['current_snapshot_timestamp_ms'] = snapshot_timestamp_ms
+    config['snapshot_id'] = snapshot_id
+    config['snapshot_timestamp_ms'] = snapshot_timestamp_ms
 
 
 def create_file_datasource(
@@ -150,11 +168,7 @@ def create_file_datasource(
     snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
     iceberg_config = _build_iceberg_config(paths, target_path, branch='master', source_config=config)
     current_snapshot = snapshot.current_snapshot() if snapshot else None
-    if current_snapshot:
-        snapshot_id = current_snapshot.snapshot_id
-        snapshot_ts = current_snapshot.timestamp_ms
-        iceberg_config['snapshot_id'] = str(snapshot_id)
-        iceberg_config['snapshot_timestamp_ms'] = int(snapshot_ts)
+    _set_snapshot_metadata(iceberg_config, current_snapshot)
     datasource = DataSource(
         id=datasource_id,
         name=name,
@@ -183,10 +197,7 @@ def create_file_datasource(
         ) from e
 
     logger.info(f'Created iceberg datasource {datasource_id} ({name}) from file {file_path}')
-    response = DataSourceResponse.model_validate(datasource)
-    response.config['source'] = file_config
-    response.config.update(file_config)
-    return response
+    return DataSourceResponse.model_validate(datasource)
 
 
 def create_placeholder_output_datasource(
@@ -560,11 +571,7 @@ def create_database_datasource(
     snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
     iceberg_config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source_config)
     current_snapshot = snapshot.current_snapshot() if snapshot else None
-    if current_snapshot:
-        snapshot_id = current_snapshot.snapshot_id
-        snapshot_ts = current_snapshot.timestamp_ms
-        iceberg_config['snapshot_id'] = str(snapshot_id)
-        iceberg_config['snapshot_timestamp_ms'] = int(snapshot_ts)
+    _set_snapshot_metadata(iceberg_config, current_snapshot)
 
     datasource = DataSource(
         id=datasource_id,
@@ -631,9 +638,7 @@ def create_iceberg_datasource(
     snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
     config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source)
     current_snapshot = snapshot.current_snapshot() if snapshot else None
-    if current_snapshot:
-        config['snapshot_id'] = str(current_snapshot.snapshot_id)
-        config['snapshot_timestamp_ms'] = int(current_snapshot.timestamp_ms)
+    _set_snapshot_metadata(config, current_snapshot)
 
     datasource = DataSource(
         id=datasource_id,
@@ -727,15 +732,11 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
     target_path = Path(metadata_path)
     if target_path.name != branch:
         target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch)
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
+    snapshot = _write_iceberg_table(lazy, target_path, build_mode='full')
 
-    current_snapshot = snapshot.current_snapshot() if snapshot else None
     next_config = dict(datasource.config)
-    if current_snapshot:
-        snapshot_id = current_snapshot.snapshot_id
-        snapshot_ts = current_snapshot.timestamp_ms
-        next_config['snapshot_id'] = str(snapshot_id)
-        next_config['snapshot_timestamp_ms'] = int(snapshot_ts)
+    current_snapshot = snapshot.current_snapshot() if snapshot else None
+    _set_snapshot_metadata(next_config, current_snapshot)
     next_config['branch'] = branch
     next_config['metadata_path'] = str(target_path)
     next_config['source'] = source
@@ -872,7 +873,9 @@ def _build_datasource_result_json(
     source_type_value = source.get('source_type')
     if source_type_value not in {DataSourceType.FILE, DataSourceType.FILE.value, DataSourceType.DATABASE, DataSourceType.DATABASE.value}:
         return result
-    snapshot_id = config.get('snapshot_id')
+    snapshot_id = config.get('current_snapshot_id')
+    if snapshot_id is None:
+        snapshot_id = config.get('snapshot_id')
     if snapshot_id is None:
         return result
     result['snapshot_id'] = str(snapshot_id)
@@ -1309,6 +1312,23 @@ def update_datasource(
             raise DataSourceValidationError(
                 'Datasource schemas are read-only and cannot be modified',
                 details={'datasource_id': datasource_id},
+            )
+
+        protected_snapshot_keys = {
+            'snapshot_id',
+            'snapshot_timestamp_ms',
+            'current_snapshot_id',
+            'current_snapshot_timestamp_ms',
+            'time_travel_snapshot_id',
+            'time_travel_snapshot_timestamp_ms',
+            'time_travel_ui',
+        }
+        for key in protected_snapshot_keys:
+            if key not in update.config:
+                continue
+            raise DataSourceValidationError(
+                'Snapshot metadata fields are system-managed and cannot be modified',
+                details={'datasource_id': datasource_id, 'field': key},
             )
 
         immutable_keys = {

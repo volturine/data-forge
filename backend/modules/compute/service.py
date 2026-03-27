@@ -223,28 +223,9 @@ def _send_pipeline_notifications(
 
 
 def _sync_iceberg_schema(table: IcebergTable, new_schema: pa.Schema) -> bool:
-    """Sync Iceberg table schema to match new_schema exactly.
+    from modules.compute.iceberg_reader import sync_iceberg_schema
 
-    Drops removed columns, adds new columns via union_by_name.
-    Returns True if schema was modified.
-    """
-    current = table.schema()
-    current_names = {field.name for field in current.fields}
-    new_names = set(new_schema.names)
-
-    to_delete = current_names - new_names
-    has_additions = bool(new_names - current_names)
-
-    if not to_delete and not has_additions:
-        return False
-
-    update = table.update_schema()
-    for name in sorted(to_delete):
-        update.delete_column(name)
-    if has_additions:
-        update.union_by_name(new_schema)
-    update.commit()
-    return True
+    return sync_iceberg_schema(table, new_schema)
 
 
 def _upsert_output_datasource(
@@ -350,6 +331,18 @@ def _resolve_branch_value(config: dict) -> str:
     if isinstance(branch, str) and branch.strip():
         return branch.strip()
     return 'master'
+
+
+def _set_snapshot_metadata(config: dict, snapshot_id: str | None, snapshot_timestamp_ms: int | None) -> dict:
+    if snapshot_id is None or snapshot_timestamp_ms is None:
+        return config
+    return {
+        **config,
+        'current_snapshot_id': snapshot_id,
+        'current_snapshot_timestamp_ms': snapshot_timestamp_ms,
+        'snapshot_id': snapshot_id,
+        'snapshot_timestamp_ms': snapshot_timestamp_ms,
+    }
 
 
 def _ensure_request_branch(request_payload: dict, branch: str) -> dict:
@@ -1153,6 +1146,7 @@ def export_data(
             'branch': branch_name,
             'namespace_name': get_namespace(),
         }
+        iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms)
         output_hidden = existing_output_ds.is_hidden if existing_output_ds else True
         schema_cache = data.get('schema', {})
         target_ds = _upsert_output_datasource(

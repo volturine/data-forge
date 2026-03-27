@@ -4,7 +4,8 @@ import type { DataSource, SourceType } from '$lib/types/datasource';
 import {
 	buildAnalysisPipelinePayload,
 	buildDatasourceConfig,
-	buildDatasourcePipelinePayload
+	buildDatasourcePipelinePayload,
+	normalizeSnapshotConfig
 } from './analysis-pipeline';
 
 function tab(overrides: Partial<AnalysisTab> = {}): AnalysisTab {
@@ -267,6 +268,28 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.sources['out-2'].analysis_tab_id).toBe('tab-2');
 		expect(result!.sources['out-3'].analysis_tab_id).toBe('tab-3');
 	});
+
+	test('normalizes time-travel fields in tab datasource config', () => {
+		const t = tab({
+			datasource: {
+				id: 'ds-1',
+				analysis_tab_id: null,
+				config: {
+					branch: 'main',
+					time_travel_snapshot_id: 'snap-42',
+					time_travel_snapshot_timestamp_ms: 1700000000000,
+					time_travel_ui: { open: true }
+				}
+			}
+		});
+		const result = buildAnalysisPipelinePayload('a-1', [t], [datasource()]);
+		expect(result).not.toBeNull();
+		const config = result!.tabs[0].datasource.config;
+		expect(config.snapshot_id).toBe('snap-42');
+		expect(config.snapshot_timestamp_ms).toBe(1700000000000);
+		expect(config.time_travel_snapshot_id).toBeUndefined();
+		expect(config.time_travel_ui).toBeUndefined();
+	});
 });
 
 // ── buildDatasourceConfig ───────────────────────────────────────────────────
@@ -435,5 +458,104 @@ describe('buildDatasourcePipelinePayload', () => {
 			datasourceConfig: null
 		});
 		expect(result.tabs[0].datasource.config.branch).toBe('master');
+	});
+
+	test('normalizes time-travel fields into compute snapshot fields', () => {
+		const result = buildDatasourcePipelinePayload({
+			datasource: datasource(),
+			datasourceConfig: {
+				branch: 'main',
+				time_travel_snapshot_id: 'snap-42',
+				time_travel_snapshot_timestamp_ms: 1700000000000
+			}
+		});
+		const config = result.tabs[0].datasource.config;
+		expect(config.snapshot_id).toBe('snap-42');
+		expect(config.snapshot_timestamp_ms).toBe(1700000000000);
+		expect(config.time_travel_snapshot_id).toBeUndefined();
+		expect(config.time_travel_snapshot_timestamp_ms).toBeUndefined();
+	});
+
+	test('strips time_travel_ui from pipeline config', () => {
+		const result = buildDatasourcePipelinePayload({
+			datasource: datasource(),
+			datasourceConfig: {
+				branch: 'main',
+				time_travel_ui: { open: true, month: '2024-06' }
+			}
+		});
+		const config = result.tabs[0].datasource.config;
+		expect(config.time_travel_ui).toBeUndefined();
+	});
+});
+
+// ── normalizeSnapshotConfig ────────────────────────────────────────────────
+
+describe('normalizeSnapshotConfig', () => {
+	test('passes through config without time-travel fields', () => {
+		const config = { branch: 'main', metadata_path: '/data/table' };
+		const result = normalizeSnapshotConfig(config);
+		expect(result).toEqual({ branch: 'main', metadata_path: '/data/table' });
+	});
+
+	test('maps time_travel_snapshot_id to snapshot_id', () => {
+		const result = normalizeSnapshotConfig({
+			branch: 'main',
+			time_travel_snapshot_id: 'snap-99'
+		});
+		expect(result.snapshot_id).toBe('snap-99');
+		expect(result.time_travel_snapshot_id).toBeUndefined();
+	});
+
+	test('maps time_travel_snapshot_timestamp_ms to snapshot_timestamp_ms', () => {
+		const result = normalizeSnapshotConfig({
+			branch: 'main',
+			time_travel_snapshot_id: 'snap-99',
+			time_travel_snapshot_timestamp_ms: 1700000000000
+		});
+		expect(result.snapshot_id).toBe('snap-99');
+		expect(result.snapshot_timestamp_ms).toBe(1700000000000);
+		expect(result.time_travel_snapshot_timestamp_ms).toBeUndefined();
+	});
+
+	test('strips time_travel_ui', () => {
+		const result = normalizeSnapshotConfig({
+			branch: 'main',
+			time_travel_ui: { open: true, month: '2024-06', day: '2024-06-15' }
+		});
+		expect(result.time_travel_ui).toBeUndefined();
+		expect(result.branch).toBe('main');
+	});
+
+	test('does not set snapshot_id when time_travel_snapshot_id is absent', () => {
+		const result = normalizeSnapshotConfig({ branch: 'dev' });
+		expect(result.snapshot_id).toBeUndefined();
+		expect(result.snapshot_timestamp_ms).toBeUndefined();
+	});
+
+	test('ignores timestamp_ms when snapshot_id is absent', () => {
+		const result = normalizeSnapshotConfig({
+			branch: 'dev',
+			time_travel_snapshot_timestamp_ms: 1700000000000
+		});
+		expect(result.snapshot_id).toBeUndefined();
+		expect(result.snapshot_timestamp_ms).toBeUndefined();
+	});
+
+	test('preserves existing snapshot_id from datasource config', () => {
+		const result = normalizeSnapshotConfig({
+			branch: 'main',
+			snapshot_id: 'original-snap'
+		});
+		expect(result.snapshot_id).toBe('original-snap');
+	});
+
+	test('time-travel overrides existing snapshot_id', () => {
+		const result = normalizeSnapshotConfig({
+			branch: 'main',
+			snapshot_id: 'original-snap',
+			time_travel_snapshot_id: 'travel-snap'
+		});
+		expect(result.snapshot_id).toBe('travel-snap');
 	});
 });

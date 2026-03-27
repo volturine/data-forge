@@ -289,7 +289,7 @@ class TestDataSourceValidation:
 
         assert confirm.status_code == 200
         config = confirm.json()['config']
-        assert config['end_row'] == 1
+        assert config['source']['end_row'] == 1
 
     def test_confirm_excel_cell_range_stores_bounds(self, client, temp_upload_dir: Path):
         """Test Excel confirm stores manual cell range selection."""
@@ -321,12 +321,12 @@ class TestDataSourceValidation:
 
         assert confirm.status_code == 200
         config = confirm.json()['config']
-        assert config['cell_range'] == 'Sheet1!A1:B3'
-        assert config['sheet_name'] == 'Sheet1'
-        assert config['start_row'] == 0
-        assert config['start_col'] == 0
-        assert config['end_col'] == 1
-        assert config['end_row'] == 2
+        assert config['source']['cell_range'] == 'Sheet1!A1:B3'
+        assert config['source']['sheet_name'] == 'Sheet1'
+        assert config['source']['start_row'] == 0
+        assert config['source']['start_col'] == 0
+        assert config['source']['end_col'] == 1
+        assert config['source']['end_row'] == 2
 
 
 class TestDataSourceSchema:
@@ -697,7 +697,10 @@ class TestDatasourceRefresh:
         out = refresh_external_datasource(test_db_session, ds.id)
         assert out.config['snapshot_id'] == '222'
         assert out.config['snapshot_timestamp_ms'] == 654321
+        assert out.config['current_snapshot_id'] == '222'
+        assert out.config['current_snapshot_timestamp_ms'] == 654321
         assert out.config['refresh'] is not None
+        mock_write.assert_called_once_with(mock_load.return_value, Path(out.config['metadata_path']), build_mode='full')
 
         runs = (
             test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
@@ -740,3 +743,31 @@ class TestDatasourceUpdateRunLogging:
         assert latest.kind == 'datasource_update'
         assert latest.result_json is not None
         assert latest.result_json['snapshot_id'] == '500'
+
+    def test_update_rejects_system_snapshot_fields(self, client, test_db_session, sample_csv_file: Path):
+        ds = DataSource(
+            id=str(uuid.uuid4()),
+            name='Snapshot Locked',
+            source_type='iceberg',
+            config={
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'snapshot_id': '111',
+                'snapshot_timestamp_ms': 1000,
+                'current_snapshot_id': '111',
+                'current_snapshot_timestamp_ms': 1000,
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds)
+        test_db_session.commit()
+
+        response = client.put(
+            f'/api/v1/datasource/{ds.id}',
+            json={'config': {'current_snapshot_id': '999'}},
+        )
+
+        assert response.status_code == 400
+        assert 'system-managed' in response.json()['detail']

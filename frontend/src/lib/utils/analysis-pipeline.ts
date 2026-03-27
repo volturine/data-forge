@@ -26,6 +26,28 @@ export type AnalysisPipelinePayload = {
 	sources: Record<string, Record<string, unknown>>;
 };
 
+/**
+ * Normalize time-travel fields into compute-ready snapshot fields.
+ * Strips `time_travel_snapshot_id`, `time_travel_snapshot_timestamp_ms`,
+ * and `time_travel_ui` from the config, mapping the first two into
+ * `snapshot_id` / `snapshot_timestamp_ms` for the engine.
+ */
+export function normalizeSnapshotConfig(config: Record<string, unknown>): Record<string, unknown> {
+	const {
+		time_travel_snapshot_id,
+		time_travel_snapshot_timestamp_ms,
+		time_travel_ui: _ui,
+		...rest
+	} = config;
+	if (time_travel_snapshot_id != null) {
+		rest.snapshot_id = time_travel_snapshot_id;
+		if (time_travel_snapshot_timestamp_ms != null) {
+			rest.snapshot_timestamp_ms = time_travel_snapshot_timestamp_ms;
+		}
+	}
+	return rest;
+}
+
 function collectTabSourceIds(tab: AnalysisTab): Set<string> {
 	const ids = new Set<string>([tab.datasource.id]);
 	for (const step of applySteps(tab.steps ?? [])) {
@@ -91,7 +113,7 @@ export function buildAnalysisPipelinePayload(
 
 	const pipelineTabs = tabs.map((tab) => {
 		const outputId = outputByTabId.get(tab.id);
-		const config = tab.datasource.config;
+		const config = normalizeSnapshotConfig(tab.datasource.config as Record<string, unknown>);
 		const datasourceId = tab.datasource.id;
 		const analysisTabId = tab.datasource.analysis_tab_id;
 		if (!datasourceId || !outputId) return null;
@@ -137,8 +159,9 @@ export function buildDatasourcePipelinePayload(args: {
 	datasourceConfig?: Record<string, unknown> | null;
 }): AnalysisPipelinePayload {
 	const datasource = args.datasource;
+	const normalized = normalizeSnapshotConfig(args.datasourceConfig ?? {});
 	const branch = String(
-		(args.datasourceConfig as { branch?: string } | null | undefined)?.branch ?? 'master'
+		(normalized as { branch?: string } | null | undefined)?.branch ?? 'master'
 	).trim();
 	const filename = (datasource.name ?? 'export').replace(/\s+/g, '_').toLowerCase();
 	const tabs: PipelineTab[] = [
@@ -148,7 +171,7 @@ export function buildDatasourcePipelinePayload(args: {
 			datasource: {
 				id: datasource.id,
 				analysis_tab_id: null,
-				config: { branch, ...(args.datasourceConfig ?? {}) }
+				config: { branch, ...normalized }
 			},
 			output: {
 				result_id: datasource.id,

@@ -325,8 +325,10 @@ export class AnalysisStore {
 		const datasourceId = this.activeTab.datasource.id;
 		if (!analysisId) return;
 		const configSnapshot = this.activeTab.datasource.config as Record<string, unknown>;
-		const snapshotId = (configSnapshot.snapshot_id as string | null | undefined) ?? null;
-		const snapshotMs = (configSnapshot.snapshot_timestamp_ms as number | null | undefined) ?? null;
+		const snapshotId =
+			(configSnapshot.time_travel_snapshot_id as string | null | undefined) ?? null;
+		const snapshotMs =
+			(configSnapshot.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
 		const snapshotKey = `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
 		const edges: Record<string, string[]> = {};
 		for (const item of nextPipeline) {
@@ -361,8 +363,10 @@ export class AnalysisStore {
 			if (String(sourceTabId ?? '') !== activeTabId) continue;
 			const depDatasourceId = tab.datasource.id;
 			const depConfig = tab.datasource.config as Record<string, unknown>;
-			const depSnapshotId = (depConfig.snapshot_id as string | null | undefined) ?? null;
-			const depSnapshotMs = (depConfig.snapshot_timestamp_ms as number | null | undefined) ?? null;
+			const depSnapshotId =
+				(depConfig.time_travel_snapshot_id as string | null | undefined) ?? null;
+			const depSnapshotMs =
+				(depConfig.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
 			const depSnapshotKey = `${depSnapshotId ?? 'latest'}:${depSnapshotMs ?? 0}`;
 			for (const item of tab.steps) {
 				if (item.type !== 'view') continue;

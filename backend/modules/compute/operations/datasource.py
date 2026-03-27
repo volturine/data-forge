@@ -1,6 +1,5 @@
 import hashlib
 import json
-import logging
 import os
 import sqlite3
 from collections import deque
@@ -128,20 +127,10 @@ class DatasourceHandler(OperationHandler):
         snapshot_id = config.snapshot_id
         snapshot_value: int | None = None
         if snapshot_id is not None:
-            from pyiceberg.table import StaticTable
-
             try:
                 snapshot_value = int(snapshot_id)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f'Iceberg snapshot ID must be an integer: {snapshot_id}') from exc
-
-            table = StaticTable.from_metadata(metadata_path)
-            snapshot = table.snapshot_by_id(snapshot_value)
-            if snapshot is None:
-                logger = logging.getLogger(__name__)
-                logger.warning('Iceberg snapshot ID %s not found, falling back to latest snapshot', snapshot_id)
-                snapshot = table.current_snapshot()
-                snapshot_value = snapshot.snapshot_id if snapshot is not None else None
         if snapshot_id is None and config.snapshot_timestamp_ms is not None:
             from pyiceberg.table import StaticTable
 

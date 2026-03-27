@@ -1,9 +1,11 @@
 from unittest.mock import MagicMock
 
 import pyarrow as pa  # type: ignore[import-untyped]
+import pytest
 from pyiceberg.schema import Schema as IcebergSchema
 from pyiceberg.types import NestedField, StringType
 
+from core.exceptions import DataSourceSnapshotError
 from modules.compute.iceberg_reader import scan_iceberg_snapshot
 
 
@@ -44,3 +46,13 @@ def test_scan_iceberg_snapshot_drops_extra_columns(monkeypatch):
     df = lf.collect()
 
     assert df.columns == ['a']
+
+
+def test_scan_iceberg_snapshot_raises_on_missing_snapshot(monkeypatch):
+    table = MagicMock()
+    table.snapshot_by_id.return_value = None
+
+    monkeypatch.setattr('modules.compute.iceberg_reader.StaticTable.from_metadata', MagicMock(return_value=table))
+
+    with pytest.raises(DataSourceSnapshotError, match='Iceberg snapshot ID not found'):
+        scan_iceberg_snapshot('file://tmp/metadata.json', 999, None)

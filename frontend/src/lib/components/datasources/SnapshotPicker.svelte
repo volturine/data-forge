@@ -44,8 +44,8 @@
 	let snapshotList = $state<
 		Array<{ id: string; timestamp: number; operation?: string | null; is_current?: boolean }>
 	>([]);
-	let selectedSnapshotId = $state<string | null>(null);
-	let selectedSnapshotLabel = $state<string | null>(null);
+	let timeTravelId = $state<string | null>(null);
+	let timeTravelLabel = $state<string | null>(null);
 	let missingSnapshotId = $state<string | null>(null);
 	const calendarDays = $derived.by(() => computeCalendarDays(snapshotMonth, filteredSnapshotList));
 	let deleteConfirmId = $state<string | null>(null);
@@ -56,12 +56,15 @@
 	const filteredSnapshotList = $derived.by(() => {
 		if (!showBuildPreviews) return snapshotList;
 		if (buildRuns.length === 0) return snapshotList;
+		if (runSnapshotMap.size === 0) return snapshotList;
 		const mapped = new SvelteMap<string, boolean>();
 		for (const snap of runSnapshotMap.values()) {
 			if (!snap) continue;
 			mapped.set(snap, true);
 		}
-		return snapshotList.filter((snap) => mapped.has(snap.id));
+		const result = snapshotList.filter((snap) => mapped.has(snap.id));
+		if (result.length === 0) return snapshotList;
+		return result;
 	});
 	const filteredSnapshots = $derived(
 		selectedDay
@@ -69,7 +72,15 @@
 			: []
 	);
 
-	// Subscription: $derived can't sync state from config.
+	const currentSnapshot = $derived(snapshotList.find((snap) => snap.is_current) ?? null);
+	const isLatest = $derived.by(() => {
+		if (!timeTravelId) return true;
+		if (snapshotList.length === 0) return true;
+		if (currentSnapshot && timeTravelId === currentSnapshot.id) return true;
+		return false;
+	});
+
+	// Subscription: $derived can't sync state from config — config is external and may change at any time.
 	$effect(() => {
 		const ui = (datasourceConfig.time_travel_ui as Record<string, unknown>) ?? {};
 		if (persistOpen && !hasOpened) {
@@ -83,17 +94,16 @@
 		if (nextMonth !== undefined) snapshotMonth = nextMonth;
 		const nextDay = ui.day as string | undefined;
 		if (nextDay !== undefined) selectedDay = nextDay;
-		const configSnapshot = datasourceConfig.snapshot_id as string | null | undefined;
-		if (configSnapshot !== undefined) {
-			selectedSnapshotId = configSnapshot ?? null;
+		const configTravelId = datasourceConfig.time_travel_snapshot_id as string | null | undefined;
+		if (configTravelId !== undefined) {
+			timeTravelId = configTravelId ?? null;
 		}
-		const ts = datasourceConfig.snapshot_timestamp_ms as number | null;
-		selectedSnapshotLabel = selectedSnapshotId && ts ? formatSnapshotLabel(ts) : null;
-		missingSnapshotId = selectedSnapshotId;
+		const ts = datasourceConfig.time_travel_snapshot_timestamp_ms as number | null;
+		timeTravelLabel = timeTravelId && ts ? formatSnapshotLabel(ts) : null;
 	});
 
 	let lastDatasourceId = $state<string | null>(null);
-	// Subscription: $derived can't reset snapshot state.
+	// Subscription: $derived can't reset snapshot state on datasource switch.
 	$effect(() => {
 		if (datasourceId === lastDatasourceId) return;
 		lastDatasourceId = datasourceId;
@@ -101,8 +111,8 @@
 		snapshotsError = null;
 		snapshotsLoading = false;
 		selectedDay = '';
-		selectedSnapshotId = null;
-		selectedSnapshotLabel = null;
+		timeTravelId = null;
+		timeTravelLabel = null;
 		snapshotMonth = '';
 		snapshotsOpen = false;
 		hasOpened = false;
@@ -146,8 +156,12 @@
 			}))
 			.sort((a, b) => b.timestamp - a.timestamp);
 		snapshotList = list;
-		if (selectedSnapshotId && list.some((snap) => snap.id === selectedSnapshotId)) {
+		if (!timeTravelId) {
 			missingSnapshotId = null;
+		} else if (list.some((snap) => snap.id === timeTravelId)) {
+			missingSnapshotId = null;
+		} else {
+			missingSnapshotId = timeTravelId;
 		}
 		const monthSource = showBuildPreviews ? filteredSnapshotList : list;
 		const monthOptions = Array.from(
@@ -211,7 +225,7 @@
 		updateUi({ month: monthKey, day: '' });
 	}
 
-	// Subscription: $derived can't clear day selection.
+	// Subscription: $derived can't clear day selection when filtered list changes.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		if (!filteredSnapshotList.length) return;
@@ -224,7 +238,7 @@
 		updateUi({ day: '' });
 	});
 
-	// Subscription: $derived can't select month on open.
+	// Subscription: $derived can't select month on open when snapshot list changes.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		const source = showBuildPreviews ? filteredSnapshotList : snapshotList;
@@ -294,18 +308,18 @@
 	}
 
 	function setSnapshot(snapshotId: string | null, timestampMs?: number) {
-		selectedSnapshotId = snapshotId;
+		timeTravelId = snapshotId;
 		const nextConfig = { ...datasourceConfig };
 		if (snapshotId === null) {
-			delete nextConfig.snapshot_id;
-			delete nextConfig.snapshot_timestamp_ms;
-			selectedSnapshotLabel = null;
+			delete nextConfig.time_travel_snapshot_id;
+			delete nextConfig.time_travel_snapshot_timestamp_ms;
+			timeTravelLabel = null;
 			missingSnapshotId = null;
 		} else {
-			nextConfig.snapshot_id = snapshotId;
-			if (timestampMs) {
-				nextConfig.snapshot_timestamp_ms = timestampMs;
-				selectedSnapshotLabel = formatSnapshotLabel(timestampMs);
+			nextConfig.time_travel_snapshot_id = snapshotId;
+			if (timestampMs != null) {
+				nextConfig.time_travel_snapshot_timestamp_ms = timestampMs;
+				timeTravelLabel = formatSnapshotLabel(timestampMs);
 			}
 			missingSnapshotId = null;
 		}
@@ -380,7 +394,7 @@
 		};
 	}
 
-	// DOM: $derived can't handle outside click.
+	// DOM: $derived can't handle outside click listener lifecycle.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		const handleOutside = (event: MouseEvent) => {
@@ -419,7 +433,7 @@
 					updateUi({ open: true });
 				}
 				loadSnapshots();
-				if (selectedSnapshotId === snapshotId) {
+				if (timeTravelId === snapshotId) {
 					setSnapshot(null);
 				}
 			},
@@ -467,21 +481,7 @@
 			<span>{label}</span>
 		</div>
 		<div class={cx(row, css({ gap: '2' }))}>
-			{#if selectedSnapshotId}
-				<span
-					class={css({
-						borderWidth: '1',
-						backgroundColor: 'bg.tertiary',
-						paddingX: '1.5',
-						paddingY: '0.5',
-						fontSize: '2xs',
-						textTransform: 'uppercase',
-						color: 'fg.muted'
-					})}
-				>
-					{selectedSnapshotId}
-				</span>
-			{:else}
+			{#if isLatest}
 				<span
 					class={css({
 						borderWidth: '1',
@@ -495,6 +495,25 @@
 					})}
 				>
 					Latest
+				</span>
+			{:else}
+				<span
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						paddingX: '1.5',
+						paddingY: '0.5',
+						fontSize: '2xs',
+						textTransform: 'uppercase',
+						color: 'fg.muted',
+						maxWidth: '120px',
+						overflow: 'hidden',
+						textOverflow: 'ellipsis',
+						whiteSpace: 'nowrap'
+					})}
+					title={timeTravelId}
+				>
+					{timeTravelId}
 				</span>
 			{/if}
 			<span class={cx(muted, row, snapshotsOpen && css({ transform: 'rotate(180deg)' }))}>
@@ -534,16 +553,17 @@
 				})}
 			>
 				<div class={css({ fontSize: 'xs', color: 'fg.muted', textAlign: 'left' })}>
-					{#if selectedSnapshotId}
-						Current: #{selectedSnapshotId}
-						{#if selectedSnapshotLabel}
-							· {selectedSnapshotLabel}
-						{/if}
+					{#if isLatest}
+						Selected: Latest{#if currentSnapshot}
+							· #{currentSnapshot.id}{/if}
 					{:else}
-						Current: Latest
+						Selected: #{timeTravelId}
+						{#if timeTravelLabel}
+							· {timeTravelLabel}
+						{/if}
 					{/if}
 				</div>
-				{#if selectedSnapshotId}
+				{#if !isLatest}
 					<button
 						class={css({
 							borderWidth: '1',
@@ -739,7 +759,7 @@
 											fontSize: 'xs',
 											_hover: { backgroundColor: 'bg.tertiary' }
 										}),
-										selectedSnapshotId === snap.id || (!selectedSnapshotId && snap.is_current)
+										timeTravelId === snap.id || (!timeTravelId && snap.is_current)
 											? css({ backgroundColor: 'bg.tertiary' })
 											: ''
 									)}
@@ -761,7 +781,7 @@
 										<span
 											class={cx(
 												css({ fontFamily: 'mono' }),
-												selectedSnapshotId === snap.id
+												timeTravelId === snap.id
 													? css({ color: 'fg.primary' })
 													: css({ color: 'fg.secondary' })
 											)}

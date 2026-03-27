@@ -437,6 +437,7 @@ class TestRunAnalysisBuildOutputDatasource:
         mock_table = MagicMock()
         mock_catalog.table_exists.return_value = False
         mock_catalog.create_table.return_value = mock_table
+        mock_table.current_snapshot.return_value = MagicMock(snapshot_id=123, timestamp_ms=1000)
 
         engine_mock = MagicMock()
         engine_mock.is_process_alive.return_value = True
@@ -499,6 +500,10 @@ class TestRunAnalysisBuildOutputDatasource:
         expected_path = str(namespace_paths().exports_dir / output_ds_id)
         assert output_ds.config['metadata_path'] == expected_path
         assert output_ds.config['table'] == f'{output_ds_id}_master'
+        assert output_ds.config['current_snapshot_id'] == '123'
+        assert output_ds.config['current_snapshot_timestamp_ms'] == 1000
+        assert output_ds.config['snapshot_id'] == '123'
+        assert output_ds.config['snapshot_timestamp_ms'] == 1000
 
     def test_tab_missing_output_filename_fails(self, test_db_session: Session, sample_datasource: DataSource):
         analysis_id = str(uuid.uuid4())
