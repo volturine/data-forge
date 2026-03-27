@@ -129,7 +129,10 @@ function parseDateTimeInput(value: string): {
 }
 
 function partsMap(format: Intl.DateTimeFormat, date: Date): Record<string, string> {
-	return Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+	const parts = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+	// Some CI/runtime combinations emit midnight as "24" instead of "00" for 24-hour clocks.
+	if (parts.hour === '24') parts.hour = '00';
+	return parts;
 }
 
 function getTimeZoneOffsetMinutes(date: Date, timezone: string): number {
