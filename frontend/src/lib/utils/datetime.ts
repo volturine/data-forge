@@ -129,7 +129,9 @@ function parseDateTimeInput(value: string): {
 }
 
 function partsMap(format: Intl.DateTimeFormat, date: Date): Record<string, string> {
-	return Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+	const parts = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+	if (parts.hour === '24') parts.hour = '00';
+	return parts;
 }
 
 function getTimeZoneOffsetMinutes(date: Date, timezone: string): number {

@@ -163,6 +163,14 @@ describe('parseDateTimeInputToIso', () => {
 		const parsed = parseDateTimeInputToIso(formatted, 'UTC', true);
 		expect(parsed).toBe(original);
 	});
+
+	test('round-trips midnight values without 24:00 formatting', () => {
+		const original = '2024-06-15T00:00:00.000Z';
+		const formatted = formatDateTimeForInput(original, 'UTC', true);
+		expect(formatted).toBe('2024-06-15T00:00');
+		const parsed = parseDateTimeInputToIso(formatted, 'UTC', true);
+		expect(parsed).toBe(original);
+	});
 });
 
 // ── getYearInZone ───────────────────────────────────────────────────────────
