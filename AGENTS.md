@@ -111,3 +111,4 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 - SvelteKit client-side `goto()` transitions can leave Playwright `waitForURL()` hanging; for in-app navigation tests prefer `expect(page).toHaveURL()` after the click, and wait for hydration (`networkidle`) before clicking JS-bound controls.
 - Monitoring and modal e2e flows are much more reliable when tests target accessible semantics (`role="tab"`, `role="dialog"`, `aria-label`) instead of DOM order, hover-only buttons, or global `.first()` selectors.
 - Datasource list/read endpoints must stay side-effect free: schema extraction and `schema_cache` backfill belong on write/create paths, not inside `list_datasources()`, or concurrent e2e traffic can trigger transient upload/delete races.
+- Before replying that a PR follow-up is ready, confirm the branch log/diff includes the intended code changes; review notes without a corresponding commit are not enough.

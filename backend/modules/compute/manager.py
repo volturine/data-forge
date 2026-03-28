@@ -10,6 +10,7 @@ from modules.compute.schemas import EngineStatus
 logger = logging.getLogger(__name__)
 
 _RESOURCE_KEYS = frozenset({'max_threads', 'max_memory_mb', 'streaming_chunk_size'})
+_SPAWN_WAIT_TIMEOUT_SECONDS = 30
 
 EngineFactory = Callable[[str, dict | None], ComputeEngine]
 
@@ -39,6 +40,7 @@ class ProcessManager:
     def __init__(self, engine_factory: EngineFactory = _default_engine_factory) -> None:
         self._engines: dict[str, EngineInfo] = {}
         self._engines_lock = threading.Lock()
+        self._engine_events: dict[str, threading.Event] = {}
         self._engine_factory = engine_factory
 
     def spawn_engine(self, analysis_id: str, resource_config: dict | None = None) -> EngineInfo:
@@ -62,50 +64,61 @@ class ProcessManager:
         from core.config import settings
 
         normalized_config = self._normalize_config(resource_config)
+        wait_event: threading.Event | None = None
 
-        shutdown_target: ComputeEngine | None = None
-        with self._engines_lock:
-            if analysis_id in self._engines:
-                info = self._engines[analysis_id]
-                if not self._configs_differ(self._normalize_config(info.engine.resource_config), normalized_config):
-                    info.touch()
-                    logger.debug(f'Reusing existing engine for analysis {analysis_id}')
-                    return info
+        while True:
+            shutdown_target: ComputeEngine | None = None
+            with self._engines_lock:
+                in_progress_event = self._engine_events.get(analysis_id)
+                if in_progress_event is not None:
+                    wait_event = in_progress_event
+                else:
+                    info = self._engines.get(analysis_id)
+                    if info and not self._configs_differ(self._normalize_config(info.engine.resource_config), normalized_config):
+                        info.touch()
+                        logger.debug(f'Reusing existing engine for analysis {analysis_id}')
+                        return info
 
-                logger.info(f'Resource config changed for analysis {analysis_id}, restarting engine')
-                shutdown_target = info.engine
-                del self._engines[analysis_id]
+                    self._engine_events[analysis_id] = threading.Event()
+                    wait_event = None
+                    if info:
+                        logger.info(f'Resource config changed for analysis {analysis_id}, restarting engine')
+                        shutdown_target = info.engine
+                        del self._engines[analysis_id]
+                    break
 
-        # Shutdown outside lock to avoid deadlock
-        if shutdown_target:
-            shutdown_target.shutdown()
+            if wait_event is not None and not wait_event.wait(timeout=_SPAWN_WAIT_TIMEOUT_SECONDS):
+                raise RuntimeError(f'Timed out waiting for engine spawn to finish for analysis {analysis_id}')
 
-        with self._engines_lock:
-            # Re-check: another thread may have spawned while we were shutting down
-            if analysis_id in self._engines:
-                info = self._engines[analysis_id]
-                info.touch()
+        try:
+            if shutdown_target:
+                shutdown_target.shutdown()
+
+            with self._engines_lock:
+                if len(self._engines) >= settings.max_concurrent_engines:
+                    logger.warning(
+                        f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}'
+                    )
+                    raise RuntimeError(
+                        f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
+                        f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
+                    )
+
+                logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
+                engine = self._engine_factory(analysis_id, normalized_config)
+                engine.start()
+                if not engine.is_process_alive():
+                    engine.shutdown()
+                    raise RuntimeError(f'Failed to start engine for analysis {analysis_id}')
+                info = EngineInfo(engine)
+                self._engines[analysis_id] = info
+                logger.info(f'Engine spawned successfully for analysis {analysis_id}')
                 return info
-
-            if len(self._engines) >= settings.max_concurrent_engines:
-                logger.warning(
-                    f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}'
-                )
-                raise RuntimeError(
-                    f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
-                    f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
-                )
-
-            logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
-            engine = self._engine_factory(analysis_id, normalized_config)
-            engine.start()
-            if not engine.is_process_alive():
-                engine.shutdown()
-                raise RuntimeError(f'Failed to start engine for analysis {analysis_id}')
-            info = EngineInfo(engine)
-            self._engines[analysis_id] = info
-            logger.info(f'Engine spawned successfully for analysis {analysis_id}')
-            return info
+        finally:
+            with self._engines_lock:
+                in_progress_event = self._engine_events.pop(analysis_id, None)
+                if in_progress_event is not None:
+                    in_progress_event.set()
 
     def _configs_differ(self, old_config: dict, new_config: dict) -> bool:
         return any(old_config.get(k) != new_config.get(k) for k in _RESOURCE_KEYS)

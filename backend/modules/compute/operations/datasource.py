@@ -159,19 +159,17 @@ class DatasourceHandler(OperationHandler):
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
 
 
-_analysis_stack_var: contextvars.ContextVar[list[tuple[str, str | None]]] = contextvars.ContextVar('_analysis_stack')
+_analysis_stack_var: contextvars.ContextVar[tuple[tuple[str, str | None], ...]] = contextvars.ContextVar(
+    '_analysis_stack',
+    default=(),
+)
 _ANALYSIS_CACHE: dict[str, pl.LazyFrame] = {}
 _ANALYSIS_CACHE_KEYS: deque[str] = deque()
 _ANALYSIS_CACHE_MAX = 20
 
 
-def _get_analysis_stack() -> list[tuple[str, str | None]]:
-    try:
-        return _analysis_stack_var.get()
-    except LookupError:
-        stack: list[tuple[str, str | None]] = []
-        _analysis_stack_var.set(stack)
-        return stack
+def _get_analysis_stack() -> tuple[tuple[str, str | None], ...]:
+    return _analysis_stack_var.get()
 
 
 def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
@@ -179,7 +177,7 @@ def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None
     stack_key = (analysis_id, tab_id)
     if stack_key in stack:
         raise ValueError('Analysis pipeline contains a circular reference')
-    stack.append(stack_key)
+    token = _analysis_stack_var.set((*stack, stack_key))
     try:
         cache_key = _analysis_cache_key(pipeline, tab_id)
         cached = _ANALYSIS_CACHE.get(cache_key)
@@ -189,7 +187,7 @@ def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None
         _store_analysis_cache(cache_key, frame)
         return frame
     finally:
-        stack.pop()
+        _analysis_stack_var.reset(token)
 
 
 def _analysis_cache_key(pipeline: dict, tab_id: str | None) -> str:
