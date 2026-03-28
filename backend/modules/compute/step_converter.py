@@ -18,6 +18,7 @@ Backend format:
 """
 
 import logging
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +349,7 @@ def convert_notification_config(config: dict) -> dict:
     }
 
 
-_CONVERTERS: dict = {
+_CONVERTERS: dict[str, Callable[[dict], dict]] = {
     'filter': convert_filter_config,
     'groupby': convert_groupby_config,
     'sort': convert_sort_config,

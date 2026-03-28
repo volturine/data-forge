@@ -38,6 +38,12 @@ class PolarsComputeEngine:
         self.current_job_id: str | None = None
         self._pending_results: dict[str, dict] = {}
 
+    @property
+    def process_id(self) -> int | None:
+        if self.process and self.process.is_alive():
+            return self.process.pid
+        return None
+
     def is_process_alive(self) -> bool:
         """Check if the subprocess is still alive."""
         return self.process is not None and self.process.is_alive()
@@ -581,6 +587,49 @@ class PolarsComputeEngine:
         return query_plans, query_plan
 
     @staticmethod
+    def _resolve_chart_preview(
+        lf: pl.LazyFrame,
+        steps: list[dict],
+        row_limit: int,
+        offset: int,
+    ) -> tuple[pl.LazyFrame, dict | None]:
+        """If the last step is a chart, compute chart data and metadata."""
+        if not steps:
+            return lf, None
+        last_step = steps[-1]
+        last_type = str(last_step.get('type', ''))
+        if last_type != 'chart' and not last_type.startswith('plot_'):
+            return lf, None
+
+        chart_config = last_step.get('config', {})
+        chart_type = get_chart_type_for_step(last_type)
+        if chart_type:
+            chart_config = {**chart_config, 'chart_type': chart_type}
+        try:
+            chart_params = convert_config_to_params('chart', chart_config)
+        except ValueError:
+            chart_params = chart_config
+        chart_model = ChartParams.model_validate(chart_params)
+        preview_lf = compute_chart_data(lf, chart_params)
+        metadata = {
+            'y_axis_scale': chart_model.y_axis_scale,
+            'y_axis_min': chart_model.y_axis_min,
+            'y_axis_max': chart_model.y_axis_max,
+            'display_units': chart_model.display_units,
+            'decimal_places': chart_model.decimal_places,
+            'legend_position': chart_model.legend_position,
+            'title': chart_model.title,
+            'overlays': compute_overlay_datasets(
+                lf,
+                chart_model,
+                row_limit=row_limit,
+                offset=offset,
+            ),
+            'reference_lines': [line.model_dump() for line in chart_model.reference_lines],
+        }
+        return preview_lf, metadata
+
+    @staticmethod
     def _execute_preview(
         datasource_config: dict,
         steps: list[dict],
@@ -598,38 +647,7 @@ class PolarsComputeEngine:
         )
         query_plans, query_plan = PolarsComputeEngine._extract_plans(plan_frames)
 
-        preview_lf = lf
-        metadata: dict | None = None
-        if steps:
-            last_step = steps[-1]
-            last_type = str(last_step.get('type', ''))
-            if last_type == 'chart' or last_type.startswith('plot_'):
-                chart_config = last_step.get('config', {})
-                chart_type = get_chart_type_for_step(last_type)
-                if chart_type:
-                    chart_config = {**chart_config, 'chart_type': chart_type}
-                try:
-                    chart_params = convert_config_to_params('chart', chart_config)
-                except ValueError:
-                    chart_params = chart_config
-                chart_model = ChartParams.model_validate(chart_params)
-                preview_lf = compute_chart_data(lf, chart_params)
-                metadata = {
-                    'y_axis_scale': chart_model.y_axis_scale,
-                    'y_axis_min': chart_model.y_axis_min,
-                    'y_axis_max': chart_model.y_axis_max,
-                    'display_units': chart_model.display_units,
-                    'decimal_places': chart_model.decimal_places,
-                    'legend_position': chart_model.legend_position,
-                    'title': chart_model.title,
-                    'overlays': compute_overlay_datasets(
-                        lf,
-                        chart_model,
-                        row_limit=row_limit,
-                        offset=offset,
-                    ),
-                    'reference_lines': [line.model_dump() for line in chart_model.reference_lines],
-                }
+        preview_lf, metadata = PolarsComputeEngine._resolve_chart_preview(lf, steps, row_limit, offset)
 
         # Get schema from lazy frame (no collection needed)
         schema_obj = preview_lf.collect_schema()

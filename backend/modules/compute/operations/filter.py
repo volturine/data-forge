@@ -73,9 +73,6 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
 
 
 class FilterHandler(OperationHandler):
-    def __init__(self) -> None:
-        self._last_schema: dict[str, pl.DataType] | None = None
-
     OPERATORS: dict[str, Callable[[pl.Expr, Any], pl.Expr]] = {
         '=': lambda col, val: col == val,
         '==': lambda col, val: col == val,
@@ -112,9 +109,9 @@ class FilterHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = FilterParams.model_validate(params)
-        self._last_schema = lf.collect_schema()
+        schema = lf.collect_schema()
 
-        exprs = [self._build_expr(cond) for cond in validated.conditions]
+        exprs = [self._build_expr(cond, schema) for cond in validated.conditions]
 
         if validated.logic == 'AND':
             return lf.filter(pl.all_horizontal(exprs))
@@ -122,12 +119,11 @@ class FilterHandler(OperationHandler):
             return lf.filter(pl.any_horizontal(exprs))
         raise ValueError(f'Unsupported logic operator: {validated.logic}')
 
-    def _build_expr(self, cond: FilterCondition) -> pl.Expr:
+    def _build_expr(self, cond: FilterCondition, schema: pl.Schema) -> pl.Expr:
         left = pl.col(cond.column)
-        schema = self._schema
-        col_dtype = schema.get(cond.column) if schema else None
+        col_dtype = schema.get(cond.column)
         if col_dtype:
-            left = self._normalize_datetime_col(left, col_dtype)
+            left = _normalize_datetime_col(left, col_dtype)
 
         if cond.operator in ('is_null', 'is_not_null'):
             return get_operator(cond.operator)(left, None)
@@ -139,11 +135,11 @@ class FilterHandler(OperationHandler):
             if not cond.compare_column:
                 raise ValueError('compare_column required when value_type is column')
             right = pl.col(cond.compare_column)
-            if schema and cond.compare_column in schema:
-                right = self._normalize_datetime_col(right, schema[cond.compare_column])
+            if cond.compare_column in schema:
+                right = _normalize_datetime_col(right, schema[cond.compare_column])
             return op(left, right)
 
-        is_date_only = self._is_date_only_value(cond.value)
+        is_date_only = _is_date_only_value(cond.value)
         is_datetime_col = isinstance(col_dtype, pl.Datetime)
 
         if is_date_only and is_datetime_col and cond.value_type == 'datetime':
@@ -171,27 +167,24 @@ class FilterHandler(OperationHandler):
             return combined
         return op(left, coerced)
 
-    def _is_date_only_value(self, value: Any) -> bool:
-        """Check if value is a date-only string (YYYY-MM-DD without time)."""
-        if not isinstance(value, str):
-            return False
-        return len(value) == 10 and '-' in value and 'T' not in value
 
-    @property
-    def _schema(self) -> dict[str, pl.DataType] | None:
-        return self._last_schema
+def _is_date_only_value(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return len(value) == 10 and '-' in value and 'T' not in value
 
-    def _normalize_datetime_col(self, expr: pl.Expr, dtype: pl.DataType) -> pl.Expr:
-        if not isinstance(dtype, pl.Datetime):
-            return expr
-        tz = dtype.time_zone
-        if settings.normalize_tz:
-            if tz is None:
-                return expr.dt.replace_time_zone(settings.timezone)
-            return expr.dt.convert_time_zone(settings.timezone)
+
+def _normalize_datetime_col(expr: pl.Expr, dtype: pl.DataType) -> pl.Expr:
+    if not isinstance(dtype, pl.Datetime):
+        return expr
+    tz = dtype.time_zone
+    if settings.normalize_tz:
         if tz is None:
-            return expr
-        return expr.dt.replace_time_zone(None)
+            return expr.dt.replace_time_zone(settings.timezone)
+        return expr.dt.convert_time_zone(settings.timezone)
+    if tz is None:
+        return expr
+    return expr.dt.replace_time_zone(None)
 
 
 def get_operator(name: str) -> Callable[[pl.Expr, Any], pl.Expr]:

@@ -62,5 +62,5 @@ class WithColumnsHandler(OperationHandler):
                     struct = pl.struct(args)
                     exprs.append(struct.map_elements(partial(apply_row, fn=fn, cols=args)).alias(expr.name))
                 else:
-                    exprs.append(pl.lit(0).map_elements(partial(apply_null, fn=fn)).alias(expr.name))
+                    exprs.append(pl.int_range(pl.len()).map_elements(partial(apply_null, fn=fn)).alias(expr.name))
         return lf.with_columns(exprs)
