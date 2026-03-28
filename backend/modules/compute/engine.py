@@ -3,7 +3,6 @@ import logging
 import multiprocessing as mp
 import os
 import resource
-import threading
 import time
 import uuid
 from collections import deque
@@ -24,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class PolarsComputeEngine:
-    _ENV_LOCK = threading.Lock()
-
     def __init__(self, analysis_id: str, resource_config: dict | None = None):
         self.analysis_id = analysis_id
         self.resource_config = resource_config or {}
@@ -95,30 +92,12 @@ class PolarsComputeEngine:
             'streaming_chunk_size': streaming_chunk_size,
         }
 
-        env_updates: dict[str, str] = {}
-        if max_threads > 0:
-            env_updates['POLARS_MAX_THREADS'] = str(max_threads)
-        if streaming_chunk_size > 0:
-            env_updates['POLARS_STREAMING_CHUNK_SIZE'] = str(streaming_chunk_size)
-
-        with self._ENV_LOCK:
-            previous_env: dict[str, str | None] = {key: os.environ.get(key) for key in env_updates}
-            for key, value in env_updates.items():
-                os.environ[key] = value
-                logger.debug(f'Set {key}={value} for subprocess spawn')
-            try:
-                process = self._mp_context.Process(
-                    target=self._run_compute,
-                    args=(self.command_queue, self.result_queue, max_memory_mb),
-                )
-                process.start()
-                self.process = process
-            finally:
-                for env_key, prev_value in previous_env.items():
-                    if prev_value is None:
-                        os.environ.pop(env_key, None)
-                        continue
-                    os.environ[env_key] = prev_value
+        process = self._mp_context.Process(
+            target=self._run_compute,
+            args=(self.command_queue, self.result_queue, max_memory_mb, max_threads, streaming_chunk_size),
+        )
+        process.start()
+        self.process = process
         self.is_running = True
         logger.info(
             f'Engine started for analysis {self.analysis_id} '
@@ -274,8 +253,21 @@ class PolarsComputeEngine:
                 queue.join_thread()
 
     @staticmethod
-    def _run_compute(command_queue: mp.Queue, result_queue: mp.Queue, max_memory_mb: int = 0) -> None:
+    def _run_compute(
+        command_queue: mp.Queue,
+        result_queue: mp.Queue,
+        max_memory_mb: int = 0,
+        max_threads: int = 0,
+        streaming_chunk_size: int = 0,
+    ) -> None:
         """Main compute loop running in subprocess."""
+        # Set Polars env vars here before any Polars computation — the thread pool is
+        # created lazily, so this takes effect even though polars is already imported.
+        if max_threads > 0:
+            os.environ['POLARS_MAX_THREADS'] = str(max_threads)
+        if streaming_chunk_size > 0:
+            os.environ['POLARS_STREAMING_CHUNK_SIZE'] = str(streaming_chunk_size)
+
         if max_memory_mb > 0:
             memory_bytes = max_memory_mb * 1024 * 1024
             try:

@@ -1,3 +1,4 @@
+import os
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -160,7 +161,7 @@ async def upload_bulk(
 
     selected_extensions = [Path(file.filename).suffix.lower() for file in files if file.filename]
     if selected_extensions:
-        unique_extensions = {ext for ext in selected_extensions if ext}
+        unique_extensions = set(selected_extensions)
         if len(unique_extensions) > 1:
             raise HTTPException(status_code=400, detail='Bulk upload must use a single file type per batch')
 
@@ -319,10 +320,11 @@ async def preflight_excel(
 async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
     file_path = Path(payload.file_path)
     paths = namespace_paths()
-    resolved = Path(file_path.resolve())
-    if paths.base_dir not in resolved.parents and paths.base_dir != resolved:
+    resolved = Path(os.path.realpath(file_path))
+    real_base = Path(os.path.realpath(paths.base_dir))
+    if real_base not in resolved.parents and real_base != resolved:
         raise HTTPException(status_code=400, detail='Excel file must be inside the data directory')
-    if not file_path.exists() or not file_path.is_file():
+    if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=400, detail='Excel file not found')
     if file_path.suffix.lower() != '.xlsx':
         raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')

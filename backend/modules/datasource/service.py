@@ -1048,9 +1048,9 @@ _SCHEMA_HANDLERS: dict[DataSourceType, Callable[[DataSource, str | None], Schema
 
 
 def list_data_files(path: str | None) -> FileListResponse:
-    base_dir = namespace_paths().base_dir.resolve()
+    base_dir = Path(os.path.realpath(namespace_paths().base_dir))
     target = Path(path) if path else base_dir
-    resolved = target.resolve()
+    resolved = Path(os.path.realpath(target))
     if base_dir not in resolved.parents and base_dir != resolved:
         raise ValueError(f'Path must be inside data directory: {base_dir}')
     if not resolved.exists():

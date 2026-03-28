@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
@@ -8,6 +9,33 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
+
+
+def _validate_regex_pattern(pattern: str) -> None:
+    """Validate that a regex pattern compiles before passing to Polars."""
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        raise ValueError(f'Invalid regex pattern: {e}') from e
+
+
+def _parse_datetime_string(s: str) -> datetime:
+    """Parse a datetime string, supporting ISO 8601 and common fallback formats."""
+    if s.endswith('Z'):
+        s = s[:-1] + '+00:00'
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Cannot parse datetime string '{s}'. Accepted formats: ISO 8601 (YYYY-MM-DDTHH:MM:SS), YYYY-MM-DD HH:MM:SS, MM/DD/YYYY"
+    )
+
 
 ValueType = Literal['string', 'number', 'date', 'datetime', 'column', 'boolean']
 
@@ -49,7 +77,10 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
         if isinstance(value, (int, float)):
             return value
         s = str(value)
-        return float(s) if '.' in s else int(s)
+        parsed = float(s)
+        if parsed.is_integer() and '.' not in s and 'e' not in s.lower():
+            return int(parsed)
+        return parsed
 
     if value_type == 'boolean':
         if isinstance(value, bool):
@@ -59,10 +90,10 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
     if value_type == 'date':
         if isinstance(value, datetime):
             return value.date()
-        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).date()
+        return _parse_datetime_string(str(value)).date()
 
     if value_type == 'datetime':
-        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        dt = value if isinstance(value, datetime) else _parse_datetime_string(str(value))
         if not dt.tzinfo and not settings.normalize_tz:
             return dt
         tz = ZoneInfo(settings.timezone)
@@ -153,6 +184,8 @@ class FilterHandler(OperationHandler):
         op = get_operator(cond.operator)
         if cond.operator == 'regex' and coerced == '':
             return pl.lit(False)
+        if cond.operator == 'regex' and isinstance(coerced, str):
+            _validate_regex_pattern(coerced)
         if isinstance(coerced, list):
             if not coerced:
                 if cond.operator in ('not_contains', 'not_in'):
