@@ -29,6 +29,7 @@ dependencies = [
     "croniter",
     "pytest-timeout>=2.2.0",
     "jsonschema>=4.0.0",
+    "websockets>=16.0",
 ]
 
 [project.optional-dependencies]

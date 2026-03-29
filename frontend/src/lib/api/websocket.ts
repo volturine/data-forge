@@ -73,7 +73,14 @@ export function websocketRequest<T, Payload>(
 				try {
 					message = JSON.parse(event.data) as WebsocketMessage<T>;
 				} catch {
-					settle(() => reject({ type: 'parse', message: 'Failed to parse websocket response' }));
+					const preview =
+						typeof event.data === 'string' ? event.data.slice(0, 100) : '[non-text payload]';
+					settle(() =>
+						reject({
+							type: 'parse',
+							message: `Failed to parse websocket response: ${preview}`
+						})
+					);
 					socket.close();
 					return;
 				}

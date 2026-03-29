@@ -19,6 +19,13 @@ from modules.mcp.router import MCPRouter
 router = MCPRouter(prefix='/compute', tags=['compute'])
 
 
+def _get_websocket_manager(websocket: WebSocket) -> ProcessManager:
+    override = websocket.app.dependency_overrides.get(get_manager)
+    if override is not None:
+        return override()
+    return websocket.app.state.manager
+
+
 def _run_compute_websocket_action(
     message: schemas.ComputeWebsocketRequest,
     manager: ProcessManager,
@@ -30,21 +37,22 @@ def _run_compute_websocket_action(
     try:
         response: BaseModel
         if message.action == schemas.ComputeWebsocketAction.PREVIEW:
-            request = schemas.StepPreviewRequest.model_validate(message.payload)
-            response = preview_step(request=request, session=session, manager=manager)
+            preview_request = schemas.StepPreviewRequest.model_validate(message.payload)
+            response = preview_step(request=preview_request, session=session, manager=manager)
         elif message.action == schemas.ComputeWebsocketAction.SCHEMA:
-            request = schemas.StepSchemaRequest.model_validate(message.payload)
-            response = get_step_schema(request=request, session=session, manager=manager)
+            schema_request = schemas.StepSchemaRequest.model_validate(message.payload)
+            response = get_step_schema(request=schema_request, session=session, manager=manager)
         elif message.action == schemas.ComputeWebsocketAction.ROW_COUNT:
-            request = schemas.StepRowCountRequest.model_validate(message.payload)
-            response = get_step_row_count(request=request, session=session, manager=manager)
+            row_count_request = schemas.StepRowCountRequest.model_validate(message.payload)
+            response = get_step_row_count(request=row_count_request, session=session, manager=manager)
         elif message.action == schemas.ComputeWebsocketAction.BUILD:
-            request = schemas.BuildRequest.model_validate(message.payload)
-            response = build_analysis_from_payload(request=request, session=session, manager=manager)
+            build_request = schemas.BuildRequest.model_validate(message.payload)
+            response = build_analysis_from_payload(request=build_request, session=session, manager=manager)
         else:
             raise ValueError(f'Unsupported websocket action: {message.action}')
         return response.model_dump(mode='json')
     finally:
+        session.close()
         session_gen.close()
         reset_namespace(token)
 
@@ -255,24 +263,22 @@ def list_engines(manager: ProcessManager = Depends(get_manager)):
 @router.websocket('/ws')
 async def compute_websocket(
     websocket: WebSocket,
-    manager: ProcessManager = Depends(get_manager),
 ):
+    manager = _get_websocket_manager(websocket)
     await websocket.accept()
+    action: schemas.ComputeWebsocketAction | None = None
     try:
         raw_message = await websocket.receive_json()
         message = schemas.ComputeWebsocketRequest.model_validate(raw_message)
-        await websocket.send_json(
-            schemas.ComputeWebsocketStartedMessage(action=message.action).model_dump(mode='json')
-        )
+        action = message.action
+        await websocket.send_json(schemas.ComputeWebsocketStartedMessage(action=message.action).model_dump(mode='json'))
         result = await run_in_threadpool(
             _run_compute_websocket_action,
             message,
             manager,
             websocket.query_params.get('namespace'),
         )
-        await websocket.send_json(
-            schemas.ComputeWebsocketResultMessage(action=message.action, data=result).model_dump(mode='json')
-        )
+        await websocket.send_json(schemas.ComputeWebsocketResultMessage(action=message.action, data=result).model_dump(mode='json'))
     except WebSocketDisconnect:
         return
     except ValidationError as exc:
@@ -285,7 +291,7 @@ async def compute_websocket(
     except HTTPException as exc:
         await websocket.send_json(
             schemas.ComputeWebsocketErrorMessage(
-                action=message.action if 'message' in locals() else None,
+                action=action,
                 error=str(exc.detail),
                 status_code=exc.status_code,
             ).model_dump(mode='json')
@@ -293,7 +299,7 @@ async def compute_websocket(
     except Exception as exc:
         await websocket.send_json(
             schemas.ComputeWebsocketErrorMessage(
-                action=message.action if 'message' in locals() else None,
+                action=action,
                 error=str(exc),
             ).model_dump(mode='json')
         )
