@@ -8,6 +8,7 @@ import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+import { websocketRequest } from './websocket';
 
 export interface StepPreviewRequest {
 	analysis_id?: string;
@@ -35,10 +36,12 @@ export interface StepPreviewResponse {
 export function previewStepData(
 	request: StepPreviewRequest
 ): ResultAsync<StepPreviewResponse, ApiError> {
-	return apiRequest<StepPreviewResponse>('/v1/compute/preview', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'preview', request, () =>
+		apiRequest<StepPreviewResponse>('/v1/compute/preview', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }
 
 // Engine lifecycle functions
@@ -185,10 +188,12 @@ export interface StepSchemaResponse {
 export function getStepSchema(
 	request: StepSchemaRequest
 ): ResultAsync<StepSchemaResponse, ApiError> {
-	return apiRequest<StepSchemaResponse>('/v1/compute/schema', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'schema', request, () =>
+		apiRequest<StepSchemaResponse>('/v1/compute/schema', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }
 
 export type StepRowCountRequest = StepSchemaRequest;
@@ -201,10 +206,12 @@ export interface StepRowCountResponse {
 export function getStepRowCount(
 	request: StepRowCountRequest
 ): ResultAsync<StepRowCountResponse, ApiError> {
-	return apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'row_count', request, () =>
+		apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }
 
 export interface BuildTabResult {
@@ -228,8 +235,10 @@ export interface BuildRequest {
 export function buildAnalysisWithPayload(
 	request: BuildRequest
 ): ResultAsync<BuildResponse, ApiError> {
-	return apiRequest<BuildResponse>('/v1/compute/build', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'build', request, () =>
+		apiRequest<BuildResponse>('/v1/compute/build', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }

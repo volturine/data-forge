@@ -21,7 +21,10 @@ export default defineConfig({
 			allow: ['styled-system']
 		},
 		proxy: {
-			'/api': 'http://localhost:8000'
+			'/api': {
+				target: 'http://localhost:8000',
+				ws: true
+			}
 		},
 		hmr: {
 			host: '0.0.0.0'

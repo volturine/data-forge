@@ -90,6 +90,80 @@ class TestComputePreview:
         assert 'data' in result
         assert result['total_rows'] == 2
 
+    def test_preview_step_success_over_websocket(self, client, sample_datasource: DataSource):
+        payload = {
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
+                        'steps': [
+                            {
+                                'id': 'step1',
+                                'type': 'filter',
+                                'config': {'column': 'age', 'operator': '>', 'value': 25},
+                            }
+                        ],
+                    }
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
+                },
+            },
+            'target_step_id': 'step1',
+        }
+
+        mock_manager = MagicMock()
+        mock_engine = MagicMock()
+
+        mock_engine.preview.return_value = 'preview-job-ws'
+        mock_engine.get_result.side_effect = [
+            None,
+            {
+                'data': {
+                    'schema': {'name': 'String'},
+                    'data': [{'name': 'Bob'}],
+                    'row_count': 1,
+                },
+                'error': None,
+            },
+        ]
+
+        mock_manager.get_engine.return_value = None
+        mock_manager.get_or_create_engine.return_value = mock_engine
+        app.dependency_overrides[get_manager] = lambda: mock_manager
+
+        with client.websocket_connect('/api/v1/compute/ws?namespace=default') as websocket:
+            websocket.send_json({'action': 'preview', 'payload': payload})
+            started = websocket.receive_json()
+            result = websocket.receive_json()
+
+        assert started == {'type': 'started', 'action': 'preview'}
+        assert result['type'] == 'result'
+        assert result['action'] == 'preview'
+        assert result['data']['step_id'] == 'step1'
+        assert result['data']['total_rows'] == 1
+
     def test_preview_step_failure(self, client, sample_datasource: DataSource):
         payload = {
             'analysis_id': 'analysis-id',

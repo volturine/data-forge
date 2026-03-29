@@ -1,7 +1,7 @@
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class EngineStatus(StrEnum):
@@ -320,3 +320,41 @@ class BuildRequest(BaseModel):
 
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
+
+
+class ComputeWebsocketAction(StrEnum):
+    PREVIEW = 'preview'
+    SCHEMA = 'schema'
+    ROW_COUNT = 'row_count'
+    BUILD = 'build'
+
+
+class ComputeWebsocketRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    action: ComputeWebsocketAction
+    payload: dict = Field(default_factory=dict)
+
+
+class ComputeWebsocketStartedMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['started'] = 'started'
+    action: ComputeWebsocketAction
+
+
+class ComputeWebsocketResultMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['result'] = 'result'
+    action: ComputeWebsocketAction
+    data: dict
+
+
+class ComputeWebsocketErrorMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['error'] = 'error'
+    action: ComputeWebsocketAction | None = None
+    error: str
+    status_code: int = 500
