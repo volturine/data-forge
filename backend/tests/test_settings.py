@@ -723,9 +723,7 @@ class TestSettingsMigrations:
                     ')'
                 )
             )
-            conn.execute(
-                text("INSERT INTO app_settings (id, smtp_password_encrypted) VALUES (1, '0a0b0c')")
-            )
+            conn.execute(text("INSERT INTO app_settings (id, smtp_password_encrypted) VALUES (1, '0a0b0c')"))
             conn.commit()
 
         _run_settings_migrations(engine)
@@ -735,6 +733,46 @@ class TestSettingsMigrations:
         assert row is not None
         assert row[0] == 'enc:0a0b0c'
         assert row[1] == ''
+
+    def test_migrations_keep_smtp_password_when_both_password_columns_exist(self, caplog):
+        from core.database import _run_settings_migrations
+
+        engine = create_engine(
+            'sqlite:///:memory:',
+            connect_args={'check_same_thread': False},
+            poolclass=StaticPool,
+        )
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    'CREATE TABLE app_settings ('
+                    'id INTEGER PRIMARY KEY, '
+                    "smtp_host TEXT NOT NULL DEFAULT '', "
+                    'smtp_port INTEGER NOT NULL DEFAULT 587, '
+                    "smtp_user TEXT NOT NULL DEFAULT '', "
+                    "smtp_password TEXT NOT NULL DEFAULT '', "
+                    "smtp_password_encrypted TEXT NOT NULL DEFAULT '', "
+                    "telegram_bot_token TEXT NOT NULL DEFAULT '', "
+                    'telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0, '
+                    "openrouter_api_key TEXT NOT NULL DEFAULT '', "
+                    "openrouter_default_model TEXT NOT NULL DEFAULT '', "
+                    'env_bootstrap_complete BOOLEAN NOT NULL DEFAULT 1, '
+                    'public_idb_debug BOOLEAN NOT NULL DEFAULT 0'
+                    ')'
+                )
+            )
+            conn.execute(text("INSERT INTO app_settings (id, smtp_password, smtp_password_encrypted) VALUES (1, 'keep-me', 'drop-me')"))
+            conn.commit()
+
+        with caplog.at_level('WARNING'):
+            _run_settings_migrations(engine)
+
+        with engine.connect() as conn:
+            row = conn.execute(text('SELECT smtp_password, smtp_password_encrypted FROM app_settings WHERE id=1')).fetchone()
+        assert row is not None
+        assert row[0] == 'keep-me'
+        assert row[1] == ''
+        assert 'keeping smtp_password' in caplog.text
 
 
 class TestSeedSettingsFromEnv:
@@ -885,6 +923,24 @@ class TestSeedSettingsFromEnv:
             assert row.smtp_password == ''
             assert row.env_bootstrap_complete is False
             assert 'SETTINGS_ENCRYPTION_KEY' in caplog.text
+
+    def test_get_settings_reencrypts_plaintext_password(self, monkeypatch) -> None:
+        from modules.settings.models import AppSettings
+        from modules.settings.service import get_settings
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+
+        engine = self._make_engine()
+        with Session(engine) as session:
+            row = AppSettings(id=1, smtp_host='mail.example.com', smtp_password='secret')
+            session.add(row)
+            session.commit()
+
+            data = get_settings(session)
+            session.refresh(row)
+
+            assert data.smtp_password == 'secret'
+            assert row.smtp_password.startswith('enc:')
 
     def test_update_settings_disables_future_env_bootstrap(self, monkeypatch) -> None:
         from core.config import settings as app_settings
