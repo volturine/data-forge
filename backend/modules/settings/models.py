@@ -15,7 +15,6 @@ class AppSettings(SQLModel, table=True):
     smtp_port: int = Field(default=587)
     smtp_user: str = Field(default='')
     smtp_password: str = Field(default='')
-    smtp_password_encrypted: str = Field(default='')
 
     # Telegram
     telegram_bot_token: str = Field(default='')

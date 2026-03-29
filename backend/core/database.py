@@ -102,8 +102,14 @@ def _run_settings_migrations(db_engine: Engine) -> None:
         settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
         if 'telegram_bot_enabled' not in settings_columns:
             pending.append('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0')
-        if 'smtp_password_encrypted' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''")
+        if 'smtp_password_encrypted' in settings_columns:
+            pending.append(
+                "UPDATE app_settings "
+                "SET smtp_password = CASE "
+                "WHEN smtp_password = '' AND smtp_password_encrypted != '' THEN 'enc:' || smtp_password_encrypted "
+                "ELSE smtp_password END"
+            )
+            pending.append("UPDATE app_settings SET smtp_password_encrypted = '' WHERE smtp_password_encrypted != ''")
         if 'openrouter_api_key' not in settings_columns:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
         if 'openrouter_default_model' not in settings_columns:

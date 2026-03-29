@@ -7,6 +7,7 @@ from modules.settings.models import AppSettings
 from modules.settings.schemas import SettingsResponse, SettingsUpdate
 
 logger = logging.getLogger(__name__)
+_ENCRYPTED_PREFIX = 'enc:'
 
 
 def _ensure_encryption_key() -> str:
@@ -26,14 +27,16 @@ def _encrypt_password(password: str) -> str:
     key = _ensure_encryption_key().encode('utf-8')
     raw = password.encode('utf-8')
     encrypted = _xor_bytes(raw, key)
-    return encrypted.hex()
+    return f'{_ENCRYPTED_PREFIX}{encrypted.hex()}'
 
 
 def _decrypt_password(value: str) -> str:
     if not value:
         return ''
+    if not value.startswith(_ENCRYPTED_PREFIX):
+        return value
     key = _ensure_encryption_key().encode('utf-8')
-    encrypted = bytes.fromhex(value)
+    encrypted = bytes.fromhex(value.removeprefix(_ENCRYPTED_PREFIX))
     raw = _xor_bytes(encrypted, key)
     return raw.decode('utf-8')
 
@@ -66,12 +69,10 @@ def seed_settings_from_env(session: Session) -> None:
     if not row.smtp_user and app_settings.smtp_user:
         row.smtp_user = app_settings.smtp_user
         changed = True
-    # Seed password only when no encrypted value already exists and key is available.
     bootstrap_complete = True
-    if not row.smtp_password_encrypted and not row.smtp_password and app_settings.smtp_password:
+    if not row.smtp_password and app_settings.smtp_password:
         try:
-            row.smtp_password_encrypted = _encrypt_password(app_settings.smtp_password)
-            row.smtp_password = ''
+            row.smtp_password = _encrypt_password(app_settings.smtp_password)
             changed = True
         except ValueError:
             bootstrap_complete = False
@@ -108,13 +109,11 @@ def get_settings(session: Session) -> SettingsResponse:
         session.commit()
         session.refresh(row)
 
-    smtp_password = _decrypt_password(row.smtp_password_encrypted) if row.smtp_password_encrypted else row.smtp_password or ''
-
     return SettingsResponse(
         smtp_host=row.smtp_host,
         smtp_port=row.smtp_port,
         smtp_user=row.smtp_user,
-        smtp_password=smtp_password,
+        smtp_password=_decrypt_password(row.smtp_password),
         telegram_bot_token=row.telegram_bot_token,
         telegram_bot_enabled=row.telegram_bot_enabled,
         openrouter_api_key=row.openrouter_api_key,
@@ -132,8 +131,7 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
     row.smtp_host = data.smtp_host
     row.smtp_port = data.smtp_port
     row.smtp_user = data.smtp_user
-    row.smtp_password_encrypted = _encrypt_password(data.smtp_password)
-    row.smtp_password = ''
+    row.smtp_password = _encrypt_password(data.smtp_password)
     row.telegram_bot_token = data.telegram_bot_token
     row.telegram_bot_enabled = data.telegram_bot_enabled
     row.openrouter_api_key = data.openrouter_api_key
@@ -162,12 +160,11 @@ def get_resolved_smtp() -> dict[str, object]:
     def _read(session: Session) -> dict[str, object]:
         row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
         if row and row.smtp_host:
-            password = _decrypt_password(row.smtp_password_encrypted) if row.smtp_password_encrypted else row.smtp_password or ''
             return {
                 'host': row.smtp_host,
                 'port': row.smtp_port,
                 'user': row.smtp_user,
-                'password': password,
+                'password': _decrypt_password(row.smtp_password),
             }
         return {
             'host': '',
