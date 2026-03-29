@@ -83,10 +83,13 @@ def init_db() -> None:
 def _init_settings_db() -> None:
     from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
+    from modules.settings.service import seed_settings_from_env
 
     AppSettings.metadata.create_all(settings_engine)
     ChatSession.metadata.create_all(settings_engine)
     _run_settings_migrations(settings_engine)
+    with Session(settings_engine) as session:
+        seed_settings_from_env(session)
 
 
 def _run_settings_migrations(db_engine: Engine) -> None:
@@ -99,10 +102,12 @@ def _run_settings_migrations(db_engine: Engine) -> None:
         settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
         if 'telegram_bot_enabled' not in settings_columns:
             pending.append('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0')
-        if 'smtp_password_encrypted' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''")
         if 'openrouter_api_key' not in settings_columns:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
+        if 'openrouter_default_model' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_default_model TEXT NOT NULL DEFAULT ''")
+        if 'env_bootstrap_complete' not in settings_columns:
+            pending.append('ALTER TABLE app_settings ADD COLUMN env_bootstrap_complete BOOLEAN NOT NULL DEFAULT 1')
 
     if inspector.has_table('chat_sessions'):
         chat_columns = {col['name'] for col in inspector.get_columns('chat_sessions')}

@@ -173,6 +173,17 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default='http://localhost:11434', alias='OLLAMA_BASE_URL')
     openai_api_key: str = Field(default='', alias='OPENAI_API_KEY')
 
+    # DB-persisted settings — seeded into app_settings on first run if the DB field is empty.
+    # Users may later override these via the UI; ENV values are never re-applied after that.
+    smtp_host: str = Field(default='', alias='SMTP_HOST')
+    smtp_port: int = Field(default=587, alias='SMTP_PORT')
+    smtp_user: str = Field(default='', alias='SMTP_USER')
+    smtp_password: str = Field(default='', alias='SMTP_PASSWORD')
+    telegram_bot_token: str = Field(default='', alias='TELEGRAM_BOT_TOKEN')
+    telegram_bot_enabled: bool = Field(default=False, alias='TELEGRAM_BOT_ENABLED')
+    openrouter_api_key: str = Field(default='', alias='OPENROUTER_API_KEY')
+    openrouter_default_model: str = Field(default='', alias='OPENROUTER_DEFAULT_MODEL')
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""

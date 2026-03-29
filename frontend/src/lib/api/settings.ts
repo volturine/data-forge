@@ -10,6 +10,7 @@ export interface AppSettings {
 	telegram_bot_token: string;
 	telegram_bot_enabled: boolean;
 	openrouter_api_key: string;
+	openrouter_default_model: string;
 	public_idb_debug: boolean;
 }
 
