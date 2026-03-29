@@ -5,6 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
+from starlette.websockets import WebSocketState
 
 from core.database import get_db
 from core.dependencies import get_manager
@@ -17,6 +18,18 @@ from modules.compute.manager import ProcessManager
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/compute', tags=['compute'])
+
+
+async def _safe_close_websocket(websocket: WebSocket) -> None:
+    if websocket.client_state is WebSocketState.DISCONNECTED:
+        return
+    if websocket.application_state is WebSocketState.DISCONNECTED:
+        return
+    try:
+        await websocket.close()
+    except RuntimeError:
+        # Client can disconnect between state checks and close(); avoid noisy ASGI double-close errors.
+        return
 
 
 def _get_websocket_manager(websocket: WebSocket) -> ProcessManager:
@@ -304,7 +317,7 @@ async def compute_websocket(
             ).model_dump(mode='json')
         )
     finally:
-        await websocket.close()
+        await _safe_close_websocket(websocket)
 
 
 @router.get('/defaults', response_model=schemas.EngineDefaults, mcp=True)

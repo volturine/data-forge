@@ -1,11 +1,13 @@
+import asyncio
 import contextvars
 import threading
 import time
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
+from starlette.websockets import WebSocketState
 
 from core.dependencies import get_manager
 from core.exceptions import PipelineValidationError
@@ -13,8 +15,31 @@ from main import app
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import _analysis_stack_var
+from modules.compute.routes import _safe_close_websocket
 from modules.datasource.models import DataSource
 from modules.engine_runs.models import EngineRun
+
+
+def test_safe_close_websocket_skips_when_already_disconnected() -> None:
+    websocket = MagicMock()
+    websocket.client_state = WebSocketState.DISCONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+    websocket.close = AsyncMock()
+
+    asyncio.run(_safe_close_websocket(websocket))
+
+    websocket.close.assert_not_called()
+
+
+def test_safe_close_websocket_swallows_runtime_disconnect_race() -> None:
+    websocket = MagicMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+    websocket.close = AsyncMock(side_effect=RuntimeError("Unexpected ASGI message 'websocket.close'"))
+
+    asyncio.run(_safe_close_websocket(websocket))
+
+    websocket.close.assert_awaited_once()
 
 
 class TestComputePreview:

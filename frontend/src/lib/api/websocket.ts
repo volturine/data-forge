@@ -27,8 +27,19 @@ function createApiError(error: unknown): ApiError {
 	};
 }
 
+function resolveWebsocketOrigin(): string {
+	if (!import.meta.env.DEV) {
+		return window.location.origin;
+	}
+	const isViteDevServer = window.location.port === '3000';
+	if (!isViteDevServer) {
+		return window.location.origin;
+	}
+	return `${window.location.protocol}//${window.location.hostname}:8000`;
+}
+
 function buildWebsocketUrl(endpoint: string): string {
-	const url = new URL(`${BASE_URL}${endpoint}`, window.location.origin);
+	const url = new URL(`${BASE_URL}${endpoint}`, resolveWebsocketOrigin());
 	url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const identity = getClientIdentity();
 	const namespace = getNamespace();
