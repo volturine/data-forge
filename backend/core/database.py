@@ -1,4 +1,3 @@
-import logging
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Concatenate, ParamSpec, TypeVar
@@ -9,8 +8,6 @@ from sqlmodel import Session, create_engine
 
 from core.config import settings
 from core.namespace import get_namespace, list_namespaces, namespace_paths
-
-logger = logging.getLogger(__name__)
 
 
 def _enable_sqlite_pragmas(engine: Engine) -> None:
@@ -105,23 +102,6 @@ def _run_settings_migrations(db_engine: Engine) -> None:
         settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
         if 'telegram_bot_enabled' not in settings_columns:
             pending.append('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0')
-        if 'smtp_password_encrypted' in settings_columns:
-            with db_engine.connect() as conn:
-                conflicting_rows = conn.execute(
-                    sa_text("SELECT COUNT(*) FROM app_settings WHERE smtp_password != '' AND smtp_password_encrypted != ''")
-                ).scalar_one()
-            if conflicting_rows:
-                logger.warning(
-                    'Found %s app_settings row(s) with both smtp_password and smtp_password_encrypted; keeping smtp_password',
-                    conflicting_rows,
-                )
-            pending.append(
-                'UPDATE app_settings '
-                'SET smtp_password = CASE '
-                "WHEN smtp_password = '' AND smtp_password_encrypted != '' THEN 'enc:' || smtp_password_encrypted "
-                'ELSE smtp_password END'
-            )
-            pending.append("UPDATE app_settings SET smtp_password_encrypted = '' WHERE smtp_password_encrypted != ''")
         if 'openrouter_api_key' not in settings_columns:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
         if 'openrouter_default_model' not in settings_columns:

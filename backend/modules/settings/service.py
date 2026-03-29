@@ -33,33 +33,10 @@ def _encrypt_password(password: str) -> str:
 def _decrypt_password(value: str) -> str:
     if not value:
         return ''
-    if not value.startswith(_ENCRYPTED_PREFIX):
-        return value
     key = _ensure_encryption_key().encode('utf-8')
     encrypted = bytes.fromhex(value.removeprefix(_ENCRYPTED_PREFIX))
     raw = _xor_bytes(encrypted, key)
     return raw.decode('utf-8')
-
-
-def _normalize_password_storage(row: AppSettings) -> tuple[str, bool]:
-    """Return the usable SMTP password and whether storage was upgraded."""
-    if not row.smtp_password:
-        return '', False
-    if row.smtp_password.startswith(_ENCRYPTED_PREFIX):
-        return _decrypt_password(row.smtp_password), False
-    password = row.smtp_password
-    try:
-        row.smtp_password = _encrypt_password(password)
-    except ValueError:
-        logger.warning('Stored SMTP password remains unencrypted because SETTINGS_ENCRYPTION_KEY is not set')
-        return password, False
-    return password, True
-
-
-def _commit_if_changed(session: Session, row: AppSettings, changed: bool) -> None:
-    if changed:
-        session.commit()
-        session.refresh(row)
 
 
 def seed_settings_from_env(session: Session) -> None:
@@ -79,7 +56,7 @@ def seed_settings_from_env(session: Session) -> None:
         row = AppSettings(id=1, env_bootstrap_complete=False)
         session.add(row)
 
-    _, changed = _normalize_password_storage(row)
+    changed = False
 
     if not row.smtp_host and app_settings.smtp_host:
         row.smtp_host = app_settings.smtp_host
@@ -114,7 +91,9 @@ def seed_settings_from_env(session: Session) -> None:
         row.env_bootstrap_complete = bootstrap_complete
         changed = True
 
-    _commit_if_changed(session, row, changed)
+    if changed:
+        session.commit()
+        session.refresh(row)
 
 
 def get_settings(session: Session) -> SettingsResponse:
@@ -128,14 +107,11 @@ def get_settings(session: Session) -> SettingsResponse:
         session.commit()
         session.refresh(row)
 
-    smtp_password, changed = _normalize_password_storage(row)
-    _commit_if_changed(session, row, changed)
-
     return SettingsResponse(
         smtp_host=row.smtp_host,
         smtp_port=row.smtp_port,
         smtp_user=row.smtp_user,
-        smtp_password=smtp_password,
+        smtp_password=_decrypt_password(row.smtp_password),
         telegram_bot_token=row.telegram_bot_token,
         telegram_bot_enabled=row.telegram_bot_enabled,
         openrouter_api_key=row.openrouter_api_key,
@@ -182,13 +158,11 @@ def get_resolved_smtp() -> dict[str, object]:
     def _read(session: Session) -> dict[str, object]:
         row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
         if row and row.smtp_host:
-            password, changed = _normalize_password_storage(row)
-            _commit_if_changed(session, row, changed)
             return {
                 'host': row.smtp_host,
                 'port': row.smtp_port,
                 'user': row.smtp_user,
-                'password': password,
+                'password': _decrypt_password(row.smtp_password),
             }
         return {
             'host': '',
