@@ -24,6 +24,7 @@ class AppSettings(SQLModel, table=True):
     # OpenRouter
     openrouter_api_key: str = Field(default='')
     openrouter_default_model: str = Field(default='')
+    env_bootstrap_complete: bool = Field(default=True)
 
     # Display
     public_idb_debug: bool = Field(default=False)

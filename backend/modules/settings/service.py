@@ -1,9 +1,12 @@
+import logging
 import os
 
 from sqlmodel import Session, select
 
 from modules.settings.models import AppSettings
 from modules.settings.schemas import SettingsResponse, SettingsUpdate
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_encryption_key() -> str:
@@ -38,15 +41,18 @@ def _decrypt_password(value: str) -> str:
 def seed_settings_from_env(session: Session) -> None:
     """Seed app_settings from ENV vars on first run.
 
-    For each DB field that maps to an ENV var: if the DB value is empty/falsy,
-    write the ENV value (if set).  Once a user overrides a value via the UI the
-    DB value is non-empty and the ENV var is never applied again.
+    Bootstrap ENV-backed settings into the DB once for a new settings row.
+
+    Existing rows are treated as user-owned state and are not re-seeded on
+    restart, even when a saved value is empty, False, or a default like 587.
     """
     from core.config import settings as app_settings
 
     row = session.get(AppSettings, 1)
+    if row and row.env_bootstrap_complete:
+        return
     if not row:
-        row = AppSettings(id=1)
+        row = AppSettings(id=1, env_bootstrap_complete=False)
         session.add(row)
 
     changed = False
@@ -60,14 +66,16 @@ def seed_settings_from_env(session: Session) -> None:
     if not row.smtp_user and app_settings.smtp_user:
         row.smtp_user = app_settings.smtp_user
         changed = True
-    # Seed password only when no encrypted value already exists and key is available
+    # Seed password only when no encrypted value already exists and key is available.
+    bootstrap_complete = True
     if not row.smtp_password_encrypted and not row.smtp_password and app_settings.smtp_password:
         try:
             row.smtp_password_encrypted = _encrypt_password(app_settings.smtp_password)
             row.smtp_password = ''
             changed = True
         except ValueError:
-            pass  # SETTINGS_ENCRYPTION_KEY not set — skip password seeding
+            bootstrap_complete = False
+            logger.warning('Skipping SMTP password bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
     if not row.telegram_bot_token and app_settings.telegram_bot_token:
         row.telegram_bot_token = app_settings.telegram_bot_token
         changed = True
@@ -79,6 +87,9 @@ def seed_settings_from_env(session: Session) -> None:
         changed = True
     if not row.openrouter_default_model and app_settings.openrouter_default_model:
         row.openrouter_default_model = app_settings.openrouter_default_model
+        changed = True
+    if row.env_bootstrap_complete != bootstrap_complete:
+        row.env_bootstrap_complete = bootstrap_complete
         changed = True
 
     if changed:
@@ -127,6 +138,7 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
     row.telegram_bot_enabled = data.telegram_bot_enabled
     row.openrouter_api_key = data.openrouter_api_key
     row.openrouter_default_model = data.openrouter_default_model
+    row.env_bootstrap_complete = True
     row.public_idb_debug = data.public_idb_debug
 
     session.commit()

@@ -623,6 +623,7 @@ class TestSettingsMigrations:
         assert 'smtp_password_encrypted' in cols
         assert 'openrouter_api_key' in cols
         assert 'openrouter_default_model' in cols
+        assert 'env_bootstrap_complete' in cols
 
     def test_migrations_idempotent(self):
         from core.database import _run_settings_migrations
@@ -684,6 +685,18 @@ class TestSettingsMigrations:
         cols = {c['name'] for c in inspector.get_columns('app_settings')}
         assert 'openrouter_default_model' in cols
 
+    def test_migrations_add_env_bootstrap_complete(self):
+        from sqlalchemy import inspect
+
+        from core.database import _run_settings_migrations
+
+        engine = self._make_legacy_engine()
+        _run_settings_migrations(engine)
+
+        inspector = inspect(engine)
+        cols = {c['name'] for c in inspector.get_columns('app_settings')}
+        assert 'env_bootstrap_complete' in cols
+
 
 class TestSeedSettingsFromEnv:
     """seed_settings_from_env() writes ENV values to an empty DB row."""
@@ -701,6 +714,7 @@ class TestSeedSettingsFromEnv:
 
     def test_seeds_all_fields_when_db_is_empty(self, monkeypatch) -> None:
         from core.config import settings as app_settings
+        from modules.settings.models import AppSettings
         from modules.settings.service import seed_settings_from_env
 
         monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
@@ -714,7 +728,7 @@ class TestSeedSettingsFromEnv:
         engine = self._make_engine()
         with Session(engine) as session:
             seed_settings_from_env(session)
-            row = session.get(__import__('modules.settings.models', fromlist=['AppSettings']).AppSettings, 1)
+            row = session.get(AppSettings, 1)
             assert row is not None
             assert row.smtp_host == 'mail.example.com'
             assert row.smtp_port == 465
@@ -723,6 +737,7 @@ class TestSeedSettingsFromEnv:
             assert row.telegram_bot_enabled is True
             assert row.openrouter_api_key == 'sk-or-test'
             assert row.openrouter_default_model == 'openai/gpt-4o'
+            assert row.env_bootstrap_complete is True
 
     def test_does_not_overwrite_existing_db_values(self, monkeypatch) -> None:
         from core.config import settings as app_settings
@@ -741,6 +756,7 @@ class TestSeedSettingsFromEnv:
                 smtp_host='db.example.com',
                 openrouter_api_key='sk-or-db',
                 openrouter_default_model='db/model',
+                env_bootstrap_complete=True,
             )
             session.add(row)
             session.commit()
@@ -783,3 +799,76 @@ class TestSeedSettingsFromEnv:
             assert row is not None
             assert row.smtp_host == 'mail.example.com'
             assert row.openrouter_api_key == 'sk-or-test'
+            assert row.env_bootstrap_complete is True
+
+    def test_existing_row_preserves_explicit_default_values(self, monkeypatch) -> None:
+        from core.config import settings as app_settings
+        from modules.settings.models import AppSettings
+        from modules.settings.service import seed_settings_from_env
+
+        monkeypatch.setattr(app_settings, 'smtp_port', 465, raising=False)
+        monkeypatch.setattr(app_settings, 'telegram_bot_enabled', True, raising=False)
+
+        engine = self._make_engine()
+        with Session(engine) as session:
+            row = AppSettings(
+                id=1,
+                smtp_port=587,
+                telegram_bot_enabled=False,
+                env_bootstrap_complete=True,
+            )
+            session.add(row)
+            session.commit()
+
+            seed_settings_from_env(session)
+            session.refresh(row)
+
+            assert row.smtp_port == 587
+            assert row.telegram_bot_enabled is False
+
+    def test_password_seed_logs_warning_until_encryption_key_exists(self, monkeypatch, caplog) -> None:
+        from core.config import settings as app_settings
+        from modules.settings.models import AppSettings
+        from modules.settings.service import seed_settings_from_env
+
+        monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
+        monkeypatch.setattr(app_settings, 'smtp_password', 'secret', raising=False)
+        monkeypatch.delenv('SETTINGS_ENCRYPTION_KEY', raising=False)
+
+        engine = self._make_engine()
+        with Session(engine) as session:
+            with caplog.at_level('WARNING'):
+                seed_settings_from_env(session)
+
+            row = session.get(AppSettings, 1)
+            assert row is not None
+            assert row.smtp_host == 'mail.example.com'
+            assert row.smtp_password_encrypted == ''
+            assert row.env_bootstrap_complete is False
+            assert 'SETTINGS_ENCRYPTION_KEY' in caplog.text
+
+    def test_update_settings_disables_future_env_bootstrap(self, monkeypatch) -> None:
+        from core.config import settings as app_settings
+        from modules.settings.models import AppSettings
+        from modules.settings.schemas import SettingsUpdate
+        from modules.settings.service import seed_settings_from_env, update_settings
+
+        monkeypatch.setattr(app_settings, 'smtp_port', 465, raising=False)
+        monkeypatch.setattr(app_settings, 'telegram_bot_enabled', True, raising=False)
+
+        engine = self._make_engine()
+        with Session(engine) as session:
+            update_settings(
+                session,
+                SettingsUpdate(
+                    smtp_port=587,
+                    telegram_bot_enabled=False,
+                ),
+            )
+            seed_settings_from_env(session)
+
+            row = session.get(AppSettings, 1)
+            assert row is not None
+            assert row.smtp_port == 587
+            assert row.telegram_bot_enabled is False
+            assert row.env_bootstrap_complete is True

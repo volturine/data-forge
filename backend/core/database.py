@@ -108,6 +108,8 @@ def _run_settings_migrations(db_engine: Engine) -> None:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
         if 'openrouter_default_model' not in settings_columns:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_default_model TEXT NOT NULL DEFAULT ''")
+        if 'env_bootstrap_complete' not in settings_columns:
+            pending.append('ALTER TABLE app_settings ADD COLUMN env_bootstrap_complete BOOLEAN NOT NULL DEFAULT 1')
 
     if inspector.has_table('chat_sessions'):
         chat_columns = {col['name'] for col in inspector.get_columns('chat_sessions')}
