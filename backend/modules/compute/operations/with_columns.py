@@ -10,8 +10,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from modules.compute.core.base import OperationHandler, OperationParams
 
-# Builtins allowed inside UDF code — system-access functions are excluded.
-_DANGEROUS_BUILTINS = frozenset({'open', 'exec', 'eval', 'compile', '__import__', 'input', 'breakpoint'})
+# Builtins allowed inside UDF code — system-access and reflection functions are excluded.
+# Reflection functions (getattr/setattr/delattr/vars/dir) are blocked to prevent
+# attribute-chain escapes even when __builtins__ is otherwise restricted.
+_DANGEROUS_BUILTINS = frozenset(
+    {
+        'open',
+        'exec',
+        'eval',
+        'compile',
+        '__import__',
+        'input',
+        'breakpoint',
+        'getattr',
+        'setattr',
+        'delattr',
+        'vars',
+        'dir',
+    }
+)
 _SAFE_BUILTINS: dict[str, Any] = {name: getattr(builtins, name) for name in dir(builtins) if name not in _DANGEROUS_BUILTINS}
 
 

@@ -1,4 +1,3 @@
-import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
@@ -9,14 +8,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
-
-
-def _validate_regex_pattern(pattern: str) -> None:
-    """Validate that a regex pattern compiles before passing to Polars."""
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        raise ValueError(f'Invalid regex pattern: {e}') from e
+from modules.compute.operations._validation import validate_regex_pattern
 
 
 def _parse_datetime_string(s: str) -> datetime:
@@ -185,7 +177,7 @@ class FilterHandler(OperationHandler):
         if cond.operator == 'regex' and coerced == '':
             return pl.lit(False)
         if cond.operator == 'regex' and isinstance(coerced, str):
-            _validate_regex_pattern(coerced)
+            validate_regex_pattern(coerced)
         if isinstance(coerced, list):
             if not coerced:
                 if cond.operator in ('not_contains', 'not_in'):

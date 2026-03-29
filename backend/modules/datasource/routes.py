@@ -326,7 +326,7 @@ async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
         raise HTTPException(status_code=400, detail='Excel file must be inside the data directory')
     if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=400, detail='Excel file not found')
-    if file_path.suffix.lower() != '.xlsx':
+    if resolved.suffix.lower() != '.xlsx':
         raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
 
     preflight_id, preflight = create_preflight(file_path)

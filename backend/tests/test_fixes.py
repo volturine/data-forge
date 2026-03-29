@@ -943,3 +943,151 @@ class TestAnalysisDatasourceDedupe:
         rows = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)).scalars().all()
         assert len(rows) == 1
         assert rows[0].datasource_id == shared_id
+
+
+# ---------------------------------------------------------------------------
+# Security audit fixes — PR #30
+# ---------------------------------------------------------------------------
+
+
+class TestSafeBuiltinsUdf:
+    """UDF execution sandbox must not allow attribute-chain escapes."""
+
+    def _run_udf(self, code: str):
+        # exec() here is intentional: we are verifying that the _SAFE_BUILTINS
+        # sandbox correctly blocks dangerous builtins. The code strings are
+        # hard-coded in each test — no user input reaches this helper.
+        from typing import Any
+        from modules.compute.operations.with_columns import _SAFE_BUILTINS
+        import polars as pl
+
+        scope: dict[str, Any] = {'pl': pl, '__builtins__': _SAFE_BUILTINS}
+        local_scope: dict[str, Any] = {}
+        exec(code, scope, local_scope)  # noqa: S102
+        udf = local_scope.get('udf') or scope.get('udf')
+        return udf() if udf else None
+
+    def test_getattr_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return getattr([], "__class__")')
+
+    def test_setattr_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf():\n    class C: pass\n    setattr(C, "x", 1)\n    return C.x')
+
+    def test_vars_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return vars()')
+
+    def test_dir_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return dir([])')
+
+    def test_open_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return open("/etc/passwd")')
+
+    def test_safe_arithmetic_works(self):
+        result = self._run_udf('def udf(): return 2 + 2')
+        assert result == 4
+
+    def test_safe_len_works(self):
+        result = self._run_udf('def udf(): return len([1, 2, 3])')
+        assert result == 3
+
+
+class TestValidateRegexPattern:
+    """Shared _validation.validate_regex_pattern helper."""
+
+    def test_valid_pattern_passes(self):
+        from modules.compute.operations._validation import validate_regex_pattern
+
+        validate_regex_pattern(r'\d+')
+
+    def test_invalid_pattern_raises(self):
+        from modules.compute.operations._validation import validate_regex_pattern
+
+        with pytest.raises(ValueError, match='Invalid regex pattern'):
+            validate_regex_pattern(r'[unclosed')
+
+
+class TestAssertSelectOnly:
+    """SQL read-only guard in datasource operations."""
+
+    def _check(self, query: str):
+        from modules.compute.operations.datasource import _assert_select_only
+
+        _assert_select_only(query)
+
+    def test_select_allowed(self):
+        self._check('SELECT * FROM t')
+
+    def test_select_leading_whitespace(self):
+        self._check('  SELECT * FROM t')
+
+    def test_with_cte_allowed(self):
+        self._check('WITH cte AS (SELECT 1) SELECT * FROM cte')
+
+    def test_insert_rejected(self):
+        with pytest.raises(ValueError, match='Only SELECT'):
+            self._check('INSERT INTO t VALUES (1)')
+
+    def test_drop_rejected(self):
+        with pytest.raises(ValueError, match='Only SELECT'):
+            self._check('DROP TABLE t')
+
+    def test_empty_rejected(self):
+        with pytest.raises(ValueError, match='Only SELECT'):
+            self._check('')
+
+
+class TestParseDatetimeString:
+    """_parse_datetime_string fallback format coverage."""
+
+    def test_iso8601(self):
+        from modules.compute.operations.filter import _parse_datetime_string
+        from datetime import datetime
+
+        dt = _parse_datetime_string('2024-06-15T12:30:00')
+        assert dt == datetime(2024, 6, 15, 12, 30, 0)
+
+    def test_z_suffix(self):
+        from modules.compute.operations.filter import _parse_datetime_string
+
+        dt = _parse_datetime_string('2024-06-15T12:30:00Z')
+        assert dt.year == 2024 and dt.month == 6 and dt.day == 15
+
+    def test_space_separated(self):
+        from modules.compute.operations.filter import _parse_datetime_string
+        from datetime import datetime
+
+        dt = _parse_datetime_string('2024-06-15 12:30:00')
+        assert dt == datetime(2024, 6, 15, 12, 30, 0)
+
+    def test_invalid_raises(self):
+        from modules.compute.operations.filter import _parse_datetime_string
+
+        with pytest.raises(ValueError, match='Cannot parse datetime string'):
+            _parse_datetime_string('not-a-date')
+
+
+class TestCoerceValueNumber:
+    """coerce_value handles scientific notation strings correctly."""
+
+    def test_integer_string(self):
+        from modules.compute.operations.filter import coerce_value
+
+        assert coerce_value('42', 'number') == 42
+        assert isinstance(coerce_value('42', 'number'), int)
+
+    def test_float_string(self):
+        from modules.compute.operations.filter import coerce_value
+
+        assert coerce_value('3.14', 'number') == pytest.approx(3.14)
+
+    def test_scientific_notation(self):
+        from modules.compute.operations.filter import coerce_value
+
+        val = coerce_value('1e5', 'number')
+        assert val == pytest.approx(100000.0)
+        assert isinstance(val, float)  # '1e5' contains 'e', must stay float
