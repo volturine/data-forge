@@ -28,6 +28,11 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
 ]
 
 
+def _default_data_dir() -> Path:
+    """Return a stable writable default data directory when DATA_DIR is unset."""
+    return Path(tempfile.gettempdir()) / 'data-forge'
+
+
 def _get_env_file() -> str | None:
     env_val = os.environ.get('ENV_FILE')
     if env_val:
@@ -84,7 +89,7 @@ class Settings(BaseSettings):
     # CORS origins - comma-separated list of allowed origins
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
 
-    data_dir: Path = Field(default_factory=lambda: Path(tempfile.TemporaryDirectory().name), alias='DATA_DIR')
+    data_dir: Path = Field(default_factory=_default_data_dir, alias='DATA_DIR')
     database_url: str = ''
     default_namespace: str = Field(default='default', alias='DEFAULT_NAMESPACE')
 

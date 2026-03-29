@@ -117,6 +117,19 @@ class TestSettings:
 
         assert isinstance(settings.data_dir, Path)
 
+    def test_empty_env_file_uses_stable_default_data_dir(self, monkeypatch, tmp_path):
+        monkeypatch.delenv('DATA_DIR', raising=False)
+        empty_env = tmp_path / '.env'
+        empty_env.write_text('', encoding='utf-8')
+        monkeypatch.setenv('ENV_FILE', str(empty_env))
+
+        first = Settings()
+        second = Settings()
+
+        assert first.data_dir == second.data_dir
+        assert first.data_dir.exists()
+        assert second.database_url == f'sqlite:///{second.data_dir / "app.db"}'
+
     def test_logging_level(self, monkeypatch):
         monkeypatch.setenv('LOG_LEVEL', 'DEBUG')
 
