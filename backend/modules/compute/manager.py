@@ -1,19 +1,28 @@
 import logging
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 
+from modules.compute.core.base import ComputeEngine
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.schemas import EngineStatus
 
 logger = logging.getLogger(__name__)
 
 _RESOURCE_KEYS = frozenset({'max_threads', 'max_memory_mb', 'streaming_chunk_size'})
+_SPAWN_WAIT_TIMEOUT_SECONDS = 30
+
+EngineFactory = Callable[[str, dict | None], ComputeEngine]
+
+
+def _default_engine_factory(analysis_id: str, resource_config: dict | None = None) -> ComputeEngine:
+    return PolarsComputeEngine(analysis_id, resource_config=resource_config)
 
 
 class EngineInfo:
     """Tracks engine and activity timestamp."""
 
-    def __init__(self, engine: PolarsComputeEngine):
+    def __init__(self, engine: ComputeEngine):
         self.engine = engine
         self.last_activity = datetime.now(UTC)
 
@@ -28,9 +37,11 @@ class EngineInfo:
 
 
 class ProcessManager:
-    def __init__(self) -> None:
+    def __init__(self, engine_factory: EngineFactory = _default_engine_factory) -> None:
         self._engines: dict[str, EngineInfo] = {}
         self._engines_lock = threading.Lock()
+        self._engine_events: dict[str, threading.Event] = {}
+        self._engine_factory = engine_factory
 
     def spawn_engine(self, analysis_id: str, resource_config: dict | None = None) -> EngineInfo:
         """
@@ -53,42 +64,61 @@ class ProcessManager:
         from core.config import settings
 
         normalized_config = self._normalize_config(resource_config)
+        wait_event: threading.Event | None = None
 
-        with self._engines_lock:
-            if analysis_id in self._engines:
-                info = self._engines[analysis_id]
-                if not self._configs_differ(self._normalize_config(info.engine.resource_config), normalized_config):
-                    info.touch()
-                    logger.debug(f'Reusing existing engine for analysis {analysis_id}')
-                    return info
+        while True:
+            shutdown_target: ComputeEngine | None = None
+            with self._engines_lock:
+                in_progress_event = self._engine_events.get(analysis_id)
+                if in_progress_event is not None:
+                    wait_event = in_progress_event
+                else:
+                    info = self._engines.get(analysis_id)
+                    if info and not self._configs_differ(self._normalize_config(info.engine.resource_config), normalized_config):
+                        info.touch()
+                        logger.debug(f'Reusing existing engine for analysis {analysis_id}')
+                        return info
 
-                logger.info(f'Resource config changed for analysis {analysis_id}, restarting engine')
+                    self._engine_events[analysis_id] = threading.Event()
+                    wait_event = None
+                    if info:
+                        logger.info(f'Resource config changed for analysis {analysis_id}, restarting engine')
+                        shutdown_target = info.engine
+                        del self._engines[analysis_id]
+                    break
 
-        # Shutdown outside lock to avoid deadlock
-        if analysis_id in self._engines:
-            self.shutdown_engine(analysis_id)
+            if wait_event is not None and not wait_event.wait(timeout=_SPAWN_WAIT_TIMEOUT_SECONDS):
+                raise RuntimeError(f'Timed out waiting for engine spawn to finish for analysis {analysis_id}')
 
-        with self._engines_lock:
-            # Check if we've reached max concurrent engines
-            if len(self._engines) >= settings.max_concurrent_engines:
-                logger.warning(
-                    f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}'
-                )
-                raise RuntimeError(
-                    f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
-                    f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
-                )
+        try:
+            if shutdown_target:
+                shutdown_target.shutdown()
 
-            logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
-            engine = PolarsComputeEngine(analysis_id, resource_config=normalized_config)
-            engine.start()
-            if not engine.is_process_alive():
-                engine.shutdown()
-                raise RuntimeError(f'Failed to start engine for analysis {analysis_id}')
-            info = EngineInfo(engine)
-            self._engines[analysis_id] = info
-            logger.info(f'Engine spawned successfully for analysis {analysis_id}')
-            return info
+            with self._engines_lock:
+                if len(self._engines) >= settings.max_concurrent_engines:
+                    logger.warning(
+                        f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}'
+                    )
+                    raise RuntimeError(
+                        f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
+                        f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
+                    )
+
+                logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
+                engine = self._engine_factory(analysis_id, normalized_config)
+                engine.start()
+                if not engine.is_process_alive():
+                    engine.shutdown()
+                    raise RuntimeError(f'Failed to start engine for analysis {analysis_id}')
+                info = EngineInfo(engine)
+                self._engines[analysis_id] = info
+                logger.info(f'Engine spawned successfully for analysis {analysis_id}')
+                return info
+        finally:
+            with self._engines_lock:
+                in_progress_event = self._engine_events.pop(analysis_id, None)
+                if in_progress_event is not None:
+                    in_progress_event.set()
 
     def _configs_differ(self, old_config: dict, new_config: dict) -> bool:
         return any(old_config.get(k) != new_config.get(k) for k in _RESOURCE_KEYS)
@@ -99,7 +129,7 @@ class ProcessManager:
         defaults = self._get_defaults()
         return {k: v for k in _RESOURCE_KEYS if (v := config.get(k)) is not None and v != defaults.get(k)}
 
-    def get_or_create_engine(self, analysis_id: str, resource_config: dict | None = None) -> PolarsComputeEngine:
+    def get_or_create_engine(self, analysis_id: str, resource_config: dict | None = None) -> ComputeEngine:
         """Get existing engine or create a new one for the analysis."""
         info = self.spawn_engine(analysis_id, resource_config=resource_config)
         return info.engine
@@ -121,7 +151,7 @@ class ProcessManager:
         self.shutdown_engine(analysis_id)
         return self.spawn_engine(analysis_id, resource_config=resource_config)
 
-    def get_engine(self, analysis_id: str) -> PolarsComputeEngine | None:
+    def get_engine(self, analysis_id: str) -> ComputeEngine | None:
         """Get existing engine by analysis_id."""
         with self._engines_lock:
             info = self._engines.get(analysis_id)
@@ -179,7 +209,7 @@ class ProcessManager:
             return {
                 'analysis_id': analysis_id,
                 'status': EngineStatus.HEALTHY if is_alive else EngineStatus.TERMINATED,
-                'process_id': engine.process.pid if is_alive and engine.process else None,
+                'process_id': engine.process_id,
                 'last_activity': info.last_activity.isoformat(),
                 'current_job_id': engine.current_job_id,
                 'resource_config': resource_config,
@@ -212,7 +242,7 @@ class ProcessManager:
         from core.config import settings  # Import here to avoid circular import
 
         cleaned = []
-        shutdown_targets: list[tuple[str, PolarsComputeEngine]] = []
+        shutdown_targets: list[tuple[str, ComputeEngine]] = []
         with self._engines_lock:
             for analysis_id, info in list(self._engines.items()):
                 info.engine.check_health()

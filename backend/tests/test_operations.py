@@ -1,3 +1,5 @@
+from typing import Any
+
 import polars as pl
 import pytest
 from pydantic import ValidationError
@@ -12,6 +14,7 @@ from modules.compute.operations.sort import SortHandler
 from modules.compute.operations.strings import StringTransformHandler
 from modules.compute.operations.timeseries import TimeseriesHandler
 from modules.compute.operations.union import UnionByNameHandler
+from modules.compute.operations.with_columns import WithColumnsHandler
 
 
 def _frame() -> pl.LazyFrame:
@@ -231,7 +234,7 @@ def test_fill_null_literal():
     assert lf.collect()['a'].to_list() == [1, 0]
 
 
-def test_join_handler_inner():
+def test_join_handler_inner_correctness():
     handler = JoinHandler()
     left = pl.DataFrame({'id': [1, 2], 'val': ['a', 'b']}).lazy()
     right = pl.DataFrame({'id': [2, 3], 'val2': ['x', 'y']}).lazy()
@@ -244,7 +247,47 @@ def test_join_handler_inner():
         },
         right_lf=right,
     )
-    assert lf.collect().height == 1
+    result = lf.collect()
+    assert result.height == 1
+    assert result['val'].to_list() == ['b']
+    assert result['val2'].to_list() == ['x']
+
+
+def test_with_columns_zero_arg_udf_uses_row_count(monkeypatch: pytest.MonkeyPatch):
+    handler = WithColumnsHandler()
+    lf = pl.DataFrame({'id': [1, 2]}).lazy()
+
+    called = {'int_range': 0, 'lit': 0}
+    original_int_range = pl.int_range
+    original_lit = pl.lit
+
+    def track_int_range(*args: Any, **kwargs: Any) -> pl.Expr:
+        called['int_range'] += 1
+        return original_int_range(*args, **kwargs)
+
+    def track_lit(*args: Any, **kwargs: Any) -> pl.Expr:
+        called['lit'] += 1
+        return original_lit(*args, **kwargs)
+
+    monkeypatch.setattr(pl, 'int_range', track_int_range)
+    monkeypatch.setattr(pl, 'lit', track_lit)
+
+    result = handler(
+        lf,
+        {
+            'expressions': [
+                {
+                    'name': 'udf_col',
+                    'type': 'udf',
+                    'code': 'def udf():\n    return 1',
+                }
+            ]
+        },
+    )
+
+    assert result is not None
+    assert called['int_range'] == 1
+    assert called['lit'] == 0
 
 
 def test_union_by_name_handler():

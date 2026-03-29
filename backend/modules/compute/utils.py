@@ -4,6 +4,7 @@ import polars as pl
 
 from core.config import settings
 from core.exceptions import EngineTimeoutError, StepNotFoundError
+from modules.compute.core.base import ComputeEngine
 
 
 def find_step_index(steps: list[dict], target_step_id: str) -> int:
@@ -101,7 +102,7 @@ def resolve_applied_target(steps: list[dict], target_step_id: str) -> str:
         current = parent_id
 
 
-def await_engine_result(engine, timeout: int, job_id: str | None = None) -> dict:
+def await_engine_result(engine: ComputeEngine, timeout: int, job_id: str | None = None) -> dict:
     deadline = time.monotonic() + timeout
     while True:
         if not engine.is_process_alive():

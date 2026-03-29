@@ -34,9 +34,15 @@ class JoinHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = JoinParams.model_validate(params)
-        join_columns = validated.join_columns or []
         right_columns = validated.right_columns or []
 
+        if right_lf is None:
+            raise ValueError('Join requires a right datasource')
+
+        if validated.how == 'cross':
+            return lf.join(right_lf, how='cross')
+
+        join_columns = validated.join_columns or []
         left_on = validated.left_on or []
         right_on = validated.right_on or []
         if join_columns:
@@ -46,28 +52,15 @@ class JoinHandler(OperationHandler):
         if not left_on or not right_on:
             raise ValueError('Join requires at least one join column pair')
 
-        if validated.how == 'cross':
-            if right_lf is not None:
-                return lf.join(right_lf, how='cross')
-            return lf.join(lf, how='cross')
-
         joined = lf.join(
-            lf,
+            right_lf,
             left_on=left_on,
             right_on=right_on,
             how=validated.how,
             suffix=validated.suffix,
         )
-        if right_lf is not None and validated.right_source:
-            joined = lf.join(
-                right_lf,
-                left_on=left_on,
-                right_on=right_on,
-                how=validated.how,
-                suffix=validated.suffix,
-            )
 
-        if right_columns and validated.how != 'cross':
+        if right_columns:
             all_columns = joined.collect_schema().names()
             final_columns = [
                 col

@@ -1,3 +1,6 @@
+import contextvars
+import threading
+import time
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +11,8 @@ from core.dependencies import get_manager
 from core.exceptions import PipelineValidationError
 from main import app
 from modules.compute.engine import PolarsComputeEngine
+from modules.compute.manager import ProcessManager
+from modules.compute.operations.datasource import _analysis_stack_var
 from modules.datasource.models import DataSource
 from modules.engine_runs.models import EngineRun
 
@@ -667,6 +672,92 @@ def test_pipeline_topological_order(mock_apply_step: MagicMock, mock_load: Magic
     # build_pipeline returns just the LazyFrame
     result = PolarsComputeEngine.build_pipeline({}, steps, 'job', MagicMock())
     assert result == fake_lf
+
+
+class FakeEngine:
+    def __init__(self, analysis_id: str, resource_config: dict[str, int] | None = None) -> None:
+        self.analysis_id = analysis_id
+        self.resource_config = resource_config or {}
+        self.effective_resources: dict[str, int] = {}
+        self.current_job_id: str | None = None
+        self._alive = False
+        self._pid = id(self)
+
+    @property
+    def process_id(self) -> int | None:
+        return self._pid if self._alive else None
+
+    def start(self) -> None:
+        self._alive = True
+
+    def is_process_alive(self) -> bool:
+        return self._alive
+
+    def check_health(self) -> bool:
+        return self._alive
+
+    def preview(self, *_args, **_kwargs) -> str:
+        return 'job'
+
+    def export(self, *_args, **_kwargs) -> str:
+        return 'job'
+
+    def get_schema(self, *_args, **_kwargs) -> str:
+        return 'job'
+
+    def get_row_count(self, *_args, **_kwargs) -> str:
+        return 'job'
+
+    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> dict | None:
+        return None
+
+    def shutdown(self) -> None:
+        # Delay the initial engine shutdown long enough for the conflicting restart
+        # thread to race the old TOCTOU path deterministically.
+        time.sleep(0.2 if self.resource_config.get('max_threads') == 1 else 0)
+        self._alive = False
+
+
+def test_spawn_engine_preserves_requested_config_during_conflicting_restarts():
+    manager = ProcessManager(engine_factory=FakeEngine)
+    manager.spawn_engine('analysis', {'max_threads': 1})
+
+    results: dict[str, dict[str, int]] = {}
+    barrier = threading.Barrier(2)
+
+    def worker(name: str, config: dict[str, int]) -> None:
+        barrier.wait()
+        info = manager.spawn_engine('analysis', config)
+        results[name] = info.engine.resource_config
+
+    first = threading.Thread(target=worker, args=('config_2', {'max_threads': 2}))
+    second = threading.Thread(target=worker, args=('config_3', {'max_threads': 3}))
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+
+    assert results['config_2'] == {'max_threads': 2}
+    assert results['config_3'] == {'max_threads': 3}
+    assert manager.get_engine('analysis') is not None
+
+
+def test_analysis_stack_context_copy_isolated():
+    token = _analysis_stack_var.set((('root', None),))
+    try:
+        copied = contextvars.copy_context()
+
+        def mutate_copy() -> tuple[tuple[str, str | None], ...]:
+            stack = _analysis_stack_var.get()
+            _analysis_stack_var.set((*stack, ('child', None)))
+            return _analysis_stack_var.get()
+
+        copied_stack = copied.run(mutate_copy)
+
+        assert copied_stack == (('root', None), ('child', None))
+        assert _analysis_stack_var.get() == (('root', None),)
+    finally:
+        _analysis_stack_var.reset(token)
 
 
 class TestEngineLifecycle:
