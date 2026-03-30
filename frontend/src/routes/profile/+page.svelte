@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { css, cx, button, input, label, spinner, row } from '$lib/styles/panda';
 	import { authStore } from '$lib/stores/auth.svelte';
-	import { updateProfile, changePassword } from '$lib/api/auth';
+	import { updateProfile, changePassword, unlinkProvider, getMe } from '$lib/api/auth';
 	import { Github } from 'lucide-svelte';
 
 	let name = $state(authStore.user?.display_name ?? '');
@@ -13,6 +13,9 @@
 	let confirm = $state('');
 	let changing = $state(false);
 	let pwMessage = $state<{ text: string; kind: 'success' | 'error' } | null>(null);
+
+	let unlinking = $state<string | null>(null);
+	let linkMessage = $state<{ text: string; kind: 'success' | 'error' } | null>(null);
 
 	const providers = $derived(authStore.user?.providers ?? []);
 
@@ -68,6 +71,28 @@
 
 	function oauth(provider: string) {
 		window.location.href = `/api/v1/auth/${provider}`;
+	}
+
+	async function disconnect(provider: string) {
+		unlinking = provider;
+		linkMessage = null;
+		const result = await unlinkProvider(provider);
+		result.match(
+			() => {
+				linkMessage = { text: `${provider} disconnected`, kind: 'success' };
+			},
+			(err) => {
+				linkMessage = { text: err.message, kind: 'error' };
+			}
+		);
+		const refresh = await getMe();
+		refresh.match(
+			(user) => {
+				authStore.user = user;
+			},
+			() => {}
+		);
+		unlinking = null;
 	}
 
 	const card = css({
@@ -230,6 +255,10 @@
 	<div class={card}>
 		<h2 class={heading}>Connected accounts</h2>
 
+		{#if linkMessage}
+			<div class={alert(linkMessage.kind)}>{linkMessage.text}</div>
+		{/if}
+
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
 			<div class={cx(row, css({ justifyContent: 'space-between', paddingY: '2' }))}>
 				<div class={cx(row, css({ gap: '3' }))}>
@@ -250,7 +279,15 @@
 					{/if}
 				</div>
 				{#if connected('google')}
-					<button type="button" class={button({ variant: 'ghost', size: 'sm' })} disabled>
+					<button
+						type="button"
+						class={button({ variant: 'ghost', size: 'sm' })}
+						disabled={unlinking === 'google'}
+						onclick={() => disconnect('google')}
+					>
+						{#if unlinking === 'google'}
+							<div class={spinner({ size: 'sm' })}></div>
+						{/if}
 						Disconnect
 					</button>
 				{:else}
@@ -282,7 +319,15 @@
 					{/if}
 				</div>
 				{#if connected('github')}
-					<button type="button" class={button({ variant: 'ghost', size: 'sm' })} disabled>
+					<button
+						type="button"
+						class={button({ variant: 'ghost', size: 'sm' })}
+						disabled={unlinking === 'github'}
+						onclick={() => disconnect('github')}
+					>
+						{#if unlinking === 'github'}
+							<div class={spinner({ size: 'sm' })}></div>
+						{/if}
 						Disconnect
 					</button>
 				{:else}

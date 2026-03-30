@@ -1,8 +1,12 @@
 import hashlib
 import hmac
+import logging
 import os
+import secrets
+import smtplib
 import uuid
 from datetime import UTC, datetime, timedelta
+from email.message import EmailMessage
 from string import hexdigits
 
 from sqlmodel import Session, select
@@ -13,12 +17,19 @@ from core.exceptions import (
     InvalidCredentialsError,
     OAuthError,
     ProviderUnlinkError,
+    TokenExpiredError,
+    TokenInvalidError,
 )
-from modules.auth.models import AuthProvider, User, UserSession
+from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
 
 _PASSWORD_PROVIDER = 'password'
 _PBKDF2_ALG = 'sha256'
 _PBKDF2_ITERATIONS = 200_000
+_EMAIL_VERIFY = 'email_verify'
+_PASSWORD_RESET = 'password_reset'
+_RESEND_COOLDOWN_MINUTES = 5
+
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -331,4 +342,177 @@ def unlink_provider(session: Session, user_id: str, provider: str) -> None:
     user.has_password = has_password_provider
     user.updated_at = datetime.now(UTC)
     session.add(user)
+    session.commit()
+
+
+def create_verification_token(session: Session, user_id: str, token_type: str, ttl_hours: int = 24) -> str:
+    now = datetime.now(UTC)
+    raw = secrets.token_urlsafe(32)
+    token = VerificationToken(
+        id=uuid.uuid4().hex,
+        user_id=user_id,
+        token=raw,
+        token_type=token_type,
+        created_at=now,
+        expires_at=now + timedelta(hours=ttl_hours),
+        used=False,
+    )
+    session.add(token)
+    session.commit()
+    return raw
+
+
+def validate_verification_token(session: Session, token: str, token_type: str) -> str:
+    stmt = select(VerificationToken).where(
+        VerificationToken.token == token,
+        VerificationToken.token_type == token_type,
+    )
+    row = session.exec(stmt).first()
+    if not row:
+        raise TokenInvalidError()
+    if row.used:
+        raise TokenInvalidError()
+    now = datetime.now(UTC)
+    if row.expires_at <= now:
+        raise TokenExpiredError()
+    row.used = True
+    session.add(row)
+    session.commit()
+    return row.user_id
+
+
+def send_verification_email(user_email: str, token: str) -> None:
+    try:
+        from modules.settings.service import get_resolved_smtp
+
+        smtp = get_resolved_smtp()
+    except Exception:
+        logger.warning('Skipping verification email send because SMTP config is unavailable', exc_info=True)
+        return
+    host = str(smtp.get('host', ''))
+    port = int(str(smtp.get('port', 587)))
+    smtp_user = str(smtp.get('user', ''))
+    password = str(smtp.get('password', ''))
+
+    if not host or not smtp_user:
+        logger.info('Skipping verification email send because SMTP is not configured')
+        return
+
+    verify_url = f'{settings.auth_frontend_url}/verify?token={token}'
+    msg = EmailMessage()
+    msg['From'] = smtp_user
+    msg['To'] = user_email
+    msg['Subject'] = 'Verify your email'
+    msg.set_content(f'Please verify your email by opening this link: {verify_url}')
+
+    try:
+        with smtplib.SMTP(host, port, timeout=10) as server:
+            server.starttls()
+            if password:
+                server.login(smtp_user, password)
+            server.send_message(msg)
+    except Exception:
+        logger.warning('Failed to send verification email', exc_info=True)
+
+
+def resend_verification(session: Session, user_id: str) -> None:
+    user = get_user_by_id(session, user_id)
+    if not user:
+        raise InvalidCredentialsError()
+    if user.email_verified:
+        return
+
+    stmt = select(VerificationToken).where(
+        VerificationToken.user_id == user_id,
+        VerificationToken.token_type == _EMAIL_VERIFY,
+    )
+    rows = session.exec(stmt).all()
+    last = max(rows, key=lambda row: row.created_at) if rows else None
+    if last:
+        now = datetime.now(UTC)
+        if last.created_at + timedelta(minutes=_RESEND_COOLDOWN_MINUTES) > now:
+            raise ValueError('Verification email was sent recently. Please wait before requesting again')
+
+    token = create_verification_token(session, user_id=user_id, token_type=_EMAIL_VERIFY)
+    send_verification_email(user.email, token)
+
+
+def create_password_reset_token(session: Session, email: str) -> str | None:
+    user = get_user_by_email(session, email)
+    if not user:
+        return None
+    return create_verification_token(session, user_id=user.id, token_type=_PASSWORD_RESET, ttl_hours=1)
+
+
+def send_password_reset_email(user_email: str, token: str) -> None:
+    try:
+        from modules.settings.service import get_resolved_smtp
+
+        smtp = get_resolved_smtp()
+    except Exception:
+        logger.warning('Skipping password reset email because SMTP config is unavailable', exc_info=True)
+        return
+    host = str(smtp.get('host', ''))
+    port = int(str(smtp.get('port', 587)))
+    smtp_user = str(smtp.get('user', ''))
+    password = str(smtp.get('password', ''))
+    if not host or not smtp_user:
+        logger.warning('Skipping password reset email because SMTP is not configured')
+        return
+    reset_url = f'{settings.auth_frontend_url}/reset-password?token={token}'
+    msg = EmailMessage()
+    msg['From'] = smtp_user
+    msg['To'] = user_email
+    msg['Subject'] = 'Reset your password'
+    msg.set_content(f'Use this link to reset your password: {reset_url}')
+    try:
+        with smtplib.SMTP(host, port, timeout=10) as server:
+            server.starttls()
+            if password:
+                server.login(smtp_user, password)
+            server.send_message(msg)
+    except Exception:
+        logger.warning('Failed to send password reset email', exc_info=True)
+
+
+def reset_password(session: Session, token: str, new_password: str) -> None:
+    validate_password(new_password)
+    stmt = select(VerificationToken).where(
+        VerificationToken.token == token,
+        VerificationToken.token_type == _PASSWORD_RESET,
+    )
+    row = session.exec(stmt).first()
+    if not row:
+        raise TokenInvalidError()
+    if row.used:
+        raise TokenInvalidError()
+    now = datetime.now(UTC)
+    if row.expires_at <= now:
+        raise TokenExpiredError()
+    user = get_user_by_id(session, row.user_id)
+    if not user:
+        raise TokenInvalidError()
+    provider = session.exec(
+        select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == _PASSWORD_PROVIDER)
+    ).first()
+    if provider:
+        provider.provider_metadata = {'password_hash': hash_password(new_password)}
+        session.add(provider)
+    if not provider:
+        session.add(
+            AuthProvider(
+                id=uuid.uuid4().hex,
+                user_id=user.id,
+                provider=_PASSWORD_PROVIDER,
+                provider_subject=user.email,
+                provider_metadata={'password_hash': hash_password(new_password)},
+                created_at=now,
+            )
+        )
+    user.has_password = True
+    user.updated_at = now
+    row.used = True
+    session.add(user)
+    session.add(row)
+    revoke_all_sessions(session, user.id)
     session.commit()

@@ -311,3 +311,13 @@ class ProviderUnlinkError(AuthError):
 class OAuthError(AuthError):
     def __init__(self, message: str = 'OAuth authentication failed'):
         super().__init__(message=message, error_code='OAUTH_ERROR')
+
+
+class TokenExpiredError(AuthError):
+    def __init__(self):
+        super().__init__(message='Token has expired', error_code='TOKEN_EXPIRED')
+
+
+class TokenInvalidError(AuthError):
+    def __init__(self):
+        super().__init__(message='Token is invalid or already used', error_code='TOKEN_INVALID')

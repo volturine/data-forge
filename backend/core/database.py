@@ -81,7 +81,7 @@ def init_db() -> None:
 
 
 def _init_settings_db() -> None:
-    from modules.auth.models import AuthProvider, User, UserSession
+    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
     from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
     from modules.settings.service import seed_settings_from_env
@@ -91,6 +91,7 @@ def _init_settings_db() -> None:
     User.metadata.create_all(settings_engine)
     AuthProvider.metadata.create_all(settings_engine)
     UserSession.metadata.create_all(settings_engine)
+    VerificationToken.metadata.create_all(settings_engine)
     _run_settings_migrations(settings_engine)
     with Session(settings_engine) as session:
         seed_settings_from_env(session)

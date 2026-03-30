@@ -126,6 +126,7 @@ def create_file_datasource(
     table_name: str | None = None,
     named_range: str | None = None,
     cell_range: str | None = None,
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     resolved_path = Path(os.path.realpath(Path(file_path).resolve()))
@@ -174,6 +175,7 @@ def create_file_datasource(
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -532,6 +534,7 @@ def create_database_datasource(
     connection_string: str,
     query: str,
     branch: str = 'master',
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     branch_name = branch
@@ -555,6 +558,7 @@ def create_database_datasource(
                 name=name,
                 source_type=DataSourceType.DATABASE,
                 config=source_config,
+                owner_id=owner_id,
                 created_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.add(datasource)
@@ -578,6 +582,7 @@ def create_database_datasource(
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -594,6 +599,7 @@ def create_iceberg_datasource(
     name: str,
     source: dict,
     branch: str = 'master',
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     source_type = source.get('source_type') if isinstance(source, dict) else None
     if source_type not in {DataSourceType.FILE, DataSourceType.DATABASE}:
@@ -645,6 +651,7 @@ def create_iceberg_datasource(
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 

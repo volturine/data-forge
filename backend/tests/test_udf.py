@@ -2,6 +2,9 @@
 
 import pytest
 
+from main import app
+from modules.auth.dependencies import get_optional_user
+from modules.udf.models import Udf
 from modules.udf.schemas import (
     UdfCreateSchema,
     UdfImportItemSchema,
@@ -413,6 +416,23 @@ class TestUdfAPI:
         result = response.json()
         assert result['name'] == 'api_test'
         assert result['description'] == 'API test UDF'
+
+    def test_create_udf_sets_owner_id_when_optional_user_present(self, client, test_db_session, test_user, monkeypatch):
+        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+        udf_data = {
+            'name': 'api_owned',
+            'description': 'Owned API test UDF',
+            'signature': {'inputs': [], 'output_dtype': 'String'},
+            'code': 'def udf():\n    return "owned"',
+        }
+
+        response = client.post('/api/v1/udf', json=udf_data)
+
+        assert response.status_code == 200
+        udf_id = response.json()['id']
+        created = test_db_session.get(Udf, udf_id)
+        assert created is not None
+        assert created.owner_id == test_user.id
 
     def test_create_udf_with_invalid_code_returns_400(self, client):
         """Test creating a UDF with invalid code returns 400."""

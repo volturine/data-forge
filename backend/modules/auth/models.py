@@ -46,3 +46,16 @@ class UserSession(SQLModel, table=True):  # type: ignore[call-arg]
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), sa_column=Column(DateTime(timezone=True), nullable=False))
     expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     revoked: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
+
+
+class VerificationToken(SQLModel, table=True):  # type: ignore[call-arg]
+    __tablename__ = 'verification_tokens'
+    __table_args__ = (Index('ix_verification_tokens_user_id', 'user_id'),)
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, sa_column=Column(String, primary_key=True))
+    user_id: str = Field(sa_column=Column(String, ForeignKey('users.id', ondelete='CASCADE'), nullable=False))
+    token: str = Field(sa_column=Column(String, nullable=False, unique=True, index=True))
+    token_type: str = Field(sa_column=Column(String, nullable=False))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), sa_column=Column(DateTime(timezone=True), nullable=False))
+    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    used: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))

@@ -258,7 +258,12 @@ export default defineConfig({
 					colXl: { value: '12rem' },
 					previewMd: { value: '14rem' },
 					previewLg: { value: '16rem' },
-					previewXl: { value: '18rem' }
+					previewXl: { value: '18rem' },
+					sidebarExpanded: { value: '220px' },
+					sidebarCollapsed: { value: '56px' },
+					panelSm: { value: '20rem' },
+					panelMd: { value: '25rem' },
+					panelLg: { value: '30rem' }
 				},
 				zIndex: {
 					header: { value: '100' },

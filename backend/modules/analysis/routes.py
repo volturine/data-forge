@@ -10,6 +10,8 @@ from core.error_handlers import handle_errors
 from core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas, service
 from modules.analysis.step_schemas import StepType, get_config_model, get_step_catalog
+from modules.auth.dependencies import get_optional_user
+from modules.auth.models import User
 from modules.compute import service as compute_service
 from modules.compute.manager import ProcessManager
 from modules.mcp.router import MCPRouter
@@ -32,6 +34,7 @@ def validate_analysis(
 def create_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """Create a new analysis pipeline.
 
@@ -46,7 +49,8 @@ def create_analysis(
     (with result_id, format, filename), and optionally steps.
     Use GET /api/v1/analysis/step-types to discover valid step types and their config schemas.
     """
-    return service.create_analysis(session, data)
+    owner_id = user.id if user else None
+    return service.create_analysis(session, data, owner_id=owner_id)
 
 
 @router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)

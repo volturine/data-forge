@@ -53,32 +53,17 @@
 	const currentPath = $derived(page.url.pathname);
 
 	const navItems = [
-		{
-			href: '/',
-			label: 'Analyses',
-			icon: LayoutGrid,
-			match: (p: string) => p === '/' || p.startsWith('/analysis')
-		},
-		{
-			href: '/datasources',
-			label: 'Data Sources',
-			icon: Database,
-			match: (p: string) => p.startsWith('/datasources')
-		},
-		{
-			href: '/monitoring',
-			label: 'Monitoring',
-			icon: Activity,
-			match: (p: string) => p.startsWith('/monitoring')
-		},
-		{
-			href: '/lineage',
-			label: 'Lineage',
-			icon: GitBranch,
-			match: (p: string) => p.startsWith('/lineage')
-		},
-		{ href: '/udfs', label: 'UDFs', icon: Code2, match: (p: string) => p.startsWith('/udfs') }
-	];
+		{ href: '/', label: 'Analyses', icon: LayoutGrid, prefix: '/analysis' },
+		{ href: '/datasources', label: 'Data Sources', icon: Database, prefix: '/datasources' },
+		{ href: '/monitoring', label: 'Monitoring', icon: Activity, prefix: '/monitoring' },
+		{ href: '/lineage', label: 'Lineage', icon: GitBranch, prefix: '/lineage' },
+		{ href: '/udfs', label: 'UDFs', icon: Code2, prefix: '/udfs' }
+	] as const;
+
+	function isActive(item: (typeof navItems)[number]): boolean {
+		if (item.href === '/') return currentPath === '/' || currentPath.startsWith('/analysis');
+		return currentPath.startsWith(item.prefix);
+	}
 
 	const sidebarClass = $derived(
 		css({
@@ -89,7 +74,7 @@
 			borderRightWidth: '1',
 			zIndex: 'nav',
 			flexShrink: 0,
-			width: collapsed ? '56px' : '220px',
+			width: collapsed ? 'sidebarCollapsed' : 'sidebarExpanded',
 			transitionProperty: 'width',
 			transitionDuration: '200ms',
 			transitionTimingFunction: 'ease',
@@ -157,6 +142,16 @@
 			transitionTimingFunction: 'ease'
 		})
 	);
+
+	const profileActive = $derived(currentPath.startsWith('/profile'));
+
+	const sectionClass = css({
+		display: 'flex',
+		flexDirection: 'column',
+		gap: '0.5',
+		paddingY: '2',
+		borderTopWidth: '1'
+	});
 </script>
 
 <aside class={sidebarClass} aria-label="Main navigation">
@@ -222,10 +217,16 @@
 			paddingY: '2',
 			flex: '1'
 		})}
+		aria-label="Primary"
 	>
 		{#each navItems as item (item.href)}
-			{@const active = item.match(currentPath)}
-			<a href={resolve(item.href as '/')} class={navLinkClass(active)} title={item.label}>
+			{@const active = isActive(item)}
+			<a
+				href={resolve(item.href as '/')}
+				class={navLinkClass(active)}
+				title={collapsed ? item.label : undefined}
+				aria-current={active ? 'page' : undefined}
+			>
 				<span class={iconWrapClass}>
 					<item.icon size={16} />
 				</span>
@@ -234,19 +235,11 @@
 		{/each}
 	</nav>
 
-	<div
-		class={css({
-			display: 'flex',
-			flexDirection: 'column',
-			gap: '0.5',
-			paddingY: '2',
-			borderTopWidth: '1'
-		})}
-	>
+	<div class={sectionClass} role="group" aria-label="Tools">
 		<button
 			class={sidebarBtnClass}
 			onclick={onOpenChat}
-			title="AI Assistant"
+			title={collapsed ? 'Chat' : 'AI Assistant'}
 			aria-label="AI Assistant"
 			type="button"
 		>
@@ -263,7 +256,7 @@
 					color: enginesStore.count > 0 ? 'fg.secondary' : 'fg.tertiary'
 				})
 			)}
-			title="Engine Monitor"
+			title={collapsed ? 'Engines' : 'Engine Monitor'}
 			aria-label="Engine Monitor"
 			type="button"
 			onclick={onOpenSettings}
@@ -307,7 +300,7 @@
 		<button
 			class={sidebarBtnClass}
 			onclick={onOpenSettings}
-			title="Settings"
+			title={collapsed ? 'Settings' : 'Settings'}
 			aria-label="Settings"
 			type="button"
 		>
@@ -320,7 +313,7 @@
 		<button
 			class={sidebarBtnClass}
 			onclick={onToggleTheme}
-			title="Toggle theme"
+			title={collapsed ? (theme === 'light' ? 'Light' : 'Dark') : 'Toggle theme'}
 			aria-label="Toggle theme"
 			type="button"
 		>
@@ -333,10 +326,16 @@
 			</span>
 			<span class={labelClass}>{theme === 'light' ? 'Light' : 'Dark'}</span>
 		</button>
+	</div>
 
-		{#if authenticated}
-			{@const profileActive = currentPath.startsWith('/profile')}
-			<a href={resolve('/profile' as '/')} class={navLinkClass(profileActive)} title="Profile">
+	{#if authenticated}
+		<div class={sectionClass} role="group" aria-label="Account">
+			<a
+				href={resolve('/profile' as '/')}
+				class={navLinkClass(profileActive)}
+				title={collapsed ? 'Profile' : undefined}
+				aria-current={profileActive ? 'page' : undefined}
+			>
 				<span class={iconWrapClass}>
 					{#if avatarUrl}
 						<img
@@ -359,7 +358,7 @@
 			<button
 				class={sidebarBtnClass}
 				onclick={onSignOut}
-				title="Sign out"
+				title={collapsed ? 'Sign out' : 'Sign out'}
 				aria-label="Sign out"
 				type="button"
 			>
@@ -368,8 +367,8 @@
 				</span>
 				<span class={labelClass}>Sign out</span>
 			</button>
-		{/if}
-	</div>
+		</div>
+	{/if}
 
 	<div
 		class={css({

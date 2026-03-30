@@ -745,6 +745,7 @@ class FakeEngine:
 
 def test_spawn_engine_preserves_requested_config_during_conflicting_restarts():
     manager = ProcessManager(engine_factory=FakeEngine)
+    manager._get_defaults = lambda: {'max_threads': 0, 'max_memory_mb': 0, 'streaming_chunk_size': 0}
     manager.spawn_engine('analysis', {'max_threads': 1})
 
     results: dict[str, dict[str, int]] = {}

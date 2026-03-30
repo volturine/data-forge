@@ -36,6 +36,8 @@ from core.exceptions import (
     ScheduleValidationError,
     SessionExpiredError,
     StepNotFoundError,
+    TokenExpiredError,
+    TokenInvalidError,
     UnsupportedExportFormatError,
 )
 
@@ -68,6 +70,8 @@ EXCEPTION_STATUS_MAP = {
     AccountDisabledError: 403,
     ProviderUnlinkError: 400,
     OAuthError: 400,
+    TokenExpiredError: 400,
+    TokenInvalidError: 400,
     # 408 - Timeout errors
     EngineTimeoutError: 408,
     JobTimeoutError: 408,

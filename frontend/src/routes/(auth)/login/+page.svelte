@@ -77,6 +77,20 @@
 				required
 				autocomplete="current-password"
 			/>
+			<a
+				href={resolve('/forgot-password')}
+				class={css({
+					display: 'block',
+					fontSize: 'xs',
+					color: 'accent.primary',
+					textDecoration: 'underline',
+					textUnderlineOffset: '2px',
+					marginTop: '1',
+					textAlign: 'right'
+				})}
+			>
+				Forgot password?
+			</a>
 		</div>
 
 		<button type="submit" class={button({ variant: 'primary' })} disabled={authStore.loading}>

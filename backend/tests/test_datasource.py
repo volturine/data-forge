@@ -5,6 +5,8 @@ from unittest.mock import patch
 import polars as pl
 
 from core.namespace import namespace_paths
+from main import app
+from modules.auth.dependencies import get_optional_user
 from modules.datasource.models import DataSource
 
 
@@ -84,6 +86,19 @@ class TestDataSourceUpload:
         assert response.status_code == 400
         assert 'Unsupported file type' in response.json()['detail']
 
+    def test_upload_sets_owner_id_when_optional_user_present(self, client, mock_file_upload: dict, test_db_session, test_user, monkeypatch):
+        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+        files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
+        data = {'name': 'Owned Upload'}
+
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
+
+        assert response.status_code == 200
+        datasource_id = response.json()['id']
+        created = test_db_session.get(DataSource, datasource_id)
+        assert created is not None
+        assert created.owner_id == test_user.id
+
 
 class TestDataSourceConnect:
     def test_connect_database_datasource(self, client):
@@ -105,6 +120,25 @@ class TestDataSourceConnect:
         assert result['source_type'] == 'database'
         assert result['config']['connection_string'] == 'postgresql://user:pass@localhost/db'
         assert result['config']['query'] == 'SELECT * FROM users'
+
+    def test_connect_sets_owner_id_when_optional_user_present(self, client, test_db_session, test_user, monkeypatch):
+        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+        payload = {
+            'name': 'Owned Database Connection',
+            'source_type': 'database',
+            'config': {
+                'connection_string': 'postgresql://user:pass@localhost/db',
+                'query': 'SELECT * FROM users',
+            },
+        }
+
+        response = client.post('/api/v1/datasource/connect', json=payload)
+
+        assert response.status_code == 200
+        datasource_id = response.json()['id']
+        created = test_db_session.get(DataSource, datasource_id)
+        assert created is not None
+        assert created.owner_id == test_user.id
 
     def test_connect_unsupported_source_type(self, client):
         payload = {

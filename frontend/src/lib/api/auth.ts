@@ -72,3 +72,36 @@ export function changePassword(payload: ChangePasswordPayload) {
 		body: JSON.stringify(payload)
 	});
 }
+
+export function unlinkProvider(provider: string) {
+	return apiRequest<{ success: boolean }>(`/v1/auth/providers/${provider}/unlink`, {
+		method: 'POST'
+	});
+}
+
+export function verifyEmail(token: string) {
+	return apiRequest<{ message: string }>('/v1/auth/verify-email', {
+		method: 'POST',
+		body: JSON.stringify({ token })
+	});
+}
+
+export function resendVerification() {
+	return apiRequest<{ message: string }>('/v1/auth/resend-verification', {
+		method: 'POST'
+	});
+}
+
+export function forgotPassword(email: string) {
+	return apiRequest<{ message: string }>('/v1/auth/forgot-password', {
+		method: 'POST',
+		body: JSON.stringify({ email })
+	});
+}
+
+export function resetPassword(token: string, password: string) {
+	return apiRequest<{ message: string }>('/v1/auth/reset-password', {
+		method: 'POST',
+		body: JSON.stringify({ token, new_password: password })
+	});
+}

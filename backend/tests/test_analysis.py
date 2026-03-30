@@ -2,7 +2,9 @@ import uuid
 
 from sqlalchemy import select
 
+from main import app
 from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.auth.dependencies import get_optional_user
 from modules.datasource.models import DataSource
 
 
@@ -309,6 +311,45 @@ class TestAnalysisCreate:
         result = response.json()
         assert len(result['pipeline_definition']['tabs']) == 2
         assert result['pipeline_definition']['tabs'][1]['datasource']['id'] == tab1_result_id
+
+    def test_create_analysis_sets_owner_id_when_optional_user_present(
+        self,
+        client,
+        sample_datasource: DataSource,
+        test_db_session,
+        test_user,
+        monkeypatch,
+    ):
+        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+        payload = {
+            'name': 'Owned Analysis',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'owned_source',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
+
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 200
+        analysis_id = response.json()['id']
+        created = test_db_session.get(Analysis, analysis_id)
+        assert created is not None
+        assert created.owner_id == test_user.id
 
 
 class TestAnalysisGet:

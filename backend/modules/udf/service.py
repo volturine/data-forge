@@ -34,7 +34,7 @@ def _signature_key(signature: dict) -> str:
     return ','.join(dtypes)
 
 
-def create_udf(session: Session, data: UdfCreateSchema) -> UdfResponseSchema:
+def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = None) -> UdfResponseSchema:
     _validate_code(data.code)
     now = datetime.now(UTC)
     udf = Udf(
@@ -45,6 +45,7 @@ def create_udf(session: Session, data: UdfCreateSchema) -> UdfResponseSchema:
         code=data.code,
         tags=data.tags,
         source=data.source or 'user',
+        owner_id=owner_id,
         created_at=now,
         updated_at=now,
     )

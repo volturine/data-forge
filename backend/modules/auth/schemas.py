@@ -29,11 +29,6 @@ class UserPublic(BaseModel):
     created_at: datetime
 
 
-class AuthResponse(BaseModel):
-    user: UserPublic
-    session_token: str
-
-
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = None
     avatar_url: str | None = None
@@ -43,6 +38,23 @@ class UpdateProfileRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 class OAuthCallbackParams(BaseModel):

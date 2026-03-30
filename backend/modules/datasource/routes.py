@@ -14,6 +14,8 @@ from core.error_handlers import handle_errors
 from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from core.namespace import namespace_paths
 from core.validation import DataSourceId, PreflightId, parse_datasource_id, parse_preflight_id
+from modules.auth.dependencies import get_optional_user
+from modules.auth.models import User
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 from modules.datasource.source_types import DataSourceType
@@ -75,6 +77,7 @@ async def upload_file(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
+    user: User | None = Depends(get_optional_user),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -124,6 +127,7 @@ async def upload_file(
         )
 
     try:
+        owner_id = user.id if user else None
         return await run_in_threadpool(
             run_db,
             service.create_file_datasource,
@@ -131,6 +135,7 @@ async def upload_file(
             file_path=str(file_path),
             file_type=file_type,
             csv_options=csv_options,
+            owner_id=owner_id,
         )
     except Exception as e:
         if file_path.exists():
@@ -147,6 +152,7 @@ async def upload_bulk(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
+    user: User | None = Depends(get_optional_user),
 ):
     if not files:
         raise HTTPException(status_code=400, detail='No files provided')
@@ -217,6 +223,7 @@ async def upload_bulk(
 
         file_csv_options = csv_options if file_type == 'csv' else None
         try:
+            owner_id = user.id if user else None
             datasource = await run_in_threadpool(
                 run_db,
                 service.create_file_datasource,
@@ -224,6 +231,7 @@ async def upload_bulk(
                 file_path=str(file_path),
                 file_type=file_type,
                 csv_options=file_csv_options,
+                owner_id=owner_id,
             )
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
         except Exception as e:
@@ -416,6 +424,7 @@ async def confirm_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
+    user: User | None = Depends(get_optional_user),
 ):
     preflight = get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
@@ -467,6 +476,7 @@ async def confirm_excel(
             table_name=table_name,
             named_range=named_range,
             cell_range=resolved_cell_range,
+            owner_id=user.id if user else None,
         )
     except Exception as e:
         if target_path.exists():
@@ -483,6 +493,7 @@ async def confirm_excel(
 def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """Connect a new datasource (database, Iceberg, or analysis type).
 
@@ -510,10 +521,10 @@ def connect_datasource(
             status_code=400,
             detail=(f'Unsupported source type: {datasource.source_type}. Use "file", "database", "iceberg", or "analysis"'),
         )
-    return handler(datasource, session)
+    return handler(datasource, session, user.id if user else None)
 
 
-def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCreate, Session], schemas.DataSourceResponse]]:
+def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCreate, Session, str | None], schemas.DataSourceResponse]]:
     return {
         DataSourceType.DATABASE: _connect_database,
         DataSourceType.ICEBERG: _connect_iceberg,
@@ -521,7 +532,7 @@ def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCrea
     }
 
 
-def _connect_database(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+def _connect_database(datasource: schemas.DataSourceCreate, session: Session, owner_id: str | None) -> schemas.DataSourceResponse:
     db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
     return service.create_database_datasource(
         session=session,
@@ -529,20 +540,23 @@ def _connect_database(datasource: schemas.DataSourceCreate, session: Session) ->
         connection_string=db_config.connection_string,
         query=db_config.query,
         branch=db_config.branch,
+        owner_id=owner_id,
     )
 
 
-def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session, owner_id: str | None) -> schemas.DataSourceResponse:
     iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
     return service.create_iceberg_datasource(
         session=session,
         name=datasource.name,
         source=iceberg_config.source,
         branch=iceberg_config.branch,
+        owner_id=owner_id,
     )
 
 
-def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session, owner_id: str | None) -> schemas.DataSourceResponse:
+    _ = owner_id
     raise HTTPException(
         status_code=400,
         detail='Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id.',

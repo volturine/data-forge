@@ -3,6 +3,8 @@ from sqlmodel import Session
 
 from core.database import get_db
 from core.validation import UdfId, parse_udf_id
+from modules.auth.dependencies import get_optional_user
+from modules.auth.models import User
 from modules.mcp.router import MCPRouter
 from modules.udf import schemas, service
 
@@ -24,6 +26,7 @@ def list_udfs(
 def create_udf(
     data: schemas.UdfCreateSchema,
     session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """Create a new user-defined function.
 
@@ -31,7 +34,8 @@ def create_udf(
     Use GET /udf to see existing UDFs. Use GET /analysis/step-types to see how UDFs are used in pipelines.
     """
     try:
-        return service.create_udf(session, data)
+        owner_id = user.id if user else None
+        return service.create_udf(session, data, owner_id=owner_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -12,6 +12,8 @@ from core.config import settings
 from core.database import clear_engine_override, get_db, set_engine_override
 from main import app
 from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.auth.dependencies import get_current_user
+from modules.auth.models import User
 from modules.datasource.models import DataSource
 
 
@@ -38,13 +40,30 @@ def test_db_session(test_engine):
 
 
 @pytest.fixture(scope='function')
-def client(test_db_session):
+def test_user() -> User:
+    now = datetime.now(UTC)
+    return User(
+        id=uuid.uuid4().hex,
+        email='test@example.com',
+        display_name='Test User',
+        status='active',
+        email_verified=True,
+        has_password=True,
+        preferences={},
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@pytest.fixture(scope='function')
+def client(test_db_session, test_user):
     def override_get_db():
         yield test_db_session
 
     if hasattr(app.state, 'mcp_registry'):
         del app.state.mcp_registry
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: test_user
     with TestClient(app) as ac:
         yield ac
     app.dependency_overrides.clear()
