@@ -24,10 +24,14 @@ from core.exceptions import (
     DataSourceValidationError,
     EmailAlreadyExistsError,
     EngineNotFoundError,
+    EngineStartError,
     EngineTimeoutError,
     FileSizeExceededError,
     FileValidationError,
+    HealthcheckNotFoundError,
+    HealthcheckValidationError,
     InvalidCredentialsError,
+    InvalidIdError,
     JobNotFoundError,
     JobTimeoutError,
     OAuthError,
@@ -37,9 +41,12 @@ from core.exceptions import (
     ScheduleNotFoundError,
     ScheduleValidationError,
     SessionExpiredError,
+    SettingsConfigurationError,
     StepNotFoundError,
     TokenExpiredError,
     TokenInvalidError,
+    UdfNotFoundError,
+    UdfValidationError,
     UnsupportedExportFormatError,
 )
 
@@ -75,6 +82,13 @@ EXCEPTION_STATUS_MAP: dict[type[AppError], int] = {
     JobTimeoutError: 408,
     FileSizeExceededError: 413,
     PipelineExecutionError: 500,
+    UdfNotFoundError: 404,
+    UdfValidationError: 400,
+    HealthcheckNotFoundError: 404,
+    HealthcheckValidationError: 400,
+    SettingsConfigurationError: 500,
+    InvalidIdError: 400,
+    EngineStartError: 500,
 }
 
 

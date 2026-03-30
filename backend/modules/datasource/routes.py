@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from collections.abc import Callable
@@ -19,6 +20,8 @@ from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 from modules.datasource.source_types import DataSourceType
 from modules.mcp.router import MCPRouter
+
+logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix='/datasource', tags=['datasource'])
 
@@ -111,9 +114,10 @@ async def upload_file(
             file_path.unlink()
         raise
     except Exception as e:
+        logger.error('Failed to save file: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to save file') from e
 
     csv_options = None
     if file_type == 'csv':
@@ -137,9 +141,10 @@ async def upload_file(
             owner_id=owner_id,
         )
     except Exception as e:
+        logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f'Failed to create datasource: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
 
 @router.post('/upload/bulk', response_model=schemas.BulkUploadResponse)
@@ -285,9 +290,10 @@ async def preflight_excel(
             file_path.unlink()
         raise
     except Exception as e:
+        logger.error('Failed to save file: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to save file') from e
 
     preflight_id, preflight = create_preflight(file_path, delete_file=False)
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
@@ -478,10 +484,11 @@ async def confirm_excel(
             owner_id=user.id if user else None,
         )
     except Exception as e:
+        logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if target_path.exists():
             target_path.unlink()
         clear_preflight(parse_preflight_id(preflight_id))
-        raise HTTPException(status_code=500, detail=f'Failed to create datasource: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
     clear_preflight(parse_preflight_id(preflight_id))
     return datasource

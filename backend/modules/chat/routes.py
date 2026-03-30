@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from core.error_handlers import handle_errors
 from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.chat.tool_contract import format_output_hint
@@ -428,12 +429,14 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
 
 
 @router.get('/sessions')
+@handle_errors('list chat sessions')
 def list_sessions() -> list[dict]:
     """List all active chat sessions with preview info."""
     return session_store.list_sessions()
 
 
 @router.post('/sessions')
+@handle_errors('create chat session')
 def create_session(body: CreateSessionRequest) -> dict:
     """Create a new chat session with the given provider/model/key."""
     session = session_store.create(body.provider, body.model, body.api_key, body.system_prompt)
@@ -441,6 +444,7 @@ def create_session(body: CreateSessionRequest) -> dict:
 
 
 @router.patch('/sessions/{session_id}')
+@handle_errors('update chat session')
 def update_session(session_id: str, body: UpdateSessionRequest) -> dict:
     """Update model, system prompt, or API key on a live session."""
     session = session_store.get(session_id)
@@ -462,6 +466,7 @@ def update_session(session_id: str, body: UpdateSessionRequest) -> dict:
 
 
 @router.post('/message')
+@handle_errors('send chat message')
 async def send_message(request: Request, body: MessageRequest) -> dict:
     """Send a user message; agent processing is kicked off asynchronously."""
     session = session_store.get(body.session_id)
@@ -478,6 +483,7 @@ async def send_message(request: Request, body: MessageRequest) -> dict:
 
 
 @router.post('/sessions/{session_id}/stop')
+@handle_errors('stop chat generation')
 async def stop_generation(session_id: str) -> dict:
     """Cancel the running agent turn for a session."""
     session = session_store.get(session_id)
@@ -495,6 +501,7 @@ class ConfirmRequest(BaseModel):
 
 
 @router.post('/sessions/{session_id}/confirm')
+@handle_errors('confirm chat tool')
 def confirm_tool(session_id: str, body: ConfirmRequest) -> dict:
     """Confirm or deny a pending tool execution."""
     session = session_store.get(session_id)
@@ -505,6 +512,7 @@ def confirm_tool(session_id: str, body: ConfirmRequest) -> dict:
 
 
 @router.get('/history/{session_id}')
+@handle_errors('get chat history')
 def get_history(session_id: str) -> dict:
     """Return the full event history for a session."""
     session = session_store.get(session_id)
@@ -514,6 +522,7 @@ def get_history(session_id: str) -> dict:
 
 
 @router.get('/stream/{session_id}')
+@handle_errors('stream chat events')
 async def stream(session_id: str) -> StreamingResponse:
     """SSE stream of chat events for a session with heartbeat."""
     session = session_store.get(session_id)
@@ -556,6 +565,7 @@ async def stream(session_id: str) -> StreamingResponse:
 
 
 @router.delete('/sessions/{session_id}')
+@handle_errors('delete chat session')
 def delete_session(session_id: str) -> dict:
     """Close and delete a chat session."""
     deleted = session_store.delete(session_id)
@@ -565,6 +575,7 @@ def delete_session(session_id: str) -> dict:
 
 
 @router.get('/models')
+@handle_errors('list chat models')
 async def get_models(api_key: str = '') -> list[dict]:
     """List models available from OpenRouter. Uses provided key or falls back to global."""
     from modules.settings.service import get_resolved_openrouter_key

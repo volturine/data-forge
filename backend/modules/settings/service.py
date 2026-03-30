@@ -3,6 +3,7 @@ import os
 
 from sqlmodel import Session, select
 
+from core.exceptions import SettingsConfigurationError
 from modules.settings.models import AppSettings
 from modules.settings.schemas import SettingsResponse, SettingsUpdate
 
@@ -13,7 +14,7 @@ _ENCRYPTED_PREFIX = 'enc:'
 def _ensure_encryption_key() -> str:
     key = os.getenv('SETTINGS_ENCRYPTION_KEY')
     if not key:
-        raise ValueError('SETTINGS_ENCRYPTION_KEY must be set to encrypt SMTP passwords')
+        raise SettingsConfigurationError('SETTINGS_ENCRYPTION_KEY must be set to encrypt SMTP passwords')
     return key
 
 
@@ -34,7 +35,7 @@ def _decrypt_password(value: str) -> str:
     if not value:
         return ''
     if not value.startswith(_ENCRYPTED_PREFIX):
-        raise ValueError('Stored SMTP password must use encrypted storage')
+        raise SettingsConfigurationError('Stored SMTP password must use encrypted storage')
     key = _ensure_encryption_key().encode('utf-8')
     encrypted = bytes.fromhex(value.removeprefix(_ENCRYPTED_PREFIX))
     raw = _xor_bytes(encrypted, key)
@@ -74,7 +75,7 @@ def seed_settings_from_env(session: Session) -> None:
         try:
             row.smtp_password = _encrypt_password(app_settings.smtp_password)
             changed = True
-        except ValueError:
+        except SettingsConfigurationError:
             bootstrap_complete = False
             logger.warning('Skipping SMTP password bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
     if not row.telegram_bot_token and app_settings.telegram_bot_token:

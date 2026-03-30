@@ -329,3 +329,75 @@ class TokenExpiredError(AuthError):
 class TokenInvalidError(AuthError):
     def __init__(self):
         super().__init__(message='Token is invalid or already used', error_code='TOKEN_INVALID')
+
+
+# UDF Exceptions
+class UdfError(AppError):
+    """Base exception for UDF-related errors."""
+
+    pass
+
+
+class UdfNotFoundError(UdfError):
+    """Raised when a UDF is not found."""
+
+    def __init__(self, udf_id: str):
+        super().__init__(
+            message=f'UDF {udf_id} not found',
+            error_code='UDF_NOT_FOUND',
+            details={'udf_id': udf_id},
+        )
+
+
+class UdfValidationError(UdfError):
+    """Raised when UDF validation fails."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='UDF_VALIDATION_ERROR', details=details)
+
+
+# Healthcheck Exceptions
+class HealthcheckError(AppError):
+    """Base exception for healthcheck-related errors."""
+
+    pass
+
+
+class HealthcheckNotFoundError(HealthcheckError):
+    """Raised when a healthcheck is not found."""
+
+    def __init__(self, healthcheck_id: str):
+        super().__init__(
+            message=f'Healthcheck {healthcheck_id} not found',
+            error_code='HEALTHCHECK_NOT_FOUND',
+            details={'healthcheck_id': healthcheck_id},
+        )
+
+
+class HealthcheckValidationError(HealthcheckError):
+    """Raised when healthcheck validation fails."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='HEALTHCHECK_VALIDATION_ERROR', details=details)
+
+
+# Settings Exceptions
+class SettingsError(AppError):
+    """Base exception for settings-related errors."""
+
+    pass
+
+
+class SettingsConfigurationError(SettingsError):
+    """Raised when a required setting is missing or invalid."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='SETTINGS_CONFIGURATION_ERROR', details=details)
+
+
+# Validation Exceptions
+class InvalidIdError(AppError):
+    """Raised when an ID fails format validation."""
+
+    def __init__(self, message: str = 'Invalid ID format', details: dict | None = None):
+        super().__init__(message=message, error_code='INVALID_ID', details=details)

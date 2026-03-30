@@ -8,6 +8,7 @@ from sqlmodel import Session
 
 from core.config import settings
 from core.database import get_settings_db
+from core.error_handlers import handle_errors
 from modules.mcp.router import MCPRouter
 from modules.settings.service import get_settings
 
@@ -40,6 +41,7 @@ class UuidResponse(BaseModel):
 
 
 @router.get('/uuid', response_model=UuidResponse, mcp=True)
+@handle_errors(operation='generate UUID')
 def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
     """Generate UUID v4 values for use in analysis creation (output.result_id) or any UUID field.
 
@@ -49,6 +51,7 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 
 
 @router.get('', response_model=FrontendConfig, mcp=True)
+@handle_errors(operation='get config')
 def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
     """Get application configuration: timeouts, logging settings, feature flags, and default namespace."""
     db_settings = get_settings(session)

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import or_, select
 from sqlmodel import Session
 
+from core.exceptions import UdfNotFoundError, UdfValidationError
 from modules.udf.models import Udf
 from modules.udf.schemas import (
     UdfCloneSchema,
@@ -19,11 +20,11 @@ from modules.udf.schemas import (
 
 def _validate_code(code: str) -> None:
     if not code.strip():
-        raise ValueError('UDF code cannot be empty')
+        raise UdfValidationError('UDF code cannot be empty')
     try:
         ast.parse(code)
     except SyntaxError as e:
-        raise ValueError(f'Invalid Python syntax: {e.msg}')
+        raise UdfValidationError(f'Invalid Python syntax: {e.msg}', details={'error': e.msg})
 
 
 def _signature_key(signature: dict) -> str:
@@ -59,7 +60,7 @@ def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
     return UdfResponseSchema.model_validate(udf)
 
 
@@ -86,7 +87,7 @@ def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfRespo
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
 
     if data.name is not None:
         udf.name = data.name
@@ -112,7 +113,7 @@ def delete_udf(session: Session, udf_id: str) -> None:
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
     session.delete(udf)
     session.commit()
 
@@ -121,7 +122,7 @@ def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfRespons
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
 
     now = datetime.now(UTC)
     cloned = Udf(

@@ -4,6 +4,7 @@ from fastapi import Depends
 from sqlmodel import Session
 
 from core.database import get_db
+from core.error_handlers import handle_errors
 from core.validation import DataSourceId, parse_datasource_id
 from modules.mcp.router import MCPRouter
 from modules.telegram import service
@@ -18,6 +19,7 @@ router = MCPRouter(prefix='/telegram', tags=['telegram'])
 
 
 @router.get('/status', response_model=BotStatusResponse, mcp=True)
+@handle_errors(operation='get bot status')
 def bot_status(session: Session = Depends(get_db)) -> BotStatusResponse:
     """Get Telegram bot status: whether the bot is running, token is configured, and active subscriber count."""
     subs = service.list_subscribers(session)
@@ -34,12 +36,14 @@ def bot_status(session: Session = Depends(get_db)) -> BotStatusResponse:
 
 
 @router.get('/subscribers', response_model=list[SubscriberResponse], mcp=True)
+@handle_errors(operation='list subscribers')
 def get_subscribers(session: Session = Depends(get_db)) -> list[SubscriberResponse]:
     """List all Telegram subscribers (chats that have interacted with the bot)."""
     return service.list_subscribers(session)
 
 
 @router.delete('/subscribers/{subscriber_id}', status_code=204, mcp=True)
+@handle_errors(operation='delete subscriber')
 def delete_subscriber(subscriber_id: int, session: Session = Depends(get_db)) -> None:
     """Remove a Telegram subscriber by ID. Use GET /telegram/subscribers to find subscriber IDs."""
     service.delete_subscriber(session, subscriber_id)
@@ -47,6 +51,7 @@ def delete_subscriber(subscriber_id: int, session: Session = Depends(get_db)) ->
 
 
 @router.get('/listeners', response_model=list[ListenerResponse], mcp=True)
+@handle_errors(operation='list listeners')
 def get_listeners(
     subscriber_id: int | None = None,
     datasource_id: DataSourceId | None = None,
@@ -60,6 +65,7 @@ def get_listeners(
 
 
 @router.post('/listeners', response_model=ListenerResponse, mcp=True)
+@handle_errors(operation='create listener')
 def create_listener(payload: ListenerCreate, session: Session = Depends(get_db)) -> ListenerResponse:
     """Create a notification listener linking a Telegram subscriber to a datasource.
 
@@ -70,6 +76,7 @@ def create_listener(payload: ListenerCreate, session: Session = Depends(get_db))
 
 
 @router.delete('/listeners/{listener_id}', status_code=204, mcp=True)
+@handle_errors(operation='delete listener')
 def delete_listener(listener_id: int, session: Session = Depends(get_db)) -> None:
     """Remove a notification listener by ID. Use GET /telegram/listeners to find listener IDs."""
     service.remove_listener(session, listener_id)

@@ -2,6 +2,7 @@
 
 import pytest
 
+from core.exceptions import UdfNotFoundError, UdfValidationError
 from main import app
 from modules.auth.dependencies import get_optional_user
 from modules.udf.models import Udf
@@ -52,7 +53,7 @@ class TestUdfValidation:
             code='',
         )
 
-        with pytest.raises(ValueError, match='UDF code cannot be empty'):
+        with pytest.raises(UdfValidationError, match='UDF code cannot be empty'):
             create_udf(test_db_session, udf_data)
 
     def test_create_udf_with_whitespace_only_code(self, test_db_session):
@@ -64,7 +65,7 @@ class TestUdfValidation:
             code='   \n\t  ',
         )
 
-        with pytest.raises(ValueError, match='UDF code cannot be empty'):
+        with pytest.raises(UdfValidationError, match='UDF code cannot be empty'):
             create_udf(test_db_session, udf_data)
 
     def test_create_udf_with_invalid_syntax(self, test_db_session):
@@ -76,7 +77,7 @@ class TestUdfValidation:
             code='def udf():\n    return invalid syntax here',
         )
 
-        with pytest.raises(ValueError, match='Invalid Python syntax'):
+        with pytest.raises(UdfValidationError, match='Invalid Python syntax'):
             create_udf(test_db_session, udf_data)
 
     def test_update_udf_with_invalid_code(self, test_db_session):
@@ -93,7 +94,7 @@ class TestUdfValidation:
         # Try to update with invalid code
         update_data = UdfUpdateSchema(code='def udf():\n    invalid syntax')
 
-        with pytest.raises(ValueError, match='Invalid Python syntax'):
+        with pytest.raises(UdfValidationError, match='Invalid Python syntax'):
             update_udf(test_db_session, created.id, update_data)
 
 
@@ -117,7 +118,7 @@ class TestUdfCRUD:
 
     def test_get_nonexistent_udf(self, test_db_session):
         """Test getting a non-existent UDF raises error."""
-        with pytest.raises(ValueError, match='UDF .* not found'):
+        with pytest.raises(UdfNotFoundError, match='UDF .* not found'):
             get_udf(test_db_session, 'nonexistent-id')
 
     def test_update_udf(self, test_db_session):
@@ -159,12 +160,12 @@ class TestUdfCRUD:
         delete_udf(test_db_session, created.id)
 
         # Verify it's deleted
-        with pytest.raises(ValueError, match='UDF .* not found'):
+        with pytest.raises(UdfNotFoundError, match='UDF .* not found'):
             get_udf(test_db_session, created.id)
 
     def test_delete_nonexistent_udf(self, test_db_session):
         """Test deleting a non-existent UDF raises error."""
-        with pytest.raises(ValueError, match='UDF .* not found'):
+        with pytest.raises(UdfNotFoundError, match='UDF .* not found'):
             delete_udf(test_db_session, 'nonexistent-id')
 
 
@@ -321,7 +322,7 @@ class TestUdfImport:
         )
 
         # Import should fail due to invalid code
-        with pytest.raises(ValueError, match='Invalid Python syntax'):
+        with pytest.raises(UdfValidationError, match='Invalid Python syntax'):
             import_udfs(test_db_session, import_data)
 
         # Verify no UDFs were created (transaction rolled back)

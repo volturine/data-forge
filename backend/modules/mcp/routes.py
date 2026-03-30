@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+from core.error_handlers import handle_errors
 from modules.mcp.executor import call_tool
 from modules.mcp.pending import pending_store
 from modules.mcp.registry import MUTATING_METHODS, build_tool_registry
@@ -50,12 +51,14 @@ class CapabilitiesRequest(BaseModel):
 
 
 @router.get('/tools')
+@handle_errors('list MCP tools')
 def list_tools(request: Request) -> list[dict]:
     """List all available MCP tools derived from /api/v1 routes."""
     return get_registry(request.app)
 
 
 @router.post('/validate')
+@handle_errors('validate MCP tool args')
 def validate(request: Request, body: ToolRequest) -> dict:
     """Validate tool args against the tool's input schema without executing."""
     tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
@@ -65,6 +68,7 @@ def validate(request: Request, body: ToolRequest) -> dict:
 
 
 @router.post('/call')
+@handle_errors('call MCP tool')
 async def call(request: Request, body: ToolRequest) -> dict:
     """Execute a tool call. Mutating methods return a pending token for preview-first flow."""
     tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
@@ -100,6 +104,7 @@ async def call(request: Request, body: ToolRequest) -> dict:
 
 
 @router.post('/confirm')
+@handle_errors('confirm MCP tool')
 async def confirm(request: Request, body: ConfirmRequest) -> dict:
     """Execute a previously previewed mutating tool call by token."""
     entry = pending_store.pop(body.token)
@@ -120,6 +125,7 @@ async def confirm(request: Request, body: ConfirmRequest) -> dict:
 
 
 @router.post('/capabilities')
+@handle_errors('check MCP capabilities')
 def capabilities(request: Request, body: CapabilitiesRequest) -> list[dict]:
     """Return per-tool schema support status for all or a subset of tools."""
     registry = get_registry(request.app)

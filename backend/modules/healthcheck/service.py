@@ -7,6 +7,7 @@ import polars as pl
 from sqlalchemy import select
 from sqlmodel import Session
 
+from core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
 from modules.datasource.models import DataSource
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
 from modules.healthcheck.schemas import HealthCheckCreate, HealthCheckResponse, HealthCheckResultResponse, HealthCheckUpdate
@@ -51,7 +52,7 @@ def update_healthcheck(
 ) -> HealthCheckResponse:
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
-        raise ValueError('Healthcheck not found')
+        raise HealthcheckNotFoundError(healthcheck_id)
     check_type = payload.check_type or check.check_type
     if check_type == 'row_count':
         _ensure_unique_row_count(session, check.datasource_id, check_type, exclude_id=healthcheck_id)
@@ -66,7 +67,7 @@ def update_healthcheck(
 def delete_healthcheck(session: Session, healthcheck_id: str) -> None:
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
-        raise ValueError('Healthcheck not found')
+        raise HealthcheckNotFoundError(healthcheck_id)
     session.delete(check)
     session.commit()
 
@@ -391,4 +392,4 @@ def _ensure_unique_row_count(
         query = query.where(HealthCheck.id != exclude_id)  # type: ignore[arg-type]
     existing = session.execute(query).scalars().first()
     if existing:
-        raise ValueError('Only one row_count healthcheck is allowed per datasource')
+        raise HealthcheckValidationError('Only one row_count healthcheck is allowed per datasource')
