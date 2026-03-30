@@ -31,7 +31,14 @@
 	let sidebarCollapsed = $state(false);
 	const currentPath = $derived(page.url.pathname);
 
-	const authPaths = ['/login', '/register', '/callback', '/verify', '/forgot-password', '/reset-password'];
+	const authPaths = [
+		'/login',
+		'/register',
+		'/callback',
+		'/verify',
+		'/forgot-password',
+		'/reset-password'
+	];
 	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
 
 	// Network: $derived can't trigger async auth resolution.
