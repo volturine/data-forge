@@ -112,7 +112,7 @@
 	}
 </script>
 
-<div class={panelClass} aria-label="{title} panel">
+<div class={panelClass} aria-label={`${title} panel`}>
 	{#if !collapsed}
 		<div class={headerClass}>
 			<div

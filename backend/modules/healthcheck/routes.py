@@ -5,6 +5,7 @@ from sqlmodel import Session
 
 from core.database import get_db
 from core.error_handlers import handle_errors
+from core.exceptions import InvalidIdError
 from core.validation import HealthcheckId, parse_datasource_id, parse_healthcheck_id
 from modules.healthcheck import schemas, service
 from modules.mcp.router import MCPRouter
@@ -24,8 +25,10 @@ def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
 def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
     """List recent healthcheck results for a datasource. Returns the last N results (default 10)."""
     parsed_id = parse_datasource_id(datasource_id)
-    if parsed_id == datasource_id and datasource_id != str(uuid.UUID(datasource_id)):
-        raise ValueError('Invalid UUID')
+    try:
+        uuid.UUID(parsed_id)
+    except ValueError as exc:
+        raise InvalidIdError(message='Invalid UUID', details={'value': parsed_id}) from exc
     return service.list_results(session, parsed_id, limit)
 
 
