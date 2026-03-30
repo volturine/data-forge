@@ -661,9 +661,9 @@
 				height: '12px',
 				cursor: 'nwse-resize',
 				zIndex: '1',
-				borderTopLeftRadius: 'lg'
+				borderTopLeftRadius: 'lg',
+				touchAction: 'none'
 			})}
-			style="touch-action: none"
 			onpointerdown={startResizeCorner}
 		></div>
 
@@ -680,9 +680,9 @@
 				width: '6px',
 				cursor: 'ew-resize',
 				zIndex: '1',
+				touchAction: 'none',
 				_hover: { backgroundColor: 'border.default' }
 			})}
-			style="touch-action: none"
 			onpointerdown={startResizeWidth}
 		></div>
 
@@ -697,6 +697,7 @@
 				flexShrink: '0',
 				borderTopRadius: 'lg',
 				position: 'relative',
+				touchAction: 'none',
 				_before: {
 					content: '""',
 					position: 'absolute',
@@ -707,7 +708,6 @@
 				},
 				_hover: { backgroundColor: 'border.default' }
 			})}
-			style="touch-action: none"
 			onpointerdown={startResize}
 		></div>
 

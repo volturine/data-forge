@@ -1,0 +1,13 @@
+{
+  "active": true,
+  "iteration": 1,
+  "minIterations": 1,
+  "maxIterations": 10,
+  "completionPromise": "COMPLETE",
+  "tasksMode": false,
+  "taskPromise": "READY_FOR_NEXT_TASK",
+  "prompt": "look through our frontend and css for bugs and potential polisment.. take realy good care. try to omptimize everything to as maintanable code as needed",
+  "startedAt": "2026-03-30T09:24:50.103Z",
+  "model": "",
+  "agent": "opencode"
+}

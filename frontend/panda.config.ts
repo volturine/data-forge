@@ -198,6 +198,7 @@ export default defineConfig({
 					xxs: { value: '1px' },
 					xs: { value: '2px' },
 					md: { value: '3px' },
+					md2: { value: '4px' },
 					sm2: { value: '6px' },
 					pill: { value: '20px' },
 					full: { value: '9999px' }
