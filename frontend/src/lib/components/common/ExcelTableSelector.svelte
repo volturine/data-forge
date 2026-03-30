@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
+	import type { ExcelParams } from '$lib/api/excel';
 	import DataTable from '$lib/components/common/DataTable.svelte';
 	import { css, cx, button, input, label, row, rowBetween } from '$lib/styles/panda';
 
@@ -176,7 +177,7 @@
 	async function runPreflight(): Promise<void> {
 		error = null;
 		previewLoading = true;
-		const params: Record<string, unknown> = {
+		const params: ExcelParams = {
 			sheet_name: selectedSheet || undefined,
 			start_row: startRow,
 			start_col: startCol,
@@ -184,19 +185,14 @@
 			has_header: excelHeader,
 			table_name: selectedTable || undefined,
 			named_range: selectedRange || undefined,
-			cell_range: cellRangeInput.trim() || undefined
+			cell_range: cellRangeInput.trim() || undefined,
+			end_row: endRowManual && endRow !== null ? endRow : undefined
 		};
-		if (endRowManual && endRow !== null) {
-			params.end_row = endRow;
-		}
 
 		const result =
 			mode === 'upload'
-				? await preflightExcel(file as File, params as Parameters<typeof preflightExcel>[1])
-				: await preflightExcelFromPath(
-						filePath as string,
-						params as Parameters<typeof preflightExcelFromPath>[1]
-					);
+				? await preflightExcel(file as File, params)
+				: await preflightExcelFromPath(filePath as string, params);
 		result.match(
 			(data) => {
 				preflightId = data.preflight_id;
@@ -237,7 +233,7 @@
 		if (!preflightId || !selectedSheet) return;
 		error = null;
 		previewLoading = true;
-		const params: Record<string, unknown> = {
+		const params: ExcelParams & { sheet_name: string } = {
 			sheet_name: selectedSheet,
 			start_row: startRow,
 			start_col: startCol,
@@ -245,12 +241,10 @@
 			has_header: excelHeader,
 			table_name: selectedTable || undefined,
 			named_range: selectedRange || undefined,
-			cell_range: cellRangeInput.trim() || undefined
+			cell_range: cellRangeInput.trim() || undefined,
+			end_row: endRowManual && endRow !== null ? endRow : undefined
 		};
-		if (endRowManual && endRow !== null) {
-			params.end_row = endRow;
-		}
-		const result = await previewExcel(preflightId, params as Parameters<typeof previewExcel>[1]);
+		const result = await previewExcel(preflightId, params);
 		result.match(
 			(data) => {
 				previewGrid = data.preview;

@@ -4,6 +4,7 @@
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { uploadFile, uploadBulkFiles, connectDatabase } from '$lib/api/datasource';
 	import { confirmExcel } from '$lib/api/excel';
+	import type { ExcelParams } from '$lib/api/excel';
 	import ExcelTableSelector from '$lib/components/common/ExcelTableSelector.svelte';
 	import type { BulkUploadResult } from '$lib/api/datasource';
 
@@ -197,7 +198,7 @@
 					loading = false;
 					return;
 				}
-				const params: Record<string, unknown> = {
+				const params: ExcelParams = {
 					sheet_name: excelConfig.sheet_name || undefined,
 					start_row: excelConfig.start_row,
 					start_col: excelConfig.start_col,
@@ -205,16 +206,10 @@
 					has_header: excelConfig.has_header,
 					table_name: excelConfig.table_name || undefined,
 					named_range: excelConfig.named_range || undefined,
-					cell_range: excelConfig.cell_range || undefined
+					cell_range: excelConfig.cell_range || undefined,
+					end_row: excelConfig.end_row ?? undefined
 				};
-				if (excelConfig.end_row !== null) {
-					params.end_row = excelConfig.end_row;
-				}
-				const result = await confirmExcel(
-					preflightId,
-					fileName,
-					params as Parameters<typeof confirmExcel>[2]
-				);
+				const result = await confirmExcel(preflightId, fileName, params);
 				if (result.isErr()) {
 					error = result.error.message || 'Upload failed';
 					loading = false;

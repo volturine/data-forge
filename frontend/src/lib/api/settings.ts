@@ -1,6 +1,6 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
-import { ResultAsync } from 'neverthrow';
+import type { ResultAsync } from 'neverthrow';
 
 export interface AppSettings {
 	smtp_host: string;

@@ -1,4 +1,6 @@
+import type { ResultAsync } from 'neverthrow';
 import { apiRequest } from './client';
+import type { ApiError } from './client';
 
 export interface UserPublic {
 	id: string;
@@ -35,71 +37,76 @@ interface ChangePasswordPayload {
 	new_password: string;
 }
 
-export function register(payload: RegisterPayload) {
+export function register(payload: RegisterPayload): ResultAsync<UserPublic, ApiError> {
 	return apiRequest<UserPublic>('/v1/auth/register', {
 		method: 'POST',
 		body: JSON.stringify(payload)
 	});
 }
 
-export function login(payload: LoginPayload) {
+export function login(payload: LoginPayload): ResultAsync<UserPublic, ApiError> {
 	return apiRequest<UserPublic>('/v1/auth/login', {
 		method: 'POST',
 		body: JSON.stringify(payload)
 	});
 }
 
-export function logout() {
+export function logout(): ResultAsync<{ success: boolean }, ApiError> {
 	return apiRequest<{ success: boolean }>('/v1/auth/logout', {
 		method: 'POST'
 	});
 }
 
-export function getMe() {
+export function getMe(): ResultAsync<UserPublic, ApiError> {
 	return apiRequest<UserPublic>('/v1/auth/me');
 }
 
-export function updateProfile(payload: UpdateProfilePayload) {
+export function updateProfile(payload: UpdateProfilePayload): ResultAsync<UserPublic, ApiError> {
 	return apiRequest<UserPublic>('/v1/auth/profile', {
 		method: 'PUT',
 		body: JSON.stringify(payload)
 	});
 }
 
-export function changePassword(payload: ChangePasswordPayload) {
+export function changePassword(
+	payload: ChangePasswordPayload
+): ResultAsync<{ success: boolean }, ApiError> {
 	return apiRequest<{ success: boolean }>('/v1/auth/password', {
 		method: 'PUT',
 		body: JSON.stringify(payload)
 	});
 }
 
-export function unlinkProvider(provider: string) {
+export function unlinkProvider(provider: string): ResultAsync<{ success: boolean }, ApiError> {
 	return apiRequest<{ success: boolean }>(`/v1/auth/providers/${provider}/unlink`, {
 		method: 'POST'
 	});
 }
 
-export function verifyEmail(token: string) {
+export function verifyEmail(token: string): ResultAsync<{ message: string }, ApiError> {
 	return apiRequest<{ message: string }>('/v1/auth/verify-email', {
 		method: 'POST',
 		body: JSON.stringify({ token })
 	});
 }
 
-export function resendVerification() {
+export function resendVerification(): ResultAsync<{ message: string }, ApiError> {
 	return apiRequest<{ message: string }>('/v1/auth/resend-verification', {
 		method: 'POST'
 	});
 }
 
-export function forgotPassword(email: string) {
+export function forgotPassword(email: string): ResultAsync<{ message: string }, ApiError> {
 	return apiRequest<{ message: string }>('/v1/auth/forgot-password', {
 		method: 'POST',
 		body: JSON.stringify({ email })
 	});
 }
 
-export function resetPassword(token: string, password: string) {
+export function resetPassword(
+	token: string,
+	password: string
+): ResultAsync<{ message: string }, ApiError> {
 	return apiRequest<{ message: string }>('/v1/auth/reset-password', {
 		method: 'POST',
 		body: JSON.stringify({ token, new_password: password })

@@ -1,4 +1,6 @@
-import { apiRequest } from '$lib/api/client';
+import type { ResultAsync } from 'neverthrow';
+import { apiRequest } from './client';
+import type { ApiError } from './client';
 
 export interface AIModel {
 	name: string;
@@ -14,7 +16,7 @@ export function listAIModels(
 	provider: string,
 	endpointUrl?: string | null,
 	apiKey?: string | null
-) {
+): ResultAsync<AIModel[], ApiError> {
 	const params = new URLSearchParams({ provider });
 	if (endpointUrl) params.set('endpoint_url', endpointUrl);
 	if (apiKey) params.set('api_key', apiKey);
@@ -25,7 +27,7 @@ export function testAIConnection(
 	provider: string,
 	endpointUrl?: string | null,
 	apiKey?: string | null
-) {
+): ResultAsync<AIConnectionResult, ApiError> {
 	const params = new URLSearchParams({ provider });
 	if (endpointUrl) params.set('endpoint_url', endpointUrl);
 	if (apiKey) params.set('api_key', apiKey);

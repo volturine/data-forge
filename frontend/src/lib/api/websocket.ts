@@ -3,6 +3,8 @@ import { getNamespace } from '$lib/stores/namespace.svelte';
 import { ResultAsync } from 'neverthrow';
 import { BASE_URL, type ApiError } from './client';
 
+const VALID_ERROR_TYPES = new Set<string>(['network', 'http', 'parse']);
+
 type WebsocketMessage<T> =
 	| {
 			type: 'started';
@@ -17,25 +19,29 @@ type WebsocketMessage<T> =
 			status_code?: number;
 	  };
 
+function isApiError(value: unknown): value is ApiError {
+	if (typeof value !== 'object' || value === null) return false;
+	const record = value as Record<string, unknown>;
+	if (typeof record.message !== 'string') return false;
+	if (typeof record.type !== 'string') return false;
+	return VALID_ERROR_TYPES.has(record.type);
+}
+
 function createApiError(error: unknown): ApiError {
-	if (typeof error === 'object' && error !== null && 'type' in error && 'message' in error) {
-		return error as ApiError;
-	}
+	if (isApiError(error)) return error;
 	return {
 		type: 'network',
 		message: error instanceof Error ? error.message : 'WebSocket request failed'
 	};
 }
 
+const DEV_BACKEND_PORT = '8000';
+const DEV_FRONTEND_PORT = '3000';
+
 function resolveWebsocketOrigin(): string {
-	if (!import.meta.env.DEV) {
-		return window.location.origin;
-	}
-	const isViteDevServer = window.location.port === '3000';
-	if (!isViteDevServer) {
-		return window.location.origin;
-	}
-	return `${window.location.protocol}//${window.location.hostname}:8000`;
+	if (!import.meta.env.DEV) return window.location.origin;
+	if (window.location.port !== DEV_FRONTEND_PORT) return window.location.origin;
+	return `${window.location.protocol}//${window.location.hostname}:${DEV_BACKEND_PORT}`;
 }
 
 function buildWebsocketUrl(endpoint: string): string {
