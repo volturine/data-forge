@@ -9,6 +9,7 @@ import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
 
 from modules.compute.core.base import OperationHandler, OperationParams
+from modules.compute.operations._validation import validate_no_reflection_escape
 
 # Builtins allowed inside UDF code — system-access and reflection functions are excluded.
 # Reflection functions (getattr/setattr/delattr/vars/dir) are blocked to prevent
@@ -65,6 +66,7 @@ class WithColumnsHandler(OperationHandler):
             elif expr.type == 'column' and expr.column:
                 exprs.append(pl.col(expr.column).alias(expr.name))
             elif expr.type == 'udf' and expr.code:
+                validate_no_reflection_escape(expr.code, label='UDF code')
                 scope: dict[str, Any] = {'pl': pl, '__builtins__': _SAFE_BUILTINS}
                 local_scope: dict[str, Any] = {}
                 exec(expr.code, scope, local_scope)

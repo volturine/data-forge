@@ -31,7 +31,7 @@ vi.mock('$lib/stores/config.svelte', () => ({
 const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
 vi.stubGlobal('fetch', fetchSpy);
 
-const { flush, setAuditPage, track } = await import('./audit-log');
+const { flush, setAuditPage, track, installAuditListeners } = await import('./audit-log');
 
 describe('audit-log', () => {
 	beforeAll(() => {
@@ -147,6 +147,105 @@ describe('audit-log', () => {
 			);
 			expect(pageView).toBeDefined();
 			expect(pageView.page).toBe('/home');
+		});
+	});
+
+	describe('field redaction', () => {
+		beforeEach(() => {
+			installAuditListeners();
+		});
+
+		test('redacts password fields on form submit', () => {
+			const form = document.createElement('form');
+			const text = document.createElement('input');
+			text.type = 'text';
+			text.name = 'username';
+			text.value = 'alice';
+			form.appendChild(text);
+			const pw = document.createElement('input');
+			pw.type = 'password';
+			pw.name = 'smtp_password';
+			pw.value = 'super-secret-123';
+			form.appendChild(pw);
+			document.body.appendChild(form);
+
+			form.dispatchEvent(new Event('submit', { bubbles: true }));
+			flush();
+
+			const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+			const submit = body.logs.find((l: Record<string, unknown>) => l.event === 'submit');
+			expect(submit).toBeDefined();
+			const fields = submit.fields as Array<{
+				name: string;
+				value: string | null;
+				redacted?: boolean;
+			}>;
+			const pwField = fields.find((f) => f.name === 'smtp_password');
+			expect(pwField).toBeDefined();
+			expect(pwField!.value).toBeNull();
+			expect(pwField!.redacted).toBe(true);
+			const textField = fields.find((f) => f.name === 'username');
+			expect(textField).toBeDefined();
+			expect(textField!.value).toBe('alice');
+			expect(textField!.redacted).toBeUndefined();
+
+			document.body.removeChild(form);
+		});
+
+		test('redacts fields with sensitive name patterns', () => {
+			const form = document.createElement('form');
+			const key = document.createElement('input');
+			key.type = 'text';
+			key.name = 'api_key';
+			key.value = 'sk-1234';
+			form.appendChild(key);
+			const token = document.createElement('input');
+			token.type = 'text';
+			token.name = 'bot_token';
+			token.value = 'tok-5678';
+			form.appendChild(token);
+			document.body.appendChild(form);
+
+			form.dispatchEvent(new Event('submit', { bubbles: true }));
+			flush();
+
+			const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+			const submit = body.logs.find((l: Record<string, unknown>) => l.event === 'submit');
+			const fields = submit.fields as Array<{
+				name: string;
+				value: string | null;
+				redacted?: boolean;
+			}>;
+			for (const f of fields) {
+				expect(f.value).toBeNull();
+				expect(f.redacted).toBe(true);
+			}
+
+			document.body.removeChild(form);
+		});
+
+		test('redacts password type inputs on change', () => {
+			const pw = document.createElement('input');
+			pw.type = 'password';
+			pw.name = 'secret_field';
+			pw.value = 'changed-password';
+			document.body.appendChild(pw);
+
+			pw.dispatchEvent(new Event('change', { bubbles: true }));
+			flush();
+
+			const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+			const change = body.logs.find((l: Record<string, unknown>) => l.event === 'change');
+			expect(change).toBeDefined();
+			const fields = change.fields as Array<{
+				name: string;
+				value: string | null;
+				redacted?: boolean;
+			}>;
+			expect(fields[0].value).toBeNull();
+			expect(fields[0].redacted).toBe(true);
+
+			document.body.removeChild(pw);
 		});
 	});
 });

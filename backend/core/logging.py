@@ -28,6 +28,19 @@ _configured = False
 _LOG_RECORD_KEYS = set(logging.LogRecord('', 0, '', 0, '', (), None).__dict__.keys())
 _DEFAULT_FLUSH_INTERVAL = 5.0
 _logger = logging.getLogger('core.logging')
+_SENSITIVE_FIELDS = {
+    'password',
+    'smtp_password',
+    'telegram_bot_token',
+    'openrouter_api_key',
+    'api_key',
+    'bot_token',
+    'current_password',
+    'new_password',
+    'token',
+}
+_SENSITIVE_PATHS = ('/api/v1/auth', '/api/v1/settings', '/api/v1/ai/chat', '/api/v1/ai/models', '/api/v1/ai/test')
+_REDACTED = '[REDACTED]'
 
 
 def _adapt_datetime(value: datetime) -> str:
@@ -521,8 +534,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             'ip': ip,
             'referer': request.headers.get('referer'),
             'error': error,
-            'request_json': self._coerce_body(request.headers.get('content-type'), request_body),
-            'response_json': self._coerce_body(response.headers.get('content-type') if response else None, response_body),
+            'request_json': redact_logged_body(request.url.path, self._coerce_body(request.headers.get('content-type'), request_body)),
+            'response_json': redact_logged_body(
+                request.url.path,
+                self._coerce_body(response.headers.get('content-type') if response else None, response_body),
+            ),
             'chunk_index': chunk_index,
         }
         if not self.writer:
@@ -533,6 +549,30 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         if not body:
             return None
         return body.decode('utf-8', errors='ignore')
+
+
+def _should_redact_path(path: str) -> bool:
+    return path.startswith(_SENSITIVE_PATHS)
+
+
+def _redact_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: (_REDACTED if key in _SENSITIVE_FIELDS else _redact_json_value(item)) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_json_value(item) for item in value]
+    return value
+
+
+def redact_logged_body(path: str, body: str | None) -> str | None:
+    if not body:
+        return None
+    if not _should_redact_path(path):
+        return body
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return body
+    return json.dumps(_redact_json_value(parsed), default=str)
 
 
 def configure_logging() -> SqliteLogWriter:

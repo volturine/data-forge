@@ -57,9 +57,11 @@ def write_settings(
 
     result = update_settings(session, data)
 
+    token = get_resolved_telegram_settings().get('token', '')
+
     try:
-        if data.telegram_bot_enabled and data.telegram_bot_token:
-            telegram_bot.start(data.telegram_bot_token)
+        if result.telegram_bot_enabled and token:
+            telegram_bot.start(str(token))
         elif telegram_bot.running:
             telegram_bot.stop()
     except Exception:

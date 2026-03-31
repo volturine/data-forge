@@ -11,6 +11,11 @@ import httpx
 from fastapi import FastAPI
 
 
+def build_tool_context(headers: dict[str, str] | None = None) -> dict[str, dict[str, str]]:
+    context_headers = {k: v for k, v in (headers or {}).items() if v}
+    return {'headers': context_headers}
+
+
 def _interpolate_path(path: str, args: dict) -> tuple[str, dict]:
     """Replace {param} placeholders in path, return (url, remaining_args)."""
     params = re.findall(r'\{(\w+)\}', path)
@@ -33,7 +38,7 @@ def _interpolate_path(path: str, args: dict) -> tuple[str, dict]:
     return path, remaining
 
 
-async def call_tool(app: FastAPI, method: str, path: str, args: dict) -> dict[str, Any]:
+async def call_tool(app: FastAPI, method: str, path: str, args: dict, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute a tool call by invoking the app's route in-process."""
     url, remaining = _interpolate_path(path, {k: v for k, v in args.items() if k != 'payload'})
 
@@ -41,6 +46,12 @@ async def call_tool(app: FastAPI, method: str, path: str, args: dict) -> dict[st
     async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
         payload = args.get('payload')
         headers = {'Content-Type': 'application/json'}
+        forwarded = (context or {}).get('headers', {})
+        if isinstance(forwarded, dict):
+            for key, value in forwarded.items():
+                if not value:
+                    continue
+                headers[str(key)] = str(value)
 
         query_params = {k: v for k, v in remaining.items() if k != 'payload'}
 
@@ -53,9 +64,9 @@ async def call_tool(app: FastAPI, method: str, path: str, args: dict) -> dict[st
                 params=query_params,
             )
         elif method == 'DELETE':
-            resp = await client.request(method, url, params=query_params)
+            resp = await client.request(method, url, params=query_params, headers=headers)
         else:
-            resp = await client.request(method, url, params=query_params)
+            resp = await client.request(method, url, params=query_params, headers=headers)
 
     status = resp.status_code
     body: Any = None

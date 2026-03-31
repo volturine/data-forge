@@ -12,6 +12,8 @@ from typing import Any
 
 from sqlmodel import Field, Session as DbSession, SQLModel, select
 
+from core.secrets import decrypt_secret, encrypt_secret, should_migrate_secret
+
 logger = logging.getLogger(__name__)
 
 MAX_EVENTS = 500
@@ -40,7 +42,7 @@ class LiveSession:
         self.id = row.id
         self.provider = row.provider
         self.model = row.model
-        self.api_key = row.api_key
+        self.api_key = decrypt_secret(row.api_key)
         self.system_prompt = row.system_prompt
         self.messages: list[dict[str, Any]] = json.loads(row.messages_json)
         self.created_at = row.created_at
@@ -170,7 +172,7 @@ class SessionStore:
             id=sid,
             provider=provider,
             model=model,
-            api_key=api_key,
+            api_key=encrypt_secret(api_key),
             system_prompt=system_prompt,
             messages_json=json.dumps(initial_messages),
             history_json='[]',
@@ -192,6 +194,11 @@ class SessionStore:
             row = db.exec(select(ChatSession).where(ChatSession.id == session_id)).first()
             if not row:
                 return None
+            if should_migrate_secret(row.api_key):
+                row.api_key = encrypt_secret(decrypt_secret(row.api_key))
+                db.add(row)
+                db.commit()
+                db.refresh(row)
             live = LiveSession(row)
             self._live[session_id] = live
             return live
@@ -205,7 +212,7 @@ class SessionStore:
             if not row:
                 return
             row.model = live.model
-            row.api_key = live.api_key
+            row.api_key = encrypt_secret(live.api_key)
             row.system_prompt = live.system_prompt
             row.messages_json = json.dumps(live.messages)
             row.history_json = json.dumps(live._history)

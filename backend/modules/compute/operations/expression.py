@@ -3,6 +3,7 @@
 import polars as pl
 
 from modules.compute.core.base import OperationHandler, OperationParams
+from modules.compute.operations._validation import validate_no_reflection_escape
 
 
 class ExpressionParams(OperationParams):
@@ -20,6 +21,8 @@ def parse_expression(expr_str: str) -> pl.Expr:
     """
     if not expr_str or not expr_str.strip():
         raise ValueError('Expression cannot be empty')
+
+    validate_no_reflection_escape(expr_str, label='Expression')
 
     # Block dangerous patterns — defense in depth alongside __builtins__: {}
     dangerous = [

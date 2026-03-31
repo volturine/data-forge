@@ -61,6 +61,35 @@ describe('renderMarkdown', () => {
 		const result = renderMarkdown('');
 		expect(result).toBe('');
 	});
+
+	test('strips script tags from output', () => {
+		const result = renderMarkdown('<script>alert("xss")</script>hello');
+		expect(result).not.toContain('<script');
+		expect(result).not.toContain('alert');
+		expect(result).toContain('hello');
+	});
+
+	test('strips inline event handlers', () => {
+		const result = renderMarkdown('<img src="x" onerror="alert(1)">');
+		expect(result).not.toContain('onerror');
+		expect(result).not.toContain('alert');
+	});
+
+	test('strips javascript: links from markdown', () => {
+		const result = renderMarkdown('[click me](javascript:alert(1))');
+		expect(result).not.toContain('javascript:');
+	});
+
+	test('strips javascript: links from raw HTML', () => {
+		const result = renderMarkdown('<a href="javascript:alert(1)">click</a>');
+		expect(result).not.toContain('javascript:');
+	});
+
+	test('preserves safe HTML within markdown', () => {
+		const result = renderMarkdown('**bold** and [link](https://safe.com)');
+		expect(result).toContain('<strong>bold</strong>');
+		expect(result).toContain('href="https://safe.com"');
+	});
 });
 
 describe('timeAgo', () => {

@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine, text
 
+from core.secrets import MASKED_SECRET
+
 
 class TestGetSettings:
     """GET /v1/settings — returns singleton settings row."""
@@ -41,8 +43,8 @@ class TestGetSettings:
         assert data['smtp_host'] == 'mail.example.com'
         assert data['smtp_port'] == 465
         assert data['smtp_user'] == 'user@example.com'
-        assert data['smtp_password'] == 'secret'
-        assert data['telegram_bot_token'] == 'bot123:abc'
+        assert data['smtp_password'] == MASKED_SECRET
+        assert data['telegram_bot_token'] == MASKED_SECRET
         assert data['public_idb_debug'] is True
 
 
@@ -67,7 +69,7 @@ class TestUpdateSettings:
         data = resp.json()
         assert data['smtp_host'] == 'smtp.test.com'
         assert data['smtp_user'] == 'test@test.com'
-        assert data['smtp_password'] == 'pw'
+        assert data['smtp_password'] == MASKED_SECRET
 
     def test_update_telegram(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
@@ -84,7 +86,7 @@ class TestUpdateSettings:
             },
         )
         assert resp.status_code == 200
-        assert resp.json()['telegram_bot_token'] == 'bot999:xyz'
+        assert resp.json()['telegram_bot_token'] == MASKED_SECRET
 
     def test_update_idb_debug(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
@@ -102,6 +104,100 @@ class TestUpdateSettings:
         )
         assert resp.status_code == 200
         assert resp.json()['public_idb_debug'] is True
+
+    def test_preserves_masked_secrets_on_partial_update(self, client: TestClient, monkeypatch) -> None:
+        from modules.settings.service import get_resolved_openrouter_key, get_resolved_smtp, get_resolved_telegram_token
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        client.put(
+            '/api/v1/settings',
+            json={
+                'smtp_host': 'smtp.test.com',
+                'smtp_port': 587,
+                'smtp_user': 'test@test.com',
+                'smtp_password': 'pw',
+                'telegram_bot_token': 'bot999:xyz',
+                'telegram_bot_enabled': True,
+                'openrouter_api_key': 'sk-live',
+                'public_idb_debug': False,
+            },
+        )
+
+        resp = client.put(
+            '/api/v1/settings',
+            json={
+                'smtp_host': 'smtp.changed.com',
+                'smtp_password': MASKED_SECRET,
+                'telegram_bot_token': '********',
+                'openrouter_api_key': MASKED_SECRET,
+            },
+        )
+        assert resp.status_code == 200
+        assert get_resolved_smtp()['password'] == 'pw'
+        assert get_resolved_telegram_token() == 'bot999:xyz'
+        assert get_resolved_openrouter_key() == 'sk-live'
+
+    def test_encrypts_settings_secrets_at_rest(self, client: TestClient, monkeypatch) -> None:
+        from core.database import run_settings_db
+        from modules.settings.models import AppSettings
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        client.put(
+            '/api/v1/settings',
+            json={
+                'smtp_host': 'smtp.test.com',
+                'smtp_port': 587,
+                'smtp_user': 'test@test.com',
+                'smtp_password': 'pw',
+                'telegram_bot_token': 'bot999:xyz',
+                'telegram_bot_enabled': True,
+                'openrouter_api_key': 'sk-live',
+                'public_idb_debug': False,
+            },
+        )
+
+        def _read(session: Session) -> AppSettings | None:
+            return session.get(AppSettings, 1)
+
+        row = run_settings_db(_read)
+        assert row is not None
+        assert row.smtp_password != 'pw'
+        assert row.telegram_bot_token != 'bot999:xyz'
+        assert row.openrouter_api_key != 'sk-live'
+        assert row.smtp_password.startswith('enc:v1:')
+        assert row.telegram_bot_token.startswith('enc:v1:')
+        assert row.openrouter_api_key.startswith('enc:v1:')
+
+    def test_get_migrates_legacy_secret_storage(self, client: TestClient, monkeypatch) -> None:
+        from core.database import run_settings_db
+        from modules.settings.models import AppSettings
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+
+        def _seed(session: Session) -> None:
+            row = session.get(AppSettings, 1)
+            assert row is not None
+            row.smtp_password = 'enc:07001001000d'
+            row.telegram_bot_token = 'legacy-token'
+            row.openrouter_api_key = 'legacy-key'
+            session.commit()
+
+        run_settings_db(_seed)
+
+        resp = client.get('/api/v1/settings')
+        assert resp.status_code == 200
+        assert resp.json()['smtp_password'] == MASKED_SECRET
+        assert resp.json()['telegram_bot_token'] == MASKED_SECRET
+        assert resp.json()['openrouter_api_key'] == MASKED_SECRET
+
+        def _read(session: Session) -> AppSettings | None:
+            return session.get(AppSettings, 1)
+
+        row = run_settings_db(_read)
+        assert row is not None
+        assert row.smtp_password.startswith('enc:v1:')
+        assert row.telegram_bot_token.startswith('enc:v1:')
+        assert row.openrouter_api_key.startswith('enc:v1:')
 
 
 class TestTestSmtp:
@@ -716,6 +812,8 @@ class TestSeedSettingsFromEnv:
         from modules.settings.models import AppSettings
         from modules.settings.service import seed_settings_from_env
 
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
         monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
         monkeypatch.setattr(app_settings, 'smtp_port', 465, raising=False)
         monkeypatch.setattr(app_settings, 'smtp_user', 'user@example.com', raising=False)
@@ -732,9 +830,9 @@ class TestSeedSettingsFromEnv:
             assert row.smtp_host == 'mail.example.com'
             assert row.smtp_port == 465
             assert row.smtp_user == 'user@example.com'
-            assert row.telegram_bot_token == 'bot123:abc'
+            assert row.telegram_bot_token.startswith('enc:v1:')
             assert row.telegram_bot_enabled is True
-            assert row.openrouter_api_key == 'sk-or-test'
+            assert row.openrouter_api_key.startswith('enc:v1:')
             assert row.openrouter_default_model == 'openai/gpt-4o'
             assert row.env_bootstrap_complete is True
 
@@ -787,6 +885,8 @@ class TestSeedSettingsFromEnv:
         from modules.settings.models import AppSettings
         from modules.settings.service import seed_settings_from_env
 
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
         monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
         monkeypatch.setattr(app_settings, 'openrouter_api_key', 'sk-or-test', raising=False)
 
@@ -797,7 +897,7 @@ class TestSeedSettingsFromEnv:
             row = session.get(AppSettings, 1)
             assert row is not None
             assert row.smtp_host == 'mail.example.com'
-            assert row.openrouter_api_key == 'sk-or-test'
+            assert row.openrouter_api_key.startswith('enc:v1:')
             assert row.env_bootstrap_complete is True
 
     def test_existing_row_preserves_explicit_default_values(self, monkeypatch) -> None:
@@ -833,6 +933,7 @@ class TestSeedSettingsFromEnv:
         monkeypatch.setattr(app_settings, 'smtp_host', 'mail.example.com', raising=False)
         monkeypatch.setattr(app_settings, 'smtp_password', 'secret', raising=False)
         monkeypatch.delenv('SETTINGS_ENCRYPTION_KEY', raising=False)
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', '', raising=False)
 
         engine = self._make_engine()
         with Session(engine) as session:
@@ -845,6 +946,32 @@ class TestSeedSettingsFromEnv:
             assert row.smtp_password == ''
             assert row.env_bootstrap_complete is False
             assert 'SETTINGS_ENCRYPTION_KEY' in caplog.text
+
+    def test_lifespan_bot_check_uses_decrypted_settings_db(self, monkeypatch):
+        from core import database
+        from core.secrets import encrypt_secret
+        from modules.settings.models import AppSettings
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        engine = create_engine(
+            'sqlite:///:memory:',
+            connect_args={'check_same_thread': False},
+            poolclass=StaticPool,
+        )
+        AppSettings.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            row = AppSettings(id=1, telegram_bot_enabled=True, telegram_bot_token=encrypt_secret('bot:tok'))
+            session.add(row)
+            session.commit()
+
+        monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
+
+        from modules.settings.service import get_resolved_telegram_settings
+
+        resolved = get_resolved_telegram_settings()
+        assert resolved['enabled'] is True
+        assert resolved['token'] == 'bot:tok'
 
     def test_update_settings_disables_future_env_bootstrap(self, monkeypatch) -> None:
         from core.config import settings as app_settings

@@ -4,6 +4,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
+from modules.compute.operations.expression import parse_expression
 from modules.compute.operations.fill_null import FillNullHandler
 from modules.compute.operations.filter import FilterHandler
 from modules.compute.operations.groupby import GroupByHandler
@@ -288,6 +289,20 @@ def test_with_columns_zero_arg_udf_uses_row_count(monkeypatch: pytest.MonkeyPatc
     assert result is not None
     assert called['int_range'] == 1
     assert called['lit'] == 0
+
+
+def test_expression_rejects_dunder_escape() -> None:
+    with pytest.raises(ValueError, match='forbidden dunder access'):
+        parse_expression('pl.col("age").__class__')
+
+
+def test_with_columns_rejects_reflection_escape() -> None:
+    handler = WithColumnsHandler()
+    with pytest.raises(ValueError, match='forbidden pattern'):
+        handler(
+            pl.DataFrame({'id': [1]}).lazy(),
+            {'expressions': [{'name': 'bad', 'type': 'udf', 'code': 'def udf():\n    return globals()'}]},
+        )
 
 
 def test_union_by_name_handler():

@@ -1,4 +1,3 @@
-from fastapi import Query
 from pydantic import BaseModel
 
 from core.error_handlers import handle_errors
@@ -18,35 +17,33 @@ class AIConnectionResponse(BaseModel):
     detail: str
 
 
-@router.get('/models', response_model=list[AIModelResponse], mcp=True)
+class AIProviderRequest(BaseModel):
+    provider: str = 'ollama'
+    endpoint_url: str | None = None
+    api_key: str | None = None
+
+
+@router.post('/models', response_model=list[AIModelResponse], mcp=True)
 @handle_errors(operation='list ai models', value_error_status=400)
-def list_models(
-    provider: str = Query('ollama'),
-    endpoint_url: str | None = Query(None),
-    api_key: str | None = Query(None),
-) -> list[AIModelResponse]:
+def list_models(body: AIProviderRequest) -> list[AIModelResponse]:
     """List available AI models from the configured provider.
 
     Returns model names and details. Use provider='ollama' for local models
     or provider='openrouter' with an api_key for cloud models.
     """
-    client = get_ai_client(provider, endpoint_url=endpoint_url, api_key=api_key)
+    client = get_ai_client(body.provider, endpoint_url=body.endpoint_url, api_key=body.api_key)
     raw = client.list_models()
     return [AIModelResponse(name=m.get('name', ''), detail=str({k: v for k, v in m.items() if k != 'name'})) for m in raw]
 
 
-@router.get('/test', response_model=AIConnectionResponse, mcp=True)
+@router.post('/test', response_model=AIConnectionResponse, mcp=True)
 @handle_errors(operation='test ai connection', value_error_status=400)
-def test_connection(
-    provider: str = Query('ollama'),
-    endpoint_url: str | None = Query(None),
-    api_key: str | None = Query(None),
-) -> AIConnectionResponse:
+def test_connection(body: AIProviderRequest) -> AIConnectionResponse:
     """Test connectivity to an AI provider.
 
     Returns {ok: true/false, detail: message}. Use this to verify
     provider/endpoint_url/api_key settings before using AI features.
     """
-    client = get_ai_client(provider, endpoint_url=endpoint_url, api_key=api_key)
+    client = get_ai_client(body.provider, endpoint_url=body.endpoint_url, api_key=body.api_key)
     result = client.test_connection()
     return AIConnectionResponse(**result)

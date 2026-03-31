@@ -157,11 +157,12 @@ export function closeSession(sessionId: string): ResultAsync<SessionActionRespon
 }
 
 export function listModels(apiKey?: string): ResultAsync<OpenRouterModel[], ApiError> {
-	const params = new URLSearchParams();
-	if (apiKey) params.set('api_key', apiKey);
-	const query = params.toString();
-	const path = query ? `/v1/ai/chat/models?${query}` : '/v1/ai/chat/models';
-	return apiRequest<OpenRouterModel[]>(path);
+	const body: Record<string, string> = {};
+	if (apiKey) body.api_key = apiKey;
+	return apiRequest<OpenRouterModel[]>('/v1/ai/chat/models', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	});
 }
 
 export function listSessions(): ResultAsync<ChatSessionInfo[], ApiError> {

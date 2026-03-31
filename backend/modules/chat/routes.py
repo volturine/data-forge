@@ -12,15 +12,18 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.error_handlers import handle_errors
+from core.namespace import get_namespace
+from modules.auth.dependencies import get_current_user
+from modules.auth.models import User
 from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.chat.tool_contract import format_output_hint
-from modules.mcp.executor import call_tool
+from modules.mcp.executor import build_tool_context, call_tool
 from modules.mcp.validation import validate_args
 
 router = APIRouter(prefix='/ai/chat', tags=['ai-chat'])
@@ -53,6 +56,12 @@ class MessageRequest(BaseModel):
     session_id: str
     content: str
     tool_ids: list[str] = []
+
+
+class ChatModelsRequest(BaseModel):
+    """Request body to list chat models."""
+
+    api_key: str = ''
 
 
 def _resolve_api_key(session_key: str) -> str:
@@ -252,7 +261,13 @@ def _parse_text_tool_calls(content: str) -> tuple[str, list[dict]]:
     return cleaned, tool_calls
 
 
-async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, tool_ids: list[str] | None = None) -> None:
+async def _run_agent_turn(
+    session: LiveSession,
+    app: Any,
+    user_content: str,
+    tool_ids: list[str] | None = None,
+    tool_context: dict[str, Any] | None = None,
+) -> None:
     """Run one agent turn: send message, handle tool calls, push SSE events."""
     from modules.mcp.routes import get_registry
 
@@ -387,7 +402,7 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
                 session.push_event({'type': 'tool_start', 'tool_id': tool_id, 'method': method, 'path': path})
                 t0 = time.monotonic()
                 try:
-                    result = await call_tool(app, method, path, normalized)
+                    result = await call_tool(app, method, path, normalized, tool_context)
                 except ValueError as exc:
                     _push_tool_error(session, tc, tool_id, method, path, normalized, str(exc))
                     continue
@@ -430,23 +445,26 @@ async def _run_agent_turn(session: LiveSession, app: Any, user_content: str, too
 
 @router.get('/sessions')
 @handle_errors('list chat sessions')
-def list_sessions() -> list[dict]:
+def list_sessions(user: User = Depends(get_current_user)) -> list[dict]:
     """List all active chat sessions with preview info."""
+    del user
     return session_store.list_sessions()
 
 
 @router.post('/sessions')
 @handle_errors('create chat session')
-def create_session(body: CreateSessionRequest) -> dict:
+def create_session(body: CreateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Create a new chat session with the given provider/model/key."""
+    del user
     session = session_store.create(body.provider, body.model, body.api_key, body.system_prompt)
     return {'session_id': session.id, 'model': session.model, 'provider': session.provider}
 
 
 @router.patch('/sessions/{session_id}')
 @handle_errors('update chat session')
-def update_session(session_id: str, body: UpdateSessionRequest) -> dict:
+def update_session(session_id: str, body: UpdateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Update model, system prompt, or API key on a live session."""
+    del user
     session = session_store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
@@ -467,8 +485,9 @@ def update_session(session_id: str, body: UpdateSessionRequest) -> dict:
 
 @router.post('/message')
 @handle_errors('send chat message')
-async def send_message(request: Request, body: MessageRequest) -> dict:
+async def send_message(request: Request, body: MessageRequest, user: User = Depends(get_current_user)) -> dict:
     """Send a user message; agent processing is kicked off asynchronously."""
+    del user
     session = session_store.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
@@ -477,15 +496,22 @@ async def send_message(request: Request, body: MessageRequest) -> dict:
     if not acquired:
         session.push_event({'type': 'error', 'content': 'Agent is busy — wait for the current turn to finish'})
         raise HTTPException(status_code=409, detail='Agent busy')
-    task = asyncio.create_task(_run_agent_turn(session, request.app, body.content, body.tool_ids or None))
+    context = build_tool_context(
+        {
+            'X-Session-Token': request.headers.get('X-Session-Token') or request.cookies.get('session_token') or '',
+            'X-Namespace': request.headers.get('X-Namespace') or get_namespace(),
+        }
+    )
+    task = asyncio.create_task(_run_agent_turn(session, request.app, body.content, body.tool_ids or None, context))
     session.set_task(task)
     return {'status': 'processing', 'session_id': body.session_id}
 
 
 @router.post('/sessions/{session_id}/stop')
 @handle_errors('stop chat generation')
-async def stop_generation(session_id: str) -> dict:
+async def stop_generation(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Cancel the running agent turn for a session."""
+    del user
     session = session_store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
@@ -502,8 +528,9 @@ class ConfirmRequest(BaseModel):
 
 @router.post('/sessions/{session_id}/confirm')
 @handle_errors('confirm chat tool')
-def confirm_tool(session_id: str, body: ConfirmRequest) -> dict:
+def confirm_tool(session_id: str, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Confirm or deny a pending tool execution."""
+    del user
     session = session_store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
@@ -513,8 +540,9 @@ def confirm_tool(session_id: str, body: ConfirmRequest) -> dict:
 
 @router.get('/history/{session_id}')
 @handle_errors('get chat history')
-def get_history(session_id: str) -> dict:
+def get_history(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Return the full event history for a session."""
+    del user
     session = session_store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
@@ -523,8 +551,9 @@ def get_history(session_id: str) -> dict:
 
 @router.get('/stream/{session_id}')
 @handle_errors('stream chat events')
-async def stream(session_id: str) -> StreamingResponse:
+async def stream(session_id: str, user: User = Depends(get_current_user)) -> StreamingResponse:
     """SSE stream of chat events for a session with heartbeat."""
+    del user
     session = session_store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
@@ -566,21 +595,23 @@ async def stream(session_id: str) -> StreamingResponse:
 
 @router.delete('/sessions/{session_id}')
 @handle_errors('delete chat session')
-def delete_session(session_id: str) -> dict:
+def delete_session(session_id: str, user: User = Depends(get_current_user)) -> dict:
     """Close and delete a chat session."""
+    del user
     deleted = session_store.delete(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail='Session not found')
     return {'status': 'closed', 'session_id': session_id}
 
 
-@router.get('/models')
+@router.post('/models')
 @handle_errors('list chat models')
-async def get_models(api_key: str = '') -> list[dict]:
+async def get_models(body: ChatModelsRequest, user: User = Depends(get_current_user)) -> list[dict]:
     """List models available from OpenRouter. Uses provided key or falls back to global."""
+    del user
     from modules.settings.service import get_resolved_openrouter_key
 
-    key = api_key or get_resolved_openrouter_key()
+    key = body.api_key or get_resolved_openrouter_key()
     if not key:
         raise HTTPException(status_code=400, detail='No API key configured')
     try:

@@ -5,6 +5,7 @@ import json
 import re
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from modules.chat.sessions import ChatSession, LiveSession, SessionStore
@@ -175,8 +176,40 @@ class TestSessionStore:
         assert restored is not None
         assert restored.messages == [{'role': 'user', 'content': 'hi'}]
 
+    def test_api_key_is_encrypted_at_rest(self) -> None:
+        store = SessionStore()
+        s = store.create('openrouter', 'gpt-4o-mini', 'key')
+        with store._db() as db:
+            row = db.get(ChatSession, s.id)
+            assert row is not None
+            assert row.api_key != 'key'
+            assert row.api_key.startswith('enc:v1:')
+
+    def test_legacy_api_key_migrates_on_load(self) -> None:
+        store = SessionStore()
+        with store._db() as db:
+            row = ChatSession(id='legacy', provider='openrouter', model='gpt-4o-mini', api_key='legacy-key')
+            db.add(row)
+            db.commit()
+        live = store.get('legacy')
+        assert live is not None
+        assert live.api_key == 'legacy-key'
+        with store._db() as db:
+            stored = db.get(ChatSession, 'legacy')
+            assert stored is not None
+            assert stored.api_key != 'legacy-key'
+            assert stored.api_key.startswith('enc:v1:')
+
 
 class TestChatRoutes:
+    def test_chat_routes_require_auth(self, client: TestClient) -> None:
+        from main import app
+        from modules.auth.dependencies import get_current_user
+
+        app.dependency_overrides.pop(get_current_user, None)
+        resp = client.get('/api/v1/ai/chat/sessions')
+        assert resp.status_code == 401
+
     def test_create_session(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
@@ -448,7 +481,7 @@ class TestModelsRoute:
     def test_models_with_provided_key(self, client: TestClient) -> None:
         mock_models = [{'id': 'openai/gpt-4o', 'name': 'GPT-4o'}]
         with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)):
-            resp = client.get('/api/v1/ai/chat/models', params={'api_key': 'sk-test'})
+            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
@@ -461,19 +494,19 @@ class TestModelsRoute:
             patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list,
             patch('modules.settings.service.get_resolved_openrouter_key', return_value='sk-global'),
         ):
-            resp = client.get('/api/v1/ai/chat/models')
+            resp = client.post('/api/v1/ai/chat/models', json={})
         assert resp.status_code == 200
         mock_list.assert_awaited_once_with('sk-global')
 
     def test_models_returns_400_when_no_key(self, client: TestClient) -> None:
         with patch('modules.settings.service.get_resolved_openrouter_key', return_value=''):
-            resp = client.get('/api/v1/ai/chat/models')
+            resp = client.post('/api/v1/ai/chat/models', json={})
         assert resp.status_code == 400
         assert 'No API key' in resp.json()['detail']
 
     def test_models_returns_empty_list(self, client: TestClient) -> None:
         with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=[])):
-            resp = client.get('/api/v1/ai/chat/models', params={'api_key': 'sk-test'})
+            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
         assert resp.status_code == 200
         assert resp.json() == []
 
@@ -483,9 +516,39 @@ class TestModelsRoute:
             patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list,
             patch('modules.settings.service.get_resolved_openrouter_key', return_value='sk-global'),
         ):
-            resp = client.get('/api/v1/ai/chat/models', params={'api_key': 'sk-session'})
+            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-session'})
         assert resp.status_code == 200
         mock_list.assert_awaited_once_with('sk-session')
+
+    def test_models_route_requires_auth(self, client: TestClient) -> None:
+        from main import app
+        from modules.auth.dependencies import get_current_user
+
+        app.dependency_overrides.pop(get_current_user, None)
+        resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
+        assert resp.status_code == 401
+
+
+class TestToolContextForwarding:
+    @pytest.mark.asyncio
+    async def test_call_tool_forwards_session_and_namespace_headers(self) -> None:
+        from fastapi import FastAPI, Header
+
+        from modules.mcp.executor import build_tool_context, call_tool
+
+        app = FastAPI()
+
+        @app.get('/api/v1/test/auth')
+        async def auth_headers(
+            x_session_token: str | None = Header(default=None),
+            x_namespace: str | None = Header(default=None),
+        ) -> dict[str, str | None]:
+            return {'token': x_session_token, 'namespace': x_namespace or 'default'}
+
+        context = build_tool_context({'X-Session-Token': 'sess-123', 'X-Namespace': 'team-a'})
+        result = await call_tool(app, 'GET', '/api/v1/test/auth', {}, context)
+        assert result['status'] == 200
+        assert result['body'] == {'token': 'sess-123', 'namespace': 'team-a'}
 
 
 SAMPLE_REGISTRY = [
@@ -1006,7 +1069,7 @@ class TestProductionHardening:
         from modules.chat.openrouter import OpenRouterError
 
         with patch('modules.chat.routes.list_models', new=AsyncMock(side_effect=OpenRouterError('bad gateway'))):
-            resp = client.get('/api/v1/ai/chat/models', params={'api_key': 'sk-test'})
+            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
         assert resp.status_code == 502
         assert 'bad gateway' in resp.json()['detail']
 

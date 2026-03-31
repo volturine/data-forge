@@ -1,4 +1,5 @@
 import { Marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 const marked = new Marked({
 	breaks: true,
@@ -8,7 +9,7 @@ const marked = new Marked({
 export function renderMarkdown(text: string): string {
 	const raw = marked.parse(text);
 	if (typeof raw !== 'string') return text;
-	return raw;
+	return DOMPurify.sanitize(raw);
 }
 
 export function timeAgo(ts: number): string {

@@ -713,7 +713,7 @@ class TestAIRoutes:
             mock_client = MagicMock()
             mock_client.list_models.return_value = mock_models
             mock_get.return_value = mock_client
-            response = client.get('/api/v1/ai/models?provider=ollama')
+            response = client.post('/api/v1/ai/models', json={'provider': 'ollama'})
             assert response.status_code == 200
             data = response.json()
             assert len(data) == 1
@@ -721,7 +721,7 @@ class TestAIRoutes:
 
     def test_list_models_invalid_provider(self, client):
         with patch('modules.ai.routes.get_ai_client', side_effect=ValueError('Unknown provider')):
-            response = client.get('/api/v1/ai/models?provider=bad')
+            response = client.post('/api/v1/ai/models', json={'provider': 'bad'})
             assert response.status_code == 400
             data = response.json()
             assert 'Unknown provider' in data['detail']
@@ -731,7 +731,7 @@ class TestAIRoutes:
             mock_client = MagicMock()
             mock_client.test_connection.return_value = {'ok': True, 'detail': '3 model(s) available'}
             mock_get.return_value = mock_client
-            response = client.get('/api/v1/ai/test?provider=ollama')
+            response = client.post('/api/v1/ai/test', json={'provider': 'ollama'})
             assert response.status_code == 200
             data = response.json()
             assert data['ok'] is True
@@ -741,7 +741,7 @@ class TestAIRoutes:
             mock_client = MagicMock()
             mock_client.test_connection.return_value = {'ok': False, 'detail': 'Connection refused'}
             mock_get.return_value = mock_client
-            response = client.get('/api/v1/ai/test?provider=ollama')
+            response = client.post('/api/v1/ai/test', json={'provider': 'ollama'})
             assert response.status_code == 200
             data = response.json()
             assert data['ok'] is False
@@ -749,7 +749,7 @@ class TestAIRoutes:
 
     def test_test_connection_no_key(self, client):
         with patch('modules.ai.routes.get_ai_client', side_effect=ValueError('OPENAI_API_KEY not configured')):
-            response = client.get('/api/v1/ai/test?provider=openai')
+            response = client.post('/api/v1/ai/test', json={'provider': 'openai'})
             assert response.status_code == 400
             data = response.json()
             assert 'OPENAI_API_KEY' in data['detail']

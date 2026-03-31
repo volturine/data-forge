@@ -104,6 +104,8 @@ def isolate_data_dir(tmp_path: Path, monkeypatch):
     log_dir = data_dir / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv('ENV_FILE', '')
+    monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+    monkeypatch.setattr(settings, 'settings_encryption_key', 'test-key', raising=False)
     monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
     monkeypatch.setattr(settings, 'database_url', f'sqlite:///{data_dir / "app.db"}', raising=False)
     monkeypatch.setattr(settings, 'log_sqlite_path', log_dir, raising=False)

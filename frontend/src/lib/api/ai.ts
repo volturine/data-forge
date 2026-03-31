@@ -17,10 +17,13 @@ export function listAIModels(
 	endpointUrl?: string | null,
 	apiKey?: string | null
 ): ResultAsync<AIModel[], ApiError> {
-	const params = new URLSearchParams({ provider });
-	if (endpointUrl) params.set('endpoint_url', endpointUrl);
-	if (apiKey) params.set('api_key', apiKey);
-	return apiRequest<AIModel[]>(`/v1/ai/models?${params}`);
+	const body: Record<string, string> = { provider };
+	if (endpointUrl) body.endpoint_url = endpointUrl;
+	if (apiKey) body.api_key = apiKey;
+	return apiRequest<AIModel[]>('/v1/ai/models', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	});
 }
 
 export function testAIConnection(
@@ -28,8 +31,11 @@ export function testAIConnection(
 	endpointUrl?: string | null,
 	apiKey?: string | null
 ): ResultAsync<AIConnectionResult, ApiError> {
-	const params = new URLSearchParams({ provider });
-	if (endpointUrl) params.set('endpoint_url', endpointUrl);
-	if (apiKey) params.set('api_key', apiKey);
-	return apiRequest<AIConnectionResult>(`/v1/ai/test?${params}`);
+	const body: Record<string, string> = { provider };
+	if (endpointUrl) body.endpoint_url = endpointUrl;
+	if (apiKey) body.api_key = apiKey;
+	return apiRequest<AIConnectionResult>('/v1/ai/test', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	});
 }

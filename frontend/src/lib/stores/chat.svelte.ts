@@ -10,7 +10,7 @@ import {
 	confirmTool
 } from '$lib/api/chat';
 import type { ChatEvent, OpenRouterModel, ChatSessionInfo } from '$lib/api/chat';
-import { getSettings, updateSettings } from '$lib/api/settings';
+import { getSettings, updateSettings, isMasked } from '$lib/api/settings';
 import type { AppSettings } from '$lib/api/settings';
 import { listTools } from '$lib/api/mcp';
 import type { MCPTool } from '$lib/api/mcp';
@@ -277,8 +277,10 @@ export class ChatStore {
 		settingsResult.match(
 			(s) => {
 				this.settings = s;
-				if (s.openrouter_api_key) this.apiKey = s.openrouter_api_key;
-				this.configured = true;
+				if (s.openrouter_api_key && !isMasked(s.openrouter_api_key)) {
+					this.apiKey = s.openrouter_api_key;
+				}
+				this.configured = !!s.openrouter_api_key;
 			},
 			() => {}
 		);
@@ -374,11 +376,11 @@ export class ChatStore {
 		this.open = true;
 		await this.loadContext();
 		void this.loadSessions();
-		if (this.apiKey && this.models.length === 0) {
+		if (this.configured && this.models.length === 0) {
 			void this.loadModels();
 		}
 		if (this.sessionId) return;
-		if (!this.apiKey) {
+		if (!this.configured) {
 			if (typeof window !== 'undefined') localStorage.removeItem(SESSION_KEY);
 			return;
 		}
