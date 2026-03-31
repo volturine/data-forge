@@ -58,7 +58,6 @@ test-e2e:
 # Run backend tests
 test:
     cd backend && uv run pytest --tb=short -q
-    just test-e2e
     cd frontend && bun run test:unit
 
 # Generate TypeScript types from Pydantic step schemas
