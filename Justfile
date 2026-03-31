@@ -39,8 +39,7 @@ test-e2e:
 
     trap cleanup EXIT INT TERM
 
-    (cd backend && uv run --env-file .env ./main.py) &
-    BACKEND_PID=$!
+    (cd backend && uv run --env-file e2e.env ./main.py) &
     (cd frontend && bun run dev) &
     FRONTEND_PID=$!
 

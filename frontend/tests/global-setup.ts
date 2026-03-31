@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { request } from '@playwright/test';
-import { API_BASE, AUTH_FILE, purgeE2eResources } from './utils/api.js';
+import { API_BASE, AUTH_FILE } from './utils/api.js';
 
 const E2E_EMAIL = 'e2e-test@example.com';
 const E2E_PASSWORD = 'e2e-test-pw-12345';
@@ -32,7 +32,6 @@ export default async function globalSetup() {
 	}
 
 	await ctx.storageState({ path: AUTH_FILE });
-	await purgeE2eResources(ctx);
 	await ctx.dispose();
 
 	const state = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8'));

@@ -15,8 +15,8 @@ export async function deleteDatasourceViaUI(page: Page, name: string): Promise<v
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await page.getByText(name).waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort — global teardown will catch stragglers
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteDatasourceViaUI failed for "${name}":`, e);
 	}
 }
 
@@ -30,8 +30,8 @@ export async function deleteAnalysisViaUI(page: Page, name: string): Promise<voi
 		await page
 			.locator(`[data-analysis-card="${name}"]`)
 			.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteAnalysisViaUI failed for "${name}":`, e);
 	}
 }
 
@@ -45,8 +45,8 @@ export async function deleteUdfViaUI(page: Page, name: string): Promise<void> {
 			.locator(`[data-udf-card="${name}"]`)
 			.first()
 			.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteUdfViaUI failed for "${name}":`, e);
 	}
 }
 
@@ -60,8 +60,8 @@ export async function deleteScheduleViaUI(page: Page, cronOrName: string): Promi
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await text.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteScheduleViaUI failed for "${cronOrName}":`, e);
 	}
 }
 
@@ -75,7 +75,7 @@ export async function deleteHealthCheckViaUI(page: Page, name: string): Promise<
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await text.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteHealthCheckViaUI failed for "${name}":`, e);
 	}
 }

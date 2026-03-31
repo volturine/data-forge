@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
 test.describe('Analyses – list & gallery', () => {
@@ -12,56 +13,64 @@ test.describe('Analyses – list & gallery', () => {
 	});
 
 	test('lists existing analysis after API create', async ({ page, request }) => {
-		const dsId = await createDatasource(request, 'e2e-list-ds');
-		await createAnalysis(request, 'E2E List Test', dsId);
+		const dsName = `e2e-list-ds-${uid()}`;
+		const aName = `E2E List ${uid()}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto('/');
-			await expect(page.getByText('E2E List Test')).toBeVisible();
+			await expect(page.getByText(aName)).toBeVisible();
 		} finally {
-			await deleteAnalysisViaUI(page, 'E2E List Test');
-			await deleteDatasourceViaUI(page, 'e2e-list-ds');
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('search filters out non-matching analyses', async ({ page, request }) => {
-		const dsId = await createDatasource(request, 'e2e-search-ds');
-		await createAnalysis(request, 'E2E Search Alpha', dsId);
+		const suffix = uid();
+		const dsName = `e2e-search-ds-${suffix}`;
+		const analysisName = `E2E Search Alpha ${suffix}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, analysisName, dsId);
 		try {
 			await page.goto('/');
-			await expect(page.getByText('E2E Search Alpha')).toBeVisible();
+			const card = page.locator(`[data-analysis-card="${analysisName}"]`);
+			await expect(card).toBeVisible();
 
 			// The search box rendered by AnalysisFilters
 			await page.getByRole('textbox').first().fill('ZZZNOMATCH');
 			await expect(page.getByText(/No analyses match your search/i)).toBeVisible();
 		} finally {
-			await deleteAnalysisViaUI(page, 'E2E Search Alpha');
-			await deleteDatasourceViaUI(page, 'e2e-search-ds');
+			await deleteAnalysisViaUI(page, analysisName);
+			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
 	test('delete analysis via confirm dialog removes it from list', async ({ page, request }) => {
-		const dsId = await createDatasource(request, 'e2e-del-ds');
-		await createAnalysis(request, 'E2E Delete Me', dsId);
+		const dsName = `e2e-del-ds-${uid()}`;
+		const aName = `E2E Delete ${uid()}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, aName, dsId);
+		try {
+			await page.goto('/');
+			const card = page.locator(`[data-analysis-card="${aName}"]`);
+			await expect(card.first()).toBeVisible();
+			const countBefore = await card.count();
 
-		await page.goto('/');
-		const card = page.locator('[data-analysis-card="E2E Delete Me"]');
-		await expect(card.first()).toBeVisible();
-		const countBefore = await card.count();
+			await card
+				.first()
+				.getByRole('button', { name: /Delete analysis/ })
+				.click();
 
-		await card
-			.first()
-			.getByRole('button', { name: /Delete analysis/ })
-			.click();
+			// Confirm dialog appears
+			const dialog = page.getByRole('dialog');
+			await expect(dialog.getByRole('heading', { name: /Delete Analysis/i })).toBeVisible();
+			await dialog.getByRole('button', { name: /^Delete$/ }).click();
 
-		// Confirm dialog appears
-		const dialog = page.getByRole('dialog');
-		await expect(dialog.getByRole('heading', { name: /Delete Analysis/i })).toBeVisible();
-		await dialog.getByRole('button', { name: /^Delete$/ }).click();
-
-		await expect(card).toHaveCount(countBefore - 1, { timeout: 8_000 });
-
-		// Cleanup the datasource
-		await deleteDatasourceViaUI(page, 'e2e-del-ds');
+			await expect(card).toHaveCount(countBefore - 1, { timeout: 8_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, dsName);
+		}
 	});
 });
 
@@ -119,18 +128,20 @@ test.describe('Analyses – create wizard', () => {
 
 	test('full create flow: wizard → analysis detail page', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-create-ds');
+		const dsName = `e2e-create-ds-${uid()}`;
+		const aName = `E2E Created ${uid()}`;
+		await createDatasource(request, dsName);
 		try {
 			await page.goto('/analysis/new');
 
 			// Step 1 – name
-			await page.locator('#name').fill('E2E Created Analysis');
+			await page.locator('#name').fill(aName);
 			await page.getByRole('button', { name: /Next/i }).click();
 
 			// Step 2 – pick datasource
 			await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
 			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator('[role="option"]', { hasText: 'e2e-create-ds' }).first().click();
+			await page.locator('[role="option"]', { hasText: dsName }).first().click();
 			// Close the dropdown by clicking outside
 			await page.getByRole('heading', { name: /Select Data Sources/i }).click();
 			await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
@@ -138,14 +149,14 @@ test.describe('Analyses – create wizard', () => {
 
 			// Step 3 – review
 			await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
-			await expect(page.getByText('E2E Created Analysis').first()).toBeVisible();
+			await expect(page.getByText(aName).first()).toBeVisible();
 			await page.getByRole('button', { name: /Create Analysis/i }).click();
 
 			// Redirects to analysis editor
 			await page.waitForURL(/\/analysis\/.+/, { timeout: 20_000 });
 		} finally {
-			await deleteAnalysisViaUI(page, 'E2E Created Analysis');
-			await deleteDatasourceViaUI(page, 'e2e-create-ds');
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
@@ -168,16 +179,20 @@ test.describe('Analyses – create wizard', () => {
 test.describe('Analyses – detail page', () => {
 	let dsId = '';
 	let aId = '';
+	let dsName: string;
+	let aName: string;
 
 	test.beforeAll(async ({ request }) => {
-		dsId = await createDatasource(request, 'e2e-detail-ds');
-		aId = await createAnalysis(request, 'E2E Detail Test', dsId);
+		dsName = `e2e-detail-ds-${uid()}`;
+		aName = `E2E Detail ${uid()}`;
+		dsId = await createDatasource(request, dsName);
+		aId = await createAnalysis(request, aName, dsId);
 	});
 
 	test.afterAll(async ({ browser }) => {
 		const page = await browser.newPage();
-		await deleteAnalysisViaUI(page, 'E2E Detail Test');
-		await deleteDatasourceViaUI(page, 'e2e-detail-ds');
+		await deleteAnalysisViaUI(page, aName);
+		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 	});
 
@@ -215,7 +230,7 @@ test.describe('Analyses – detail page', () => {
 
 	test('analysis name is shown in the detail page', async ({ page }) => {
 		await page.goto(`/analysis/${aId}`);
-		await expect(page.getByText('E2E Detail Test')).toBeVisible({ timeout: 10_000 });
+		await expect(page.getByText(aName)).toBeVisible({ timeout: 10_000 });
 	});
 });
 

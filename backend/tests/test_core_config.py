@@ -1,10 +1,20 @@
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from core.config import Settings
+
+
+def _set_isolated_settings_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, data_dir: Path | None = None) -> Path:
+    env_file = tmp_path / '.env'
+    env_file.write_text('', encoding='utf-8')
+    resolved_data_dir = data_dir or (tmp_path / 'data')
+    monkeypatch.setenv('DATA_DIR', str(resolved_data_dir))
+    monkeypatch.setenv('ENV_FILE', str(env_file))
+    return resolved_data_dir
 
 
 class TestSettings:
@@ -26,8 +36,7 @@ class TestSettings:
                 'WORKERS',
             ]:
                 monkeypatch.delenv(key, raising=False)
-        # Point ENV_FILE to a non-existent path so .env is not loaded
-        monkeypatch.setenv('ENV_FILE', str(tmp_path / 'nonexistent.env'))
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('PUBLIC_IDB_DEBUG', 'false')
 
         settings = Settings()
@@ -43,6 +52,7 @@ class TestSettings:
 
     def test_custom_settings_from_env(self, monkeypatch, tmp_path):
         data_dir = tmp_path / 'data'
+        _set_isolated_settings_env(monkeypatch, tmp_path, data_dir)
         monkeypatch.setenv('DEBUG', 'true')
         monkeypatch.setenv('DATABASE_URL', 'sqlite:///./test.db')
         monkeypatch.setenv('DATA_DIR', str(data_dir))
@@ -62,7 +72,8 @@ class TestSettings:
         assert settings.job_timeout == 3600
         assert settings.public_idb_debug is True
 
-    def test_polars_settings(self, monkeypatch):
+    def test_polars_settings(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('POLARS_MAX_THREADS', '8')
         monkeypatch.setenv('POLARS_STREAMING_CHUNK_SIZE', '100000')
 
@@ -71,7 +82,8 @@ class TestSettings:
         assert settings.polars_max_threads == 8
         assert settings.polars_streaming_chunk_size == 100000
 
-    def test_cors_settings(self, monkeypatch):
+    def test_cors_settings(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5173')
 
         settings = Settings()
@@ -80,7 +92,8 @@ class TestSettings:
         assert 'http://localhost:3000' in settings.cors_origins_list
         assert 'http://localhost:5173' in settings.cors_origins_list
 
-    def test_cors_default(self):
+    def test_cors_default(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         settings = Settings()
 
         assert settings.cors_origins is not None
@@ -89,12 +102,14 @@ class TestSettings:
     def test_database_url_always_derived_from_data_dir(self, monkeypatch, tmp_path):
         """database_url is always derived from data_dir regardless of DATABASE_URL env var."""
         data_dir = tmp_path / 'data'
+        _set_isolated_settings_env(monkeypatch, tmp_path, data_dir)
         monkeypatch.setenv('DATABASE_URL', 'invalid-url')
         monkeypatch.setenv('DATA_DIR', str(data_dir))
         settings = Settings()
         assert settings.database_url == f'sqlite:///{data_dir / "app.db"}'
 
-    def test_negative_timeout_values(self, monkeypatch):
+    def test_negative_timeout_values(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('ENGINE_IDLE_TIMEOUT', '-100')
 
         with pytest.raises(ValidationError, match='engine_idle_timeout must be >= 1'):
@@ -112,7 +127,8 @@ class TestSettings:
         with pytest.raises(ValidationError, match='engine_pooling_interval must be >= 1'):
             Settings()
 
-    def test_directory_paths_are_path_objects(self):
+    def test_directory_paths_are_path_objects(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         settings = Settings()
 
         assert isinstance(settings.data_dir, Path)
@@ -122,39 +138,46 @@ class TestSettings:
         empty_env = tmp_path / '.env'
         empty_env.write_text('', encoding='utf-8')
         monkeypatch.setenv('ENV_FILE', str(empty_env))
+        monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
 
         first = Settings()
         second = Settings()
 
+        assert first.data_dir == tmp_path / 'data-forge'
         assert first.data_dir == second.data_dir
         assert first.data_dir.exists()
         assert second.database_url == f'sqlite:///{second.data_dir / "app.db"}'
 
-    def test_logging_level(self, monkeypatch):
+    def test_logging_level(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('LOG_LEVEL', 'DEBUG')
 
         settings = Settings()
 
         assert settings.log_level == 'debug'
 
-    def test_default_logging_level(self):
+    def test_default_logging_level(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         settings = Settings()
 
         assert settings.log_level == 'info'
 
-    def test_default_log_sqlite_paths(self):
+    def test_default_log_sqlite_paths(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         settings = Settings()
 
         assert 'logs' in str(settings.log_sqlite_path)
 
-    def test_worker_settings(self, monkeypatch):
+    def test_worker_settings(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         monkeypatch.setenv('WORKERS', '4')
 
         settings = Settings()
 
         assert settings.workers == 4
 
-    def test_settings_validation(self):
+    def test_settings_validation(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
         settings = Settings()
 
         assert settings.app_name == 'Data-Forge Analysis Platform'

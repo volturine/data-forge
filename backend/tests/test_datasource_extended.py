@@ -534,25 +534,32 @@ class TestDataSourceDeletion:
         # Should succeed or return appropriate error
         assert response.status_code in [204, 400, 409]
 
-    def test_delete_datasource_removes_file(self, client, temp_upload_dir: Path):
-        """Test that deleting a datasource removes the file."""
-        # Create and upload a file
-        csv_path = temp_upload_dir / 'to_delete.csv'
-        df = pl.DataFrame({'id': [1], 'value': [10]})
-        df.write_csv(csv_path)
+    def test_delete_uploaded_datasource_removes_iceberg_and_upload(self, client):
+        payload = b'id,value\n1,10\n2,20\n'
+        files = {'file': ('to_delete.csv', payload, 'text/csv')}
+        data = {'name': 'Delete Test'}
 
-        with open(csv_path, 'rb') as f:
-            files = {'file': ('to_delete.csv', f.read(), 'text/csv')}
-            data = {'name': 'Delete Test'}
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
+        create = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-        datasource_id = response.json()['id']
+        assert create.status_code == 200
+        body = create.json()
+        datasource_id = body['id']
+        metadata_path = Path(body['config']['metadata_path'])
+        source = body['config']['source']
+        upload_path = Path(source['file_path'])
 
-        # Delete the datasource
+        assert metadata_path.exists()
+        assert upload_path.exists()
+        assert source['source_type'] == 'file'
+
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
-        # File should be removed (implementation dependent)
         assert response.status_code == 204
+        assert not metadata_path.exists()
+        assert not upload_path.exists()
+
+        get_response = client.get(f'/api/v1/datasource/{datasource_id}')
+        assert get_response.status_code == 404
 
 
 class TestIsHidden:

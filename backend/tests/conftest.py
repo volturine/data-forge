@@ -31,6 +31,9 @@ def _settings():
 
 @pytest.fixture(scope='function')
 def test_engine():
+    from modules.udf.models import Udf
+
+    del Udf
     engine = create_engine(
         'sqlite:///:memory:',
         echo=False,
