@@ -57,6 +57,7 @@ class TestSettings:
         data_dir = tmp_path / 'data'
         _set_isolated_settings_env(monkeypatch, tmp_path, data_dir)
         monkeypatch.setenv('DEBUG', 'true')
+        monkeypatch.setenv('PORT', '8123')
         monkeypatch.setenv('DATABASE_URL', 'sqlite:///./test.db')
         monkeypatch.setenv('DATA_DIR', str(data_dir))
         monkeypatch.setenv('DEFAULT_NAMESPACE', 'acme')
@@ -67,6 +68,7 @@ class TestSettings:
         settings = Settings()
 
         assert settings.debug is True
+        assert settings.port == 8123
         # database_url is always derived from data_dir, ignoring the env var
         assert settings.database_url == f'sqlite:///{data_dir / "app.db"}'
         assert settings.data_dir == data_dir
@@ -128,6 +130,18 @@ class TestSettings:
         monkeypatch.setenv('ENGINE_POOLING_INTERVAL', '0')
 
         with pytest.raises(ValidationError, match='engine_pooling_interval must be >= 1'):
+            Settings()
+
+    def test_port_must_be_in_valid_range(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('PORT', '0')
+
+        with pytest.raises(ValidationError, match='port must be >= 1'):
+            Settings()
+
+        monkeypatch.setenv('PORT', '65536')
+
+        with pytest.raises(ValidationError, match='port must be <= 65535'):
             Settings()
 
     def test_directory_paths_are_path_objects(self, monkeypatch, tmp_path):

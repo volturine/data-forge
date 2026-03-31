@@ -94,11 +94,23 @@ class TestPasswordHashing:
         assert verify_password('strongpassword123', 'pbkdf2_sha256$200000$0$11') is False
 
     def test_validate_password_valid(self) -> None:
-        validate_password('strong123')
+        validate_password('Strong123')
 
     def test_validate_password_too_short(self) -> None:
         with pytest.raises(ValueError, match='at least 8'):
             validate_password('short')
+
+    def test_validate_password_requires_uppercase(self) -> None:
+        with pytest.raises(ValueError, match='uppercase'):
+            validate_password('strong123')
+
+    def test_validate_password_requires_lowercase(self) -> None:
+        with pytest.raises(ValueError, match='lowercase'):
+            validate_password('STRONG123')
+
+    def test_validate_password_requires_digit(self) -> None:
+        with pytest.raises(ValueError, match='digit'):
+            validate_password('StrongPass')
 
 
 class TestUserService:
@@ -113,7 +125,7 @@ class TestUserService:
         )
         monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
         monkeypatch.setattr('core.config.settings.default_user_email', 'seeded@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'seededpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'SeededPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Seeded User')
 
         database._init_settings_db()
@@ -129,7 +141,7 @@ class TestUserService:
 
     def test_ensure_default_user_seeds_from_env(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('core.config.settings.default_user_email', 'guest@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'guestpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'GuestPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Guest User')
 
         user = ensure_default_user(auth_db_session)
@@ -145,16 +157,16 @@ class TestUserService:
         assert provider.provider_subject == 'guest@example.com'
         assert isinstance(provider.provider_metadata, dict)
         assert provider.provider_metadata['managed_by'] == 'env_default_user'
-        assert verify_password('guestpass123', provider.provider_metadata['password_hash']) is True
+        assert verify_password('GuestPass123', provider.provider_metadata['password_hash']) is True
 
     def test_ensure_default_user_updates_existing_account(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('core.config.settings.default_user_email', 'first@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'firstpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'FirstPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'First User')
         first = ensure_default_user(auth_db_session)
 
         monkeypatch.setattr('core.config.settings.default_user_email', 'second@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'secondpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'SecondPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Second User')
         updated = ensure_default_user(auth_db_session)
 
@@ -167,7 +179,7 @@ class TestUserService:
         assert provider is not None
         assert provider.provider_subject == 'second@example.com'
         assert isinstance(provider.provider_metadata, dict)
-        assert verify_password('secondpass123', provider.provider_metadata['password_hash']) is True
+        assert verify_password('SecondPass123', provider.provider_metadata['password_hash']) is True
 
     def test_ensure_default_user_keeps_email_when_new_env_email_is_taken(
         self,
@@ -175,13 +187,13 @@ class TestUserService:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr('core.config.settings.default_user_email', 'default@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'defaultpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'DefaultPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Default User')
         user = ensure_default_user(auth_db_session)
-        create_user(auth_db_session, 'taken@example.com', 'password123', 'Taken User')
+        create_user(auth_db_session, 'taken@example.com', 'Password123', 'Taken User')
 
         monkeypatch.setattr('core.config.settings.default_user_email', 'taken@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'changedpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'ChangedPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Renamed Default')
         updated = ensure_default_user(auth_db_session)
 
@@ -194,10 +206,10 @@ class TestUserService:
         assert provider is not None
         assert provider.provider_subject == 'default@example.com'
         assert isinstance(provider.provider_metadata, dict)
-        assert verify_password('changedpass123', provider.provider_metadata['password_hash']) is True
+        assert verify_password('ChangedPass123', provider.provider_metadata['password_hash']) is True
 
     def test_create_user_success(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
         assert user.email == 'test@example.com'
         assert user.display_name == 'Test User'
@@ -212,13 +224,13 @@ class TestUserService:
         assert 'password_hash' in provider.provider_metadata
 
     def test_create_user_duplicate_email(self, auth_db_session: Session) -> None:
-        create_user(auth_db_session, 'test@example.com', 'password123', 'User One')
+        create_user(auth_db_session, 'test@example.com', 'Password123', 'User One')
 
         with pytest.raises(EmailAlreadyExistsError):
-            create_user(auth_db_session, 'test@example.com', 'password123', 'User Two')
+            create_user(auth_db_session, 'test@example.com', 'Password123', 'User Two')
 
     def test_get_user_by_email(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
         found = get_user_by_email(auth_db_session, 'TEST@EXAMPLE.COM')
 
@@ -231,7 +243,7 @@ class TestUserService:
         assert found is None
 
     def test_get_user_by_id(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
         found = get_user_by_id(auth_db_session, user.id)
 
@@ -239,7 +251,7 @@ class TestUserService:
         assert found.email == 'test@example.com'
 
     def test_update_profile(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
         updated = update_profile(
             auth_db_session,
@@ -252,9 +264,9 @@ class TestUserService:
         assert updated.display_name == 'Updated Name'
 
     def test_change_password(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
-        change_password(auth_db_session, user.id, 'password123', 'newpassword123')
+        change_password(auth_db_session, user.id, 'Password123', 'Newpassword123')
 
         provider = auth_db_session.exec(
             select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'password')
@@ -263,19 +275,19 @@ class TestUserService:
         assert isinstance(provider.provider_metadata, dict)
         hashed = provider.provider_metadata.get('password_hash')
         assert isinstance(hashed, str)
-        assert verify_password('newpassword123', hashed) is True
-        assert verify_password('password123', hashed) is False
+        assert verify_password('Newpassword123', hashed) is True
+        assert verify_password('Password123', hashed) is False
 
     def test_change_password_wrong_current(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
         with pytest.raises(InvalidCredentialsError):
-            change_password(auth_db_session, user.id, 'wrongpassword', 'newpassword123')
+            change_password(auth_db_session, user.id, 'wrongpassword', 'Newpassword123')
 
 
 class TestSessionService:
     def test_create_session(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
 
         user_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
 
@@ -284,7 +296,7 @@ class TestSessionService:
         assert user_session.expires_at > datetime.now(UTC).replace(tzinfo=None)
 
     def test_validate_session_valid(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
         user_session = create_session(auth_db_session, user.id, None, None)
 
         resolved = validate_session(auth_db_session, user_session.id)
@@ -294,7 +306,7 @@ class TestSessionService:
         assert resolved.last_login_at is not None
 
     def test_validate_session_expired(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
         now = datetime.now(UTC).replace(tzinfo=None)
         user_session = UserSession(
             user_id=user.id,
@@ -316,7 +328,7 @@ class TestSessionService:
         assert refreshed.revoked is True
 
     def test_validate_session_revoked(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
         now = datetime.now(UTC).replace(tzinfo=None)
         user_session = UserSession(
             user_id=user.id,
@@ -335,7 +347,7 @@ class TestSessionService:
         assert resolved is None
 
     def test_revoke_session(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
         user_session = create_session(auth_db_session, user.id, None, None)
 
         revoke_session(auth_db_session, user_session.id)
@@ -345,7 +357,7 @@ class TestSessionService:
         assert refreshed.revoked is True
 
     def test_revoke_all_sessions(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'test@example.com', 'password123', 'Test User')
+        user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
         first = create_session(auth_db_session, user.id, None, None)
         second = create_session(auth_db_session, user.id, None, None)
 
@@ -401,7 +413,7 @@ class TestOAuthService:
         assert len(providers) == 1
 
     def test_find_or_create_oauth_user_existing_email(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'existing@example.com', 'password123', 'Existing User')
+        user = create_user(auth_db_session, 'existing@example.com', 'Password123', 'Existing User')
 
         resolved = find_or_create_oauth_user(
             session=auth_db_session,
@@ -418,7 +430,7 @@ class TestOAuthService:
         assert names == {'password', 'google'}
 
     def test_unlink_provider_success(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'existing@example.com', 'password123', 'Existing User')
+        user = create_user(auth_db_session, 'existing@example.com', 'Password123', 'Existing User')
         find_or_create_oauth_user(
             session=auth_db_session,
             provider='google',
@@ -450,7 +462,7 @@ class TestOAuthService:
 
 class TestVerificationTokenService:
     def test_create_verification_token_returns_valid_token(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'verify-token@example.com', 'password123', 'Verify Token User')
+        user = create_user(auth_db_session, 'verify-token@example.com', 'Password123', 'Verify Token User')
 
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
 
@@ -463,7 +475,7 @@ class TestVerificationTokenService:
         assert row.used is False
 
     def test_validate_verification_token_valid(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'validate-token@example.com', 'password123', 'Validate Token User')
+        user = create_user(auth_db_session, 'validate-token@example.com', 'Password123', 'Validate Token User')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
 
         resolved_user_id = validate_verification_token(auth_db_session, token=token, token_type='email_verify')
@@ -474,14 +486,14 @@ class TestVerificationTokenService:
         assert row.used is True
 
     def test_validate_verification_token_expired(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'expired-token@example.com', 'password123', 'Expired Token User')
+        user = create_user(auth_db_session, 'expired-token@example.com', 'Password123', 'Expired Token User')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify', ttl_hours=-1)
 
         with pytest.raises(TokenExpiredError):
             validate_verification_token(auth_db_session, token=token, token_type='email_verify')
 
     def test_validate_verification_token_used(self, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'used-token@example.com', 'password123', 'Used Token User')
+        user = create_user(auth_db_session, 'used-token@example.com', 'Password123', 'Used Token User')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
         validate_verification_token(auth_db_session, token=token, token_type='email_verify')
 
@@ -497,7 +509,7 @@ class TestAuthRoutes:
     ) -> None:
         monkeypatch.setattr('core.config.settings.auth_required', False)
         monkeypatch.setattr('core.config.settings.default_user_email', 'guest@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'guestpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'GuestPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Guest User')
         ensure_default_user(auth_db_session)
 
@@ -561,7 +573,7 @@ class TestAuthRoutes:
     ) -> None:
         monkeypatch.setattr('core.config.settings.auth_required', False)
         monkeypatch.setattr('core.config.settings.default_user_email', 'guest@example.com')
-        monkeypatch.setattr('core.config.settings.default_user_password', 'guestpass123')
+        monkeypatch.setattr('core.config.settings.default_user_password', 'GuestPass123')
         monkeypatch.setattr('core.config.settings.default_user_name', 'Guest User')
         ensure_default_user(auth_db_session)
 
@@ -575,7 +587,7 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'register@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Register User',
             },
         )
@@ -590,7 +602,7 @@ class TestAuthRoutes:
     def test_register_duplicate_email(self, auth_client: TestClient) -> None:
         payload = {
             'email': 'duplicate@example.com',
-            'password': 'password123',
+            'password': 'Password123',
             'display_name': 'User One',
         }
         first = auth_client.post('/api/v1/auth/register', json=payload)
@@ -616,12 +628,12 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'login@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Login User',
             },
         )
 
-        response = auth_client.post('/api/v1/auth/login', json={'email': 'login@example.com', 'password': 'password123'})
+        response = auth_client.post('/api/v1/auth/login', json={'email': 'login@example.com', 'password': 'Password123'})
 
         assert response.status_code == 200
         assert response.json()['email'] == 'login@example.com'
@@ -632,7 +644,7 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'wrongpass@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Wrong Pass User',
             },
         )
@@ -642,7 +654,7 @@ class TestAuthRoutes:
         assert response.status_code == 401
 
     def test_login_nonexistent_email(self, auth_client: TestClient) -> None:
-        response = auth_client.post('/api/v1/auth/login', json={'email': 'missing@example.com', 'password': 'password123'})
+        response = auth_client.post('/api/v1/auth/login', json={'email': 'missing@example.com', 'password': 'Password123'})
 
         assert response.status_code == 401
 
@@ -651,7 +663,7 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'me@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Me User',
             },
         )
@@ -680,7 +692,7 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'logout@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Logout User',
             },
         )
@@ -698,7 +710,7 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'profile@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Profile User',
             },
         )
@@ -716,25 +728,25 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'changepass@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Change Password User',
             },
         )
 
         response = auth_client.put(
             '/api/v1/auth/password',
-            json={'current_password': 'password123', 'new_password': 'newpassword123'},
+            json={'current_password': 'Password123', 'new_password': 'Newpassword123'},
         )
 
         assert response.status_code == 200
         assert response.json()['success'] is True
 
         auth_client.post('/api/v1/auth/logout')
-        login = auth_client.post('/api/v1/auth/login', json={'email': 'changepass@example.com', 'password': 'newpassword123'})
+        login = auth_client.post('/api/v1/auth/login', json={'email': 'changepass@example.com', 'password': 'Newpassword123'})
         assert login.status_code == 200
 
     def test_forgot_password_existing_email_creates_token(self, auth_client: TestClient, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'forgot-existing@example.com', 'password123', 'Forgot Existing User')
+        user = create_user(auth_db_session, 'forgot-existing@example.com', 'Password123', 'Forgot Existing User')
 
         response = auth_client.post('/api/v1/auth/forgot-password', json={'email': user.email})
 
@@ -762,13 +774,13 @@ class TestAuthRoutes:
         assert len(rows) == 0
 
     def test_reset_password_happy_path(self, auth_client: TestClient, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'reset-happy@example.com', 'password123', 'Reset Happy User')
+        user = create_user(auth_db_session, 'reset-happy@example.com', 'Password123', 'Reset Happy User')
         user_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='password_reset', ttl_hours=1)
 
         response = auth_client.post(
             '/api/v1/auth/reset-password',
-            json={'token': token, 'new_password': 'newpassword123'},
+            json={'token': token, 'new_password': 'Newpassword123'},
         )
 
         assert response.status_code == 200
@@ -780,7 +792,7 @@ class TestAuthRoutes:
         assert isinstance(provider.provider_metadata, dict)
         hashed = provider.provider_metadata.get('password_hash')
         assert isinstance(hashed, str)
-        assert verify_password('newpassword123', hashed) is True
+        assert verify_password('Newpassword123', hashed) is True
         token_row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
         assert token_row is not None
         assert token_row.used is True
@@ -789,12 +801,12 @@ class TestAuthRoutes:
         assert refreshed_session.revoked is True
 
     def test_reset_password_with_expired_token(self, auth_client: TestClient, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'reset-expired@example.com', 'password123', 'Reset Expired User')
+        user = create_user(auth_db_session, 'reset-expired@example.com', 'Password123', 'Reset Expired User')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='password_reset', ttl_hours=-1)
 
         response = auth_client.post(
             '/api/v1/auth/reset-password',
-            json={'token': token, 'new_password': 'newpassword123'},
+            json={'token': token, 'new_password': 'Newpassword123'},
         )
 
         assert response.status_code == 400
@@ -802,20 +814,20 @@ class TestAuthRoutes:
     def test_reset_password_with_invalid_token(self, auth_client: TestClient) -> None:
         response = auth_client.post(
             '/api/v1/auth/reset-password',
-            json={'token': 'invalid-token', 'new_password': 'newpassword123'},
+            json={'token': 'invalid-token', 'new_password': 'Newpassword123'},
         )
 
         assert response.status_code == 400
 
     def test_reset_password_revokes_existing_sessions(self, auth_client: TestClient, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'reset-revoke@example.com', 'password123', 'Reset Revoke User')
+        user = create_user(auth_db_session, 'reset-revoke@example.com', 'Password123', 'Reset Revoke User')
         first = create_session(auth_db_session, user.id, 'pytest-agent-1', '127.0.0.1')
         second = create_session(auth_db_session, user.id, 'pytest-agent-2', '127.0.0.2')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='password_reset', ttl_hours=1)
 
         response = auth_client.post(
             '/api/v1/auth/reset-password',
-            json={'token': token, 'new_password': 'anotherpass123'},
+            json={'token': token, 'new_password': 'Anotherpass123'},
         )
 
         assert response.status_code == 200
@@ -883,7 +895,7 @@ class TestAuthRoutes:
             '/api/v1/auth/register',
             json={
                 'email': 'secure-cookie@example.com',
-                'password': 'password123',
+                'password': 'Password123',
                 'display_name': 'Secure Cookie User',
             },
         )
@@ -895,7 +907,7 @@ class TestAuthRoutes:
         assert 'SameSite=lax' in set_cookie
 
     def test_verify_email_route_happy_path(self, auth_client: TestClient, auth_db_session: Session) -> None:
-        user = create_user(auth_db_session, 'verify-route@example.com', 'password123', 'Verify Route User')
+        user = create_user(auth_db_session, 'verify-route@example.com', 'Password123', 'Verify Route User')
         token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
 
         response = auth_client.post('/api/v1/auth/verify-email', json={'token': token})
@@ -912,13 +924,14 @@ class TestAuthRoutes:
         auth_db_session: Session,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        user = create_user(auth_db_session, 'resend-route@example.com', 'password123', 'Resend Route User')
+        user = create_user(auth_db_session, 'resend-route@example.com', 'Password123', 'Resend Route User')
         user_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
 
         sent: list[tuple[str, str]] = []
 
-        def fake_send(email: str, token: str) -> None:
+        async def fake_send(email: str, token: str) -> bool:
             sent.append((email, token))
+            return True
 
         monkeypatch.setattr('modules.auth.service.send_verification_email', fake_send)
         auth_client.cookies.set('session_token', user_session.id)
@@ -936,10 +949,14 @@ class TestAuthRoutes:
         auth_db_session: Session,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        user = create_user(auth_db_session, 'resend-limit@example.com', 'password123', 'Resend Limit User')
+        user = create_user(auth_db_session, 'resend-limit@example.com', 'Password123', 'Resend Limit User')
         user_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
         monkeypatch.setattr('modules.auth.service.send_verification_email', send_verification_email)
-        monkeypatch.setattr('modules.auth.service.send_verification_email', lambda *_args: None)
+
+        async def fake_send(*_args) -> bool:
+            return True
+
+        monkeypatch.setattr('modules.auth.service.send_verification_email', fake_send)
         auth_client.cookies.set('session_token', user_session.id)
 
         first = auth_client.post('/api/v1/auth/resend-verification')

@@ -94,7 +94,13 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		if (!configStore.config) return;
-		installAuditListeners();
+		const cleanup = installAuditListeners();
+		return cleanup;
+	});
+
+	// Cleanup: $derived can't teardown singleton resources.
+	$effect(() => {
+		return () => chatStore.destroy();
 	});
 
 	// Subscription: $derived can't update audit page.

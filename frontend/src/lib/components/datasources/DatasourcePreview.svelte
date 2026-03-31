@@ -39,21 +39,6 @@
 		statsOpen = false;
 	}
 
-	// Subscription: $derived can't reset pagination/state.
-	$effect(() => {
-		if (!datasourceId) return;
-		void datasourceConfig;
-		page = 1;
-		statsOpen = false;
-		statsColumn = null;
-	});
-
-	// Subscription: $derived can't reset pagination on pipeline changes.
-	$effect(() => {
-		if (!analysisPipeline) return;
-		page = 1;
-	});
-
 	const resolvedDatasource = $derived(datasource ?? null);
 	const analysisSourceId = $derived.by(() => {
 		return (
@@ -81,23 +66,32 @@
 		});
 	});
 
+	const configKey = $derived(JSON.stringify(datasourceConfig));
+	const pipelineKey = $derived(JSON.stringify(analysisPipeline));
+
+	// Subscription: $derived can't reset pagination/state.
+	$effect(() => {
+		if (!datasourceId) return;
+		void configKey;
+		page = 1;
+		statsOpen = false;
+		statsColumn = null;
+	});
+
+	// Subscription: $derived can't reset pagination on pipeline changes.
+	$effect(() => {
+		if (!pipelineKey) return;
+		page = 1;
+	});
+
 	const query = createQuery(() => ({
-		queryKey: [
-			'datasource-preview',
-			datasourceId,
-			page,
-			rowLimit,
-			datasourceConfig,
-			analysisPipeline
-		],
+		queryKey: ['datasource-preview', datasourceId, page, rowLimit, configKey, pipelineKey],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			if (!analysisPipeline) {
-				throw new Error('Analysis pipeline payload required for preview');
-			}
+			const pipeline = analysisPipeline!;
 			const request = {
 				analysis_id: '',
 				target_step_id: 'source',
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: pipeline,
 				row_limit: rowLimit,
 				page
 			} satisfies StepPreviewRequest;
@@ -108,7 +102,7 @@
 			return result.value;
 		},
 		staleTime: 30000,
-		enabled: !!datasourceId
+		enabled: !!datasourceId && !!analysisPipeline
 	}));
 
 	const data = $derived(query.data);

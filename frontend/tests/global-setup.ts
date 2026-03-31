@@ -3,8 +3,10 @@ import path from 'node:path';
 import { request } from '@playwright/test';
 import { API_BASE, AUTH_FILE } from './utils/api.js';
 
+const port = process.env.FRONTEND_PORT || '3000';
+const origin = `http://localhost:${port}`;
 const E2E_EMAIL = 'e2e-test@example.com';
-const E2E_PASSWORD = 'e2e-test-pw-12345';
+const E2E_PASSWORD = 'E2eTestPw12345';
 
 export default async function globalSetup() {
 	fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
@@ -35,17 +37,12 @@ export default async function globalSetup() {
 	await ctx.dispose();
 
 	const state = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8'));
-	const origin = state.origins?.find(
-		(o: { origin: string }) => o.origin === 'http://localhost:3000'
-	);
+	const match = state.origins?.find((o: { origin: string }) => o.origin === origin);
 	const entry = { name: 'debug:prefer-http', value: 'true' };
-	if (origin) {
-		origin.localStorage = [...(origin.localStorage ?? []), entry];
+	if (match) {
+		match.localStorage = [...(match.localStorage ?? []), entry];
 	} else {
-		state.origins = [
-			...(state.origins ?? []),
-			{ origin: 'http://localhost:3000', localStorage: [entry] }
-		];
+		state.origins = [...(state.origins ?? []), { origin, localStorage: [entry] }];
 	}
 	fs.writeFileSync(AUTH_FILE, JSON.stringify(state, null, 2));
 }

@@ -96,13 +96,31 @@ class ProcessManager:
 
             with self._engines_lock:
                 if len(self._engines) >= settings.max_concurrent_engines:
-                    logger.warning(
-                        f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), cannot spawn engine for {analysis_id}'
-                    )
-                    raise RuntimeError(
-                        f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
-                        f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
-                    )
+                    idle_id: str | None = None
+                    idle_info: EngineInfo | None = None
+                    for engine_id, info in self._engines.items():
+                        if info.engine.current_job_id and info.engine.is_process_alive():
+                            continue
+                        if idle_info is not None and info.last_activity >= idle_info.last_activity:
+                            continue
+                        idle_id = engine_id
+                        idle_info = info
+                    if idle_id and idle_info:
+                        logger.warning(
+                            f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), '
+                            f'evicting idle engine {idle_id} to spawn {analysis_id}'
+                        )
+                        idle_info.engine.shutdown()
+                        del self._engines[idle_id]
+                    else:
+                        logger.warning(
+                            f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), '
+                            f'cannot spawn engine for {analysis_id}'
+                        )
+                        raise RuntimeError(
+                            f'Maximum concurrent engines limit ({settings.max_concurrent_engines}) reached. '
+                            f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.'
+                        )
 
                 logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
                 engine = self._engine_factory(analysis_id, normalized_config)

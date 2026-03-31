@@ -1,6 +1,9 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
+const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
+const apiPort = parseInt(process.env.PORT || '8000', 10);
+
 export default defineConfig({
 	resolve: {
 		dedupe: [
@@ -15,14 +18,14 @@ export default defineConfig({
 
 	server: {
 		host: '0.0.0.0',
-		port: 3000,
+		port,
 		allowedHosts: true,
 		fs: {
 			allow: ['styled-system']
 		},
 		proxy: {
 			'/api': {
-				target: 'http://localhost:8000',
+				target: `http://localhost:${apiPort}`,
 				ws: true
 			}
 		},

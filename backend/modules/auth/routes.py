@@ -130,7 +130,7 @@ def _request_ip_address(request: Request) -> str | None:
 async def register(body: RegisterRequest, request: Request, response: Response, session: Session = Depends(get_settings_db)) -> UserPublic:
     user = create_user(session, body.email, body.password, body.display_name)
     token = create_verification_token(session, user_id=user.id, token_type='email_verify')
-    send_verification_email(user.email, token)
+    await send_verification_email(user.email, token)
     created_session = create_session(
         session,
         user_id=user.id,
@@ -202,7 +202,7 @@ async def resend_verification_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> MessageResponse:
-    resend_verification(session, current_user.id)
+    await resend_verification(session, current_user.id)
     return MessageResponse(message='Verification email sent')
 
 
@@ -211,7 +211,7 @@ async def resend_verification_route(
 async def forgot_password(body: ForgotPasswordRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
     token = create_password_reset_token(session, body.email)
     if token:
-        send_password_reset_email(body.email.strip().lower(), token)
+        await send_password_reset_email(body.email.strip().lower(), token)
     return MessageResponse(message='If the email exists, a password reset link has been sent')
 
 

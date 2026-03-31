@@ -17,7 +17,11 @@
 
 	function handleClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;
-		if (target.closest('button') || target.closest('input[type=checkbox]')) return;
+		if (target.closest('button') || target.closest('input[type=checkbox]')) {
+			e.preventDefault();
+			return;
+		}
+		e.preventDefault();
 		goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
 	}
 
@@ -44,18 +48,20 @@
 	}
 </script>
 
-<div
+<a
 	data-analysis-card={analysis.name}
+	href={resolve(`/analysis/${analysis.id}`)}
 	class={css({
 		position: 'relative',
 		cursor: 'pointer',
 		overflow: 'hidden',
-		backgroundColor: 'bg.primary'
+		backgroundColor: 'bg.primary',
+		display: 'block',
+		textDecoration: 'none',
+		color: 'inherit'
 	})}
 	onclick={handleClick}
 	onkeypress={handleKeyPress}
-	role="button"
-	tabindex="0"
 >
 	<div
 		class={css({
@@ -156,4 +162,4 @@
 			<span>{formatDate(analysis.updated_at)}</span>
 		</div>
 	</div>
-</div>
+</a>

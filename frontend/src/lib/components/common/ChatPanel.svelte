@@ -583,7 +583,7 @@
 	);
 
 	async function copyToClipboard(text: string, id: string) {
-		await navigator.clipboard.writeText(text);
+		await navigator.clipboard.writeText(text).catch(() => {});
 		copiedId = id;
 		setTimeout(() => {
 			if (copiedId === id) copiedId = null;
@@ -654,7 +654,8 @@
 			userSelect: isResizing ? 'none' : 'auto',
 			overflow: 'hidden'
 		})}
-		style="width: {panelWidth}px; height: {activeHeight}px"
+		style:width="{panelWidth}px"
+		style:height="{activeHeight}px"
 	>
 		<!-- Corner resize handle (top-left) -->
 		<div

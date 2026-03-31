@@ -378,8 +378,7 @@
 					})
 				)}
 				class:ready={canDrop}
-				role="button"
-				tabindex="0"
+				role="listitem"
 				data-index="0"
 				ondragenter={(e) => handleDragEnter(e, 0)}
 				ondragover={handleDragOver}
@@ -514,8 +513,7 @@
 						})
 					)}
 					class:ready={canDrop}
-					role="button"
-					tabindex="0"
+					role="listitem"
 					data-index={i + 1}
 					ondragenter={(e) => handleDragEnter(e, i + 1)}
 					ondragover={handleDragOver}

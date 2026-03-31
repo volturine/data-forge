@@ -7,7 +7,7 @@ import { screenshot } from './utils/visual.js';
 test.describe('Analyses – list & gallery', () => {
 	test('home page renders main content area', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.getByRole('heading', { name: 'Analyses' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 		await expect(page.getByText(/Browse and manage your data analyses/i)).toBeVisible();
 		await screenshot(page, 'analysis/crud', 'gallery');
 	});
@@ -274,6 +274,6 @@ test.describe('Analyses – detail error state', () => {
 		// Navigate home — shell should still work
 		await page.locator('a[href="/"]').first().click();
 		await expect(page).toHaveURL('/');
-		await expect(page.getByRole('heading', { name: 'Analyses' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 	});
 });

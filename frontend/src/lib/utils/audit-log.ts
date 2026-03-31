@@ -204,9 +204,9 @@ export function track(event: AuditLogItem) {
 	});
 }
 
-export function installAuditListeners() {
-	if (!browser) return;
-	if (state.installed) return;
+export function installAuditListeners(): (() => void) | undefined {
+	if (!browser) return undefined;
+	if (state.installed) return undefined;
 	state.installed = true;
 	ensureSessionId();
 
@@ -266,4 +266,13 @@ export function installAuditListeners() {
 	window.addEventListener('change', onChange, { capture: true });
 	window.addEventListener('visibilitychange', onVisibility);
 	window.addEventListener('beforeunload', flush);
+
+	return () => {
+		window.removeEventListener('click', onClick, { capture: true });
+		window.removeEventListener('submit', onSubmit, { capture: true });
+		window.removeEventListener('change', onChange, { capture: true });
+		window.removeEventListener('visibilitychange', onVisibility);
+		window.removeEventListener('beforeunload', flush);
+		state.installed = false;
+	};
 }

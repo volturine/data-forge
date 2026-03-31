@@ -66,13 +66,24 @@
 	let isSaving = $state(false);
 	let saveError = $state('');
 	let tabError = $state('');
+	let tabErrorTimer = $state<number | null>(null);
 
 	function flashTabError(msg: string) {
 		tabError = msg;
-		setTimeout(() => {
+		if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+		tabErrorTimer = window.setTimeout(() => {
 			tabError = '';
+			tabErrorTimer = null;
 		}, 5000);
 	}
+
+	// Cleanup: $derived can't clear pending timers on destroy.
+	$effect(() => {
+		return () => {
+			if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+		};
+	});
+
 	let draftLoaded = $state(false);
 	let isDirty = $state(false);
 	let draftTimer: number | null = null;
@@ -1318,7 +1329,7 @@
 							'& > .step-config': { width: '100%', flex: '1', minHeight: '0' },
 							...(rightPaneCollapsed ? { border: 'none' } : {})
 						})}
-						style="height: {rightPaneCollapsed ? 0 : bottomPaneHeight}px;"
+						style:height="{rightPaneCollapsed ? 0 : bottomPaneHeight}px"
 					>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div

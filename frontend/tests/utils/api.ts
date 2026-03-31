@@ -1,7 +1,8 @@
 import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 
-export const API_BASE = 'http://localhost:8000/api/v1';
+const apiPort = process.env.PORT || '8000';
+export const API_BASE = `http://localhost:${apiPort}/api/v1`;
 export const AUTH_FILE = path.resolve('tests/.auth/state.json');
 
 const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n';

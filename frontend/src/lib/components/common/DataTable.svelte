@@ -586,25 +586,29 @@
 
 	{#if !loading && data.length === 0}
 		{#if analysis}
-			<div
+			<button
+				type="button"
 				class={css({
 					display: 'flex',
 					height: '100%',
+					width: '100%',
 					flexDirection: 'column',
 					alignItems: 'center',
 					justifyContent: 'center',
 					gap: '3',
-					color: 'fg.tertiary'
+					color: 'fg.tertiary',
+					border: 'none',
+					backgroundColor: 'transparent',
+					cursor: onPreview ? 'pointer' : 'default'
 				})}
-				role="button"
 				tabindex={onPreview ? 0 : -1}
-				aria-disabled={!onPreview}
+				disabled={!onPreview}
 				onclick={handlePreview}
 				onkeydown={handlePreviewKey}
 			>
 				<Play size={18} />
 				<p class={css({ margin: '0', color: 'fg.tertiary' })}>Preview</p>
-			</div>
+			</button>
 		{:else}
 			<div class={css({ padding: '12', textAlign: 'center', margin: '0', color: 'fg.muted' })}>
 				<p class={css({ margin: '0' })}>No data available</p>
@@ -1037,7 +1041,8 @@
 			backgroundColor: 'bg.primary',
 			boxShadow: 'popup'
 		})}
-		style="left: {dragPointerX + 12}px; top: {dragPointerY + 12}px;"
+		style:left="{dragPointerX + 12}px"
+		style:top="{dragPointerY + 12}px"
 	>
 		<GripVertical size={12} class={muted} />
 		<span class={css({ fontFamily: 'mono' })}>{dragLabel}</span>

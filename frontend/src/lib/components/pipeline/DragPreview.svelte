@@ -97,7 +97,8 @@
 			borderColor: isReorder ? 'border.warning' : 'border.primary',
 			boxShadow: 'drag'
 		})}
-		style="left: {position.x + 12}px; top: {position.y + 12}px;"
+		style:left="{position.x + 12}px"
+		style:top="{position.y + 12}px"
 	>
 		<Icon size={16} class={css({ fontSize: 'md' })} />
 		<span class={css({ fontWeight: 'semibold', color: 'fg.primary' })}>{info.label}</span>

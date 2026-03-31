@@ -14,7 +14,7 @@ from sqlmodel import Session, text
 
 from api import router
 from core.config import settings
-from core.database import get_db, get_settings_db, init_db
+from core.database import get_settings_db, init_db, run_db
 from core.error_handlers import app_error_handler, generic_error_handler, validation_error_handler
 from core.exceptions import AppError
 from core.logging import RequestLoggingMiddleware, configure_logging
@@ -74,38 +74,44 @@ async def scheduler_loop(stop_event: asyncio.Event, manager: ProcessManager) -> 
             for name in namespaces:
                 token = set_namespace_context(name)
                 try:
-                    for session in get_db():
-                        due = scheduler_service.get_due_schedules(session)
-                        if not due:
-                            logger.debug('No schedules due')
-                            break
-
-                        # Build schedule-level dependency order within each analysis group.
-                        # If schedule B depends_on schedule A, run A before B.
-                        due_by_id = {s.id: s for s in due}
-                        completed_schedule_ids: set[str] = set()
-
-                        sorted_schedules = _topo_sort_schedules(due, due_by_id)
-                        for sched in sorted_schedules:
-                            if sched.depends_on and sched.depends_on not in completed_schedule_ids and sched.depends_on in due_by_id:
-                                logger.warning(f'Scheduler: skipping schedule {sched.id} — dependency {sched.depends_on} did not complete')
-                                continue
-
-                            try:
-                                result = scheduler_service.execute_schedule(session, manager, sched.id)
-                                scheduler_service.mark_schedule_run(session, sched.id)
-                                completed_schedule_ids.add(sched.id)
-                                logger.info(
-                                    'Scheduler: execution complete for schedule %s (datasource=%s status=%s)',
-                                    sched.id,
-                                    sched.datasource_id,
-                                    result.get('status', 'unknown'),
-                                )
-                            except Exception as e:
-                                logger.error(f'Scheduler: execution failed for schedule {sched.id}: {e}', exc_info=True)
-                                # Still mark the schedule as run to prevent retry storms
-                                scheduler_service.mark_schedule_run(session, sched.id)
+                    due = await asyncio.to_thread(run_db, scheduler_service.get_due_schedules)
+                    if not due:
+                        logger.debug('No schedules due')
                         break
+
+                    due_by_id = {s.id: s for s in due}
+                    completed_schedule_ids: set[str] = set()
+
+                    sorted_schedules = _topo_sort_schedules(due, due_by_id)
+                    for sched in sorted_schedules:
+                        sched_id = sched.id
+                        if sched.depends_on and sched.depends_on not in completed_schedule_ids and sched.depends_on in due_by_id:
+                            logger.warning(f'Scheduler: skipping schedule {sched_id} — dependency {sched.depends_on} did not complete')
+                            continue
+
+                        try:
+
+                            def _execute_and_mark(session: Session, target_id: str = sched_id) -> dict:
+                                result = scheduler_service.execute_schedule(session, manager, target_id)
+                                scheduler_service.mark_schedule_run(session, target_id)
+                                return result
+
+                            result = await asyncio.to_thread(run_db, _execute_and_mark)
+                            completed_schedule_ids.add(sched.id)
+                            logger.info(
+                                'Scheduler: execution complete for schedule %s (datasource=%s status=%s)',
+                                sched_id,
+                                sched.datasource_id,
+                                result.get('status', 'unknown'),
+                            )
+                        except Exception as e:
+                            logger.error(f'Scheduler: execution failed for schedule {sched_id}: {e}', exc_info=True)
+
+                            def _mark(session: Session, target_id: str = sched_id) -> None:
+                                scheduler_service.mark_schedule_run(session, target_id)
+
+                            await asyncio.to_thread(run_db, _mark)
+                    break
                 finally:
                     reset_namespace(token)
         except Exception as e:
@@ -150,10 +156,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info('Starting application...')
     app.state.manager = ProcessManager()
-    init_db()
-    for session in get_db():
-        ensure_udf_seeds(session)
-        break
+    await init_db()
+    await asyncio.to_thread(run_db, ensure_udf_seeds)
 
     # Start background cleanup task
     stop_event = asyncio.Event()
@@ -348,4 +352,4 @@ async def serve_static_or_index(full_path: str) -> FileResponse:
 if __name__ == '__main__':
     import uvicorn
 
-    uvicorn.run('main:app', host='0.0.0.0', port=8000, reload=settings.debug)
+    uvicorn.run('main:app', host='0.0.0.0', port=settings.port, reload=settings.debug)

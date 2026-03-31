@@ -255,7 +255,9 @@
 			iceberg: { namespace: 'outputs', table_name: 'export', branch: '' }
 		};
 		const nextOutput = { ...fallback, ...currentOutput, ...patch };
-		analysisStore.updateTab(tab.id, { output: nextOutput as unknown as AnalysisTabOutput });
+		analysisStore.updateTab(tab.id, {
+			output: nextOutput as unknown as AnalysisTabOutput
+		});
 	}
 
 	function updateIcebergConfig(patch: Record<string, unknown>) {
@@ -270,7 +272,9 @@
 		if (!defaults) return;
 		const currentOutput = tab.output as Record<string, unknown>;
 		const merged = { ...defaults, ...currentOutput };
-		analysisStore.updateTab(tab.id, { output: merged as unknown as AnalysisTabOutput });
+		analysisStore.updateTab(tab.id, {
+			output: merged as unknown as AnalysisTabOutput
+		});
 	}
 
 	function startNameEdit() {

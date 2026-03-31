@@ -1076,7 +1076,8 @@
 							<span>Type</span>
 						</div>
 						{#each columns as column, index (index)}
-							<div
+							<button
+								type="button"
 								class={cx(
 									css({
 										display: 'grid',
@@ -1086,7 +1087,11 @@
 										paddingX: '3',
 										paddingY: '1.5',
 										_hover: { backgroundColor: 'bg.hover' },
-										cursor: 'pointer'
+										cursor: 'pointer',
+										border: 'none',
+										backgroundColor: 'transparent',
+										width: '100%',
+										textAlign: 'left'
 									}),
 									index > 0
 										? css({
@@ -1094,24 +1099,16 @@
 											})
 										: ''
 								)}
-								role="button"
-								tabindex="0"
 								data-schema-column={column.name}
 								onclick={() => {
 									statsColumn = column.name;
 									statsOpen = true;
 								}}
-								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										statsColumn = column.name;
-										statsOpen = true;
-									}
-								}}
 							>
 								<span class={css({ fontSize: 'xs', color: 'fg.faint' })}>{index + 1}</span>
 								<span class={css({ fontSize: 'xs' })}>{column.name}</span>
 								<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
-							</div>
+							</button>
 						{/each}
 					</div>
 				{:else}

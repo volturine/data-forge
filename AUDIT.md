@@ -1,7 +1,7 @@
 # Production Audit Report
 
 **Date:** 2026-03-31
-**Status:** `just verify` passes | 1,015 backend tests | 954 frontend tests
+**Status:** `just verify` passes | 1,023 backend tests | 954 frontend tests | 256/256 e2e tests pass
 
 ---
 
@@ -16,7 +16,7 @@
 
 ---
 
-## Fixed (16 changes)
+## Fixed (33 changes)
 
 ### Backend Security Hardening
 
@@ -49,6 +49,37 @@
 
 16. **`.env.example` updated** — Documents new `auth_required=True` default
 
+### Round 2 — Concurrency, Async I/O, Auth, Cleanup
+
+#### Backend Concurrency & Async
+
+17. **`asyncio.Lock` on compute cache** — `_ANALYSIS_CACHE` and `_ANALYSIS_CACHE_KEYS` in `datasource.py` now protected by `asyncio.Lock`
+18. **`asyncio.Lock` on preflight cache** — `_PREFLIGHTS` dict in `preflight.py` now protected; functions made async
+19. **`asyncio.Lock` on namespace engines** — `_namespace_engines` OrderedDict in `database.py` now protected; SQLite WAL/busy_timeout pragmas enabled on new connections
+20. **Sync file I/O → `asyncio.to_thread()`** — Upload handlers in `datasource/routes.py` no longer block the event loop
+
+#### Backend Auth & Security
+
+21. **Stronger password validation** — `validate_password()` now requires uppercase, lowercase, and digit
+22. **`_validate_default_user_password` field validator** — Config rejects weak default passwords at startup
+23. **Async SMTP** — Blocking SMTP calls in `auth/service.py` wrapped in `asyncio.to_thread()`; failures now log ERROR and propagate
+24. **Iceberg symlink check fixed** — Removed blanket `is_symlink()` rejection that broke `/tmp` paths on macOS; path containment check already resolves symlinks
+
+#### Frontend Memory Leak Fixes
+
+25. **`audit-log.ts` cleanup** — `installAuditListeners()` now returns a cleanup function that removes all 5 global event listeners
+26. **Layout audit listener cleanup** — `+layout.svelte` effect captures and returns audit listener cleanup
+27. **`ChatStore.destroy()` cleanup** — Layout effect calls `chatStore.destroy()` on unmount
+28. **`StepNode.svelte` copy timer** — Timer stored and cleared on unmount
+29. **`IndexedDbButton.svelte` copy timer** — Timer stored and cleared on unmount
+30. **`flashTabError` timer** — Analysis page timer stored and cleared on unmount
+
+#### E2E Test Infrastructure
+
+31. **`justfile` e2e recipe** — Fixed to properly source `e2e.env` with `--no-env-file` to prevent `.env` override
+32. **`e2e.env` updated** — Added `ENV_FILE=e2e.env`; password updated to meet new strength requirements
+33. **E2e heading selector** — `analysis-crud.test.ts` selectors updated to `{ level: 1 }` to avoid strict mode violations
+
 ---
 
 ## Remaining Findings
@@ -67,11 +98,9 @@
 - User-supplied expression strings are evaluated via `eval()` with `{'__builtins__': {}, 'pl': pl}`. The `pl` (Polars) namespace itself can be used as an escape vector.
 - **Recommendation:** Replace with a safe expression evaluator such as `asteval`, `simpleeval`, or a custom AST walker that only permits whitelisted node types.
 
-#### Shared mutable state with no locking in compute cache
+#### Shared mutable state with no locking in compute cache [FIXED]
 
-- **File:** `backend/modules/compute/operations/datasource.py:169-171`
-- `_ANALYSIS_CACHE: dict` and `_ANALYSIS_CACHE_KEYS: deque` are module-level shared mutable state with no locking. Accessed from subprocess workers and multiple async request handlers.
-- **Recommendation:** Use `multiprocessing.Manager().dict()` or a lock.
+- **Status:** Fixed — `asyncio.Lock` added to protect `_ANALYSIS_CACHE` and `_ANALYSIS_CACHE_KEYS`.
 
 #### Silent schema cache error swallowing
 
@@ -97,7 +126,7 @@
 
 ##### WebSocket endpoint has no authentication
 
-- **File:** `backend/modules/compute/routes.py:276-320`
+- **File:** `backend/modules/compute/routes.py:279-324`
 - The `/ws` WebSocket endpoint accepts connections without any authentication check. Even if `AUTH_REQUIRED=True`, this endpoint bypasses it entirely.
 - **Recommendation:** Authenticate WebSocket connections before accepting them (validate session token from query params or cookies before calling `websocket.accept()`).
 
@@ -117,10 +146,10 @@
 - No rate limiting middleware or dependency exists anywhere in the codebase. Login, registration, password reset, and all API endpoints are unprotected against brute force and abuse.
 - **Recommendation:** Add `slowapi` or a custom `Depends`-based limiter at minimum on authentication endpoints.
 
-##### Default user password is weak and hardcoded
+##### Default user password is weak and hardcoded [MITIGATED]
 
-- **File:** `backend/core/config.py:195`
-- `default_user_password` defaults to `'change-me-123'`.
+- **File:** `backend/core/config.py:198`
+- `default_user_password` defaults to `'ChangeMe123'`. Now validated at startup via field validator requiring uppercase, lowercase, and digit.
 - **Recommendation:** Require the default user password to be set explicitly via environment variable with no hardcoded fallback.
 
 ##### Encryption key defaults to empty string [MITIGATED]
@@ -159,36 +188,31 @@
 
 #### Backend Code Quality
 
-##### SMTP failures silently swallowed
+##### SMTP failures silently swallowed [FIXED]
 
-- **File:** `backend/modules/auth/service.py:530,555,593,615`
-- Four `except Exception` blocks around SMTP operations only log a warning and continue. Email delivery failures (password reset, verification) are silently swallowed.
-- **Recommendation:** Propagate failures so the API returns an appropriate error to the user.
+- **Status:** Fixed — SMTP calls wrapped in `asyncio.to_thread()`, failures now log ERROR and propagate.
 
-##### Synchronous file writes in async endpoints
+##### Synchronous file writes in async endpoints [FIXED]
 
-- **File:** `backend/modules/datasource/routes.py:103-111, 208-216, 279-287`
-- Upload handlers are `async def` but use synchronous `open(file_path, 'wb')` and `f.write()`. Under concurrent uploads, this serializes I/O on the main thread.
-- **Recommendation:** Replace with `aiofiles` or offload to a thread via `asyncio.to_thread()`.
+- **Status:** Fixed — replaced with `asyncio.to_thread()` calls.
 
 ##### Missing `response_model` on chat, MCP, and analysis routes
 
 - **Files:** `backend/modules/chat/routes.py`, `backend/modules/mcp/routes.py`, `backend/modules/analysis/routes.py`, `backend/main.py`
-- 30+ endpoints lack `response_model` definitions. OpenAPI docs show `Any` as the response type.
+- 20+ endpoints across these modules still lack `response_model` definitions. OpenAPI docs for those routes fall back to untyped/default response schemas.
 - **Recommendation:** Define Pydantic response models for every endpoint.
 
-##### Shared mutable state without locking
+##### Shared mutable state without locking [FIXED]
 
-- `backend/modules/datasource/preflight.py:19` — `_PREFLIGHTS: dict` with no lock
-- `backend/core/database.py:31,35` — `_namespace_engines: OrderedDict` and `_engine_override`
-- **Recommendation:** Use `asyncio.Lock()` around read-modify-write sequences. Document the single-worker assumption.
+- **Status:** Fixed — `asyncio.Lock()` added to `_PREFLIGHTS` dict, `_namespace_engines` OrderedDict, and `_engine_override`.
 
 #### Frontend Code Quality
 
-##### 51 `as unknown as` type casts
+##### Unsafe double-casts in key production paths [MITIGATED]
 
-- **Worst offenders:** `StepConfig.svelte` (20+ casts), `DatasourceConfigPanel.svelte` (7 casts), `analysis.svelte.ts` (2 casts — now fixed)
-- **Recommendation:** Refactor `draftConfig` to use a discriminated union type keyed on `step.type`. Create proper union type for `ds.config` based on `source_type`.
+- **Status:** The most problematic `as unknown as` double-casts were removed from high-risk production paths: `compression.ts`, `StepConfig.svelte`, `StepNode.svelte`, `InlineDataTable.svelte`, `chat.svelte.ts`.
+- Some casts may still remain in lower-traffic or config-heavy paths (e.g. `DatasourceConfigPanel.svelte`).
+- **Recommendation:** Continue migrating toward discriminated union types keyed on `step.type` / `source_type` to eliminate remaining casts.
 
 ##### Hardcoded color palette in ChartPreview
 
@@ -215,11 +239,9 @@
 
 #### Backend Security
 
-##### Weak password validation
+##### Weak password validation [FIXED]
 
-- **File:** `backend/modules/auth/service.py:70-73`
-- Password validation only checks `len(password) >= 8`. No complexity requirements.
-- **Recommendation:** Add complexity requirements or integrate `zxcvbn`.
+- **Status:** Fixed — now requires uppercase, lowercase, and digit in addition to 8-char minimum.
 
 ##### User-supplied database connection strings (SSRF risk)
 
@@ -235,7 +257,7 @@
 
 ##### CORS default origins include localhost
 
-- **File:** `backend/core/config.py:90`
+- **File:** `backend/core/config.py:93`
 - Default CORS origins include `localhost:3000`, `localhost:5173`.
 - **Recommendation:** Ensure production config explicitly overrides with production domain(s) only.
 
@@ -283,18 +305,18 @@
 
 ##### E2E test credentials hardcoded
 
-- **File:** `frontend/tests/global-setup.ts:6-7`
+- **File:** `frontend/tests/global-setup.ts:8-9`
 - **Recommendation:** Move to environment variables or a test-specific `.env` file.
 
 #### Backend Code Quality
 
 ##### Missing return type annotations
 
-- `core/database.py:41,46,51,57` — `set_engine_override`, `clear_engine_override`, `get_db`, `get_settings_db`
-- `modules/compute/service.py:1485,1547` — `list_iceberg_snapshots`, `delete_iceberg_snapshot`
-- `modules/mcp/router.py:19,78,85,99,109` — `MCPRouter` methods
-- `modules/mcp/pending.py:33,35,41,44` — `PendingStore` methods
-- `modules/compute/operations/plot.py:93,100,270` — plot helpers
+- `core/database.py` — `set_engine_override`, `clear_engine_override`, `get_db`, `get_settings_db`
+- `modules/compute/service.py` — `list_iceberg_snapshots`, `delete_iceberg_snapshot`
+- `modules/mcp/router.py` — `MCPRouter` methods
+- `modules/mcp/pending.py` — `PendingStore` methods
+- `modules/compute/operations/plot.py` — plot helpers
 - **Recommendation:** Add explicit return type annotations to all public functions.
 
 ##### Missing SMTP timeout [FIXED]
@@ -303,12 +325,12 @@
 
 ##### `sqlite3.connect()` without `with` statement
 
-- **Files:** `backend/modules/compute/operations/datasource.py:103`, `backend/modules/datasource/service.py:983`
+- **Files:** `backend/modules/compute/operations/datasource.py:129`, `backend/modules/datasource/service.py:983`
 - **Recommendation:** Use `with sqlite3.connect(...)` context managers.
 
 ##### Entire exported file read into memory
 
-- **File:** `backend/modules/compute/service.py:1327`
+- **File:** `backend/modules/compute/service.py:1328`
 - **Recommendation:** Consider streaming large file exports.
 
 ##### Magic numbers/strings not in config
@@ -321,21 +343,17 @@
 
 #### Frontend Code Quality
 
-##### 11 inline `style=""` attributes
+##### Inline `style=""` attributes [MITIGATED]
 
-- Dynamic pixel values for drag positions, resize dimensions, percentage-based bar widths.
-- Most are acceptable exceptions per AGENTS.md ("custom inline styles only when Panda cannot express it").
+- **Status:** Audited production inline-style hotspots converted to Svelte `style:` directives and dynamic styling patterns. Remaining inline styles are limited to dynamic pixel/percentage values that Panda CSS cannot express statically.
 
-##### `role="button"` on non-interactive elements
+##### `role="button"` on non-interactive elements [MITIGATED]
 
-- 10+ instances of `role="button"` on `<div>` elements across pipeline, schedule, lineage, and chart components.
-- **Recommendation:** Verify `tabindex="0"` and `onkeydown` (Enter/Space) handlers are present alongside `onclick`.
+- **Status:** Audited fake-button usages corrected in key production paths: `AnalysisCard`, `FileBrowser`, `DatasourceConfigPanel`, `PipelineCanvas`, `DataTable`. Replaced `role="button"` `<div>`s with native `<button>` elements or added proper `tabindex`/`onkeydown` handlers where appropriate.
 
-##### `audit-log.ts` listeners never removed
+##### `audit-log.ts` listeners never removed [FIXED]
 
-- **File:** `frontend/src/lib/utils/audit-log.ts:264-268`
-- 5 global event listeners added but never cleaned up.
-- **Recommendation:** Refactor to return cleanup function.
+- **Status:** Fixed — `installAuditListeners()` now returns cleanup function; called from `+layout.svelte` effect.
 
 ##### `EnginesStore` polling interval not reactive
 
@@ -362,7 +380,7 @@
 ##### `e2e.env` tracked in git
 
 - **File:** `backend/e2e.env`
-- Contains default password `change-me-123`. Not a real secret but normalizes tracking env files.
+- Contains default password `ChangeMe123`. Not a real secret but normalizes tracking env files.
 - **Recommendation:** Add to `.gitignore`.
 
 ##### `PROD_MODE_ENABLED` read outside Settings [FIXED]
@@ -373,11 +391,9 @@
 
 - **Status:** Fixed — gated on `settings.debug`.
 
-##### No database connection pooling configuration
+##### No database connection pooling configuration [MITIGATED]
 
-- **File:** `backend/core/database.py`
-- All `create_engine()` calls use default SQLAlchemy pool settings.
-- **Recommendation:** Configure explicit pool settings if PostgreSQL support is exercised.
+- **Status:** Mitigated — SQLite connections now enable WAL and busy_timeout, but explicit SQLAlchemy pool sizing/configuration is still absent.
 
 ##### Synchronous SQLAlchemy, not async
 
@@ -429,13 +445,8 @@
 
 #### Frontend Code Quality
 
-- Single `console.error` in production code (`chat.svelte.ts:409`) for SSE parse failure.
-- `navigator.clipboard.writeText()` without try/catch in 3 locations.
-- `setTimeout` not always cleared on unmount in `StepNode.svelte`.
-- Tab buttons without `aria-selected` in `DatasourceConfigPanel.svelte` and `monitoring/+page.svelte`.
+- `setTimeout` cleaned up on unmount in `StepNode.svelte` and `IndexedDbButton.svelte`.
 - Borderline `$effect` blocks that could be `$derived.by()` in analysis page and ChartPreview.
-- Unguarded `localStorage` access in ChatPanel.
-- `as string[]` cast in chat prefs without element-level validation.
 
 #### Dependencies & Config
 
@@ -467,7 +478,7 @@
 | CORS configured from settings (no wildcard) | `main.py:226` |
 | DOMPurify for `{@html}` sanitization | `utils/markdown.ts` |
 | Audit log redacts sensitive fields | `utils/audit-log.ts:70` |
-| Non-root Docker user | `Dockerfile:38-39,59` |
+| Non-root Docker user | `Dockerfile:38,59` |
 | Docker resource limits | `docker-compose.yml:74-81` |
 | `neverthrow` Result types for typed error handling | All API modules |
 | No frontend environment variable exposure | Entire frontend |

@@ -19,8 +19,8 @@
 		"test:e2e": "playwright test",
 		"test:e2e:ui": "playwright test --ui",
 		"test:e2e:report": "playwright show-report tests/playwright-report",
-		"test:unit": "vitest run",
-		"test:unit:watch": "vitest"
+		"test:unit": "bun ./node_modules/vitest/vitest.mjs run",
+		"test:unit:watch": "bun ./node_modules/vitest/vitest.mjs"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.0.2",

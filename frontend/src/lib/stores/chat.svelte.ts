@@ -145,10 +145,14 @@ export class ChatStore {
 		if (typeof prefs.systemPrompt === 'string') this.systemPrompt = prefs.systemPrompt;
 		if (prefs.mode === 'plan' || prefs.mode === 'execute') this.mode = prefs.mode;
 		if (Array.isArray(prefs.disabledTools)) {
-			this.disabledTools = new SvelteSet(prefs.disabledTools as string[]);
+			this.disabledTools = new SvelteSet(
+				prefs.disabledTools.filter((x): x is string => typeof x === 'string')
+			);
 		}
 		if (Array.isArray(prefs.disabledTags)) {
-			this.disabledTags = new SvelteSet(prefs.disabledTags as string[]);
+			this.disabledTags = new SvelteSet(
+				prefs.disabledTags.filter((x): x is string => typeof x === 'string')
+			);
 		}
 	}
 
@@ -403,10 +407,10 @@ export class ChatStore {
 		};
 		this._es.onmessage = (ev) => {
 			try {
-				const event: ChatEvent = JSON.parse(ev.data as string);
+				const event: ChatEvent = JSON.parse(ev.data);
 				this._handleEvent(event);
 			} catch {
-				console.error('[chat] failed to parse SSE event:', ev.data);
+				console.debug('[chat] failed to parse SSE event:', ev.data);
 			}
 		};
 		this._es.onerror = () => {

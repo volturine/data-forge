@@ -34,17 +34,19 @@ test-e2e:
     set -euo pipefail
 
     cleanup() {
-        lsof -ti tcp:8000,3000 | xargs kill 2>/dev/null || true
+        lsof -ti tcp:8001,3001 | xargs kill 2>/dev/null || true
     }
 
     trap cleanup EXIT INT TERM
 
-    (cd backend && uv run --env-file e2e.env ./main.py) &
+    set -a; source backend/e2e.env; set +a
+    export FRONTEND_PORT=3001
+    (cd backend && uv run --no-env-file ./main.py) &
     (cd frontend && bun run dev) &
     FRONTEND_PID=$!
 
     for _ in {1..90}; do
-        if nc -z localhost 8000 && nc -z localhost 3000; then
+        if nc -z localhost 8001 && nc -z localhost 3001; then
             cd frontend && bun run test:e2e
             exit 0
         fi

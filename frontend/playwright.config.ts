@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
+const baseURL = `http://localhost:${port}`;
+
 export default defineConfig({
 	testDir: './tests',
 	globalSetup: './tests/global-setup.ts',
@@ -11,7 +14,7 @@ export default defineConfig({
 	outputDir: './tests/test-results',
 	reporter: [['html', { open: 'never', outputFolder: 'tests/playwright-report' }], ['line']],
 	use: {
-		baseURL: 'http://localhost:3000',
+		baseURL,
 		storageState: 'tests/.auth/state.json',
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure'
@@ -27,7 +30,7 @@ export default defineConfig({
 	],
 	webServer: {
 		command: 'bun run dev',
-		url: 'http://localhost:3000',
+		url: baseURL,
 		reuseExistingServer: true,
 		timeout: 60_000
 	}

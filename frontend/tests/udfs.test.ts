@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { test, expect } from '@playwright/test';
-import { createUdf } from './utils/api.js';
+import { API_BASE, createUdf } from './utils/api.js';
 import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
@@ -237,7 +237,7 @@ test.describe('UDFs – export & import', () => {
 			const ourUdf = importPayload.udfs.find((u) => u.name === udf);
 			if (!ourUdf) throw new Error(`${udf} not found in export JSON`);
 
-			const importResp = await request.post('http://localhost:8000/api/v1/udf/import', {
+			const importResp = await request.post(`${API_BASE}/udf/import`, {
 				data: { udfs: [ourUdf], overwrite: false }
 			});
 			if (!importResp.ok()) {

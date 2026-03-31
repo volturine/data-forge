@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -68,9 +69,22 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def validate_password(password: str) -> None:
-    if len(password) >= 8:
-        return
-    raise ValueError('Password must be at least 8 characters long')
+    if len(password) < 8:
+        raise ValueError('Password must be at least 8 characters long')
+    if not any(char.isupper() for char in password):
+        raise ValueError('Password must contain at least one uppercase letter')
+    if not any(char.islower() for char in password):
+        raise ValueError('Password must contain at least one lowercase letter')
+    if not any(char.isdigit() for char in password):
+        raise ValueError('Password must contain at least one digit')
+
+
+def _send_smtp_message(host: str, port: int, smtp_user: str, password: str, msg: EmailMessage) -> None:
+    with smtplib.SMTP(host, port, timeout=10) as server:
+        server.starttls()
+        if password:
+            server.login(smtp_user, password)
+        server.send_message(msg)
 
 
 def _normalize_default_user_email(email: str) -> str:
@@ -522,22 +536,22 @@ def validate_verification_token(session: Session, token: str, token_type: str) -
     return row.user_id
 
 
-def send_verification_email(user_email: str, token: str) -> None:
+async def send_verification_email(user_email: str, token: str) -> bool:
     try:
         from modules.settings.service import get_resolved_smtp
 
         smtp = get_resolved_smtp()
     except Exception:
-        logger.warning('Skipping verification email send because SMTP config is unavailable', exc_info=True)
-        return
+        logger.error('Failed to resolve SMTP config for verification email', exc_info=True)
+        raise
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
     smtp_user = str(smtp.get('user', ''))
     password = str(smtp.get('password', ''))
 
     if not host or not smtp_user:
-        logger.info('Skipping verification email send because SMTP is not configured')
-        return
+        logger.error('SMTP is not configured for verification email')
+        return False
 
     verify_url = f'{settings.auth_frontend_url}/verify?token={token}'
     msg = EmailMessage()
@@ -547,21 +561,19 @@ def send_verification_email(user_email: str, token: str) -> None:
     msg.set_content(f'Please verify your email by opening this link: {verify_url}')
 
     try:
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            if password:
-                server.login(smtp_user, password)
-            server.send_message(msg)
+        await asyncio.to_thread(_send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
-        logger.warning('Failed to send verification email', exc_info=True)
+        logger.error('Failed to send verification email', exc_info=True)
+        raise
+    return True
 
 
-def resend_verification(session: Session, user_id: str) -> None:
+async def resend_verification(session: Session, user_id: str) -> bool:
     user = get_user_by_id(session, user_id)
     if not user:
         raise InvalidCredentialsError()
     if user.email_verified:
-        return
+        return False
 
     stmt = select(VerificationToken).where(
         VerificationToken.user_id == user_id,
@@ -575,7 +587,7 @@ def resend_verification(session: Session, user_id: str) -> None:
             raise ValueError('Verification email was sent recently. Please wait before requesting again')
 
     token = create_verification_token(session, user_id=user_id, token_type=_EMAIL_VERIFY)
-    send_verification_email(user.email, token)
+    return await send_verification_email(user.email, token)
 
 
 def create_password_reset_token(session: Session, email: str) -> str | None:
@@ -585,21 +597,21 @@ def create_password_reset_token(session: Session, email: str) -> str | None:
     return create_verification_token(session, user_id=user.id, token_type=_PASSWORD_RESET, ttl_hours=1)
 
 
-def send_password_reset_email(user_email: str, token: str) -> None:
+async def send_password_reset_email(user_email: str, token: str) -> bool:
     try:
         from modules.settings.service import get_resolved_smtp
 
         smtp = get_resolved_smtp()
     except Exception:
-        logger.warning('Skipping password reset email because SMTP config is unavailable', exc_info=True)
-        return
+        logger.error('Failed to resolve SMTP config for password reset email', exc_info=True)
+        raise
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
     smtp_user = str(smtp.get('user', ''))
     password = str(smtp.get('password', ''))
     if not host or not smtp_user:
-        logger.warning('Skipping password reset email because SMTP is not configured')
-        return
+        logger.error('SMTP is not configured for password reset email')
+        return False
     reset_url = f'{settings.auth_frontend_url}/reset-password?token={token}'
     msg = EmailMessage()
     msg['From'] = smtp_user
@@ -607,13 +619,11 @@ def send_password_reset_email(user_email: str, token: str) -> None:
     msg['Subject'] = 'Reset your password'
     msg.set_content(f'Use this link to reset your password: {reset_url}')
     try:
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            if password:
-                server.login(smtp_user, password)
-            server.send_message(msg)
+        await asyncio.to_thread(_send_smtp_message, host, port, smtp_user, password, msg)
     except Exception:
-        logger.warning('Failed to send password reset email', exc_info=True)
+        logger.error('Failed to send password reset email', exc_info=True)
+        raise
+    return True
 
 
 def reset_password(session: Session, token: str, new_password: str) -> None:

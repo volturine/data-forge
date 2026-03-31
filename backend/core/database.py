@@ -1,6 +1,7 @@
+import asyncio
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -29,6 +30,7 @@ settings_engine = create_engine(
 _enable_sqlite_pragmas(settings_engine)
 
 _namespace_engines: OrderedDict[str, Engine] = OrderedDict()
+_namespace_engines_lock = asyncio.Lock()
 _MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
@@ -36,6 +38,14 @@ _engine_override: Engine | None = None
 
 P = ParamSpec('P')
 T = TypeVar('T')
+
+
+def _run_async(value: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(value)
+    raise RuntimeError('Cannot synchronously access namespace database while the event loop is running')
 
 
 def set_engine_override(test_engine: Engine):
@@ -49,7 +59,7 @@ def clear_engine_override():
 
 
 def get_db():
-    engine_to_use = _engine_override or _get_namespace_engine()
+    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
     with Session(engine_to_use) as session:
         yield session
 
@@ -60,7 +70,7 @@ def get_settings_db():
 
 
 def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    engine_to_use = _engine_override or _get_namespace_engine()
+    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
 
@@ -70,14 +80,14 @@ def run_settings_db(func: Callable[Concatenate[Session, P], T], *args: P.args, *
         return func(session, *args, **kwargs)
 
 
-def init_db() -> None:
+async def init_db() -> None:
     _init_settings_db()
     namespaces = list_namespaces()
     if not namespaces:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
         namespace_paths(namespace)
-        _init_namespace_db(namespace)
+        await _init_namespace_db(namespace)
 
 
 def _init_settings_db() -> None:
@@ -179,23 +189,29 @@ def _run_namespace_migrations(db_engine: Engine) -> None:
             conn.commit()
 
 
-def _get_namespace_engine() -> Engine:
+async def _get_namespace_engine() -> Engine:
     namespace = get_namespace()
-    if namespace in _namespace_engines:
-        _namespace_engines.move_to_end(namespace)
-        return _namespace_engines[namespace]
-    if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
-        oldest = next(iter(_namespace_engines))
-        del _namespace_engines[oldest]
-    paths = namespace_paths(namespace)
-    engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
-    _enable_sqlite_pragmas(engine)
-    _namespace_engines[namespace] = engine
-    _init_namespace_db(namespace)
-    return engine
+    async with _namespace_engines_lock:
+        if namespace in _namespace_engines:
+            _namespace_engines.move_to_end(namespace)
+            return _namespace_engines[namespace]
+        if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
+            oldest = next(iter(_namespace_engines))
+            del _namespace_engines[oldest]
+        paths = namespace_paths(namespace)
+        engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
+        _enable_sqlite_pragmas(engine)
+        _namespace_engines[namespace] = engine
+        _init_namespace_db_unlocked(namespace)
+        return engine
 
 
-def _init_namespace_db(namespace: str) -> None:
+async def _init_namespace_db(namespace: str) -> None:
+    async with _namespace_engines_lock:
+        _init_namespace_db_unlocked(namespace)
+
+
+def _init_namespace_db_unlocked(namespace: str) -> None:
     namespace_engine = _namespace_engines.get(namespace)
     if not namespace_engine:
         paths = namespace_paths(namespace)

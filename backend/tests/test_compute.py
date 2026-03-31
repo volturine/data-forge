@@ -797,6 +797,20 @@ def test_spawn_engine_preserves_requested_config_during_conflicting_restarts():
     assert manager.get_engine('analysis') is not None
 
 
+def test_spawn_engine_evicts_oldest_idle_when_limit_reached(monkeypatch):
+    from core.config import settings
+
+    manager = ProcessManager(engine_factory=FakeEngine)
+    manager._get_defaults = lambda: {'max_threads': 0, 'max_memory_mb': 0, 'streaming_chunk_size': 0}
+    monkeypatch.setattr(settings, 'max_concurrent_engines', 2)
+    manager.spawn_engine('a')
+    time.sleep(0.01)
+    manager.spawn_engine('b')
+    manager.spawn_engine('c')
+    engines = set(manager.list_engines())
+    assert engines == {'b', 'c'}
+
+
 def test_analysis_stack_context_copy_isolated():
     token = _analysis_stack_var.set((('root', None),))
     try:

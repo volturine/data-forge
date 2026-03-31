@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import uuid
@@ -11,11 +12,13 @@ from starlette.concurrency import run_in_threadpool
 
 from core.config import settings
 from core.database import get_db, run_db
+from core.dependencies import get_manager
 from core.error_handlers import handle_errors
 from core.namespace import namespace_paths
 from core.validation import DataSourceId, PreflightId, parse_datasource_id, parse_preflight_id
 from modules.auth.dependencies import get_optional_user
 from modules.auth.models import User
+from modules.compute.manager import ProcessManager
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 from modules.datasource.source_types import DataSourceType
@@ -33,6 +36,24 @@ _FILE_TYPE_MAPPING: dict[str, str] = {
     '.jsonl': 'ndjson',
     '.xlsx': 'excel',
 }
+
+
+def _write_chunk(path: Path, chunk: bytes) -> None:
+    with open(path, 'ab') as handle:
+        handle.write(chunk)
+
+
+async def _save_upload_file(file: UploadFile, file_path: Path, max_bytes: int) -> None:
+    total = 0
+    await asyncio.to_thread(file_path.write_bytes, b'')
+    while True:
+        chunk = await file.read(settings.upload_chunk_size)
+        if not chunk:
+            return
+        total += len(chunk)
+        if max_bytes and total > max_bytes:
+            raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
+        await asyncio.to_thread(_write_chunk, file_path, chunk)
 
 
 def _list_export_branches(metadata_path: str) -> list[str]:
@@ -97,18 +118,8 @@ async def upload_file(
     unique_filename = f'{uuid.uuid4()}{file_extension}'
     file_path = namespace_paths().upload_dir / unique_filename
 
-    max_bytes = settings.upload_max_file_size_bytes
-    total = 0
     try:
-        with open(file_path, 'wb') as f:
-            while True:
-                chunk = await file.read(settings.upload_chunk_size)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if max_bytes and total > max_bytes:
-                    raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-                f.write(chunk)
+        await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
     except HTTPException:
         if file_path.exists():
             file_path.unlink()
@@ -202,18 +213,8 @@ async def upload_bulk(
         file_path = namespace_paths().upload_dir / unique_filename
         name = Path(file.filename).stem
 
-        max_bytes = settings.upload_max_file_size_bytes
-        total = 0
         try:
-            with open(file_path, 'wb') as f:
-                while True:
-                    chunk = await file.read(settings.upload_chunk_size)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if max_bytes and total > max_bytes:
-                        raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-                    f.write(chunk)
+            await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
         except HTTPException as exc:
             if file_path.exists():
                 file_path.unlink()
@@ -273,18 +274,8 @@ async def preflight_excel(
 
     unique_filename = f'{uuid.uuid4()}{file_extension}'
     file_path = namespace_paths().upload_dir / unique_filename
-    max_bytes = settings.upload_max_file_size_bytes
-    total = 0
     try:
-        with open(file_path, 'wb') as f:
-            while True:
-                chunk = await file.read(settings.upload_chunk_size)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if max_bytes and total > max_bytes:
-                    raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-                f.write(chunk)
+        await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
     except HTTPException:
         if file_path.exists():
             file_path.unlink()
@@ -295,13 +286,14 @@ async def preflight_excel(
             file_path.unlink()
         raise HTTPException(status_code=500, detail='Failed to save file') from e
 
-    preflight_id, preflight = create_preflight(file_path, delete_file=False)
+    preflight_id, preflight = await create_preflight(file_path, delete_file=False)
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        clear_preflight(preflight_id, delete_file=False)
+        await clear_preflight(preflight_id, delete_file=False)
         raise HTTPException(status_code=400, detail='No sheets found in file')
 
-    preview_result = service.build_excel_preview(
+    preview_result = await asyncio.to_thread(
+        service.build_excel_preview,
         file_path=file_path,
         sheet_name=target_sheet,
         start_row=start_row,
@@ -342,13 +334,14 @@ async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
     if resolved.suffix.lower() != '.xlsx':
         raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
 
-    preflight_id, preflight = create_preflight(file_path)
+    preflight_id, preflight = await create_preflight(file_path)
     target_sheet = payload.sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        clear_preflight(preflight_id)
+        await clear_preflight(preflight_id)
         raise HTTPException(status_code=400, detail='No sheets found in file')
 
-    preview_result = service.build_excel_preview(
+    preview_result = await asyncio.to_thread(
+        service.build_excel_preview,
         file_path=file_path,
         sheet_name=target_sheet,
         start_row=payload.start_row,
@@ -389,11 +382,12 @@ async def preflight_preview(
     named_range: str | None = None,
     cell_range: str | None = None,
 ):
-    preflight = get_preflight(parse_preflight_id(preflight_id))
+    preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
-    preview_result = service.build_excel_preview(
+    preview_result = await asyncio.to_thread(
+        service.build_excel_preview,
         file_path=preflight.temp_path,
         sheet_name=sheet_name,
         start_row=start_row,
@@ -431,13 +425,13 @@ async def confirm_excel(
     cell_range: str | None = Form(None),
     user: User | None = Depends(get_optional_user),
 ):
-    preflight = get_preflight(parse_preflight_id(preflight_id))
+    preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        clear_preflight(parse_preflight_id(preflight_id))
+        await clear_preflight(parse_preflight_id(preflight_id))
         raise HTTPException(status_code=400, detail='No sheet selected')
 
     file_extension = preflight.temp_path.suffix.lower()
@@ -445,8 +439,9 @@ async def confirm_excel(
     target_path = namespace_paths().upload_dir / target_filename
 
     try:
-        copy2(preflight.temp_path, target_path)
-        resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = service.resolve_excel_selection(
+        await asyncio.to_thread(copy2, preflight.temp_path, target_path)
+        resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = await asyncio.to_thread(
+            service.resolve_excel_selection,
             preflight.temp_path,
             target_sheet,
             start_row,
@@ -487,10 +482,10 @@ async def confirm_excel(
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if target_path.exists():
             target_path.unlink()
-        clear_preflight(parse_preflight_id(preflight_id))
+        await clear_preflight(parse_preflight_id(preflight_id))
         raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
-    clear_preflight(parse_preflight_id(preflight_id))
+    await clear_preflight(parse_preflight_id(preflight_id))
     return datasource
 
 
@@ -748,7 +743,12 @@ def refresh_datasource(
 def delete_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Delete a datasource and its associated files. Use GET /datasource to find IDs."""
-    service.delete_datasource(session, parse_datasource_id(datasource_id))
+    datasource_id_value = parse_datasource_id(datasource_id)
+    service.delete_datasource(session, datasource_id_value)
+    preview_key = f'__preview__{datasource_id_value}'
+    if manager.get_engine(preview_key):
+        manager.shutdown_engine(preview_key)
     return None

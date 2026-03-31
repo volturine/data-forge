@@ -9,6 +9,7 @@ from pydantic_settings.sources import DotEnvSettingsSource
 
 # (field_name, min_inclusive, max_inclusive) — None means no bound
 _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
+    ('port', 1, 65535),
     ('engine_idle_timeout', 1, None),
     ('job_timeout', 1, None),
     ('engine_pooling_interval', 1, None),
@@ -86,6 +87,7 @@ class Settings(BaseSettings):
     # Debug mode - enables SQL echo, verbose logging
     debug: bool = False
     prod_mode_enabled: bool = Field(default=False, alias='PROD_MODE_ENABLED')
+    port: int = Field(default=8000, alias='PORT')
 
     # CORS origins - comma-separated list of allowed origins
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
@@ -193,7 +195,7 @@ class Settings(BaseSettings):
     # Auth / OAuth
     auth_required: bool = Field(default=True, alias='AUTH_REQUIRED')
     default_user_email: str = Field(default='default@example.com', alias='DEFAULT_USER_EMAIL')
-    default_user_password: str = Field(default='change-me-123', alias='DEFAULT_USER_PASSWORD')
+    default_user_password: str = Field(default='ChangeMe123', alias='DEFAULT_USER_PASSWORD')
     default_user_name: str = Field(default='Default User', alias='DEFAULT_USER_NAME')
     google_client_id: str = Field(default='', alias='GOOGLE_CLIENT_ID')
     google_client_secret: str = Field(default='', alias='GOOGLE_CLIENT_SECRET')
@@ -279,6 +281,12 @@ class Settings(BaseSettings):
     def _validate_default_user_password(cls, value: str) -> str:
         if len(value) < 8:
             raise ValueError('DEFAULT_USER_PASSWORD must be at least 8 characters long')
+        if not any(char.isupper() for char in value):
+            raise ValueError('DEFAULT_USER_PASSWORD must contain at least one uppercase letter')
+        if not any(char.islower() for char in value):
+            raise ValueError('DEFAULT_USER_PASSWORD must contain at least one lowercase letter')
+        if not any(char.isdigit() for char in value):
+            raise ValueError('DEFAULT_USER_PASSWORD must contain at least one digit')
         return value
 
     @model_validator(mode='after')

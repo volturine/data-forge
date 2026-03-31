@@ -1,10 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import {
-		previewStepData,
-		type StepPreviewRequest,
-		type StepPreviewResponse
-	} from '$lib/api/compute';
+	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -95,18 +91,14 @@
 			datasourceKey
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
-				string,
-				unknown
-			> | null;
 			const result = await previewStepData({
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: analysisPipeline!,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage,
-				resource_config: resourceConfig
-			} as unknown as StepPreviewRequest);
+				resource_config: analysisStore.resourceConfig
+			});
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}

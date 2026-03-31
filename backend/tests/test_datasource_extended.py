@@ -1,5 +1,7 @@
+import asyncio
+import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -245,6 +247,109 @@ class TestDataSourceValidation:
         assert body['sheet_name'] == 'Sheet1'
         assert body['preflight_id']
         assert len(body['preview']) == 3
+
+    @pytest.mark.asyncio
+    async def test_preflight_cleanup_removes_expired_without_clear_preflight(self, tmp_path: Path, monkeypatch) -> None:
+        from modules.datasource import preflight
+
+        keep_path = tmp_path / 'keep.xlsx'
+        keep_path.write_bytes(b'keep')
+        drop_path = tmp_path / 'drop.xlsx'
+        drop_path.write_bytes(b'drop')
+        stay_path = tmp_path / 'stay.xlsx'
+        stay_path.write_bytes(b'stay')
+        now = datetime.now(UTC).replace(tzinfo=None)
+
+        async def fail(*args, **kwargs) -> None:
+            raise AssertionError('_cleanup_expired() should not call clear_preflight()')
+
+        monkeypatch.setattr(preflight, 'clear_preflight', fail)
+        preflight._PREFLIGHTS.clear()
+        preflight._PREFLIGHTS['keep'] = preflight.ExcelPreflight(
+            temp_path=keep_path,
+            sheets=[],
+            tables={},
+            named_ranges=[],
+            created_at=now - preflight._PREFLIGHT_TTL - timedelta(seconds=1),
+            delete_file=False,
+        )
+        preflight._PREFLIGHTS['drop'] = preflight.ExcelPreflight(
+            temp_path=drop_path,
+            sheets=[],
+            tables={},
+            named_ranges=[],
+            created_at=now - preflight._PREFLIGHT_TTL - timedelta(seconds=1),
+            delete_file=True,
+        )
+        preflight._PREFLIGHTS['stay'] = preflight.ExcelPreflight(
+            temp_path=stay_path,
+            sheets=[],
+            tables={},
+            named_ranges=[],
+            created_at=now,
+            delete_file=True,
+        )
+
+        try:
+            await preflight._cleanup_expired()
+
+            assert 'keep' not in preflight._PREFLIGHTS
+            assert 'drop' not in preflight._PREFLIGHTS
+            assert 'stay' in preflight._PREFLIGHTS
+            assert keep_path.exists()
+            assert not drop_path.exists()
+            assert stay_path.exists()
+        finally:
+            preflight._PREFLIGHTS.clear()
+
+    @pytest.mark.asyncio
+    async def test_create_preflight_allows_concurrent_workbook_parsing(self, tmp_path: Path, monkeypatch) -> None:
+        from modules.datasource import preflight
+
+        class Sheet:
+            def __init__(self, title: str) -> None:
+                self.title = title
+                self.tables = {f'{title}_table': object()}
+
+        class Book:
+            def __init__(self, title: str) -> None:
+                self.sheetnames = [title]
+                self.worksheets = [Sheet(title)]
+                self.defined_names = [f'{title}_range']
+
+        barrier = threading.Barrier(2, timeout=1)
+
+        def fake_load_workbook(path: Path, read_only: bool = False, data_only: bool = True) -> Book:
+            assert read_only is False
+            assert data_only is True
+            barrier.wait()
+            return Book(path.stem)
+
+        one = tmp_path / 'one.xlsx'
+        two = tmp_path / 'two.xlsx'
+        one.write_bytes(b'one')
+        two.write_bytes(b'two')
+        monkeypatch.setattr(preflight, 'load_workbook', fake_load_workbook)
+        preflight._PREFLIGHTS.clear()
+
+        try:
+            first, second = await asyncio.wait_for(
+                asyncio.gather(
+                    preflight.create_preflight(one),
+                    preflight.create_preflight(two),
+                ),
+                timeout=2,
+            )
+            first_id, first_preflight = first
+            second_id, second_preflight = second
+
+            assert first_id != second_id
+            assert first_preflight.sheets == ['one']
+            assert second_preflight.sheets == ['two']
+            assert preflight._PREFLIGHTS[first_id] is first_preflight
+            assert preflight._PREFLIGHTS[second_id] is second_preflight
+        finally:
+            preflight._PREFLIGHTS.clear()
 
     def test_confirm_excel_end_row(self, client, temp_upload_dir: Path):
         """Test Excel confirm stores manual end row selection."""
