@@ -661,7 +661,9 @@ class TestAuthRoutes:
         assert response.status_code == 200
         assert response.json()['email'] == 'me@example.com'
 
-    def test_me_unauthenticated(self, auth_client: TestClient) -> None:
+    def test_me_unauthenticated(self, auth_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', True)
+
         response = auth_client.get('/api/v1/auth/me')
 
         assert response.status_code == 401

@@ -77,6 +77,7 @@ class DatasourceHandler(OperationHandler):
             'has_header': opts.get('has_header', True),
             'skip_rows': opts.get('skip_rows', 0),
             'encoding': opts.get('encoding', 'utf8'),
+            'try_parse_dates': True,
         }
 
     def _load_file(self, config: DatasourceParams) -> pl.LazyFrame:

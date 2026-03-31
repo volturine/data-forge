@@ -135,10 +135,7 @@ class TestDataSourceValidation:
         excel_path = temp_upload_dir / 'test.xlsx'
         df = pl.DataFrame({'id': [1, 2, 3], 'name': ['A', 'B', 'C']})
 
-        try:
-            df.write_excel(excel_path)
-        except (ImportError, ValueError, OSError):
-            pytest.skip('Excel support not available')
+        df.write_excel(excel_path)
 
         with open(excel_path, 'rb') as f:
             files = {'file': ('test.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}

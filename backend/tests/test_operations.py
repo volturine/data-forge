@@ -220,6 +220,149 @@ def test_timeseries_offset_add():
     assert lf.collect()['shifted'][0].day == 2
 
 
+def test_timeseries_timestamp():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {'column': 'date', 'operation_type': 'timestamp', 'new_column': 'ts', 'unit': 'us'},
+    )
+    result = lf.collect()['ts'].to_list()
+    assert all(isinstance(v, int) for v in result)
+    assert len(result) == 3
+
+
+def test_timeseries_subtract():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            'column': 'date',
+            'operation_type': 'subtract',
+            'new_column': 'earlier',
+            'unit': 'days',
+            'value': 1,
+        },
+    )
+    assert lf.collect()['earlier'][0].day == 31
+
+
+def test_timeseries_diff():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            'column': 'date',
+            'operation_type': 'diff',
+            'new_column': 'delta',
+            'column2': 'date2',
+        },
+    )
+    result = lf.collect()
+    assert 'delta' in result.columns
+
+
+def test_timeseries_months_offset():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            'column': 'date',
+            'operation_type': 'add',
+            'new_column': 'shifted',
+            'unit': 'months',
+            'value': 2,
+        },
+    )
+    assert lf.collect()['shifted'][0].month == 3
+
+
+def test_timeseries_truncate():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            'column': 'date',
+            'operation_type': 'truncate',
+            'new_column': 'truncated',
+            'unit': 'days',
+        },
+    )
+    result = lf.collect()['truncated'][0]
+    assert result.hour == 0
+    assert result.minute == 0
+
+
+def test_timeseries_round():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            'column': 'date',
+            'operation_type': 'round',
+            'new_column': 'rounded',
+            'unit': 'hours',
+        },
+    )
+    result = lf.collect()
+    assert 'rounded' in result.columns
+    assert result['rounded'][0].minute == 0
+
+
+def test_timeseries_extract_dayofweek():
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {'column': 'date', 'operation_type': 'extract', 'new_column': 'dow', 'component': 'dayofweek'},
+    )
+    result = lf.collect()['dow'].to_list()
+    assert all(isinstance(v, int) for v in result)
+
+
+def test_timeseries_unsupported_operation():
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match='Unsupported timeseries operation'):
+        handler(
+            _frame(),
+            {'column': 'date', 'operation_type': 'bogus', 'new_column': 'x'},
+        ).collect()
+
+
+def test_timeseries_add_missing_value():
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match='requires numeric value'):
+        handler(
+            _frame(),
+            {'column': 'date', 'operation_type': 'add', 'new_column': 'x', 'unit': 'days'},
+        ).collect()
+
+
+def test_timeseries_add_missing_unit():
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match='requires unit'):
+        handler(
+            _frame(),
+            {'column': 'date', 'operation_type': 'add', 'new_column': 'x', 'value': 1},
+        ).collect()
+
+
+def test_timeseries_diff_missing_column2():
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match='requires column2'):
+        handler(
+            _frame(),
+            {'column': 'date', 'operation_type': 'diff', 'new_column': 'x'},
+        ).collect()
+
+
+def test_timeseries_truncate_missing_unit():
+    handler = TimeseriesHandler()
+    with pytest.raises(ValueError, match='requires unit'):
+        handler(
+            _frame(),
+            {'column': 'date', 'operation_type': 'truncate', 'new_column': 'x'},
+        ).collect()
+
+
 def test_string_transform_uppercase():
     handler = StringTransformHandler()
     lf = handler(_frame(), {'column': 'name', 'method': 'uppercase', 'new_column': 'name_upper'})

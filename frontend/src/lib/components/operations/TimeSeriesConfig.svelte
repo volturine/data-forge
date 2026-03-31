@@ -36,7 +36,9 @@
 		{ value: 'timestamp', label: 'Convert to Timestamp' },
 		{ value: 'add', label: 'Add Time Period' },
 		{ value: 'subtract', label: 'Subtract Time Period' },
-		{ value: 'diff', label: 'Date Difference' }
+		{ value: 'diff', label: 'Date Difference' },
+		{ value: 'truncate', label: 'Truncate to Boundary' },
+		{ value: 'round', label: 'Round to Nearest' }
 	];
 
 	const extractComponents = [
@@ -51,7 +53,7 @@
 		'dayofweek'
 	];
 
-	const timeUnits = ['seconds', 'minutes', 'hours', 'days', 'weeks'];
+	const timeUnits = ['seconds', 'minutes', 'hours', 'days', 'weeks', 'months'];
 
 	const timestampUnits = ['ns', 'us', 'ms'];
 
@@ -348,6 +350,50 @@
 					col.dtype.toLowerCase() === 'date' ||
 					col.dtype.toLowerCase() === 'datetime'}
 			/>
+		</div>
+	{:else if config.operation_type === 'truncate' || config.operation_type === 'round'}
+		<div
+			class={css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				backgroundColor: 'transparent',
+				border: 'none'
+			})}
+			role="group"
+			aria-labelledby="ts-truncate-unit-heading"
+		>
+			<h4
+				id="ts-truncate-unit-heading"
+				class={css({
+					marginTop: '0',
+					marginBottom: '3',
+					fontSize: 'xs',
+					fontWeight: 'semibold',
+					color: 'fg.muted',
+					textTransform: 'uppercase',
+					letterSpacing: 'wide3'
+				})}
+			>
+				{config.operation_type === 'truncate' ? 'Truncate' : 'Round'} Unit
+			</h4>
+			<label for="ts-select-truncate-unit" class={label({ variant: 'hidden' })}
+				>Select unit for {config.operation_type}</label
+			>
+			<select
+				id="ts-select-truncate-unit"
+				data-testid="ts-truncate-unit-select"
+				class={input()}
+				bind:value={config.unit}
+			>
+				{#each timeUnits as unit (unit)}
+					<option value={unit}>{unit}</option>
+				{/each}
+			</select>
+			<p class={css({ fontSize: 'sm', marginTop: '2', marginBottom: '0', color: 'fg.muted' })}>
+				{config.operation_type === 'truncate'
+					? 'Truncate datetime to the start of the selected time unit.'
+					: 'Round datetime to the nearest selected time unit boundary.'}
+			</p>
 		</div>
 	{/if}
 

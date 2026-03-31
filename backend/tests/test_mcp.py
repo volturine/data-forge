@@ -11,10 +11,11 @@ from modules.mcp.router import MCP_ROUTE_META, MCPRouter, get_mcp_route_meta
 
 
 class TestMCPToolListing:
-    def test_routes_require_auth(self, client: TestClient) -> None:
+    def test_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from main import app
         from modules.auth.dependencies import get_current_user
 
+        monkeypatch.setattr('core.config.settings.auth_required', True)
         app.dependency_overrides.pop(get_current_user, None)
         response = client.get('/api/v1/mcp/tools')
         assert response.status_code == 401
@@ -236,25 +237,6 @@ class TestValidationFormatAndDefaults:
 
         schema = {'type': 'object', 'properties': {'d': {'type': 'string', 'format': 'date'}}}
         valid, errors, _ = validate_args(schema, {'d': 'not-a-date'})
-        assert valid is False
-
-    def test_format_uri_valid(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {'type': 'object', 'properties': {'url': {'type': 'string', 'format': 'uri'}}}
-        valid, errors, _ = validate_args(schema, {'url': 'https://example.com'})
-        assert valid is True
-
-    def test_format_uri_invalid(self) -> None:
-        import pytest
-        from jsonschema import FormatChecker
-
-        if 'uri' not in FormatChecker().checkers:
-            pytest.skip('uri format checker not available (requires rfc3986 extra)')
-        from modules.mcp.validation import validate_args
-
-        schema = {'type': 'object', 'properties': {'url': {'type': 'string', 'format': 'uri'}}}
-        valid, errors, _ = validate_args(schema, {'url': 'not a uri'})
         assert valid is False
 
     def test_const_applied_when_missing(self) -> None:

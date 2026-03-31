@@ -202,10 +202,11 @@ class TestSessionStore:
 
 
 class TestChatRoutes:
-    def test_chat_routes_require_auth(self, client: TestClient) -> None:
+    def test_chat_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from main import app
         from modules.auth.dependencies import get_current_user
 
+        monkeypatch.setattr('core.config.settings.auth_required', True)
         app.dependency_overrides.pop(get_current_user, None)
         resp = client.get('/api/v1/ai/chat/sessions')
         assert resp.status_code == 401
@@ -520,10 +521,11 @@ class TestModelsRoute:
         assert resp.status_code == 200
         mock_list.assert_awaited_once_with('sk-session')
 
-    def test_models_route_requires_auth(self, client: TestClient) -> None:
+    def test_models_route_requires_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         from main import app
         from modules.auth.dependencies import get_current_user
 
+        monkeypatch.setattr('core.config.settings.auth_required', True)
         app.dependency_overrides.pop(get_current_user, None)
         resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
         assert resp.status_code == 401

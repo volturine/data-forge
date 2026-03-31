@@ -995,9 +995,7 @@ test.describe('Analyses – timeseries config editing', () => {
 		}
 	});
 
-	// CSV upload uses pl.scan_csv which does not auto-detect date columns;
-	// strings like "2024-01-15" remain String type, so no date columns are available.
-	test.skip('TimeSeries: extract month with date CSV', async ({ page, request }) => {
+	test('TimeSeries: extract month with date CSV', async ({ page, request }) => {
 		test.setTimeout(90_000);
 		const id = uid();
 		const ds = `e2e-ts-date-${id}`;
