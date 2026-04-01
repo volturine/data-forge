@@ -48,10 +48,7 @@
 	}
 </script>
 
-<div
-	data-analysis-card={analysis.name}
-	class={css({ position: 'relative' })}
->
+<div data-analysis-card={analysis.name} class={css({ position: 'relative' })}>
 	<a
 		href={resolve(`/analysis/${analysis.id}`)}
 		class={css({
