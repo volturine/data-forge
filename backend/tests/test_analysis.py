@@ -697,6 +697,7 @@ class TestAnalysisDelete:
         assert response.status_code == 409
         assert 'locked by another owner' in response.json()['detail']
 
+    def test_delete_analysis_cascades_links(self, client, sample_analysis: Analysis, test_db_session):
 
         analysis_id = sample_analysis.id
 
