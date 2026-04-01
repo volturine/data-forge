@@ -107,11 +107,14 @@ jobs:
         working-directory: backend
         run: |
           set -a; source e2e.env; set +a
-          uv run --no-env-file ./main.py &
+          uv run --no-env-file ./main.py > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
 
       - name: Start frontend
         working-directory: frontend
-        run: bun run dev &
+        run: |
+          bun run dev --port $FRONTEND_PORT > /tmp/frontend.log 2>&1 &
+          echo $! > /tmp/frontend.pid
 
       - name: Wait for services
         run: |
@@ -123,11 +126,23 @@ jobs:
             sleep 1
           done
           echo "Timed out waiting for services" >&2
+          echo "--- backend log ---" >&2
+          cat /tmp/backend.log >&2
+          echo "--- frontend log ---" >&2
+          cat /tmp/frontend.log >&2
           exit 1
 
       - name: Run e2e tests
         working-directory: frontend
         run: bun run test:e2e
+
+      - name: Print service logs on failure
+        if: failure()
+        run: |
+          echo "--- backend log ---"
+          cat /tmp/backend.log || true
+          echo "--- frontend log ---"
+          cat /tmp/frontend.log || true
 
       - name: Upload Playwright report
         if: failure()

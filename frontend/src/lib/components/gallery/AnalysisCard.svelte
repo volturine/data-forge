@@ -48,118 +48,124 @@
 	}
 </script>
 
-<a
+<div
 	data-analysis-card={analysis.name}
-	href={resolve(`/analysis/${analysis.id}`)}
-	class={css({
-		position: 'relative',
-		cursor: 'pointer',
-		overflow: 'hidden',
-		backgroundColor: 'bg.primary',
-		display: 'block',
-		textDecoration: 'none',
-		color: 'inherit'
-	})}
-	onclick={handleClick}
-	onkeypress={handleKeyPress}
+	class={css({ position: 'relative' })}
 >
-	<div
+	<a
+		href={resolve(`/analysis/${analysis.id}`)}
 		class={css({
 			position: 'relative',
-			display: 'flex',
-			aspectRatio: '16 / 9',
-			width: '100%',
-			alignItems: 'center',
-			justifyContent: 'center',
-			backgroundColor: 'bg.tertiary'
+			cursor: 'pointer',
+			overflow: 'hidden',
+			backgroundColor: 'bg.primary',
+			display: 'block',
+			textDecoration: 'none',
+			color: 'inherit'
 		})}
+		onclick={handleClick}
+		onkeypress={handleKeyPress}
 	>
-		<input
-			type="checkbox"
-			class={css({
-				position: 'absolute',
-				left: '5',
-				top: '5',
-				height: 'icon',
-				width: 'icon'
-			})}
-			id="analysis-{analysis.id}-select"
-			checked={selected}
-			onchange={(e) => {
-				e.stopPropagation();
-				onToggleSelect(analysis.id);
-			}}
-			onclick={(e) => e.stopPropagation()}
-			aria-label={`Select ${analysis.name}`}
-		/>
-		{#if analysis.thumbnail}
-			<img
-				src={analysis.thumbnail}
-				alt={analysis.name}
-				class={css({ height: '100%', width: '100%', objectFit: 'cover' })}
-			/>
-		{:else}
-			<ChartBar size={32} class={css({ color: 'fg.faint' })} />
-		{/if}
-	</div>
-
-	<div class={css({ padding: '4' })}>
 		<div
 			class={css({
-				marginBottom: '2',
+				position: 'relative',
 				display: 'flex',
-				alignItems: 'flex-start',
-				justifyContent: 'space-between',
-				gap: '3'
+				aspectRatio: '16 / 9',
+				width: '100%',
+				alignItems: 'center',
+				justifyContent: 'center',
+				backgroundColor: 'bg.tertiary'
 			})}
 		>
-			<h3
+			<input
+				type="checkbox"
 				class={css({
-					margin: '0',
-					minWidth: '0',
-					flex: '1',
-					textOverflow: 'ellipsis',
-					overflow: 'hidden',
-					whiteSpace: 'nowrap',
-					fontSize: 'sm',
-					fontWeight: 'semibold',
-					color: 'fg.primary'
+					position: 'absolute',
+					left: '5',
+					top: '5',
+					height: 'icon',
+					width: 'icon'
 				})}
-			>
-				{analysis.name}
-			</h3>
-			<button
-				type="button"
-				class={css({
-					display: 'inline-flex',
-					flexShrink: '0',
-					alignItems: 'center',
-					justifyContent: 'center',
-					border: 'none',
-					backgroundColor: 'transparent',
-					padding: '1',
-					color: 'fg.muted',
-					cursor: 'pointer',
-					_hover: { color: 'fg.error' },
-					_focusVisible: {
-						color: 'fg.error',
-						outline: '2px solid',
-						outlineColor: 'accent.primary',
-						outlineOffset: '1px'
-					}
-				})}
-				onclick={(e) => {
+				id="analysis-{analysis.id}-select"
+				checked={selected}
+				onchange={(e) => {
 					e.stopPropagation();
-					onDelete(analysis.id);
+					onToggleSelect(analysis.id);
 				}}
-				aria-label="Delete analysis"
-			>
-				<Trash2 size={16} />
-			</button>
+				onclick={(e) => e.stopPropagation()}
+				aria-label={`Select ${analysis.name}`}
+			/>
+			{#if analysis.thumbnail}
+				<img
+					src={analysis.thumbnail}
+					alt={analysis.name}
+					class={css({ height: '100%', width: '100%', objectFit: 'cover' })}
+				/>
+			{:else}
+				<ChartBar size={32} class={css({ color: 'fg.faint' })} />
+			{/if}
 		</div>
 
-		<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-			<span>{formatDate(analysis.updated_at)}</span>
+		<div class={css({ padding: '4' })}>
+			<div
+				class={css({
+					marginBottom: '2',
+					display: 'flex',
+					alignItems: 'flex-start',
+					justifyContent: 'space-between',
+					gap: '3',
+					paddingRight: '7'
+				})}
+			>
+				<h3
+					class={css({
+						margin: '0',
+						minWidth: '0',
+						flex: '1',
+						textOverflow: 'ellipsis',
+						overflow: 'hidden',
+						whiteSpace: 'nowrap',
+						fontSize: 'sm',
+						fontWeight: 'semibold',
+						color: 'fg.primary'
+					})}
+				>
+					{analysis.name}
+				</h3>
+			</div>
+
+			<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+				<span>{formatDate(analysis.updated_at)}</span>
+			</div>
 		</div>
-	</div>
-</a>
+	</a>
+
+	<button
+		type="button"
+		class={css({
+			position: 'absolute',
+			top: 'calc(56.25% + 1rem)',
+			right: '1rem',
+			display: 'inline-flex',
+			flexShrink: '0',
+			alignItems: 'center',
+			justifyContent: 'center',
+			border: 'none',
+			backgroundColor: 'transparent',
+			padding: '1',
+			color: 'fg.muted',
+			cursor: 'pointer',
+			_hover: { color: 'fg.error' },
+			_focusVisible: {
+				color: 'fg.error',
+				outline: '2px solid',
+				outlineColor: 'accent.primary',
+				outlineOffset: '1px'
+			}
+		})}
+		onclick={() => onDelete(analysis.id)}
+		aria-label="Delete analysis"
+	>
+		<Trash2 size={16} />
+	</button>
+</div>

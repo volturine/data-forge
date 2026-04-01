@@ -110,23 +110,19 @@
 		deleteConfirmId = id;
 	}
 
-	function confirmDelete() {
+	async function confirmDelete() {
 		if (!deleteConfirmId) return;
 		deleteError = '';
-
-		deleteAnalysis(deleteConfirmId).match(
-			() => {
-				queryClient.invalidateQueries({ queryKey: ['analyses'] });
-				if (deleteConfirmId) {
-					selectedIds.delete(deleteConfirmId);
-				}
-				deleteConfirmId = null;
-			},
-			(error) => {
-				deleteError = `Failed to delete: ${error.message}`;
-				deleteConfirmId = null;
-			}
-		);
+		const id = deleteConfirmId;
+		const result = await deleteAnalysis(id);
+		if (result.isOk()) {
+			queryClient.invalidateQueries({ queryKey: ['analyses'] });
+			selectedIds.delete(id);
+			deleteConfirmId = null;
+		} else {
+			deleteError = `Failed to delete: ${result.error.message}`;
+			deleteConfirmId = null;
+		}
 	}
 
 	function cancelDelete() {
