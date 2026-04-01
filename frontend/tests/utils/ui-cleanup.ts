@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 interface NamedItem {
 	id: string;
@@ -47,6 +47,9 @@ export async function deleteAnalysisViaUI(page: Page, name: string): Promise<voi
 		const card = page.locator(`[data-analysis-card="${name}"]`).first();
 		await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 5_000 });
 		const dialog = page.getByRole('dialog');
+		await expect(dialog.getByRole('heading', { name: /Delete Analysis/i })).toBeVisible({
+			timeout: 5_000
+		});
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await page
 			.locator(`[data-analysis-card="${name}"]`)

@@ -678,7 +678,26 @@ class TestAnalysisDelete:
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
 
-    def test_delete_analysis_cascades_links(self, client, sample_analysis: Analysis, test_db_session):
+    def test_delete_analysis_blocked_when_locked_by_another_owner(self, client, sample_analysis: Analysis, test_db_session):
+        now = datetime.now(UTC).replace(tzinfo=None)
+        row = ResourceLock(
+            resource_type='analysis',
+            resource_id=sample_analysis.id,
+            owner_id='other-owner',
+            lock_token='delete-lock-token',
+            acquired_at=now,
+            expires_at=now + timedelta(minutes=5),
+            last_heartbeat=now,
+        )
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        response = client.delete(f'/api/v1/analysis/{sample_analysis.id}')
+
+        assert response.status_code == 409
+        assert 'locked by another owner' in response.json()['detail']
+
+
         analysis_id = sample_analysis.id
 
         result = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id))  # type: ignore[arg-type]
