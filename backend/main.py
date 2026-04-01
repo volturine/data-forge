@@ -1,20 +1,22 @@
 import asyncio
 import contextlib
 import logging
-import os
 from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import Session, text
 
 from api import router
 from core.config import settings
-from core.database import get_db, get_settings_db, init_db
+from core.database import get_settings_db, init_db, run_db
+from core.error_handlers import app_error_handler, generic_error_handler, validation_error_handler
+from core.exceptions import AppError
 from core.logging import RequestLoggingMiddleware, configure_logging
 from core.namespace import list_namespaces, namespace_paths, reset_namespace, set_namespace_context
 from modules.compute.manager import ProcessManager
@@ -72,38 +74,44 @@ async def scheduler_loop(stop_event: asyncio.Event, manager: ProcessManager) -> 
             for name in namespaces:
                 token = set_namespace_context(name)
                 try:
-                    for session in get_db():
-                        due = scheduler_service.get_due_schedules(session)
-                        if not due:
-                            logger.debug('No schedules due')
-                            break
-
-                        # Build schedule-level dependency order within each analysis group.
-                        # If schedule B depends_on schedule A, run A before B.
-                        due_by_id = {s.id: s for s in due}
-                        completed_schedule_ids: set[str] = set()
-
-                        sorted_schedules = _topo_sort_schedules(due, due_by_id)
-                        for sched in sorted_schedules:
-                            if sched.depends_on and sched.depends_on not in completed_schedule_ids and sched.depends_on in due_by_id:
-                                logger.warning(f'Scheduler: skipping schedule {sched.id} — dependency {sched.depends_on} did not complete')
-                                continue
-
-                            try:
-                                result = scheduler_service.execute_schedule(session, manager, sched.id)
-                                scheduler_service.mark_schedule_run(session, sched.id)
-                                completed_schedule_ids.add(sched.id)
-                                logger.info(
-                                    'Scheduler: execution complete for schedule %s (datasource=%s status=%s)',
-                                    sched.id,
-                                    sched.datasource_id,
-                                    result.get('status', 'unknown'),
-                                )
-                            except Exception as e:
-                                logger.error(f'Scheduler: execution failed for schedule {sched.id}: {e}', exc_info=True)
-                                # Still mark the schedule as run to prevent retry storms
-                                scheduler_service.mark_schedule_run(session, sched.id)
+                    due = await asyncio.to_thread(run_db, scheduler_service.get_due_schedules)
+                    if not due:
+                        logger.debug('No schedules due')
                         break
+
+                    due_by_id = {s.id: s for s in due}
+                    completed_schedule_ids: set[str] = set()
+
+                    sorted_schedules = _topo_sort_schedules(due, due_by_id)
+                    for sched in sorted_schedules:
+                        sched_id = sched.id
+                        if sched.depends_on and sched.depends_on not in completed_schedule_ids and sched.depends_on in due_by_id:
+                            logger.warning(f'Scheduler: skipping schedule {sched_id} — dependency {sched.depends_on} did not complete')
+                            continue
+
+                        try:
+
+                            def _execute_and_mark(session: Session, target_id: str = sched_id) -> dict:
+                                result = scheduler_service.execute_schedule(session, manager, target_id)
+                                scheduler_service.mark_schedule_run(session, target_id)
+                                return result
+
+                            result = await asyncio.to_thread(run_db, _execute_and_mark)
+                            completed_schedule_ids.add(sched.id)
+                            logger.info(
+                                'Scheduler: execution complete for schedule %s (datasource=%s status=%s)',
+                                sched_id,
+                                sched.datasource_id,
+                                result.get('status', 'unknown'),
+                            )
+                        except Exception as e:
+                            logger.error(f'Scheduler: execution failed for schedule {sched_id}: {e}', exc_info=True)
+
+                            def _mark(session: Session, target_id: str = sched_id) -> None:
+                                scheduler_service.mark_schedule_run(session, target_id)
+
+                            await asyncio.to_thread(run_db, _mark)
+                    break
                 finally:
                     reset_namespace(token)
         except Exception as e:
@@ -148,10 +156,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info('Starting application...')
     app.state.manager = ProcessManager()
-    init_db()
-    for session in get_db():
-        ensure_udf_seeds(session)
-        break
+    await init_db()
+    await asyncio.to_thread(run_db, ensure_udf_seeds)
 
     # Start background cleanup task
     stop_event = asyncio.Event()
@@ -163,12 +169,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from modules.telegram.bot import telegram_bot
 
     def _check_bot_enabled(session: Session) -> tuple[bool, str]:
-        from modules.settings.models import AppSettings
+        from modules.settings.service import get_resolved_telegram_settings
 
-        row = session.get(AppSettings, 1)
-        if row and row.telegram_bot_enabled and row.telegram_bot_token:
-            return True, row.telegram_bot_token
-        return False, ''
+        del session
+        resolved = get_resolved_telegram_settings()
+        enabled = bool(resolved.get('enabled'))
+        token = str(resolved.get('token', ''))
+        return enabled, token
 
     from core.database import run_settings_db
 
@@ -201,9 +208,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
+# Global exception handlers for consistent structured error responses
+app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(Exception, generic_error_handler)  # type: ignore[arg-type]
+
 
 @app.middleware('http')
-async def namespace_middleware(request: Request, call_next):
+async def namespace_middleware(request: Request, call_next) -> Response:
     token = set_namespace_context(request.headers.get('X-Namespace'))
     try:
         return await call_next(request)
@@ -216,8 +228,22 @@ app.add_middleware(
     allow_credentials=True,
     allow_origins=settings.cors_origins_list,
     allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allow_headers=['Content-Type', 'Authorization', 'X-Namespace'],
+    allow_headers=['Content-Type', 'Authorization', 'If-Match', 'X-Client-Id', 'X-Namespace', 'X-Session-Token'],
 )
+
+
+@app.middleware('http')
+async def security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '0'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    if not settings.debug:
+        response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains'
+    return response
+
 
 app.add_middleware(RequestLoggingMiddleware)
 
@@ -225,12 +251,11 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(router)
 
 
-@app.get('/')
-async def root():
-    prod_mode_enabled = os.getenv('PROD_MODE_ENABLED', 'false').lower() in ['true', '1', 'yes']
+@app.get('/', response_model=None)
+async def root() -> FileResponse | dict[str, str]:
     index_path = frontend_build_dir / 'index.html'
 
-    if prod_mode_enabled and index_path.exists():
+    if settings.prod_mode_enabled and index_path.exists():
         return FileResponse(str(index_path))
 
     return {'message': 'Welcome to Svelte-FastAPI Template'}
@@ -238,19 +263,17 @@ async def root():
 
 # Health Check Endpoints
 @app.get('/health')
-async def health():
+async def health() -> dict[str, str]:
     """Basic liveness check - returns 200 if app is running."""
     return {'status': 'healthy', 'service': settings.app_name, 'version': settings.app_version}
 
 
 @app.get('/health/ready')
-def readiness(request: Request, session: Session = Depends(get_settings_db)):
+async def readiness(request: Request, session: Session = Depends(get_settings_db)) -> JSONResponse:
     """
     Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
     """
-    from fastapi.responses import JSONResponse
-
     checks = {}
     is_ready = True
 
@@ -290,7 +313,7 @@ def readiness(request: Request, session: Session = Depends(get_settings_db)):
 
 
 @app.get('/health/startup')
-async def startup():
+async def startup() -> dict[str, str]:
     """
     Startup probe - quick check for container startup.
     Returns 200 when app is initialized and ready to accept traffic.
@@ -302,12 +325,9 @@ async def startup():
         return {'status': 'error', 'message': str(e)}
 
 
-@app.get('/{full_path:path}', include_in_schema=False)
-async def serve_static_or_index(full_path: str):
-    prod_mode_enabled = os.getenv('PROD_MODE_ENABLED', 'false').lower() in ['true', '1', 'yes']
-    frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
-
-    if not prod_mode_enabled:
+@app.get('/{full_path:path}', include_in_schema=False, response_model=None)
+async def serve_static_or_index(full_path: str) -> FileResponse:
+    if not settings.prod_mode_enabled:
         logger.info('Frontend build not served (development mode or build missing)')
         raise HTTPException(status_code=404, detail='Frontend build not found')
 
@@ -332,4 +352,4 @@ async def serve_static_or_index(full_path: str):
 if __name__ == '__main__':
     import uvicorn
 
-    uvicorn.run('main:app', host='0.0.0.0', port=8000, reload=True)
+    uvicorn.run('main:app', host='0.0.0.0', port=settings.port, reload=settings.debug)

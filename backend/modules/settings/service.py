@@ -1,44 +1,58 @@
 import logging
-import os
 
 from sqlmodel import Session, select
 
+from core.exceptions import SettingsConfigurationError
+from core.secrets import (
+    decrypt_secret,
+    encrypt_secret,
+    is_masked_secret,
+    mask_secret,
+    should_migrate_secret,
+)
 from modules.settings.models import AppSettings
 from modules.settings.schemas import SettingsResponse, SettingsUpdate
 
 logger = logging.getLogger(__name__)
-_ENCRYPTED_PREFIX = 'enc:'
 
 
-def _ensure_encryption_key() -> str:
-    key = os.getenv('SETTINGS_ENCRYPTION_KEY')
-    if not key:
-        raise ValueError('SETTINGS_ENCRYPTION_KEY must be set to encrypt SMTP passwords')
-    return key
-
-
-def _xor_bytes(payload: bytes, key: bytes) -> bytes:
-    return bytes(b ^ key[idx % len(key)] for idx, b in enumerate(payload))
-
-
-def _encrypt_password(password: str) -> str:
-    if not password:
+def _read_secret(row: AppSettings, field: str) -> str:
+    stored = str(getattr(row, field, '') or '')
+    if not stored:
         return ''
-    key = _ensure_encryption_key().encode('utf-8')
-    raw = password.encode('utf-8')
-    encrypted = _xor_bytes(raw, key)
-    return f'{_ENCRYPTED_PREFIX}{encrypted.hex()}'
+    value = decrypt_secret(stored)
+    if should_migrate_secret(stored):
+        setattr(row, field, encrypt_secret(value))
+    return value
 
 
-def _decrypt_password(value: str) -> str:
-    if not value:
-        return ''
-    if not value.startswith(_ENCRYPTED_PREFIX):
-        raise ValueError('Stored SMTP password must use encrypted storage')
-    key = _ensure_encryption_key().encode('utf-8')
-    encrypted = bytes.fromhex(value.removeprefix(_ENCRYPTED_PREFIX))
-    raw = _xor_bytes(encrypted, key)
-    return raw.decode('utf-8')
+def _write_secret(row: AppSettings, field: str, value: str) -> None:
+    setattr(row, field, encrypt_secret(value))
+
+
+def _resolve_updated_secret(row: AppSettings, field: str, value: str | None) -> str:
+    if value is None:
+        return _read_secret(row, field)
+    if is_masked_secret(value):
+        return _read_secret(row, field)
+    return value
+
+
+def _masked_settings_response(row: AppSettings) -> SettingsResponse:
+    smtp_password = _read_secret(row, 'smtp_password')
+    telegram_bot_token = _read_secret(row, 'telegram_bot_token')
+    openrouter_api_key = _read_secret(row, 'openrouter_api_key')
+    return SettingsResponse(
+        smtp_host=row.smtp_host,
+        smtp_port=row.smtp_port,
+        smtp_user=row.smtp_user,
+        smtp_password=mask_secret(smtp_password),
+        telegram_bot_token=mask_secret(telegram_bot_token),
+        telegram_bot_enabled=row.telegram_bot_enabled,
+        openrouter_api_key=mask_secret(openrouter_api_key),
+        openrouter_default_model=row.openrouter_default_model,
+        public_idb_debug=row.public_idb_debug,
+    )
 
 
 def seed_settings_from_env(session: Session) -> None:
@@ -72,20 +86,28 @@ def seed_settings_from_env(session: Session) -> None:
     bootstrap_complete = True
     if not row.smtp_password and app_settings.smtp_password:
         try:
-            row.smtp_password = _encrypt_password(app_settings.smtp_password)
+            _write_secret(row, 'smtp_password', app_settings.smtp_password)
             changed = True
-        except ValueError:
+        except SettingsConfigurationError:
             bootstrap_complete = False
             logger.warning('Skipping SMTP password bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
     if not row.telegram_bot_token and app_settings.telegram_bot_token:
-        row.telegram_bot_token = app_settings.telegram_bot_token
-        changed = True
+        try:
+            _write_secret(row, 'telegram_bot_token', app_settings.telegram_bot_token)
+            changed = True
+        except SettingsConfigurationError:
+            bootstrap_complete = False
+            logger.warning('Skipping Telegram token bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
     if not row.telegram_bot_enabled and app_settings.telegram_bot_enabled:
         row.telegram_bot_enabled = app_settings.telegram_bot_enabled
         changed = True
     if not row.openrouter_api_key and app_settings.openrouter_api_key:
-        row.openrouter_api_key = app_settings.openrouter_api_key
-        changed = True
+        try:
+            _write_secret(row, 'openrouter_api_key', app_settings.openrouter_api_key)
+            changed = True
+        except SettingsConfigurationError:
+            bootstrap_complete = False
+            logger.warning('Skipping OpenRouter key bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
     if not row.openrouter_default_model and app_settings.openrouter_default_model:
         row.openrouter_default_model = app_settings.openrouter_default_model
         changed = True
@@ -109,17 +131,18 @@ def get_settings(session: Session) -> SettingsResponse:
         session.commit()
         session.refresh(row)
 
-    return SettingsResponse(
-        smtp_host=row.smtp_host,
-        smtp_port=row.smtp_port,
-        smtp_user=row.smtp_user,
-        smtp_password=_decrypt_password(row.smtp_password),
-        telegram_bot_token=row.telegram_bot_token,
-        telegram_bot_enabled=row.telegram_bot_enabled,
-        openrouter_api_key=row.openrouter_api_key,
-        openrouter_default_model=row.openrouter_default_model,
-        public_idb_debug=row.public_idb_debug,
-    )
+    migrated = False
+    for field in ('smtp_password', 'telegram_bot_token', 'openrouter_api_key'):
+        stored = str(getattr(row, field, '') or '')
+        if should_migrate_secret(stored):
+            _read_secret(row, field)
+            migrated = True
+    if migrated:
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+
+    return _masked_settings_response(row)
 
 
 def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
@@ -128,30 +151,29 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
         row = AppSettings(id=1)
         session.add(row)
 
-    row.smtp_host = data.smtp_host
-    row.smtp_port = data.smtp_port
-    row.smtp_user = data.smtp_user
-    row.smtp_password = _encrypt_password(data.smtp_password)
-    row.telegram_bot_token = data.telegram_bot_token
-    row.telegram_bot_enabled = data.telegram_bot_enabled
-    row.openrouter_api_key = data.openrouter_api_key
-    row.openrouter_default_model = data.openrouter_default_model
+    if data.smtp_host is not None:
+        row.smtp_host = data.smtp_host
+    if data.smtp_port is not None:
+        row.smtp_port = data.smtp_port
+    if data.smtp_user is not None:
+        row.smtp_user = data.smtp_user
+    smtp_password = _resolve_updated_secret(row, 'smtp_password', data.smtp_password)
+    telegram_bot_token = _resolve_updated_secret(row, 'telegram_bot_token', data.telegram_bot_token)
+    openrouter_api_key = _resolve_updated_secret(row, 'openrouter_api_key', data.openrouter_api_key)
+    _write_secret(row, 'smtp_password', smtp_password)
+    _write_secret(row, 'telegram_bot_token', telegram_bot_token)
+    _write_secret(row, 'openrouter_api_key', openrouter_api_key)
+    if data.telegram_bot_enabled is not None:
+        row.telegram_bot_enabled = data.telegram_bot_enabled
+    if data.openrouter_default_model is not None:
+        row.openrouter_default_model = data.openrouter_default_model
     row.env_bootstrap_complete = True
-    row.public_idb_debug = data.public_idb_debug
+    if data.public_idb_debug is not None:
+        row.public_idb_debug = data.public_idb_debug
 
     session.commit()
     session.refresh(row)
-    return SettingsResponse(
-        smtp_host=row.smtp_host,
-        smtp_port=row.smtp_port,
-        smtp_user=row.smtp_user,
-        smtp_password=data.smtp_password,
-        telegram_bot_token=row.telegram_bot_token,
-        telegram_bot_enabled=row.telegram_bot_enabled,
-        openrouter_api_key=row.openrouter_api_key,
-        openrouter_default_model=row.openrouter_default_model,
-        public_idb_debug=row.public_idb_debug,
-    )
+    return _masked_settings_response(row)
 
 
 def get_resolved_smtp() -> dict[str, object]:
@@ -164,7 +186,7 @@ def get_resolved_smtp() -> dict[str, object]:
                 'host': row.smtp_host,
                 'port': row.smtp_port,
                 'user': row.smtp_user,
-                'password': _decrypt_password(row.smtp_password),
+                'password': _read_secret(row, 'smtp_password'),
             }
         return {
             'host': '',
@@ -187,7 +209,7 @@ def get_resolved_telegram_settings() -> dict[str, object]:
     def _read(session: Session) -> dict[str, object]:
         row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
         if row:
-            token = row.telegram_bot_token
+            token = _read_secret(row, 'telegram_bot_token')
             enabled = bool(row.telegram_bot_enabled and token)
             return {'enabled': enabled, 'token': token}
         return {'enabled': False, 'token': ''}
@@ -201,7 +223,7 @@ def get_resolved_openrouter_key() -> str:
     def _read(session: Session) -> str:
         row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
         if row:
-            return row.openrouter_api_key
+            return _read_secret(row, 'openrouter_api_key')
         return ''
 
     return run_settings_db(_read)

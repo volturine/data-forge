@@ -1,6 +1,6 @@
-import { apiRequest } from '$lib/api/client';
+import { apiRequest, BASE_URL } from './client';
 import type { ResultAsync } from 'neverthrow';
-import type { ApiError } from '$lib/api/client';
+import type { ApiError } from './client';
 
 export interface ChatSession {
 	session_id: string;
@@ -49,18 +49,61 @@ export interface ChatEvent {
 	duration_ms?: number;
 }
 
+export interface SessionActionResponse {
+	status: string;
+	session_id: string;
+}
+
+export interface ConfirmToolResponse {
+	status: string;
+	approved: boolean;
+}
+
+export interface CreateSessionPayload {
+	provider: string;
+	model: string;
+	api_key?: string;
+	system_prompt?: string;
+}
+
+export interface SendMessagePayload {
+	session_id: string;
+	content: string;
+	tool_ids?: string[];
+}
+
+export interface UpdateSessionPayload {
+	model?: string;
+	system_prompt?: string;
+	api_key?: string;
+}
+
+export interface OpenRouterModel {
+	id: string;
+	name: string;
+	context_length: number;
+}
+
+export interface ChatSessionInfo {
+	id: string;
+	model: string;
+	provider: string;
+	created_at: number;
+	preview: string;
+}
+
 export function createSession(
 	provider: string,
 	model: string,
 	apiKey?: string,
 	systemPrompt?: string
 ): ResultAsync<ChatSession, ApiError> {
-	const body: Record<string, string> = { provider, model };
-	if (apiKey) body.api_key = apiKey;
-	if (systemPrompt) body.system_prompt = systemPrompt;
+	const payload: CreateSessionPayload = { provider, model };
+	if (apiKey) payload.api_key = apiKey;
+	if (systemPrompt) payload.system_prompt = systemPrompt;
 	return apiRequest<ChatSession>('/v1/ai/chat/sessions', {
 		method: 'POST',
-		body: JSON.stringify(body)
+		body: JSON.stringify(payload)
 	});
 }
 
@@ -68,10 +111,10 @@ export function sendMessage(
 	sessionId: string,
 	content: string,
 	toolIds?: string[]
-): ResultAsync<{ status: string; session_id: string }, ApiError> {
-	const payload: Record<string, unknown> = { session_id: sessionId, content };
+): ResultAsync<SessionActionResponse, ApiError> {
+	const payload: SendMessagePayload = { session_id: sessionId, content };
 	if (toolIds && toolIds.length > 0) payload.tool_ids = toolIds;
-	return apiRequest('/v1/ai/chat/message', {
+	return apiRequest<SessionActionResponse>('/v1/ai/chat/message', {
 		method: 'POST',
 		body: JSON.stringify(payload)
 	});
@@ -83,7 +126,7 @@ export function getHistory(sessionId: string): ResultAsync<ChatHistoryResponse, 
 
 export function updateSession(
 	sessionId: string,
-	updates: { model?: string; system_prompt?: string; api_key?: string }
+	updates: UpdateSessionPayload
 ): ResultAsync<ChatSession, ApiError> {
 	return apiRequest<ChatSession>(`/v1/ai/chat/sessions/${sessionId}`, {
 		method: 'PATCH',
@@ -91,45 +134,35 @@ export function updateSession(
 	});
 }
 
-export function stopGeneration(
-	sessionId: string
-): ResultAsync<{ status: string; session_id: string }, ApiError> {
-	return apiRequest(`/v1/ai/chat/sessions/${sessionId}/stop`, { method: 'POST' });
+export function stopGeneration(sessionId: string): ResultAsync<SessionActionResponse, ApiError> {
+	return apiRequest<SessionActionResponse>(`/v1/ai/chat/sessions/${sessionId}/stop`, {
+		method: 'POST'
+	});
 }
 
 export function confirmTool(
 	sessionId: string,
 	approved: boolean
-): ResultAsync<{ status: string; approved: boolean }, ApiError> {
-	return apiRequest(`/v1/ai/chat/sessions/${sessionId}/confirm`, {
+): ResultAsync<ConfirmToolResponse, ApiError> {
+	return apiRequest<ConfirmToolResponse>(`/v1/ai/chat/sessions/${sessionId}/confirm`, {
 		method: 'POST',
 		body: JSON.stringify({ approved })
 	});
 }
 
-export function closeSession(
-	sessionId: string
-): ResultAsync<{ status: string; session_id: string }, ApiError> {
-	return apiRequest(`/v1/ai/chat/sessions/${sessionId}`, { method: 'DELETE' });
-}
-
-export interface OpenRouterModel {
-	id: string;
-	name: string;
-	context_length: number;
+export function closeSession(sessionId: string): ResultAsync<SessionActionResponse, ApiError> {
+	return apiRequest<SessionActionResponse>(`/v1/ai/chat/sessions/${sessionId}`, {
+		method: 'DELETE'
+	});
 }
 
 export function listModels(apiKey?: string): ResultAsync<OpenRouterModel[], ApiError> {
-	const params = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '';
-	return apiRequest<OpenRouterModel[]>(`/v1/ai/chat/models${params}`);
-}
-
-export interface ChatSessionInfo {
-	id: string;
-	model: string;
-	provider: string;
-	created_at: number;
-	preview: string;
+	const body: Record<string, string> = {};
+	if (apiKey) body.api_key = apiKey;
+	return apiRequest<OpenRouterModel[]>('/v1/ai/chat/models', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	});
 }
 
 export function listSessions(): ResultAsync<ChatSessionInfo[], ApiError> {
@@ -137,5 +170,5 @@ export function listSessions(): ResultAsync<ChatSessionInfo[], ApiError> {
 }
 
 export function openEventStream(sessionId: string): EventSource {
-	return new EventSource(`/api/v1/ai/chat/stream/${sessionId}`);
+	return new EventSource(`${BASE_URL}/v1/ai/chat/stream/${sessionId}`);
 }

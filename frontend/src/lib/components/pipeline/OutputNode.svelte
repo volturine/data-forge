@@ -255,7 +255,9 @@
 			iceberg: { namespace: 'outputs', table_name: 'export', branch: '' }
 		};
 		const nextOutput = { ...fallback, ...currentOutput, ...patch };
-		analysisStore.updateTab(tab.id, { output: nextOutput as unknown as AnalysisTabOutput });
+		analysisStore.updateTab(tab.id, {
+			output: nextOutput as unknown as AnalysisTabOutput
+		});
 	}
 
 	function updateIcebergConfig(patch: Record<string, unknown>) {
@@ -264,7 +266,15 @@
 	}
 
 	function ensureOutputConfig(): void {
-		return;
+		const tab = activeTab;
+		if (!tab) return;
+		const defaults = outputDefaults;
+		if (!defaults) return;
+		const currentOutput = tab.output as Record<string, unknown>;
+		const merged = { ...defaults, ...currentOutput };
+		analysisStore.updateTab(tab.id, {
+			output: merged as unknown as AnalysisTabOutput
+		});
 	}
 
 	function startNameEdit() {
@@ -349,7 +359,9 @@
 			datasourceStore.datasources
 		);
 		if (!pipeline) {
-			error = 'Unable to build analysis payload.';
+			error = datasourceStore.loaded
+				? 'Unable to build analysis payload.'
+				: 'Datasources are still loading. Please try again.';
 			building = false;
 			return;
 		}
@@ -437,7 +449,7 @@
 				<span
 					class={css({
 						fontSize: 'xs',
-						fontWeight: '600',
+						fontWeight: 'semibold',
 						textTransform: 'uppercase',
 						letterSpacing: 'wide'
 					})}
@@ -552,7 +564,7 @@
 						</button>
 					</div>
 				{:else}
-					<span class={css({ fontSize: 'sm', fontWeight: '500' })}>
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>
 						{outputConfig.iceberg.table_name}
 					</span>
 					<button
@@ -612,7 +624,7 @@
 				})}
 			>
 				<div class={rowBetween}>
-					<span class={css({ fontSize: 'sm', fontWeight: '600' })}>
+					<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
 						{outputConfig.iceberg.table_name}
 					</span>
 					<button
@@ -801,7 +813,7 @@
 					paddingY: '2',
 					paddingX: '3',
 					fontSize: 'xs',
-					fontWeight: '500',
+					fontWeight: 'medium',
 					color: 'fg.secondary',
 					_hover: {
 						backgroundColor: 'bg.tertiary',

@@ -151,6 +151,7 @@ def validate_analysis(
 def create_analysis(
     session: Session,  # type: ignore[type-arg]
     data: AnalysisCreateSchema,
+    owner_id: str | None = None,
 ) -> AnalysisResponseSchema:
     analysis_id = str(uuid.uuid4())
 
@@ -169,6 +170,7 @@ def create_analysis(
         status='draft',
         created_at=now,
         updated_at=now,
+        owner_id=owner_id,
     )
 
     transaction = session.begin_nested() if session.in_transaction() else session.begin()

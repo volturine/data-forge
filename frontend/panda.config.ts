@@ -1,6 +1,5 @@
 import { defineConfig } from '@pandacss/dev';
 import {
-	navLink,
 	iconButton,
 	button,
 	spinner,
@@ -140,7 +139,6 @@ export default defineConfig({
 				}
 			},
 			recipes: {
-				navLink,
 				iconButton,
 				button,
 				spinner,
@@ -198,6 +196,7 @@ export default defineConfig({
 					xxs: { value: '1px' },
 					xs: { value: '2px' },
 					md: { value: '3px' },
+					md2: { value: '4px' },
 					sm2: { value: '6px' },
 					pill: { value: '20px' },
 					full: { value: '9999px' }
@@ -258,7 +257,12 @@ export default defineConfig({
 					colXl: { value: '12rem' },
 					previewMd: { value: '14rem' },
 					previewLg: { value: '16rem' },
-					previewXl: { value: '18rem' }
+					previewXl: { value: '18rem' },
+					sidebarExpanded: { value: '220px' },
+					sidebarCollapsed: { value: '56px' },
+					panelSm: { value: '20rem' },
+					panelMd: { value: '25rem' },
+					panelLg: { value: '30rem' }
 				},
 				zIndex: {
 					header: { value: '100' },
@@ -305,7 +309,7 @@ export default defineConfig({
 					secondary: { value: { base: '#27272a', _dark: '#d4d4d4' } }
 				},
 				border: {
-					primary: { value: { base: '#e0e0e0', _dark: 'rgba(43, 43, 43, 0.663)' } },
+					primary: { value: { base: '#e0e0e0', _dark: '#2b2b2b' } },
 					error: { value: { base: '#dc2626', _dark: '#991b1b' } },
 					accent: { value: { base: '#09090b', _dark: '#fafafa' } },
 					success: { value: { base: '#16a34a', _dark: '#86efac' } },

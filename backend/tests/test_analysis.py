@@ -1,9 +1,13 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
+from main import app
 from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.auth.dependencies import get_optional_user
 from modules.datasource.models import DataSource
+from modules.locks.models import ResourceLock
 
 
 class TestAnalysisCreate:
@@ -310,6 +314,45 @@ class TestAnalysisCreate:
         assert len(result['pipeline_definition']['tabs']) == 2
         assert result['pipeline_definition']['tabs'][1]['datasource']['id'] == tab1_result_id
 
+    def test_create_analysis_sets_owner_id_when_optional_user_present(
+        self,
+        client,
+        sample_datasource: DataSource,
+        test_db_session,
+        test_user,
+        monkeypatch,
+    ):
+        monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
+        payload = {
+            'name': 'Owned Analysis',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'owned_source',
+                    },
+                    'steps': [],
+                }
+            ],
+        }
+
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 200
+        analysis_id = response.json()['id']
+        created = test_db_session.get(Analysis, analysis_id)
+        assert created is not None
+        assert created.owner_id == test_user.id
+
 
 class TestAnalysisGet:
     def test_get_analysis_success(self, client, sample_analysis: Analysis):
@@ -371,6 +414,62 @@ class TestAnalysisList:
 
 
 class TestAnalysisUpdate:
+    def test_update_analysis_sets_version_headers(self, client, sample_analysis: Analysis):
+        current = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        payload = {
+            'name': 'Updated Analysis Name',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
+        }
+
+        response = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json=payload,
+            headers={'If-Match': current.headers['ETag']},
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert response.headers['X-Analysis-Version'] == result['updated_at']
+        assert response.headers['ETag'] == f'"analysis-{result["id"]}-{result["updated_at"]}"'
+
+    def test_update_analysis_rejects_stale_if_match(self, client, sample_analysis: Analysis):
+        payload = {
+            'name': 'Updated Analysis Name',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
+        }
+
+        response = client.put(
+            f'/api/v1/analysis/{sample_analysis.id}',
+            json=payload,
+            headers={'If-Match': '"analysis-stale"'},
+        )
+
+        assert response.status_code == 412
+        assert response.json()['detail'] == 'Analysis version mismatch'
+
+    def test_update_analysis_blocked_when_locked_by_another_owner(self, client, sample_analysis: Analysis, test_db_session):
+        now = datetime.now(UTC).replace(tzinfo=None)
+        row = ResourceLock(
+            resource_type='analysis',
+            resource_id=sample_analysis.id,
+            owner_id='other-owner',
+            lock_token='lock-token',
+            acquired_at=now,
+            expires_at=now + timedelta(minutes=5),
+            last_heartbeat=now,
+        )
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        payload = {
+            'name': 'Updated Analysis Name',
+            'tabs': sample_analysis.pipeline_definition['tabs'],
+        }
+        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
+
+        assert response.status_code == 409
+        assert 'locked by another owner' in response.json()['detail']
+
     def test_update_analysis_name(self, client, sample_analysis: Analysis):
         payload = {
             'name': 'Updated Analysis Name',
@@ -633,6 +732,31 @@ class TestStepTypes:
 
 
 class TestAddStep:
+    def test_add_step_blocked_when_locked_by_another_owner(self, client, sample_analysis: Analysis, test_db_session):
+        tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
+        now = datetime.now(UTC).replace(tzinfo=None)
+        row = ResourceLock(
+            resource_type='analysis',
+            resource_id=sample_analysis.id,
+            owner_id='other-owner',
+            lock_token='lock-token',
+            acquired_at=now,
+            expires_at=now + timedelta(minutes=5),
+            last_heartbeat=now,
+        )
+        test_db_session.add(row)
+        test_db_session.commit()
+
+        payload = {
+            'type': 'select',
+            'config': {'columns': ['name', 'age']},
+        }
+
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/{tab_id}/steps', json=payload)
+
+        assert response.status_code == 409
+        assert 'locked by another owner' in response.json()['detail']
+
     def test_add_step_success(self, client, sample_analysis: Analysis):
         tab_id = sample_analysis.pipeline_definition['tabs'][0]['id']
         payload = {

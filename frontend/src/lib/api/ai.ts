@@ -1,4 +1,6 @@
-import { apiRequest } from '$lib/api/client';
+import type { ResultAsync } from 'neverthrow';
+import { apiRequest } from './client';
+import type { ApiError } from './client';
 
 export interface AIModel {
 	name: string;
@@ -14,20 +16,26 @@ export function listAIModels(
 	provider: string,
 	endpointUrl?: string | null,
 	apiKey?: string | null
-) {
-	const params = new URLSearchParams({ provider });
-	if (endpointUrl) params.set('endpoint_url', endpointUrl);
-	if (apiKey) params.set('api_key', apiKey);
-	return apiRequest<AIModel[]>(`/v1/ai/models?${params}`);
+): ResultAsync<AIModel[], ApiError> {
+	const body: Record<string, string> = { provider };
+	if (endpointUrl) body.endpoint_url = endpointUrl;
+	if (apiKey) body.api_key = apiKey;
+	return apiRequest<AIModel[]>('/v1/ai/models', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	});
 }
 
 export function testAIConnection(
 	provider: string,
 	endpointUrl?: string | null,
 	apiKey?: string | null
-) {
-	const params = new URLSearchParams({ provider });
-	if (endpointUrl) params.set('endpoint_url', endpointUrl);
-	if (apiKey) params.set('api_key', apiKey);
-	return apiRequest<AIConnectionResult>(`/v1/ai/test?${params}`);
+): ResultAsync<AIConnectionResult, ApiError> {
+	const body: Record<string, string> = { provider };
+	if (endpointUrl) body.endpoint_url = endpointUrl;
+	if (apiKey) body.api_key = apiKey;
+	return apiRequest<AIConnectionResult>('/v1/ai/test', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	});
 }

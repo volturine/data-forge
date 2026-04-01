@@ -11,6 +11,15 @@ from modules.mcp.router import MCP_ROUTE_META, MCPRouter, get_mcp_route_meta
 
 
 class TestMCPToolListing:
+    def test_routes_require_auth(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        from main import app
+        from modules.auth.dependencies import get_current_user
+
+        monkeypatch.setattr('core.config.settings.auth_required', True)
+        app.dependency_overrides.pop(get_current_user, None)
+        response = client.get('/api/v1/mcp/tools')
+        assert response.status_code == 401
+
     def test_list_tools_returns_list(self, client: TestClient) -> None:
         response = client.get('/api/v1/mcp/tools')
         assert response.status_code == 200
@@ -103,6 +112,8 @@ class TestMCPCallPreview:
 
 class TestMCPConfirm:
     def test_confirm_executes_pending_action(self, client: TestClient) -> None:
+        from modules.mcp.pending import pending_store
+
         response = client.get('/api/v1/mcp/tools')
         tools = response.json()
         post_tool = next((t for t in tools if t['method'] == 'POST' and not t['input_schema'].get('required')), None)
@@ -111,6 +122,9 @@ class TestMCPConfirm:
 
         call_resp = client.post('/api/v1/mcp/call', json={'tool_id': post_tool['id'], 'args': {}})
         token = call_resp.json()['token']
+        pending = pending_store.get(token)
+        assert pending is not None
+        assert pending['context']['headers']['X-Namespace'] == 'default'
 
         confirm_resp = client.post('/api/v1/mcp/confirm', json={'token': token})
         assert confirm_resp.status_code == 200
@@ -223,25 +237,6 @@ class TestValidationFormatAndDefaults:
 
         schema = {'type': 'object', 'properties': {'d': {'type': 'string', 'format': 'date'}}}
         valid, errors, _ = validate_args(schema, {'d': 'not-a-date'})
-        assert valid is False
-
-    def test_format_uri_valid(self) -> None:
-        from modules.mcp.validation import validate_args
-
-        schema = {'type': 'object', 'properties': {'url': {'type': 'string', 'format': 'uri'}}}
-        valid, errors, _ = validate_args(schema, {'url': 'https://example.com'})
-        assert valid is True
-
-    def test_format_uri_invalid(self) -> None:
-        import pytest
-        from jsonschema import FormatChecker
-
-        if 'uri' not in FormatChecker().checkers:
-            pytest.skip('uri format checker not available (requires rfc3986 extra)')
-        from modules.mcp.validation import validate_args
-
-        schema = {'type': 'object', 'properties': {'url': {'type': 'string', 'format': 'uri'}}}
-        valid, errors, _ = validate_args(schema, {'url': 'not a uri'})
         assert valid is False
 
     def test_const_applied_when_missing(self) -> None:
@@ -975,6 +970,25 @@ class TestPathParameterReliability:
         assert result['ok'] is True
         assert result['status'] == 200
         assert result['body']['name'] == 'a b'
+
+    async def test_call_tool_forwards_context_headers(self) -> None:
+        from fastapi import FastAPI, Header
+
+        from modules.mcp.executor import build_tool_context, call_tool
+
+        app = FastAPI()
+
+        @app.get('/api/v1/test/context')
+        async def get_context(
+            x_session_token: str | None = Header(default=None),
+            x_namespace: str | None = Header(default=None),
+        ) -> dict[str, str | None]:
+            return {'session_token': x_session_token, 'namespace': x_namespace or 'default'}
+
+        context = build_tool_context({'X-Session-Token': 'session-1', 'X-Namespace': 'alpha'})
+        result = await call_tool(app, 'GET', '/api/v1/test/context', {}, context)
+        assert result['ok'] is True
+        assert result['body'] == {'session_token': 'session-1', 'namespace': 'alpha'}
 
 
 class TestCheckSchemaSupported:

@@ -11,6 +11,7 @@ export class DatasourceStore {
 	datasources = $state<DataSource[]>([]);
 	schemas = $state(new SvelteMap<string, SchemaInfo>());
 	loading = $state(false);
+	loaded = $state(false);
 	error = $state<string | null>(null);
 
 	async loadDatasources(includeHidden: boolean = false): Promise<void> {
@@ -21,10 +22,12 @@ export class DatasourceStore {
 			(datasources) => {
 				this.datasources = datasources;
 				this.loading = false;
+				this.loaded = true;
 			},
 			(err) => {
 				this.error = err.message;
 				this.loading = false;
+				this.loaded = true;
 			}
 		);
 	}
@@ -101,6 +104,7 @@ export class DatasourceStore {
 		this.schemas.clear();
 		this.error = null;
 		this.loading = false;
+		this.loaded = false;
 	}
 }
 

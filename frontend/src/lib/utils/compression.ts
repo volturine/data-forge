@@ -43,7 +43,7 @@ export async function decompress<T>(compressed: string): Promise<T | null> {
 	try {
 		const stream = new DecompressionStream('gzip');
 		const writer = stream.writable.getWriter();
-		await writer.write(base64ToArrayBuffer(compressed) as unknown as BufferSource);
+		await writer.write(base64ToArrayBuffer(compressed));
 		await writer.close();
 		const result = await collectStream(stream.readable);
 		return JSON.parse(new TextDecoder().decode(result)) as T;
@@ -77,6 +77,10 @@ function arrayBufferToBase64(buffer: Uint8Array): string {
 /**
  * Convert base64 string to Uint8Array
  */
-function base64ToArrayBuffer(base64: string): Uint8Array {
-	return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+function base64ToArrayBuffer(base64: string): Uint8Array<ArrayBuffer> {
+	const raw = atob(base64);
+	const buffer = new ArrayBuffer(raw.length);
+	const view = new Uint8Array(buffer);
+	for (let i = 0; i < raw.length; i++) view[i] = raw.charCodeAt(i);
+	return view;
 }

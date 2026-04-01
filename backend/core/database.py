@@ -1,6 +1,7 @@
+import asyncio
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -29,6 +30,7 @@ settings_engine = create_engine(
 _enable_sqlite_pragmas(settings_engine)
 
 _namespace_engines: OrderedDict[str, Engine] = OrderedDict()
+_namespace_engines_lock = asyncio.Lock()
 _MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
@@ -36,6 +38,14 @@ _engine_override: Engine | None = None
 
 P = ParamSpec('P')
 T = TypeVar('T')
+
+
+def _run_async(value: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(value)
+    raise RuntimeError('Cannot synchronously access namespace database while the event loop is running')
 
 
 def set_engine_override(test_engine: Engine):
@@ -49,7 +59,7 @@ def clear_engine_override():
 
 
 def get_db():
-    engine_to_use = _engine_override or _get_namespace_engine()
+    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
     with Session(engine_to_use) as session:
         yield session
 
@@ -60,7 +70,7 @@ def get_settings_db():
 
 
 def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    engine_to_use = _engine_override or _get_namespace_engine()
+    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
 
@@ -70,26 +80,33 @@ def run_settings_db(func: Callable[Concatenate[Session, P], T], *args: P.args, *
         return func(session, *args, **kwargs)
 
 
-def init_db() -> None:
+async def init_db() -> None:
     _init_settings_db()
     namespaces = list_namespaces()
     if not namespaces:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
         namespace_paths(namespace)
-        _init_namespace_db(namespace)
+        await _init_namespace_db(namespace)
 
 
 def _init_settings_db() -> None:
+    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+    from modules.auth.service import ensure_default_user
     from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
     from modules.settings.service import seed_settings_from_env
 
     AppSettings.metadata.create_all(settings_engine)
     ChatSession.metadata.create_all(settings_engine)
+    User.metadata.create_all(settings_engine)
+    AuthProvider.metadata.create_all(settings_engine)
+    UserSession.metadata.create_all(settings_engine)
+    VerificationToken.metadata.create_all(settings_engine)
     _run_settings_migrations(settings_engine)
     with Session(settings_engine) as session:
         seed_settings_from_env(session)
+        ensure_default_user(session)
 
 
 def _run_settings_migrations(db_engine: Engine) -> None:
@@ -138,6 +155,18 @@ def _run_namespace_migrations(db_engine: Engine) -> None:
             pending.append('ALTER TABLE datasources ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT 0')
         if 'created_by' not in ds_columns:
             pending.append("ALTER TABLE datasources ADD COLUMN created_by TEXT NOT NULL DEFAULT 'import'")
+        if 'owner_id' not in ds_columns:
+            pending.append('ALTER TABLE datasources ADD COLUMN owner_id TEXT')
+
+    if inspector.has_table('analyses'):
+        analysis_columns = {col['name'] for col in inspector.get_columns('analyses')}
+        if 'owner_id' not in analysis_columns:
+            pending.append('ALTER TABLE analyses ADD COLUMN owner_id TEXT')
+
+    if inspector.has_table('udfs'):
+        udf_columns = {col['name'] for col in inspector.get_columns('udfs')}
+        if 'owner_id' not in udf_columns:
+            pending.append('ALTER TABLE udfs ADD COLUMN owner_id TEXT')
 
     if inspector.has_table('schedules'):
         sched_columns = {col['name'] for col in inspector.get_columns('schedules')}
@@ -160,23 +189,29 @@ def _run_namespace_migrations(db_engine: Engine) -> None:
             conn.commit()
 
 
-def _get_namespace_engine() -> Engine:
+async def _get_namespace_engine() -> Engine:
     namespace = get_namespace()
-    if namespace in _namespace_engines:
-        _namespace_engines.move_to_end(namespace)
-        return _namespace_engines[namespace]
-    if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
-        oldest = next(iter(_namespace_engines))
-        del _namespace_engines[oldest]
-    paths = namespace_paths(namespace)
-    engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
-    _enable_sqlite_pragmas(engine)
-    _namespace_engines[namespace] = engine
-    _init_namespace_db(namespace)
-    return engine
+    async with _namespace_engines_lock:
+        if namespace in _namespace_engines:
+            _namespace_engines.move_to_end(namespace)
+            return _namespace_engines[namespace]
+        if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
+            oldest = next(iter(_namespace_engines))
+            del _namespace_engines[oldest]
+        paths = namespace_paths(namespace)
+        engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
+        _enable_sqlite_pragmas(engine)
+        _namespace_engines[namespace] = engine
+        _init_namespace_db_unlocked(namespace)
+        return engine
 
 
-def _init_namespace_db(namespace: str) -> None:
+async def _init_namespace_db(namespace: str) -> None:
+    async with _namespace_engines_lock:
+        _init_namespace_db_unlocked(namespace)
+
+
+def _init_namespace_db_unlocked(namespace: str) -> None:
     namespace_engine = _namespace_engines.get(namespace)
     if not namespace_engine:
         paths = namespace_paths(namespace)
@@ -192,6 +227,7 @@ def _init_namespace_db(namespace: str) -> None:
     from modules.datasource.models import DataSource
     from modules.engine_runs.models import EngineRun
     from modules.healthcheck.models import HealthCheck, HealthCheckResult
+    from modules.locks.models import ResourceLock
     from modules.scheduler.models import Schedule
     from modules.telegram.models import TelegramListener, TelegramSubscriber
     from modules.udf.models import Udf
@@ -203,6 +239,7 @@ def _init_namespace_db(namespace: str) -> None:
     EngineRun.metadata.create_all(namespace_engine)
     HealthCheck.metadata.create_all(namespace_engine)
     HealthCheckResult.metadata.create_all(namespace_engine)
+    ResourceLock.metadata.create_all(namespace_engine)
     Schedule.metadata.create_all(namespace_engine)
     TelegramListener.metadata.create_all(namespace_engine)
     TelegramSubscriber.metadata.create_all(namespace_engine)

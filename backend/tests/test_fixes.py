@@ -989,6 +989,16 @@ class TestSafeBuiltinsUdf:
         with pytest.raises((NameError, TypeError)):
             self._run_udf('def udf(): return open("/etc/passwd")')
 
+    def test_dunder_escape_blocked_before_exec(self):
+        from modules.compute.operations.with_columns import WithColumnsHandler
+
+        handler = WithColumnsHandler()
+        with pytest.raises(ValueError, match='forbidden dunder access'):
+            handler(
+                pl.DataFrame({'id': [1]}).lazy(),
+                {'expressions': [{'name': 'bad', 'type': 'udf', 'code': 'def udf():\n    return [].__class__'}]},
+            )
+
     def test_safe_arithmetic_works(self):
         result = self._run_udf('def udf(): return 2 + 2')
         assert result == 4

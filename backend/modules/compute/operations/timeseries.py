@@ -28,6 +28,15 @@ _DURATION_BUILDERS: dict[str, Callable[[int], pl.Expr]] = {
     'weeks': lambda value: pl.duration(weeks=value),
 }
 
+_EVERY_MAP: dict[str, str] = {
+    'seconds': '1s',
+    'minutes': '1m',
+    'hours': '1h',
+    'days': '1d',
+    'weeks': '1w',
+    'months': '1mo',
+}
+
 
 def get_extractor(component: str) -> str:
     if component not in _VALID_COMPONENTS:
@@ -84,5 +93,14 @@ class TimeseriesHandler(OperationHandler):
             if not validated.column2:
                 raise ValueError('timeseries operation requires column2 parameter')
             return lf.with_columns((pl.col(validated.column2) - pl.col(validated.column)).alias(validated.new_column))
+
+        if validated.operation_type in {'truncate', 'round'}:
+            if not validated.unit:
+                raise ValueError('timeseries truncate/round requires unit parameter')
+            every = _EVERY_MAP.get(validated.unit)
+            if not every:
+                raise ValueError(f'Unsupported truncate/round unit: {validated.unit}')
+            method = getattr(pl.col(validated.column).dt, validated.operation_type)
+            return lf.with_columns(method(every).alias(validated.new_column))
 
         raise ValueError(f'Unsupported timeseries operation: {validated.operation_type}')

@@ -30,22 +30,32 @@
 		datasourceStore.datasources.find((ds) => ds.id === currentTabDatasource)
 	);
 	const datasourceOptions = $derived(datasourceStore.datasources);
+	const ready = $derived(datasourceStore.loaded);
 
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping only, never read by template
 	const loaded = new Set<string>();
+	let pending = $state(0);
+	const loading = $derived(pending > 0);
 
 	async function loadSourceSchema(datasourceId: string) {
 		loaded.add(datasourceId);
-		const schemaInfo = await datasourceStore.getSchema(datasourceId);
-		const unionSchema: Schema = {
-			columns: schemaInfo.columns.map((c) => ({
-				name: c.name,
-				dtype: c.dtype,
-				nullable: c.nullable
-			})),
-			row_count: schemaInfo.row_count
-		};
-		schemaStore.setJoinDatasource(datasourceId, unionSchema);
+		pending += 1;
+		try {
+			const schemaInfo = await datasourceStore.getSchema(datasourceId);
+			const unionSchema: Schema = {
+				columns: schemaInfo.columns.map((c) => ({
+					name: c.name,
+					dtype: c.dtype,
+					nullable: c.nullable
+				})),
+				row_count: schemaInfo.row_count
+			};
+			schemaStore.setJoinDatasource(datasourceId, unionSchema);
+		} catch {
+			loaded.delete(datasourceId);
+		} finally {
+			pending -= 1;
+		}
 	}
 
 	function removeSourceSchema(datasourceId: string) {
@@ -66,7 +76,7 @@
 	});
 </script>
 
-<div class={stepConfig()}>
+<div class={stepConfig()} data-ready={ready || undefined} data-loading={loading || undefined}>
 	<p
 		class={css({
 			marginTop: '0',

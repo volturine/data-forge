@@ -86,7 +86,7 @@
 				marginTop: '0',
 				marginBottom: '3',
 				fontSize: 'xs',
-				fontWeight: '600',
+				fontWeight: 'semibold',
 				color: 'fg.muted',
 				textTransform: 'uppercase',
 				letterSpacing: 'wide3'
@@ -153,7 +153,7 @@
 				marginTop: '0',
 				marginBottom: '3',
 				fontSize: 'xs',
-				fontWeight: '600',
+				fontWeight: 'semibold',
 				color: 'fg.muted',
 				textTransform: 'uppercase',
 				letterSpacing: 'wide3'
@@ -192,7 +192,7 @@
 					marginTop: '0',
 					marginBottom: '3',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					color: 'fg.muted',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide3'
@@ -281,7 +281,7 @@
 					marginTop: '0',
 					marginBottom: '3',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					color: 'fg.muted',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide3'
@@ -369,7 +369,7 @@
 					marginTop: '0',
 					marginBottom: '3',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					color: 'fg.muted',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide3'
@@ -456,7 +456,7 @@
 					marginTop: '0',
 					marginBottom: '3',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					color: 'fg.muted',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide3'
@@ -514,7 +514,7 @@
 					marginTop: '0',
 					marginBottom: '3',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					color: 'fg.muted',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide3'
@@ -608,7 +608,7 @@
 				marginTop: '0',
 				marginBottom: '3',
 				fontSize: 'xs',
-				fontWeight: '600',
+				fontWeight: 'semibold',
 				color: 'fg.muted',
 				textTransform: 'uppercase',
 				letterSpacing: 'wide3'

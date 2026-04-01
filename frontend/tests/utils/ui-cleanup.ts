@@ -1,5 +1,25 @@
 import type { Page } from '@playwright/test';
 
+interface NamedItem {
+	id: string;
+	name: string;
+}
+
+async function deleteByName(
+	page: Page,
+	listUrl: string,
+	deleteUrl: (id: string) => string,
+	name: string
+) {
+	const list = await page.request.get(listUrl);
+	if (!list.ok()) return;
+	const items = (await list.json()) as NamedItem[];
+	const matches = items.filter((item) => item.name === name);
+	for (const item of matches) {
+		await page.request.delete(deleteUrl(item.id));
+	}
+}
+
 /**
  * UI-based cleanup helpers. Each function navigates to the relevant page,
  * finds the resource by name, and deletes it through the application's own
@@ -15,8 +35,9 @@ export async function deleteDatasourceViaUI(page: Page, name: string): Promise<v
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await page.getByText(name).waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort — global teardown will catch stragglers
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteDatasourceViaUI failed for "${name}":`, e);
+		await deleteByName(page, '/api/v1/datasource', (id) => `/api/v1/datasource/${id}`, name);
 	}
 }
 
@@ -30,8 +51,9 @@ export async function deleteAnalysisViaUI(page: Page, name: string): Promise<voi
 		await page
 			.locator(`[data-analysis-card="${name}"]`)
 			.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteAnalysisViaUI failed for "${name}":`, e);
+		await deleteByName(page, '/api/v1/analysis', (id) => `/api/v1/analysis/${id}`, name);
 	}
 }
 
@@ -45,8 +67,8 @@ export async function deleteUdfViaUI(page: Page, name: string): Promise<void> {
 			.locator(`[data-udf-card="${name}"]`)
 			.first()
 			.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteUdfViaUI failed for "${name}":`, e);
 	}
 }
 
@@ -60,8 +82,8 @@ export async function deleteScheduleViaUI(page: Page, cronOrName: string): Promi
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await text.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteScheduleViaUI failed for "${cronOrName}":`, e);
 	}
 }
 
@@ -75,7 +97,7 @@ export async function deleteHealthCheckViaUI(page: Page, name: string): Promise<
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await text.waitFor({ state: 'hidden', timeout: 8_000 });
-	} catch {
-		// Best-effort
+	} catch (e: unknown) {
+		console.warn(`[ui-cleanup] deleteHealthCheckViaUI failed for "${name}":`, e);
 	}
 }

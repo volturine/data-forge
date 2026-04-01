@@ -126,6 +126,7 @@ def create_file_datasource(
     table_name: str | None = None,
     named_range: str | None = None,
     cell_range: str | None = None,
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     resolved_path = Path(os.path.realpath(Path(file_path).resolve()))
@@ -174,6 +175,7 @@ def create_file_datasource(
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -532,6 +534,7 @@ def create_database_datasource(
     connection_string: str,
     query: str,
     branch: str = 'master',
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     branch_name = branch
@@ -555,6 +558,7 @@ def create_database_datasource(
                 name=name,
                 source_type=DataSourceType.DATABASE,
                 config=source_config,
+                owner_id=owner_id,
                 created_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.add(datasource)
@@ -578,6 +582,7 @@ def create_database_datasource(
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -594,6 +599,7 @@ def create_iceberg_datasource(
     name: str,
     source: dict,
     branch: str = 'master',
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     source_type = source.get('source_type') if isinstance(source, dict) else None
     if source_type not in {DataSourceType.FILE, DataSourceType.DATABASE}:
@@ -645,6 +651,7 @@ def create_iceberg_datasource(
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -1599,58 +1606,83 @@ def delete_datasource(session: Session, datasource_id: str) -> None:
     logger.info(f'Deleted datasource {datasource_id}')
 
 
-def _delete_datasource_files(datasource: DataSource) -> None:
-    # Delete associated file if it's a file datasource (original file in uploads)
-    if datasource.source_type == 'file' and 'file_path' in datasource.config:
-        file_path = Path(datasource.config['file_path'])
-        if file_path.exists():
-            try:
-                # Check if file is accessible before deletion
-                if not file_path.is_file():
-                    logger.warning(f'Path exists but is not a file: {file_path}')
-                else:
-                    file_path.unlink()
-                    logger.info(f'Deleted file: {file_path}')
-            except PermissionError as e:
-                logger.error(f'Permission denied when deleting file {file_path}: {e}')
-                raise FileError(
-                    f'Permission denied when deleting file: {file_path}',
-                    error_code='FILE_PERMISSION_DENIED',
-                    details={'file_path': str(file_path)},
-                )
-            except OSError as e:
-                logger.error(f'OS error when deleting file {file_path}: {e}')
-                raise FileError(
-                    f'Failed to delete file: {file_path}',
-                    error_code='FILE_DELETE_ERROR',
-                    details={'file_path': str(file_path), 'error': str(e)},
-                )
+def _delete_file_path(file_path: str) -> None:
+    path = Path(file_path)
+    if not path.exists():
+        return
+    try:
+        if not path.is_file():
+            logger.warning(f'Path exists but is not a file: {path}')
+            return
+        path.unlink()
+        logger.info(f'Deleted file: {path}')
+    except PermissionError as exc:
+        logger.error(f'Permission denied when deleting file {path}: {exc}')
+        raise FileError(
+            f'Permission denied when deleting file: {path}',
+            error_code='FILE_PERMISSION_DENIED',
+            details={'file_path': str(path)},
+        ) from exc
+    except OSError as exc:
+        logger.error(f'OS error when deleting file {path}: {exc}')
+        raise FileError(
+            f'Failed to delete file: {path}',
+            error_code='FILE_DELETE_ERROR',
+            details={'file_path': str(path), 'error': str(exc)},
+        ) from exc
 
-    # Delete Iceberg datasource files from clean or exports directory
-    if datasource.source_type == 'iceberg' and isinstance(datasource.config, dict):
+
+def _iceberg_cleanup_root(metadata_path: str) -> Path | None:
+    path = Path(os.path.realpath(metadata_path))
+    start = path if path.is_dir() else path.parent
+    paths = namespace_paths()
+    clean_dir = Path(os.path.realpath(paths.clean_dir))
+    exports_dir = Path(os.path.realpath(paths.exports_dir))
+
+    for candidate in [start, *start.parents]:
+        if candidate.parent == clean_dir or candidate.parent == exports_dir:
+            return candidate
+        if candidate in (clean_dir, exports_dir):
+            return None
+    return None
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    resolved_path = Path(os.path.realpath(path))
+    resolved_root = Path(os.path.realpath(root))
+    return resolved_root in resolved_path.parents or resolved_root == resolved_path
+
+
+def _delete_datasource_files(datasource: DataSource) -> None:
+    if datasource.source_type == DataSourceType.FILE and 'file_path' in datasource.config:
+        _delete_file_path(str(datasource.config['file_path']))
+
+    if datasource.source_type == DataSourceType.ICEBERG and isinstance(datasource.config, dict):
         config = datasource.config
         metadata_path = config.get('metadata_path')
-        if metadata_path:
-            metadata_path_obj = Path(metadata_path)
-            paths = namespace_paths()
-            exports_dir = paths.exports_dir
-            clean_dir = paths.clean_dir
-
-            # Determine if this is in exports_dir or clean_dir
-            is_under_exports = exports_dir in metadata_path_obj.parents or metadata_path_obj.parent == exports_dir
-            is_under_clean = clean_dir in metadata_path_obj.parents or metadata_path_obj.parent == clean_dir
-
-            if is_under_exports or is_under_clean:
-                # This is an exported or ingested datasource - delete the entire directory
-                parent_dir = metadata_path_obj.parent
+        if isinstance(metadata_path, str):
+            root = _iceberg_cleanup_root(metadata_path)
+            if root:
                 try:
-                    if parent_dir.exists() and parent_dir.is_dir():
-                        shutil.rmtree(parent_dir)
-                        logger.info(f'Deleted Iceberg directory: {parent_dir}')
-                except OSError as e:
-                    logger.error(f'OS error when deleting Iceberg directory {parent_dir}: {e}')
+                    if root.exists() and root.is_dir():
+                        shutil.rmtree(root)
+                        logger.info(f'Deleted Iceberg directory: {root}')
+                except OSError as exc:
+                    logger.error(f'OS error when deleting Iceberg directory {root}: {exc}')
                     raise FileError(
-                        f'Failed to delete Iceberg directory: {parent_dir}',
+                        f'Failed to delete Iceberg directory: {root}',
                         error_code='FILE_DELETE_ERROR',
-                        details={'path': str(parent_dir), 'error': str(e)},
-                    )
+                        details={'path': str(root), 'error': str(exc)},
+                    ) from exc
+
+        source = config.get('source')
+        if not isinstance(source, dict):
+            return
+        if source.get('source_type') != DataSourceType.FILE:
+            return
+        file_path = source.get('file_path')
+        if not isinstance(file_path, str):
+            return
+        if not _is_within(Path(file_path), namespace_paths().upload_dir):
+            return
+        _delete_file_path(file_path)

@@ -189,6 +189,8 @@ class AnalysisValidationError(AnalysisError):
 
 
 class AnalysisVersionNotFoundError(AnalysisError):
+    """Raised when an analysis version is not found."""
+
     def __init__(self, analysis_id: str, version: int):
         super().__init__(
             message=f'Analysis version {version} not found for analysis {analysis_id}',
@@ -198,6 +200,8 @@ class AnalysisVersionNotFoundError(AnalysisError):
 
 
 class AnalysisCycleError(AnalysisError):
+    """Raised when a pipeline cycle is detected."""
+
     def __init__(self, message: str):
         super().__init__(message=message, error_code='ANALYSIS_CYCLE_ERROR', details={})
 
@@ -209,7 +213,7 @@ class FileError(AppError):
     pass
 
 
-class FileNotFoundError(FileError):
+class DataFileNotFoundError(FileError):
     """Raised when a file is not found."""
 
     def __init__(self, file_path: str):
@@ -271,9 +275,129 @@ class ScheduleValidationError(ScheduleError):
 
 
 class ScheduleNotFoundError(ScheduleError):
+    """Raised when a schedule is not found."""
+
     def __init__(self, schedule_id: str):
         super().__init__(
             message=f'Schedule {schedule_id} not found',
             error_code='SCHEDULE_NOT_FOUND',
             details={'schedule_id': schedule_id},
         )
+
+
+class AuthError(AppError):
+    """Base exception for authentication errors."""
+
+    pass
+
+
+class InvalidCredentialsError(AuthError):
+    def __init__(self):
+        super().__init__(message='Invalid email or password', error_code='INVALID_CREDENTIALS')
+
+
+class EmailAlreadyExistsError(AuthError):
+    def __init__(self):
+        super().__init__(message='An account with this email already exists', error_code='EMAIL_EXISTS')
+
+
+class SessionExpiredError(AuthError):
+    def __init__(self):
+        super().__init__(message='Session has expired', error_code='SESSION_EXPIRED')
+
+
+class AccountDisabledError(AuthError):
+    def __init__(self):
+        super().__init__(message='Account is disabled', error_code='ACCOUNT_DISABLED')
+
+
+class ProviderUnlinkError(AuthError):
+    def __init__(self, message: str = 'Cannot unlink the last login method'):
+        super().__init__(message=message, error_code='PROVIDER_UNLINK_ERROR')
+
+
+class OAuthError(AuthError):
+    def __init__(self, message: str = 'OAuth authentication failed'):
+        super().__init__(message=message, error_code='OAUTH_ERROR')
+
+
+class TokenExpiredError(AuthError):
+    def __init__(self):
+        super().__init__(message='Token has expired', error_code='TOKEN_EXPIRED')
+
+
+class TokenInvalidError(AuthError):
+    def __init__(self):
+        super().__init__(message='Token is invalid or already used', error_code='TOKEN_INVALID')
+
+
+# UDF Exceptions
+class UdfError(AppError):
+    """Base exception for UDF-related errors."""
+
+    pass
+
+
+class UdfNotFoundError(UdfError):
+    """Raised when a UDF is not found."""
+
+    def __init__(self, udf_id: str):
+        super().__init__(
+            message=f'UDF {udf_id} not found',
+            error_code='UDF_NOT_FOUND',
+            details={'udf_id': udf_id},
+        )
+
+
+class UdfValidationError(UdfError):
+    """Raised when UDF validation fails."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='UDF_VALIDATION_ERROR', details=details)
+
+
+# Healthcheck Exceptions
+class HealthcheckError(AppError):
+    """Base exception for healthcheck-related errors."""
+
+    pass
+
+
+class HealthcheckNotFoundError(HealthcheckError):
+    """Raised when a healthcheck is not found."""
+
+    def __init__(self, healthcheck_id: str):
+        super().__init__(
+            message=f'Healthcheck {healthcheck_id} not found',
+            error_code='HEALTHCHECK_NOT_FOUND',
+            details={'healthcheck_id': healthcheck_id},
+        )
+
+
+class HealthcheckValidationError(HealthcheckError):
+    """Raised when healthcheck validation fails."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='HEALTHCHECK_VALIDATION_ERROR', details=details)
+
+
+# Settings Exceptions
+class SettingsError(AppError):
+    """Base exception for settings-related errors."""
+
+    pass
+
+
+class SettingsConfigurationError(SettingsError):
+    """Raised when a required setting is missing or invalid."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message=message, error_code='SETTINGS_CONFIGURATION_ERROR', details=details)
+
+
+# Validation Exceptions
+class InvalidIdError(AppError):
+    """Raised when an ID fails format validation."""
+
+    def __init__(self, message: str = 'Invalid ID format', details: dict | None = None):
+        super().__init__(message=message, error_code='INVALID_ID', details=details)

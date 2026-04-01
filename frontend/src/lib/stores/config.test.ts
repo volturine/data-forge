@@ -25,6 +25,7 @@ function makeConfig(overrides: Partial<FrontendConfig> = {}): FrontendConfig {
 		smtp_enabled: true,
 		telegram_enabled: false,
 		default_namespace: 'test-ns',
+		auth_required: true,
 		...overrides
 	};
 }
@@ -121,6 +122,10 @@ describe('ConfigStore', () => {
 		test('telegramEnabled returns false', () => {
 			expect(store.telegramEnabled).toBe(false);
 		});
+
+		test('authRequired returns true', () => {
+			expect(store.authRequired).toBe(true);
+		});
 	});
 
 	describe('fetch success', () => {
@@ -140,7 +145,8 @@ describe('ConfigStore', () => {
 				makeConfig({
 					engine_pooling_interval: 7000,
 					timezone: 'America/New_York',
-					smtp_enabled: true
+					smtp_enabled: true,
+					auth_required: false
 				})
 			);
 
@@ -149,6 +155,7 @@ describe('ConfigStore', () => {
 			expect(store.enginePoolingInterval).toBe(7000);
 			expect(store.timezone).toBe('America/New_York');
 			expect(store.smtpEnabled).toBe(true);
+			expect(store.authRequired).toBe(false);
 		});
 	});
 

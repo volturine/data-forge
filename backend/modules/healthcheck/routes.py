@@ -1,10 +1,11 @@
 import uuid
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends
 from sqlmodel import Session
 
 from core.database import get_db
 from core.error_handlers import handle_errors
+from core.exceptions import InvalidIdError
 from core.validation import HealthcheckId, parse_datasource_id, parse_healthcheck_id
 from modules.healthcheck import schemas, service
 from modules.mcp.router import MCPRouter
@@ -24,8 +25,10 @@ def list_healthchecks(datasource_id: str, session: Session = Depends(get_db)):
 def list_results(datasource_id: str, limit: int = 10, session: Session = Depends(get_db)):
     """List recent healthcheck results for a datasource. Returns the last N results (default 10)."""
     parsed_id = parse_datasource_id(datasource_id)
-    if parsed_id == datasource_id and datasource_id != str(uuid.UUID(datasource_id)):
-        raise HTTPException(status_code=400, detail='Invalid UUID')
+    try:
+        uuid.UUID(parsed_id)
+    except ValueError as exc:
+        raise InvalidIdError(message='Invalid UUID', details={'value': parsed_id}) from exc
     return service.list_results(session, parsed_id, limit)
 
 
@@ -49,19 +52,12 @@ def update_healthcheck(
     session: Session = Depends(get_db),
 ):
     """Update a healthcheck's name, config, enabled state, or critical flag. Use GET /healthchecks to find IDs."""
-    try:
-        return service.update_healthcheck(session, parse_healthcheck_id(healthcheck_id), payload)
-    except ValueError as exc:
-        status = 404 if str(exc) == 'Healthcheck not found' else 400
-        raise HTTPException(status_code=status, detail=str(exc))
+    return service.update_healthcheck(session, parse_healthcheck_id(healthcheck_id), payload)
 
 
 @router.delete('/{healthcheck_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete healthcheck')
 def delete_healthcheck(healthcheck_id: HealthcheckId, session: Session = Depends(get_db)):
     """Delete a healthcheck by ID. Use GET /healthchecks?datasource_id=... to find healthcheck IDs."""
-    try:
-        service.delete_healthcheck(session, parse_healthcheck_id(healthcheck_id))
-        return None
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    service.delete_healthcheck(session, parse_healthcheck_id(healthcheck_id))
+    return None

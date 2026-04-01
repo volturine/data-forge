@@ -270,10 +270,11 @@
 		return () => window.removeEventListener('keydown', onGlobalKey);
 	});
 
-	// Inject copy buttons into rendered code blocks
+	// DOM mutation: $derived can't inject buttons into rendered HTML.
 	$effect(() => {
 		void timelineLength;
 		if (!messagesEl) return;
+		const buttons: HTMLButtonElement[] = [];
 		requestAnimationFrame(() => {
 			const blocks = messagesEl?.querySelectorAll('.chat-markdown pre');
 			if (!blocks) return;
@@ -298,8 +299,14 @@
 					});
 				});
 				pre.appendChild(btn);
+				buttons.push(btn);
 			}
 		});
+		return () => {
+			for (const btn of buttons) {
+				btn.remove();
+			}
+		};
 	});
 
 	const connectionColor = $derived(
@@ -576,7 +583,7 @@
 	);
 
 	async function copyToClipboard(text: string, id: string) {
-		await navigator.clipboard.writeText(text);
+		await navigator.clipboard.writeText(text).catch(() => {});
 		copiedId = id;
 		setTimeout(() => {
 			if (copiedId === id) copiedId = null;
@@ -647,7 +654,8 @@
 			userSelect: isResizing ? 'none' : 'auto',
 			overflow: 'hidden'
 		})}
-		style="width: {panelWidth}px; height: {activeHeight}px"
+		style:width="{panelWidth}px"
+		style:height="{activeHeight}px"
 	>
 		<!-- Corner resize handle (top-left) -->
 		<div
@@ -661,9 +669,9 @@
 				height: '12px',
 				cursor: 'nwse-resize',
 				zIndex: '1',
-				borderTopLeftRadius: 'lg'
+				borderTopLeftRadius: 'lg',
+				touchAction: 'none'
 			})}
-			style="touch-action: none"
 			onpointerdown={startResizeCorner}
 		></div>
 
@@ -680,9 +688,9 @@
 				width: '6px',
 				cursor: 'ew-resize',
 				zIndex: '1',
+				touchAction: 'none',
 				_hover: { backgroundColor: 'border.default' }
 			})}
-			style="touch-action: none"
 			onpointerdown={startResizeWidth}
 		></div>
 
@@ -697,6 +705,7 @@
 				flexShrink: '0',
 				borderTopRadius: 'lg',
 				position: 'relative',
+				touchAction: 'none',
 				_before: {
 					content: '""',
 					position: 'absolute',
@@ -707,7 +716,6 @@
 				},
 				_hover: { backgroundColor: 'border.default' }
 			})}
-			style="touch-action: none"
 			onpointerdown={startResize}
 		></div>
 

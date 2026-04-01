@@ -18,8 +18,11 @@
 		testSmtp,
 		getBotStatus,
 		getSubscribers,
-		deleteSubscriber
+		deleteSubscriber,
+		isMasked,
+		MASKED_PLACEHOLDER
 	} from '$lib/api/settings';
+	import type { AppSettings } from '$lib/api/settings';
 	import { configStore } from '$lib/stores/config.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
@@ -43,6 +46,10 @@
 	let telegram_bot_enabled = $state(false);
 	let idb = $state(false);
 
+	// Track whether user explicitly changed secret fields
+	let smtp_password_dirty = $state(false);
+	let telegram_bot_token_dirty = $state(false);
+
 	// UI state
 	let loading = $state(false);
 	let saving = $state(false);
@@ -55,6 +62,8 @@
 		if (!open) return;
 		loading = true;
 		feedback = null;
+		smtp_password_dirty = false;
+		telegram_bot_token_dirty = false;
 		let aborted = false;
 		getSettings().match(
 			(s) => {
@@ -62,8 +71,8 @@
 				smtp_host = s.smtp_host;
 				smtp_port = s.smtp_port;
 				smtp_user = s.smtp_user;
-				smtp_password = s.smtp_password;
-				telegram_bot_token = s.telegram_bot_token;
+				smtp_password = isMasked(s.smtp_password) ? '' : s.smtp_password;
+				telegram_bot_token = isMasked(s.telegram_bot_token) ? '' : s.telegram_bot_token;
 				telegram_bot_enabled = s.telegram_bot_enabled;
 				idb = s.public_idb_debug;
 				loading = false;
@@ -129,15 +138,16 @@
 	async function save() {
 		saving = true;
 		feedback = null;
-		const result = await updateSettings({
+		const payload: Partial<AppSettings> = {
 			smtp_host,
 			smtp_port,
 			smtp_user,
-			smtp_password,
-			telegram_bot_token,
 			telegram_bot_enabled,
 			public_idb_debug: idb
-		});
+		};
+		if (smtp_password_dirty) payload.smtp_password = smtp_password;
+		if (telegram_bot_token_dirty) payload.telegram_bot_token = telegram_bot_token;
+		const result = await updateSettings(payload);
 		result.match(
 			() => {
 				feedback = { type: 'success', message: 'Settings saved' };
@@ -309,7 +319,8 @@
 						class={input()}
 						id="smtp-password"
 						bind:value={smtp_password}
-						placeholder="••••••••"
+						oninput={() => (smtp_password_dirty = true)}
+						placeholder={MASKED_PLACEHOLDER}
 					/>
 				</label>
 			</div>
@@ -387,7 +398,8 @@
 					class={input()}
 					id="telegram-bot-token"
 					bind:value={telegram_bot_token}
-					placeholder="123456:ABC-DEF..."
+					oninput={() => (telegram_bot_token_dirty = true)}
+					placeholder={MASKED_PLACEHOLDER}
 				/>
 			</label>
 

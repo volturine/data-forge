@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { getLineage, type LineageNode, type LineageResponse } from '$lib/api/lineage';
+	import {
+		getLineage,
+		type LineageNode,
+		type LineageResponse,
+		type LineageMode,
+		type NodeKind
+	} from '$lib/api/lineage';
 	import { listDatasources } from '$lib/api/datasource';
 	import LineageGraph from '$lib/components/common/LineageGraph.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
@@ -14,9 +20,21 @@
 		LayoutGrid,
 		RotateCcw,
 		ZoomIn,
-		ZoomOut
+		ZoomOut,
+		Layers,
+		GitBranch
 	} from 'lucide-svelte';
-	import { css, cx, button, input, row, divider, muted } from '$lib/styles/panda';
+	import {
+		css,
+		cx,
+		button,
+		input,
+		row,
+		divider,
+		muted,
+		toggleButton,
+		chip
+	} from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 	type LineageGraphApi = {
@@ -27,6 +45,8 @@
 
 	let selectedDatasourceId = $state<string>('');
 	let selectedBranch = $state<string>('');
+	let lineageMode = $state<LineageMode>('full');
+	let internals = $state(false);
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -61,9 +81,14 @@
 	});
 
 	const query = createQuery(() => ({
-		queryKey: ['lineage', selectedDatasourceId, selectedBranch],
+		queryKey: ['lineage', selectedDatasourceId, selectedBranch, lineageMode, internals],
 		queryFn: async () => {
-			const result = await getLineage(selectedDatasourceId || null, selectedBranch || null);
+			const result = await getLineage({
+				target: selectedDatasourceId || null,
+				branch: selectedBranch || null,
+				mode: lineageMode,
+				internals
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -82,7 +107,6 @@
 		selectedNode = null;
 	}
 
-	// Parse raw ID from prefixed node ID ("datasource:uuid" or "analysis:uuid")
 	const selectedRawId = $derived(
 		selectedNode ? selectedNode.id.split(':').slice(1).join(':') : null
 	);
@@ -114,6 +138,19 @@
 		const target = event.currentTarget as HTMLSelectElement;
 		selectedBranch = target.value;
 	}
+
+	const kindLabel: Record<NodeKind, string> = {
+		source: 'Source',
+		output: 'Output',
+		internal: 'Internal',
+		analysis: 'Analysis'
+	};
+
+	const modeOptions: Array<{ value: LineageMode; label: string }> = [
+		{ value: 'full', label: 'Full' },
+		{ value: 'upstream', label: 'Upstream' },
+		{ value: 'downstream', label: 'Downstream' }
+	];
 </script>
 
 <div class={css({ display: 'flex', height: '100%', flexDirection: 'column' })}>
@@ -147,7 +184,8 @@
 					paddingX: '3',
 					paddingY: '1.5',
 					borderBottomWidth: '1',
-					background: 'bg.primary'
+					background: 'bg.primary',
+					flexWrap: 'wrap'
 				})
 			)}
 		>
@@ -195,6 +233,54 @@
 					{/if}
 				</select>
 			</div>
+
+			<div
+				class={css({
+					marginX: '2',
+					height: 'iconSm',
+					width: 'px',
+					backgroundColor: 'bg.muted'
+				})}
+			></div>
+
+			<div class={cx(row, css({ gap: '0' }))}>
+				{#each modeOptions as opt, i (opt.value)}
+					<button
+						class={toggleButton({
+							active: lineageMode === opt.value,
+							radius: i === 0 ? 'left' : i === modeOptions.length - 1 ? 'right' : undefined
+						})}
+						onclick={() => {
+							lineageMode = opt.value;
+						}}
+						title={`${opt.label} lineage`}
+					>
+						<span class={css({ fontSize: 'xs' })}>{opt.label}</span>
+					</button>
+				{/each}
+			</div>
+
+			<button
+				class={button({ variant: internals ? 'primary' : 'ghost', size: 'sm' })}
+				onclick={() => {
+					internals = !internals;
+				}}
+				title="Toggle internal nodes"
+				aria-pressed={internals}
+			>
+				<Layers size={14} />
+				<span class={css({ fontSize: 'xs' })}>Internals</span>
+			</button>
+
+			<div
+				class={css({
+					marginX: '2',
+					height: 'iconSm',
+					width: 'px',
+					backgroundColor: 'bg.muted'
+				})}
+			></div>
+
 			<span class={css({ marginRight: '2', fontSize: 'xs', color: 'fg.muted' })}>Layout</span>
 			<button
 				class={layoutMode === 'horizontal'
@@ -297,7 +383,7 @@
 							color: 'fg.muted'
 						})}
 					>
-						{selectedNode ? (selectedType === 'datasource' ? 'Datasource' : 'Analysis') : 'Details'}
+						{selectedNode ? kindLabel[selectedNode.node_kind] : 'Details'}
 					</div>
 					<div
 						class={css({
@@ -328,6 +414,14 @@
 					<div
 						class={css({ marginBottom: '4', display: 'flex', flexDirection: 'column', gap: '2' })}
 					>
+						<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+							<span class={muted}>Kind</span>
+							<span
+								class={chip({ tone: selectedNode.node_kind === 'internal' ? 'neutral' : 'accent' })}
+							>
+								{kindLabel[selectedNode.node_kind]}
+							</span>
+						</div>
 						{#if selectedNode.source_type}
 							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
 								<span class={muted}>Source</span>
@@ -338,6 +432,15 @@
 							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
 								<span class={muted}>Status</span>
 								<span>{selectedNode.status}</span>
+							</div>
+						{/if}
+						{#if selectedNode.branch}
+							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+								<span class={muted}>Branch</span>
+								<div class={cx(row, css({ gap: '1' }))}>
+									<GitBranch size={12} />
+									<span>{selectedNode.branch}</span>
+								</div>
 							</div>
 						{/if}
 						<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
@@ -392,7 +495,8 @@
 				gridRow: '2',
 				minHeight: '0',
 				minWidth: '0',
-				overflow: 'hidden'
+				overflow: 'hidden',
+				position: 'relative'
 			})}
 		>
 			{#if query.isLoading}
@@ -424,6 +528,72 @@
 					}}
 					panelOffset={panelWidth}
 				/>
+
+				<!-- Legend -->
+				<div
+					class={css({
+						position: 'absolute',
+						bottom: '3',
+						right: '3',
+						display: 'flex',
+						gap: '3',
+						paddingX: '3',
+						paddingY: '2',
+						background: 'bg.primary',
+						borderWidth: '1',
+						fontSize: 'xs',
+						color: 'fg.muted',
+						zIndex: '5'
+					})}
+				>
+					<div class={cx(row, css({ gap: '1.5' }))}>
+						<div
+							class={css({
+								width: '3',
+								height: '3',
+								borderLeftWidth: '3',
+								borderLeftColor: 'accent.primary'
+							})}
+						></div>
+						<span>Source</span>
+					</div>
+					<div class={cx(row, css({ gap: '1.5' }))}>
+						<div
+							class={css({
+								width: '3',
+								height: '3',
+								borderLeftWidth: '3',
+								borderLeftColor: 'fg.success'
+							})}
+						></div>
+						<span>Output</span>
+					</div>
+					<div class={cx(row, css({ gap: '1.5' }))}>
+						<div
+							class={css({
+								width: '3',
+								height: '3',
+								borderLeftWidth: '3',
+								borderLeftColor: 'fg.warning'
+							})}
+						></div>
+						<span>Analysis</span>
+					</div>
+					{#if internals}
+						<div class={cx(row, css({ gap: '1.5' }))}>
+							<div
+								class={css({
+									width: '3',
+									height: '3',
+									borderWidth: '1',
+									borderStyle: 'dashed',
+									borderColor: 'fg.faint'
+								})}
+							></div>
+							<span>Internal</span>
+						</div>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	</div>

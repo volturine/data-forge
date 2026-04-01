@@ -15,20 +15,23 @@
 	let skipUpdate = false;
 	let programmatic = false;
 
+	const CURSOR_COLOR = 'var(--colors-fg-muted)';
+	const SELECTION_COLOR = 'var(--colors-bg-muted)';
+
 	const theme = EditorView.theme(
 		{
-			'.cm-cursor': { borderLeftColor: '#2f333b' },
+			'.cm-cursor': { borderLeftColor: CURSOR_COLOR },
 			'.cm-scroller': {
 				fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 			},
 			'.cm-selectionMatch': {
-				backgroundColor: '#2f3b52'
+				backgroundColor: SELECTION_COLOR
 			},
 			'&.cm-focused .cm-selectionBackground': {
-				backgroundColor: '#2f3b52'
+				backgroundColor: SELECTION_COLOR
 			},
 			'.cm-selectionBackground': {
-				backgroundColor: '#2f3b52'
+				backgroundColor: SELECTION_COLOR
 			}
 		},
 		{ dark: true }

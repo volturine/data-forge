@@ -22,15 +22,15 @@ class SettingsResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     """Settings update payload from the frontend."""
 
-    smtp_host: str = ''
-    smtp_port: int = 587
-    smtp_user: str = ''
-    smtp_password: str = ''
-    telegram_bot_token: str = ''
-    telegram_bot_enabled: bool = False
-    openrouter_api_key: str = ''
-    openrouter_default_model: str = ''
-    public_idb_debug: bool = False
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_bot_enabled: bool | None = None
+    openrouter_api_key: str | None = None
+    openrouter_default_model: str | None = None
+    public_idb_debug: bool | None = None
 
 
 class TestSmtpRequest(BaseModel):

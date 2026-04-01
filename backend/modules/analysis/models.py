@@ -17,6 +17,7 @@ class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
     updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     result_path: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     thumbnail: str | None = Field(default=None, sa_column=Column(String, nullable=True))
+    owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
 
 
 class AnalysisDataSource(SQLModel, table=True):  # type: ignore[call-arg]

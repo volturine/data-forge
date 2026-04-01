@@ -3995,12 +3995,14 @@
 	});
 
 	const tabRightCss = css({
-		borderRadius: '6px 0 0 6px',
+		borderTopLeftRadius: 'sm2',
+		borderBottomLeftRadius: 'sm2',
 		borderRightWidth: '0'
 	});
 
 	const tabLeftCss = css({
-		borderRadius: '0 6px 6px 0',
+		borderTopRightRadius: 'sm2',
+		borderBottomRightRadius: 'sm2',
 		borderLeftWidth: '0'
 	});
 
@@ -4022,8 +4024,14 @@
 		borderWidth: '1'
 	});
 
-	const itemsRightCss = css({ borderRadius: '0 4px 4px 0' });
-	const itemsLeftCss = css({ borderRadius: '4px 0 0 4px' });
+	const itemsRightCss = css({
+		borderTopRightRadius: 'md2',
+		borderBottomRightRadius: 'md2'
+	});
+	const itemsLeftCss = css({
+		borderTopLeftRadius: 'md2',
+		borderBottomLeftRadius: 'md2'
+	});
 
 	const legendItemCss = css({
 		display: 'flex',

@@ -10,7 +10,7 @@ import {
 	confirmTool
 } from '$lib/api/chat';
 import type { ChatEvent, OpenRouterModel, ChatSessionInfo } from '$lib/api/chat';
-import { getSettings, updateSettings } from '$lib/api/settings';
+import { getSettings, updateSettings, isMasked } from '$lib/api/settings';
 import type { AppSettings } from '$lib/api/settings';
 import { listTools } from '$lib/api/mcp';
 import type { MCPTool } from '$lib/api/mcp';
@@ -145,10 +145,14 @@ export class ChatStore {
 		if (typeof prefs.systemPrompt === 'string') this.systemPrompt = prefs.systemPrompt;
 		if (prefs.mode === 'plan' || prefs.mode === 'execute') this.mode = prefs.mode;
 		if (Array.isArray(prefs.disabledTools)) {
-			this.disabledTools = new SvelteSet(prefs.disabledTools as string[]);
+			this.disabledTools = new SvelteSet(
+				prefs.disabledTools.filter((x): x is string => typeof x === 'string')
+			);
 		}
 		if (Array.isArray(prefs.disabledTags)) {
-			this.disabledTags = new SvelteSet(prefs.disabledTags as string[]);
+			this.disabledTags = new SvelteSet(
+				prefs.disabledTags.filter((x): x is string => typeof x === 'string')
+			);
 		}
 	}
 
@@ -277,8 +281,10 @@ export class ChatStore {
 		settingsResult.match(
 			(s) => {
 				this.settings = s;
-				if (s.openrouter_api_key) this.apiKey = s.openrouter_api_key;
-				this.configured = true;
+				if (s.openrouter_api_key && !isMasked(s.openrouter_api_key)) {
+					this.apiKey = s.openrouter_api_key;
+				}
+				this.configured = !!s.openrouter_api_key;
 			},
 			() => {}
 		);
@@ -374,11 +380,11 @@ export class ChatStore {
 		this.open = true;
 		await this.loadContext();
 		void this.loadSessions();
-		if (this.apiKey && this.models.length === 0) {
+		if (this.configured && this.models.length === 0) {
 			void this.loadModels();
 		}
 		if (this.sessionId) return;
-		if (!this.apiKey) {
+		if (!this.configured) {
 			if (typeof window !== 'undefined') localStorage.removeItem(SESSION_KEY);
 			return;
 		}
@@ -401,10 +407,10 @@ export class ChatStore {
 		};
 		this._es.onmessage = (ev) => {
 			try {
-				const event: ChatEvent = JSON.parse(ev.data as string);
+				const event: ChatEvent = JSON.parse(ev.data);
 				this._handleEvent(event);
 			} catch {
-				console.error('[chat] failed to parse SSE event:', ev.data);
+				console.debug('[chat] failed to parse SSE event:', ev.data);
 			}
 		};
 		this._es.onerror = () => {
@@ -816,6 +822,13 @@ export class ChatStore {
 		}
 		this._resetState();
 		void this.loadSessions();
+	}
+
+	destroy(): void {
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('beforeunload', this._onUnload);
+		}
+		this.close();
 	}
 
 	close(): void {

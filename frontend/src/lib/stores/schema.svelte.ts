@@ -1,5 +1,4 @@
 import type { Schema, ColumnInfo } from '$lib/types/schema';
-import type { PipelineStep } from '$lib/types/analysis';
 import { analysisStore } from '$lib/stores/analysis.svelte';
 import { emptySchema } from '$lib/types/schema';
 import {
@@ -44,7 +43,7 @@ export class SchemaStore {
 				(sourceSchema ? { columns: sourceSchema.columns, row_count: null } : emptySchema());
 			const config = step.config as StepConfig;
 			const transformer = getStepTransform(step);
-			const isApplied = (step as PipelineStep & { is_applied?: boolean }).is_applied !== false;
+			const isApplied = step.is_applied !== false;
 
 			let output: Schema;
 			const entry = this.previewSchemas.get(step.id);

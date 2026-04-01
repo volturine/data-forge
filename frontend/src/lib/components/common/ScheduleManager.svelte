@@ -482,7 +482,7 @@
 			<span
 				class={css({
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide',
 					color: 'fg.muted'
@@ -541,7 +541,9 @@
 					color: 'fg.secondary'
 				})}
 			>
-				<p class={css({ margin: '0', marginBottom: '1', fontWeight: '500' })}>Schedule Triggers:</p>
+				<p class={css({ margin: '0', marginBottom: '1', fontWeight: 'medium' })}>
+					Schedule Triggers:
+				</p>
 				<ul
 					class={css({
 						margin: '0',
@@ -580,7 +582,7 @@
 				!compact && css({ marginBottom: '6' })
 			)}
 		>
-			<h3 class={css({ margin: '0', marginBottom: '4', fontSize: 'sm', fontWeight: '500' })}>
+			<h3 class={css({ margin: '0', marginBottom: '4', fontSize: 'sm', fontWeight: 'medium' })}>
 				Create Schedule
 			</h3>
 
@@ -598,7 +600,7 @@
 					)}
 				>
 					<Database size={14} class={css({ color: 'accent.primary' })} />
-					<span class={css({ fontSize: 'xs', fontWeight: '500' })}>
+					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>
 						Target Dataset — What gets rebuilt
 					</span>
 				</div>
@@ -607,7 +609,7 @@
 					<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
 						<div class={cx(row, css({ gap: '2' }))}>
 							<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
-							<span class={css({ fontWeight: '500' })}>
+							<span class={css({ fontWeight: 'medium' })}>
 								{currentTarget.datasourceName}
 							</span>
 						</div>
@@ -662,7 +664,7 @@
 							<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
 								<div class={cx(row, css({ gap: '2' }))}>
 									<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
-									<span class={css({ fontWeight: '500' })}>{selectedDatasource.name}</span>
+									<span class={css({ fontWeight: 'medium' })}>{selectedDatasource.name}</span>
 								</div>
 								<div
 									class={cx(
@@ -701,7 +703,7 @@
 					)}
 				>
 					<Clock size={14} class={css({ color: 'accent.primary' })} />
-					<span class={css({ fontSize: 'xs', fontWeight: '500' })}>
+					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>
 						When to Run — What triggers the build
 					</span>
 				</div>
@@ -728,7 +730,7 @@
 							class={css({ marginTop: '0.5' })}
 						/>
 						<div class={css({ flex: '1' })}>
-							<div class={css({ marginBottom: '1', fontSize: 'xs', fontWeight: '500' })}>
+							<div class={css({ marginBottom: '1', fontSize: 'xs', fontWeight: 'medium' })}>
 								On a Schedule
 							</div>
 							<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
@@ -784,7 +786,7 @@
 							<div
 								class={cx(
 									row,
-									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: '500' })
+									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: 'medium' })
 								)}
 							>
 								<Link size={12} class={muted} />
@@ -842,7 +844,7 @@
 							<div
 								class={cx(
 									row,
-									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: '500' })
+									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: 'medium' })
 								)}
 							>
 								<Database size={12} class={muted} />
@@ -1280,7 +1282,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							></th>
 							{#if !datasourceId}
@@ -1290,7 +1292,7 @@
 										paddingX: '2',
 										paddingY: '1.5',
 										textAlign: 'left',
-										fontWeight: '500'
+										fontWeight: 'medium'
 									})}
 								>
 									Target
@@ -1302,7 +1304,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							>
 								Produced By
@@ -1313,7 +1315,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							>
 								Trigger Type
@@ -1324,7 +1326,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							>
 								Trigger
@@ -1335,7 +1337,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							>
 								Status
@@ -1346,7 +1348,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							>
 								Next Run
@@ -1358,7 +1360,7 @@
 									paddingX: '2',
 									paddingY: '1.5',
 									textAlign: 'left',
-									fontWeight: '500'
+									fontWeight: 'medium'
 								})}
 							></th>
 						</tr>

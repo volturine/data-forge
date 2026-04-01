@@ -33,7 +33,7 @@
 			class={css({
 				display: 'block',
 				fontSize: 'xs',
-				fontWeight: '600',
+				fontWeight: 'semibold',
 				color: 'fg.muted',
 				marginBottom: '1.5',
 				textTransform: 'uppercase',
@@ -58,7 +58,7 @@
 			class={css({
 				display: 'block',
 				fontSize: 'xs',
-				fontWeight: '600',
+				fontWeight: 'semibold',
 				color: 'fg.muted',
 				marginBottom: '1.5',
 				textTransform: 'uppercase',

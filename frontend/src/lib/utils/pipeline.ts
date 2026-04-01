@@ -1,9 +1,7 @@
 import type { PipelineStep } from '$lib/types/analysis';
 
 export function applySteps(steps: PipelineStep[]): PipelineStep[] {
-	const applied = steps.filter(
-		(step) => (step as PipelineStep & { is_applied?: boolean }).is_applied !== false
-	);
+	const applied = steps.filter((step) => step.is_applied !== false);
 	if (applied.length === 0) return [];
 
 	const map = new Map(steps.map((step) => [step.id, step]));

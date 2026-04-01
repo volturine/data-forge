@@ -271,8 +271,12 @@ class PolarsComputeEngine:
         # created lazily, so this takes effect even though polars is already imported.
         if max_threads > 0:
             os.environ['POLARS_MAX_THREADS'] = str(max_threads)
+        else:
+            os.environ.pop('POLARS_MAX_THREADS', None)
         if streaming_chunk_size > 0:
             os.environ['POLARS_STREAMING_CHUNK_SIZE'] = str(streaming_chunk_size)
+        else:
+            os.environ.pop('POLARS_STREAMING_CHUNK_SIZE', None)
 
         if max_memory_mb > 0:
             memory_bytes = max_memory_mb * 1024 * 1024

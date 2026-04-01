@@ -26,7 +26,7 @@
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { getStepSchema, type StepSchemaRequest, type StepSchemaResponse } from '$lib/api/compute';
+	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
 	import { normalizeConfig } from '$lib/utils/step-config-defaults';
 	import type { NotificationConfigData, AIConfigData } from '$lib/types/operation-config';
@@ -137,8 +137,7 @@
 
 	const hasChanges = $derived(
 		!!step &&
-			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) ||
-				(step as PipelineStep & { is_applied?: boolean }).is_applied === false)
+			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) || step.is_applied === false)
 	);
 
 	function handleRefreshPivotSchema() {
@@ -170,7 +169,7 @@
 			analysis_pipeline: analysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
 			target_step_id: step.id
-		} as unknown as StepSchemaRequest)
+		})
 			.map((response: StepSchemaResponse) => {
 				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);
 				fetchingPivotSchema = false;
@@ -190,10 +189,8 @@
 	function handleApplyConfig() {
 		if (!step) return;
 		analysisStore.updateStepConfig(step.id, cloneConfig(draftConfig));
-		if ((step as PipelineStep & { is_applied?: boolean }).is_applied === false) {
-			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep> & {
-				is_applied: boolean;
-			});
+		if (step.is_applied === false) {
+			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep>);
 		}
 		onConfigApply?.();
 		if (step.type === 'expression' || step.type === 'with_columns') {
@@ -216,7 +213,7 @@
 			analysis_pipeline: analysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
 			target_step_id: stepId
-		} as unknown as StepSchemaRequest)
+		})
 			.map((response: StepSchemaResponse) => {
 				schemaStore.syncPreviewSchema(stepId, response, pipelineHash);
 			})
@@ -512,7 +509,7 @@
 					paddingY: '2.5',
 					fontFamily: 'mono',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					textTransform: 'uppercase',
 					letterSpacing: 'wider',
 					color: 'fg.secondary',
@@ -535,7 +532,7 @@
 					paddingY: '2.5',
 					fontFamily: 'mono',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					textTransform: 'uppercase',
 					letterSpacing: 'wider',
 					color: 'accent.primary',

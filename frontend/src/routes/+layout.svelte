@@ -1,28 +1,26 @@
 <script lang="ts">
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
-	import { Sun, Moon, Settings, MessageSquare } from 'lucide-svelte';
-	import { css, cx, iconButton, navLink, row, muted } from '$lib/styles/panda';
-	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
-	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
+	import { css, spinner } from '$lib/styles/panda';
 	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
+	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import { chatStore } from '$lib/stores/chat.svelte';
 	import { initializeStores } from '$lib/stores/context.svelte';
 	import { initNamespace, setNamespace, useNamespace } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import { untrack } from 'svelte';
 	import 'styled-system/styles.css';
 
 	let { children } = $props();
 
-	// Initialize stores via context API for SSR safety
-	// This creates fresh store instances per request, preventing state leakage
 	initializeStores();
 
 	const themeAttribute =
@@ -30,7 +28,40 @@
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
 	let settingsOpen = $state(false);
+	let sidebarCollapsed = $state(false);
 	const currentPath = $derived(page.url.pathname);
+
+	const authPaths = [
+		'/login',
+		'/register',
+		'/callback',
+		'/verify',
+		'/forgot-password',
+		'/reset-password'
+	];
+	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
+
+	// Network: $derived can't trigger async auth resolution.
+	$effect(() => {
+		if (!configStore.config) return;
+		void authStore.resolve(configStore.authRequired);
+	});
+
+	const ready = $derived(
+		configStore.config !== null && (!configStore.authRequired || authStore.resolved)
+	);
+
+	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
+	$effect(() => {
+		if (!ready) return;
+		if (!configStore.authRequired) {
+			if (onAuthPage) void goto(resolve('/'));
+			return;
+		}
+		if (authStore.authenticated) return;
+		if (onAuthPage) return;
+		void goto(resolve('/login'));
+	});
 
 	// DOM: $derived can't sync theme to DOM/storage.
 	$effect(() => {
@@ -43,6 +74,11 @@
 		void idbGet<'light' | 'dark'>('theme').then((value) => {
 			if (!value) return;
 			theme = value;
+		});
+
+		void idbGet<boolean>('sidebar_collapsed').then((value) => {
+			if (value === null) return;
+			sidebarCollapsed = value;
 		});
 	}
 
@@ -62,7 +98,13 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		if (!configStore.config) return;
-		installAuditListeners();
+		const cleanup = installAuditListeners();
+		return cleanup;
+	});
+
+	// Cleanup: $derived can't teardown singleton resources.
+	$effect(() => {
+		return () => chatStore.destroy();
 	});
 
 	// Subscription: $derived can't update audit page.
@@ -98,10 +140,13 @@
 		};
 	});
 
-	// Shift-scroll handling is now scoped to DataTable only.
-
 	function toggleTheme() {
 		theme = theme === 'light' ? 'dark' : 'light';
+	}
+
+	function toggleSidebar() {
+		sidebarCollapsed = !sidebarCollapsed;
+		void idbSet('sidebar_collapsed', sidebarCollapsed);
 	}
 
 	const namespaceState = useNamespace();
@@ -119,6 +164,19 @@
 		namespaceOpen = true;
 	}
 
+	async function handleSignOut() {
+		await authStore.logout();
+		void goto(resolve('/login'));
+	}
+
+	function handleOpenChat() {
+		if (chatStore.open) {
+			chatStore.close();
+			return;
+		}
+		void chatStore.open_panel();
+	}
+
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
@@ -129,14 +187,6 @@
 			}
 		}
 	});
-
-	const navItems = [
-		{ href: '/', label: 'Analyses' },
-		{ href: '/datasources', label: 'Data Sources' },
-		{ href: '/monitoring', label: 'Monitoring' },
-		{ href: '/lineage', label: 'Lineage' },
-		{ href: '/udfs', label: 'UDF Library' }
-	];
 </script>
 
 <svelte:head>
@@ -151,133 +201,59 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	<div class={css({ display: 'flex', height: '100vh', flexDirection: 'column' })}>
-		<header
+	{#if !ready && !onAuthPage}
+		<div
 			class={css({
-				position: 'sticky',
-				top: '0',
-				zIndex: 'nav',
-				backgroundColor: 'bg.panel',
-				borderBottomWidth: '1'
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: '100vh',
+				backgroundColor: 'bg.secondary'
 			})}
 		>
-			<div
+			<div class={spinner()}></div>
+		</div>
+	{:else if onAuthPage && configStore.authRequired}
+		{@render children()}
+	{:else}
+		<div class={css({ display: 'flex', height: '100vh' })}>
+			<Sidebar
+				collapsed={sidebarCollapsed}
+				onToggle={toggleSidebar}
+				{theme}
+				onToggleTheme={toggleTheme}
+				onOpenSettings={() => (settingsOpen = true)}
+				onOpenChat={handleOpenChat}
+				onOpenNamespace={openNamespace}
+				onSignOut={handleSignOut}
+				namespace={namespaceDraft}
+				authenticated={authStore.authenticated}
+				authRequired={configStore.authRequired}
+				avatarUrl={authStore.user?.avatar_url ?? null}
+				bind:namespaceTrigger
+			/>
+
+			<main
 				class={css({
-					marginX: 'auto',
-					maxWidth: 'page',
-					display: 'flex',
-					alignItems: 'center',
-					gap: '6',
-					paddingX: '6',
-					paddingY: '3'
+					minHeight: '0',
+					minWidth: '0',
+					flex: '1',
+					overflowY: 'auto',
+					backgroundColor: 'bg.secondary'
 				})}
 			>
-				<div class={cx(row, css({ gap: '2' }))}>
-					<button
-						class={css({
-							display: 'flex',
-							alignItems: 'center',
-							gap: '1',
-							fontSize: 'md',
-							fontWeight: 'semibold',
-							textDecoration: 'none',
-							backgroundColor: 'transparent',
-							borderWidth: '0',
-							padding: '0'
-						})}
-						onclick={openNamespace}
-						type="button"
-						aria-label="Select namespace"
-						bind:this={namespaceTrigger}
-					>
-						<span>analysis</span>
-						<span class={muted}>/</span>
-						<span class={css({ color: 'fg.tertiary' })}>{namespaceDraft}</span>
-					</button>
-				</div>
+				{@render children()}
+			</main>
+		</div>
 
-				<nav class={cx(row, css({ gap: '1' }))}>
-					{#each navItems as item (item.href)}
-						<a
-							href={resolve(item.href as '/')}
-							class={cx(
-								navLink({
-									active:
-										currentPath === item.href ||
-										(currentPath.startsWith('/analysis') && item.href === '/') ||
-										(currentPath.startsWith('/udfs') && item.href === '/udfs') ||
-										(currentPath.startsWith('/monitoring') && item.href === '/monitoring') ||
-										(currentPath.startsWith('/lineage') && item.href === '/lineage')
-								})
-							)}
-						>
-							{item.label}
-						</a>
-					{/each}
-				</nav>
-
-				<div
-					class={css({
-						marginLeft: 'auto',
-						display: 'flex',
-						alignItems: 'center',
-						gap: '2'
-					})}
-				>
-					<EngineMonitor />
-					<IndexedDbButton />
-					<button
-						class={iconButton()}
-						onclick={() => (settingsOpen = true)}
-						title="Settings"
-						aria-label="Settings"
-					>
-						<Settings size={16} />
-					</button>
-					<button
-						class={iconButton()}
-						onclick={() => {
-							if (chatStore.open) {
-								chatStore.close();
-								return;
-							}
-							void chatStore.open_panel();
-						}}
-						title="AI Assistant"
-						aria-label="AI Assistant"
-					>
-						<MessageSquare size={16} />
-					</button>
-					<button
-						class={iconButton()}
-						onclick={toggleTheme}
-						title="Toggle theme"
-						aria-label="Toggle theme"
-					>
-						{#if theme === 'light'}
-							<Sun size={16} />
-						{:else}
-							<Moon size={16} />
-						{/if}
-					</button>
-				</div>
-			</div>
-		</header>
-
-		<main
-			class={css({ minHeight: '0', flex: '1', overflowY: 'auto', backgroundColor: 'bg.secondary' })}
-		>
-			{@render children()}
-		</main>
-	</div>
-
-	<SettingsPopup bind:open={settingsOpen} />
-	<NamespacePickerModal
-		open={namespaceOpen}
-		selected={namespaceDraft}
-		onSelect={handleNamespaceSelect}
-		onClose={() => (namespaceOpen = false)}
-		anchor={namespaceTrigger}
-	/>
-	<ChatPanel />
+		<SettingsPopup bind:open={settingsOpen} />
+		<NamespacePickerModal
+			open={namespaceOpen}
+			selected={namespaceDraft}
+			onSelect={handleNamespaceSelect}
+			onClose={() => (namespaceOpen = false)}
+			anchor={namespaceTrigger}
+		/>
+		<ChatPanel />
+	{/if}
 </QueryClientProvider>

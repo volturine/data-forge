@@ -1,6 +1,7 @@
-export { css, cx } from '../../../styled-system/css';
+import { css, cx } from '../../../styled-system/css';
+
+export { css, cx };
 export {
-	navLink,
 	iconButton,
 	button,
 	spinner,
@@ -18,8 +19,6 @@ export {
 	label,
 	stepConfig
 } from '../../../styled-system/recipes';
-
-import { css } from '../../../styled-system/css';
 
 export const muted = css({ color: 'fg.muted' });
 export const row = css({ display: 'flex', alignItems: 'center' });

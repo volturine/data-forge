@@ -13,7 +13,7 @@ from modules.compute.operations.notification import (
 )
 from modules.compute.service import _send_pipeline_notifications
 from modules.compute.step_converter import convert_notification_config
-from modules.notification.service import render_template
+from modules.notification.service import NotificationService, render_template
 
 
 @dataclass(frozen=True)
@@ -787,3 +787,19 @@ class TestRenderTemplate:
 
     def test_numeric(self):
         assert render_template('Count: {{n}}', {'n': 42}) == 'Count: 42'
+
+
+class TestNotificationService:
+    def test_send_email_uses_smtp_timeout(self):
+        service = NotificationService()
+
+        with (
+            patch(
+                'modules.notification.service.get_resolved_smtp',
+                return_value={'host': 'smtp.example.com', 'port': 587, 'user': 'user@example.com', 'password': 'secret'},
+            ),
+            patch('smtplib.SMTP') as mock_smtp,
+        ):
+            service.send_email(to='dest@example.com', subject='Subj', body='Body')
+
+        mock_smtp.assert_called_once_with('smtp.example.com', 587, timeout=10)

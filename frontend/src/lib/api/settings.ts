@@ -1,6 +1,12 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
-import { ResultAsync } from 'neverthrow';
+import type { ResultAsync } from 'neverthrow';
+
+export const MASKED_PLACEHOLDER = '••••••••';
+
+export function isMasked(value: string): boolean {
+	return value === MASKED_PLACEHOLDER || /^\*+$/.test(value);
+}
 
 export interface AppSettings {
 	smtp_host: string;

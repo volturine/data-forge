@@ -84,9 +84,15 @@
 	function selectDatasource(id: string | null) {
 		selectedId = id;
 		showConfig = id;
-		snapshotConfig = null;
 		selectedBranch = id ? 'master' : null;
 		showComparison = false;
+		if (id) {
+			const ds = datasources.find((d) => d.id === id);
+			const config = (ds?.config ?? {}) as Record<string, unknown>;
+			snapshotConfig = { ...config, branch: 'master' };
+		} else {
+			snapshotConfig = null;
+		}
 		const url = id ? `/datasources?id=${id}` : '/datasources';
 		goto(resolve(url as '/'), { replaceState: true });
 	}

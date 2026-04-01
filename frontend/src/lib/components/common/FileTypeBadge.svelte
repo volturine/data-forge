@@ -62,7 +62,7 @@
 			flexShrink: '0',
 			gap: '1',
 			whiteSpace: 'nowrap',
-			fontWeight: '600',
+			fontWeight: 'semibold',
 			transition: 'color 150ms, background-color 150ms, border-color 150ms',
 			fontSize: sizes[size].fontSize,
 			paddingX: sizes[size].paddingX,

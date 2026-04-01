@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LineageNode, LineageResponse } from '$lib/api/lineage';
+	import type { LineageNode, LineageResponse, NodeKind, EdgeType } from '$lib/api/lineage';
 	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from 'lucide-svelte';
 	import { css, cx, button } from '$lib/styles/panda';
 
@@ -29,7 +29,6 @@
 	const nodeHeight = 72;
 
 	/* ---------- non-reactive position map ---------- */
-	// Plain Map for positions — NOT reactive. Used by deterministic layouts.
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- intentionally non-reactive for layout computation
 	const physicsMap = new Map<string, { x: number; y: number; vx: number; vy: number }>();
 
@@ -49,7 +48,13 @@
 	let panStart: { x: number; y: number; px: number; py: number } | null = null;
 
 	const layoutNodes = $derived.by(() => {
-		const next = [] as Array<{ id: string; label: string; meta: string | null; type: string }>;
+		const next = [] as Array<{
+			id: string;
+			label: string;
+			meta: string | null;
+			type: string;
+			kind: NodeKind;
+		}>;
 		for (const node of nodes) {
 			const meta =
 				node.type === 'datasource'
@@ -61,11 +66,28 @@
 				id: node.id,
 				label: node.name,
 				meta,
-				type: node.type
+				type: node.type,
+				kind: node.node_kind
 			});
 		}
 		return next;
 	});
+
+	/* ---------- node kind → border color ---------- */
+	const kindBorderColor: Record<NodeKind, string> = {
+		source: 'var(--colors-accent-primary)',
+		output: 'var(--colors-fg-success)',
+		internal: 'var(--colors-fg-faint)',
+		analysis: 'var(--colors-fg-warning)'
+	};
+
+	/* ---------- edge type → stroke config ---------- */
+	const edgeStroke: Record<EdgeType, { color: string; dash: string }> = {
+		uses: { color: 'var(--colors-canvas-lineage-edge)', dash: '' },
+		produces: { color: 'var(--colors-fg-success)', dash: '' },
+		chains: { color: 'var(--colors-fg-faint)', dash: '6 4' },
+		consumes_internal: { color: 'var(--colors-fg-faint)', dash: '6 4' }
+	};
 
 	/* ---------- topological sort for tree layouts ---------- */
 	function topoSort(): string[][] {
@@ -98,7 +120,6 @@
 			}
 			queue = next;
 		}
-		// add any remaining (cycles)
 		const remaining = layoutNodes.filter((n) => !visited.has(n.id)).map((n) => n.id);
 		if (remaining.length > 0) layers.push(remaining);
 		return layers;
@@ -219,7 +240,6 @@
 		const pos = physicsMap.get(id);
 		if (!pos) return;
 		dragId = id;
-		// Account for pan and scale when computing offset
 		dragOffset = {
 			x: event.clientX / scale - pan.x / scale - pos.x,
 			y: event.clientY / scale - pan.y / scale - pos.y
@@ -254,7 +274,6 @@
 		dragOffset = null;
 
 		if (!wasDrag) {
-			// This was a click, not a drag
 			const node = nodes.find((n) => n.id === clickedId);
 			if (node && onnodeclick) onnodeclick(node);
 		}
@@ -262,9 +281,8 @@
 		wasDrag = false;
 	}
 
-	/* ---------- pan (any click on canvas background, or middle/right-click anywhere) ---------- */
+	/* ---------- pan ---------- */
 	function startPan(event: PointerEvent) {
-		// Allow left-click pan only on canvas background (not on nodes)
 		if (event.button === 0) {
 			const target = event.target as HTMLElement;
 			if (target.closest('.lineage-node')) return;
@@ -293,7 +311,6 @@
 		event.preventDefault();
 		const delta = event.deltaY > 0 ? 0.9 : 1.1;
 		const next = clamp(scale * delta, 0.2, 3);
-		// Zoom toward cursor position
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		const mx = event.clientX - rect.left;
 		const my = event.clientY - rect.top;
@@ -365,6 +382,13 @@
 			}
 		};
 	}
+
+	const kindLabel: Record<NodeKind, string> = {
+		source: 'Source',
+		output: 'Output',
+		internal: 'Internal',
+		analysis: 'Analysis'
+	};
 </script>
 
 {#if nodes.length === 0}
@@ -490,17 +514,45 @@
 					>
 						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-primary)" />
 					</marker>
+					<marker
+						id="lineage-arrow-success"
+						markerWidth="10"
+						markerHeight="10"
+						refX="8"
+						refY="5"
+						orient="auto"
+					>
+						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-success)" />
+					</marker>
+					<marker
+						id="lineage-arrow-faint"
+						markerWidth="10"
+						markerHeight="10"
+						refX="8"
+						refY="5"
+						orient="auto"
+					>
+						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-faint)" />
+					</marker>
 				</defs>
 				{#each edges as edge (edge.from + edge.to)}
 					{@const from = positionSnapshot[edge.from]}
 					{@const to = positionSnapshot[edge.to]}
+					{@const stroke = edgeStroke[edge.type] ?? edgeStroke.uses}
+					{@const marker =
+						edge.type === 'produces'
+							? 'url(#lineage-arrow-success)'
+							: edge.type === 'chains' || edge.type === 'consumes_internal'
+								? 'url(#lineage-arrow-faint)'
+								: 'url(#lineage-arrow)'}
 					{#if from && to}
 						<path
 							d={`M ${from.x + nodeWidth} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth + 60} ${from.y + nodeHeight / 2} ${to.x - 60} ${to.y + nodeHeight / 2} ${to.x} ${to.y + nodeHeight / 2}`}
 							fill="none"
-							stroke="var(--colors-fg-primary)"
+							stroke={stroke.color}
 							stroke-width="1.5"
-							marker-end="url(#lineage-arrow)"
+							stroke-dasharray={stroke.dash}
+							marker-end={marker}
 						/>
 					{/if}
 				{/each}
@@ -508,6 +560,7 @@
 
 			{#each layoutNodes as node (node.id)}
 				{@const pos = positionSnapshot[node.id]}
+				{@const isInternal = node.kind === 'internal'}
 				{#if pos}
 					<div
 						class={cx(
@@ -528,9 +581,12 @@
 								borderWidth: '1',
 								paddingX: '4',
 								paddingY: '3',
-								boxShadow: 'sm'
+								boxShadow: 'sm',
+								borderLeftWidth: isInternal ? '1' : '3'
 							})
 						)}
+						style:border-left-color={kindBorderColor[node.kind]}
+						style:border-style={isInternal ? 'dashed' : 'solid'}
 						use:setPosition={pos}
 						onpointerdown={(event) => {
 							if (event.button === 0) startDrag(event, node.id);
@@ -540,17 +596,17 @@
 						onpointercancel={stopDrag}
 						role="button"
 						tabindex="0"
-						aria-label={`${node.type} ${node.label}`}
+						aria-label={`${node.kind} ${node.label}`}
 					>
 						<div
 							class={css({
 								fontSize: 'xs',
 								textTransform: 'uppercase',
 								letterSpacing: 'wide',
-								color: 'fg.muted'
+								color: isInternal ? 'fg.faint' : 'fg.muted'
 							})}
 						>
-							{node.type === 'datasource' ? 'Datasource' : 'Analysis'}
+							{kindLabel[node.kind]}
 						</div>
 						<div
 							class={css({
@@ -558,13 +614,16 @@
 								textOverflow: 'ellipsis',
 								whiteSpace: 'nowrap',
 								fontSize: 'sm',
-								fontWeight: '600'
+								fontWeight: 'semibold',
+								color: isInternal ? 'fg.tertiary' : 'fg.primary'
 							})}
 						>
 							{node.label}
 						</div>
 						{#if node.meta}
-							<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>{node.meta}</div>
+							<div class={css({ fontSize: 'xs', color: isInternal ? 'fg.faint' : 'fg.tertiary' })}>
+								{node.meta}
+							</div>
 						{/if}
 					</div>
 				{/if}

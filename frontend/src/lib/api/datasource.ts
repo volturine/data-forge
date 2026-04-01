@@ -5,7 +5,7 @@ import type {
 	SchemaInfo
 } from '$lib/types/datasource';
 import { apiRequest } from './client';
-import { ResultAsync } from 'neverthrow';
+import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
 function appendCsvOptions(formData: FormData, csvOptions: CSVOptions): void {

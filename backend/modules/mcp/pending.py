@@ -15,13 +15,14 @@ class PendingStore:
     def __init__(self) -> None:
         self._store: dict[str, dict[str, Any]] = {}
 
-    def create(self, tool_id: str, method: str, path: str, args: dict) -> str:
+    def create(self, tool_id: str, method: str, path: str, args: dict, context: dict[str, Any] | None = None) -> str:
         token = secrets.token_urlsafe(24)
         self._store[token] = {
             'tool_id': tool_id,
             'method': method,
             'path': path,
             'args': args,
+            'context': context or {},
             'created_at': time.time(),
         }
         return token

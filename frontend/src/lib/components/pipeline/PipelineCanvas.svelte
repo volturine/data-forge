@@ -247,6 +247,17 @@
 		drag.setTarget(target, valid);
 	});
 
+	// Lifecycle: register synchronous target resolver so commit() can
+	// resolve the drop target even if the reactive $effect above hasn't run yet.
+	$effect(() => {
+		drag.setTargetResolver((x: number, y: number) => {
+			const target = resolveTargetFromPoint(x, y);
+			if (!target) return null;
+			return { target, valid: isValidTarget(target.index) };
+		});
+		return () => drag.setTargetResolver(null);
+	});
+
 	const scrollThreshold = 60;
 	const scrollSpeed = 15;
 
@@ -367,8 +378,7 @@
 					})
 				)}
 				class:ready={canDrop}
-				role="button"
-				tabindex="0"
+				role="listitem"
 				data-index="0"
 				ondragenter={(e) => handleDragEnter(e, 0)}
 				ondragover={handleDragOver}
@@ -411,7 +421,7 @@
 								class={css({
 									fontFamily: 'mono',
 									fontSize: 'sm',
-									fontWeight: '500',
+									fontWeight: 'medium',
 									textTransform: 'lowercase'
 								})}>{drag.type ?? 'step'}</span
 							>
@@ -503,8 +513,7 @@
 						})
 					)}
 					class:ready={canDrop}
-					role="button"
-					tabindex="0"
+					role="listitem"
 					data-index={i + 1}
 					ondragenter={(e) => handleDragEnter(e, i + 1)}
 					ondragover={handleDragOver}
@@ -550,7 +559,7 @@
 									class={css({
 										fontFamily: 'mono',
 										fontSize: 'sm',
-										fontWeight: '500',
+										fontWeight: 'medium',
 										textTransform: 'lowercase'
 									})}>{drag.type ?? 'step'}</span
 								>

@@ -2,15 +2,28 @@
 
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from modules.mcp.executor import call_tool
+from core.error_handlers import handle_errors
+from core.namespace import get_namespace
+from modules.auth.dependencies import get_current_user
+from modules.auth.models import User
+from modules.mcp.executor import build_tool_context, call_tool
 from modules.mcp.pending import pending_store
 from modules.mcp.registry import MUTATING_METHODS, build_tool_registry
 from modules.mcp.validation import check_schema_supported, validate_args
 
 router = APIRouter(prefix='/mcp', tags=['mcp'])
+
+
+def _request_tool_context(request: Request) -> dict[str, dict[str, str]]:
+    return build_tool_context(
+        {
+            'X-Session-Token': request.headers.get('X-Session-Token') or request.cookies.get('session_token') or '',
+            'X-Namespace': request.headers.get('X-Namespace') or get_namespace(),
+        }
+    )
 
 
 def get_registry(app: FastAPI) -> list[dict]:
@@ -50,14 +63,18 @@ class CapabilitiesRequest(BaseModel):
 
 
 @router.get('/tools')
-def list_tools(request: Request) -> list[dict]:
+@handle_errors('list MCP tools')
+def list_tools(request: Request, user: User = Depends(get_current_user)) -> list[dict]:
     """List all available MCP tools derived from /api/v1 routes."""
+    del user
     return get_registry(request.app)
 
 
 @router.post('/validate')
-def validate(request: Request, body: ToolRequest) -> dict:
+@handle_errors('validate MCP tool args')
+def validate(request: Request, body: ToolRequest, user: User = Depends(get_current_user)) -> dict:
     """Validate tool args against the tool's input schema without executing."""
+    del user
     tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
     if not valid:
         return {'valid': False, 'errors': errors, 'args': body.args}
@@ -65,17 +82,20 @@ def validate(request: Request, body: ToolRequest) -> dict:
 
 
 @router.post('/call')
-async def call(request: Request, body: ToolRequest) -> dict:
+@handle_errors('call MCP tool')
+async def call(request: Request, body: ToolRequest, user: User = Depends(get_current_user)) -> dict:
     """Execute a tool call. Mutating methods return a pending token for preview-first flow."""
+    del user
     tool, valid, errors, normalized = _resolve_tool(request.app, body.tool_id, body.args)
     if not valid:
         return {'status': 'validation_error', 'valid': False, 'errors': errors, 'args': body.args}
 
     method = tool['method']
     path = tool['path']
+    context = _request_tool_context(request)
 
     if method in MUTATING_METHODS:
-        token = pending_store.create(body.tool_id, method, path, normalized)
+        token = pending_store.create(body.tool_id, method, path, normalized, context)
         return {
             'status': 'pending',
             'token': token,
@@ -87,7 +107,7 @@ async def call(request: Request, body: ToolRequest) -> dict:
         }
 
     try:
-        result = await call_tool(request.app, method, path, normalized)
+        result = await call_tool(request.app, method, path, normalized, context)
     except ValueError as exc:
         return {
             'status': 'validation_error',
@@ -100,14 +120,16 @@ async def call(request: Request, body: ToolRequest) -> dict:
 
 
 @router.post('/confirm')
-async def confirm(request: Request, body: ConfirmRequest) -> dict:
+@handle_errors('confirm MCP tool')
+async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(get_current_user)) -> dict:
     """Execute a previously previewed mutating tool call by token."""
+    del user
     entry = pending_store.pop(body.token)
     if entry is None:
         raise HTTPException(status_code=404, detail='Token not found or expired')
 
     try:
-        result = await call_tool(request.app, entry['method'], entry['path'], entry['args'])
+        result = await call_tool(request.app, entry['method'], entry['path'], entry['args'], entry.get('context'))
     except ValueError as exc:
         return {
             'status': 'validation_error',
@@ -120,8 +142,10 @@ async def confirm(request: Request, body: ConfirmRequest) -> dict:
 
 
 @router.post('/capabilities')
-def capabilities(request: Request, body: CapabilitiesRequest) -> list[dict]:
+@handle_errors('check MCP capabilities')
+def capabilities(request: Request, body: CapabilitiesRequest, user: User = Depends(get_current_user)) -> list[dict]:
     """Return per-tool schema support status for all or a subset of tools."""
+    del user
     registry = get_registry(request.app)
     tools = registry if not body.tool_ids else [t for t in registry if t['id'] in body.tool_ids]
     return [

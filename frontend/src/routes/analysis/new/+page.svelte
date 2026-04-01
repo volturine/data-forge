@@ -146,7 +146,7 @@
 				<span
 					class={css({
 						fontSize: 'sm',
-						...(step === 1 ? { color: 'fg.primary', fontWeight: '500' } : { color: 'fg.muted' })
+						...(step === 1 ? { color: 'fg.primary', fontWeight: 'medium' } : { color: 'fg.muted' })
 					})}
 				>
 					Details
@@ -195,7 +195,7 @@
 				<span
 					class={css({
 						fontSize: 'sm',
-						...(step === 2 ? { color: 'fg.primary', fontWeight: '500' } : { color: 'fg.muted' })
+						...(step === 2 ? { color: 'fg.primary', fontWeight: 'medium' } : { color: 'fg.muted' })
 					})}>Data Source</span
 				>
 			</div>
@@ -236,7 +236,7 @@
 				<span
 					class={css({
 						fontSize: 'sm',
-						...(step === 3 ? { color: 'fg.primary', fontWeight: '500' } : { color: 'fg.muted' })
+						...(step === 3 ? { color: 'fg.primary', fontWeight: 'medium' } : { color: 'fg.muted' })
 					})}>Review</span
 				>
 			</div>

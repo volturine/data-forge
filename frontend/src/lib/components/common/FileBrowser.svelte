@@ -110,9 +110,7 @@
 			backgroundColor: 'bg.overlaySoft'
 		})
 	)}
-	role="button"
-	tabindex="0"
-	aria-label="Close file picker"
+	role="presentation"
 	onclick={oncancel}
 	onkeydown={handleBackdropKeydown}
 >

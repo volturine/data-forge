@@ -15,6 +15,7 @@ import { DatasourceStore } from './datasource.svelte';
 import { SchemaStore } from './schema.svelte';
 import { EnginesStore } from './engines.svelte';
 import { ConfigStore } from './config.svelte';
+import { AuthStore } from './auth.svelte';
 
 // Import singletons for fallback (backward compatibility during migration)
 import { analysisStore as analysisSingleton } from './analysis.svelte';
@@ -22,6 +23,7 @@ import { datasourceStore as datasourceSingleton } from './datasource.svelte';
 import { schemaStore as schemaSingleton } from './schema.svelte';
 import { enginesStore as enginesSingleton } from './engines.svelte';
 import { configStore as configSingleton } from './config.svelte';
+import { authStore as authSingleton } from './auth.svelte';
 
 // Context keys (using Symbols for uniqueness)
 const ANALYSIS_STORE_KEY = Symbol('analysis-store');
@@ -29,6 +31,7 @@ const DATASOURCE_STORE_KEY = Symbol('datasource-store');
 const SCHEMA_STORE_KEY = Symbol('schema-store');
 const ENGINES_STORE_KEY = Symbol('engines-store');
 const CONFIG_STORE_KEY = Symbol('config-store');
+const AUTH_STORE_KEY = Symbol('auth-store');
 
 function makeStoreContext<T>(key: symbol, fallback: T) {
 	return {
@@ -42,6 +45,7 @@ const datasourceCtx = makeStoreContext(DATASOURCE_STORE_KEY, datasourceSingleton
 const schemaCtx = makeStoreContext(SCHEMA_STORE_KEY, schemaSingleton);
 const enginesCtx = makeStoreContext(ENGINES_STORE_KEY, enginesSingleton);
 const configCtx = makeStoreContext(CONFIG_STORE_KEY, configSingleton);
+const authCtx = makeStoreContext(AUTH_STORE_KEY, authSingleton);
 
 export const setAnalysisContext = analysisCtx.set;
 export const getAnalysisContext = analysisCtx.get;
@@ -53,6 +57,8 @@ export const setEnginesContext = enginesCtx.set;
 export const getEnginesContext = enginesCtx.get;
 export const setConfigContext = configCtx.set;
 export const getConfigContext = configCtx.get;
+export const setAuthContext = authCtx.set;
+export const getAuthContext = authCtx.get;
 
 // Stores interface for type safety
 export interface AppStores {
@@ -61,6 +67,7 @@ export interface AppStores {
 	schema: SchemaStore;
 	engines: EnginesStore;
 	config: ConfigStore;
+	auth: AuthStore;
 }
 
 // Initialize all stores and set them in context (call from root layout)
@@ -70,7 +77,8 @@ export function initializeStores(): AppStores {
 		datasource: new DatasourceStore(),
 		schema: new SchemaStore(),
 		engines: new EnginesStore(),
-		config: new ConfigStore()
+		config: new ConfigStore(),
+		auth: new AuthStore()
 	};
 
 	setAnalysisContext(stores.analysis);
@@ -78,9 +86,10 @@ export function initializeStores(): AppStores {
 	setSchemaContext(stores.schema);
 	setEnginesContext(stores.engines);
 	setConfigContext(stores.config);
+	setAuthContext(stores.auth);
 
 	return stores;
 }
 
 // Re-export store classes for direct use if needed
-export { AnalysisStore, DatasourceStore, SchemaStore, EnginesStore, ConfigStore };
+export { AnalysisStore, DatasourceStore, SchemaStore, EnginesStore, ConfigStore, AuthStore };

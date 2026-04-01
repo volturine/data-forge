@@ -254,7 +254,7 @@
 				margin: '0',
 				marginBottom: '3',
 				fontSize: 'xs',
-				fontWeight: '600',
+				fontWeight: 'semibold',
 				textTransform: 'uppercase',
 				letterSpacing: 'widest',
 				color: 'fg.muted'
@@ -332,7 +332,7 @@
 						gap: '0'
 					})}
 				>
-					<span class={css({ fontSize: 'xs', fontWeight: '500' })}>{stepType.label}</span>
+					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>{stepType.label}</span>
 					<span
 						class={css({
 							overflow: 'hidden',

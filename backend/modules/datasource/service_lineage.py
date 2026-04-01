@@ -1,228 +1,189 @@
-from sqlalchemy import desc, select
+from collections import deque
+
+from sqlalchemy import select
 from sqlmodel import Session
 
 from core.namespace import get_namespace
 from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.datasource.models import DataSource
-from modules.engine_runs.models import EngineRun
 
 
-def build_lineage(session: Session, target_datasource_id: str | None = None, branch: str | None = None) -> dict:
+def build_lineage(
+    session: Session,
+    target_datasource_id: str | None = None,
+    branch: str | None = None,
+    include_internals: bool = False,
+    mode: str = 'full',
+) -> dict:
     datasources = session.execute(select(DataSource)).scalars().all()
     analyses = session.execute(select(Analysis)).scalars().all()
+    deps = session.execute(select(AnalysisDataSource)).scalars().all()
 
     datasource_map = {ds.id: ds for ds in datasources}
     analysis_map = {analysis.id: analysis for analysis in analyses}
 
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
-
-    def datasource_key(datasource_id: str, branch_name: str | None) -> str:
-        if not branch_name:
-            return f'datasource:{datasource_id}'
-        return f'datasource:{datasource_id}:{branch_name}'
-
-    def add_datasource_node(ds: DataSource, branch_name: str | None = None):
-        node_id = datasource_key(ds.id, branch_name)
-        if node_id not in nodes:
-            name = ds.name
-            if branch_name:
-                name = f'{name} ({branch_name})'
-            nodes[node_id] = {
-                'id': node_id,
-                'type': 'datasource',
-                'name': name,
-                'source_type': ds.source_type,
-                'branch': branch_name,
-            }
-        if ds.created_by_analysis_id:
-            edges.append(
-                {
-                    'from': f'analysis:{ds.created_by_analysis_id}',
-                    'to': node_id,
-                    'type': 'derived',
-                }
-            )
-
-    def add_analysis_node(analysis: Analysis):
-        node_id = f'analysis:{analysis.id}'
-        if node_id in nodes:
-            return
-        nodes[node_id] = {
-            'id': node_id,
-            'type': 'analysis',
-            'name': analysis.name,
-            'status': analysis.status,
-        }
-
-    def add_dependency_edges(
-        analysis_id: str,
-        datasource_overrides: dict[str, str | None] | None = None,
-        datasource_filter: set[str] | None = None,
-    ):
-        deps = (
-            session.execute(
-                select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)  # type: ignore[arg-type]
-            )
-            .scalars()
-            .all()
-        )
-        for dep in deps:
-            if datasource_filter is not None and dep.datasource_id not in datasource_filter:
-                continue
-            branch_name = None
-            if datasource_overrides:
-                branch_name = datasource_overrides.get(dep.datasource_id)
-            edges.append(
-                {
-                    'from': datasource_key(dep.datasource_id, branch_name),
-                    'to': f'analysis:{analysis_id}',
-                    'type': 'uses',
-                }
-            )
-
-    if not target_datasource_id:
-        for ds in datasources:
-            add_datasource_node(ds)
-        for analysis in analyses:
-            add_analysis_node(analysis)
-            add_dependency_edges(analysis.id)
-        return {'nodes': list(nodes.values()), 'edges': edges}
-
     if branch is not None:
-        branch = str(branch).strip()
+        branch = branch.strip()
         if not branch:
             branch = None
 
-    target_ds = datasource_map.get(target_datasource_id)
-    if not target_ds:
-        return {'nodes': [], 'edges': []}
-    if isinstance(target_ds.config, dict):
-        namespace_name = target_ds.config.get('namespace_name')
-        if namespace_name and namespace_name != get_namespace():
+    if target_datasource_id:
+        target = datasource_map.get(target_datasource_id)
+        if not target:
             return {'nodes': [], 'edges': []}
-    target_config = target_ds.config if isinstance(target_ds.config, dict) else {}
-    branch_value = branch or (target_config.get('branch') if isinstance(target_config, dict) else None)
-    if branch_value is not None:
-        branch_value = str(branch_value)
-    add_datasource_node(target_ds, branch_value)
+        if isinstance(target.config, dict):
+            namespace_name = target.config.get('namespace_name')
+            if namespace_name and namespace_name != get_namespace():
+                return {'nodes': [], 'edges': []}
 
-    analysis_id = target_ds.created_by_analysis_id
-    if not analysis_id:
-        return {'nodes': list(nodes.values()), 'edges': edges}
-    analysis = analysis_map.get(analysis_id)
-    if not analysis:
-        return {'nodes': list(nodes.values()), 'edges': edges}
+    ds_to_consumers: dict[str, set[str]] = {}
+    for dep in deps:
+        consumers = ds_to_consumers.setdefault(dep.datasource_id, set())
+        consumers.add(dep.analysis_id)
 
-    add_analysis_node(analysis)
-
-    pipeline = None
-    tab_override = None
-    run_branch = branch_value
-    stmt = (
-        select(EngineRun)
-        .where(EngineRun.datasource_id == target_datasource_id)  # type: ignore[arg-type]
-        .where(EngineRun.kind.in_(['datasource_update', 'datasource_create']))  # type: ignore[arg-type, attr-defined]
-        .where(EngineRun.status == 'success')  # type: ignore[arg-type]
-        .order_by(desc(EngineRun.created_at))  # type: ignore[arg-type]
-        .limit(50)
-    )
-    runs = session.execute(stmt).scalars().all()
-    for run in runs:
-        payload = run.request_json if isinstance(run.request_json, dict) else {}
-        opts = payload.get('iceberg_options')
-        branch_name = opts.get('branch') if isinstance(opts, dict) else None
-        if run_branch and branch_name != run_branch:
+    internal_ids: set[str] = set()
+    for ds in datasources:
+        producer = ds.created_by_analysis_id
+        if not producer:
             continue
-        pipeline_value = payload.get('analysis_pipeline')
-        if isinstance(pipeline_value, dict):
-            pipeline = pipeline_value
-            tab_override = payload.get('tab_id')
-        break
+        consumers = ds_to_consumers.get(ds.id, set())
+        if producer in consumers:
+            internal_ids.add(ds.id)
 
-    pipeline = pipeline or (analysis.pipeline_definition if isinstance(analysis.pipeline_definition, dict) else {})
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
-    sources = pipeline.get('sources') if isinstance(pipeline, dict) else None
-    if not isinstance(sources, dict):
-        sources = {}
+    nodes: dict[str, dict] = {}
+    edges: list[dict] = []
+    edge_keys: set[tuple[str, str, str]] = set()
 
-    target_tab_id = str(tab_override) if tab_override else None
-    if not target_tab_id:
-        for tab in tabs:
-            output = tab.get('output') if isinstance(tab, dict) else None
-            output_id = output.get('result_id') if isinstance(output, dict) else None
-            if output_id == target_datasource_id:
-                target_tab_id = str(tab.get('id')) if tab.get('id') else None
-                break
-    if not target_tab_id:
-        add_dependency_edges(analysis.id)
-        return {'nodes': list(nodes.values()), 'edges': edges}
+    def datasource_key(datasource_id: str) -> str:
+        return f'datasource:{datasource_id}'
 
-    output_map: dict[str, str] = {}
-    output_to_tab: dict[str, str] = {}
-    for tab in tabs:
-        tab_id = tab.get('id')
-        output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('result_id') if isinstance(output, dict) else None
-        if tab_id and output_id:
-            output_map[str(tab_id)] = str(output_id)
-            output_to_tab[str(output_id)] = str(tab_id)
-    tab_map = {tab.get('id'): tab for tab in tabs if tab.get('id')}
+    def analysis_key(analysis_id: str) -> str:
+        return f'analysis:{analysis_id}'
 
-    ordered: list[dict] = []
-    seen: set[str] = set()
-    current_id = str(target_tab_id)
-    while current_id:
-        if current_id in seen:
-            break
-        seen.add(current_id)
-        current_tab = tab_map.get(current_id)
-        if not current_tab:
-            break
-        ordered.append(current_tab)
-        datasource = current_tab.get('datasource') if isinstance(current_tab, dict) else None
-        input_id = datasource.get('id') if isinstance(datasource, dict) else None
-        upstream_tab_id = None
-        if input_id:
-            upstream_tab_id = output_to_tab.get(str(input_id))
-        if upstream_tab_id:
-            current_id = str(upstream_tab_id)
+    def classify_datasource(ds: DataSource) -> str:
+        if ds.id in internal_ids:
+            return 'internal'
+        if ds.created_by_analysis_id:
+            return 'output'
+        return 'source'
+
+    def datasource_branch(ds: DataSource) -> str | None:
+        if target_datasource_id and ds.id == target_datasource_id and branch is not None:
+            return branch
+        if not isinstance(ds.config, dict):
+            return None
+        value = ds.config.get('branch')
+        if value is None:
+            return None
+        return str(value)
+
+    def add_datasource_node(ds: DataSource) -> str:
+        node_id = datasource_key(ds.id)
+        if node_id in nodes:
+            return node_id
+        node_branch = datasource_branch(ds)
+        nodes[node_id] = {
+            'id': node_id,
+            'type': 'datasource',
+            'node_kind': classify_datasource(ds),
+            'name': ds.name,
+            'source_type': ds.source_type,
+            'branch': node_branch,
+        }
+        return node_id
+
+    def add_analysis_node(analysis: Analysis) -> str:
+        node_id = analysis_key(analysis.id)
+        if node_id in nodes:
+            return node_id
+        nodes[node_id] = {
+            'id': node_id,
+            'type': 'analysis',
+            'node_kind': 'analysis',
+            'name': analysis.name,
+            'status': analysis.status,
+        }
+        return node_id
+
+    def add_edge(from_id: str, to_id: str, edge_type: str) -> None:
+        key = (from_id, to_id, edge_type)
+        if key in edge_keys:
+            return
+        edge_keys.add(key)
+        edges.append({'from': from_id, 'to': to_id, 'type': edge_type})
+
+    for ds in datasources:
+        ds_node_id = add_datasource_node(ds)
+        producer_id = ds.created_by_analysis_id
+        if not producer_id:
             continue
-        break
-    ordered.reverse()
-
-    branch_overrides: dict[str, str | None] = {}
-    input_ids: set[str] = set()
-    for tab in ordered:
-        datasource = tab.get('datasource') if isinstance(tab, dict) else None
-        input_id = datasource.get('id') if isinstance(datasource, dict) else None
-        if not input_id:
+        analysis = analysis_map.get(producer_id)
+        if not analysis:
             continue
-        tab_config = datasource.get('config') if isinstance(datasource, dict) else {}
-        output_branch = None
-        output_config = tab.get('output') if isinstance(tab.get('output'), dict) else None
-        if isinstance(output_config, dict):
-            iceberg_cfg = output_config.get('iceberg')
-            if isinstance(iceberg_cfg, dict):
-                output_branch = iceberg_cfg.get('branch') or run_branch
-        output = tab.get('output') if isinstance(tab, dict) else None
-        output_id = output.get('result_id') if isinstance(output, dict) else None
-        if output_id:
-            branch_value = str(output_branch) if output_branch is not None else None
-            branch_overrides[str(output_id)] = branch_value
-        base_config = sources.get(str(input_id)) if isinstance(sources, dict) else None
-        if not isinstance(base_config, dict):
-            base_config = {}
-        merged = {**base_config, **(tab_config if isinstance(tab_config, dict) else {})}
-        branch_name = merged.get('branch') if isinstance(merged, dict) else None
-        if branch_name is not None:
-            branch_name = str(branch_name)
-        branch_overrides[str(input_id)] = branch_name
-        input_ids.add(str(input_id))
-        source = datasource_map.get(str(input_id))
-        if source:
-            add_datasource_node(source, branch_name)
+        analysis_node_id = add_analysis_node(analysis)
+        edge_type = 'chains' if ds.id in internal_ids else 'produces'
+        add_edge(analysis_node_id, ds_node_id, edge_type)
 
-    add_dependency_edges(analysis.id, datasource_overrides=branch_overrides, datasource_filter=input_ids)
+    for analysis in analyses:
+        add_analysis_node(analysis)
+
+    for dep in deps:
+        datasource = datasource_map.get(dep.datasource_id)
+        analysis = analysis_map.get(dep.analysis_id)
+        if not datasource or not analysis:
+            continue
+        ds_node_id = add_datasource_node(datasource)
+        analysis_node_id = add_analysis_node(analysis)
+        producer_id = datasource.created_by_analysis_id
+        same_analysis_internal = datasource.id in internal_ids and producer_id == analysis.id
+        edge_type = 'consumes_internal' if same_analysis_internal else 'uses'
+        add_edge(ds_node_id, analysis_node_id, edge_type)
+
+    if mode in {'upstream', 'downstream'} and target_datasource_id:
+        target_node_id = datasource_key(target_datasource_id)
+        if target_node_id not in nodes:
+            return {'nodes': [], 'edges': []}
+
+        include_internal_edges = include_internals
+        lineage_types = {'uses', 'produces'}
+        if include_internal_edges:
+            lineage_types.update({'chains', 'consumes_internal'})
+
+        forward_adj: dict[str, set[str]] = {}
+        reverse_adj: dict[str, set[str]] = {}
+        for edge in edges:
+            edge_type = edge['type']
+            if edge_type not in lineage_types:
+                continue
+            source = edge['from']
+            target = edge['to']
+            forward_adj.setdefault(source, set()).add(target)
+            reverse_adj.setdefault(target, set()).add(source)
+
+        reachable: set[str] = {target_node_id}
+        queue: deque[str] = deque([target_node_id])
+
+        while queue:
+            current = queue.popleft()
+            neighbors = reverse_adj.get(current, set()) if mode == 'upstream' else forward_adj.get(current, set())
+            for node_id in neighbors:
+                if node_id in reachable:
+                    continue
+                reachable.add(node_id)
+                queue.append(node_id)
+
+        nodes = {node_id: node for node_id, node in nodes.items() if node_id in reachable}
+        edges = [edge for edge in edges if edge['from'] in reachable and edge['to'] in reachable]
+
+    if not include_internals:
+        internal_node_ids = {node_id for node_id, node in nodes.items() if node.get('node_kind') == 'internal'}
+        nodes = {node_id: node for node_id, node in nodes.items() if node_id not in internal_node_ids}
+        edges = [
+            edge
+            for edge in edges
+            if edge['type'] not in {'chains', 'consumes_internal'}
+            and edge['from'] not in internal_node_ids
+            and edge['to'] not in internal_node_ids
+        ]
 
     return {'nodes': list(nodes.values()), 'edges': edges}

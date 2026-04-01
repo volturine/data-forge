@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import os
 import threading
 import time
 import uuid
@@ -40,6 +41,18 @@ def test_safe_close_websocket_swallows_runtime_disconnect_race() -> None:
     asyncio.run(_safe_close_websocket(websocket))
 
     websocket.close.assert_awaited_once()
+
+
+def test_run_compute_clears_inherited_polars_env_for_auto_values(monkeypatch) -> None:
+    monkeypatch.setenv('POLARS_MAX_THREADS', '8')
+    monkeypatch.setenv('POLARS_STREAMING_CHUNK_SIZE', '100000')
+    command_queue = MagicMock()
+    command_queue.get.return_value = {'type': 'shutdown'}
+
+    PolarsComputeEngine._run_compute(command_queue, MagicMock(), max_threads=0, streaming_chunk_size=0)
+
+    assert 'POLARS_MAX_THREADS' not in os.environ
+    assert 'POLARS_STREAMING_CHUNK_SIZE' not in os.environ
 
 
 class TestComputePreview:
@@ -193,6 +206,22 @@ class TestComputePreview:
         assert result['action'] == 'preview'
         assert result['data']['step_id'] == 'step1'
         assert result['data']['total_rows'] == 1
+
+    def test_preview_step_websocket_internal_error_is_sanitized(self, client):
+        with (
+            patch('modules.compute.routes._run_compute_websocket_action', side_effect=RuntimeError('secret failure details')),
+            client.websocket_connect('/api/v1/compute/ws?namespace=default') as websocket,
+        ):
+            websocket.send_json({'action': 'preview', 'payload': {}})
+            started = websocket.receive_json()
+            error = websocket.receive_json()
+
+        assert started == {'type': 'started', 'action': 'preview'}
+        assert error['type'] == 'error'
+        assert error['action'] == 'preview'
+        assert error['error'] == 'An internal error occurred'
+        assert error['status_code'] == 500
+        assert 'secret failure details' not in str(error)
 
     def test_preview_step_failure(self, client, sample_datasource: DataSource):
         payload = {
@@ -745,6 +774,7 @@ class FakeEngine:
 
 def test_spawn_engine_preserves_requested_config_during_conflicting_restarts():
     manager = ProcessManager(engine_factory=FakeEngine)
+    manager._get_defaults = lambda: {'max_threads': 0, 'max_memory_mb': 0, 'streaming_chunk_size': 0}
     manager.spawn_engine('analysis', {'max_threads': 1})
 
     results: dict[str, dict[str, int]] = {}
@@ -765,6 +795,20 @@ def test_spawn_engine_preserves_requested_config_during_conflicting_restarts():
     assert results['config_2'] == {'max_threads': 2}
     assert results['config_3'] == {'max_threads': 3}
     assert manager.get_engine('analysis') is not None
+
+
+def test_spawn_engine_evicts_oldest_idle_when_limit_reached(monkeypatch):
+    from core.config import settings
+
+    manager = ProcessManager(engine_factory=FakeEngine)
+    manager._get_defaults = lambda: {'max_threads': 0, 'max_memory_mb': 0, 'streaming_chunk_size': 0}
+    monkeypatch.setattr(settings, 'max_concurrent_engines', 2)
+    manager.spawn_engine('a')
+    time.sleep(0.01)
+    manager.spawn_engine('b')
+    manager.spawn_engine('c')
+    engines = set(manager.list_engines())
+    assert engines == {'b', 'c'}
 
 
 def test_analysis_stack_context_copy_isolated():

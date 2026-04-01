@@ -8,9 +8,7 @@
 		previewStepData,
 		getStepRowCount,
 		downloadStep,
-		type StepPreviewRequest,
-		type StepPreviewResponse,
-		type StepRowCountRequest
+		type StepPreviewResponse
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
@@ -73,9 +71,7 @@
 	const Icon = $derived(stepConfig.icon);
 	const label = $derived(stepConfig.label);
 	const summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
-	const isApplied = $derived(
-		(step as PipelineStep & { is_applied?: boolean }).is_applied !== false
-	);
+	const isApplied = $derived(step.is_applied !== false);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
 	const chartPipeline = $derived(applySteps(allSteps));
@@ -112,18 +108,14 @@
 			JSON.stringify(chartDatasourceConfig)
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
-				string,
-				unknown
-			> | null;
 			const result = await previewStepData({
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: analysisPipeline!,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: step.id,
 				row_limit: 5000,
 				page: 1,
-				resource_config: resourceConfig
-			} as unknown as StepPreviewRequest);
+				resource_config: analysisStore.resourceConfig
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
@@ -176,10 +168,10 @@
 		rowCountLoads.set(rowCountKey, true);
 		rowCountErrors.delete(rowCountKey);
 		const result = await getStepRowCount({
-			analysis_pipeline: analysisPipeline,
+			analysis_pipeline: analysisPipeline!,
 			tab_id: analysisStore.activeTab?.id ?? null,
 			target_step_id: step.id
-		} as StepRowCountRequest);
+		});
 		rowCountLoads.set(rowCountKey, false);
 		if (result.isErr()) {
 			rowCountErrors.set(rowCountKey, result.error.message);
@@ -190,19 +182,28 @@
 	}
 
 	let copyFeedback = $state(false);
+	let copyTimer = $state<number | null>(null);
 
 	async function copyStepToClipboard() {
 		const payload = JSON.stringify({
 			type: step.type,
 			config: step.config,
-			is_applied: (step as PipelineStep & { is_applied?: boolean }).is_applied
+			is_applied: step.is_applied
 		});
-		await navigator.clipboard.writeText(payload);
+		await navigator.clipboard.writeText(payload).catch(() => {});
 		copyFeedback = true;
-		window.setTimeout(() => {
+		if (copyTimer !== null) window.clearTimeout(copyTimer);
+		copyTimer = window.setTimeout(() => {
 			copyFeedback = false;
+			copyTimer = null;
 		}, 1200);
 	}
+
+	$effect(() => {
+		return () => {
+			if (copyTimer !== null) window.clearTimeout(copyTimer);
+		};
+	});
 
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
@@ -267,7 +268,7 @@
 		if (event.cancelable) {
 			event.preventDefault();
 		}
-		drag.startMove(step.id, step.type, event.pointerId, event.clientX, event.clientY);
+		drag.startMove(step.id, step.type, event.pointerId, event.clientX, event.clientY, onTouchMove);
 		if (event.currentTarget instanceof HTMLElement) {
 			event.currentTarget.setPointerCapture(event.pointerId);
 			drag.setCapturedElement(event.currentTarget, event.pointerId);
@@ -301,10 +302,7 @@
 
 	function finishDrag(): void {
 		if (dragging && drag.active) {
-			if (drag.target && drag.stepId && drag.valid) {
-				onTouchMove(drag.stepId, drag.target);
-			}
-			drag.end();
+			drag.commit();
 		}
 		const wasDragging = dragging;
 		dragging = false;
@@ -402,7 +400,7 @@
 				class={css({
 					flex: '1',
 					fontSize: 'xs',
-					fontWeight: '600',
+					fontWeight: 'semibold',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide'
 				})}
@@ -473,7 +471,7 @@
 						border: 'none',
 						backgroundColor: 'transparent',
 						paddingY: '2.5',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						textTransform: 'uppercase',
 						letterSpacing: 'widest',
 						fontSize: '3xs',
@@ -509,7 +507,7 @@
 						backgroundColor: 'transparent',
 						paddingY: '2.5',
 						fontSize: '3xs',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						textTransform: 'uppercase',
 						letterSpacing: 'widest',
 						color: 'fg.muted',
@@ -533,7 +531,7 @@
 						backgroundColor: 'transparent',
 						paddingY: '2.5',
 						fontSize: '3xs',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						textTransform: 'uppercase',
 						letterSpacing: 'widest',
 						color: 'fg.muted',
@@ -592,7 +590,7 @@
 							border: '1px dashed',
 							backgroundColor: 'bg.primary'
 						})}
-						style="height: {chartHeightPx}px"
+						style:height="{chartHeightPx}px"
 					>
 						<Icon size={14} class={css({ marginRight: '2' })} />
 						{#if ((step.config?.x_column as string | undefined) ?? '') === ''}

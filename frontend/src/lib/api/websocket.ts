@@ -1,6 +1,6 @@
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { getNamespace } from '$lib/stores/namespace.svelte';
-import { ResultAsync } from 'neverthrow';
+import { errAsync, okAsync, ResultAsync } from 'neverthrow';
 import { BASE_URL, type ApiError } from './client';
 
 type WebsocketMessage<T> =
@@ -17,28 +17,16 @@ type WebsocketMessage<T> =
 			status_code?: number;
 	  };
 
-function createApiError(error: unknown): ApiError {
-	if (typeof error === 'object' && error !== null && 'type' in error && 'message' in error) {
-		return error as ApiError;
-	}
-	return {
-		type: 'network',
-		message: error instanceof Error ? error.message : 'WebSocket request failed'
-	};
-}
+const DEV_BACKEND_PORT = '8000';
+const DEV_FRONTEND_PORT = '3000';
 
 function resolveWebsocketOrigin(): string {
-	if (!import.meta.env.DEV) {
-		return window.location.origin;
-	}
-	const isViteDevServer = window.location.port === '3000';
-	if (!isViteDevServer) {
-		return window.location.origin;
-	}
-	return `${window.location.protocol}//${window.location.hostname}:8000`;
+	if (!import.meta.env.DEV) return window.location.origin;
+	if (window.location.port !== DEV_FRONTEND_PORT) return window.location.origin;
+	return `${window.location.protocol}//${window.location.hostname}:${DEV_BACKEND_PORT}`;
 }
 
-function buildWebsocketUrl(endpoint: string): string {
+export function buildWebsocketUrl(endpoint: string): string {
 	const url = new URL(`${BASE_URL}${endpoint}`, resolveWebsocketOrigin());
 	url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const identity = getClientIdentity();
@@ -55,83 +43,119 @@ function buildWebsocketUrl(endpoint: string): string {
 	return url.toString();
 }
 
+function preferHttp(): boolean {
+	if (typeof window === 'undefined') return false;
+	try {
+		return localStorage.getItem('debug:prefer-http') === 'true';
+	} catch {
+		return false;
+	}
+}
+
+type WsResult<T> =
+	| { ok: true; data: T }
+	| { ok: false; error: ApiError }
+	| { ok: false; fallback: true };
+
+function attemptWebsocket<T, Payload>(
+	endpoint: string,
+	action: string,
+	payload: Payload
+): Promise<WsResult<T>> {
+	return new Promise<WsResult<T>>((resolve) => {
+		const socket = new WebSocket(buildWebsocketUrl(endpoint));
+		let settled = false;
+		let opened = false;
+
+		const settle = (result: WsResult<T>) => {
+			if (settled) return;
+			settled = true;
+			resolve(result);
+		};
+
+		socket.addEventListener('open', () => {
+			opened = true;
+			socket.send(JSON.stringify({ action, payload }));
+		});
+
+		socket.addEventListener('message', (event) => {
+			let message: WebsocketMessage<T>;
+			try {
+				message = JSON.parse(event.data) as WebsocketMessage<T>;
+			} catch {
+				const preview =
+					typeof event.data === 'string' ? event.data.slice(0, 100) : '[non-text payload]';
+				settle({
+					ok: false,
+					error: { type: 'parse', message: `Failed to parse websocket response: ${preview}` }
+				});
+				socket.close();
+				return;
+			}
+
+			if (message.type === 'started') {
+				return;
+			}
+
+			if (message.type === 'error') {
+				settle({
+					ok: false,
+					error: {
+						type: 'http',
+						message: message.error,
+						status: message.status_code,
+						statusText: 'WebSocket request failed'
+					}
+				});
+				socket.close();
+				return;
+			}
+
+			settle({ ok: true, data: message.data });
+			socket.close();
+		});
+
+		socket.addEventListener('error', () => {
+			if (!opened) {
+				settle({ ok: false, fallback: true });
+				return;
+			}
+			settle({ ok: false, error: { type: 'network', message: 'WebSocket request failed' } });
+		});
+
+		socket.addEventListener('close', (event) => {
+			if (settled) return;
+			if (!opened) {
+				settle({ ok: false, fallback: true });
+				return;
+			}
+			settle({
+				ok: false,
+				error: {
+					type: 'network',
+					message:
+						event.reason || `WebSocket closed before a result was received (code ${event.code})`
+				}
+			});
+		});
+	});
+}
+
 export function websocketRequest<T, Payload>(
 	endpoint: string,
 	action: string,
 	payload: Payload,
 	fallback: () => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
-	if (typeof window === 'undefined' || typeof WebSocket === 'undefined') {
+	if (typeof window === 'undefined' || typeof WebSocket === 'undefined' || preferHttp()) {
 		return fallback();
 	}
 	return ResultAsync.fromPromise(
-		new Promise<T>((resolve, reject) => {
-			const socket = new WebSocket(buildWebsocketUrl(endpoint));
-			let settled = false;
-
-			const settle = (callback: () => void) => {
-				if (settled) return;
-				settled = true;
-				callback();
-			};
-
-			socket.addEventListener('open', () => {
-				socket.send(JSON.stringify({ action, payload }));
-			});
-
-			socket.addEventListener('message', (event) => {
-				let message: WebsocketMessage<T>;
-				try {
-					message = JSON.parse(event.data) as WebsocketMessage<T>;
-				} catch {
-					const preview =
-						typeof event.data === 'string' ? event.data.slice(0, 100) : '[non-text payload]';
-					settle(() =>
-						reject({
-							type: 'parse',
-							message: `Failed to parse websocket response: ${preview}`
-						})
-					);
-					socket.close();
-					return;
-				}
-
-				if (message.type === 'started') {
-					return;
-				}
-
-				if (message.type === 'error') {
-					settle(() =>
-						reject({
-							type: 'http',
-							message: message.error,
-							status: message.status_code,
-							statusText: 'WebSocket request failed'
-						})
-					);
-					socket.close();
-					return;
-				}
-
-				settle(() => resolve(message.data));
-				socket.close();
-			});
-
-			socket.addEventListener('error', () => {
-				settle(() => reject({ type: 'network', message: 'WebSocket request failed' }));
-			});
-
-			socket.addEventListener('close', (event) => {
-				if (settled) return;
-				settle(() =>
-					reject({
-						type: 'network',
-						message:
-							event.reason || `WebSocket closed before a result was received (code ${event.code})`
-					})
-				);
-			});
-		}),
-		createApiError
-	);
+		attemptWebsocket<T, Payload>(endpoint, action, payload),
+		(): ApiError => ({ type: 'network', message: 'Unexpected error in WebSocket transport' })
+	).andThen((result) => {
+		if (result.ok) return okAsync<T, ApiError>(result.data);
+		if ('fallback' in result) return fallback();
+		return errAsync<T, ApiError>(result.error);
+	});
 }

@@ -1,8 +1,8 @@
 ---
 description: Python / FastAPI / Polars specialist — implements backend code
 mode: subagent
-model: github-copilot/gpt-5.3-codex
-variant: medium
+model: github-copilot/gpt-5.4
+variant: high
 temperature: 0.1
 name: backend
 tools:

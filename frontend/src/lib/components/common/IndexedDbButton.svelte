@@ -11,6 +11,7 @@
 	let dropdownRef = $state<HTMLElement>();
 	let expandedKey = $state<string | null>(null);
 	let copiedKey = $state<string | null>(null);
+	let copyTimer = $state<number | null>(null);
 	const truncateLimit = 120;
 
 	function formatValue(value: unknown): string {
@@ -34,12 +35,21 @@
 
 	async function copyValue(key: string, value: unknown) {
 		const formatted = formatValue(value);
-		await navigator.clipboard.writeText(formatted);
+		await navigator.clipboard.writeText(formatted).catch(() => {});
 		copiedKey = key;
-		window.setTimeout(() => {
+		if (copyTimer !== null) window.clearTimeout(copyTimer);
+		copyTimer = window.setTimeout(() => {
 			copiedKey = null;
+			copyTimer = null;
 		}, 1500);
 	}
+
+	// Cleanup: $derived can't clear pending timers on destroy.
+	$effect(() => {
+		return () => {
+			if (copyTimer !== null) window.clearTimeout(copyTimer);
+		};
+	});
 
 	async function refresh() {
 		loading = true;

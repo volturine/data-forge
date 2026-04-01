@@ -487,7 +487,7 @@
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						color: 'accent.primary',
 						_hover: { color: 'fg.secondary' }
 					})
@@ -499,7 +499,7 @@
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						color: 'fg.muted',
 						_hover: { color: 'fg.secondary' }
 					})}
@@ -518,7 +518,7 @@
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						color: 'accent.primary',
 						_hover: { color: 'fg.secondary' }
 					})
@@ -530,7 +530,7 @@
 						paddingX: '3',
 						paddingY: '1.5',
 						fontSize: 'xs',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						color: 'fg.muted',
 						_hover: { color: 'fg.secondary' }
 					})}

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import os
 import uuid
 from collections.abc import Callable
@@ -10,14 +12,19 @@ from starlette.concurrency import run_in_threadpool
 
 from core.config import settings
 from core.database import get_db, run_db
+from core.dependencies import get_manager
 from core.error_handlers import handle_errors
-from core.exceptions import DataSourceNotFoundError, DataSourceValidationError
 from core.namespace import namespace_paths
 from core.validation import DataSourceId, PreflightId, parse_datasource_id, parse_preflight_id
+from modules.auth.dependencies import get_optional_user
+from modules.auth.models import User
+from modules.compute.manager import ProcessManager
 from modules.datasource import schemas, service
 from modules.datasource.preflight import clear_preflight, create_preflight, get_preflight
 from modules.datasource.source_types import DataSourceType
 from modules.mcp.router import MCPRouter
+
+logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix='/datasource', tags=['datasource'])
 
@@ -29,6 +36,24 @@ _FILE_TYPE_MAPPING: dict[str, str] = {
     '.jsonl': 'ndjson',
     '.xlsx': 'excel',
 }
+
+
+def _write_chunk(path: Path, chunk: bytes) -> None:
+    with open(path, 'ab') as handle:
+        handle.write(chunk)
+
+
+async def _save_upload_file(file: UploadFile, file_path: Path, max_bytes: int) -> None:
+    total = 0
+    await asyncio.to_thread(file_path.write_bytes, b'')
+    while True:
+        chunk = await file.read(settings.upload_chunk_size)
+        if not chunk:
+            return
+        total += len(chunk)
+        if max_bytes and total > max_bytes:
+            raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
+        await asyncio.to_thread(_write_chunk, file_path, chunk)
 
 
 def _list_export_branches(metadata_path: str) -> list[str]:
@@ -75,6 +100,7 @@ async def upload_file(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
+    user: User | None = Depends(get_optional_user),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail='No filename provided')
@@ -92,26 +118,17 @@ async def upload_file(
     unique_filename = f'{uuid.uuid4()}{file_extension}'
     file_path = namespace_paths().upload_dir / unique_filename
 
-    max_bytes = settings.upload_max_file_size_bytes
-    total = 0
     try:
-        with open(file_path, 'wb') as f:
-            while True:
-                chunk = await file.read(settings.upload_chunk_size)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if max_bytes and total > max_bytes:
-                    raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-                f.write(chunk)
+        await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
     except HTTPException:
         if file_path.exists():
             file_path.unlink()
         raise
     except Exception as e:
+        logger.error('Failed to save file: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to save file') from e
 
     csv_options = None
     if file_type == 'csv':
@@ -124,6 +141,7 @@ async def upload_file(
         )
 
     try:
+        owner_id = user.id if user else None
         return await run_in_threadpool(
             run_db,
             service.create_file_datasource,
@@ -131,11 +149,13 @@ async def upload_file(
             file_path=str(file_path),
             file_type=file_type,
             csv_options=csv_options,
+            owner_id=owner_id,
         )
     except Exception as e:
+        logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f'Failed to create datasource: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
 
 @router.post('/upload/bulk', response_model=schemas.BulkUploadResponse)
@@ -147,6 +167,7 @@ async def upload_bulk(
     has_header: bool = Form(True),
     skip_rows: int = Form(0),
     encoding: str = Form('utf8'),
+    user: User | None = Depends(get_optional_user),
 ):
     if not files:
         raise HTTPException(status_code=400, detail='No files provided')
@@ -192,18 +213,8 @@ async def upload_bulk(
         file_path = namespace_paths().upload_dir / unique_filename
         name = Path(file.filename).stem
 
-        max_bytes = settings.upload_max_file_size_bytes
-        total = 0
         try:
-            with open(file_path, 'wb') as f:
-                while True:
-                    chunk = await file.read(settings.upload_chunk_size)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if max_bytes and total > max_bytes:
-                        raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-                    f.write(chunk)
+            await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
         except HTTPException as exc:
             if file_path.exists():
                 file_path.unlink()
@@ -217,6 +228,7 @@ async def upload_bulk(
 
         file_csv_options = csv_options if file_type == 'csv' else None
         try:
+            owner_id = user.id if user else None
             datasource = await run_in_threadpool(
                 run_db,
                 service.create_file_datasource,
@@ -224,6 +236,7 @@ async def upload_bulk(
                 file_path=str(file_path),
                 file_type=file_type,
                 csv_options=file_csv_options,
+                owner_id=owner_id,
             )
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
         except Exception as e:
@@ -261,34 +274,26 @@ async def preflight_excel(
 
     unique_filename = f'{uuid.uuid4()}{file_extension}'
     file_path = namespace_paths().upload_dir / unique_filename
-    max_bytes = settings.upload_max_file_size_bytes
-    total = 0
     try:
-        with open(file_path, 'wb') as f:
-            while True:
-                chunk = await file.read(settings.upload_chunk_size)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if max_bytes and total > max_bytes:
-                    raise HTTPException(status_code=413, detail='Uploaded file exceeds size limit')
-                f.write(chunk)
+        await _save_upload_file(file, file_path, settings.upload_max_file_size_bytes)
     except HTTPException:
         if file_path.exists():
             file_path.unlink()
         raise
     except Exception as e:
+        logger.error('Failed to save file: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
             file_path.unlink()
-        raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}') from e
+        raise HTTPException(status_code=500, detail='Failed to save file') from e
 
-    preflight_id, preflight = create_preflight(file_path, delete_file=False)
+    preflight_id, preflight = await create_preflight(file_path, delete_file=False)
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        clear_preflight(preflight_id, delete_file=False)
+        await clear_preflight(preflight_id, delete_file=False)
         raise HTTPException(status_code=400, detail='No sheets found in file')
 
-    preview_result = service.build_excel_preview(
+    preview_result = await asyncio.to_thread(
+        service.build_excel_preview,
         file_path=file_path,
         sheet_name=target_sheet,
         start_row=start_row,
@@ -329,13 +334,14 @@ async def preflight_excel_path(payload: schemas.ExcelPreflightPathRequest):
     if resolved.suffix.lower() != '.xlsx':
         raise HTTPException(status_code=400, detail='Only .xlsx files are supported for preflight')
 
-    preflight_id, preflight = create_preflight(file_path)
+    preflight_id, preflight = await create_preflight(file_path)
     target_sheet = payload.sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        clear_preflight(preflight_id)
+        await clear_preflight(preflight_id)
         raise HTTPException(status_code=400, detail='No sheets found in file')
 
-    preview_result = service.build_excel_preview(
+    preview_result = await asyncio.to_thread(
+        service.build_excel_preview,
         file_path=file_path,
         sheet_name=target_sheet,
         start_row=payload.start_row,
@@ -376,11 +382,12 @@ async def preflight_preview(
     named_range: str | None = None,
     cell_range: str | None = None,
 ):
-    preflight = get_preflight(parse_preflight_id(preflight_id))
+    preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
-    preview_result = service.build_excel_preview(
+    preview_result = await asyncio.to_thread(
+        service.build_excel_preview,
         file_path=preflight.temp_path,
         sheet_name=sheet_name,
         start_row=start_row,
@@ -416,14 +423,15 @@ async def confirm_excel(
     table_name: str | None = Form(None),
     named_range: str | None = Form(None),
     cell_range: str | None = Form(None),
+    user: User | None = Depends(get_optional_user),
 ):
-    preflight = get_preflight(parse_preflight_id(preflight_id))
+    preflight = await get_preflight(parse_preflight_id(preflight_id))
     if not preflight:
         raise HTTPException(status_code=404, detail='Preflight not found')
 
     target_sheet = sheet_name or (preflight.sheets[0] if preflight.sheets else None)
     if not target_sheet:
-        clear_preflight(parse_preflight_id(preflight_id))
+        await clear_preflight(parse_preflight_id(preflight_id))
         raise HTTPException(status_code=400, detail='No sheet selected')
 
     file_extension = preflight.temp_path.suffix.lower()
@@ -431,8 +439,9 @@ async def confirm_excel(
     target_path = namespace_paths().upload_dir / target_filename
 
     try:
-        copy2(preflight.temp_path, target_path)
-        resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = service.resolve_excel_selection(
+        await asyncio.to_thread(copy2, preflight.temp_path, target_path)
+        resolved_sheet, resolved_start_row, resolved_start_col, resolved_end_col, resolved_end_row = await asyncio.to_thread(
+            service.resolve_excel_selection,
             preflight.temp_path,
             target_sheet,
             start_row,
@@ -467,14 +476,16 @@ async def confirm_excel(
             table_name=table_name,
             named_range=named_range,
             cell_range=resolved_cell_range,
+            owner_id=user.id if user else None,
         )
     except Exception as e:
+        logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if target_path.exists():
             target_path.unlink()
-        clear_preflight(parse_preflight_id(preflight_id))
-        raise HTTPException(status_code=500, detail=f'Failed to create datasource: {str(e)}') from e
+        await clear_preflight(parse_preflight_id(preflight_id))
+        raise HTTPException(status_code=500, detail='Failed to create datasource') from e
 
-    clear_preflight(parse_preflight_id(preflight_id))
+    await clear_preflight(parse_preflight_id(preflight_id))
     return datasource
 
 
@@ -483,6 +494,7 @@ async def confirm_excel(
 def connect_datasource(
     datasource: schemas.DataSourceCreate,
     session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     """Connect a new datasource (database, Iceberg, or analysis type).
 
@@ -510,10 +522,10 @@ def connect_datasource(
             status_code=400,
             detail=(f'Unsupported source type: {datasource.source_type}. Use "file", "database", "iceberg", or "analysis"'),
         )
-    return handler(datasource, session)
+    return handler(datasource, session, user.id if user else None)
 
 
-def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCreate, Session], schemas.DataSourceResponse]]:
+def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCreate, Session, str | None], schemas.DataSourceResponse]]:
     return {
         DataSourceType.DATABASE: _connect_database,
         DataSourceType.ICEBERG: _connect_iceberg,
@@ -521,7 +533,7 @@ def _connect_handlers() -> dict[DataSourceType, Callable[[schemas.DataSourceCrea
     }
 
 
-def _connect_database(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+def _connect_database(datasource: schemas.DataSourceCreate, session: Session, owner_id: str | None) -> schemas.DataSourceResponse:
     db_config = schemas.DatabaseDataSourceConfig.model_validate(datasource.config)
     return service.create_database_datasource(
         session=session,
@@ -529,20 +541,23 @@ def _connect_database(datasource: schemas.DataSourceCreate, session: Session) ->
         connection_string=db_config.connection_string,
         query=db_config.query,
         branch=db_config.branch,
+        owner_id=owner_id,
     )
 
 
-def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session, owner_id: str | None) -> schemas.DataSourceResponse:
     iceberg_config = schemas.IcebergDataSourceConfig.model_validate(datasource.config)
     return service.create_iceberg_datasource(
         session=session,
         name=datasource.name,
         source=iceberg_config.source,
         branch=iceberg_config.branch,
+        owner_id=owner_id,
     )
 
 
-def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session) -> schemas.DataSourceResponse:
+def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session, owner_id: str | None) -> schemas.DataSourceResponse:
+    _ = owner_id
     raise HTTPException(
         status_code=400,
         detail='Direct creation of analysis datasources is no longer supported. Use analysis tabs with analysis_tab_id.',
@@ -565,6 +580,8 @@ def list_datasources(include_hidden: bool = False, session: Session = Depends(ge
 def get_lineage(
     target_datasource_id: DataSourceId | None = None,
     branch: str | None = None,
+    include_internals: bool = False,
+    mode: str = 'full',
     session: Session = Depends(get_db),
 ):
     """Get the dependency lineage graph for datasources.
@@ -584,7 +601,13 @@ def get_lineage(
         branch = branch.strip()
         if not branch:
             branch = None
-    return build_lineage(session, target_datasource_id=datasource_id, branch=branch)
+    return build_lineage(
+        session,
+        target_datasource_id=datasource_id,
+        branch=branch,
+        include_internals=include_internals,
+        mode=mode,
+    )
 
 
 @router.get('/{datasource_id}', response_model=schemas.DataSourceResponse, mcp=True)
@@ -594,17 +617,12 @@ def get_datasource(
     session: Session = Depends(get_db),
 ):
     """Get a single datasource by ID with full config and metadata. Use GET /datasource to find IDs."""
-    try:
-        response = service.get_datasource(session, parse_datasource_id(datasource_id))
-        if response.source_type == DataSourceType.ICEBERG:
-            metadata_path = response.config.get('metadata_path')
-            if isinstance(metadata_path, str):
-                response.config['branches'] = _list_export_branches(metadata_path)
-        return response
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response = service.get_datasource(session, parse_datasource_id(datasource_id))
+    if response.source_type == DataSourceType.ICEBERG:
+        metadata_path = response.config.get('metadata_path')
+        if isinstance(metadata_path, str):
+            response.config['branches'] = _list_export_branches(metadata_path)
+    return response
 
 
 @router.get('/{datasource_id}/schema', response_model=schemas.SchemaInfo, mcp=True)
@@ -620,12 +638,7 @@ def get_datasource_schema(
     For Excel files, pass sheet_name to select a specific sheet.
     Set refresh=true to re-read the schema from the source file.
     """
-    try:
-        return service.get_datasource_schema(session, parse_datasource_id(datasource_id), sheet_name=sheet_name, refresh=refresh)
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service.get_datasource_schema(session, parse_datasource_id(datasource_id), sheet_name=sheet_name, refresh=refresh)
 
 
 @router.post('/{datasource_id}/compare-snapshots', response_model=schemas.SnapshotCompareResponse, mcp=True)
@@ -640,18 +653,13 @@ def compare_snapshots(
     Returns row count deltas, schema differences, column stats, and data previews for both snapshots.
     Use GET /compute/iceberg/{id}/snapshots to find snapshot IDs.
     """
-    try:
-        return service.compare_iceberg_snapshots(
-            session,
-            parse_datasource_id(datasource_id),
-            payload.snapshot_a,
-            payload.snapshot_b,
-            payload.row_limit,
-        )
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service.compare_iceberg_snapshots(
+        session,
+        parse_datasource_id(datasource_id),
+        payload.snapshot_a,
+        payload.snapshot_b,
+        payload.row_limit,
+    )
 
 
 def _handle_column_stats(
@@ -686,12 +694,7 @@ def get_column_stats(
 
     Set sample=false for exact stats (slower on large datasets).
     """
-    try:
-        return _handle_column_stats(datasource_id, column_name, sample, None, session)
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _handle_column_stats(datasource_id, column_name, sample, None, session)
 
 
 @router.post('/{datasource_id}/column/{column_name}/stats', response_model=schemas.ColumnStatsResponse, mcp=True)
@@ -704,12 +707,7 @@ def get_column_stats_with_config(
     session: Session = Depends(get_db),
 ):
     """Get column statistics with custom datasource config (e.g., different branch or snapshot)."""
-    try:
-        return _handle_column_stats(datasource_id, column_name, sample, payload, session)
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _handle_column_stats(datasource_id, column_name, sample, payload, session)
 
 
 @router.get('/file/list', response_model=schemas.FileListResponse, mcp=True)
@@ -727,12 +725,7 @@ def update_datasource(
     session: Session = Depends(get_db),
 ):
     """Update a datasource's name or config. Use GET /datasource/{id} to see current values."""
-    try:
-        return service.update_datasource(session, parse_datasource_id(datasource_id), update)
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service.update_datasource(session, parse_datasource_id(datasource_id), update)
 
 
 @router.post('/{datasource_id}/refresh', response_model=schemas.DataSourceResponse, mcp=True)
@@ -742,12 +735,7 @@ def refresh_datasource(
     session: Session = Depends(get_db),
 ):
     """Refresh an external datasource (re-read schema from source). Useful after upstream data changes."""
-    try:
-        return service.refresh_external_datasource(session, parse_datasource_id(datasource_id))
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except DataSourceValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service.refresh_external_datasource(session, parse_datasource_id(datasource_id))
 
 
 @router.delete('/{datasource_id}', status_code=204, mcp=True)
@@ -755,11 +743,12 @@ def refresh_datasource(
 def delete_datasource(
     datasource_id: DataSourceId,
     session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
 ):
     """Delete a datasource and its associated files. Use GET /datasource to find IDs."""
     datasource_id_value = parse_datasource_id(datasource_id)
-    try:
-        service.delete_datasource(session, datasource_id_value)
-    except DataSourceNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    service.delete_datasource(session, datasource_id_value)
+    preview_key = f'__preview__{datasource_id_value}'
+    if manager.get_engine(preview_key):
+        manager.shutdown_engine(preview_key)
     return None

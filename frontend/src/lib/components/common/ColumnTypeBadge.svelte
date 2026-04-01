@@ -39,7 +39,7 @@
 	class={cx(
 		badge({ tone: 'type' }),
 		css({
-			fontWeight: '600',
+			fontWeight: 'semibold',
 			whiteSpace: 'nowrap',
 			lineHeight: '1',
 			userSelect: 'none',

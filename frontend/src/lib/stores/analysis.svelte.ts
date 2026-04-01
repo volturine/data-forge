@@ -15,7 +15,7 @@ import { normalizeConfig } from '$lib/utils/step-config-defaults';
 import { track } from '$lib/utils/audit-log';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
-import { ResultAsync, err, ok } from 'neverthrow';
+import { ResultAsync, errAsync, ok } from 'neverthrow';
 import type { ApiError } from '$lib/api/client';
 import { idbGet, idbSet } from '$lib/utils/indexeddb';
 
@@ -480,10 +480,10 @@ export class AnalysisStore {
 	save(): ResultAsync<void, ApiError> {
 		if (!this.current) {
 			this.loading = false;
-			return err({
+			return errAsync({
 				type: 'parse' as const,
 				message: 'No analysis loaded'
-			}) as unknown as ResultAsync<void, ApiError>;
+			});
 		}
 
 		this.loading = true;
@@ -492,10 +492,10 @@ export class AnalysisStore {
 		const errors = validatePipelineTabs(this.tabs);
 		if (errors.length) {
 			this.loading = false;
-			return err({
+			return errAsync({
 				type: 'parse' as const,
 				message: errors[0]?.message ?? 'Pipeline validation failed'
-			}) as unknown as ResultAsync<void, ApiError>;
+			});
 		}
 		const update: AnalysisUpdate = {
 			name: this.current.name,
@@ -503,9 +503,11 @@ export class AnalysisStore {
 			tabs: this.tabs
 		};
 
-		return updateAnalysis(this.current.id, update)
-			.andThen((updated) => {
-				this.current = updated;
+		const version = this.current.version ?? null;
+
+		return updateAnalysis(this.current.id, update, version)
+			.andThen(({ analysis: updated, version: nextVersion }) => {
+				this.current = { ...updated, version: nextVersion };
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
 				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
 				if (tabs.length) {

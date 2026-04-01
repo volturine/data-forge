@@ -1,6 +1,6 @@
-import { apiRequest } from '$lib/api/client';
+import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
-import type { ApiError } from '$lib/api/client';
+import type { ApiError } from './client';
 
 export interface MCPTool {
 	id: string;

@@ -512,6 +512,36 @@ describe('timeseriesTransform', () => {
 		expect(result.columns).toHaveLength(2);
 		expect(result.columns[1].dtype).toBe('Int32');
 	});
+
+	test('uses source column dtype for truncate operation', () => {
+		const schema: Schema = {
+			columns: [{ name: 'event_date', dtype: 'Datetime', nullable: false }],
+			row_count: 3
+		};
+		const result = timeseriesTransform(schema, {
+			column: 'event_date',
+			operation_type: 'truncate',
+			new_column: 'truncated',
+			unit: 'days'
+		});
+		expect(result.columns).toHaveLength(2);
+		expect(result.columns[1]).toEqual({ name: 'truncated', dtype: 'Datetime', nullable: false });
+	});
+
+	test('uses source column dtype for round operation', () => {
+		const schema: Schema = {
+			columns: [{ name: 'event_date', dtype: 'Datetime', nullable: false }],
+			row_count: 3
+		};
+		const result = timeseriesTransform(schema, {
+			column: 'event_date',
+			operation_type: 'round',
+			new_column: 'rounded',
+			unit: 'hours'
+		});
+		expect(result.columns).toHaveLength(2);
+		expect(result.columns[1]).toEqual({ name: 'rounded', dtype: 'Datetime', nullable: false });
+	});
 });
 
 // ── nullCountTransform ──────────────────────────────────────────────────────

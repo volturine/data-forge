@@ -301,7 +301,7 @@
 				<span
 					class={css({
 						fontSize: 'xs',
-						fontWeight: '600',
+						fontWeight: 'semibold',
 						textTransform: 'uppercase',
 						letterSpacing: 'wide'
 					})}
@@ -419,7 +419,7 @@
 						</button>
 					</div>
 				{:else}
-					<span class={css({ fontSize: 'sm', fontWeight: '500' })}
+					<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}
 						>{tabName ?? datasourceLabel ?? datasource?.name ?? 'Untitled'}</span
 					>
 					{#if onRenameTab}
@@ -483,7 +483,7 @@
 					})}
 				>
 					<div class={rowBetween}>
-						<div class={css({ fontSize: 'sm', fontWeight: '600' })}>
+						<div class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
 							{datasourceLabel ?? datasource?.name}
 						</div>
 						<div class={cx(row, css({ gap: '2' }))}>
@@ -741,7 +741,7 @@
 						paddingY: '2',
 						paddingX: '3',
 						fontSize: 'xs2',
-						fontWeight: '500',
+						fontWeight: 'medium',
 						_hover: {
 							backgroundColor: 'bg.tertiary',
 							color: 'fg.primary',

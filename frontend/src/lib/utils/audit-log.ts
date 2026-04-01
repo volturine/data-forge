@@ -67,6 +67,14 @@ function getTargetLabel(el: Element | null): string | undefined {
 	return el.tagName.toLowerCase();
 }
 
+const SENSITIVE_PATTERNS = /password|secret|token|api_key|apikey/i;
+
+function isSensitive(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): boolean {
+	if (el instanceof HTMLInputElement && el.type === 'password') return true;
+	const name = el.name || el.id || '';
+	return SENSITIVE_PATTERNS.test(name);
+}
+
 function extractFields(form: HTMLFormElement): AuditField[] {
 	const fields: AuditField[] = [];
 	const elements = Array.from(form.elements);
@@ -86,6 +94,10 @@ function extractFields(form: HTMLFormElement): AuditField[] {
 			element.id ||
 			element.getAttribute('data-audit-label') ||
 			element.tagName.toLowerCase();
+		if (isSensitive(element)) {
+			fields.push({ name, value: null, redacted: true });
+			continue;
+		}
 		fields.push({ name, value: element.value ?? '' });
 	}
 	return fields;
@@ -192,9 +204,9 @@ export function track(event: AuditLogItem) {
 	});
 }
 
-export function installAuditListeners() {
-	if (!browser) return;
-	if (state.installed) return;
+export function installAuditListeners(): (() => void) | undefined {
+	if (!browser) return undefined;
+	if (state.installed) return undefined;
 	state.installed = true;
 	ensureSessionId();
 
@@ -232,11 +244,14 @@ export function installAuditListeners() {
 		if (shouldSkipTarget(target)) return;
 		if (target instanceof HTMLInputElement && target.type === 'text') return;
 		const name = target.name || target.id || target.tagName.toLowerCase();
+		const redacted = isSensitive(target);
 		pushLog({
 			event: 'change',
 			action: target.type || target.tagName.toLowerCase(),
 			target: name,
-			fields: [{ name, value: target.value ?? '' }],
+			fields: [
+				redacted ? { name, value: null, redacted: true } : { name, value: target.value ?? '' }
+			],
 			page: state.page,
 			session_id: state.session
 		});
@@ -251,4 +266,13 @@ export function installAuditListeners() {
 	window.addEventListener('change', onChange, { capture: true });
 	window.addEventListener('visibilitychange', onVisibility);
 	window.addEventListener('beforeunload', flush);
+
+	return () => {
+		window.removeEventListener('click', onClick, { capture: true });
+		window.removeEventListener('submit', onSubmit, { capture: true });
+		window.removeEventListener('change', onChange, { capture: true });
+		window.removeEventListener('visibilitychange', onVisibility);
+		window.removeEventListener('beforeunload', flush);
+		state.installed = false;
+	};
 }

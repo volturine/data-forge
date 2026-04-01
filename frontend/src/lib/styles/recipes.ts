@@ -200,30 +200,6 @@ export const spinner = defineRecipe({
 	defaultVariants: { size: 'default' }
 });
 
-export const navLink = defineRecipe({
-	className: 'nav-link',
-	base: {
-		borderWidth: '1',
-		borderColor: 'transparent',
-		paddingX: '3',
-		paddingY: '1.5',
-		fontSize: 'sm',
-		color: 'fg.tertiary',
-		textDecoration: 'none',
-		transitionProperty: 'color',
-		transitionDuration: '160ms',
-		transitionTimingFunction: 'ease'
-	},
-	variants: {
-		active: {
-			true: {
-				color: 'fg.primary',
-				backgroundColor: 'bg.tertiary'
-			}
-		}
-	}
-});
-
 export const iconButton = defineRecipe({
 	className: 'icon-button',
 	base: {
@@ -322,6 +298,7 @@ export const input = defineRecipe({
 		transitionDuration: '160ms',
 		transitionTimingFunction: 'ease',
 		_focus: { outline: 'none' },
+		_focusVisible: { borderColor: 'border.accent' },
 		_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
 		_placeholder: { color: 'fg.muted' }
 	},
@@ -353,7 +330,7 @@ export const input = defineRecipe({
 				paddingX: '3',
 				paddingY: '2',
 				fontSize: 'sm',
-				_focus: { outline: 'none', backgroundColor: 'bg.primary' },
+				_focus: { outline: 'none', backgroundColor: 'bg.primary', borderColor: 'border.accent' },
 				_placeholder: { color: 'fg.muted' }
 			},
 			searchWide: {
@@ -373,7 +350,7 @@ export const label = defineRecipe({
 	base: {
 		display: 'block',
 		fontSize: 'xs2',
-		fontWeight: '600',
+		fontWeight: 'semibold',
 		color: 'fg.muted',
 		marginBottom: '1.5',
 		textTransform: 'uppercase',

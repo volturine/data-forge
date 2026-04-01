@@ -1,14 +1,16 @@
 import uuid
 from typing import Annotated
 
-from fastapi import HTTPException, Path
+from fastapi import Path
+
+from core.exceptions import InvalidIdError
 
 
 def _parse_uuid(value: str) -> str:
     try:
         return str(uuid.UUID(value))
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail='Invalid UUID') from exc
+        raise InvalidIdError(message=f'Invalid UUID: {value}', details={'value': value}) from exc
 
 
 AnalysisId = Annotated[str, Path(description='Analysis ID', examples=['b3b1a08a-6a30-4f06-8c8a-9c1f1c8a4c2a'], min_length=1)]

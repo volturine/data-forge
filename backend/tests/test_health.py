@@ -1,5 +1,7 @@
 """Tests for health check endpoints."""
 
+from core.config import settings
+
 
 class TestHealthEndpoints:
     """Test health check endpoints."""
@@ -67,3 +69,17 @@ class TestHealthEndpoints:
         assert response.status_code == 200
         assert 'content-type' in response.headers
         assert 'application/json' in response.headers['content-type']
+        assert response.headers['x-content-type-options'] == 'nosniff'
+        assert response.headers['x-frame-options'] == 'DENY'
+        assert response.headers['x-xss-protection'] == '0'
+        assert response.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
+        assert response.headers['permissions-policy'] == 'camera=(), microphone=(), geolocation=()'
+        assert response.headers['strict-transport-security'] == 'max-age=63072000; includeSubDomains'
+
+    def test_security_headers_skip_hsts_in_debug(self, client, monkeypatch):
+        monkeypatch.setattr(settings, 'debug', True, raising=False)
+
+        response = client.get('/health/startup')
+
+        assert response.status_code == 200
+        assert 'strict-transport-security' not in response.headers

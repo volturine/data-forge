@@ -70,7 +70,7 @@ class NotificationService:
 
         import smtplib
 
-        with smtplib.SMTP(host, port) as server:
+        with smtplib.SMTP(host, port, timeout=10) as server:
             server.starttls()
             if password:
                 server.login(user, password)

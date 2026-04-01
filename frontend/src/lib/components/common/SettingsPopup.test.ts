@@ -15,7 +15,9 @@ vi.mock('$lib/api/settings', () => ({
 	testSmtp: (...args: unknown[]) => mockTestSmtp(...args),
 	getBotStatus: (...args: unknown[]) => mockGetBotStatus(...args),
 	getSubscribers: (...args: unknown[]) => mockGetSubscribers(...args),
-	deleteSubscriber: (...args: unknown[]) => mockDeleteSubscriber(...args)
+	deleteSubscriber: (...args: unknown[]) => mockDeleteSubscriber(...args),
+	MASKED_PLACEHOLDER: '••••••••',
+	isMasked: (v: string) => v === '••••••••' || /^\*+$/.test(v)
 }));
 
 vi.mock('$lib/stores/config.svelte', () => ({
@@ -50,8 +52,8 @@ function makeSettingsResponse() {
 		smtp_host: 'smtp.test.com',
 		smtp_port: 587,
 		smtp_user: 'user@test.com',
-		smtp_password: 'secret',
-		telegram_bot_token: 'tok123',
+		smtp_password: '••••••••',
+		telegram_bot_token: '••••••••',
 		telegram_bot_enabled: false,
 		openrouter_api_key: '',
 		public_idb_debug: false
@@ -143,7 +145,9 @@ describe('SettingsPopup', () => {
 
 		test('shows Bot token input', () => {
 			renderPopup();
-			expect(screen.getByPlaceholderText('123456:ABC-DEF...')).toBeInTheDocument();
+			const el = document.getElementById('telegram-bot-token');
+			expect(el).toBeInTheDocument();
+			expect(el).toHaveAttribute('type', 'password');
 		});
 
 		test('shows Enable Bot toggle', () => {

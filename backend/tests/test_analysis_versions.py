@@ -380,7 +380,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
 
     response = client.post(f'/api/v1/analysis/{analysis_id}/versions/1/restore')
 
-    assert response.status_code == 404
+    assert response.status_code == 422
     assert 'analysis cannot use itself' in response.json()['detail'].lower()
 
 

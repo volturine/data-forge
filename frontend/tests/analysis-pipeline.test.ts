@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import type { Page, APIRequestContext } from '@playwright/test';
 import { createDatasource, createDatasourceWithDates, API_BASE } from './utils/api.js';
+import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -81,7 +83,7 @@ async function navigateAndGetPreview(page: Page, analysisId: string): Promise<Pr
 		(resp) => resp.url().includes('/api/v1/compute/preview') && resp.request().method() === 'POST',
 		{ timeout: 45_000 }
 	);
-	await page.goto(`/analysis/${analysisId}`, { waitUntil: 'networkidle' });
+	await page.goto(`/analysis/${analysisId}`);
 	const resp = await previewPromise;
 	const body = await resp.json();
 	if (!resp.ok()) {
@@ -108,19 +110,24 @@ test.describe('Pipeline data verification', () => {
 	test.setTimeout(60_000);
 
 	let dsId: string;
+	let dsName: string;
 
 	test.beforeAll(async ({ request }) => {
-		dsId = await createDatasource(request, 'e2e-pipe-ds');
+		dsName = `e2e-pipe-ds-${uid()}`;
+		dsId = await createDatasource(request, dsName);
 	});
 
-	test.afterAll(async ({ request }) => {
-		await request.delete(`${API_BASE}/datasource/${dsId}`).catch(() => {});
+	test.afterAll(async ({ browser }) => {
+		const page = await browser.newPage();
+		await deleteDatasourceViaUI(page, dsName);
+		await page.close();
 	});
 
 	// ── Baseline ──────────────────────────────────────────────────────────────
 
 	test('view passthrough returns all original data', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe View', dsId, []);
+		const aName = `E2E Pipe View ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, []);
 		try {
 			const preview = await navigateAndGetPreview(page, aId);
 
@@ -147,14 +154,15 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'view-passthrough');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	// ── Row operations ────────────────────────────────────────────────────────
 
 	test('filter removes rows not matching condition', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Filter', dsId, [
+		const aName = `E2E Pipe Filter ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'filter',
 				config: {
@@ -182,12 +190,13 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'filter');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('limit keeps only first N rows', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Limit', dsId, [
+		const aName = `E2E Pipe Limit ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
@@ -201,13 +210,14 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'limit');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('topk returns rows with largest values', async ({ page, request }) => {
 		// descending=true → sort descending, take head(k) → 2 largest
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe TopK', dsId, [
+		const aName = `E2E Pipe TopK ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'topk', config: { column: 'age', k: 2, descending: true } }
 		]);
 		try {
@@ -227,12 +237,13 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'topk');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('sample with fraction 1.0 returns all rows', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Sample', dsId, [
+		const aName = `E2E Pipe Sample ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'sample', config: { fraction: 1.0, seed: 42 } }
 		]);
 		try {
@@ -248,12 +259,13 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'sample');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('deduplicate preserves unique rows', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Dedup', dsId, [
+		const aName = `E2E Pipe Dedup ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'deduplicate', config: {} }
 		]);
 		try {
@@ -266,14 +278,15 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'deduplicate');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	// ── Column operations ─────────────────────────────────────────────────────
 
 	test('select keeps only specified columns', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Select', dsId, [
+		const aName = `E2E Pipe Select ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'select', config: { columns: ['name', 'age'] } }
 		]);
 		try {
@@ -292,12 +305,13 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'select');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('drop removes specified columns', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Drop', dsId, [
+		const aName = `E2E Pipe Drop ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'drop', config: { columns: ['city'] } }
 		]);
 		try {
@@ -313,12 +327,13 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'drop');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('rename changes column names', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Rename', dsId, [
+		const aName = `E2E Pipe Rename ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'rename', config: { column_mapping: { name: 'full_name' } } }
 		]);
 		try {
@@ -338,14 +353,15 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'rename');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	// ── Data transformations ──────────────────────────────────────────────────
 
 	test('sort reorders rows by column value', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Sort', dsId, [
+		const aName = `E2E Pipe Sort ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'sort', config: { columns: ['age'], descending: [false] } }
 		]);
 		try {
@@ -362,12 +378,13 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'sort');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('expression adds computed column', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Expr', dsId, [
+		const aName = `E2E Pipe Expr ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'expression',
 				config: { expression: 'pl.col("age") + 1', column_name: 'age_plus_one' }
@@ -391,12 +408,13 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'expression');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('with_columns adds literal column', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe WithCols', dsId, [
+		const aName = `E2E Pipe WithCols ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'with_columns',
 				config: {
@@ -421,12 +439,13 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'with-columns');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('string_transform applies string operation', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe StrXform', dsId, [
+		const aName = `E2E Pipe StrXform ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'uppercase', new_column: 'name_upper' }
@@ -449,12 +468,13 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'string-transform');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('groupby aggregates data by group', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe GroupBy', dsId, [
+		const aName = `E2E Pipe GroupBy ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'groupby',
 				config: {
@@ -482,14 +502,15 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'groupby');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	// ── Reshaping ─────────────────────────────────────────────────────────────
 
 	test('unpivot converts wide format to long format', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Unpivot', dsId, [
+		const aName = `E2E Pipe Unpivot ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'unpivot',
 				config: {
@@ -515,12 +536,13 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'unpivot');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('pivot converts long format to wide format', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Pivot', dsId, [
+		const aName = `E2E Pipe Pivot ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'pivot',
 				config: {
@@ -551,14 +573,15 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'pivot');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	// ── Special operations ────────────────────────────────────────────────────
 
 	test('fill_null with zero strategy preserves clean data', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe FillNull', dsId, [
+		const aName = `E2E Pipe FillNull ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'fill_null', config: { strategy: 'zero' } }
 		]);
 		try {
@@ -572,16 +595,18 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'fill-null');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('join self-join matches rows by column', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Join', dsId, [
+		const aName = `E2E Pipe Join ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'join',
 				config: {
 					how: 'inner',
+					right_source: dsId,
 					join_columns: [{ id: 'jc1', left_column: 'city', right_column: 'city' }],
 					suffix: '_right'
 				}
@@ -607,14 +632,15 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'join');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	// ── Multi-step chain ──────────────────────────────────────────────────────
 
 	test('chained pipeline: filter → sort → limit', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Chain', dsId, [
+		const aName = `E2E Pipe Chain ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'filter',
 				config: {
@@ -648,7 +674,7 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'chained-filter-sort-limit');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 });
@@ -661,23 +687,28 @@ test.describe('Pipeline data – pass-through operations', () => {
 	test.setTimeout(60_000);
 
 	let dsId: string;
+	let dsName: string;
 
 	test.beforeAll(async ({ request }) => {
-		dsId = await createDatasource(request, 'e2e-pipe-passthrough-ds');
+		dsName = `e2e-pipe-passthrough-ds-${uid()}`;
+		dsId = await createDatasource(request, dsName);
 	});
 
-	test.afterAll(async ({ request }) => {
-		await request.delete(`${API_BASE}/datasource/${dsId}`).catch(() => {});
+	test.afterAll(async ({ browser }) => {
+		const page = await browser.newPage();
+		await deleteDatasourceViaUI(page, dsName);
+		await page.close();
 	});
 
 	test('chart (plot_bar) computes aggregated visualization data', async ({ page, request }) => {
 		// Chart steps produce x/y visualization columns. The trailing view step
 		// added by createPipelineAnalysis would override the chart preview with
 		// the original schema, so we build the pipeline without a trailing view.
+		const aName = `E2E Pipe Chart ${uid()}`;
 		const chartStepId = crypto.randomUUID();
 		const response = await request.post(`${API_BASE}/analysis`, {
 			data: {
-				name: 'E2E Pipe Chart',
+				name: aName,
 				description: null,
 				tabs: [
 					{
@@ -733,12 +764,13 @@ test.describe('Pipeline data – pass-through operations', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('export passes data through unchanged', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Export', dsId, [
+		const aName = `E2E Pipe Export ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'export',
 				config: {
@@ -758,12 +790,13 @@ test.describe('Pipeline data – pass-through operations', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'export');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('download passes data through unchanged', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Download', dsId, [
+		const aName = `E2E Pipe Download ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'download',
 				config: {
@@ -782,13 +815,14 @@ test.describe('Pipeline data – pass-through operations', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'download');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 
 	test('explode expands list column into rows', async ({ page, request }) => {
 		// Create a list column via expression, then explode it
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Explode', dsId, [
+		const aName = `E2E Pipe Explode ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'expression',
 				config: {
@@ -825,7 +859,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'explode');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 });
@@ -838,17 +872,22 @@ test.describe('Pipeline data – timeseries', () => {
 	test.setTimeout(60_000);
 
 	let dateDsId: string;
+	let dateDsName: string;
 
 	test.beforeAll(async ({ request }) => {
-		dateDsId = await createDatasourceWithDates(request, 'e2e-pipe-date-ds');
+		dateDsName = `e2e-pipe-date-ds-${uid()}`;
+		dateDsId = await createDatasourceWithDates(request, dateDsName);
 	});
 
-	test.afterAll(async ({ request }) => {
-		await request.delete(`${API_BASE}/datasource/${dateDsId}`).catch(() => {});
+	test.afterAll(async ({ browser }) => {
+		const page = await browser.newPage();
+		await deleteDatasourceViaUI(page, dateDsName);
+		await page.close();
 	});
 
 	test('timeseries extracts month from date column', async ({ page, request }) => {
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe TimeSeries', dateDsId, [
+		const aName = `E2E Pipe TimeSeries ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dateDsId, [
 			// Cast event_date from string to Date before timeseries operation
 			{
 				type: 'select',
@@ -885,7 +924,7 @@ test.describe('Pipeline data – timeseries', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'timeseries');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 });
@@ -899,20 +938,27 @@ test.describe('Pipeline data – union by name', () => {
 
 	let dsId1: string;
 	let dsId2: string;
+	let dsName1: string;
+	let dsName2: string;
 
 	test.beforeAll(async ({ request }) => {
-		dsId1 = await createDatasource(request, 'e2e-pipe-union-ds1');
-		dsId2 = await createDatasource(request, 'e2e-pipe-union-ds2');
+		dsName1 = `e2e-pipe-union-ds1-${uid()}`;
+		dsName2 = `e2e-pipe-union-ds2-${uid()}`;
+		dsId1 = await createDatasource(request, dsName1);
+		dsId2 = await createDatasource(request, dsName2);
 	});
 
-	test.afterAll(async ({ request }) => {
-		await request.delete(`${API_BASE}/datasource/${dsId1}`).catch(() => {});
-		await request.delete(`${API_BASE}/datasource/${dsId2}`).catch(() => {});
+	test.afterAll(async ({ browser }) => {
+		const page = await browser.newPage();
+		await deleteDatasourceViaUI(page, dsName1);
+		await deleteDatasourceViaUI(page, dsName2);
+		await page.close();
 	});
 
 	test('union_by_name combines rows from two datasources', async ({ page, request }) => {
 		// Union step references the second datasource by its ID (same as UI behavior)
-		const aId = await createPipelineAnalysis(request, 'E2E Pipe Union', dsId1, [
+		const aName = `E2E Pipe Union ${uid()}`;
+		const aId = await createPipelineAnalysis(request, aName, dsId1, [
 			{
 				type: 'union_by_name',
 				config: { sources: [dsId2], allow_missing: true }
@@ -936,7 +982,7 @@ test.describe('Pipeline data – union by name', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'union-by-name');
 		} finally {
-			await request.delete(`${API_BASE}/analysis/${aId}`).catch(() => {});
+			await deleteAnalysisViaUI(page, aName);
 		}
 	});
 });

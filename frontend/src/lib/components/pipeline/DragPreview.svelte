@@ -97,17 +97,18 @@
 			borderColor: isReorder ? 'border.warning' : 'border.primary',
 			boxShadow: 'drag'
 		})}
-		style="left: {position.x + 12}px; top: {position.y + 12}px;"
+		style:left="{position.x + 12}px"
+		style:top="{position.y + 12}px"
 	>
 		<Icon size={16} class={css({ fontSize: 'md' })} />
-		<span class={css({ fontWeight: '600', color: 'fg.primary' })}>{info.label}</span>
+		<span class={css({ fontWeight: 'semibold', color: 'fg.primary' })}>{info.label}</span>
 		{#if isReorder}
 			<span
 				class={css({
 					paddingX: '1.5',
 					paddingY: '0.5',
 					fontSize: 'xs',
-					fontWeight: '500',
+					fontWeight: 'medium',
 					textTransform: 'uppercase',
 					letterSpacing: 'wide',
 					backgroundColor: 'fg.warning',

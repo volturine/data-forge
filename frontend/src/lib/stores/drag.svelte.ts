@@ -11,6 +11,12 @@ export interface DropTarget {
 	nextId: string | null;
 }
 
+export type DropHandler = (stepId: string, target: DropTarget) => void;
+export type TargetResolver = (
+	x: number,
+	y: number
+) => { target: DropTarget; valid: boolean } | null;
+
 export class DragState {
 	/** The operation type being dragged (e.g., "filter", "select") - only for library drags */
 	public type: string | null = $state<string | null>(null);
@@ -46,9 +52,15 @@ export class DragState {
 	/** Whether this is an insert operation (adding new step from library) */
 	public isInsert: boolean = $derived(this.source === 'library' && this.type !== null);
 
+	/** Callback invoked on successful drop for reorder operations */
+	private dropHandler: DropHandler | null = null;
+
+	/** Synchronous target resolver set by PipelineCanvas */
+	private targetResolver: TargetResolver | null = null;
+
 	/** Start a drag operation for a new step from library */
 	start(type: string, source: DragSource, pointerId: number, pointerX: number, pointerY: number) {
-		if (this.active) return; // Prevent concurrent drags
+		if (this.active) return;
 		this.type = type;
 		this.stepId = null;
 		this.source = source;
@@ -57,6 +69,7 @@ export class DragState {
 		this.pointerId = pointerId;
 		this.pointerX = pointerX;
 		this.pointerY = pointerY;
+		this.dropHandler = null;
 	}
 
 	/** Start a reorder operation for an existing step */
@@ -65,9 +78,10 @@ export class DragState {
 		type: string,
 		pointerId: number,
 		pointerX: number,
-		pointerY: number
+		pointerY: number,
+		onDrop?: DropHandler
 	) {
-		if (this.active) return; // Prevent concurrent drags
+		if (this.active) return;
 		this.stepId = stepId;
 		this.type = type;
 		this.source = 'canvas';
@@ -76,6 +90,7 @@ export class DragState {
 		this.pointerId = pointerId;
 		this.pointerX = pointerX;
 		this.pointerY = pointerY;
+		this.dropHandler = onDrop ?? null;
 	}
 
 	/** Update the current drop target */
@@ -102,6 +117,11 @@ export class DragState {
 		this.pointerId = pointerId;
 	}
 
+	/** Register a synchronous target resolver (set by PipelineCanvas) */
+	public setTargetResolver(resolver: TargetResolver | null) {
+		this.targetResolver = resolver;
+	}
+
 	/** Release pointer capture if held */
 	private releaseCapture() {
 		if (this.capturedElement && this.pointerId !== null) {
@@ -116,12 +136,30 @@ export class DragState {
 
 	/** Cancel the drag operation (e.g., via Escape key) */
 	cancel() {
+		this.dropHandler = null;
+		this.end();
+	}
+
+	/** Commit the current drop: invoke the handler then reset */
+	commit() {
+		if (!this.target && this.pointerX !== null && this.pointerY !== null && this.targetResolver) {
+			const resolved = this.targetResolver(this.pointerX, this.pointerY);
+			if (resolved) {
+				this.target = resolved.target;
+				this.valid = resolved.valid;
+			}
+		}
+		if (this.target && this.stepId && this.valid && this.dropHandler) {
+			this.dropHandler(this.stepId, this.target);
+		}
+		this.dropHandler = null;
 		this.end();
 	}
 
 	/** End the drag operation and reset all state */
 	end() {
 		this.releaseCapture();
+		this.dropHandler = null;
 		this.type = null;
 		this.stepId = null;
 		this.source = null;
@@ -148,6 +186,23 @@ $effect.root(() => {
 		};
 		window.addEventListener('keydown', handleKeydown);
 		return () => window.removeEventListener('keydown', handleKeydown);
+	});
+
+	// DOM: global pointerup/mouseup to commit or clean up drags when the
+	// captured element misses the event (e.g., pointer released outside).
+	$effect(() => {
+		if (!drag.active) return;
+		const finish = (e: PointerEvent) => {
+			if (!drag.active) return;
+			drag.setPointer(e.clientX, e.clientY);
+			drag.commit();
+		};
+		window.addEventListener('pointerup', finish);
+		window.addEventListener('pointercancel', finish);
+		return () => {
+			window.removeEventListener('pointerup', finish);
+			window.removeEventListener('pointercancel', finish);
+		};
 	});
 
 	// Body class management for touch-dragging

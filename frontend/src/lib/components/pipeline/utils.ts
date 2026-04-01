@@ -225,7 +225,13 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			const value = c.value as number;
 			const unit = c.unit as string;
 			if (!col || !op) return 'not configured';
-			const detail = component ? `.${component}` : value && unit ? `(${value} ${unit})` : '';
+			const detail = component
+				? `.${component}`
+				: value && unit
+					? `(${value} ${unit})`
+					: unit
+						? `(${unit})`
+						: '';
 			return `${col}.${op}${detail} → ${newCol}`;
 		}
 	},

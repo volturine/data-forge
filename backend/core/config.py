@@ -9,10 +9,13 @@ from pydantic_settings.sources import DotEnvSettingsSource
 
 # (field_name, min_inclusive, max_inclusive) — None means no bound
 _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
+    ('port', 1, 65535),
     ('engine_idle_timeout', 1, None),
     ('job_timeout', 1, None),
     ('engine_pooling_interval', 1, None),
     ('scheduler_check_interval', 1, None),
+    ('lock_ttl_seconds', 1, None),
+    ('lock_heartbeat_interval_seconds', 1, None),
     ('polars_max_threads', 0, None),
     ('polars_max_memory_mb', 0, None),
     ('polars_streaming_chunk_size', 0, None),
@@ -85,6 +88,8 @@ class Settings(BaseSettings):
 
     # Debug mode - enables SQL echo, verbose logging
     debug: bool = False
+    prod_mode_enabled: bool = Field(default=False, alias='PROD_MODE_ENABLED')
+    port: int = Field(default=8000, alias='PORT')
 
     # CORS origins - comma-separated list of allowed origins
     cors_origins: str = 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
@@ -107,6 +112,10 @@ class Settings(BaseSettings):
     # Scheduler check interval in seconds (default 60 seconds)
     # How often to check for schedules that need to run
     scheduler_check_interval: int = Field(default=60, alias='SCHEDULER_CHECK_INTERVAL')
+
+    # Resource lock defaults
+    lock_ttl_seconds: int = Field(default=30, alias='LOCK_TTL_SECONDS')
+    lock_heartbeat_interval_seconds: int = Field(default=10, alias='LOCK_HEARTBEAT_INTERVAL_SECONDS')
 
     # Job execution timeout in seconds (default 5 minutes)
     # Jobs that exceed this duration will be terminated
@@ -189,6 +198,26 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(default='', alias='OPENROUTER_API_KEY')
     openrouter_default_model: str = Field(default='', alias='OPENROUTER_DEFAULT_MODEL')
 
+    # Auth / OAuth
+    auth_required: bool = Field(default=True, alias='AUTH_REQUIRED')
+    default_user_email: str = Field(default='default@example.com', alias='DEFAULT_USER_EMAIL')
+    default_user_password: str = Field(default='ChangeMe123', alias='DEFAULT_USER_PASSWORD')
+    default_user_name: str = Field(default='Default User', alias='DEFAULT_USER_NAME')
+    google_client_id: str = Field(default='', alias='GOOGLE_CLIENT_ID')
+    google_client_secret: str = Field(default='', alias='GOOGLE_CLIENT_SECRET')
+    google_redirect_uri: str = Field(
+        default='http://localhost:8000/api/v1/auth/google/callback',
+        alias='GOOGLE_REDIRECT_URI',
+    )
+    github_client_id: str = Field(default='', alias='GITHUB_CLIENT_ID')
+    github_client_secret: str = Field(default='', alias='GITHUB_CLIENT_SECRET')
+    github_redirect_uri: str = Field(
+        default='http://localhost:8000/api/v1/auth/github/callback',
+        alias='GITHUB_REDIRECT_URI',
+    )
+    auth_frontend_url: str = Field(default='http://localhost:5173', alias='AUTH_FRONTEND_URL')
+    session_max_age_days: int = Field(default=30, alias='SESSION_MAX_AGE_DAYS')
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
@@ -253,6 +282,19 @@ class Settings(BaseSettings):
             raise ValueError(f'log_queue_overflow must be one of {valid}, got {value}')
         return value.lower()
 
+    @field_validator('default_user_password')
+    @classmethod
+    def _validate_default_user_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError('DEFAULT_USER_PASSWORD must be at least 8 characters long')
+        if not any(char.isupper() for char in value):
+            raise ValueError('DEFAULT_USER_PASSWORD must contain at least one uppercase letter')
+        if not any(char.islower() for char in value):
+            raise ValueError('DEFAULT_USER_PASSWORD must contain at least one lowercase letter')
+        if not any(char.isdigit() for char in value):
+            raise ValueError('DEFAULT_USER_PASSWORD must contain at least one digit')
+        return value
+
     @model_validator(mode='after')
     def _validate_numeric_constraints(self) -> 'Settings':
         for field_name, min_val, max_val in _NUMERIC_CONSTRAINTS:
@@ -270,6 +312,25 @@ class Settings(BaseSettings):
             dir_path = getattr(self, dir_name)
             if not os.access(dir_path, os.W_OK):
                 raise ValueError(f'{dir_name} is not writable: {dir_path}')
+        return self
+
+    @model_validator(mode='after')
+    def _validate_encryption_key(self) -> 'Settings':
+        if self.auth_required and not self.settings_encryption_key:
+            import warnings
+
+            warnings.warn(
+                'SETTINGS_ENCRYPTION_KEY is empty while AUTH_REQUIRED=True. '
+                'Stored secrets (SMTP passwords, API keys) will not be encrypted. '
+                'Set SETTINGS_ENCRYPTION_KEY to a strong random value for production.',
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _validate_lock_intervals(self) -> 'Settings':
+        if self.lock_heartbeat_interval_seconds >= self.lock_ttl_seconds:
+            raise ValueError('lock_heartbeat_interval_seconds must be < lock_ttl_seconds')
         return self
 
 

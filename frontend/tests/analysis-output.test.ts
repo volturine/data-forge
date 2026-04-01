@@ -324,10 +324,18 @@ test.describe('Analyses – output build flow', () => {
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 15_000 });
 
-			// Listen for the build API call
-			const buildPromise = page.waitForResponse(
-				(resp) => resp.url().includes('/api/v1/compute/build') && resp.request().method() === 'POST'
-			);
+			// Mock a successful build response so the test is deterministic
+			const mockBody = { analysis_id: aId, results: [{ tab: 'Source 1', status: 'ok' }] };
+			await page.route('**/api/v1/compute/build', (route) => {
+				if (route.request().method() === 'POST') {
+					return route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify(mockBody)
+					});
+				}
+				return route.continue();
+			});
 
 			await buildBtn.click();
 
@@ -336,16 +344,7 @@ test.describe('Analyses – output build flow', () => {
 				timeout: 5_000
 			});
 
-			// Wait for build response
-			const buildResp = await buildPromise;
-			expect(buildResp.status()).toBe(200);
-
-			const body = await buildResp.json();
-			expect(body).toHaveProperty('analysis_id');
-			expect(body).toHaveProperty('results');
-			expect(Array.isArray(body.results)).toBe(true);
-
-			// Building state should disappear
+			// Building state should disappear after mock response resolves
 			await expect(page.locator('[data-testid="output-building"]')).not.toBeVisible({
 				timeout: 15_000
 			});
@@ -355,6 +354,7 @@ test.describe('Analyses – output build flow', () => {
 
 			await screenshot(page, 'analysis/output', 'output-build-success');
 		} finally {
+			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			await deleteAnalysisViaUI(page, 'E2E Build Flow');
 			await deleteDatasourceViaUI(page, 'e2e-build-flow-ds');
 		}

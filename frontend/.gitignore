@@ -27,3 +27,4 @@ vite.config.ts.timestamp-*
 tests/playwright-report/
 tests/test-results/
 tests/screenshots/
+tests/.auth/

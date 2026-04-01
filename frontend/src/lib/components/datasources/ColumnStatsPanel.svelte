@@ -127,7 +127,7 @@
 								<div
 									class={css({
 										fontSize: '2xs',
-										fontWeight: '600',
+										fontWeight: 'semibold',
 										textTransform: 'uppercase',
 										letterSpacing: 'wider',
 										color: 'fg.muted',
@@ -148,7 +148,7 @@
 									<span
 										class={css({
 											fontSize: 'xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											fontFamily: 'mono'
 										})}>{stats.count.toLocaleString()}</span
 									>
@@ -165,7 +165,7 @@
 									<span
 										class={css({
 											fontSize: 'xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											fontFamily: 'mono'
 										})}
 									>
@@ -207,7 +207,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.unique.toLocaleString()}</span
 										>
@@ -221,7 +221,7 @@
 									<div
 										class={css({
 											fontSize: '2xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider',
 											color: 'fg.muted',
@@ -242,7 +242,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{fmt(stats.mean)}</span
 										>
@@ -260,7 +260,7 @@
 											<span
 												class={css({
 													fontSize: 'xs',
-													fontWeight: '600',
+													fontWeight: 'semibold',
 													fontFamily: 'mono'
 												})}>{fmt(stats.median)}</span
 											>
@@ -279,7 +279,7 @@
 											<span
 												class={css({
 													fontSize: 'xs',
-													fontWeight: '600',
+													fontWeight: 'semibold',
 													fontFamily: 'mono'
 												})}>{fmt(stats.std)}</span
 											>
@@ -297,7 +297,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.min}</span
 										>
@@ -315,7 +315,7 @@
 											<span
 												class={css({
 													fontSize: 'xs',
-													fontWeight: '600',
+													fontWeight: 'semibold',
 													fontFamily: 'mono'
 												})}>{fmt(stats.q25)}</span
 											>
@@ -334,7 +334,7 @@
 											<span
 												class={css({
 													fontSize: 'xs',
-													fontWeight: '600',
+													fontWeight: 'semibold',
 													fontFamily: 'mono'
 												})}>{fmt(stats.q75)}</span
 											>
@@ -352,7 +352,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.max}</span
 										>
@@ -366,7 +366,7 @@
 									<div
 										class={css({
 											fontSize: '2xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider',
 											color: 'fg.muted',
@@ -387,7 +387,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.min}</span
 										>
@@ -404,7 +404,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.max}</span
 										>
@@ -420,7 +420,7 @@
 									<div
 										class={css({
 											fontSize: '2xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider',
 											color: 'fg.muted',
@@ -468,7 +468,7 @@
 									<div
 										class={css({
 											fontSize: '2xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider',
 											color: 'fg.muted',
@@ -489,7 +489,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.min_length}</span
 										>
@@ -506,7 +506,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{fmt(stats.avg_length)}</span
 										>
@@ -523,7 +523,7 @@
 										<span
 											class={css({
 												fontSize: 'xs',
-												fontWeight: '600',
+												fontWeight: 'semibold',
 												fontFamily: 'mono'
 											})}>{stats.max_length}</span
 										>
@@ -540,7 +540,7 @@
 									<div
 										class={css({
 											fontSize: '2xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider',
 											color: 'fg.muted',
@@ -603,7 +603,7 @@
 									<div
 										class={css({
 											fontSize: '2xs',
-											fontWeight: '600',
+											fontWeight: 'semibold',
 											textTransform: 'uppercase',
 											letterSpacing: 'wider',
 											color: 'fg.muted',

@@ -112,7 +112,7 @@
 	}));
 
 	const updateMutation = createMutation(() => ({
-		mutationFn: async (update: { name: string; config: Record<string, unknown> }) => {
+		mutationFn: async (update: { name: string; config?: Record<string, unknown> }) => {
 			const result = await updateDatasource(datasource.id, update);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
@@ -128,6 +128,7 @@
 	let name = $state('');
 	let columns = $state<ColumnSchema[]>([]);
 	let hasChanges = $state(false);
+	let configDirty = $state(false);
 	let isRefreshing = $state(false);
 	let refreshError = $state<string | null>(null);
 	let schemaChanged = $state(false);
@@ -149,6 +150,7 @@
 		name = ds.name;
 		columns = [];
 		hasChanges = false;
+		configDirty = false;
 		isRefreshing = false;
 		refreshError = null;
 		schemaChanged = false;
@@ -292,6 +294,7 @@
 	) {
 		csvConfig = { ...csvConfig, [key]: value };
 		hasChanges = true;
+		configDirty = true;
 	}
 
 	function isExcelConfigEqual(a: typeof excelConfig, b: typeof excelConfig): boolean {
@@ -312,67 +315,87 @@
 		if (isExcelConfigEqual(value, excelConfig)) return;
 		excelConfig = value;
 		hasChanges = true;
+		configDirty = true;
+	}
+
+	const PROTECTED_CONFIG_KEYS = [
+		'snapshot_id',
+		'snapshot_timestamp_ms',
+		'current_snapshot_id',
+		'current_snapshot_timestamp_ms',
+		'time_travel_snapshot_id',
+		'time_travel_snapshot_timestamp_ms',
+		'time_travel_ui'
+	];
+
+	function stripProtectedKeys(config: Record<string, unknown>): Record<string, unknown> {
+		const cleaned = { ...config };
+		for (const key of PROTECTED_CONFIG_KEYS) {
+			delete cleaned[key];
+		}
+		return cleaned;
 	}
 
 	async function handleSave() {
 		if (!datasourceQuery.data) return;
 
-		const update: { name: string; config: Record<string, unknown> } = { name, config: {} };
+		const update: { name: string; config?: Record<string, unknown> } = { name };
 
-		if (isCsv(datasourceQuery.data)) {
-			const csvOptions = {
-				delimiter: csvConfig.delimiter,
-				quote_char: csvConfig.quote_char,
-				has_header: csvConfig.has_header,
-				skip_rows: csvConfig.skip_rows,
-				encoding: csvConfig.encoding
-			};
-			if (datasourceQuery.data.source_type === 'iceberg') {
-				const existingSource = (datasourceQuery.data.config as Record<string, unknown>)?.source as
-					| Record<string, unknown>
-					| undefined;
-				update.config = {
-					...datasourceQuery.data.config,
-					source: { ...existingSource, csv_options: csvOptions }
+		if (configDirty) {
+			if (isCsv(datasourceQuery.data)) {
+				const csvOptions = {
+					delimiter: csvConfig.delimiter,
+					quote_char: csvConfig.quote_char,
+					has_header: csvConfig.has_header,
+					skip_rows: csvConfig.skip_rows,
+					encoding: csvConfig.encoding
 				};
-			} else {
-				update.config = {
-					...datasourceQuery.data.config,
-					csv_options: csvOptions
+				if (datasourceQuery.data.source_type === 'iceberg') {
+					const existingSource = (datasourceQuery.data.config as Record<string, unknown>)
+						?.source as Record<string, unknown> | undefined;
+					update.config = stripProtectedKeys({
+						...datasourceQuery.data.config,
+						source: { ...existingSource, csv_options: csvOptions }
+					});
+				} else {
+					update.config = stripProtectedKeys({
+						...datasourceQuery.data.config,
+						csv_options: csvOptions
+					});
+				}
+			} else if (isExcel(datasourceQuery.data)) {
+				const excelOptions = {
+					sheet_name: excelConfig.sheet_name || null,
+					table_name: excelConfig.table_name || null,
+					named_range: excelConfig.named_range || null,
+					cell_range: excelConfig.cell_range || null,
+					start_row: excelConfig.start_row,
+					start_col: excelConfig.start_col,
+					end_col: excelConfig.end_col,
+					end_row: excelConfig.end_row,
+					has_header: excelConfig.has_header
 				};
+				if (datasourceQuery.data.source_type === 'iceberg') {
+					const existingSource = (datasourceQuery.data.config as Record<string, unknown>)
+						?.source as Record<string, unknown> | undefined;
+					update.config = stripProtectedKeys({
+						...datasourceQuery.data.config,
+						source: { ...existingSource, ...excelOptions }
+					});
+				} else {
+					update.config = stripProtectedKeys({
+						...datasourceQuery.data.config,
+						...excelOptions
+					});
+				}
+			} else if (isFile(datasourceQuery.data)) {
+				update.config = stripProtectedKeys({ ...datasourceQuery.data.config });
 			}
-		} else if (isExcel(datasourceQuery.data)) {
-			const excelOptions = {
-				sheet_name: excelConfig.sheet_name || null,
-				table_name: excelConfig.table_name || null,
-				named_range: excelConfig.named_range || null,
-				cell_range: excelConfig.cell_range || null,
-				start_row: excelConfig.start_row,
-				start_col: excelConfig.start_col,
-				end_col: excelConfig.end_col,
-				end_row: excelConfig.end_row,
-				has_header: excelConfig.has_header
-			};
-			if (datasourceQuery.data.source_type === 'iceberg') {
-				const existingSource = (datasourceQuery.data.config as Record<string, unknown>)?.source as
-					| Record<string, unknown>
-					| undefined;
-				update.config = {
-					...datasourceQuery.data.config,
-					source: { ...existingSource, ...excelOptions }
-				};
-			} else {
-				update.config = {
-					...datasourceQuery.data.config,
-					...excelOptions
-				};
-			}
-		} else if (isFile(datasourceQuery.data)) {
-			update.config = { ...datasourceQuery.data.config };
 		}
 
 		await updateMutation.mutateAsync(update);
 		hasChanges = false;
+		configDirty = false;
 
 		if (update.config && ds.source_type === 'iceberg') {
 			const source = (ds.config as Record<string, unknown>)?.source as
@@ -1053,7 +1076,8 @@
 							<span>Type</span>
 						</div>
 						{#each columns as column, index (index)}
-							<div
+							<button
+								type="button"
 								class={cx(
 									css({
 										display: 'grid',
@@ -1063,7 +1087,11 @@
 										paddingX: '3',
 										paddingY: '1.5',
 										_hover: { backgroundColor: 'bg.hover' },
-										cursor: 'pointer'
+										cursor: 'pointer',
+										border: 'none',
+										backgroundColor: 'transparent',
+										width: '100%',
+										textAlign: 'left'
 									}),
 									index > 0
 										? css({
@@ -1071,24 +1099,16 @@
 											})
 										: ''
 								)}
-								role="button"
-								tabindex="0"
 								data-schema-column={column.name}
 								onclick={() => {
 									statsColumn = column.name;
 									statsOpen = true;
 								}}
-								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										statsColumn = column.name;
-										statsOpen = true;
-									}
-								}}
 							>
 								<span class={css({ fontSize: 'xs', color: 'fg.faint' })}>{index + 1}</span>
 								<span class={css({ fontSize: 'xs' })}>{column.name}</span>
 								<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
-							</div>
+							</button>
 						{/each}
 					</div>
 				{:else}

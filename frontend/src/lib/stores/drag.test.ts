@@ -1,6 +1,6 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { DragState } from './drag.svelte';
-import type { DropTarget } from './drag.svelte';
+import type { DropTarget, TargetResolver } from './drag.svelte';
 
 describe('DragState', () => {
 	let state: DragState;
@@ -184,6 +184,138 @@ describe('DragState', () => {
 			expect(state.active).toBe(false);
 			expect(state.type).toBeNull();
 			expect(state.source).toBeNull();
+		});
+
+		test('does not invoke dropHandler', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 10, 20, handler);
+			state.setTarget({ index: 0, parentId: null, nextId: 'x' });
+			state.cancel();
+			expect(handler).not.toHaveBeenCalled();
+			expect(state.active).toBe(false);
+		});
+	});
+
+	describe('startMove with onDrop', () => {
+		test('stores dropHandler from onDrop argument', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 0, 0, handler);
+			state.setTarget({ index: 2, parentId: 'a', nextId: 'b' });
+			state.commit();
+			expect(handler).toHaveBeenCalledOnce();
+			expect(handler).toHaveBeenCalledWith('step-1', { index: 2, parentId: 'a', nextId: 'b' });
+		});
+
+		test('works without onDrop argument', () => {
+			state.startMove('step-1', 'filter', 1, 0, 0);
+			state.setTarget({ index: 0, parentId: null, nextId: null });
+			state.commit();
+			expect(state.active).toBe(false);
+		});
+	});
+
+	describe('commit', () => {
+		test('invokes dropHandler when target, stepId, and valid', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 100, 200, handler);
+			state.setTarget({ index: 1, parentId: 'a', nextId: 'b' });
+			state.commit();
+			expect(handler).toHaveBeenCalledOnce();
+			expect(handler).toHaveBeenCalledWith('step-1', { index: 1, parentId: 'a', nextId: 'b' });
+			expect(state.active).toBe(false);
+		});
+
+		test('does not invoke handler when valid is false', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 100, 200, handler);
+			state.setTarget({ index: 1, parentId: 'a', nextId: 'b' }, false);
+			state.commit();
+			expect(handler).not.toHaveBeenCalled();
+			expect(state.active).toBe(false);
+		});
+
+		test('does not invoke handler when target is null and no resolver', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 100, 200, handler);
+			state.commit();
+			expect(handler).not.toHaveBeenCalled();
+			expect(state.active).toBe(false);
+		});
+
+		test('uses targetResolver when target is null but pointer coords exist', () => {
+			const handler = vi.fn();
+			const resolved: DropTarget = { index: 3, parentId: 'p', nextId: 'n' };
+			const resolver: TargetResolver = vi.fn().mockReturnValue({ target: resolved, valid: true });
+			state.startMove('step-1', 'filter', 1, 50, 60, handler);
+			state.setTargetResolver(resolver);
+			state.commit();
+			expect(resolver).toHaveBeenCalledWith(50, 60);
+			expect(handler).toHaveBeenCalledWith('step-1', resolved);
+			expect(state.active).toBe(false);
+		});
+
+		test('does not use resolver when target already set', () => {
+			const handler = vi.fn();
+			const resolver: TargetResolver = vi.fn();
+			const existing: DropTarget = { index: 1, parentId: null, nextId: null };
+			state.startMove('step-1', 'filter', 1, 50, 60, handler);
+			state.setTarget(existing);
+			state.setTargetResolver(resolver);
+			state.commit();
+			expect(resolver).not.toHaveBeenCalled();
+			expect(handler).toHaveBeenCalledWith('step-1', existing);
+		});
+
+		test('does not invoke handler when resolver returns null', () => {
+			const handler = vi.fn();
+			const resolver: TargetResolver = vi.fn().mockReturnValue(null);
+			state.startMove('step-1', 'filter', 1, 50, 60, handler);
+			state.setTargetResolver(resolver);
+			state.commit();
+			expect(handler).not.toHaveBeenCalled();
+			expect(state.active).toBe(false);
+		});
+
+		test('does not invoke handler when resolver returns invalid target', () => {
+			const handler = vi.fn();
+			const resolved: DropTarget = { index: 2, parentId: null, nextId: null };
+			const resolver: TargetResolver = vi.fn().mockReturnValue({ target: resolved, valid: false });
+			state.startMove('step-1', 'filter', 1, 50, 60, handler);
+			state.setTargetResolver(resolver);
+			state.commit();
+			expect(handler).not.toHaveBeenCalled();
+		});
+
+		test('ends even for library insert drags (no dropHandler)', () => {
+			state.start('filter', 'library', 1, 100, 200);
+			state.setTarget({ index: 0, parentId: null, nextId: 'x' });
+			state.commit();
+			expect(state.active).toBe(false);
+		});
+
+		test('double commit is safe', () => {
+			const handler = vi.fn();
+			state.startMove('step-1', 'filter', 1, 100, 200, handler);
+			state.setTarget({ index: 1, parentId: null, nextId: null });
+			state.commit();
+			state.commit();
+			expect(handler).toHaveBeenCalledOnce();
+			expect(state.active).toBe(false);
+		});
+	});
+
+	describe('setTargetResolver', () => {
+		test('sets and clears resolver', () => {
+			const resolver: TargetResolver = vi.fn().mockReturnValue(null);
+			state.setTargetResolver(resolver);
+			state.startMove('step-1', 'filter', 1, 50, 60);
+			state.commit();
+			expect(resolver).toHaveBeenCalled();
+
+			state.setTargetResolver(null);
+			state.startMove('step-2', 'sort', 2, 70, 80);
+			state.commit();
+			expect(resolver).toHaveBeenCalledOnce();
 		});
 	});
 

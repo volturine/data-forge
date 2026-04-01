@@ -13,6 +13,7 @@ export interface ApiError {
 	message: string;
 	status?: number;
 	statusText?: string;
+	code?: string;
 }
 
 export interface ApiResponse<T> {
@@ -34,9 +35,10 @@ function createApiError(
 	type: ApiErrorType,
 	message: string,
 	status?: number,
-	statusText?: string
+	statusText?: string,
+	code?: string
 ): ApiError {
-	return { type, message, status, statusText };
+	return { type, message, status, statusText, code };
 }
 
 function buildHeaders(options?: RequestInit): Headers {
@@ -72,11 +74,18 @@ function handleErrorResponse(
 			response.status,
 			response.statusText
 		)
-	).andThen((errorText) =>
-		err(
-			createApiError('http', errorText || response.statusText, response.status, response.statusText)
-		)
-	);
+	).andThen((raw) => {
+		let message = raw || response.statusText;
+		let code: string | undefined;
+		try {
+			const parsed = JSON.parse(raw);
+			if (typeof parsed.detail === 'string') message = parsed.detail;
+			if (typeof parsed.error_code === 'string') code = parsed.error_code;
+		} catch {
+			// raw text is fine as fallback
+		}
+		return err(createApiError('http', message, response.status, response.statusText, code));
+	});
 }
 
 function apiFetch<T>(

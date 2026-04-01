@@ -5,6 +5,7 @@ import {
 	deleteScheduleViaUI,
 	deleteHealthCheckViaUI
 } from './utils/ui-cleanup.js';
+import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
 /**
@@ -14,6 +15,7 @@ import { screenshot } from './utils/visual.js';
 test.describe('Monitoring – page structure', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/monitoring');
+		await page.waitForLoadState('networkidle');
 		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Builds' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Builds' })).toHaveAttribute(
@@ -83,57 +85,61 @@ test.describe('Monitoring – Schedules tab', () => {
 	});
 
 	test('created schedule appears in the Schedules tab', async ({ page, request }) => {
-		const dsId = await createDatasource(request, 'e2e-sched-ds');
+		const ds = `e2e-sched-${uid()}`;
+		const dsId = await createDatasource(request, ds);
 		await createSchedule(request, dsId, '0 6 * * *');
 		try {
 			await page.goto('/monitoring?tab=schedules');
-			await expect(page.getByText('e2e-sched-ds')).toBeVisible({ timeout: 8_000 });
+			await expect(page.getByText(ds)).toBeVisible({ timeout: 8_000 });
 			await expect(page.getByText('Cron: 0 6 * * *')).toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteScheduleViaUI(page, 'e2e-sched-ds');
-			await deleteDatasourceViaUI(page, 'e2e-sched-ds');
+			await deleteScheduleViaUI(page, ds);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('schedule can be deleted via UI', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		const dsId = await createDatasource(request, 'e2e-sched-del-ds');
+		const ds = `e2e-sched-del-${uid()}`;
+		const dsId = await createDatasource(request, ds);
 		await createSchedule(request, dsId, '0 7 * * *');
 
-		await page.goto('/monitoring?tab=schedules');
+		try {
+			await page.goto('/monitoring?tab=schedules');
 
-		// Wait for the schedule delete button to appear
-		const deleteBtn = page
-			.locator('tr', { has: page.getByText('e2e-sched-del-ds') })
-			.first()
-			.getByLabel('Delete schedule');
-		await expect(deleteBtn).toBeAttached({ timeout: 15_000 });
+			// Wait for the schedule delete button to appear
+			const deleteBtn = page
+				.locator('tr', { has: page.getByText(ds) })
+				.first()
+				.getByLabel('Delete schedule');
+			await expect(deleteBtn).toBeAttached({ timeout: 15_000 });
 
-		// Delete button is always visible in the table row
-		await deleteBtn.click({ timeout: 5_000 });
+			// Delete button is always visible in the table row
+			await deleteBtn.click({ timeout: 5_000 });
 
-		// Confirm in the dialog
-		const dialog = page.getByRole('dialog');
-		await expect(dialog.getByRole('heading', { name: /Delete Schedule/i })).toBeVisible();
-		await dialog.getByRole('button', { name: /^Delete$/ }).click();
+			// Confirm in the dialog
+			const dialog = page.getByRole('dialog');
+			await expect(dialog.getByRole('heading', { name: /Delete Schedule/i })).toBeVisible();
+			await dialog.getByRole('button', { name: /^Delete$/ }).click();
 
-		// After deletion the datasource name should disappear from the table
-		await expect(page.getByText('e2e-sched-del-ds')).not.toBeVisible({ timeout: 8_000 });
-
-		// Cleanup the datasource
-		await deleteDatasourceViaUI(page, 'e2e-sched-del-ds');
+			// After deletion the datasource name should disappear from the table
+			await expect(page.getByText(ds)).not.toBeVisible({ timeout: 8_000 });
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
 	});
 
 	test('schedule enable/disable toggle works', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		const dsId = await createDatasource(request, 'e2e-sched-toggle-ds');
+		const ds = `e2e-sched-toggle-${uid()}`;
+		const dsId = await createDatasource(request, ds);
 		await createSchedule(request, dsId, '0 8 * * *');
 		try {
 			await page.goto('/monitoring?tab=schedules');
-			await expect(page.getByText('e2e-sched-toggle-ds')).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByText(ds)).toBeVisible({ timeout: 10_000 });
 
 			// Find the toggle button in the schedule table row
-			const schedRow = page.locator('tr', { has: page.getByText('e2e-sched-toggle-ds') }).first();
+			const schedRow = page.locator('tr', { has: page.getByText(ds) }).first();
 			const toggleBtn = schedRow.locator('button[title="Click to disable"]');
 			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
 			await toggleBtn.click({ timeout: 5_000 });
@@ -143,8 +149,8 @@ test.describe('Monitoring – Schedules tab', () => {
 				timeout: 8_000
 			});
 		} finally {
-			await deleteScheduleViaUI(page, 'e2e-sched-toggle-ds');
-			await deleteDatasourceViaUI(page, 'e2e-sched-toggle-ds');
+			await deleteScheduleViaUI(page, ds);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -152,7 +158,8 @@ test.describe('Monitoring – Schedules tab', () => {
 test.describe('Monitoring – Schedule create flow', () => {
 	test('create schedule via UI form', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-sched-create-ds');
+		const ds = `e2e-sched-create-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=schedules', { waitUntil: 'networkidle' });
 			await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
@@ -163,7 +170,7 @@ test.describe('Monitoring – Schedule create flow', () => {
 			// Select datasource from dropdown
 			const dsSelect = page.locator('#schedule-datasource');
 			await expect(dsSelect).toBeVisible({ timeout: 5_000 });
-			await dsSelect.selectOption({ label: 'e2e-sched-create-ds' });
+			await dsSelect.selectOption({ label: ds });
 
 			// Cron is the default trigger type with default value — submit
 			const createBtn = page.getByRole('button', { name: 'Create Schedule' });
@@ -172,19 +179,20 @@ test.describe('Monitoring – Schedule create flow', () => {
 
 			// Schedule should appear in the list table (scope to table rows to avoid matching the form <option>)
 			const panel = page.locator('#panel-schedules');
-			await expect(panel.locator('tr', { hasText: 'e2e-sched-create-ds' })).toBeVisible({
+			await expect(panel.locator('tr', { hasText: ds })).toBeVisible({
 				timeout: 8_000
 			});
 			await expect(page.getByText('Every hour')).toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteScheduleViaUI(page, 'e2e-sched-create-ds');
-			await deleteDatasourceViaUI(page, 'e2e-sched-create-ds');
+			await deleteScheduleViaUI(page, ds);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('schedule create form Cancel closes form without creating', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-sched-cancel-ds');
+		const ds = `e2e-sched-cancel-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=schedules');
 			await page.getByRole('button', { name: /New Schedule/i }).click({ timeout: 10_000 });
@@ -197,7 +205,7 @@ test.describe('Monitoring – Schedule create flow', () => {
 			// Form should be gone — the datasource dropdown should not be visible
 			await expect(page.locator('#schedule-datasource')).not.toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-sched-cancel-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -208,14 +216,15 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 		request
 	}) => {
 		test.setTimeout(60_000);
-		const dsId = await createDatasource(request, 'e2e-sched-cron-ds');
+		const ds = `e2e-sched-cron-${uid()}`;
+		const dsId = await createDatasource(request, ds);
 		await createSchedule(request, dsId, '0 6 * * *');
 		try {
 			await page.goto('/monitoring?tab=schedules');
-			await expect(page.getByText('e2e-sched-cron-ds')).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByText(ds)).toBeVisible({ timeout: 10_000 });
 
 			// Expand the schedule row by clicking on it (table view uses <tr>)
-			const schedRow = page.locator('tr', { has: page.getByText('e2e-sched-cron-ds') }).first();
+			const schedRow = page.locator('tr', { has: page.getByText(ds) }).first();
 			await schedRow.click();
 
 			// Wait for expanded detail row (sibling <tr> with cron section)
@@ -243,21 +252,22 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 
 			await screenshot(page, 'monitoring', 'schedule-cron-edited');
 		} finally {
-			await deleteScheduleViaUI(page, 'e2e-sched-cron-ds');
-			await deleteDatasourceViaUI(page, 'e2e-sched-cron-ds');
+			await deleteScheduleViaUI(page, ds);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('inline cron edit: Escape cancels without saving', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		const dsId = await createDatasource(request, 'e2e-sched-cron-esc-ds');
+		const ds = `e2e-sched-cron-esc-${uid()}`;
+		const dsId = await createDatasource(request, ds);
 		await createSchedule(request, dsId, '0 6 * * *');
 		try {
 			await page.goto('/monitoring?tab=schedules');
-			await expect(page.getByText('e2e-sched-cron-esc-ds')).toBeVisible({ timeout: 10_000 });
+			await expect(page.getByText(ds)).toBeVisible({ timeout: 10_000 });
 
 			// Expand (table view)
-			const schedRow = page.locator('tr', { has: page.getByText('e2e-sched-cron-esc-ds') }).first();
+			const schedRow = page.locator('tr', { has: page.getByText(ds) }).first();
 			await schedRow.click();
 			const detailRow = schedRow.locator('+ tr');
 			await expect(detailRow.locator('code')).toBeVisible({ timeout: 5_000 });
@@ -277,8 +287,8 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 				timeout: 5_000
 			});
 		} finally {
-			await deleteScheduleViaUI(page, 'e2e-sched-cron-esc-ds');
-			await deleteDatasourceViaUI(page, 'e2e-sched-cron-esc-ds');
+			await deleteScheduleViaUI(page, ds);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -300,55 +310,65 @@ test.describe('Monitoring – Health Checks tab', () => {
 	});
 
 	test('created health check appears in list', async ({ page, request }) => {
-		const dsId = await createDatasource(request, 'e2e-hc-ds');
-		await createHealthCheck(request, dsId, 'e2e Row Count Check');
+		const id = uid();
+		const ds = `e2e-hc-${id}`;
+		const hc = `e2e Row Count ${id}`;
+		const dsId = await createDatasource(request, ds);
+		await createHealthCheck(request, dsId, hc);
 		try {
 			await page.goto('/monitoring?tab=health');
-			await expect(page.getByText('e2e Row Count Check')).toBeVisible({ timeout: 8_000 });
+			await expect(page.getByText(hc)).toBeVisible({ timeout: 8_000 });
 		} finally {
-			await deleteHealthCheckViaUI(page, 'e2e Row Count Check');
-			await deleteDatasourceViaUI(page, 'e2e-hc-ds');
+			await deleteHealthCheckViaUI(page, hc);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('health check delete button removes it from list', async ({ page, request }) => {
-		const dsId = await createDatasource(request, 'e2e-hc-del-ds');
-		await createHealthCheck(request, dsId, 'e2e Delete Health Check');
+		const id = uid();
+		const ds = `e2e-hc-del-${id}`;
+		const hc = `e2e Delete HC ${id}`;
+		const dsId = await createDatasource(request, ds);
+		await createHealthCheck(request, dsId, hc);
 
-		await page.goto('/monitoring?tab=health');
-		await expect(page.getByText('e2e Delete Health Check').first()).toBeVisible({
-			timeout: 8_000
-		});
+		try {
+			await page.goto('/monitoring?tab=health');
+			await expect(page.getByText(hc).first()).toBeVisible({
+				timeout: 8_000
+			});
 
-		// Scope the delete to the row containing our health check name
-		const row = page.locator('tr', { has: page.getByText('e2e Delete Health Check') }).first();
-		await row.getByLabel('Delete check').click({ timeout: 5_000 });
+			// Scope the delete to the row containing our health check name
+			const row = page.locator('tr', { has: page.getByText(hc) }).first();
+			await row.getByLabel('Delete check').click({ timeout: 5_000 });
 
-		// Confirm in the dialog
-		const dialog = page.getByRole('dialog');
-		await expect(dialog.getByRole('heading', { name: /Delete Health Check/i })).toBeVisible();
-		await dialog.getByRole('button', { name: /^Delete$/ }).click();
+			// Confirm in the dialog
+			const dialog = page.getByRole('dialog');
+			await expect(dialog.getByRole('heading', { name: /Delete Health Check/i })).toBeVisible();
+			await dialog.getByRole('button', { name: /^Delete$/ }).click();
 
-		await expect(page.getByText('e2e Delete Health Check')).not.toBeVisible({
-			timeout: 8_000
-		});
-
-		// Cleanup the datasource
-		await deleteDatasourceViaUI(page, 'e2e-hc-del-ds');
+			await expect(page.getByText(hc)).not.toBeVisible({
+				timeout: 8_000
+			});
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
 	});
 
 	test('health check enable/disable toggle works', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		const dsId = await createDatasource(request, 'e2e-hc-toggle-ds');
-		await createHealthCheck(request, dsId, 'e2e Toggle Health Check');
+		const id = uid();
+		const ds = `e2e-hc-toggle-${id}`;
+		const hc = `e2e Toggle HC ${id}`;
+		const dsId = await createDatasource(request, ds);
+		await createHealthCheck(request, dsId, hc);
 		try {
 			await page.goto('/monitoring?tab=health');
-			await expect(page.getByText('e2e Toggle Health Check').first()).toBeVisible({
+			await expect(page.getByText(hc).first()).toBeVisible({
 				timeout: 8_000
 			});
 
 			// Find the toggle button in the health check row — starts enabled (title "Click to disable")
-			const row = page.locator('tr', { has: page.getByText('e2e Toggle Health Check') }).first();
+			const row = page.locator('tr', { has: page.getByText(hc) }).first();
 			const toggleBtn = row.locator('button[title="Click to disable"]');
 			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
 			await toggleBtn.click({ timeout: 5_000 });
@@ -361,8 +381,8 @@ test.describe('Monitoring – Health Checks tab', () => {
 
 			await screenshot(page, 'monitoring', 'health-check-toggled-off');
 		} finally {
-			await deleteHealthCheckViaUI(page, 'e2e Toggle Health Check');
-			await deleteDatasourceViaUI(page, 'e2e-hc-toggle-ds');
+			await deleteHealthCheckViaUI(page, hc);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -370,7 +390,10 @@ test.describe('Monitoring – Health Checks tab', () => {
 test.describe('Monitoring – Health Check create flow', () => {
 	test('create health check via UI form', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-hc-create-ds');
+		const id = uid();
+		const ds = `e2e-hc-create-${id}`;
+		const hc = `e2e UI Check ${id}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=health');
 			await expect(page.getByRole('button', { name: /New Check/i })).toBeVisible({
@@ -381,10 +404,10 @@ test.describe('Monitoring – Health Check create flow', () => {
 			// Select datasource
 			const dsSelect = page.locator('#hc-target');
 			await expect(dsSelect).toBeVisible({ timeout: 5_000 });
-			await dsSelect.selectOption({ label: 'e2e-hc-create-ds' });
+			await dsSelect.selectOption({ label: ds });
 
 			// Fill name
-			await page.locator('#hc-name').fill('e2e UI Created Check');
+			await page.locator('#hc-name').fill(hc);
 
 			// Type defaults to row_count — fill min_rows
 			await page.locator('#hc-min-rows').fill('1');
@@ -395,10 +418,10 @@ test.describe('Monitoring – Health Check create flow', () => {
 			await saveBtn.click();
 
 			// Check should appear in the list
-			await expect(page.getByText('e2e UI Created Check')).toBeVisible({ timeout: 8_000 });
+			await expect(page.getByText(hc)).toBeVisible({ timeout: 8_000 });
 		} finally {
-			await deleteHealthCheckViaUI(page, 'e2e UI Created Check');
-			await deleteDatasourceViaUI(page, 'e2e-hc-create-ds');
+			await deleteHealthCheckViaUI(page, hc);
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });
@@ -429,46 +452,49 @@ test.describe('Monitoring – Builds tab', () => {
 
 	test('Builds search filters by text', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-filter-ds');
+		const ds = `e2e-filter-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			await expect(panel.getByText('e2e-filter-ds').first()).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 20_000 });
 
 			await page.getByLabel(/Search builds, schedules, or health checks/i).fill('ZZZNOMATCH');
-			await expect(panel.getByText('e2e-filter-ds')).not.toBeVisible({ timeout: 5_000 });
+			await expect(panel.getByText(ds)).not.toBeVisible({ timeout: 5_000 });
 
-			await page.getByLabel(/Search builds, schedules, or health checks/i).fill('e2e-filter-ds');
-			await expect(panel.getByText('e2e-filter-ds').first()).toBeVisible({ timeout: 5_000 });
+			await page.getByLabel(/Search builds, schedules, or health checks/i).fill(ds);
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-filter-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('Builds tab shows datasource creation run', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-build-ds');
+		const ds = `e2e-build-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible();
-			await expect(panel.getByText('e2e-build-ds').first()).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 20_000 });
 			const cells = panel.locator('td');
 			await expect(cells.getByText('Success').first()).toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-build-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('clicking a build row expands to show detail panel', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-expand-ds');
+		const ds = `e2e-expand-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			await expect(panel.getByText('e2e-expand-ds').first()).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 20_000 });
 
-			const buildRow = panel.locator('tr[data-build-row]', { hasText: 'e2e-expand-ds' }).first();
+			const buildRow = panel.locator('tr[data-build-row]', { hasText: ds }).first();
 			await buildRow.click();
 
 			const detailRow = panel.locator('tr[data-build-detail]').first();
@@ -477,19 +503,20 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect(detailRow.getByText('Result')).toBeVisible();
 			await screenshot(page, 'monitoring', 'build-row-expanded');
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-expand-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('build detail shows Request Payload JSON', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-payload-ds');
+		const ds = `e2e-payload-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			await expect(panel.getByText('e2e-payload-ds').first()).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 20_000 });
 
-			const buildRow = panel.locator('tr[data-build-row]', { hasText: 'e2e-payload-ds' }).first();
+			const buildRow = panel.locator('tr[data-build-row]', { hasText: ds }).first();
 			await buildRow.click();
 
 			const detailRow = panel.locator('tr[data-build-detail]').first();
@@ -497,19 +524,20 @@ test.describe('Monitoring – Builds tab', () => {
 			await expect(detailRow.getByText('Request Payload')).toBeVisible();
 			await expect(detailRow.getByText('Run ID:')).toBeVisible();
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-payload-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('build detail Result tab shows result metadata', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-result-ds');
+		const ds = `e2e-result-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			await expect(panel.getByText('e2e-result-ds').first()).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 20_000 });
 
-			const buildRow = panel.locator('tr[data-build-row]', { hasText: 'e2e-result-ds' }).first();
+			const buildRow = panel.locator('tr[data-build-row]', { hasText: ds }).first();
 			await buildRow.click();
 
 			const detailRow = panel.locator('tr[data-build-detail]').first();
@@ -520,19 +548,20 @@ test.describe('Monitoring – Builds tab', () => {
 				detailRow.getByText('Result Metadata').or(detailRow.getByText('No result data available'))
 			).toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-result-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 
 	test('clicking an expanded build row collapses it', async ({ page, request }) => {
 		test.setTimeout(60_000);
-		await createDatasource(request, 'e2e-collapse-ds');
+		const ds = `e2e-collapse-${uid()}`;
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			await expect(panel.getByText('e2e-collapse-ds').first()).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText(ds).first()).toBeVisible({ timeout: 20_000 });
 
-			const buildRow = panel.locator('tr[data-build-row]', { hasText: 'e2e-collapse-ds' }).first();
+			const buildRow = panel.locator('tr[data-build-row]', { hasText: ds }).first();
 			await buildRow.click();
 			const detailRow = panel.locator('tr[data-build-detail]').first();
 			await expect(detailRow).toBeVisible({ timeout: 5_000 });
@@ -541,7 +570,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await buildRow.click();
 			await expect(detailRow).not.toBeVisible({ timeout: 5_000 });
 		} finally {
-			await deleteDatasourceViaUI(page, 'e2e-collapse-ds');
+			await deleteDatasourceViaUI(page, ds);
 		}
 	});
 });

@@ -200,6 +200,18 @@ class TestRunHealthchecks:
         assert results[0].passed is True
         assert 'Nulls:' in results[0].message
 
+    def test_null_percentage_zero_column_dataset(self, test_db_session):
+        check = _make_check('ds-1', check_type='null_percentage', config={'threshold': 30})
+        test_db_session.add(check)
+        test_db_session.flush()
+
+        results = run_healthchecks(test_db_session, [check], pl.DataFrame(schema={}).lazy())
+
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert results[0].message == 'Nulls: 0.0% (threshold: 30.0%)'
+        assert results[0].details['actual_percentage'] == 0.0
+
     def test_duplicate_percentage(self, test_db_session):
         check = _make_check('ds-1', check_type='duplicate_percentage', config={'threshold': 10})
         test_db_session.add(check)

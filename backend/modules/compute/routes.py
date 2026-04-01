@@ -1,3 +1,4 @@
+import logging
 from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -16,6 +17,8 @@ from core.validation import AnalysisId, DataSourceId, parse_analysis_id, parse_d
 from modules.compute import schemas, service
 from modules.compute.manager import ProcessManager
 from modules.mcp.router import MCPRouter
+
+logger = logging.getLogger(__name__)
 
 router = MCPRouter(prefix='/compute', tags=['compute'])
 
@@ -310,10 +313,11 @@ async def compute_websocket(
             ).model_dump(mode='json')
         )
     except Exception as exc:
+        logger.error('WebSocket error: %s', exc, exc_info=True)
         await websocket.send_json(
             schemas.ComputeWebsocketErrorMessage(
                 action=action,
-                error=str(exc),
+                error='An internal error occurred',
             ).model_dump(mode='json')
         )
     finally:

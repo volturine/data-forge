@@ -1,22 +1,43 @@
+from __future__ import annotations
+
+import asyncio
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import polars as pl
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from core.config import settings
-from core.database import clear_engine_override, get_db, set_engine_override
-from main import app
-from modules.analysis.models import Analysis, AnalysisDataSource
-from modules.datasource.models import DataSource
+if TYPE_CHECKING:
+    from modules.analysis.models import Analysis
+    from modules.auth.models import User
+    from modules.datasource.models import DataSource
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    os.environ.pop('POLARS_MAX_THREADS', None)
+    os.environ.pop('POLARS_STREAMING_CHUNK_SIZE', None)
+    os.environ.setdefault('ENV_FILE', '')
+    os.environ.setdefault('SETTINGS_ENCRYPTION_KEY', 'test-key')
+
+
+def _settings():
+    from core.config import settings
+
+    return settings
 
 
 @pytest.fixture(scope='function')
 def test_engine():
+    from modules.locks.models import ResourceLock
+    from modules.udf.models import Udf
+
+    del ResourceLock
+    del Udf
     engine = create_engine(
         'sqlite:///:memory:',
         echo=False,
@@ -29,6 +50,8 @@ def test_engine():
 
 @pytest.fixture(scope='function')
 def test_db_session(test_engine):
+    from core.database import clear_engine_override, set_engine_override
+
     # Set the engine override so run_db uses the test engine
     set_engine_override(test_engine)
     with Session(test_engine) as session:
@@ -38,16 +61,48 @@ def test_db_session(test_engine):
 
 
 @pytest.fixture(scope='function')
-def client(test_db_session):
+def test_user() -> User:
+    from modules.auth.models import User
+
+    now = datetime.now(UTC)
+    return User(
+        id=uuid.uuid4().hex,
+        email='test@example.com',
+        display_name='Test User',
+        status='active',
+        email_verified=True,
+        has_password=True,
+        preferences={},
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@pytest.fixture(scope='function')
+def client(test_db_session, test_user):
+    from core.database import get_db
+    from main import app
+    from modules.auth.dependencies import get_current_user
+
     def override_get_db():
         yield test_db_session
 
     if hasattr(app.state, 'mcp_registry'):
         del app.state.mcp_registry
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: test_user
     with TestClient(app) as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True, scope='function')
+def clear_lock_watchers():
+    from modules.locks.watchers import registry
+
+    asyncio.run(registry.clear())
+    yield
+    asyncio.run(registry.clear())
 
 
 @pytest.fixture(scope='function')
@@ -59,11 +114,14 @@ def temp_upload_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True, scope='function')
 def isolate_data_dir(tmp_path: Path, monkeypatch):
+    settings = _settings()
     data_dir = tmp_path / 'data'
     data_dir.mkdir(parents=True, exist_ok=True)
     log_dir = data_dir / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv('ENV_FILE', '')
+    monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+    monkeypatch.setattr(settings, 'settings_encryption_key', 'test-key', raising=False)
     monkeypatch.setattr(settings, 'data_dir', data_dir, raising=False)
     monkeypatch.setattr(settings, 'database_url', f'sqlite:///{data_dir / "app.db"}', raising=False)
     monkeypatch.setattr(settings, 'log_sqlite_path', log_dir, raising=False)
@@ -73,8 +131,11 @@ def isolate_data_dir(tmp_path: Path, monkeypatch):
 def isolate_settings_engine(isolate_data_dir, monkeypatch):
     from core import database
     from core.database import _run_settings_migrations
+    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+    from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
 
+    settings = _settings()
     settings_db_path = settings.data_dir / 'app.db'
     settings_url = f'sqlite:///{settings_db_path}'
     engine = create_engine(
@@ -84,10 +145,11 @@ def isolate_settings_engine(isolate_data_dir, monkeypatch):
         poolclass=StaticPool,
     )
     AppSettings.metadata.create_all(engine)
-
-    from modules.chat.sessions import ChatSession
-
     ChatSession.metadata.create_all(engine)
+    User.metadata.create_all(engine)
+    AuthProvider.metadata.create_all(engine)
+    UserSession.metadata.create_all(engine)
+    VerificationToken.metadata.create_all(engine)
     _run_settings_migrations(engine)
     monkeypatch.setattr(settings, 'database_url', settings_url, raising=False)
     monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
@@ -107,6 +169,8 @@ def cleanup_namespace_engines():
 
 @pytest.fixture(scope='function')
 def sample_csv_file(temp_upload_dir: Path) -> Path:
+    import polars as pl
+
     csv_path = temp_upload_dir / 'sample.csv'
     df = pl.DataFrame(
         {
@@ -122,6 +186,8 @@ def sample_csv_file(temp_upload_dir: Path) -> Path:
 
 @pytest.fixture(scope='function')
 def sample_parquet_file(temp_upload_dir: Path) -> Path:
+    import polars as pl
+
     parquet_path = temp_upload_dir / 'sample.parquet'
     df = pl.DataFrame(
         {
@@ -137,6 +203,8 @@ def sample_parquet_file(temp_upload_dir: Path) -> Path:
 
 @pytest.fixture(scope='function')
 def sample_ndjson_file(temp_upload_dir: Path) -> Path:
+    import polars as pl
+
     ndjson_path = temp_upload_dir / 'sample.ndjson'
     df = pl.DataFrame(
         {
@@ -151,6 +219,8 @@ def sample_ndjson_file(temp_upload_dir: Path) -> Path:
 
 @pytest.fixture(scope='function')
 def sample_json_file(temp_upload_dir: Path) -> Path:
+    import polars as pl
+
     json_path = temp_upload_dir / 'sample.json'
     df = pl.DataFrame(
         {
@@ -165,6 +235,8 @@ def sample_json_file(temp_upload_dir: Path) -> Path:
 
 @pytest.fixture(scope='function')
 def sample_datasource(test_db_session: Session, sample_csv_file: Path) -> DataSource:
+    from modules.datasource.models import DataSource
+
     datasource_id = str(uuid.uuid4())
 
     config = {
@@ -190,6 +262,8 @@ def sample_datasource(test_db_session: Session, sample_csv_file: Path) -> DataSo
 
 @pytest.fixture(scope='function')
 def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_parquet_file: Path) -> list[DataSource]:
+    from modules.datasource.models import DataSource
+
     datasources = []
 
     for _idx, (file_path, file_type, name) in enumerate(
@@ -226,6 +300,8 @@ def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_p
 
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
+    from modules.analysis.models import Analysis, AnalysisDataSource
+
     analysis_id = str(uuid.uuid4())
     tab1_result_id = str(uuid.uuid4())
 
@@ -285,6 +361,8 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
 
 @pytest.fixture(scope='function')
 def sample_analyses(test_db_session: Session, sample_datasources: list[DataSource]) -> list[Analysis]:
+    from modules.analysis.models import Analysis, AnalysisDataSource
+
     analyses = []
 
     for idx in range(3):

@@ -8,6 +8,7 @@ from sqlmodel import Session
 
 from core.config import settings
 from core.database import get_settings_db
+from core.error_handlers import handle_errors
 from modules.mcp.router import MCPRouter
 from modules.settings.service import get_settings
 
@@ -31,6 +32,7 @@ class FrontendConfig(BaseModel):
     smtp_enabled: bool
     telegram_enabled: bool
     default_namespace: str
+    auth_required: bool
 
 
 class UuidResponse(BaseModel):
@@ -40,6 +42,7 @@ class UuidResponse(BaseModel):
 
 
 @router.get('/uuid', response_model=UuidResponse, mcp=True)
+@handle_errors(operation='generate UUID')
 def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
     """Generate UUID v4 values for use in analysis creation (output.result_id) or any UUID field.
 
@@ -49,6 +52,7 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 
 
 @router.get('', response_model=FrontendConfig, mcp=True)
+@handle_errors(operation='get config')
 def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
     """Get application configuration: timeouts, logging settings, feature flags, and default namespace."""
     db_settings = get_settings(session)
@@ -64,6 +68,7 @@ def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
         log_client_flush_cooldown_ms=settings.log_client_flush_cooldown_ms,
         log_queue_max_size=settings.log_queue_max_size,
         public_idb_debug=db_settings.public_idb_debug,
+        auth_required=settings.auth_required,
         smtp_enabled=bool(db_settings.smtp_host and db_settings.smtp_user),
         telegram_enabled=bool(db_settings.telegram_bot_enabled and db_settings.telegram_bot_token),
         default_namespace=settings.default_namespace,

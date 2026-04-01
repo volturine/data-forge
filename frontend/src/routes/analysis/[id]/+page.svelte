@@ -24,6 +24,8 @@
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { getStepSchema, spawnEngine } from '$lib/api/compute';
+	import { acquireLock, releaseLock, watchLock, type LockWatcher } from '$lib/api/locks';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
@@ -66,26 +68,94 @@
 	let isSaving = $state(false);
 	let saveError = $state('');
 	let tabError = $state('');
+	let tabErrorTimer = $state<number | null>(null);
 
 	function flashTabError(msg: string) {
 		tabError = msg;
-		setTimeout(() => {
+		if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+		tabErrorTimer = window.setTimeout(() => {
 			tabError = '';
+			tabErrorTimer = null;
 		}, 5000);
 	}
+
+	// Cleanup: $derived can't clear pending timers on destroy.
+	$effect(() => {
+		return () => {
+			if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+		};
+	});
+
 	let draftLoaded = $state(false);
 	let isDirty = $state(false);
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
-	let schemaRefreshTimer: number | null = null;
 	let hydratedGates = $state(new Set<string>());
+
+	let lockOwner = $state<string | null>(null);
+	const userId = $derived(authStore.user?.id ?? null);
+	let lockedByOther = $derived(lockOwner !== null && (userId === null || lockOwner !== userId));
+
+	function releaseCurrentLock(id: string, token: string): void {
+		releaseLock('analysis', id, token).match(
+			() => {},
+			() => {}
+		);
+	}
+
+	function startWatcher(id: string, token: string | null): LockWatcher {
+		return watchLock({
+			resourceType: 'analysis',
+			resourceId: id,
+			token,
+			onStatus: (lock) => {
+				lockOwner = lock?.owner_id ?? null;
+			}
+		});
+	}
+
+	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
+	$effect(() => {
+		const id = analysisId;
+		if (!id) return;
+
+		lockOwner = null;
+
+		let token: string | null = null;
+		let watcher: LockWatcher | null = null;
+		let alive = true;
+
+		acquireLock('analysis', id).match(
+			(status) => {
+				if (!alive) {
+					releaseCurrentLock(id, status.lock_token);
+					return;
+				}
+				token = status.lock_token;
+				lockOwner = status.owner_id;
+				watcher = startWatcher(id, token);
+			},
+			(error) => {
+				if (!alive) return;
+				if (error.status === 409) {
+					watcher = startWatcher(id, null);
+				}
+			}
+		);
+
+		return () => {
+			alive = false;
+			watcher?.close();
+			if (token) releaseCurrentLock(id, token);
+			lockOwner = null;
+		};
+	});
 
 	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
 	// Timer: $derived can't schedule schema refresh.
 	$effect(() => {
 		if (!analysisId) return;
-		if (schemaRefreshTimer) window.clearTimeout(schemaRefreshTimer);
 		if (lastAnalysisId !== analysisId) {
 			analysisStore.reset();
 			schemaStore.reset();
@@ -94,9 +164,6 @@
 			lastAnalysisId = analysisId;
 		}
 		draftLoaded = false;
-		schemaRefreshTimer = window.setTimeout(() => {
-			void datasourceStore.loadDatasources();
-		}, 1500);
 	});
 
 	// Storage: $derived can't hydrate from IndexedDB.
@@ -178,6 +245,9 @@
 		draftTimer = window.setTimeout(() => {
 			void idbSet(storageKey, JSON.stringify(payload));
 		}, 400);
+		return () => {
+			if (draftTimer) window.clearTimeout(draftTimer);
+		};
 	});
 
 	// Subscription: $derived can't sync store side effects.
@@ -265,11 +335,17 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
-			// Sync to store in query success instead of effect
 			datasourceStore.datasources = result.value;
 			return result.value;
 		}
 	}));
+
+	// Sync: $derived can't write to an external store.
+	$effect(() => {
+		if (datasourcesQuery.isSuccess || datasourcesQuery.isError) {
+			datasourceStore.loaded = true;
+		}
+	});
 
 	// Network: $derived can't fetch engine defaults.
 	$effect(() => {
@@ -311,8 +387,7 @@
 
 		const targets = pipeline.filter(
 			(step) =>
-				(step.type === 'expression' || step.type === 'with_columns') &&
-				(step as PipelineStep & { is_applied?: boolean }).is_applied !== false
+				(step.type === 'expression' || step.type === 'with_columns') && step.is_applied !== false
 		);
 		for (const step of targets) {
 			getStepSchema({
@@ -442,12 +517,12 @@
 		};
 		const isChart = type === 'chart' || type.startsWith('plot_');
 		if (type === 'view') {
-			return { ...base, is_applied: true } as PipelineStep & { is_applied: boolean };
+			return { ...base, is_applied: true } as PipelineStep;
 		}
 		if (isChart) {
-			return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
+			return { ...base, is_applied: false } as PipelineStep;
 		}
-		return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
+		return { ...base, is_applied: false } as PipelineStep;
 	}
 
 	function markUnsaved() {
@@ -509,15 +584,13 @@
 	function handleToggleStep(stepId: string) {
 		const step = analysisStore.pipeline.find((item) => item.id === stepId);
 		if (!step) return;
-		const next = (step as PipelineStep & { is_applied?: boolean }).is_applied === false;
-		analysisStore.updateStep(stepId, { is_applied: next } as Partial<PipelineStep> & {
-			is_applied: boolean;
-		});
+		const next = step.is_applied === false;
+		analysisStore.updateStep(stepId, { is_applied: next } as Partial<PipelineStep>);
 		markUnsaved();
 	}
 
 	async function handleSave() {
-		if (isSaving) return;
+		if (isSaving || lockedByOther) return;
 
 		isSaving = true;
 		saveError = '';
@@ -540,7 +613,14 @@
 				}
 			},
 			(error) => {
-				saveError = `Failed to save pipeline: ${error.message}`;
+				if (error.status === 409) {
+					saveError = 'This analysis is locked by another user. Refresh to see the latest version.';
+				} else if (error.status === 412) {
+					saveError =
+						'Analysis was modified elsewhere since you loaded it. Discard your changes and reload.';
+				} else {
+					saveError = `Failed to save pipeline: ${error.message}`;
+				}
 				isSaving = false;
 			}
 		);
@@ -1167,7 +1247,7 @@
 							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 						})}
 						onclick={discardChanges}
-						disabled={!isDirty || isSaving || analysisStore.loading}
+						disabled={!isDirty || isSaving || analysisStore.loading || lockedByOther}
 						type="button"
 					>
 						Discard
@@ -1194,10 +1274,10 @@
 								...(isDirty ? { color: 'fg.warning' } : { color: 'fg.success' })
 							})}
 							onclick={handleSave}
-							disabled={isSaving || analysisStore.loading}
+							disabled={isSaving || analysisStore.loading || lockedByOther}
 							type="button"
 						>
-							{isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
+							{lockedByOther ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
 						</button>
 						<button
 							class={css({
@@ -1229,6 +1309,15 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
+
+		{#if lockedByOther}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-banner">
+				<Callout tone="warn"
+					>This analysis is being edited by another user. Saving is disabled until the lock is
+					released.</Callout
+				>
 			</div>
 		{/if}
 
@@ -1317,7 +1406,7 @@
 							'& > .step-config': { width: '100%', flex: '1', minHeight: '0' },
 							...(rightPaneCollapsed ? { border: 'none' } : {})
 						})}
-						style="height: {rightPaneCollapsed ? 0 : bottomPaneHeight}px;"
+						style:height="{rightPaneCollapsed ? 0 : bottomPaneHeight}px"
 					>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
