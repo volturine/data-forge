@@ -43,13 +43,17 @@
 
 	// Network: $derived can't trigger async auth resolution.
 	$effect(() => {
-		void authStore.resolve();
+		if (!configStore.config) return;
+		void authStore.resolve(configStore.authRequired);
 	});
+
+	const ready = $derived(
+		configStore.config !== null && (!configStore.authRequired || authStore.resolved)
+	);
 
 	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
 	$effect(() => {
-		if (!authStore.resolved) return;
-		if (!configStore.config) return;
+		if (!ready) return;
 		if (!configStore.authRequired) {
 			if (onAuthPage) void goto(resolve('/'));
 			return;
@@ -197,7 +201,7 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	{#if (!authStore.resolved || !configStore.config) && !onAuthPage}
+	{#if !ready && !onAuthPage}
 		<div
 			class={css({
 				display: 'flex',

@@ -1,11 +1,11 @@
 import contextlib
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from core.database import get_db
-from core.dependencies import get_manager
+from core.dependencies import get_manager, get_optional_lock_owner_id
 from core.error_handlers import handle_errors
 from core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas, service
@@ -14,14 +14,47 @@ from modules.auth.dependencies import get_optional_user
 from modules.auth.models import User
 from modules.compute import service as compute_service
 from modules.compute.manager import ProcessManager
+from modules.locks import service as lock_service
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/analysis', tags=['analysis'])
 
 
+def _analysis_etag(analysis: schemas.AnalysisResponseSchema) -> str:
+    return f'"analysis-{analysis.id}-{analysis.updated_at.isoformat()}"'
+
+
+def _analysis_version(analysis: schemas.AnalysisResponseSchema) -> str:
+    return analysis.updated_at.isoformat()
+
+
+def _validate_if_match(current_version: str, current_etag: str, if_match: str | None) -> None:
+    if if_match is None:
+        return
+    normalized = if_match.strip()
+    if normalized == '*':
+        return
+    if normalized == current_version:
+        return
+    if normalized == current_etag:
+        return
+    raise HTTPException(status_code=412, detail='Analysis version mismatch')
+
+
+async def require_analysis_lock(
+    analysis_id: AnalysisId,
+    session: Session = Depends(get_db),
+    owner_id: str | None = Depends(get_optional_lock_owner_id),
+) -> None:
+    try:
+        lock_service.ensure_mutation_lock(session, 'analysis', parse_analysis_id(analysis_id), owner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post('/validate', mcp=True)
 @handle_errors(operation='validate analysis', value_error_status=400)
-def validate_analysis(
+async def validate_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
 ):
@@ -31,7 +64,7 @@ def validate_analysis(
 
 @router.post('', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='create analysis', value_error_status=400)
-def create_analysis(
+async def create_analysis(
     data: schemas.AnalysisCreateSchema,
     session: Session = Depends(get_db),
     user: User | None = Depends(get_optional_user),
@@ -55,14 +88,14 @@ def create_analysis(
 
 @router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list analyses')
-def list_analyses(session: Session = Depends(get_db)):
+async def list_analyses(session: Session = Depends(get_db)):
     """List all analyses as gallery items with id, name, thumbnail, and timestamps."""
     return service.list_analyses(session)
 
 
 @router.get('/step-types', mcp=True)
 @handle_errors(operation='list step types')
-def list_step_types():
+async def list_step_types():
     """List all available pipeline step types with descriptions and config schemas.
 
     Use this to discover what operations are available and what configuration
@@ -73,23 +106,26 @@ def list_step_types():
 
 @router.get('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
 @handle_errors(operation='get analysis', value_error_status=404)
-def get_analysis(
+async def get_analysis(
     analysis_id: AnalysisId,
     response: Response,
     session: Session = Depends(get_db),
 ):
     """Get a single analysis by ID with full pipeline definition including all tabs and steps."""
     analysis = service.get_analysis(session, parse_analysis_id(analysis_id))
-    response.headers['ETag'] = f'"analysis-{analysis.id}-{analysis.updated_at.isoformat()}"'
-    response.headers['X-Analysis-Version'] = analysis.updated_at.isoformat()
+    response.headers['ETag'] = _analysis_etag(analysis)
+    response.headers['X-Analysis-Version'] = _analysis_version(analysis)
     return analysis
 
 
 @router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)
-@handle_errors(operation='update analysis', value_error_status=409)
-def update_analysis(
+@handle_errors(operation='update analysis')
+async def update_analysis(
     analysis_id: AnalysisId,
+    response: Response,
     data: schemas.AnalysisUpdateSchema,
+    if_match: str | None = Header(default=None, alias='If-Match'),
+    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Update an analysis and replace the full tabs array.
@@ -99,17 +135,23 @@ def update_analysis(
     """
     analysis_id_value = parse_analysis_id(analysis_id)
     try:
-        service.get_analysis(session, analysis_id_value)
+        analysis = service.get_analysis(session, analysis_id_value)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return service.update_analysis(session, analysis_id_value, data)
+    _validate_if_match(_analysis_version(analysis), _analysis_etag(analysis), if_match)
+
+    updated = service.update_analysis(session, analysis_id_value, data)
+    response.headers['ETag'] = _analysis_etag(updated)
+    response.headers['X-Analysis-Version'] = _analysis_version(updated)
+    return updated
 
 
 @router.delete('/{analysis_id}', status_code=204, mcp=True)
 @handle_errors(operation='delete analysis', value_error_status=404)
-def delete_analysis(
+async def delete_analysis(
     analysis_id: AnalysisId,
+    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
     manager: ProcessManager = Depends(get_manager),
 ):
@@ -202,10 +244,11 @@ class UpdateStepBody(BaseModel):
 
 @router.post('/{analysis_id}/tabs/{tab_id}/steps', mcp=True)
 @handle_errors(operation='add step', value_error_status=400)
-def add_step(
+async def add_step(
     analysis_id: AnalysisId,
     tab_id: str,
     data: AddStepBody,
+    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Add a new pipeline step to a tab in an analysis.
@@ -230,11 +273,12 @@ def add_step(
 
 @router.put('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', mcp=True)
 @handle_errors(operation='update step', value_error_status=400)
-def update_step(
+async def update_step(
     analysis_id: AnalysisId,
     tab_id: str,
     step_id: str,
     data: UpdateStepBody,
+    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Update a pipeline step's type and/or config.
@@ -271,10 +315,11 @@ def update_step(
 
 @router.delete('/{analysis_id}/tabs/{tab_id}/steps/{step_id}', status_code=204, mcp=True)
 @handle_errors(operation='remove step', value_error_status=400)
-def remove_step(
+async def remove_step(
     analysis_id: AnalysisId,
     tab_id: str,
     step_id: str,
+    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Remove a pipeline step from a tab. Also cleans up depends_on references in other steps that depended on the removed step."""
@@ -293,10 +338,11 @@ class DeriveTabBody(BaseModel):
 
 @router.post('/{analysis_id}/tabs/{tab_id}/derive', mcp=True)
 @handle_errors(operation='derive tab', value_error_status=400)
-def derive_tab(
+async def derive_tab(
     analysis_id: AnalysisId,
     tab_id: str,
     data: DeriveTabBody,
+    _lock: None = Depends(require_analysis_lock),
     session: Session = Depends(get_db),
 ):
     """Create a new tab whose datasource is the given tab's output result_id.

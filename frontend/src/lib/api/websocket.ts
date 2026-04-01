@@ -26,7 +26,7 @@ function resolveWebsocketOrigin(): string {
 	return `${window.location.protocol}//${window.location.hostname}:${DEV_BACKEND_PORT}`;
 }
 
-function buildWebsocketUrl(endpoint: string): string {
+export function buildWebsocketUrl(endpoint: string): string {
 	const url = new URL(`${BASE_URL}${endpoint}`, resolveWebsocketOrigin());
 	url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const identity = getClientIdentity();

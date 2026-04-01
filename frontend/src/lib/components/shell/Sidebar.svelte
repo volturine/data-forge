@@ -337,7 +337,7 @@
 		</button>
 	</div>
 
-	{#if authenticated}
+	{#if authenticated || !authRequired}
 		<div class={sectionClass} role="group" aria-label="Account">
 			<a
 				href={resolve('/profile' as '/')}

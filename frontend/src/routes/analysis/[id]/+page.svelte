@@ -24,6 +24,8 @@
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { getStepSchema, spawnEngine } from '$lib/api/compute';
+	import { acquireLock, releaseLock, watchLock, type LockWatcher } from '$lib/api/locks';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
@@ -89,6 +91,65 @@
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
 	let hydratedGates = $state(new Set<string>());
+
+	let lockOwner = $state<string | null>(null);
+	const userId = $derived(authStore.user?.id ?? null);
+	let lockedByOther = $derived(lockOwner !== null && (userId === null || lockOwner !== userId));
+
+	function releaseCurrentLock(id: string, token: string): void {
+		releaseLock('analysis', id, token).match(
+			() => {},
+			() => {}
+		);
+	}
+
+	function startWatcher(id: string, token: string | null): LockWatcher {
+		return watchLock({
+			resourceType: 'analysis',
+			resourceId: id,
+			token,
+			onStatus: (lock) => {
+				lockOwner = lock?.owner_id ?? null;
+			}
+		});
+	}
+
+	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
+	$effect(() => {
+		const id = analysisId;
+		if (!id) return;
+
+		lockOwner = null;
+
+		let token: string | null = null;
+		let watcher: LockWatcher | null = null;
+		let alive = true;
+
+		acquireLock('analysis', id).match(
+			(status) => {
+				if (!alive) {
+					releaseCurrentLock(id, status.lock_token);
+					return;
+				}
+				token = status.lock_token;
+				lockOwner = status.owner_id;
+				watcher = startWatcher(id, token);
+			},
+			(error) => {
+				if (!alive) return;
+				if (error.status === 409) {
+					watcher = startWatcher(id, null);
+				}
+			}
+		);
+
+		return () => {
+			alive = false;
+			watcher?.close();
+			if (token) releaseCurrentLock(id, token);
+			lockOwner = null;
+		};
+	});
 
 	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
 
@@ -529,7 +590,7 @@
 	}
 
 	async function handleSave() {
-		if (isSaving) return;
+		if (isSaving || lockedByOther) return;
 
 		isSaving = true;
 		saveError = '';
@@ -552,7 +613,14 @@
 				}
 			},
 			(error) => {
-				saveError = `Failed to save pipeline: ${error.message}`;
+				if (error.status === 409) {
+					saveError = 'This analysis is locked by another user. Refresh to see the latest version.';
+				} else if (error.status === 412) {
+					saveError =
+						'Analysis was modified elsewhere since you loaded it. Discard your changes and reload.';
+				} else {
+					saveError = `Failed to save pipeline: ${error.message}`;
+				}
 				isSaving = false;
 			}
 		);
@@ -1179,7 +1247,7 @@
 							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 						})}
 						onclick={discardChanges}
-						disabled={!isDirty || isSaving || analysisStore.loading}
+						disabled={!isDirty || isSaving || analysisStore.loading || lockedByOther}
 						type="button"
 					>
 						Discard
@@ -1206,10 +1274,10 @@
 								...(isDirty ? { color: 'fg.warning' } : { color: 'fg.success' })
 							})}
 							onclick={handleSave}
-							disabled={isSaving || analysisStore.loading}
+							disabled={isSaving || analysisStore.loading || lockedByOther}
 							type="button"
 						>
-							{isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
+							{lockedByOther ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
 						</button>
 						<button
 							class={css({
@@ -1241,6 +1309,15 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
+
+		{#if lockedByOther}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-banner">
+				<Callout tone="warn"
+					>This analysis is being edited by another user. Saving is disabled until the lock is
+					released.</Callout
+				>
 			</div>
 		{/if}
 

@@ -503,9 +503,11 @@ export class AnalysisStore {
 			tabs: this.tabs
 		};
 
-		return updateAnalysis(this.current.id, update)
-			.andThen((updated) => {
-				this.current = updated;
+		const version = this.current.version ?? null;
+
+		return updateAnalysis(this.current.id, update, version)
+			.andThen(({ analysis: updated, version: nextVersion }) => {
+				this.current = { ...updated, version: nextVersion };
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
 				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
 				if (tabs.length) {

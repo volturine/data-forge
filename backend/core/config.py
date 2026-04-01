@@ -14,6 +14,8 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('job_timeout', 1, None),
     ('engine_pooling_interval', 1, None),
     ('scheduler_check_interval', 1, None),
+    ('lock_ttl_seconds', 1, None),
+    ('lock_heartbeat_interval_seconds', 1, None),
     ('polars_max_threads', 0, None),
     ('polars_max_memory_mb', 0, None),
     ('polars_streaming_chunk_size', 0, None),
@@ -110,6 +112,10 @@ class Settings(BaseSettings):
     # Scheduler check interval in seconds (default 60 seconds)
     # How often to check for schedules that need to run
     scheduler_check_interval: int = Field(default=60, alias='SCHEDULER_CHECK_INTERVAL')
+
+    # Resource lock defaults
+    lock_ttl_seconds: int = Field(default=30, alias='LOCK_TTL_SECONDS')
+    lock_heartbeat_interval_seconds: int = Field(default=10, alias='LOCK_HEARTBEAT_INTERVAL_SECONDS')
 
     # Job execution timeout in seconds (default 5 minutes)
     # Jobs that exceed this duration will be terminated
@@ -319,6 +325,12 @@ class Settings(BaseSettings):
                 'Set SETTINGS_ENCRYPTION_KEY to a strong random value for production.',
                 stacklevel=2,
             )
+        return self
+
+    @model_validator(mode='after')
+    def _validate_lock_intervals(self) -> 'Settings':
+        if self.lock_heartbeat_interval_seconds >= self.lock_ttl_seconds:
+            raise ValueError('lock_heartbeat_interval_seconds must be < lock_ttl_seconds')
         return self
 
 

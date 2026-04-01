@@ -9,10 +9,12 @@ from core.config import settings
 from modules.analysis_versions import models as analysis_versions_models
 from modules.datasource import models as datasource_models
 from modules.engine_runs import models as engine_runs_models
+from modules.locks import models as locks_models
 
 _eng: type = engine_runs_models.EngineRun
 _ana: type = analysis_versions_models.AnalysisVersion
 _dsrc: type = datasource_models.DataSource
+_lock: type = locks_models.ResourceLock
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

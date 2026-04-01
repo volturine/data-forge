@@ -27,8 +27,22 @@ export function getAnalysisWithHeaders(
 	}));
 }
 
-export const updateAnalysis = (id: string, data: AnalysisUpdate): ResultAsync<Analysis, ApiError> =>
-	apiRequest<Analysis>(`/v1/analysis/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export function updateAnalysis(
+	id: string,
+	data: AnalysisUpdate,
+	version?: string | null
+): ResultAsync<{ analysis: Analysis; version: string | null }, ApiError> {
+	const headers: Record<string, string> = {};
+	if (version) headers['If-Match'] = version;
+	return apiRequestWithHeaders<Analysis>(`/v1/analysis/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(data),
+		headers
+	}).map(({ data: analysis, headers: h }) => ({
+		analysis,
+		version: h.get('X-Analysis-Version')
+	}));
+}
 
 export const listAnalysisVersions = (
 	analysisId: string

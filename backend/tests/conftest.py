@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import UTC, datetime
@@ -32,8 +33,10 @@ def _settings():
 
 @pytest.fixture(scope='function')
 def test_engine():
+    from modules.locks.models import ResourceLock
     from modules.udf.models import Udf
 
+    del ResourceLock
     del Udf
     engine = create_engine(
         'sqlite:///:memory:',
@@ -93,6 +96,15 @@ def client(test_db_session, test_user):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True, scope='function')
+def clear_lock_watchers():
+    from modules.locks.watchers import registry
+
+    asyncio.run(registry.clear())
+    yield
+    asyncio.run(registry.clear())
+
+
 @pytest.fixture(scope='function')
 def temp_upload_dir(tmp_path: Path) -> Path:
     upload_dir = tmp_path / 'uploads'
@@ -119,6 +131,8 @@ def isolate_data_dir(tmp_path: Path, monkeypatch):
 def isolate_settings_engine(isolate_data_dir, monkeypatch):
     from core import database
     from core.database import _run_settings_migrations
+    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+    from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
 
     settings = _settings()
@@ -131,10 +145,11 @@ def isolate_settings_engine(isolate_data_dir, monkeypatch):
         poolclass=StaticPool,
     )
     AppSettings.metadata.create_all(engine)
-
-    from modules.chat.sessions import ChatSession
-
     ChatSession.metadata.create_all(engine)
+    User.metadata.create_all(engine)
+    AuthProvider.metadata.create_all(engine)
+    UserSession.metadata.create_all(engine)
+    VerificationToken.metadata.create_all(engine)
     _run_settings_migrations(engine)
     monkeypatch.setattr(settings, 'database_url', settings_url, raising=False)
     monkeypatch.setattr(database, 'settings_engine', engine, raising=False)

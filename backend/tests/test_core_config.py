@@ -49,6 +49,8 @@ class TestSettings:
         assert settings.job_timeout == 300
         assert settings.engine_idle_timeout == 300
         assert settings.engine_pooling_interval == 30
+        assert settings.lock_ttl_seconds == 30
+        assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
         assert settings.auth_required is True
         assert settings.prod_mode_enabled is False
@@ -218,3 +220,11 @@ class TestSettings:
 
         assert settings.auth_required is False
         assert not caught
+
+    def test_rejects_lock_heartbeat_not_less_than_ttl(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('LOCK_TTL_SECONDS', '10')
+        monkeypatch.setenv('LOCK_HEARTBEAT_INTERVAL_SECONDS', '10')
+
+        with pytest.raises(ValidationError, match='lock_heartbeat_interval_seconds must be < lock_ttl_seconds'):
+            Settings()

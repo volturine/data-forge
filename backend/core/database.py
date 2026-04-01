@@ -227,6 +227,7 @@ def _init_namespace_db_unlocked(namespace: str) -> None:
     from modules.datasource.models import DataSource
     from modules.engine_runs.models import EngineRun
     from modules.healthcheck.models import HealthCheck, HealthCheckResult
+    from modules.locks.models import ResourceLock
     from modules.scheduler.models import Schedule
     from modules.telegram.models import TelegramListener, TelegramSubscriber
     from modules.udf.models import Udf
@@ -238,6 +239,7 @@ def _init_namespace_db_unlocked(namespace: str) -> None:
     EngineRun.metadata.create_all(namespace_engine)
     HealthCheck.metadata.create_all(namespace_engine)
     HealthCheckResult.metadata.create_all(namespace_engine)
+    ResourceLock.metadata.create_all(namespace_engine)
     Schedule.metadata.create_all(namespace_engine)
     TelegramListener.metadata.create_all(namespace_engine)
     TelegramSubscriber.metadata.create_all(namespace_engine)
