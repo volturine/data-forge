@@ -149,6 +149,7 @@
 					}
 				})}
 				onclick={(e) => {
+					e.preventDefault();
 					e.stopPropagation();
 					onDelete(analysis.id);
 				}}
