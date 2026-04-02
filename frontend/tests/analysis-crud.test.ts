@@ -123,7 +123,7 @@ test.describe('Analyses – create wizard', () => {
 	test('Cancel on step 1 returns to home', async ({ page }) => {
 		await page.goto('/analysis/new');
 		await page.getByRole('link', { name: /Cancel/i }).click();
-		await page.waitForURL('/', { timeout: 8_000 });
+		await expect(page).toHaveURL('/', { timeout: 8_000 });
 	});
 
 	test('full create flow: wizard → analysis detail page', async ({ page, request }) => {
@@ -153,7 +153,7 @@ test.describe('Analyses – create wizard', () => {
 			await page.getByRole('button', { name: /Create Analysis/i }).click();
 
 			// Redirects to analysis editor
-			await page.waitForURL(/\/analysis\/.+/, { timeout: 20_000 });
+			await expect(page).toHaveURL(/\/analysis\/.+/, { timeout: 20_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);

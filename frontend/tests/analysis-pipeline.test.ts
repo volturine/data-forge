@@ -18,7 +18,8 @@ async function createPipelineAnalysis(
 	name: string,
 	dsId: string,
 	steps: Array<{ type: string; config: Record<string, unknown> }>
-): Promise<string> {
+): Promise<{ analysisId: string; viewStepId: string }> {
+	const viewStepId = crypto.randomUUID();
 	const pipelineSteps = [
 		...steps.map((s) => ({
 			id: crypto.randomUUID(),
@@ -28,7 +29,7 @@ async function createPipelineAnalysis(
 			is_applied: true
 		})),
 		{
-			id: crypto.randomUUID(),
+			id: viewStepId,
 			type: 'view',
 			config: {},
 			depends_on: [] as string[],
@@ -64,10 +65,12 @@ async function createPipelineAnalysis(
 	if (!response.ok()) {
 		throw new Error(`createPipelineAnalysis: ${response.status()} ${await response.text()}`);
 	}
-	return ((await response.json()) as { id: string }).id;
+	const created = (await response.json()) as { id: string };
+	return { analysisId: created.id, viewStepId };
 }
 
 interface PreviewData {
+	step_id: string;
 	columns: string[];
 	column_types: Record<string, string>;
 	data: Array<Record<string, unknown>>;
@@ -78,18 +81,51 @@ interface PreviewData {
  * Navigate to an analysis page and return the first successful preview response.
  * Response interception is set up *before* navigation to catch the auto-triggered preview.
  */
-async function navigateAndGetPreview(page: Page, analysisId: string): Promise<PreviewData> {
-	const previewPromise = page.waitForResponse(
-		(resp) => resp.url().includes('/api/v1/compute/preview') && resp.request().method() === 'POST',
-		{ timeout: 45_000 }
-	);
+async function leaveAnalysisPage(page: Page): Promise<void> {
+	await page.goto('/');
+	await expect(page).toHaveURL('/');
+}
+
+async function navigateAndGetPreview(
+	page: Page,
+	analysisId: string,
+	expectedStepId: string
+): Promise<PreviewData> {
+	const timeoutMs = 45_000;
+	const deadline = Date.now() + timeoutMs;
+	let lastFailure: string | null = null;
+
+	const previewPromise = (async () => {
+		while (true) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) {
+				throw new Error(
+					lastFailure
+						? `Preview did not return 200 within ${timeoutMs}ms. Last preview failure: ${lastFailure}`
+						: `Timed out waiting for preview response within ${timeoutMs}ms.`
+				);
+			}
+
+			const resp = await page.waitForResponse(
+				(r) => r.url().includes('/api/v1/compute/preview') && r.request().method() === 'POST',
+				{ timeout: remaining }
+			);
+
+			const raw = await resp.text();
+			const parsed = JSON.parse(raw) as PreviewData;
+
+			if (resp.status() === 200) {
+				if (parsed.step_id === expectedStepId) return parsed;
+				lastFailure = `Received preview for unexpected step ${parsed.step_id ?? 'unknown'}, expected ${expectedStepId}`;
+				continue;
+			}
+
+			lastFailure = `${resp.status()} ${resp.statusText()}: ${raw}`;
+		}
+	})();
+
 	await page.goto(`/analysis/${analysisId}`);
-	const resp = await previewPromise;
-	const body = await resp.json();
-	if (!resp.ok()) {
-		throw new Error(`Preview API ${resp.status()}: ${JSON.stringify(body)}`);
-	}
-	return body as PreviewData;
+	return await previewPromise;
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -127,9 +163,9 @@ test.describe('Pipeline data verification', () => {
 
 	test('view passthrough returns all original data', async ({ page, request }) => {
 		const aName = `E2E Pipe View ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, []);
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, []);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
@@ -154,7 +190,8 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'view-passthrough');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
@@ -162,7 +199,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('filter removes rows not matching condition', async ({ page, request }) => {
 		const aName = `E2E Pipe Filter ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'filter',
 				config: {
@@ -172,7 +209,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(2);
@@ -190,17 +227,18 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'filter');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('limit keeps only first N rows', async ({ page, request }) => {
 		const aName = `E2E Pipe Limit ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(2);
@@ -210,18 +248,19 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'limit');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('topk returns rows with largest values', async ({ page, request }) => {
 		// descending=true → sort descending, take head(k) → 2 largest
 		const aName = `E2E Pipe TopK ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'topk', config: { column: 'age', k: 2, descending: true } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.total_rows).toBe(2);
 
@@ -237,17 +276,18 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'topk');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('sample with fraction 1.0 returns all rows', async ({ page, request }) => {
 		const aName = `E2E Pipe Sample ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'sample', config: { fraction: 1.0, seed: 42 } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.total_rows).toBe(3);
 			const names = preview.data.map((r) => r.name);
@@ -259,17 +299,18 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'sample');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('deduplicate preserves unique rows', async ({ page, request }) => {
 		const aName = `E2E Pipe Dedup ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'deduplicate', config: {} }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
@@ -278,7 +319,8 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'deduplicate');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
@@ -286,11 +328,11 @@ test.describe('Pipeline data verification', () => {
 
 	test('select keeps only specified columns', async ({ page, request }) => {
 		const aName = `E2E Pipe Select ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'select', config: { columns: ['name', 'age'] } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['name', 'age']);
 			expect(preview.total_rows).toBe(3);
@@ -305,17 +347,18 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'select');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('drop removes specified columns', async ({ page, request }) => {
 		const aName = `E2E Pipe Drop ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'drop', config: { columns: ['city'] } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age']);
 			expect(preview.total_rows).toBe(3);
@@ -327,17 +370,18 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'drop');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('rename changes column names', async ({ page, request }) => {
 		const aName = `E2E Pipe Rename ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'rename', config: { column_mapping: { name: 'full_name' } } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toContain('full_name');
 			expect(preview.columns).not.toContain('name');
@@ -353,7 +397,8 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'rename');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
@@ -361,11 +406,11 @@ test.describe('Pipeline data verification', () => {
 
 	test('sort reorders rows by column value', async ({ page, request }) => {
 		const aName = `E2E Pipe Sort ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'sort', config: { columns: ['age'], descending: [false] } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.total_rows).toBe(3);
 
@@ -378,20 +423,21 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'sort');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('expression adds computed column', async ({ page, request }) => {
 		const aName = `E2E Pipe Expr ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'expression',
 				config: { expression: 'pl.col("age") + 1', column_name: 'age_plus_one' }
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toContain('age_plus_one');
 			expect(preview.columns).toContain('age');
@@ -408,13 +454,14 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'expression');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('with_columns adds literal column', async ({ page, request }) => {
 		const aName = `E2E Pipe WithCols ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'with_columns',
 				config: {
@@ -423,7 +470,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toContain('tag');
 			expect(preview.total_rows).toBe(3);
@@ -439,20 +486,21 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'with-columns');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('string_transform applies string operation', async ({ page, request }) => {
 		const aName = `E2E Pipe StrXform ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'uppercase', new_column: 'name_upper' }
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toContain('name_upper');
 			expect(preview.total_rows).toBe(3);
@@ -468,13 +516,14 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'string-transform');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('groupby aggregates data by group', async ({ page, request }) => {
 		const aName = `E2E Pipe GroupBy ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'groupby',
 				config: {
@@ -484,7 +533,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// 2 columns: city, total_age (original id/name dropped by groupby)
 			expect(preview.columns).toContain('city');
@@ -502,7 +551,8 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'groupby');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
@@ -510,7 +560,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('unpivot converts wide format to long format', async ({ page, request }) => {
 		const aName = `E2E Pipe Unpivot ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'unpivot',
 				config: {
@@ -522,7 +572,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(expect.arrayContaining(['name', 'city', 'field', 'val']));
 			// 3 rows × 2 unpivoted columns = 6 rows
@@ -536,13 +586,14 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'unpivot');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('pivot converts long format to wide format', async ({ page, request }) => {
 		const aName = `E2E Pipe Pivot ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'pivot',
 				config: {
@@ -554,7 +605,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// City values become column names
 			expect(preview.columns).toContain('name');
@@ -573,7 +624,8 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'pivot');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
@@ -581,11 +633,11 @@ test.describe('Pipeline data verification', () => {
 
 	test('fill_null with zero strategy preserves clean data', async ({ page, request }) => {
 		const aName = `E2E Pipe FillNull ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'fill_null', config: { strategy: 'zero' } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// No nulls in sample data → structure unchanged
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
@@ -595,13 +647,14 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'fill-null');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('join self-join matches rows by column', async ({ page, request }) => {
 		const aName = `E2E Pipe Join ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'join',
 				config: {
@@ -613,7 +666,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// Self-join on city: each city matches once → 3 rows
 			expect(preview.total_rows).toBe(3);
@@ -632,7 +685,8 @@ test.describe('Pipeline data verification', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'join');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
@@ -640,7 +694,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('chained pipeline: filter → sort → limit', async ({ page, request }) => {
 		const aName = `E2E Pipe Chain ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'filter',
 				config: {
@@ -652,7 +706,7 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// All 3 rows match age >= 25, sorted desc: Charlie(35), Alice(30), Bob(25)
 			// Then limited to 2: Charlie, Alice
@@ -674,7 +728,8 @@ test.describe('Pipeline data verification', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'chained-filter-sort-limit');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 });
@@ -749,7 +804,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 		}
 		const aId = ((await response.json()) as { id: string }).id;
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, aId, chartStepId);
 
 			// Chart preview returns aggregated data with x/y columns
 			expect(preview.columns).toContain('x');
@@ -764,13 +819,14 @@ test.describe('Pipeline data – pass-through operations', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('export passes data through unchanged', async ({ page, request }) => {
 		const aName = `E2E Pipe Export ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'export',
 				config: {
@@ -781,7 +837,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
@@ -790,13 +846,14 @@ test.describe('Pipeline data – pass-through operations', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'export');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('download passes data through unchanged', async ({ page, request }) => {
 		const aName = `E2E Pipe Download ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'download',
 				config: {
@@ -806,7 +863,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
@@ -815,14 +872,15 @@ test.describe('Pipeline data – pass-through operations', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'download');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 
 	test('explode expands list column into rows', async ({ page, request }) => {
 		// Create a list column via expression, then explode it
 		const aName = `E2E Pipe Explode ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'expression',
 				config: {
@@ -843,7 +901,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// Each row had 2 elements in tags (name,city) → 3×2 = 6 rows
 			expect(preview.total_rows).toBe(6);
@@ -859,7 +917,8 @@ test.describe('Pipeline data – pass-through operations', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'explode');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 });
@@ -887,7 +946,7 @@ test.describe('Pipeline data – timeseries', () => {
 
 	test('timeseries extracts month from date column', async ({ page, request }) => {
 		const aName = `E2E Pipe TimeSeries ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dateDsId, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dateDsId, [
 			// Cast event_date from string to Date before timeseries operation
 			{
 				type: 'select',
@@ -907,7 +966,7 @@ test.describe('Pipeline data – timeseries', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			expect(preview.columns).toContain('event_month');
 			expect(preview.total_rows).toBe(3);
@@ -924,7 +983,8 @@ test.describe('Pipeline data – timeseries', () => {
 
 			await screenshot(page, 'analysis/pipeline', 'timeseries');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 });
@@ -958,7 +1018,7 @@ test.describe('Pipeline data – union by name', () => {
 	test('union_by_name combines rows from two datasources', async ({ page, request }) => {
 		// Union step references the second datasource by its ID (same as UI behavior)
 		const aName = `E2E Pipe Union ${uid()}`;
-		const aId = await createPipelineAnalysis(request, aName, dsId1, [
+		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId1, [
 			{
 				type: 'union_by_name',
 				config: { sources: [dsId2], allow_missing: true }
@@ -966,7 +1026,7 @@ test.describe('Pipeline data – union by name', () => {
 		]);
 
 		try {
-			const preview = await navigateAndGetPreview(page, aId);
+			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
 
 			// Both datasources have same SAMPLE_CSV (3 rows each) → 6 rows total
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
@@ -982,7 +1042,8 @@ test.describe('Pipeline data – union by name', () => {
 			await expect(table).toBeVisible({ timeout: 15_000 });
 			await screenshot(page, 'analysis/pipeline', 'union-by-name');
 		} finally {
-			await deleteAnalysisViaUI(page, aName);
+			await leaveAnalysisPage(page);
+			await deleteAnalysisViaUI(page, aName, { skipNavigation: true });
 		}
 	});
 });

@@ -15,7 +15,6 @@ import { screenshot } from './utils/visual.js';
 test.describe('Monitoring – page structure', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/monitoring');
-		await page.waitForLoadState('networkidle');
 		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Builds' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Builds' })).toHaveAttribute(
@@ -161,7 +160,7 @@ test.describe('Monitoring – Schedule create flow', () => {
 		const ds = `e2e-sched-create-${uid()}`;
 		await createDatasource(request, ds);
 		try {
-			await page.goto('/monitoring?tab=schedules', { waitUntil: 'networkidle' });
+			await page.goto('/monitoring?tab=schedules');
 			await expect(page.getByRole('button', { name: /New Schedule/i })).toBeVisible({
 				timeout: 10_000
 			});

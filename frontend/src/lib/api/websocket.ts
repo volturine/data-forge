@@ -43,7 +43,7 @@ export function buildWebsocketUrl(endpoint: string): string {
 	return url.toString();
 }
 
-function preferHttp(): boolean {
+export function preferHttp(): boolean {
 	if (typeof window === 'undefined') return false;
 	try {
 		return localStorage.getItem('debug:prefer-http') === 'true';

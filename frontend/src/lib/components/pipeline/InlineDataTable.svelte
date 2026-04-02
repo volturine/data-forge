@@ -107,6 +107,7 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
+		retry: false,
 		enabled: hasRun && isActiveStep && !!analysisPipeline
 	}));
 

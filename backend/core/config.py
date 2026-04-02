@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     openrouter_default_model: str = Field(default='', alias='OPENROUTER_DEFAULT_MODEL')
 
     # Auth / OAuth
-    auth_required: bool = Field(default=True, alias='AUTH_REQUIRED')
+    auth_required: bool = Field(default=False, alias='AUTH_REQUIRED')
     default_user_email: str = Field(default='default@example.com', alias='DEFAULT_USER_EMAIL')
     default_user_password: str = Field(default='ChangeMe123', alias='DEFAULT_USER_PASSWORD')
     default_user_name: str = Field(default='Default User', alias='DEFAULT_USER_NAME')

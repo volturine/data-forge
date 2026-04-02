@@ -52,7 +52,7 @@ class TestSettings:
         assert settings.lock_ttl_seconds == 30
         assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
-        assert settings.auth_required is True
+        assert settings.auth_required is False
         assert settings.prod_mode_enabled is False
 
     def test_custom_settings_from_env(self, monkeypatch, tmp_path):
@@ -204,6 +204,7 @@ class TestSettings:
 
     def test_warns_when_auth_required_without_encryption_key(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('AUTH_REQUIRED', 'true')
         monkeypatch.delenv('SETTINGS_ENCRYPTION_KEY', raising=False)
 
         with pytest.warns(UserWarning, match='SETTINGS_ENCRYPTION_KEY is empty while AUTH_REQUIRED=True'):

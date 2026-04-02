@@ -9,15 +9,19 @@ async function deleteByName(
 	page: Page,
 	listUrl: string,
 	deleteUrl: (id: string) => string,
-	name: string
-) {
+	name: string,
+	match: 'exact' | 'includes' = 'exact'
+): Promise<number | null> {
 	const list = await page.request.get(listUrl);
-	if (!list.ok()) return;
+	if (!list.ok()) return null;
 	const items = (await list.json()) as NamedItem[];
-	const matches = items.filter((item) => item.name === name);
+	const matches = items.filter((item) =>
+		match === 'exact' ? item.name === name : item.name.includes(name)
+	);
 	for (const item of matches) {
 		await page.request.delete(deleteUrl(item.id));
 	}
+	return matches.length;
 }
 
 /**
@@ -28,6 +32,14 @@ async function deleteByName(
  */
 
 export async function deleteDatasourceViaUI(page: Page, name: string): Promise<void> {
+	const deleted = await deleteByName(
+		page,
+		'/api/v1/datasource',
+		(id) => `/api/v1/datasource/${id}`,
+		name
+	);
+	if (deleted !== null) return;
+
 	try {
 		await page.goto('/datasources');
 		const row = page.locator(`[data-ds-row="${name}"]`);
@@ -37,13 +49,26 @@ export async function deleteDatasourceViaUI(page: Page, name: string): Promise<v
 		await page.getByText(name).waitFor({ state: 'hidden', timeout: 8_000 });
 	} catch (e: unknown) {
 		console.warn(`[ui-cleanup] deleteDatasourceViaUI failed for "${name}":`, e);
-		await deleteByName(page, '/api/v1/datasource', (id) => `/api/v1/datasource/${id}`, name);
 	}
 }
 
-export async function deleteAnalysisViaUI(page: Page, name: string): Promise<void> {
+export async function deleteAnalysisViaUI(
+	page: Page,
+	name: string,
+	options?: { skipNavigation?: boolean }
+): Promise<void> {
+	const deleted = await deleteByName(
+		page,
+		'/api/v1/analysis',
+		(id) => `/api/v1/analysis/${id}`,
+		name
+	);
+	if (deleted !== null) return;
+
 	try {
-		await page.goto('/');
+		if (!options?.skipNavigation) {
+			await page.goto('/');
+		}
 		const card = page.locator(`[data-analysis-card="${name}"]`).first();
 		await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 5_000 });
 		const dialog = page.getByRole('dialog');
@@ -53,11 +78,19 @@ export async function deleteAnalysisViaUI(page: Page, name: string): Promise<voi
 			.waitFor({ state: 'hidden', timeout: 8_000 });
 	} catch (e: unknown) {
 		console.warn(`[ui-cleanup] deleteAnalysisViaUI failed for "${name}":`, e);
-		await deleteByName(page, '/api/v1/analysis', (id) => `/api/v1/analysis/${id}`, name);
 	}
 }
 
 export async function deleteUdfViaUI(page: Page, name: string): Promise<void> {
+	const deleted = await deleteByName(
+		page,
+		'/api/v1/udf',
+		(id) => `/api/v1/udf/${id}`,
+		name,
+		'includes'
+	);
+	if (deleted !== null) return;
+
 	try {
 		await page.goto('/udfs');
 		const card = page.locator(`[data-udf-card="${name}"]`).first();
@@ -69,7 +102,6 @@ export async function deleteUdfViaUI(page: Page, name: string): Promise<void> {
 			.waitFor({ state: 'hidden', timeout: 8_000 });
 	} catch (e: unknown) {
 		console.warn(`[ui-cleanup] deleteUdfViaUI failed for "${name}":`, e);
-		await deleteByName(page, '/api/v1/udf', (id) => `/api/v1/udf/${id}`, name);
 	}
 }
 

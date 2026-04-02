@@ -1,8 +1,30 @@
 import { test, expect } from '@playwright/test';
-import { createDatasource, createLargeDatasource } from './utils/api.js';
+import type { APIRequestContext } from '@playwright/test';
+import { createDatasource, createLargeDatasource, API_BASE } from './utils/api.js';
 import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+
+async function waitForDatasourceCreateRun(
+	request: APIRequestContext,
+	datasourceId: string,
+	timeoutMs = 15_000
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const resp = await request.get(
+			`${API_BASE}/engine-runs?datasource_id=${datasourceId}&limit=50`
+		);
+		if (resp.ok()) {
+			const runs = (await resp.json()) as Array<{ kind: string }>;
+			if (runs.some((r) => r.kind === 'datasource_create')) return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+	throw new Error(
+		`waitForDatasourceCreateRun: no datasource_create run for ${datasourceId} within ${timeoutMs}ms`
+	);
+}
 
 /**
  * E2E tests for datasources – mirrors test_datasource.py / test_datasource_extended.py.
@@ -147,7 +169,6 @@ test.describe('Datasources – upload page', () => {
 		test.setTimeout(60_000);
 		const dsName = `e2e-upload-${Date.now()}`;
 		await page.goto('/datasources/new');
-		await page.waitForLoadState('networkidle');
 
 		const fileInput = page.locator('#file-input');
 		await fileInput.setInputFiles({
@@ -365,7 +386,8 @@ test.describe('Datasources – config tab interactions', () => {
 
 	test('Runs tab shows datasource_create run for fresh datasource', async ({ page, request }) => {
 		const ds = `e2e-runs-tab-${uid()}`;
-		await createDatasource(request, ds);
+		const dsId = await createDatasource(request, ds);
+		await waitForDatasourceCreateRun(request, dsId);
 		try {
 			await page.goto('/datasources');
 			await page.getByText(ds).click();

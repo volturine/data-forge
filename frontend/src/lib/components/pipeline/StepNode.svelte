@@ -122,6 +122,7 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
+		retry: false,
 		enabled:
 			isChart &&
 			isApplied &&

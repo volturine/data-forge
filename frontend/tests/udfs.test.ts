@@ -134,7 +134,7 @@ test.describe('UDFs – list & management', () => {
 			await page.goto('/udfs');
 			const row = page.locator(`[data-udf-card="${udf}"]`);
 			await row.getByRole('button', { name: /Edit/i }).click();
-			await page.waitForURL(new RegExp(`/udfs/${udfId}`), { timeout: 10_000 });
+			await expect(page).toHaveURL(new RegExp(`/udfs/${udfId}`), { timeout: 10_000 });
 		} finally {
 			await deleteUdfViaUI(page, udf);
 		}
@@ -162,7 +162,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import button opens the import dialog', async ({ page }) => {
-		await page.goto('/udfs', { waitUntil: 'networkidle' });
+		await page.goto('/udfs');
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -171,7 +171,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog Cancel closes it', async ({ page }) => {
-		await page.goto('/udfs', { waitUntil: 'networkidle' });
+		await page.goto('/udfs');
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -184,7 +184,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog: invalid JSON shows error', async ({ page }) => {
-		await page.goto('/udfs', { waitUntil: 'networkidle' });
+		await page.goto('/udfs');
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -196,7 +196,7 @@ test.describe('UDFs – export & import', () => {
 	});
 
 	test('Import dialog: missing udfs array shows error', async ({ page }) => {
-		await page.goto('/udfs', { waitUntil: 'networkidle' });
+		await page.goto('/udfs');
 		const importBtn = page.getByRole('button', { name: /Import/i });
 		await expect(importBtn).toBeVisible();
 		await importBtn.click();
@@ -307,7 +307,7 @@ test.describe('UDFs – editor functional flows', () => {
 			await saveBtn.click();
 
 			// After create, editor redirects to /udfs/<id>
-			await page.waitForURL(/\/udfs\/[0-9a-f-]+$/, { timeout: 15_000 });
+			await expect(page).toHaveURL(/\/udfs\/[0-9a-f-]+$/, { timeout: 15_000 });
 			await screenshot(page, 'udfs', 'editor-after-create');
 
 			// Navigate to list and verify the UDF appears

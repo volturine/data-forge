@@ -1,6 +1,6 @@
 import type { ResultAsync } from 'neverthrow';
 import { apiRequest, type ApiError } from './client';
-import { buildWebsocketUrl } from './websocket';
+import { buildWebsocketUrl, preferHttp } from './websocket';
 
 export interface LockStatus {
 	resource_type: string;
@@ -52,6 +52,7 @@ interface LockWatcherOptions {
 const DEFAULT_PING_MS = 10_000;
 
 export function watchLock(options: LockWatcherOptions): LockWatcher {
+	if (preferHttp()) return { close() {} };
 	const pingMs = options.pingMs ?? DEFAULT_PING_MS;
 	let socket: WebSocket | null = null;
 	let timer: number | null = null;
