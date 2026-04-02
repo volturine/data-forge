@@ -30,9 +30,15 @@ async function deleteByName(
 export async function deleteDatasourceViaUI(page: Page, name: string): Promise<void> {
 	try {
 		await page.goto('/datasources');
+		const search = page.getByLabel('Search datasources');
+		if (await search.isVisible().catch(() => false)) {
+			await search.fill('');
+		}
 		const row = page.locator(`[data-ds-row="${name}"]`);
+		await row.waitFor({ state: 'visible', timeout: 8_000 });
 		await row.locator('button[title="Delete"]').click({ timeout: 5_000 });
 		const dialog = page.getByRole('dialog');
+		await dialog.waitFor({ state: 'visible', timeout: 5_000 });
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await page.getByText(name).waitFor({ state: 'hidden', timeout: 8_000 });
 	} catch (e: unknown) {
@@ -44,9 +50,15 @@ export async function deleteDatasourceViaUI(page: Page, name: string): Promise<v
 export async function deleteAnalysisViaUI(page: Page, name: string): Promise<void> {
 	try {
 		await page.goto('/');
+		const search = page.getByLabel('Search analyses');
+		if (await search.isVisible().catch(() => false)) {
+			await search.fill('');
+		}
 		const card = page.locator(`[data-analysis-card="${name}"]`).first();
+		await card.waitFor({ state: 'visible', timeout: 8_000 });
 		await card.getByRole('button', { name: /Delete analysis/ }).click({ timeout: 5_000 });
 		const dialog = page.getByRole('dialog');
+		await dialog.waitFor({ state: 'visible', timeout: 5_000 });
 		await dialog.getByRole('button', { name: /^Delete$/ }).click({ timeout: 5_000 });
 		await page
 			.locator(`[data-analysis-card="${name}"]`)

@@ -86,10 +86,14 @@
 			id="analysis-{analysis.id}-select"
 			checked={selected}
 			onchange={(e) => {
+				e.preventDefault();
 				e.stopPropagation();
 				onToggleSelect(analysis.id);
 			}}
-			onclick={(e) => e.stopPropagation()}
+			onclick={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+			}}
 			aria-label={`Select ${analysis.name}`}
 		/>
 		{#if analysis.thumbnail}
@@ -149,6 +153,7 @@
 					}
 				})}
 				onclick={(e) => {
+					e.preventDefault();
 					e.stopPropagation();
 					onDelete(analysis.id);
 				}}
