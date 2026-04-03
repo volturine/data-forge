@@ -564,7 +564,7 @@ def _connect_analysis(datasource: schemas.DataSourceCreate, session: Session, ow
     )
 
 
-@router.get('', response_model=list[schemas.DataSourceResponse], mcp=True)
+@router.get('', response_model=list[schemas.DataSourceListItem], mcp=True)
 @handle_errors(operation='list datasources')
 def list_datasources(include_hidden: bool = False, session: Session = Depends(get_db)):
     """List all datasources with their type, config, and metadata.

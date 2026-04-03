@@ -1,8 +1,18 @@
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, String
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import Field, SQLModel
+
+from modules.analysis.pipeline_types import AnalysisPipelineDefinition
+
+
+class AnalysisStatus(StrEnum):
+    DRAFT = 'draft'
+    RUNNING = 'running'
+    COMPLETED = 'completed'
+    ERROR = 'error'
 
 
 class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
@@ -11,8 +21,8 @@ class Analysis(SQLModel, table=True):  # type: ignore[call-arg]
     id: str = Field(sa_column=Column(String, primary_key=True))
     name: str = Field(sa_column=Column(String, nullable=False))
     description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
-    pipeline_definition: dict = Field(sa_column=Column(MutableDict.as_mutable(JSON), nullable=False))
-    status: str = Field(default='draft', sa_column=Column(String, nullable=False))
+    pipeline_definition: AnalysisPipelineDefinition = Field(sa_column=Column(MutableDict.as_mutable(JSON), nullable=False))
+    status: AnalysisStatus = Field(default=AnalysisStatus.DRAFT, sa_column=Column(String, nullable=False))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     result_path: str | None = Field(default=None, sa_column=Column(String, nullable=True))

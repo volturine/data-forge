@@ -931,8 +931,10 @@ test.describe('Analyses – join config editing', () => {
 		const dsLeft = `e2e-join-left-${id}`;
 		const dsRight = `e2e-join-right-${id}`;
 		const analysis = `E2E Join Config ${id}`;
-		const dsId = await createDatasource(request, dsLeft);
-		const rightDsId = await createDatasource(request, dsRight);
+		const [dsId, rightDsId] = await Promise.all([
+			createDatasource(request, dsLeft),
+			createDatasource(request, dsRight)
+		]);
 		const aId = await createAnalysis(request, analysis, dsId);
 		void rightDsId;
 		try {
@@ -1126,8 +1128,10 @@ test.describe('Analyses – union_by_name config editing', () => {
 		const dsBase = `e2e-union-base-${id}`;
 		const dsSource = `e2e-union-source-${id}`;
 		const analysis = `E2E Union Config ${id}`;
-		const dsId = await createDatasource(request, dsBase);
-		const unionDsId = await createDatasource(request, dsSource);
+		const [dsId, unionDsId] = await Promise.all([
+			createDatasource(request, dsBase),
+			createDatasource(request, dsSource)
+		]);
 		const aId = await createAnalysis(request, analysis, dsId);
 		void unionDsId;
 		try {

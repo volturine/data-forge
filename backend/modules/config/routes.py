@@ -1,13 +1,14 @@
 """Configuration and utility endpoints."""
 
+from __future__ import annotations
+
+import time
 import uuid
 
-from fastapi import Depends, Query
+from fastapi import Query
 from pydantic import BaseModel
-from sqlmodel import Session
 
 from core.config import settings
-from core.database import get_settings_db
 from core.error_handlers import handle_errors
 from modules.mcp.router import MCPRouter
 from modules.settings.service import get_settings
@@ -41,6 +42,18 @@ class UuidResponse(BaseModel):
     uuids: list[str]
 
 
+_config_cache: FrontendConfig | None = None
+_config_cache_time: float = 0.0
+_CONFIG_CACHE_TTL: float = 10.0
+
+
+def invalidate_config_cache() -> None:
+    """Clear cached config so the next request rebuilds it."""
+    global _config_cache, _config_cache_time  # noqa: PLW0603
+    _config_cache = None
+    _config_cache_time = 0.0
+
+
 @router.get('/uuid', response_model=UuidResponse, mcp=True)
 @handle_errors(operation='generate UUID')
 def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
@@ -53,10 +66,18 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 
 @router.get('', response_model=FrontendConfig, mcp=True)
 @handle_errors(operation='get config')
-def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
+async def get_config() -> FrontendConfig:
     """Get application configuration: timeouts, logging settings, feature flags, and default namespace."""
-    db_settings = get_settings(session)
-    return FrontendConfig(
+    global _config_cache, _config_cache_time  # noqa: PLW0603
+
+    now = time.monotonic()
+    if _config_cache is not None and (now - _config_cache_time) < _CONFIG_CACHE_TTL:
+        return _config_cache
+
+    from core.database import run_settings_db
+
+    db_settings = run_settings_db(get_settings)
+    config = FrontendConfig(
         engine_pooling_interval=settings.engine_pooling_interval * 1000,  # Convert to ms
         engine_idle_timeout=settings.engine_idle_timeout,
         job_timeout=settings.job_timeout,
@@ -73,3 +94,6 @@ def get_config(session: Session = Depends(get_settings_db)) -> FrontendConfig:
         telegram_enabled=bool(db_settings.telegram_bot_enabled and db_settings.telegram_bot_token),
         default_namespace=settings.default_namespace,
     )
+    _config_cache = config
+    _config_cache_time = now
+    return config

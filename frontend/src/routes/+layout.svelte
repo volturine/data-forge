@@ -6,12 +6,13 @@
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
 	import { css, spinner } from '$lib/styles/panda';
+	import { PanelLeftClose } from 'lucide-svelte';
 	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
+	import EnginesPopup from '$lib/components/common/EnginesPopup.svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import { chatStore } from '$lib/stores/chat.svelte';
-	import { initializeStores } from '$lib/stores/context.svelte';
 	import { initNamespace, setNamespace, useNamespace } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
@@ -21,14 +22,14 @@
 
 	let { children } = $props();
 
-	initializeStores();
-
 	const themeAttribute =
 		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
 	let settingsOpen = $state(false);
+	let enginesOpen = $state(false);
 	let sidebarCollapsed = $state(false);
+	let sidebarHovered = $state(false);
 	const currentPath = $derived(page.url.pathname);
 
 	const authPaths = [
@@ -41,10 +42,10 @@
 	];
 	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
 
-	// Network: $derived can't trigger async auth resolution.
+	// Network: resolve auth eagerly in parallel with config fetch.
 	$effect(() => {
-		if (!configStore.config) return;
-		void authStore.resolve(configStore.authRequired);
+		if (typeof window === 'undefined') return;
+		untrack(() => void authStore.resolve());
 	});
 
 	const ready = $derived(
@@ -152,6 +153,7 @@
 	const namespaceState = useNamespace();
 	let namespaceOpen = $state(false);
 	let namespaceTrigger = $state<HTMLButtonElement>();
+	let enginesTrigger = $state<HTMLButtonElement>();
 	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
@@ -180,9 +182,8 @@
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
-				staleTime: 0,
-				gcTime: 0,
-				refetchOnMount: 'always',
+				staleTime: 30_000,
+				refetchOnWindowFocus: false,
 				retry: 1
 			}
 		}
@@ -217,21 +218,60 @@
 		{@render children()}
 	{:else}
 		<div class={css({ display: 'flex', height: '100vh' })}>
-			<Sidebar
-				collapsed={sidebarCollapsed}
-				onToggle={toggleSidebar}
-				{theme}
-				onToggleTheme={toggleTheme}
-				onOpenSettings={() => (settingsOpen = true)}
-				onOpenChat={handleOpenChat}
-				onOpenNamespace={openNamespace}
-				onSignOut={handleSignOut}
-				namespace={namespaceDraft}
-				authenticated={authStore.authenticated}
-				authRequired={configStore.authRequired}
-				avatarUrl={authStore.user?.avatar_url ?? null}
-				bind:namespaceTrigger
-			/>
+			<div
+				class={css({ position: 'relative', flexShrink: 0 })}
+				onmouseenter={() => (sidebarHovered = true)}
+				onmouseleave={() => (sidebarHovered = false)}
+				role="presentation"
+			>
+				<Sidebar
+					collapsed={sidebarCollapsed}
+					onToggle={toggleSidebar}
+					{theme}
+					onToggleTheme={toggleTheme}
+					onOpenSettings={() => (settingsOpen = true)}
+					onOpenEngines={() => (enginesOpen = true)}
+					onOpenChat={handleOpenChat}
+					onOpenNamespace={openNamespace}
+					onSignOut={handleSignOut}
+					namespace={namespaceDraft}
+					authenticated={authStore.authenticated}
+					authRequired={configStore.authRequired}
+					avatarUrl={authStore.user?.avatar_url ?? null}
+					bind:namespaceTrigger
+					bind:enginesTrigger
+				/>
+
+				{#if !sidebarCollapsed}
+					<button
+						class={css({
+							position: 'absolute',
+							top: '0.5',
+							right: '-8',
+							zIndex: 'popover',
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							cursor: 'pointer',
+							backgroundColor: 'transparent',
+							padding: '3',
+							borderWidth: '1',
+							borderRadius: 'sm',
+							color: 'fg.muted',
+							opacity: sidebarHovered ? 1 : 0,
+							transitionProperty: 'opacity, color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_hover: { color: 'fg.primary' }
+						})}
+						onclick={toggleSidebar}
+						aria-label="Collapse sidebar"
+						type="button"
+					>
+						<PanelLeftClose size={16} />
+					</button>
+				{/if}
+			</div>
 
 			<main
 				class={css({
@@ -247,6 +287,7 @@
 		</div>
 
 		<SettingsPopup bind:open={settingsOpen} />
+		<EnginesPopup bind:open={enginesOpen} anchor={enginesTrigger} />
 		<NamespacePickerModal
 			open={namespaceOpen}
 			selected={namespaceDraft}

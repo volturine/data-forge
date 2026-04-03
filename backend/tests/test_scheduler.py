@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError
-from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+from modules.analysis.pipeline_types import AnalysisPipelineDefinition
 from modules.datasource.models import DataSource
 from modules.engine_runs.models import EngineRun
 from modules.scheduler.models import Schedule
@@ -61,7 +62,7 @@ def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> Da
 def analysis_with_output(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     """Analysis with a tab that has output configuration (for build testing)."""
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'tabs': [
             {
                 'id': 'tab-1',
@@ -107,7 +108,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
         name='Build Test Analysis',
         description='Has output config',
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=now,
         updated_at=now,
     )
@@ -188,6 +189,38 @@ class TestScheduleCrud:
         create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 0 * * *'))
         result = list_schedules(test_db_session)
         assert len(result) == 2
+
+    def test_list_schedules_batch_enrichment(
+        self, test_db_session: Session, sample_analysis: Analysis, sample_analyses: list[Analysis], output_datasource: DataSource
+    ):
+        """Batch enrichment resolves analysis_name and analysis_id for multiple schedules."""
+        ds2 = DataSource(
+            id=str(uuid.uuid4()),
+            name='Output DS 2',
+            source_type='iceberg',
+            config={'analysis_tab_id': 'tab1'},
+            created_by='analysis',
+            created_by_analysis_id=sample_analyses[1].id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds2)
+        test_db_session.commit()
+
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=ds2.id, cron_expression='0 0 * * *'))
+
+        result = list_schedules(test_db_session)
+        assert len(result) == 2
+
+        by_ds = {r.datasource_id: r for r in result}
+        r1 = by_ds[output_datasource.id]
+        r2 = by_ds[ds2.id]
+
+        assert r1.analysis_id == sample_analysis.id
+        assert r1.analysis_name == sample_analysis.name
+        assert r2.analysis_id == sample_analyses[1].id
+        assert r2.analysis_name == sample_analyses[1].name
 
     def test_list_schedules_filter_by_datasource(
         self, test_db_session: Session, sample_analyses: list[Analysis], output_datasource: DataSource
@@ -478,7 +511,7 @@ class TestGetBuildOrder:
                     }
                 ]
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -511,7 +544,7 @@ class TestGetBuildOrder:
                     }
                 ]
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -547,7 +580,7 @@ class TestRunAnalysisBuild:
             name='Empty',
             description='',
             pipeline_definition={},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -637,7 +670,7 @@ class TestRunAnalysisBuild:
         output_b = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        pipeline: dict[str, object] = {
+        pipeline: AnalysisPipelineDefinition = {
             'tabs': [
                 {
                     'id': 'tab-a',
@@ -682,7 +715,7 @@ class TestRunAnalysisBuild:
             name='Multi DS',
             description='',
             pipeline_definition=pipeline,
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -982,7 +1015,7 @@ class TestGetBuildOrderNoDuplicateInDegree:
             name='Upstream',
             description='',
             pipeline_definition={'tabs': []},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -994,7 +1027,7 @@ class TestGetBuildOrderNoDuplicateInDegree:
             name='Downstream',
             description='',
             pipeline_definition={'tabs': []},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )

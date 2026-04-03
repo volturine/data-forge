@@ -108,6 +108,12 @@ describe('normalizeConfig', () => {
 		expect(config).toHaveProperty('x_column', 'age');
 	});
 
+	test('chart step keeps provided chart_type and does not derive from step name', () => {
+		const config = normalizeConfig('chart', { chart_type: 'line', x_column: 'age' });
+		expect(config).toHaveProperty('chart_type', 'line');
+		expect(config).toHaveProperty('x_column', 'age');
+	});
+
 	test('export step removes iceberg_options and sets destination', () => {
 		const config = normalizeConfig('export', {
 			format: 'parquet',

@@ -124,7 +124,7 @@ class TestMCPConfirm:
         token = call_resp.json()['token']
         pending = pending_store.get(token)
         assert pending is not None
-        assert pending['context']['headers']['X-Namespace'] == 'default'
+        assert pending.context['headers']['X-Namespace'] == 'default'
 
         confirm_resp = client.post('/api/v1/mcp/confirm', json={'token': token})
         assert confirm_resp.status_code == 200

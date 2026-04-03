@@ -16,7 +16,7 @@ export class AuthStore {
 		return this.status !== 'unknown';
 	}
 
-	async resolve(authRequired = true): Promise<void> {
+	async resolve(): Promise<void> {
 		if (this.status !== 'unknown') return;
 		this.loading = true;
 		this.error = null;
@@ -27,10 +27,8 @@ export class AuthStore {
 				this.status = 'authenticated';
 			},
 			() => {
-				if (authRequired) {
-					this.user = null;
-					this.status = 'unauthenticated';
-				}
+				this.user = null;
+				this.status = 'unauthenticated';
 			}
 		);
 		this.loading = false;

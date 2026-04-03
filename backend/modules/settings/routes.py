@@ -12,6 +12,7 @@ from core.database import get_settings_db
 from core.error_handlers import handle_errors
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
+from modules.config.routes import invalidate_config_cache
 from modules.mcp.router import MCPRouter
 from modules.settings.schemas import (
     DetectCustomBotRequest,
@@ -56,6 +57,7 @@ def write_settings(
     from modules.telegram.bot import telegram_bot
 
     result = update_settings(session, data)
+    invalidate_config_cache()
 
     token = get_resolved_telegram_settings().get('token', '')
 

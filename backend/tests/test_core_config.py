@@ -47,7 +47,7 @@ class TestSettings:
         assert settings.data_dir.exists()
         assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.job_timeout == 300
-        assert settings.engine_idle_timeout == 300
+        assert settings.engine_idle_timeout == 60
         assert settings.engine_pooling_interval == 30
         assert settings.lock_ttl_seconds == 30
         assert settings.lock_heartbeat_interval_seconds == 10

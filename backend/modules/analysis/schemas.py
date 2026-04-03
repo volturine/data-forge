@@ -4,6 +4,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
+from modules.analysis.models import AnalysisStatus
+from modules.analysis.pipeline_types import AnalysisPipelineDefinition
 from modules.analysis.step_schemas import StepType
 
 
@@ -12,8 +14,8 @@ class PipelineStepSchema(BaseModel):
 
     id: str
     type: StepType
-    config: dict
-    depends_on: list[str] = []
+    config: dict[str, object]
+    depends_on: list[str] = Field(default_factory=list)
     is_applied: bool | None = None
 
 
@@ -72,7 +74,7 @@ class TabSchema(BaseModel):
     parent_id: str | None = None
     datasource: TabDatasourceSchema
     output: TabOutputSchema
-    steps: list[PipelineStepSchema] = []
+    steps: list[PipelineStepSchema] = Field(default_factory=list)
 
 
 def _reject_pipeline_steps(data: Any) -> Any:
@@ -97,7 +99,7 @@ class AnalysisCreateSchema(_RejectPipelineStepsModel):
 class AnalysisUpdateSchema(_RejectPipelineStepsModel):
     name: str | None = None
     description: str | None = None
-    status: str | None = None
+    status: AnalysisStatus | None = None
     tabs: list[TabSchema]
 
 
@@ -107,8 +109,8 @@ class AnalysisResponseSchema(BaseModel):
     id: str
     name: str
     description: str | None
-    pipeline_definition: dict
-    status: str
+    pipeline_definition: AnalysisPipelineDefinition
+    status: AnalysisStatus
     created_at: datetime
     updated_at: datetime
     result_path: str | None

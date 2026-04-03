@@ -1,10 +1,10 @@
 import logging
 import re
-from typing import Literal
+from enum import StrEnum
 
 import httpx
 import polars as pl
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.notification.service import notification_service
@@ -15,15 +15,20 @@ logger = logging.getLogger(__name__)
 _PLACEHOLDER_RE = re.compile(r'\{\{(\w+)\}\}')
 
 
+class NotificationMethod(StrEnum):
+    EMAIL = 'email'
+    TELEGRAM = 'telegram'
+
+
 class NotificationParams(OperationParams):
     model_config = ConfigDict(extra='forbid')
 
-    method: Literal['email', 'telegram'] = 'email'
+    method: NotificationMethod = NotificationMethod.EMAIL
     recipient: str = ''
-    subscriber_ids: list[str] = []
+    subscriber_ids: list[str] = Field(default_factory=list)
     bot_token: str = ''
     recipient_column: str = ''
-    input_columns: list[str] = []
+    input_columns: list[str] = Field(default_factory=list)
     output_column: str = 'notification_status'
     message_template: str = '{{message}}'
     subject_template: str = 'Notification'
@@ -67,7 +72,7 @@ class NotificationHandler(OperationHandler):
     ) -> pl.LazyFrame:
         validated = NotificationParams.model_validate(params)
         telegram_enabled = True
-        if validated.method == 'telegram':
+        if validated.method == NotificationMethod.TELEGRAM:
             resolved = get_resolved_telegram_settings()
             telegram_enabled = bool(resolved.get('enabled'))
         schema = lf.collect_schema()
@@ -95,7 +100,7 @@ class NotificationHandler(OperationHandler):
                 return df.with_columns(
                     pl.Series(name=validated.output_column, values=[], dtype=pl.Utf8),
                 )
-            if validated.method == 'telegram' and not telegram_enabled:
+            if validated.method == NotificationMethod.TELEGRAM and not telegram_enabled:
                 return df.with_columns(
                     pl.Series(
                         name=validated.output_column,
@@ -119,7 +124,7 @@ class NotificationHandler(OperationHandler):
                             recipients = parse_recipients(validated.recipient)
                         if not recipients:
                             raise ValueError('recipient is required')
-                        if validated.method == 'email':
+                        if validated.method == NotificationMethod.EMAIL:
                             subject = _build_message(validated.subject_template, row)
                             notification_service.send_email(
                                 to=','.join(recipients),

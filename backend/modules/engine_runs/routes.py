@@ -6,6 +6,7 @@ from core.error_handlers import handle_errors
 from core.validation import EngineRunId, parse_analysis_id, parse_datasource_id, parse_engine_run_id
 from modules.engine_runs import schemas, service
 from modules.engine_runs.models import EngineRun
+from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from modules.mcp.router import MCPRouter
 
 router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
@@ -37,16 +38,16 @@ def compare_runs(
 def list_runs(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
-    kind: str | None = None,
-    status: str | None = None,
+    kind: EngineRunKind | None = None,
+    status: EngineRunStatus | None = None,
     limit: int = 100,
     offset: int = 0,
     session: Session = Depends(get_db),
 ):
     """List engine runs with optional filters.
 
-    Filters: analysis_id, datasource_id, kind (preview/export/datasource_update),
-    status (pending/running/success/failed). Supports pagination via limit/offset.
+    Filters: analysis_id, datasource_id, kind (preview/row_count/download/datasource_create/datasource_update),
+    status (success/failed). Supports pagination via limit/offset.
     """
     return service.list_engine_runs(
         session=session,

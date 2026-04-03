@@ -108,7 +108,7 @@ describe('AuthStore', () => {
 		});
 	});
 
-	describe('resolve with authRequired=true (default)', () => {
+	describe('resolve', () => {
 		test('success sets authenticated', async () => {
 			const user = makeUser();
 			mockMeSuccess(user);
@@ -143,39 +143,15 @@ describe('AuthStore', () => {
 		});
 	});
 
-	describe('resolve with authRequired=false', () => {
-		test('success sets authenticated', async () => {
-			const user = makeUser();
-			mockMeSuccess(user);
-
-			await store.resolve(false);
-
-			expect(store.status).toBe('authenticated');
-			expect(store.user).toEqual(user);
-			expect(store.authenticated).toBe(true);
-		});
-
-		test('failure keeps status unknown so it can retry', async () => {
+	describe('resolve always resolves on failure', () => {
+		test('failure sets unauthenticated', async () => {
 			mockMeError('Network error');
 
-			await store.resolve(false);
+			await store.resolve();
 
-			expect(store.status).toBe('unknown');
+			expect(store.status).toBe('unauthenticated');
 			expect(store.user).toBeNull();
-			expect(store.resolved).toBe(false);
-		});
-
-		test('retry after transient failure succeeds', async () => {
-			mockMeError('Network error');
-			await store.resolve(false);
-			expect(store.status).toBe('unknown');
-
-			const user = makeUser();
-			mockMeSuccess(user);
-			await store.resolve(false);
-
-			expect(store.status).toBe('authenticated');
-			expect(store.user).toEqual(user);
+			expect(store.resolved).toBe(true);
 		});
 	});
 

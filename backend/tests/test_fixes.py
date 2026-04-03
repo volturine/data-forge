@@ -50,7 +50,7 @@ class TestEngineRunProgressDefault:
             'analysis_id': None,
             'datasource_id': 'ds-1',
             'kind': 'preview',
-            'status': 'running',
+            'status': 'success',
             'request_json': {},
             'result_json': None,
             'error_message': None,

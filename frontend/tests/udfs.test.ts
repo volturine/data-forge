@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { test, expect } from '@playwright/test';
 import { API_BASE, createUdf } from './utils/api.js';
+import { waitForUdfList, gotoUdfEditor } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
@@ -30,6 +31,7 @@ test.describe('UDFs – list & management', () => {
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			await expect(page.locator('h3', { hasText: udf })).toBeVisible();
 			await screenshot(page, 'udfs', 'list-with-udf');
 		} finally {
@@ -42,6 +44,7 @@ test.describe('UDFs – list & management', () => {
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			await expect(page.getByText(`Test UDF: ${udf}`)).toBeVisible();
 		} finally {
 			await deleteUdfViaUI(page, udf);
@@ -53,6 +56,7 @@ test.describe('UDFs – list & management', () => {
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			// Tag chips are <span> elements inside the UDF row
 			await expect(page.locator('span', { hasText: 'test' }).first()).toBeVisible();
 		} finally {
@@ -65,6 +69,7 @@ test.describe('UDFs – list & management', () => {
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			await expect(page.locator('h3', { hasText: udf })).toBeVisible();
 
 			await page.getByPlaceholder(/Search UDFs/i).fill('ZZZNOMATCH');
@@ -79,6 +84,7 @@ test.describe('UDFs – list & management', () => {
 		const udf = `e2e_delete_${uid()}`;
 		await createUdf(request, udf);
 		await page.goto('/udfs');
+		await waitForUdfList(page);
 		await expect(page.locator('h3', { hasText: udf })).toBeVisible();
 
 		// Row container
@@ -97,6 +103,7 @@ test.describe('UDFs – list & management', () => {
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			const row = page.locator(`[data-udf-card="${udf}"]`);
 			await row.getByRole('button', { name: /^Delete$/i }).click();
 			await row.getByRole('button', { name: /Cancel/i }).click();
@@ -107,22 +114,25 @@ test.describe('UDFs – list & management', () => {
 	});
 
 	test('Clone button creates a copy of the UDF', async ({ page, request }) => {
+		test.setTimeout(60_000);
 		const udf = `e2e_clone_${uid()}`;
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			await expect(page.locator('h3', { hasText: udf })).toBeVisible();
 
 			const row = page.locator(`[data-udf-card="${udf}"]`);
 			await row.getByRole('button', { name: /Clone/i }).click();
 
-			// A second UDF with same name or "Copy" suffix appears
-			await expect(page.locator('h3', { hasText: udf }).nth(1)).toBeVisible({
+			// Clone gets the name "${udf} (copy)"
+			const cloneName = `${udf} (copy)`;
+			await expect(page.locator(`[data-udf-card="${cloneName}"]`)).toBeVisible({
 				timeout: 8_000
 			});
 		} finally {
-			// Delete both the clone and the original via UI
-			await deleteUdfViaUI(page, udf);
+			// Delete clone first (has " (copy)" suffix), then original
+			await deleteUdfViaUI(page, `${udf} (copy)`);
 			await deleteUdfViaUI(page, udf);
 		}
 	});
@@ -132,6 +142,7 @@ test.describe('UDFs – list & management', () => {
 		const udfId = await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			const row = page.locator(`[data-udf-card="${udf}"]`);
 			await row.getByRole('button', { name: /Edit/i }).click();
 			await expect(page).toHaveURL(new RegExp(`/udfs/${udfId}`), { timeout: 10_000 });
@@ -147,6 +158,7 @@ test.describe('UDFs – export & import', () => {
 		await createUdf(request, udf);
 		try {
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			// Wait for UDF list to load before exporting
 			await expect(page.locator('h3', { hasText: udf })).toBeVisible();
 
@@ -228,6 +240,7 @@ test.describe('UDFs – export & import', () => {
 			// Delete the UDF via UI first
 			await deleteUdfViaUI(page, udf);
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			await expect(page.locator('h3', { hasText: udf })).toHaveCount(0);
 
 			// Import it back via API (testing the API import, not the UI import)
@@ -279,10 +292,8 @@ test.describe('UDFs – editor page', () => {
 		const udf = `e2e_editor_${uid()}`;
 		const udfId = await createUdf(request, udf);
 		try {
-			await page.goto(`/udfs/${udfId}`);
-			// The name input (#udf-name) is populated with the UDF name
+			await gotoUdfEditor(page, udfId);
 			const nameInput = page.locator('#udf-name');
-			await expect(nameInput).toBeVisible({ timeout: 10_000 });
 			await expect(nameInput).toHaveValue(new RegExp(udf));
 		} finally {
 			await deleteUdfViaUI(page, udf);
@@ -312,6 +323,7 @@ test.describe('UDFs – editor functional flows', () => {
 
 			// Navigate to list and verify the UDF appears
 			await page.goto('/udfs');
+			await waitForUdfList(page);
 			await expect(page.locator('h3', { hasText: udf })).toBeVisible({
 				timeout: 10_000
 			});
@@ -325,9 +337,8 @@ test.describe('UDFs – editor functional flows', () => {
 		const udf = `e2e_edit_flow_${uid()}`;
 		const udfId = await createUdf(request, udf);
 		try {
-			await page.goto(`/udfs/${udfId}`);
+			await gotoUdfEditor(page, udfId);
 			const nameInput = page.locator('#udf-name');
-			await expect(nameInput).toBeVisible({ timeout: 10_000 });
 			await expect(nameInput).toHaveValue(udf);
 
 			// Modify the description

@@ -7,7 +7,6 @@
 		Activity,
 		GitBranch,
 		Code2,
-		PanelLeftClose,
 		PanelLeftOpen,
 		Sun,
 		Moon,
@@ -27,6 +26,7 @@
 		theme: 'light' | 'dark';
 		onToggleTheme: () => void;
 		onOpenSettings: () => void;
+		onOpenEngines: () => void;
 		onOpenChat: () => void;
 		onOpenNamespace: () => void;
 		onSignOut: () => void;
@@ -35,6 +35,7 @@
 		authRequired: boolean;
 		avatarUrl: string | null;
 		namespaceTrigger?: HTMLButtonElement;
+		enginesTrigger?: HTMLButtonElement;
 	}
 
 	let {
@@ -43,6 +44,7 @@
 		theme,
 		onToggleTheme,
 		onOpenSettings,
+		onOpenEngines,
 		onOpenChat,
 		onOpenNamespace,
 		onSignOut,
@@ -50,7 +52,8 @@
 		authenticated,
 		authRequired,
 		avatarUrl,
-		namespaceTrigger = $bindable()
+		namespaceTrigger = $bindable(),
+		enginesTrigger = $bindable()
 	}: Props = $props();
 
 	const currentPath = $derived(page.url.pathname);
@@ -95,11 +98,13 @@
 		css({
 			display: 'flex',
 			alignItems: 'center',
-			gap: '3',
+			justifyContent: collapsed ? 'center' : 'flex-start',
+			gap: collapsed ? '0' : '3',
 			width: '100%',
-			paddingX: '3',
+			paddingX: collapsed ? '0' : '3',
 			paddingY: '2',
 			fontSize: 'sm',
+			cursor: 'pointer',
 			color: active ? 'fg.primary' : 'fg.tertiary',
 			backgroundColor: active ? 'bg.tertiary' : 'transparent',
 			textDecoration: 'none',
@@ -114,24 +119,30 @@
 			overflow: 'hidden'
 		});
 
-	const sidebarBtnClass = css({
-		display: 'flex',
-		alignItems: 'center',
-		gap: '3',
-		width: '100%',
-		paddingX: '3',
-		paddingY: '2',
-		fontSize: 'sm',
-		color: 'fg.tertiary',
-		backgroundColor: 'transparent',
-		borderWidth: '0',
-		transitionProperty: 'color, background-color',
-		transitionDuration: '160ms',
-		transitionTimingFunction: 'ease',
-		_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' },
-		whiteSpace: 'nowrap',
-		overflow: 'hidden'
-	});
+	const sidebarBtnClass = $derived(
+		css({
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: collapsed ? 'center' : 'flex-start',
+			gap: collapsed ? '0' : '3',
+			width: '100%',
+			paddingX: collapsed ? '0' : '3',
+			paddingY: '2',
+			fontSize: 'sm',
+			cursor: 'pointer',
+			color: 'fg.tertiary',
+			backgroundColor: 'transparent',
+			borderWidth: '0',
+			borderLeftWidth: '2',
+			borderLeftColor: 'transparent',
+			transitionProperty: 'color, background-color',
+			transitionDuration: '160ms',
+			transitionTimingFunction: 'ease',
+			_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' },
+			whiteSpace: 'nowrap',
+			overflow: 'hidden'
+		})
+	);
 
 	const iconWrapClass = css({
 		display: 'flex',
@@ -141,16 +152,6 @@
 		width: '5',
 		height: '5'
 	});
-
-	const labelClass = $derived(
-		css({
-			overflow: 'hidden',
-			opacity: collapsed ? '0' : '1',
-			transitionProperty: 'opacity',
-			transitionDuration: '160ms',
-			transitionTimingFunction: 'ease'
-		})
-	);
 
 	const profileActive = $derived(currentPath.startsWith('/profile'));
 
@@ -166,56 +167,79 @@
 <aside class={sidebarClass} aria-label="Main navigation">
 	<div
 		class={css({
+			display: 'flex',
+			alignItems: 'center',
 			paddingX: '3',
-			paddingY: '3',
+			height: '12',
 			borderBottomWidth: '1'
 		})}
 	>
-		<button
-			class={cx(
-				sidebarBtnClass,
-				css({
-					paddingX: '0',
-					gap: '2',
-					fontSize: 'md',
-					fontWeight: 'semibold'
-				})
-			)}
-			onclick={onOpenNamespace}
-			type="button"
-			aria-label="Select namespace"
-			bind:this={namespaceTrigger}
-		>
-			<span
+		{#if collapsed}
+			<button
+				class={cx(
+					sidebarBtnClass,
+					css({
+						paddingX: '0',
+						borderLeftWidth: '0',
+						justifyContent: 'center'
+					})
+				)}
+				onclick={onToggle}
+				type="button"
+				aria-label="Expand sidebar"
+			>
+				<span class={iconWrapClass}>
+					<PanelLeftOpen size={16} />
+				</span>
+			</button>
+		{:else}
+			<button
 				class={css({
 					display: 'flex',
 					alignItems: 'center',
 					justifyContent: 'center',
-					flexShrink: 0,
-					width: '5',
-					height: '5',
-					fontSize: 'xs',
-					fontWeight: 'bold'
+					gap: '0',
+					width: '100%',
+					paddingX: '0',
+					paddingY: '2',
+					fontSize: 'md',
+					fontWeight: 'semibold',
+					cursor: 'pointer',
+					color: 'fg.tertiary',
+					backgroundColor: 'transparent',
+					borderWidth: '0',
+					transitionProperty: 'color, background-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
 				})}
+				onclick={onOpenNamespace}
+				type="button"
+				aria-label="Select namespace"
+				bind:this={namespaceTrigger}
 			>
-				a
-			</span>
-			{#if !collapsed}
-				<span class={css({ display: 'flex', alignItems: 'center', gap: '1', overflow: 'hidden' })}>
-					<span class={css({ color: 'fg.muted' })}>/</span>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '0', overflow: 'hidden' })}>
 					<span
-						class={css({
-							color: 'fg.tertiary',
-							overflow: 'hidden',
-							textOverflow: 'ellipsis',
-							whiteSpace: 'nowrap'
-						})}
+						class={css({ display: 'flex', alignItems: 'center', gap: '0', overflow: 'hidden' })}
 					>
-						{namespace}
+						<span class={css({ color: 'fg.muted' })}>/</span>
+						<span
+							class={css({
+								color: 'fg.primary',
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap',
+								textDecoration: 'underline',
+								textDecorationColor: 'fg.muted',
+								textUnderlineOffset: '3px'
+							})}
+						>
+							{namespace}
+						</span>
 					</span>
-				</span>
-			{/if}
-		</button>
+				</span></button
+			>
+		{/if}
 	</div>
 
 	<nav
@@ -239,7 +263,9 @@
 				<span class={iconWrapClass}>
 					<item.icon size={16} />
 				</span>
-				<span class={labelClass}>{item.label}</span>
+				{#if !collapsed}
+					<span>{item.label}</span>
+				{/if}
 			</a>
 		{/each}
 	</nav>
@@ -255,7 +281,9 @@
 			<span class={iconWrapClass}>
 				<MessageSquare size={16} />
 			</span>
-			<span class={labelClass}>Chat</span>
+			{#if !collapsed}
+				<span>Chat</span>
+			{/if}
 		</button>
 
 		<button
@@ -268,7 +296,8 @@
 			title={collapsed ? 'Engines' : 'Engine Monitor'}
 			aria-label="Engine Monitor"
 			type="button"
-			onclick={onOpenSettings}
+			onclick={onOpenEngines}
+			bind:this={enginesTrigger}
 		>
 			<span
 				class={css({
@@ -303,7 +332,9 @@
 					</span>
 				{/if}
 			</span>
-			<span class={labelClass}>Engines</span>
+			{#if !collapsed}
+				<span>Engines</span>
+			{/if}
 		</button>
 
 		<button
@@ -316,7 +347,9 @@
 			<span class={iconWrapClass}>
 				<Settings size={16} />
 			</span>
-			<span class={labelClass}>Settings</span>
+			{#if !collapsed}
+				<span>Settings</span>
+			{/if}
 		</button>
 
 		<button
@@ -333,7 +366,9 @@
 					<Moon size={16} />
 				{/if}
 			</span>
-			<span class={labelClass}>{theme === 'light' ? 'Light' : 'Dark'}</span>
+			{#if !collapsed}
+				<span>{theme === 'light' ? 'Light' : 'Dark'}</span>
+			{/if}
 		</button>
 	</div>
 
@@ -361,7 +396,9 @@
 						<User size={16} />
 					{/if}
 				</span>
-				<span class={labelClass}>Profile</span>
+				{#if !collapsed}
+					<span>Profile</span>
+				{/if}
 			</a>
 
 			{#if authRequired}
@@ -375,32 +412,11 @@
 					<span class={iconWrapClass}>
 						<LogOut size={16} />
 					</span>
-					<span class={labelClass}>Sign out</span>
+					{#if !collapsed}
+						<span>Sign out</span>
+					{/if}
 				</button>
 			{/if}
 		</div>
 	{/if}
-
-	<div
-		class={css({
-			borderTopWidth: '1',
-			paddingY: '1'
-		})}
-	>
-		<button
-			class={cx(sidebarBtnClass, css({ justifyContent: collapsed ? 'center' : 'flex-end' }))}
-			onclick={onToggle}
-			title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-			aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-			type="button"
-		>
-			<span class={iconWrapClass}>
-				{#if collapsed}
-					<PanelLeftOpen size={16} />
-				{:else}
-					<PanelLeftClose size={16} />
-				{/if}
-			</span>
-		</button>
-	</div>
 </aside>

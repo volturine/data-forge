@@ -1,4 +1,6 @@
+import asyncio
 import secrets
+import time
 from urllib.parse import urlencode
 
 import httpx
@@ -7,11 +9,11 @@ from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
 from core.config import settings
-from core.database import get_settings_db
+from core.database import get_settings_db, run_settings_db
 from core.error_handlers import handle_errors
 from core.exceptions import AccountDisabledError, InvalidCredentialsError, OAuthError
 from modules.auth.dependencies import get_current_user
-from modules.auth.models import AuthProvider, User
+from modules.auth.models import AuthProvider, AuthProviderName, User, UserStatus, VerificationTokenType
 from modules.auth.schemas import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -30,6 +32,8 @@ from modules.auth.service import (
     create_session,
     create_user,
     create_verification_token,
+    delete_user_account,
+    ensure_default_user,
     find_or_create_oauth_user,
     get_user_by_email,
     get_user_by_id,
@@ -41,11 +45,36 @@ from modules.auth.service import (
     send_password_reset_email,
     send_verification_email,
     unlink_provider,
+    validate_session,
     validate_verification_token,
     verify_password,
 )
 
 router = APIRouter(prefix='/auth', tags=['auth'])
+
+_me_cache: dict[str, tuple[float, UserPublic]] = {}
+_ME_CACHE_TTL: float = 10.0
+_ME_CACHE_MAX_SIZE: int = 200
+
+
+def _evict_me_cache() -> None:
+    """Remove expired entries if cache exceeds max size."""
+    if len(_me_cache) <= _ME_CACHE_MAX_SIZE:
+        return
+    now = time.monotonic()
+    expired = [k for k, (ts, _) in _me_cache.items() if now - ts >= _ME_CACHE_TTL]
+    for k in expired:
+        del _me_cache[k]
+
+
+def invalidate_me_cache(token: str | None = None) -> None:
+    """Clear cached /me response. If token given, clear only that entry."""
+    if token:
+        _me_cache.pop(token, None)
+    else:
+        _me_cache.clear()
+
+
 _OAUTH_STATE_MAX_AGE_SECONDS = 600
 
 
@@ -129,7 +158,7 @@ def _request_ip_address(request: Request) -> str | None:
 @handle_errors(operation='register')
 async def register(body: RegisterRequest, request: Request, response: Response, session: Session = Depends(get_settings_db)) -> UserPublic:
     user = create_user(session, body.email, body.password, body.display_name)
-    token = create_verification_token(session, user_id=user.id, token_type='email_verify')
+    token = create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
     await send_verification_email(user.email, token)
     created_session = create_session(
         session,
@@ -147,12 +176,12 @@ async def login(body: LoginRequest, request: Request, response: Response, sessio
     user = get_user_by_email(session, body.email)
     if not user:
         raise InvalidCredentialsError()
-    if user.status == 'disabled':
+    if user.status == UserStatus.DISABLED:
         raise AccountDisabledError()
     password_provider = session.exec(
         select(AuthProvider).where(
             AuthProvider.user_id == user.id,
-            AuthProvider.provider == 'password',
+            AuthProvider.provider == AuthProviderName.PASSWORD,
         )
     ).first()
     if not password_provider:
@@ -179,6 +208,20 @@ async def logout(request: Request, response: Response, session: Session = Depend
     token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
     if token:
         revoke_session(session, token)
+        invalidate_me_cache(token)
+    _clear_session_cookie(response)
+    return {'success': True}
+
+
+@router.delete('/account')
+@handle_errors(operation='delete account')
+async def delete_account_route(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_settings_db),
+) -> dict[str, bool]:
+    delete_user_account(session, current_user.id)
+    invalidate_me_cache()
     _clear_session_cookie(response)
     return {'success': True}
 
@@ -186,7 +229,7 @@ async def logout(request: Request, response: Response, session: Session = Depend
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
 async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    user_id = validate_verification_token(session, token=body.token, token_type='email_verify')
+    user_id = validate_verification_token(session, token=body.token, token_type=VerificationTokenType.EMAIL_VERIFY)
     user = get_user_by_id(session, user_id)
     if not user:
         raise InvalidCredentialsError()
@@ -222,10 +265,38 @@ async def reset_password_route(body: ResetPasswordRequest, session: Session = De
     return MessageResponse(message='Password reset successful')
 
 
+def _resolve_me(session: Session, token: str | None) -> UserPublic:
+    """Resolve the current user inside a settings DB session (runs in threadpool on cache miss)."""
+    if token:
+        user = validate_session(session, token)
+        if user:
+            return _build_user_public(session, user)
+    if not settings.auth_required:
+        user = ensure_default_user(session)
+        return _build_user_public(session, user)
+    raise HTTPException(status_code=401, detail='Not authenticated')
+
+
 @router.get('/me', response_model=UserPublic)
 @handle_errors(operation='get current user')
-async def me(current_user: User = Depends(get_current_user), session: Session = Depends(get_settings_db)) -> UserPublic:
-    return _build_user_public(session, current_user)
+async def me(request: Request) -> UserPublic:
+    token = request.cookies.get('session_token') or request.headers.get('X-Session-Token')
+
+    if token:
+        cached = _me_cache.get(token)
+        if cached is not None:
+            ts, result = cached
+            if time.monotonic() - ts < _ME_CACHE_TTL:
+                return result
+            del _me_cache[token]
+
+    result = await asyncio.to_thread(run_settings_db, _resolve_me, token)
+
+    if token:
+        _evict_me_cache()
+        _me_cache[token] = (time.monotonic(), result)
+
+    return result
 
 
 @router.put('/profile', response_model=UserPublic)
@@ -244,6 +315,7 @@ async def update_profile_route(
         avatar_url=body.avatar_url,
         preferences=body.preferences,
     )
+    invalidate_me_cache()
     return _build_user_public(session, updated)
 
 
@@ -255,6 +327,7 @@ async def change_password_route(
     session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
     change_password(session, current_user.id, body.current_password, body.new_password)
+    invalidate_me_cache()
     return {'success': True}
 
 
@@ -270,6 +343,7 @@ async def revoke_all_sessions_route(
     revoke_all_sessions(session, current_user.id)
     if current_token:
         revoke_session(session, current_token)
+    invalidate_me_cache()
     _clear_session_cookie(response)
     return {'success': True}
 
@@ -289,7 +363,7 @@ async def google_oauth_start() -> RedirectResponse:
     }
     url = f'https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(response, provider='google', state=state)
+    _set_oauth_state_cookie(response, provider=AuthProviderName.GOOGLE.value, state=state)
     return response
 
 
@@ -302,7 +376,7 @@ async def google_oauth_callback(
 ) -> RedirectResponse:
     redirect_url = f'{settings.auth_frontend_url}/#/auth/callback'
     response = RedirectResponse(url=redirect_url)
-    _validate_oauth_state(request, response, provider='google', state=params.state)
+    _validate_oauth_state(request, response, provider=AuthProviderName.GOOGLE.value, state=params.state)
     token_payload = {
         'code': params.code,
         'client_id': settings.google_client_id,
@@ -331,7 +405,7 @@ async def google_oauth_callback(
         raise OAuthError('Google user info missing id or email')
     user = find_or_create_oauth_user(
         session=session,
-        provider='google',
+        provider=AuthProviderName.GOOGLE,
         provider_subject=subject,
         email=email,
         display_name=str(info.get('name') or email.split('@')[0]),
@@ -359,7 +433,7 @@ async def github_oauth_start() -> RedirectResponse:
     }
     url = f'https://github.com/login/oauth/authorize?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(response, provider='github', state=state)
+    _set_oauth_state_cookie(response, provider=AuthProviderName.GITHUB.value, state=state)
     return response
 
 
@@ -372,7 +446,7 @@ async def github_oauth_callback(
 ) -> RedirectResponse:
     redirect_url = f'{settings.auth_frontend_url}/#/auth/callback'
     response = RedirectResponse(url=redirect_url)
-    _validate_oauth_state(request, response, provider='github', state=params.state)
+    _validate_oauth_state(request, response, provider=AuthProviderName.GITHUB.value, state=params.state)
     payload = {
         'client_id': settings.github_client_id,
         'client_secret': settings.github_client_secret,
@@ -407,7 +481,7 @@ async def github_oauth_callback(
         raise OAuthError('GitHub account has no verified email')
     user = find_or_create_oauth_user(
         session=session,
-        provider='github',
+        provider=AuthProviderName.GITHUB,
         provider_subject=str(subject),
         email=email,
         display_name=str(gh_user.get('name') or gh_user.get('login') or email.split('@')[0]),
@@ -430,7 +504,11 @@ async def unlink_provider_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
-    if provider not in {'google', 'github'}:
+    try:
+        provider_name = AuthProviderName(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Unsupported provider') from exc
+    if provider_name not in {AuthProviderName.GOOGLE, AuthProviderName.GITHUB}:
         raise HTTPException(status_code=400, detail='Unsupported provider')
-    unlink_provider(session, current_user.id, provider)
+    unlink_provider(session, current_user.id, provider_name)
     return {'success': True}

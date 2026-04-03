@@ -16,6 +16,7 @@ from openpyxl.utils.cell import get_column_letter, range_boundaries
 from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table
 from sqlalchemy import select, update
+from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
 from core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError, FileError
@@ -27,11 +28,13 @@ from modules.datasource.schemas import (
     ColumnStats,
     ColumnStatsResponse,
     CSVOptions,
+    DataSourceListItem,
     DataSourceResponse,
     DataSourceUpdate,
     FileListItem,
     FileListResponse,
     SchemaDiff,
+    SchemaDiffStatus,
     SchemaInfo,
     SnapshotCompareResponse,
     SnapshotPreview,
@@ -291,35 +294,38 @@ def build_excel_preview(
     preview_rows: int = 100,
 ) -> ExcelPreviewResult:
     workbook = load_workbook(file_path, read_only=False, data_only=True)
-    resolved = _resolve_excel_bounds(
-        workbook,
-        sheet_name,
-        start_row,
-        start_col,
-        end_col,
-        end_row,
-        table_name,
-        named_range,
-        cell_range,
-    )
-    sheet = workbook[resolved.sheet_name]
+    try:
+        resolved = _resolve_excel_bounds(
+            workbook,
+            sheet_name,
+            start_row,
+            start_col,
+            end_col,
+            end_row,
+            table_name,
+            named_range,
+            cell_range,
+        )
+        sheet = workbook[resolved.sheet_name]
 
-    end_row_value = resolved.end_row
-    if end_row_value is None:
-        end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-    _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
+        end_row_value = resolved.end_row
+        if end_row_value is None:
+            end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+        _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
 
-    preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
-    rows = _collect_preview_rows(sheet, resolved.start_row, resolved.start_col, resolved.end_col, preview_end_row)
-    return ExcelPreviewResult(
-        preview=rows,
-        detected_end_row=end_row_value,
-        sheet_name=resolved.sheet_name,
-        start_row=resolved.start_row,
-        start_col=resolved.start_col,
-        end_col=resolved.end_col,
-        end_row=end_row_value,
-    )
+        preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
+        rows = _collect_preview_rows(sheet, resolved.start_row, resolved.start_col, resolved.end_col, preview_end_row)
+        return ExcelPreviewResult(
+            preview=rows,
+            detected_end_row=end_row_value,
+            sheet_name=resolved.sheet_name,
+            start_row=resolved.start_row,
+            start_col=resolved.start_col,
+            end_col=resolved.end_col,
+            end_row=end_row_value,
+        )
+    finally:
+        workbook.close()
 
 
 def resolve_excel_selection(
@@ -334,26 +340,29 @@ def resolve_excel_selection(
     cell_range: str | None = None,
 ) -> tuple[str, int, int, int, int]:
     workbook = load_workbook(file_path, read_only=False, data_only=True)
-    target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
-    if not target_sheet:
-        raise ValueError('No sheets found in file')
-    resolved = _resolve_excel_bounds(
-        workbook,
-        target_sheet,
-        start_row,
-        start_col,
-        end_col,
-        end_row,
-        table_name,
-        named_range,
-        cell_range,
-    )
-    sheet = workbook[resolved.sheet_name]
-    end_row_value = resolved.end_row
-    if end_row_value is None:
-        end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-    _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
-    return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
+    try:
+        target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
+        if not target_sheet:
+            raise ValueError('No sheets found in file')
+        resolved = _resolve_excel_bounds(
+            workbook,
+            target_sheet,
+            start_row,
+            start_col,
+            end_col,
+            end_row,
+            table_name,
+            named_range,
+            cell_range,
+        )
+        sheet = workbook[resolved.sheet_name]
+        end_row_value = resolved.end_row
+        if end_row_value is None:
+            end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+        _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
+        return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
+    finally:
+        workbook.close()
 
 
 @dataclass
@@ -1236,7 +1245,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='removed',
+                status=SchemaDiffStatus.REMOVED,
                 type_a=str(schema_a[name]),
                 type_b=None,
             )
@@ -1246,7 +1255,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='added',
+                status=SchemaDiffStatus.ADDED,
                 type_a=None,
                 type_b=str(schema_b[name]),
             )
@@ -1260,7 +1269,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='type_changed',
+                status=SchemaDiffStatus.TYPE_CHANGED,
                 type_a=dtype_a,
                 type_b=dtype_b,
             )
@@ -1280,16 +1289,17 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     return response
 
 
-def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceResponse]:
-    query = select(DataSource)
+def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
+    query = select(DataSource).options(
+        defer(DataSource.schema_cache),  # type: ignore[arg-type]
+    )
     if not include_hidden:
         # SQLModel field typed as bool; == creates SA expression at runtime
         query = query.where(col(DataSource.is_hidden) == False)  # type: ignore[arg-type]  # noqa: E712
-    result = session.execute(query)
-    datasources = result.scalars().all()
-    results: list[DataSourceResponse] = []
+    datasources = session.execute(query).scalars().all()
+    results: list[DataSourceListItem] = []
     for ds in datasources:
-        item = DataSourceResponse.model_validate(ds)
+        item = DataSourceListItem.model_validate(ds)
         item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
         results.append(item)
     return results

@@ -1,21 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { API_BASE, AUTH_FILE } from './utils/api.js';
+import {
+	API_BASE,
+	AUTH_FILE,
+	E2E_DISPLAY_NAME,
+	E2E_EMAIL,
+	E2E_PASSWORD,
+	deleteAccount,
+	login,
+	parseSessionToken,
+	readStoredSessionToken
+} from './utils/api.js';
 
 const port = process.env.FRONTEND_PORT || '3000';
 const origin = `http://localhost:${port}`;
-const E2E_EMAIL = 'e2e-test@example.com';
-const E2E_PASSWORD = 'E2eTestPw12345';
-
-function parseSessionToken(response: Response): string | undefined {
-	const raw = response.headers.getSetCookie?.();
-	const entries = raw ?? [response.headers.get('set-cookie') ?? ''];
-	for (const entry of entries) {
-		const match = entry.match(/session_token=([^;]+)/);
-		if (match) return match[1];
-	}
-	return undefined;
-}
 
 function buildStorageState(
 	sessionToken: string | undefined,
@@ -51,7 +49,67 @@ function buildStorageState(
 	};
 }
 
-export default async function globalSetup() {
+async function register(): Promise<string> {
+	const resp = await fetch(`${API_BASE}/auth/register`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			email: E2E_EMAIL,
+			password: E2E_PASSWORD,
+			display_name: E2E_DISPLAY_NAME
+		})
+	});
+	if (!resp.ok) {
+		throw new Error(`E2E register failed: ${resp.status} ${await resp.text()}`);
+	}
+	const token = parseSessionToken(resp);
+	if (!token) {
+		throw new Error('E2E register succeeded but no session_token cookie received');
+	}
+	return token;
+}
+
+/**
+ * Ensure no leftover E2E account exists before registering fresh.
+ *
+ * Strategy:
+ * 1. Try deleting via stored session token.
+ * 2. If unauthenticated or no stored token, try login to get a fresh token, then delete.
+ * 3. If login returns invalid_credentials, account doesn't exist — clean state confirmed.
+ * 4. Forbidden (default user) and unexpected errors are fatal.
+ */
+async function ensureCleanState(): Promise<void> {
+	const stored = readStoredSessionToken();
+
+	if (stored) {
+		const outcome = await deleteAccount(stored);
+		if (outcome === 'deleted') return;
+		if (outcome === 'forbidden') {
+			throw new Error('[setup] cannot delete default/protected account — fix test config');
+		}
+		if (outcome === 'error') {
+			throw new Error('[setup] unexpected error deleting account with stored token');
+		}
+		// unauthenticated — stored token is stale, fall through to login path
+	}
+
+	const result = await login();
+	if (result.status === 'invalid_credentials') return;
+	if (result.status === 'error') {
+		throw new Error(`[setup] login probe failed with status ${result.code}`);
+	}
+
+	const outcome = await deleteAccount(result.token);
+	if (outcome === 'deleted') return;
+	if (outcome === 'forbidden') {
+		throw new Error('[setup] cannot delete default/protected account — fix test config');
+	}
+	throw new Error(
+		`[setup] delete after login returned '${outcome}' — cannot establish clean state`
+	);
+}
+
+export default async function globalSetup(): Promise<void> {
 	fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
 
 	const configResp = await fetch(`${API_BASE}/config`);
@@ -62,29 +120,8 @@ export default async function globalSetup() {
 	let sessionToken: string | undefined;
 
 	if (authRequired) {
-		const regResp = await fetch(`${API_BASE}/auth/register`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ email: E2E_EMAIL, password: E2E_PASSWORD, display_name: 'E2E Test' })
-		});
-
-		if (regResp.ok) {
-			sessionToken = parseSessionToken(regResp);
-		} else {
-			const loginResp = await fetch(`${API_BASE}/auth/login`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ email: E2E_EMAIL, password: E2E_PASSWORD })
-			});
-			if (!loginResp.ok) {
-				throw new Error(`E2E auth failed: register=${regResp.status}, login=${loginResp.status}`);
-			}
-			sessionToken = parseSessionToken(loginResp);
-		}
-
-		if (!sessionToken) {
-			throw new Error('E2E auth succeeded but no session_token cookie received');
-		}
+		await ensureCleanState();
+		sessionToken = await register();
 	}
 
 	const apiOrigin = new URL(API_BASE).origin;

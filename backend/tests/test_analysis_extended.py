@@ -1,8 +1,11 @@
 """Extended tests for analysis module."""
 
 import uuid
+from typing import cast
 
 from modules.analysis.models import Analysis
+from modules.analysis.pipeline_types import AnalysisPipelineStep
+from modules.analysis.step_types import StepType
 from modules.datasource.models import DataSource
 
 
@@ -263,10 +266,10 @@ class TestAnalysisPipeline:
 
     def test_update_analysis_pipeline(self, client, sample_analysis: Analysis):
         """Test updating analysis pipeline."""
-        new_steps = [
+        new_steps: list[AnalysisPipelineStep] = [
             {
                 'id': 'new_step',
-                'type': 'filter',
+                'type': cast(StepType, 'filter'),
                 'config': {'column': 'id', 'operator': '=', 'value': 1},
                 'depends_on': [],
             }

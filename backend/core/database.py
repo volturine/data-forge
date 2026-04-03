@@ -35,6 +35,7 @@ _MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
 _engine_override: Engine | None = None
+_settings_engine_override: Engine | None = None
 
 P = ParamSpec('P')
 T = TypeVar('T')
@@ -58,6 +59,16 @@ def clear_engine_override():
     _engine_override = None
 
 
+def set_settings_engine_override(test_engine: Engine):
+    global _settings_engine_override
+    _settings_engine_override = test_engine
+
+
+def clear_settings_engine_override():
+    global _settings_engine_override
+    _settings_engine_override = None
+
+
 def get_db():
     engine_to_use = _engine_override or _run_async(_get_namespace_engine())
     with Session(engine_to_use) as session:
@@ -65,7 +76,8 @@ def get_db():
 
 
 def get_settings_db():
-    with Session(settings_engine) as session:
+    engine_to_use = _settings_engine_override or settings_engine
+    with Session(engine_to_use) as session:
         yield session
 
 
@@ -76,7 +88,8 @@ def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: 
 
 
 def run_settings_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    with Session(settings_engine) as session:
+    engine_to_use = _settings_engine_override or settings_engine
+    with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
 
 
@@ -197,7 +210,7 @@ async def _get_namespace_engine() -> Engine:
             return _namespace_engines[namespace]
         if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
             oldest = next(iter(_namespace_engines))
-            del _namespace_engines[oldest]
+            _namespace_engines.pop(oldest).dispose()
         paths = namespace_paths(namespace)
         engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
         _enable_sqlite_pragmas(engine)

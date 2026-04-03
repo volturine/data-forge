@@ -612,7 +612,7 @@ class TestSendPipelineNotifications:
         call_kwargs = mock_svc.send_telegram.call_args.kwargs
         assert call_kwargs['chat_id'] == '99999'
         assert 'A' in call_kwargs['message']
-        assert 'done' in call_kwargs['message']
+        assert 'success' in call_kwargs['message']
 
     def test_output_notification_empty_recipient_skipped(self):
         with patch('modules.compute.service.notification_service') as mock_svc:

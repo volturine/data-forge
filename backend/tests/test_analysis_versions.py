@@ -1,7 +1,8 @@
 import uuid
 from datetime import UTC, datetime
 
-from modules.analysis.models import Analysis
+from modules.analysis.models import Analysis, AnalysisStatus
+from modules.analysis.pipeline_types import AnalysisPipelineDefinition
 from modules.analysis_versions.models import AnalysisVersion
 from modules.analysis_versions.service import create_version, get_version
 from modules.datasource.models import DataSource
@@ -10,7 +11,7 @@ from modules.datasource.source_types import DataSourceType
 
 def test_list_versions_returns_versions(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -37,7 +38,7 @@ def test_list_versions_returns_versions(test_db_session, client, sample_datasour
         name='Versioned Analysis',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -64,7 +65,7 @@ def test_list_versions_returns_versions(test_db_session, client, sample_datasour
 
 def test_restore_version_updates_analysis(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    analysis_pipeline: dict[str, object] = {
+    analysis_pipeline: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -91,7 +92,7 @@ def test_restore_version_updates_analysis(test_db_session, client, sample_dataso
         name='Original',
         description=None,
         pipeline_definition=analysis_pipeline,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -138,7 +139,7 @@ def test_restore_version_updates_analysis(test_db_session, client, sample_dataso
 
 def test_rename_version(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -165,7 +166,7 @@ def test_rename_version(test_db_session, client, sample_datasource: DataSource):
         name='Rename Test',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -195,7 +196,7 @@ def test_rename_version(test_db_session, client, sample_datasource: DataSource):
 
 def test_rename_version_not_found(test_db_session, client, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -222,7 +223,7 @@ def test_rename_version_not_found(test_db_session, client, sample_datasource: Da
         name='Not Found Test',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -239,7 +240,7 @@ def test_rename_version_not_found(test_db_session, client, sample_datasource: Da
 
 def test_create_version_increments(test_db_session, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -266,7 +267,7 @@ def test_create_version_increments(test_db_session, sample_datasource: DataSourc
         name='Versioned Analysis',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -281,7 +282,7 @@ def test_create_version_increments(test_db_session, sample_datasource: DataSourc
 
 def test_get_version_returns_none(test_db_session, sample_datasource: DataSource):
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -308,7 +309,7 @@ def test_get_version_returns_none(test_db_session, sample_datasource: DataSource
         name='Missing Version',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -334,7 +335,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
         created_at=datetime.now(UTC),
     )
     test_db_session.add(cycle_ds)
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'steps': [],
         'tabs': [
             {
@@ -361,7 +362,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
         name='Cycle Analysis',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -414,7 +415,7 @@ def test_restore_version_requires_datasource(test_db_session, client):
         name='Missing Datasource',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -476,7 +477,7 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
         name='Relink Analysis',
         description=None,
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )

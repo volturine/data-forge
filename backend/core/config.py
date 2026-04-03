@@ -101,9 +101,9 @@ class Settings(BaseSettings):
     upload_chunk_size: int = Field(default=5 * 1024 * 1024, alias='UPLOAD_CHUNK_SIZE')
     upload_max_file_size_bytes: int = Field(default=2 * 1024 * 1024 * 1024, alias='UPLOAD_MAX_FILE_SIZE_BYTES')
 
-    # Engine idle timeout in seconds (default 5 minutes)
+    # Engine idle timeout in seconds (default 60s)
     # Engines will be terminated after this duration of inactivity (reset on save)
-    engine_idle_timeout: int = Field(default=300, alias='ENGINE_IDLE_TIMEOUT')
+    engine_idle_timeout: int = Field(default=60, alias='ENGINE_IDLE_TIMEOUT')
 
     # Engine pooling interval in seconds (default 5 seconds)
     # How often to check engine states and cleanup idle engines
@@ -172,11 +172,11 @@ class Settings(BaseSettings):
     # Max queued log batches before dropping
     log_queue_max_size: int = Field(default=2000, alias='LOG_QUEUE_MAX_SIZE')
 
-    # Queue overflow behavior: 'block' (default) or 'drop'
-    log_queue_overflow: str = Field(default='block', alias='LOG_QUEUE_OVERFLOW')
+    # Queue overflow behavior: 'block' or 'drop' (default)
+    log_queue_overflow: str = Field(default='drop', alias='LOG_QUEUE_OVERFLOW')
 
-    # Max body size to log in bytes (default 1MB, 0 = unlimited)
-    log_max_body_size: int = Field(default=1 * 1024 * 1024, alias='LOG_MAX_BODY_SIZE')
+    # Max body size to log in bytes (default 64KB, 0 = unlimited)
+    log_max_body_size: int = Field(default=64 * 1024, alias='LOG_MAX_BODY_SIZE')
 
     # Frontend debug panels
     public_idb_debug: bool = Field(default=False, alias='PUBLIC_IDB_DEBUG')

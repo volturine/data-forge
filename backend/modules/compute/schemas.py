@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
@@ -298,12 +298,27 @@ class StepRowCountResponse(BaseModel):
     row_count: int
 
 
+class BuildStatus(StrEnum):
+    SUCCESS = 'success'
+    WARNING = 'warning'
+
+
+class BuildTabStatus(StrEnum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
+
+
+class ComputeRunStatus(StrEnum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
+
+
 class BuildTabResult(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     tab_id: str
     tab_name: str
-    status: str
+    status: BuildTabStatus
     error: str | None = None
 
 
@@ -336,17 +351,23 @@ class ComputeWebsocketRequest(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class ComputeWebsocketMessageType(StrEnum):
+    STARTED = 'started'
+    RESULT = 'result'
+    ERROR = 'error'
+
+
 class ComputeWebsocketStartedMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: Literal['started'] = 'started'
+    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.STARTED
     action: ComputeWebsocketAction
 
 
 class ComputeWebsocketResultMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: Literal['result'] = 'result'
+    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.RESULT
     action: ComputeWebsocketAction
     data: dict
 
@@ -354,7 +375,7 @@ class ComputeWebsocketResultMessage(BaseModel):
 class ComputeWebsocketErrorMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: Literal['error'] = 'error'
+    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.ERROR
     action: ComputeWebsocketAction | None = None
     error: str
     status_code: int = 500

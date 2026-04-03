@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from modules.auth.models import AuthProviderName, UserStatus
+
 
 class RegisterRequest(BaseModel):
     email: str
@@ -21,18 +23,18 @@ class UserPublic(BaseModel):
     email: str
     display_name: str
     avatar_url: str | None
-    status: str
+    status: UserStatus
     email_verified: bool
     has_password: bool
-    preferences: dict
-    providers: list[str]
+    preferences: dict[str, object]
+    providers: list[AuthProviderName]
     created_at: datetime
 
 
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = None
     avatar_url: str | None = None
-    preferences: dict | None = None
+    preferences: dict[str, object] | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -65,4 +67,4 @@ class OAuthCallbackParams(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     error_code: str
-    details: dict = Field(default_factory=dict)
+    details: dict[str, object] = Field(default_factory=dict)

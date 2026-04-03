@@ -8,10 +8,10 @@ predefined UDF with wiring to LLM request endpoints.
 
 import logging
 import re
-from typing import Literal
+from enum import StrEnum
 
 import polars as pl
-from pydantic import ConfigDict, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from modules.ai.service import AIError, get_ai_client, parse_request_options
 from modules.compute.core.base import OperationHandler, OperationParams
@@ -19,6 +19,11 @@ from modules.compute.core.base import OperationHandler, OperationParams
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r'\{\{(\w+)\}\}')
+
+
+class AIProvider(StrEnum):
+    OLLAMA = 'ollama'
+    OPENAI = 'openai'
 
 
 class AIParams(OperationParams):
@@ -31,20 +36,20 @@ class AIParams(OperationParams):
 
     model_config = ConfigDict(extra='forbid')
 
-    provider: Literal['ollama', 'openai'] = 'ollama'
+    provider: AIProvider = AIProvider.OLLAMA
     model: str = 'llama2'
-    input_columns: list[str] = []
+    input_columns: list[str] = Field(default_factory=list)
     input_column: str | None = None  # legacy — promoted into input_columns
     output_column: str = 'ai_result'
     prompt_template: str = 'Classify this text: {{text}}'
     batch_size: int = 10
     endpoint_url: str | None = None
     api_key: str | None = None
-    request_options: dict | None = None
+    request_options: dict[str, object] | None = None
 
     @field_validator('request_options', mode='before')
     @classmethod
-    def _parse_options(cls, v: str | dict | None) -> dict | None:
+    def _parse_options(cls, v: str | dict[str, object] | None) -> dict[str, object] | None:
         return parse_request_options(v)
 
     @model_validator(mode='after')

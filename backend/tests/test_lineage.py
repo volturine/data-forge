@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
 from modules.datasource.models import DataSource
 
 
@@ -11,7 +11,7 @@ def _create_analysis(analysis_id: str, name: str) -> Analysis:
         name=name,
         description=None,
         pipeline_definition={'steps': [], 'tabs': []},
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=now,
         updated_at=now,
     )

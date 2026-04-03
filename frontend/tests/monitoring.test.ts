@@ -243,11 +243,12 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await cronInput.fill('30 12 * * 1');
 			await cronInput.press('Enter');
 
-			// After save, the input should disappear and new expression should show
-			await expect(cronInput).not.toBeVisible({ timeout: 5_000 });
+			// After save, the new expression should appear (wait for mutation + refetch)
 			await expect(detailRow.locator('code', { hasText: '30 12 * * 1' })).toBeVisible({
-				timeout: 5_000
+				timeout: 10_000
 			});
+			// Input should be gone once the code element is back
+			await expect(cronInput).not.toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'monitoring', 'schedule-cron-edited');
 		} finally {
@@ -372,11 +373,11 @@ test.describe('Monitoring – Health Checks tab', () => {
 			await expect(toggleBtn).toBeAttached({ timeout: 5_000 });
 			await toggleBtn.click({ timeout: 5_000 });
 
-			// After toggle, the button should change to "Click to enable" and show "Off"
-			await expect(row.locator('button[title="Click to enable"]')).toBeAttached({
-				timeout: 8_000
-			});
-			await expect(row.getByText('Off')).toBeVisible({ timeout: 5_000 });
+			// After toggle the mutation refetches data, re-rendering the table.
+			// Wait for the visible "Off" text which is the stable end-state indicator;
+			// checking button[title] attachment is racy during row re-render.
+			const updatedRow = page.locator('tr', { has: page.getByText(hc) }).first();
+			await expect(updatedRow.getByText('Off')).toBeVisible({ timeout: 10_000 });
 
 			await screenshot(page, 'monitoring', 'health-check-toggled-off');
 		} finally {

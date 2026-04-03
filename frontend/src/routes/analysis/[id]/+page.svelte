@@ -28,6 +28,7 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import { isChartStep } from '$lib/components/pipeline/utils';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
 	import { hashPipeline } from '$lib/utils/hash';
@@ -290,6 +291,7 @@
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
 		enabled: !!analysisId,
+		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
 			const result = await getAnalysisWithHeaders(analysisId);
@@ -304,14 +306,13 @@
 			isDirty = false;
 			return result.value.analysis;
 		},
-		staleTime: 0,
-		refetchOnMount: 'always',
 		retry: false
 	}));
 
 	const versionsQuery = createQuery(() => ({
 		queryKey: ['analysis-versions', analysisId],
-		enabled: false,
+		enabled: showVersionModal,
+		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
 			const result = await listAnalysisVersions(analysisId);
@@ -515,7 +516,7 @@
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
-		const isChart = type === 'chart' || type.startsWith('plot_');
+		const isChart = isChartStep(type);
 		if (type === 'view') {
 			return { ...base, is_applied: true } as PipelineStep;
 		}
@@ -827,9 +828,6 @@
 	function openVersionModal() {
 		versionError = null;
 		showVersionModal = true;
-		versionsQuery.refetch().catch(() => {
-			versionError = 'Failed to load version history';
-		});
 	}
 
 	function closeVersionModal() {
@@ -1276,6 +1274,13 @@
 							onclick={handleSave}
 							disabled={isSaving || analysisStore.loading || lockedByOther}
 							type="button"
+							data-save-state={lockedByOther
+								? 'locked'
+								: isSaving
+									? 'saving'
+									: isDirty
+										? 'dirty'
+										: 'clean'}
 						>
 							{lockedByOther ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
 						</button>
@@ -1749,7 +1754,9 @@
 				gap: '2'
 			})}
 		>
-			<button class={button({ variant: 'secondary' })} onclick={closeVersionModal}>Close</button>
+			<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button"
+				>Close</button
+			>
 		</div>
 	</div>
 {/if}

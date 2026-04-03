@@ -1,8 +1,39 @@
 import type { Schema } from './schema';
+import type { PipelineStepType } from './pipeline-step';
+
+export interface AnalysisTabTimeTravelUIConfig {
+	open?: boolean;
+	month?: string;
+	day?: string;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabDatasourceConfig {
+	branch: string;
+	time_travel_snapshot_id?: string | null;
+	time_travel_snapshot_timestamp_ms?: number | null;
+	time_travel_ui?: AnalysisTabTimeTravelUIConfig;
+	snapshot_id?: string | null;
+	snapshot_timestamp_ms?: number | null;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabIcebergConfig {
+	namespace?: string;
+	table_name?: string;
+	branch?: string;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabNotificationConfig {
+	method?: string;
+	body_template?: string;
+	[key: string]: unknown;
+}
 
 export interface PipelineStep {
 	id: string;
-	type: string;
+	type: PipelineStepType;
 	config: Record<string, unknown>;
 	depends_on?: string[];
 	is_applied?: boolean;
@@ -13,7 +44,7 @@ export interface PipelineStep {
 export interface AnalysisTabDatasource {
 	id: string;
 	analysis_tab_id: string | null;
-	config: { branch: string } & Record<string, unknown>;
+	config: AnalysisTabDatasourceConfig;
 }
 
 export interface AnalysisTabOutput {
@@ -21,7 +52,8 @@ export interface AnalysisTabOutput {
 	format: string;
 	filename: string;
 	build_mode?: string;
-	iceberg?: Record<string, unknown>;
+	iceberg?: AnalysisTabIcebergConfig;
+	notification?: AnalysisTabNotificationConfig | null;
 	[key: string]: unknown;
 }
 

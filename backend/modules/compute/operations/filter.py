@@ -1,10 +1,11 @@
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import polars as pl
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
@@ -29,7 +30,60 @@ def _parse_datetime_string(s: str) -> datetime:
     )
 
 
-ValueType = Literal['string', 'number', 'date', 'datetime', 'column', 'boolean']
+class FilterValueType(StrEnum):
+    STRING = 'string'
+    NUMBER = 'number'
+    DATE = 'date'
+    DATETIME = 'datetime'
+    COLUMN = 'column'
+    BOOLEAN = 'boolean'
+
+
+NULL_CHECK_OPERATORS = frozenset({'is_null', 'is_not_null'})
+
+
+def _normalize_text_field(value: Any) -> str:
+    if not isinstance(value, str):
+        return ''
+    return value.strip()
+
+
+def normalize_filter_conditions(conditions: list[Any] | None) -> list[Any]:
+    if not conditions:
+        return []
+
+    normalized: list[Any] = []
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            normalized.append(condition)
+            continue
+
+        column = _normalize_text_field(condition.get('column'))
+        if not column:
+            continue
+
+        operator = condition.get('operator') or '='
+        value_type = condition.get('value_type', FilterValueType.STRING.value)
+        item: dict[str, Any] = {
+            'column': column,
+            'operator': operator,
+            'value': condition.get('value'),
+            'value_type': value_type,
+        }
+
+        if operator in NULL_CHECK_OPERATORS:
+            normalized.append(item)
+            continue
+
+        compare_column = _normalize_text_field(condition.get('compare_column'))
+        if value_type == FilterValueType.COLUMN and not compare_column:
+            continue
+        if compare_column:
+            item['compare_column'] = compare_column
+
+        normalized.append(item)
+
+    return normalized
 
 
 class FilterCondition(BaseModel):
@@ -38,26 +92,33 @@ class FilterCondition(BaseModel):
     column: str
     operator: str = '=='
     value: Any | list[Any] | None = None
-    value_type: ValueType = 'string'
+    value_type: FilterValueType = FilterValueType.STRING
     compare_column: str | None = None
 
     @model_validator(mode='after')
     def validate_condition(self) -> 'FilterCondition':
-        if self.operator in ('is_null', 'is_not_null'):
+        if self.operator in NULL_CHECK_OPERATORS:
             return self
-        if self.value_type == 'column' and not self.compare_column:
+        if self.value_type == FilterValueType.COLUMN and not self.compare_column:
             raise ValueError('compare_column required when value_type is column')
-        if self.value_type != 'column' and self.value is None:
+        if self.value_type != FilterValueType.COLUMN and self.value is None:
             raise ValueError('value required for non-column comparisons')
         return self
 
 
 class FilterParams(OperationParams):
-    conditions: list[FilterCondition]
+    conditions: list[FilterCondition] = Field(default_factory=list)
     logic: str = 'AND'
 
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_conditions(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        return {**data, 'conditions': normalize_filter_conditions(data.get('conditions'))}
 
-def coerce_value(value: Any, value_type: ValueType) -> Any:
+
+def coerce_value(value: Any, value_type: FilterValueType) -> Any:
     """Coerce value to the appropriate Python/Polars type."""
     if value is None:
         return None
@@ -65,7 +126,7 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
     if isinstance(value, list):
         return [coerce_value(item, value_type) for item in value]
 
-    if value_type == 'number':
+    if value_type == FilterValueType.NUMBER:
         if isinstance(value, (int, float)):
             return value
         s = str(value)
@@ -74,17 +135,17 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
             return int(parsed)
         return parsed
 
-    if value_type == 'boolean':
+    if value_type == FilterValueType.BOOLEAN:
         if isinstance(value, bool):
             return value
         return str(value).lower() in ('true', '1', 'yes')
 
-    if value_type == 'date':
+    if value_type == FilterValueType.DATE:
         if isinstance(value, datetime):
             return value.date()
         return _parse_datetime_string(str(value)).date()
 
-    if value_type == 'datetime':
+    if value_type == FilterValueType.DATETIME:
         dt = value if isinstance(value, datetime) else _parse_datetime_string(str(value))
         if not dt.tzinfo and not settings.normalize_tz:
             return dt
@@ -132,6 +193,9 @@ class FilterHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = FilterParams.model_validate(params)
+        if not validated.conditions:
+            return lf
+
         schema = lf.collect_schema()
 
         exprs = [self._build_expr(cond, schema) for cond in validated.conditions]
@@ -151,7 +215,7 @@ class FilterHandler(OperationHandler):
         if cond.operator in ('is_null', 'is_not_null'):
             return get_operator(cond.operator)(left, None)
 
-        if cond.value_type == 'column':
+        if cond.value_type == FilterValueType.COLUMN:
             op = self.COLUMN_OPERATORS.get(cond.operator)
             if not op:
                 raise ValueError(f'Operator {cond.operator} not supported for column comparison')
@@ -166,7 +230,7 @@ class FilterHandler(OperationHandler):
         is_datetime_col = isinstance(col_dtype, pl.Datetime)
 
         if is_date_only and is_datetime_col and cond.value_type == 'datetime':
-            return get_operator(cond.operator)(pl.col(cond.column).dt.date(), coerce_value(cond.value, 'date'))
+            return get_operator(cond.operator)(pl.col(cond.column).dt.date(), coerce_value(cond.value, FilterValueType.DATE))
 
         coerced = coerce_value(cond.value, cond.value_type)
         op = get_operator(cond.operator)

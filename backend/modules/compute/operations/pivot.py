@@ -1,19 +1,56 @@
-from typing import Literal
+from enum import StrEnum
 
 import polars as pl
 
 from modules.compute.core.base import OperationHandler, OperationParams
 
 
+class PivotAggregateFunction(StrEnum):
+    FIRST = 'first'
+    LAST = 'last'
+    SUM = 'sum'
+    MEAN = 'mean'
+    MEDIAN = 'median'
+    MIN = 'min'
+    MAX = 'max'
+    COUNT = 'count'
+
+
 class PivotParams(OperationParams):
     index: list[str]
     columns: str
     values: str | None = None
-    aggregate_function: Literal['first', 'last', 'sum', 'mean', 'median', 'min', 'max', 'count'] = 'first'
+    aggregate_function: PivotAggregateFunction = PivotAggregateFunction.FIRST
     on_columns: list[str] | None = None
 
 
 class PivotHandler(OperationHandler):
+    @staticmethod
+    def _pivot_with_aggregate(
+        lf: pl.LazyFrame,
+        *,
+        pivot_column: str,
+        on_columns: list[str],
+        index: list[str],
+        values: str | None,
+        aggregate_function: PivotAggregateFunction,
+    ) -> pl.LazyFrame:
+        if aggregate_function == PivotAggregateFunction.COUNT:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='len', values=values)
+        if aggregate_function == PivotAggregateFunction.FIRST:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='first', values=values)
+        if aggregate_function == PivotAggregateFunction.LAST:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='last', values=values)
+        if aggregate_function == PivotAggregateFunction.SUM:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='sum', values=values)
+        if aggregate_function == PivotAggregateFunction.MEAN:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='mean', values=values)
+        if aggregate_function == PivotAggregateFunction.MEDIAN:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='median', values=values)
+        if aggregate_function == PivotAggregateFunction.MIN:
+            return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='min', values=values)
+        return lf.pivot(on=pivot_column, on_columns=on_columns, index=index, aggregate_function='max', values=values)
+
     def __call__(
         self,
         lf: pl.LazyFrame,
@@ -34,11 +71,11 @@ class PivotHandler(OperationHandler):
         if not on_columns:
             on_columns = lf.select(validated.columns).collect().to_series().unique().sort().to_list()
 
-        agg = None if validated.aggregate_function == 'count' else validated.aggregate_function
-        return lf.pivot(
-            on=validated.columns,
+        return self._pivot_with_aggregate(
+            lf,
+            pivot_column=validated.columns,
             on_columns=on_columns,
             index=validated.index,
-            aggregate_function=agg,
             values=validated.values,
+            aggregate_function=validated.aggregate_function,
         )

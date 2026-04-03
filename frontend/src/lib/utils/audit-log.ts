@@ -268,6 +268,10 @@ export function installAuditListeners(): (() => void) | undefined {
 	window.addEventListener('beforeunload', flush);
 
 	return () => {
+		if (state.timer !== null) {
+			clearTimeout(state.timer);
+			state.timer = null;
+		}
 		window.removeEventListener('click', onClick, { capture: true });
 		window.removeEventListener('submit', onSubmit, { capture: true });
 		window.removeEventListener('change', onChange, { capture: true });

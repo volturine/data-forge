@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
+from modules.compute.schemas import BuildStatus
 from modules.compute.service import _build_subscriber_message, _resolve_build_status
 from modules.datasource.models import DataSource
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
@@ -249,7 +250,7 @@ class TestRunHealthchecks:
 class TestResolveBuildStatus:
     def test_no_results(self):
         status, summary, details = _resolve_build_status([])
-        assert status == 'success'
+        assert status is BuildStatus.SUCCESS
         assert summary is None
         assert details is None
 
@@ -259,7 +260,7 @@ class TestResolveBuildStatus:
             HealthCheckResult(id='r2', healthcheck_id='c2', passed=True, message='ok', details={}, checked_at=datetime.now(UTC)),
         ]
         status, summary, details = _resolve_build_status(results)
-        assert status == 'success'
+        assert status is BuildStatus.SUCCESS
         assert summary == '2/2 passed'
         assert details is None
 
@@ -269,7 +270,7 @@ class TestResolveBuildStatus:
             HealthCheckResult(id='r2', healthcheck_id='c2', passed=False, message='bad', details={}, checked_at=datetime.now(UTC)),
         ]
         status, summary, details = _resolve_build_status(results)
-        assert status == 'warning'
+        assert status is BuildStatus.WARNING
         assert summary == '1/2 failed'
         assert details is not None
         assert len(details) == 2
@@ -289,7 +290,7 @@ class TestResolveBuildStatus:
             HealthCheckResult(id='r1', healthcheck_id='c1', passed=False, message='bad', details={}, checked_at=datetime.now(UTC)),
         ]
         status, summary, details = _resolve_build_status(results, [check])
-        assert status == 'warning'
+        assert status is BuildStatus.WARNING
         assert summary == '1/1 failed'
         assert details is not None
 
@@ -309,15 +310,15 @@ class TestResolveBuildStatus:
         ]
         _, _, details = _resolve_build_status(results, [check])
         assert details is not None
-        assert details[0]['name'] == 'Row Guard'
-        assert details[0]['critical'] is False
+        assert details[0].name == 'Row Guard'
+        assert details[0].critical is False
 
 
 class TestBuildSubscriberMessage:
     def test_no_healthchecks(self):
         msg = _build_subscriber_message(
             {
-                'status': 'success',
+                'status': BuildStatus.SUCCESS,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
@@ -332,7 +333,7 @@ class TestBuildSubscriberMessage:
     def test_all_pass(self):
         msg = _build_subscriber_message(
             {
-                'status': 'success',
+                'status': BuildStatus.SUCCESS,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
@@ -346,7 +347,7 @@ class TestBuildSubscriberMessage:
     def test_some_fail(self):
         msg = _build_subscriber_message(
             {
-                'status': 'warning',
+                'status': BuildStatus.WARNING,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
@@ -364,7 +365,7 @@ class TestBuildSubscriberMessage:
         details = [{'name': f'check-{i}', 'passed': False, 'message': 'bad'} for i in range(300)]
         msg = _build_subscriber_message(
             {
-                'status': 'warning',
+                'status': BuildStatus.WARNING,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
