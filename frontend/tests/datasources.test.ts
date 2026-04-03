@@ -4,6 +4,7 @@ import { createDatasource, createLargeDatasource, API_BASE } from './utils/api.j
 import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+import { selectDatasourceAndWaitForConfig, openSchemaTabAndWait } from './utils/readiness.js';
 
 async function waitForDatasourceCreateRun(
 	request: APIRequestContext,
@@ -136,7 +137,7 @@ test.describe('Datasources – list & management', () => {
 		await expect(dialog.getByRole('heading', { name: /Delete Datasource/i })).toBeVisible();
 		await dialog.getByRole('button', { name: /^Delete$/ }).click();
 
-		await expect(page.getByText(ds)).not.toBeVisible({ timeout: 8_000 });
+		await expect(row).not.toBeVisible({ timeout: 8_000 });
 	});
 
 	test('Show/Hide hidden datasources toggle is visible', async ({ page }) => {
@@ -222,13 +223,10 @@ test.describe('Datasources – detail view', () => {
 
 	test('Schema tab shows actual column names from CSV', async ({ page }) => {
 		await page.goto('/datasources');
-		await page.locator(`[data-ds-row="${ds}"]`).click();
+		await selectDatasourceAndWaitForConfig(page, ds);
+		await openSchemaTabAndWait(page);
 
 		const config = page.locator('[data-ds-config]');
-		await expect(config).toBeVisible({ timeout: 8_000 });
-
-		await config.getByRole('tab', { name: 'Schema' }).click();
-
 		await expect(config.locator('[data-schema-column="id"]')).toBeVisible({ timeout: 10_000 });
 		await expect(config.locator('[data-schema-column="name"]')).toBeVisible();
 		await expect(config.locator('[data-schema-column="age"]')).toBeVisible();

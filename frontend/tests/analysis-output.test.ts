@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
+import { waitForLayoutReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
@@ -44,9 +46,8 @@ test.describe('Analyses – output node interactions', () => {
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
 
 			// Build button should be visible
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
@@ -81,9 +82,8 @@ test.describe('Analyses – output node interactions', () => {
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
 
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
 			await expect(modeTrigger).toBeVisible({ timeout: 10_000 });
@@ -126,9 +126,8 @@ test.describe('Analyses – output node interactions', () => {
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
 
 			// All section toggles should be visible
 			const notifyToggle = page.locator('[data-testid="output-notify-toggle"]');
@@ -177,9 +176,8 @@ test.describe('Analyses – output node interactions', () => {
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
 
 			// Click the edit pencil button (aria-label="Edit export name")
 			const editBtn = page.locator('[aria-label="Edit export name"]').first();
@@ -215,8 +213,7 @@ test.describe('Analyses – output node table name edit', () => {
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 15_000 });
+			await gotoAnalysisEditor(page, aId);
 
 			const editBtn = page.locator('button[aria-label="Edit export name"]').first();
 			await expect(editBtn).toBeVisible({ timeout: 5_000 });
@@ -250,9 +247,8 @@ test.describe('Analyses – output node persistence', () => {
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
 
 			const modeTrigger = page.locator('[data-testid="output-mode-trigger"]');
 			await expect(modeTrigger).toBeVisible({ timeout: 10_000 });
@@ -270,9 +266,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Reload and verify mode persisted
 			await page.reload();
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForEditorReload(page);
 
 			const modeTriggerAfter = page.locator('[data-testid="output-mode-trigger"]');
 			await expect(modeTriggerAfter).toBeVisible({ timeout: 10_000 });
@@ -293,9 +287,8 @@ test.describe('Analyses – output node persistence', () => {
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
 
 			// Edit the table name
 			const editBtn = page.locator('[aria-label="Edit export name"]').first();
@@ -316,9 +309,7 @@ test.describe('Analyses – output node persistence', () => {
 
 			// Reload and verify table name persisted
 			await page.reload();
-			await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-				timeout: 15_000
-			});
+			await waitForEditorReload(page);
 			await expect(page.getByText('persisted_table').first()).toBeVisible({ timeout: 10_000 });
 
 			await screenshot(page, 'analysis/output', 'output-tablename-persisted');
@@ -433,8 +424,7 @@ test.describe('Analyses – row count action', () => {
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('[data-step-type="view"]')).toBeVisible({ timeout: 15_000 });
+			await gotoAnalysisEditor(page, aId);
 
 			const viewNode = page.locator('[data-step-type="view"]').first();
 			const countBtn = viewNode.locator('[data-action="count-rows"]');
@@ -500,8 +490,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('button[data-step="filter"]')).toBeVisible({ timeout: 15_000 });
+			await gotoAnalysisEditor(page, aId);
 
 			await page.locator('button[data-step="filter"]').click();
 			const filterNode = page.locator('[data-step-type="filter"]').first();
@@ -549,8 +538,7 @@ test.describe('Analyses – row count on non-view steps', () => {
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto(`/analysis/${aId}`);
-			await expect(page.locator('button[data-step="limit"]')).toBeVisible({ timeout: 15_000 });
+			await gotoAnalysisEditor(page, aId);
 
 			await page.locator('button[data-step="limit"]').click();
 			const limitNode = page.locator('[data-step-type="limit"]').first();
@@ -568,8 +556,13 @@ test.describe('Analyses – row count on non-view steps', () => {
 
 			// Click count-rows on the limit node
 			const countBtn = limitNode.locator('[data-action="count-rows"]');
-			await expect(countBtn).toBeVisible();
+			await expect(countBtn).toBeVisible({ timeout: 5_000 });
 			await countBtn.click();
+
+			// Wait for loading spinner to disappear before asserting badge
+			await expect(limitNode.locator('[data-action="count-rows"]')).not.toBeVisible({
+				timeout: 15_000
+			});
 
 			await expect(limitNode.locator('[data-testid="step-row-count"]')).toBeVisible({
 				timeout: 15_000

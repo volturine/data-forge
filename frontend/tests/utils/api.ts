@@ -1,9 +1,68 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 
 const apiPort = process.env.PORT || '8000';
 export const API_BASE = `http://localhost:${apiPort}/api/v1`;
 export const AUTH_FILE = path.resolve('tests/.auth/state.json');
+
+export const E2E_EMAIL = 'e2e-test@example.com';
+export const E2E_PASSWORD = 'E2eTestPw12345';
+export const E2E_DISPLAY_NAME = 'E2E Test';
+
+// ── Auth helpers (shared by global-setup / global-teardown) ───────────────────
+
+export function readStoredSessionToken(): string | undefined {
+	try {
+		const raw = fs.readFileSync(AUTH_FILE, 'utf-8');
+		const state = JSON.parse(raw) as { cookies?: Array<{ name: string; value: string }> };
+		return state.cookies?.find((c) => c.name === 'session_token')?.value;
+	} catch {
+		return undefined;
+	}
+}
+
+export type DeleteOutcome = 'deleted' | 'unauthenticated' | 'forbidden' | 'error';
+export type LoginResult =
+	| { status: 'ok'; token: string }
+	| { status: 'invalid_credentials' }
+	| { status: 'error'; code: number };
+
+export function parseSessionToken(response: Response): string | undefined {
+	const raw = response.headers.getSetCookie?.();
+	const entries = raw ?? [response.headers.get('set-cookie') ?? ''];
+	for (const entry of entries) {
+		const match = entry.match(/session_token=([^;]+)/);
+		if (match) return match[1];
+	}
+	return undefined;
+}
+
+export async function deleteAccount(token: string): Promise<DeleteOutcome> {
+	const resp = await fetch(`${API_BASE}/auth/account`, {
+		method: 'DELETE',
+		headers: { Cookie: `session_token=${token}` }
+	});
+	if (resp.status === 200) return 'deleted';
+	if (resp.status === 401) return 'unauthenticated';
+	if (resp.status === 403) return 'forbidden';
+	return 'error';
+}
+
+export async function login(): Promise<LoginResult> {
+	const resp = await fetch(`${API_BASE}/auth/login`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email: E2E_EMAIL, password: E2E_PASSWORD })
+	});
+	if (resp.ok) {
+		const token = parseSessionToken(resp);
+		if (!token) return { status: 'error', code: resp.status };
+		return { status: 'ok', token };
+	}
+	if (resp.status === 401) return { status: 'invalid_credentials' };
+	return { status: 'error', code: resp.status };
+}
 
 const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n';
 

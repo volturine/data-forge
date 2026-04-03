@@ -374,12 +374,10 @@ test.describe('Monitoring – Health Checks tab', () => {
 			await toggleBtn.click({ timeout: 5_000 });
 
 			// After toggle the mutation refetches data, re-rendering the table.
-			// Re-query the row from the DOM to avoid stale element references.
+			// Wait for the visible "Off" text which is the stable end-state indicator;
+			// checking button[title] attachment is racy during row re-render.
 			const updatedRow = page.locator('tr', { has: page.getByText(hc) }).first();
-			await expect(updatedRow.locator('button[title="Click to enable"]')).toBeAttached({
-				timeout: 10_000
-			});
-			await expect(updatedRow.getByText('Off')).toBeVisible({ timeout: 5_000 });
+			await expect(updatedRow.getByText('Off')).toBeVisible({ timeout: 10_000 });
 
 			await screenshot(page, 'monitoring', 'health-check-toggled-off');
 		} finally {

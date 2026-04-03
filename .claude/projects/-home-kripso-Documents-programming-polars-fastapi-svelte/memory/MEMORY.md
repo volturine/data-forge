@@ -1,0 +1,1 @@
+- [Prefer dicts over lists of tuples](feedback_prefer_dicts.md) — use dict/dataclass for named mappings, not list[tuple]

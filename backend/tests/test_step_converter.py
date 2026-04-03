@@ -1,4 +1,4 @@
-from modules.compute.step_converter import convert_groupby_config, convert_rename_config
+from modules.compute.step_converter import convert_filter_config, convert_groupby_config, convert_rename_config
 
 
 def test_convert_groupby_config_prefers_group_by() -> None:
@@ -30,3 +30,55 @@ def test_convert_rename_config_accepts_column_mapping_and_mapping() -> None:
 
     assert by_column_mapping == {'mapping': {'old': 'new'}}
     assert by_mapping == {'mapping': {'old': 'new'}}
+
+
+def test_convert_filter_config_ignores_blank_placeholder_conditions() -> None:
+    result = convert_filter_config(
+        {
+            'conditions': [
+                {
+                    'column': '',
+                    'operator': '=',
+                    'value': '',
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        }
+    )
+
+    assert result == {'conditions': [], 'logic': 'AND'}
+
+
+def test_convert_filter_config_keeps_valid_conditions_when_placeholders_present() -> None:
+    result = convert_filter_config(
+        {
+            'conditions': [
+                {
+                    'column': '',
+                    'operator': '=',
+                    'value': '',
+                    'value_type': 'string',
+                },
+                {
+                    'column': 'age',
+                    'operator': '>',
+                    'value': 30,
+                    'value_type': 'number',
+                },
+            ],
+            'logic': 'AND',
+        }
+    )
+
+    assert result == {
+        'conditions': [
+            {
+                'column': 'age',
+                'operator': '>',
+                'value': 30,
+                'value_type': 'number',
+            }
+        ],
+        'logic': 'AND',
+    }

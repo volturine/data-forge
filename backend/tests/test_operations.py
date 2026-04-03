@@ -185,6 +185,54 @@ def test_filter_handler_empty_regex():
     assert lf.collect().height == 0
 
 
+def test_filter_handler_placeholder_conditions_are_noop() -> None:
+    handler = FilterHandler()
+
+    result = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': '',
+                    'operator': '=',
+                    'value': '',
+                    'value_type': 'string',
+                }
+            ],
+            'logic': 'AND',
+        },
+    ).collect()
+
+    assert result['name'].to_list() == ['Alice', 'Bob', 'Charlie']
+
+
+def test_filter_handler_ignores_placeholder_conditions_when_valid_ones_exist() -> None:
+    handler = FilterHandler()
+
+    result = handler(
+        _frame(),
+        {
+            'conditions': [
+                {
+                    'column': '',
+                    'operator': '=',
+                    'value': '',
+                    'value_type': 'string',
+                },
+                {
+                    'column': 'age',
+                    'operator': '>',
+                    'value': 30,
+                    'value_type': 'number',
+                },
+            ],
+            'logic': 'AND',
+        },
+    ).collect()
+
+    assert result['name'].to_list() == ['Charlie']
+
+
 def test_groupby_handler():
     handler = GroupByHandler()
     lf = handler(

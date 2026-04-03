@@ -1,4 +1,5 @@
 import type { Browser, Page } from '@playwright/test';
+import { waitForDatasourceList, waitForUdfList } from './readiness.js';
 
 /**
  * UI-based cleanup helpers. Each function navigates to the relevant page,
@@ -36,8 +37,22 @@ export async function createCleanupPage(browser: Browser) {
 export async function deleteDatasourceViaUI(page: Page, name: string): Promise<void> {
 	try {
 		await page.goto('/datasources', { waitUntil: 'domcontentloaded' });
+		await waitForDatasourceList(page, ELEMENT_VISIBLE_TIMEOUT);
+
 		const row = page.locator(`[data-ds-row="${name}"]`);
-		await row.waitFor({ state: 'visible', timeout: ELEMENT_VISIBLE_TIMEOUT });
+
+		// If the row isn't visible, enable show-hidden toggle (datasource may be auto-generated)
+		if (!(await row.isVisible())) {
+			const toggle = page.locator('button[title="Show auto-generated datasources"]');
+			if (await toggle.isVisible()) {
+				await toggle.click();
+				await waitForDatasourceList(page, ELEMENT_VISIBLE_TIMEOUT);
+			}
+		}
+
+		// If still not visible after toggling, the datasource is genuinely absent
+		if (!(await row.isVisible())) return;
+
 		await row.locator('button[title="Delete"]').click();
 		const dialog = page.getByRole('dialog');
 		await dialog.getByRole('button', { name: /^Delete$/ }).click();
@@ -81,8 +96,9 @@ export async function deleteAnalysisViaUI(
 export async function deleteUdfViaUI(page: Page, name: string): Promise<void> {
 	try {
 		await page.goto('/udfs', { waitUntil: 'domcontentloaded' });
+		await waitForUdfList(page, ELEMENT_VISIBLE_TIMEOUT);
 		const card = page.locator(`[data-udf-card="${name}"]`).first();
-		await card.waitFor({ state: 'visible', timeout: ELEMENT_VISIBLE_TIMEOUT });
+		if (!(await card.isVisible())) return;
 		await card.getByRole('button', { name: /^Delete$/i }).click();
 		await card.getByRole('button', { name: /Confirm/i }).click();
 		// Don't wait for card hidden — TanStack Query cache invalidation may

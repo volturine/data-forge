@@ -68,7 +68,7 @@
 	}
 
 	const listQuery = createQuery(() => ({
-		queryKey: ['healthchecks', datasourceId ?? 'all', datasourcesQuery.data?.length ?? 0],
+		queryKey: ['healthchecks', datasourceId ?? 'all'],
 		queryFn: async (): Promise<HealthCheckItem[]> => {
 			if (datasourceId) {
 				const result = await listHealthChecks(datasourceId);
@@ -96,7 +96,7 @@
 	}));
 
 	const resultsQuery = createQuery(() => ({
-		queryKey: ['healthcheck-results', datasourceId ?? 'all', datasourcesQuery.data?.length ?? 0],
+		queryKey: ['healthcheck-results', datasourceId ?? 'all'],
 		queryFn: async () => {
 			if (datasourceId) {
 				const result = await listHealthCheckResults(datasourceId, 50);
@@ -149,7 +149,24 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		onSuccess: () => {
+		onMutate: async (payload) => {
+			await queryClient.cancelQueries({ queryKey: ['healthchecks'] });
+			const listKey = ['healthchecks', datasourceId ?? 'all'];
+			const previous = queryClient.getQueryData<HealthCheckItem[]>(listKey);
+			if (previous) {
+				queryClient.setQueryData<HealthCheckItem[]>(
+					listKey,
+					previous.map((c) => (c.id === payload.id ? { ...c, ...payload.update } : c))
+				);
+			}
+			return { previous, listKey };
+		},
+		onError: (_err, _payload, context) => {
+			if (context?.previous) {
+				queryClient.setQueryData(context.listKey, context.previous);
+			}
+		},
+		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: ['healthchecks'] });
 			queryClient.invalidateQueries({ queryKey: ['healthcheck-results'] });
 		}

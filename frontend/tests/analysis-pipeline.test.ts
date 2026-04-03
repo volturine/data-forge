@@ -13,33 +13,58 @@ import { screenshot } from './utils/visual.js';
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────────
 
+interface PipelineStep {
+	id: string;
+	type: string;
+	config: Record<string, unknown>;
+	depends_on: string[];
+	is_applied: boolean;
+}
+
+interface PipelineAnalysisResult {
+	analysisId: string;
+	viewStepId: string;
+	tabId: string;
+	resultId: string;
+	dsId: string;
+	steps: PipelineStep[];
+}
+
 /**
  * Create an analysis with pre-configured steps via API.
  * A view step is always appended so the inline preview auto-triggers.
+ * Returns enough info to call `fetchPreviewViaAPI` without re-fetching
+ * the analysis.
  */
 async function createPipelineAnalysis(
 	request: APIRequestContext,
 	name: string,
 	dsId: string,
 	steps: Array<{ type: string; config: Record<string, unknown> }>
-): Promise<{ analysisId: string; viewStepId: string }> {
+): Promise<PipelineAnalysisResult> {
 	const viewStepId = crypto.randomUUID();
-	const pipelineSteps = [
-		...steps.map((s) => ({
-			id: crypto.randomUUID(),
+	const tabId = crypto.randomUUID();
+	const resultId = crypto.randomUUID();
+	const pipelineSteps: PipelineStep[] = [];
+	let prevId: string | null = null;
+	for (const s of steps) {
+		const stepId = crypto.randomUUID();
+		pipelineSteps.push({
+			id: stepId,
 			type: s.type,
 			config: s.config,
-			depends_on: [] as string[],
+			depends_on: prevId ? [prevId] : [],
 			is_applied: true
-		})),
-		{
-			id: viewStepId,
-			type: 'view',
-			config: {},
-			depends_on: [] as string[],
-			is_applied: true
-		}
-	];
+		});
+		prevId = stepId;
+	}
+	pipelineSteps.push({
+		id: viewStepId,
+		type: 'view',
+		config: {},
+		depends_on: prevId ? [prevId] : [],
+		is_applied: true
+	});
 
 	const response = await request.post(`${API_BASE}/analysis`, {
 		data: {
@@ -47,7 +72,7 @@ async function createPipelineAnalysis(
 			description: null,
 			tabs: [
 				{
-					id: crypto.randomUUID(),
+					id: tabId,
 					name: 'Source 1',
 					parent_id: null,
 					datasource: {
@@ -56,7 +81,7 @@ async function createPipelineAnalysis(
 						config: { branch: 'master' }
 					},
 					output: {
-						result_id: crypto.randomUUID(),
+						result_id: resultId,
 						datasource_type: 'iceberg',
 						format: 'parquet',
 						filename: 'source_1'
@@ -70,7 +95,7 @@ async function createPipelineAnalysis(
 		throw new Error(`createPipelineAnalysis: ${response.status()} ${await response.text()}`);
 	}
 	const created = (await response.json()) as { id: string };
-	return { analysisId: created.id, viewStepId };
+	return { analysisId: created.id, viewStepId, tabId, resultId, dsId, steps: pipelineSteps };
 }
 
 interface PreviewData {
@@ -82,54 +107,102 @@ interface PreviewData {
 }
 
 /**
- * Navigate to an analysis page and return the first successful preview response.
- * Response interception is set up *before* navigation to catch the auto-triggered preview.
+ * Fetch preview data deterministically via the HTTP API.
+ *
+ * Builds the same pipeline payload the browser would send, but calls
+ * `/compute/preview` directly through Playwright's `APIRequestContext`.
+ * No browser network interception, no WebSocket race — fully deterministic.
+ *
+ * `extraDsIds` — additional datasource IDs referenced by steps (e.g. join
+ * right_source, union sources) that need to be included in the sources map.
  */
-async function leaveAnalysisPage(page: Page): Promise<void> {
-	await page.goto('/');
-	await expect(page).toHaveURL('/');
+async function fetchPreviewViaAPI(
+	request: APIRequestContext,
+	info: PipelineAnalysisResult,
+	targetStepId: string,
+	extraDsIds: string[] = []
+): Promise<PreviewData> {
+	const allDsIds = [info.dsId, ...extraDsIds.filter((id) => id !== info.dsId)];
+
+	const sources: Record<string, Record<string, unknown>> = {
+		[info.resultId]: {
+			source_type: 'analysis',
+			analysis_id: info.analysisId,
+			analysis_tab_id: info.tabId
+		}
+	};
+
+	for (const id of allDsIds) {
+		const dsResp = await request.get(`${API_BASE}/datasource/${id}`);
+		if (!dsResp.ok()) {
+			throw new Error(
+				`fetchPreviewViaAPI: datasource GET ${id} ${dsResp.status()} ${await dsResp.text()}`
+			);
+		}
+		const ds = (await dsResp.json()) as {
+			id: string;
+			source_type: string;
+			config: Record<string, unknown>;
+		};
+		sources[ds.id] = { source_type: ds.source_type, ...ds.config };
+	}
+
+	const previewResp = await request.post(`${API_BASE}/compute/preview`, {
+		data: {
+			analysis_id: info.analysisId,
+			target_step_id: targetStepId,
+			analysis_pipeline: {
+				analysis_id: info.analysisId,
+				tabs: [
+					{
+						id: info.tabId,
+						name: 'Source 1',
+						datasource: {
+							id: info.dsId,
+							analysis_tab_id: null,
+							config: { branch: 'master' }
+						},
+						output: {
+							result_id: info.resultId,
+							format: 'parquet',
+							filename: 'source_1'
+						},
+						steps: info.steps
+					}
+				],
+				sources
+			}
+		}
+	});
+	if (!previewResp.ok()) {
+		throw new Error(
+			`fetchPreviewViaAPI: preview POST ${previewResp.status()} ${await previewResp.text()}`
+		);
+	}
+	return (await previewResp.json()) as PreviewData;
 }
 
-async function navigateAndGetPreview(
-	page: Page,
-	analysisId: string,
-	expectedStepId: string
-): Promise<PreviewData> {
-	const timeoutMs = 45_000;
-	const deadline = Date.now() + timeoutMs;
-	let lastFailure: string | null = null;
+/**
+ * Navigate away from the analysis page. Safe to call if the page is
+ * already closed (e.g. after a timeout).
+ */
+async function leaveAnalysisPage(page: Page): Promise<void> {
+	try {
+		if (page.isClosed()) return;
+		await page.goto('/');
+		await expect(page).toHaveURL('/');
+	} catch {
+		// Page may have been torn down by a timeout — swallow to avoid masking the real error.
+	}
+}
 
-	const previewPromise = (async () => {
-		while (true) {
-			const remaining = deadline - Date.now();
-			if (remaining <= 0) {
-				throw new Error(
-					lastFailure
-						? `Preview did not return 200 within ${timeoutMs}ms. Last preview failure: ${lastFailure}`
-						: `Timed out waiting for preview response within ${timeoutMs}ms.`
-				);
-			}
-
-			const resp = await page.waitForResponse(
-				(r) => r.url().includes('/api/v1/compute/preview') && r.request().method() === 'POST',
-				{ timeout: remaining }
-			);
-
-			const raw = await resp.text();
-			const parsed = JSON.parse(raw) as PreviewData;
-
-			if (resp.status() === 200) {
-				if (parsed.step_id === expectedStepId) return parsed;
-				lastFailure = `Received preview for unexpected step ${parsed.step_id ?? 'unknown'}, expected ${expectedStepId}`;
-				continue;
-			}
-
-			lastFailure = `${resp.status()} ${resp.statusText()}: ${raw}`;
-		}
-	})();
-
+/**
+ * Navigate to the analysis page and wait for the inline data table to render.
+ */
+async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<void> {
 	await page.goto(`/analysis/${analysisId}`);
-	return await previewPromise;
+	const table = page.locator('[data-testid="inline-data-table"]');
+	await expect(table).toBeVisible({ timeout: 30_000 });
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -168,9 +241,9 @@ test.describe('Pipeline data verification', () => {
 
 	test('view passthrough returns all original data', async ({ page, request }) => {
 		const aName = `E2E Pipe View ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, []);
+		const info = await createPipelineAnalysis(request, aName, dsId, []);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
@@ -182,8 +255,8 @@ test.describe('Pipeline data verification', () => {
 			expect(names).toContain('Charlie');
 
 			// UI: column headers rendered
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
@@ -204,7 +277,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('filter removes rows not matching condition', async ({ page, request }) => {
 		const aName = `E2E Pipe Filter ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'filter',
 				config: {
@@ -214,7 +287,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(2);
@@ -225,8 +298,8 @@ test.describe('Pipeline data verification', () => {
 			expect(names).not.toContain('Bob');
 
 			// UI: Bob should not appear in the table
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
 			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
 
@@ -239,18 +312,17 @@ test.describe('Pipeline data verification', () => {
 
 	test('limit keeps only first N rows', async ({ page, request }) => {
 		const aName = `E2E Pipe Limit ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(2);
 			expect(preview.data).toHaveLength(2);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'limit');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -261,11 +333,11 @@ test.describe('Pipeline data verification', () => {
 	test('topk returns rows with largest values', async ({ page, request }) => {
 		// descending=true → sort descending, take head(k) → 2 largest
 		const aName = `E2E Pipe TopK ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'topk', config: { column: 'age', k: 2, descending: true } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.total_rows).toBe(2);
 
@@ -277,8 +349,7 @@ test.describe('Pipeline data verification', () => {
 			// First row should be highest age (descending sort)
 			expect(preview.data[0].name).toBe('Charlie');
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'topk');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -288,11 +359,11 @@ test.describe('Pipeline data verification', () => {
 
 	test('sample with fraction 1.0 returns all rows', async ({ page, request }) => {
 		const aName = `E2E Pipe Sample ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'sample', config: { fraction: 1.0, seed: 42 } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.total_rows).toBe(3);
 			const names = preview.data.map((r) => r.name);
@@ -300,8 +371,7 @@ test.describe('Pipeline data verification', () => {
 			expect(names).toContain('Bob');
 			expect(names).toContain('Charlie');
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'sample');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -311,17 +381,16 @@ test.describe('Pipeline data verification', () => {
 
 	test('deduplicate preserves unique rows', async ({ page, request }) => {
 		const aName = `E2E Pipe Dedup ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'deduplicate', config: {} }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'deduplicate');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -333,18 +402,18 @@ test.describe('Pipeline data verification', () => {
 
 	test('select keeps only specified columns', async ({ page, request }) => {
 		const aName = `E2E Pipe Select ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'select', config: { columns: ['name', 'age'] } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['name', 'age']);
 			expect(preview.total_rows).toBe(3);
 
 			// UI: only name and age columns visible
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="id"]')).not.toBeVisible();
@@ -359,17 +428,17 @@ test.describe('Pipeline data verification', () => {
 
 	test('drop removes specified columns', async ({ page, request }) => {
 		const aName = `E2E Pipe Drop ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'drop', config: { columns: ['city'] } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age']);
 			expect(preview.total_rows).toBe(3);
 
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="city"]')).not.toBeVisible();
 			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
 
@@ -382,11 +451,11 @@ test.describe('Pipeline data verification', () => {
 
 	test('rename changes column names', async ({ page, request }) => {
 		const aName = `E2E Pipe Rename ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'rename', config: { column_mapping: { name: 'full_name' } } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toContain('full_name');
 			expect(preview.columns).not.toContain('name');
@@ -395,8 +464,8 @@ test.describe('Pipeline data verification', () => {
 			// Data still has the right values under the new column name
 			expect(preview.data.map((r) => r.full_name)).toContain('Alice');
 
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="full_name"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name"]')).not.toBeVisible();
 
@@ -411,11 +480,11 @@ test.describe('Pipeline data verification', () => {
 
 	test('sort reorders rows by column value', async ({ page, request }) => {
 		const aName = `E2E Pipe Sort ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'sort', config: { columns: ['age'], descending: [false] } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.total_rows).toBe(3);
 
@@ -424,8 +493,7 @@ test.describe('Pipeline data verification', () => {
 			expect(preview.data[1].name).toBe('Alice');
 			expect(preview.data[2].name).toBe('Charlie');
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'sort');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -435,14 +503,14 @@ test.describe('Pipeline data verification', () => {
 
 	test('expression adds computed column', async ({ page, request }) => {
 		const aName = `E2E Pipe Expr ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'expression',
 				config: { expression: 'pl.col("age") + 1', column_name: 'age_plus_one' }
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toContain('age_plus_one');
 			expect(preview.columns).toContain('age');
@@ -453,8 +521,8 @@ test.describe('Pipeline data verification', () => {
 				expect(row.age_plus_one).toBe((row.age as number) + 1);
 			}
 
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="age_plus_one"]')).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'expression');
@@ -466,7 +534,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('with_columns adds literal column', async ({ page, request }) => {
 		const aName = `E2E Pipe WithCols ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'with_columns',
 				config: {
@@ -475,7 +543,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toContain('tag');
 			expect(preview.total_rows).toBe(3);
@@ -485,8 +553,8 @@ test.describe('Pipeline data verification', () => {
 				expect(row.tag).toBe('test');
 			}
 
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="tag"]')).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'with-columns');
@@ -498,14 +566,14 @@ test.describe('Pipeline data verification', () => {
 
 	test('string_transform applies string operation', async ({ page, request }) => {
 		const aName = `E2E Pipe StrXform ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'string_transform',
 				config: { column: 'name', method: 'uppercase', new_column: 'name_upper' }
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toContain('name_upper');
 			expect(preview.total_rows).toBe(3);
@@ -515,8 +583,8 @@ test.describe('Pipeline data verification', () => {
 			expect(uppers).toContain('BOB');
 			expect(uppers).toContain('CHARLIE');
 
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.getByText('ALICE', { exact: true })).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'string-transform');
@@ -528,7 +596,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('groupby aggregates data by group', async ({ page, request }) => {
 		const aName = `E2E Pipe GroupBy ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'groupby',
 				config: {
@@ -538,7 +606,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			// 2 columns: city, total_age (original id/name dropped by groupby)
 			expect(preview.columns).toContain('city');
@@ -552,8 +620,7 @@ test.describe('Pipeline data verification', () => {
 			expect(lookup['Paris']).toBe(25);
 			expect(lookup['Berlin']).toBe(35);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'groupby');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -565,7 +632,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('unpivot converts wide format to long format', async ({ page, request }) => {
 		const aName = `E2E Pipe Unpivot ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'unpivot',
 				config: {
@@ -577,7 +644,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(expect.arrayContaining(['name', 'city', 'field', 'val']));
 			// 3 rows × 2 unpivoted columns = 6 rows
@@ -587,8 +654,7 @@ test.describe('Pipeline data verification', () => {
 			expect(fields).toContain('id');
 			expect(fields).toContain('age');
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'unpivot');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -598,7 +664,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('pivot converts long format to wide format', async ({ page, request }) => {
 		const aName = `E2E Pipe Pivot ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'pivot',
 				config: {
@@ -610,7 +676,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			// City values become column names
 			expect(preview.columns).toContain('name');
@@ -625,8 +691,7 @@ test.describe('Pipeline data verification', () => {
 			const bob = preview.data.find((r) => r.name === 'Bob');
 			expect(bob?.Paris).toBe(25);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'pivot');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -638,18 +703,17 @@ test.describe('Pipeline data verification', () => {
 
 	test('fill_null with zero strategy preserves clean data', async ({ page, request }) => {
 		const aName = `E2E Pipe FillNull ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'fill_null', config: { strategy: 'zero' } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			// No nulls in sample data → structure unchanged
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'fill-null');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -659,7 +723,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('join self-join matches rows by column', async ({ page, request }) => {
 		const aName = `E2E Pipe Join ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'join',
 				config: {
@@ -671,7 +735,7 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			// Self-join on city: each city matches once → 3 rows
 			expect(preview.total_rows).toBe(3);
@@ -686,8 +750,7 @@ test.describe('Pipeline data verification', () => {
 				expect(row.age).toBe(row.age_right);
 			}
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'join');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -699,7 +762,7 @@ test.describe('Pipeline data verification', () => {
 
 	test('chained pipeline: filter → sort → limit', async ({ page, request }) => {
 		const aName = `E2E Pipe Chain ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'filter',
 				config: {
@@ -711,7 +774,7 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			// All 3 rows match age >= 25, sorted desc: Charlie(35), Alice(30), Bob(25)
 			// Then limited to 2: Charlie, Alice
@@ -720,6 +783,7 @@ test.describe('Pipeline data verification', () => {
 			expect(preview.data[1].name).toBe('Alice');
 
 			// UI: verify the step nodes are all present on canvas
+			await navigateAndWaitForTable(page, info.analysisId);
 			await expect(page.locator('[data-step-type="filter"]')).toBeVisible();
 			await expect(page.locator('[data-step-type="sort"]')).toBeVisible();
 			await expect(page.locator('[data-step-type="limit"]')).toBeVisible();
@@ -727,7 +791,6 @@ test.describe('Pipeline data verification', () => {
 
 			// UI: verify table shows correct data
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
 			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
 
@@ -767,13 +830,29 @@ test.describe('Pipeline data – pass-through operations', () => {
 		// the original schema, so we build the pipeline without a trailing view.
 		const aName = `E2E Pipe Chart ${uid()}`;
 		const chartStepId = crypto.randomUUID();
+		const chartTabId = crypto.randomUUID();
+		const chartResultId = crypto.randomUUID();
+		const chartSteps: PipelineStep[] = [
+			{
+				id: chartStepId,
+				type: 'plot_bar',
+				config: {
+					chart_type: 'bar',
+					x_column: 'city',
+					y_column: 'age',
+					aggregation: 'sum'
+				},
+				depends_on: [],
+				is_applied: true
+			}
+		];
 		const response = await request.post(`${API_BASE}/analysis`, {
 			data: {
 				name: aName,
 				description: null,
 				tabs: [
 					{
-						id: crypto.randomUUID(),
+						id: chartTabId,
 						name: 'Source 1',
 						parent_id: null,
 						datasource: {
@@ -782,25 +861,12 @@ test.describe('Pipeline data – pass-through operations', () => {
 							config: { branch: 'master' }
 						},
 						output: {
-							result_id: crypto.randomUUID(),
+							result_id: chartResultId,
 							datasource_type: 'iceberg',
 							format: 'parquet',
 							filename: 'source_1'
 						},
-						steps: [
-							{
-								id: chartStepId,
-								type: 'plot_bar',
-								config: {
-									chart_type: 'bar',
-									x_column: 'city',
-									y_column: 'age',
-									aggregation: 'sum'
-								},
-								depends_on: [],
-								is_applied: true
-							}
-						]
+						steps: chartSteps
 					}
 				]
 			}
@@ -809,8 +875,16 @@ test.describe('Pipeline data – pass-through operations', () => {
 			throw new Error(`createPipelineAnalysis: ${response.status()} ${await response.text()}`);
 		}
 		const aId = ((await response.json()) as { id: string }).id;
+		const chartInfo: PipelineAnalysisResult = {
+			analysisId: aId,
+			viewStepId: chartStepId,
+			tabId: chartTabId,
+			resultId: chartResultId,
+			dsId,
+			steps: chartSteps
+		};
 		try {
-			const preview = await navigateAndGetPreview(page, aId, chartStepId);
+			const preview = await fetchPreviewViaAPI(request, chartInfo, chartStepId);
 
 			// Chart preview returns aggregated data with x/y columns
 			expect(preview.columns).toContain('x');
@@ -832,7 +906,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 
 	test('export passes data through unchanged', async ({ page, request }) => {
 		const aName = `E2E Pipe Export ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'export',
 				config: {
@@ -843,13 +917,12 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'export');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -859,7 +932,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 
 	test('download passes data through unchanged', async ({ page, request }) => {
 		const aName = `E2E Pipe Download ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'download',
 				config: {
@@ -869,13 +942,12 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
 			expect(preview.total_rows).toBe(3);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'download');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -886,7 +958,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 	test('explode expands list column into rows', async ({ page, request }) => {
 		// Create a list column via expression, then explode it
 		const aName = `E2E Pipe Explode ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId, [
+		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
 				type: 'expression',
 				config: {
@@ -907,7 +979,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			// Each row had 2 elements in tags (name,city) → 3×2 = 6 rows
 			expect(preview.total_rows).toBe(6);
@@ -919,8 +991,7 @@ test.describe('Pipeline data – pass-through operations', () => {
 			expect(tags).toContain('Bob');
 			expect(tags).toContain('Paris');
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'explode');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -953,7 +1024,7 @@ test.describe('Pipeline data – timeseries', () => {
 
 	test('timeseries extracts month from date column', async ({ page, request }) => {
 		const aName = `E2E Pipe TimeSeries ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dateDsId, [
+		const info = await createPipelineAnalysis(request, aName, dateDsId, [
 			// Cast event_date from string to Date before timeseries operation
 			{
 				type: 'select',
@@ -973,7 +1044,7 @@ test.describe('Pipeline data – timeseries', () => {
 			}
 		]);
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
 
 			expect(preview.columns).toContain('event_month');
 			expect(preview.total_rows).toBe(3);
@@ -984,8 +1055,8 @@ test.describe('Pipeline data – timeseries', () => {
 			expect(months).toContain(3);
 			expect(months).toContain(6);
 
+			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
 			await expect(table.locator('[data-column-id="event_month"]')).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'timeseries');
@@ -1026,7 +1097,7 @@ test.describe('Pipeline data – union by name', () => {
 	test('union_by_name combines rows from two datasources', async ({ page, request }) => {
 		// Union step references the second datasource by its ID (same as UI behavior)
 		const aName = `E2E Pipe Union ${uid()}`;
-		const { analysisId, viewStepId } = await createPipelineAnalysis(request, aName, dsId1, [
+		const info = await createPipelineAnalysis(request, aName, dsId1, [
 			{
 				type: 'union_by_name',
 				config: { sources: [dsId2], allow_missing: true }
@@ -1034,7 +1105,7 @@ test.describe('Pipeline data – union by name', () => {
 		]);
 
 		try {
-			const preview = await navigateAndGetPreview(page, analysisId, viewStepId);
+			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId, [dsId2]);
 
 			// Both datasources have same SAMPLE_CSV (3 rows each) → 6 rows total
 			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
@@ -1046,8 +1117,7 @@ test.describe('Pipeline data – union by name', () => {
 			expect(names.filter((n) => n === 'Bob')).toHaveLength(2);
 			expect(names.filter((n) => n === 'Charlie')).toHaveLength(2);
 
-			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table).toBeVisible({ timeout: 15_000 });
+			await navigateAndWaitForTable(page, info.analysisId);
 			await screenshot(page, 'analysis/pipeline', 'union-by-name');
 		} finally {
 			await leaveAnalysisPage(page);

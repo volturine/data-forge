@@ -311,6 +311,11 @@ class AccountDisabledError(AuthError):
         super().__init__(message='Account is disabled', error_code='ACCOUNT_DISABLED')
 
 
+class DefaultUserDeletionError(AuthError):
+    def __init__(self):
+        super().__init__(message='The default account cannot be deleted', error_code='DEFAULT_USER_DELETION_FORBIDDEN')
+
+
 class ProviderUnlinkError(AuthError):
     def __init__(self, message: str = 'Cannot unlink the last login method'):
         super().__init__(message=message, error_code='PROVIDER_UNLINK_ERROR')

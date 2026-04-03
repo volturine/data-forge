@@ -20,6 +20,8 @@ Backend format:
 import logging
 from collections.abc import Callable
 
+from modules.compute.operations.filter import normalize_filter_conditions
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,23 +70,10 @@ def convert_filter_config(config: dict) -> dict:
     Supports multiple conditions with AND/OR logic.
     Supports typed values (string, number, date, datetime, column) and NULL checks.
     """
-    conditions = config.get('conditions', [])
-    if not conditions:
-        raise ValueError('Filter requires at least one condition')
-
-    converted = []
-    for cond in conditions:
-        item = {
-            'column': cond.get('column', ''),
-            'operator': cond.get('operator', '='),
-            'value': cond.get('value'),
-            'value_type': cond.get('value_type', 'string'),
-        }
-        if cond.get('compare_column'):
-            item['compare_column'] = cond['compare_column']
-        converted.append(item)
-
-    return {'conditions': converted, 'logic': config.get('logic', 'AND')}
+    return {
+        'conditions': normalize_filter_conditions(config.get('conditions')),
+        'logic': config.get('logic', 'AND'),
+    }
 
 
 def convert_groupby_config(config: dict) -> dict:

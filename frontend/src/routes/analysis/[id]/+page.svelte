@@ -1273,6 +1273,13 @@
 							onclick={handleSave}
 							disabled={isSaving || analysisStore.loading || lockedByOther}
 							type="button"
+							data-save-state={lockedByOther
+								? 'locked'
+								: isSaving
+									? 'saving'
+									: isDirty
+										? 'dirty'
+										: 'clean'}
 						>
 							{lockedByOther ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
 						</button>
@@ -1746,7 +1753,9 @@
 				gap: '2'
 			})}
 		>
-			<button class={button({ variant: 'secondary' })} onclick={closeVersionModal}>Close</button>
+			<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button"
+				>Close</button
+			>
 		</div>
 	</div>
 {/if}

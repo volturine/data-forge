@@ -4,7 +4,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import polars as pl
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
@@ -30,6 +30,51 @@ def _parse_datetime_string(s: str) -> datetime:
 
 
 ValueType = Literal['string', 'number', 'date', 'datetime', 'column', 'boolean']
+NULL_CHECK_OPERATORS = frozenset({'is_null', 'is_not_null'})
+
+
+def _normalize_text_field(value: Any) -> str:
+    if not isinstance(value, str):
+        return ''
+    return value.strip()
+
+
+def normalize_filter_conditions(conditions: list[Any] | None) -> list[Any]:
+    if not conditions:
+        return []
+
+    normalized: list[Any] = []
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            normalized.append(condition)
+            continue
+
+        column = _normalize_text_field(condition.get('column'))
+        if not column:
+            continue
+
+        operator = condition.get('operator') or '='
+        value_type = condition.get('value_type', 'string')
+        item: dict[str, Any] = {
+            'column': column,
+            'operator': operator,
+            'value': condition.get('value'),
+            'value_type': value_type,
+        }
+
+        if operator in NULL_CHECK_OPERATORS:
+            normalized.append(item)
+            continue
+
+        compare_column = _normalize_text_field(condition.get('compare_column'))
+        if value_type == 'column' and not compare_column:
+            continue
+        if compare_column:
+            item['compare_column'] = compare_column
+
+        normalized.append(item)
+
+    return normalized
 
 
 class FilterCondition(BaseModel):
@@ -43,7 +88,7 @@ class FilterCondition(BaseModel):
 
     @model_validator(mode='after')
     def validate_condition(self) -> 'FilterCondition':
-        if self.operator in ('is_null', 'is_not_null'):
+        if self.operator in NULL_CHECK_OPERATORS:
             return self
         if self.value_type == 'column' and not self.compare_column:
             raise ValueError('compare_column required when value_type is column')
@@ -53,8 +98,15 @@ class FilterCondition(BaseModel):
 
 
 class FilterParams(OperationParams):
-    conditions: list[FilterCondition]
+    conditions: list[FilterCondition] = Field(default_factory=list)
     logic: str = 'AND'
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_conditions(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        return {**data, 'conditions': normalize_filter_conditions(data.get('conditions'))}
 
 
 def coerce_value(value: Any, value_type: ValueType) -> Any:
@@ -132,6 +184,9 @@ class FilterHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = FilterParams.model_validate(params)
+        if not validated.conditions:
+            return lf
+
         schema = lf.collect_schema()
 
         exprs = [self._build_expr(cond, schema) for cond in validated.conditions]

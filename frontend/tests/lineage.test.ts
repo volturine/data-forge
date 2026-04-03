@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createDatasource, createAnalysis } from './utils/api.js';
+import { waitForLineageToolbar } from './utils/readiness.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
@@ -15,12 +16,14 @@ test.describe('Lineage – page structure', () => {
 
 	test('shows datasource and branch selectors', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await expect(page.getByLabel('Output datasource')).toBeVisible();
 		await expect(page.getByLabel('Branch')).toBeVisible();
 	});
 
 	test('shows layout toolbar buttons', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await expect(page.locator('button[title="Horizontal tree layout"]')).toBeVisible();
 		await expect(page.locator('button[title="Vertical tree layout"]')).toBeVisible();
 		await expect(page.locator('button[title="Grid layout"]')).toBeVisible();
@@ -28,6 +31,7 @@ test.describe('Lineage – page structure', () => {
 
 	test('shows zoom controls', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await expect(page.locator('button[title="Zoom in"]')).toBeVisible();
 		await expect(page.locator('button[title="Zoom out"]')).toBeVisible();
 		await expect(page.locator('button[title="Reset view"]')).toBeVisible();
@@ -42,6 +46,7 @@ test.describe('Lineage – page structure', () => {
 
 	test('branch selector is disabled when no datasource is selected', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await expect(page.getByLabel('Branch')).toBeDisabled();
 	});
 });
@@ -49,6 +54,7 @@ test.describe('Lineage – page structure', () => {
 test.describe('Lineage – layout switching', () => {
 	test('clicking Vertical layout button switches to vertical mode', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		const verticalBtn = page.locator('button[title="Vertical tree layout"]');
 		await verticalBtn.click();
 		await expect(page.getByText('Vertical')).toBeVisible();
@@ -56,6 +62,7 @@ test.describe('Lineage – layout switching', () => {
 
 	test('clicking Grid layout button switches to grid mode', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		const gridBtn = page.locator('button[title="Grid layout"]');
 		await gridBtn.click();
 		await expect(page.getByText('Grid')).toBeVisible();
@@ -63,6 +70,7 @@ test.describe('Lineage – layout switching', () => {
 
 	test('clicking Horizontal layout button restores horizontal mode', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		await page.locator('button[title="Grid layout"]').click();
 		await page.locator('button[title="Horizontal tree layout"]').click();
 		await expect(page.getByText('Horizontal')).toBeVisible();
@@ -72,12 +80,14 @@ test.describe('Lineage – layout switching', () => {
 test.describe('Lineage – graph interaction', () => {
 	test('zoom percentage is displayed', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		// The zoom label renders as "{zoomPercent}%" – match the specific pattern
 		await expect(page.getByText(/^\d+%$/)).toBeVisible();
 	});
 
 	test('lineage graph loads without error state', async ({ page }) => {
 		await page.goto('/lineage');
+		await waitForLineageToolbar(page);
 		// Wait for the loading state to clear first, then verify no error
 		await expect(page.getByText('Loading lineage...')).not.toBeVisible({ timeout: 15_000 });
 		await expect(page.getByText('Failed to load lineage.')).not.toBeVisible();

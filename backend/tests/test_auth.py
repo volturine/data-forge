@@ -9,13 +9,16 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from core.database import clear_settings_engine_override, get_settings_db, set_settings_engine_override
 from core.exceptions import (
+    DefaultUserDeletionError,
     EmailAlreadyExistsError,
     InvalidCredentialsError,
     ProviderUnlinkError,
     TokenExpiredError,
     TokenInvalidError,
 )
+from core.namespace import namespace_paths
 from main import app
+from modules.analysis.models import Analysis
 from modules.auth.dependencies import get_current_user, get_optional_user
 from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
 from modules.auth.routes import invalidate_me_cache
@@ -24,6 +27,7 @@ from modules.auth.service import (
     create_session,
     create_user,
     create_verification_token,
+    delete_user_account,
     ensure_default_user,
     find_or_create_oauth_user,
     get_user_by_email,
@@ -39,6 +43,8 @@ from modules.auth.service import (
     validate_verification_token,
     verify_password,
 )
+from modules.datasource.models import DataSource
+from modules.udf.models import Udf
 
 
 @pytest.fixture(scope='function')
@@ -288,6 +294,83 @@ class TestUserService:
 
         with pytest.raises(InvalidCredentialsError):
             change_password(auth_db_session, user.id, 'wrongpassword', 'Newpassword123')
+
+    def test_delete_user_account_rejects_default_user(self, auth_db_session: Session) -> None:
+        user = ensure_default_user(auth_db_session)
+
+        with pytest.raises(DefaultUserDeletionError):
+            delete_user_account(auth_db_session, user.id)
+
+    def test_delete_user_account_clears_owned_resources_in_namespace_dbs(
+        self,
+        auth_db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.data_dir', tmp_path)
+        user = create_user(auth_db_session, 'delete-namespace@example.com', 'Password123', 'Delete Namespace')
+        now = datetime.now(UTC).replace(tzinfo=None)
+        paths = namespace_paths('alpha')
+        namespace_engine = create_engine(f'sqlite:///{paths.db_path}', echo=False, connect_args={})
+        try:
+            SQLModel.metadata.create_all(namespace_engine)
+            with Session(namespace_engine) as namespace_session:
+                namespace_session.add(
+                    DataSource(
+                        id='namespace-datasource',
+                        name='Namespace Datasource',
+                        source_type='file',
+                        config={'path': '/tmp/namespace.csv'},
+                        schema_cache=None,
+                        created_by_analysis_id=None,
+                        created_by='import',
+                        is_hidden=False,
+                        owner_id=user.id,
+                        created_at=now,
+                    )
+                )
+                namespace_session.add(
+                    Analysis(
+                        id='namespace-analysis',
+                        name='Namespace Analysis',
+                        description=None,
+                        pipeline_definition={'steps': []},
+                        status='draft',
+                        created_at=now,
+                        updated_at=now,
+                        result_path=None,
+                        thumbnail=None,
+                        owner_id=user.id,
+                    )
+                )
+                namespace_session.add(
+                    Udf(
+                        id='namespace-udf',
+                        name='namespace_udf',
+                        description=None,
+                        signature={'args': [], 'returns': 'int'},
+                        code='def apply():\n    return 1',
+                        tags=None,
+                        source='user',
+                        owner_id=user.id,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                namespace_session.commit()
+
+            delete_user_account(auth_db_session, user.id)
+
+            with Session(namespace_engine) as namespace_session:
+                datasource_owner = namespace_session.exec(select(DataSource.owner_id).where(DataSource.id == 'namespace-datasource')).one()
+                analysis_owner = namespace_session.exec(select(Analysis.owner_id).where(Analysis.id == 'namespace-analysis')).one()
+                udf_owner = namespace_session.exec(select(Udf.owner_id).where(Udf.id == 'namespace-udf')).one()
+
+            assert datasource_owner is None
+            assert analysis_owner is None
+            assert udf_owner is None
+        finally:
+            namespace_engine.dispose()
 
 
 class TestSessionService:
@@ -729,6 +812,106 @@ class TestAuthRoutes:
         set_cookie = response.headers.get('set-cookie', '')
         assert 'session_token=' in set_cookie
         assert 'Max-Age=0' in set_cookie
+
+    def test_delete_account_deletes_user_auth_records_and_owned_resources(
+        self,
+        auth_client: TestClient,
+        auth_db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', True)
+        user = create_user(auth_db_session, 'delete-me@example.com', 'Password123', 'Delete Me')
+        current_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
+        create_session(auth_db_session, user.id, 'pytest-agent-2', '127.0.0.2')
+        create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
+        now = datetime.now(UTC).replace(tzinfo=None)
+        datasource = DataSource(
+            id='delete-account-datasource',
+            name='Delete Account Datasource',
+            source_type='file',
+            config={'path': '/tmp/data.csv'},
+            schema_cache=None,
+            created_by_analysis_id=None,
+            created_by='import',
+            is_hidden=False,
+            owner_id=user.id,
+            created_at=now,
+        )
+        analysis = Analysis(
+            id='delete-account-analysis',
+            name='Delete Account Analysis',
+            description=None,
+            pipeline_definition={'steps': []},
+            status='draft',
+            created_at=now,
+            updated_at=now,
+            result_path=None,
+            thumbnail=None,
+            owner_id=user.id,
+        )
+        udf = Udf(
+            id='delete-account-udf',
+            name='delete_account_udf',
+            description=None,
+            signature={'args': [], 'returns': 'int'},
+            code='def apply():\n    return 1',
+            tags=None,
+            source='user',
+            owner_id=user.id,
+            created_at=now,
+            updated_at=now,
+        )
+        auth_db_session.add(datasource)
+        auth_db_session.add(analysis)
+        auth_db_session.add(udf)
+        auth_db_session.commit()
+
+        auth_client.cookies.set('session_token', current_session.id)
+        me_response = auth_client.get('/api/v1/auth/me')
+        assert me_response.status_code == 200
+
+        response = auth_client.delete('/api/v1/auth/account')
+
+        assert response.status_code == 200
+        assert response.json()['success'] is True
+        set_cookie = response.headers.get('set-cookie', '')
+        assert 'session_token=' in set_cookie
+        assert 'Max-Age=0' in set_cookie
+        assert get_user_by_id(auth_db_session, user.id) is None
+        assert auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all() == []
+        assert auth_db_session.exec(select(UserSession).where(UserSession.user_id == user.id)).all() == []
+        assert auth_db_session.exec(select(VerificationToken).where(VerificationToken.user_id == user.id)).all() == []
+        assert datasource.owner_id is None
+        assert analysis.owner_id is None
+        assert udf.owner_id is None
+
+        datasource_owner = auth_db_session.exec(select(DataSource.owner_id).where(DataSource.id == datasource.id)).one()
+        analysis_owner = auth_db_session.exec(select(Analysis.owner_id).where(Analysis.id == analysis.id)).one()
+        udf_owner = auth_db_session.exec(select(Udf.owner_id).where(Udf.id == udf.id)).one()
+        assert datasource_owner is None
+        assert analysis_owner is None
+        assert udf_owner is None
+
+        reused_session = auth_client.get('/api/v1/auth/me', headers={'X-Session-Token': current_session.id})
+        assert reused_session.status_code == 401
+
+    def test_delete_account_rejects_default_user(
+        self,
+        auth_client: TestClient,
+        auth_db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', True)
+        default_user = ensure_default_user(auth_db_session)
+        default_session = create_session(auth_db_session, default_user.id, 'pytest-agent', '127.0.0.1')
+        auth_client.cookies.set('session_token', default_session.id)
+
+        response = auth_client.delete('/api/v1/auth/account')
+
+        assert response.status_code == 403
+        assert response.json()['error_code'] == 'DEFAULT_USER_DELETION_FORBIDDEN'
+        assert response.json()['detail'] == 'The default account cannot be deleted'
+        assert get_user_by_id(auth_db_session, default_user.id) is not None
 
     def test_update_profile_authenticated(self, auth_client: TestClient) -> None:
         auth_client.post(

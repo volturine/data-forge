@@ -7,6 +7,8 @@ import {
 } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+import { gotoAnalysesGallery, gotoNewAnalysis, waitForLayoutReady } from './utils/readiness.js';
+import { gotoAnalysisEditor } from './utils/analysis.js';
 
 test.describe('Analyses – list & gallery', () => {
 	test('home page renders main content area', async ({ page }) => {
@@ -23,7 +25,7 @@ test.describe('Analyses – list & gallery', () => {
 		const dsId = await createDatasource(request, dsName);
 		await createAnalysis(request, aName, dsId);
 		try {
-			await page.goto('/');
+			await gotoAnalysesGallery(page);
 			await expect(page.getByText(aName)).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
@@ -82,18 +84,18 @@ test.describe('Analyses – list & gallery', () => {
 
 test.describe('Analyses – create wizard', () => {
 	test('step 1: Next is disabled when name is empty', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await expect(page.getByRole('button', { name: /Next/i })).toBeDisabled();
 	});
 
 	test('step 1: Next is enabled after typing a name', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.locator('#name').fill('My E2E Analysis');
 		await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
 	});
 
 	test('step 1 → step 2: shows datasource selection', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.locator('#name').fill('E2E Wizard Test');
 		await page.getByRole('button', { name: /Next/i }).click();
 		await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
@@ -112,14 +114,14 @@ test.describe('Analyses – create wizard', () => {
 			return route.continue();
 		});
 
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.locator('#name').fill('E2E No DS');
 		await page.getByRole('button', { name: /Next/i }).click();
 		await expect(page.getByText(/No data sources available/i)).toBeVisible();
 	});
 
 	test('can navigate Back from step 2 to step 1', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.locator('#name').fill('Back Test');
 		await page.getByRole('button', { name: /Next/i }).click();
 		await page.getByRole('button', { name: /Back/i }).click();
@@ -127,7 +129,7 @@ test.describe('Analyses – create wizard', () => {
 	});
 
 	test('Cancel on step 1 returns to home', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.getByRole('link', { name: /Cancel/i }).click();
 		await expect(page).toHaveURL('/', { timeout: 8_000 });
 	});
@@ -138,7 +140,7 @@ test.describe('Analyses – create wizard', () => {
 		const aName = `E2E Created ${uid()}`;
 		await createDatasource(request, dsName);
 		try {
-			await page.goto('/analysis/new');
+			await gotoNewAnalysis(page);
 
 			// Step 1 – name
 			await page.locator('#name').fill(aName);
@@ -167,7 +169,7 @@ test.describe('Analyses – create wizard', () => {
 	});
 
 	test('description field is optional – can proceed without it', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.locator('#name').fill('No Desc Analysis');
 		// description textarea exists but is empty – should not block Next
 		await expect(page.locator('#description')).toBeVisible();
@@ -175,7 +177,7 @@ test.describe('Analyses – create wizard', () => {
 	});
 
 	test('description field accepts multiline text', async ({ page }) => {
-		await page.goto('/analysis/new');
+		await gotoNewAnalysis(page);
 		await page.locator('#description').fill('Line 1\nLine 2\nLine 3');
 		const value = await page.locator('#description').inputValue();
 		expect(value).toContain('Line 1');
@@ -204,21 +206,17 @@ test.describe('Analyses – detail page', () => {
 	});
 
 	test('analysis detail page loads with step library', async ({ page }) => {
-		await page.goto(`/analysis/${aId}`);
-		// StepLibrary heading is "Operations"
-		await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-			timeout: 15_000
-		});
+		await gotoAnalysisEditor(page, aId);
 		await screenshot(page, 'analysis/crud', 'detail-step-library');
 	});
 
 	test('step library shows search box', async ({ page }) => {
-		await page.goto(`/analysis/${aId}`);
+		await gotoAnalysisEditor(page, aId);
 		await expect(page.getByPlaceholder(/Search operations/i)).toBeVisible({ timeout: 10_000 });
 	});
 
 	test('step library search filters operations', async ({ page }) => {
-		await page.goto(`/analysis/${aId}`);
+		await gotoAnalysisEditor(page, aId);
 		await page.getByPlaceholder(/Search operations/i).fill('filter');
 		await expect(page.getByText('Filter', { exact: true })).toBeVisible();
 		// Non-matching steps should not show
@@ -226,10 +224,7 @@ test.describe('Analyses – detail page', () => {
 	});
 
 	test('Save button is present', async ({ page }) => {
-		await page.goto(`/analysis/${aId}`);
-		await expect(page.getByRole('heading', { name: 'Operations' })).toBeVisible({
-			timeout: 15_000
-		});
+		await gotoAnalysisEditor(page, aId);
 		await expect(page.getByRole('button', { name: /^(Save|Saved|Saving\.\.\.)$/ })).toBeVisible({
 			timeout: 10_000
 		});
@@ -237,6 +232,7 @@ test.describe('Analyses – detail page', () => {
 
 	test('analysis name is shown in the detail page', async ({ page }) => {
 		await page.goto(`/analysis/${aId}`);
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('heading', { name: aName, level: 1 })).toBeVisible({
 			timeout: 15_000
 		});

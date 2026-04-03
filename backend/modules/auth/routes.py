@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import time
 from urllib.parse import urlencode
@@ -31,6 +32,7 @@ from modules.auth.service import (
     create_session,
     create_user,
     create_verification_token,
+    delete_user_account,
     ensure_default_user,
     find_or_create_oauth_user,
     get_user_by_email,
@@ -211,6 +213,19 @@ async def logout(request: Request, response: Response, session: Session = Depend
     return {'success': True}
 
 
+@router.delete('/account')
+@handle_errors(operation='delete account')
+async def delete_account_route(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_settings_db),
+) -> dict[str, bool]:
+    delete_user_account(session, current_user.id)
+    invalidate_me_cache()
+    _clear_session_cookie(response)
+    return {'success': True}
+
+
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
 async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
@@ -275,7 +290,7 @@ async def me(request: Request) -> UserPublic:
                 return result
             del _me_cache[token]
 
-    result = run_settings_db(_resolve_me, token)
+    result = await asyncio.to_thread(run_settings_db, _resolve_me, token)
 
     if token:
         _evict_me_cache()

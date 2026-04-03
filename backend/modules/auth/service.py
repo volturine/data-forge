@@ -8,12 +8,15 @@ import smtplib
 import uuid
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
+from pathlib import Path
 from string import hexdigits
 
-from sqlmodel import Session, select
+from sqlalchemy import inspect
+from sqlmodel import Session, create_engine, select
 
 from core.config import settings
 from core.exceptions import (
+    DefaultUserDeletionError,
     EmailAlreadyExistsError,
     InvalidCredentialsError,
     OAuthError,
@@ -38,6 +41,43 @@ _DEFAULT_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, 'data-forge-default-user').hex
 _DEFAULT_USER_MARKER = 'env_default_user'
 
 logger = logging.getLogger(__name__)
+
+
+def _clear_owned_resources(session: Session, user_id: str) -> None:
+    from modules.analysis.models import Analysis
+    from modules.datasource.models import DataSource
+    from modules.udf.models import Udf
+
+    tables = set(inspect(session.get_bind()).get_table_names())
+    ownership_models: dict[str, type[DataSource] | type[Analysis] | type[Udf]] = {
+        'datasources': DataSource,
+        'analyses': Analysis,
+        'udfs': Udf,
+    }
+    for table_name, model in ownership_models.items():
+        if table_name not in tables:
+            continue
+        for item in session.exec(select(model).where(model.owner_id == user_id)).all():
+            item.owner_id = None
+            session.add(item)
+
+
+def _namespace_db_files() -> list[Path]:
+    base_dir = settings.data_dir / 'namespaces'
+    if not base_dir.exists():
+        return []
+    return sorted(entry / 'namespace.db' for entry in base_dir.iterdir() if entry.is_dir() and (entry / 'namespace.db').exists())
+
+
+def _clear_owned_resources_in_namespaces(user_id: str) -> None:
+    for db_path in _namespace_db_files():
+        engine = create_engine(f'sqlite:///{db_path}', echo=settings.debug, connect_args={})
+        try:
+            with Session(engine) as namespace_session:
+                _clear_owned_resources(namespace_session, user_id)
+                namespace_session.commit()
+        finally:
+            engine.dispose()
 
 
 def hash_password(password: str) -> str:
@@ -267,6 +307,24 @@ def get_user_providers(session: Session, user_id: str) -> list[str]:
     stmt = select(AuthProvider).where(AuthProvider.user_id == user_id)
     providers = session.exec(stmt).all()
     return [provider.provider for provider in providers]
+
+
+def delete_user_account(session: Session, user_id: str) -> None:
+    user = get_user_by_id(session, user_id)
+    if not user:
+        raise InvalidCredentialsError()
+    if user.id == _DEFAULT_USER_ID:
+        raise DefaultUserDeletionError()
+
+    _clear_owned_resources(session, user_id)
+    _clear_owned_resources_in_namespaces(user_id)
+
+    for model in (AuthProvider, UserSession, VerificationToken):
+        for item in session.exec(select(model).where(model.user_id == user_id)).all():
+            session.delete(item)
+
+    session.delete(user)
+    session.commit()
 
 
 def update_profile(

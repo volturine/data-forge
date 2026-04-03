@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { screenshot } from './utils/visual.js';
+import { waitForAppShell, waitForLayoutReady } from './utils/readiness.js';
 
 /**
  * Smoke tests: every top-level route renders without a JS crash,
@@ -85,6 +86,7 @@ test.describe('Navigation – page load smoke tests', () => {
 test.describe('Navigation – settings popup', () => {
 	test('settings popup opens and shows SMTP, Telegram, Debug sections', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -105,6 +107,7 @@ test.describe('Navigation – settings popup', () => {
 
 	test('settings popup closes via close button', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -118,6 +121,7 @@ test.describe('Navigation – settings popup', () => {
 
 	test('settings popup closes via Escape key', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -129,6 +133,7 @@ test.describe('Navigation – settings popup', () => {
 
 	test('settings popup shows IndexedDB toggle in Debug section', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -141,6 +146,7 @@ test.describe('Navigation – settings popup', () => {
 
 	test('settings popup shows Telegram bot toggle', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -170,6 +176,7 @@ test.describe('Navigation – settings popup', () => {
 		});
 
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -196,6 +203,7 @@ test.describe('Navigation – settings popup', () => {
 		});
 
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -224,6 +232,7 @@ test.describe('Navigation – settings popup', () => {
 		});
 
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -249,6 +258,7 @@ test.describe('Navigation – settings popup', () => {
 		});
 
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -262,6 +272,7 @@ test.describe('Navigation – settings popup', () => {
 
 	test('SMTP test button is disabled without recipient', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -273,6 +284,7 @@ test.describe('Navigation – settings popup', () => {
 
 	test('Telegram bot toggle updates aria-checked state', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 		const settingsBtn = page.getByRole('button', { name: 'Settings' });
 		await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
 		await settingsBtn.click();
@@ -301,6 +313,7 @@ test.describe('Navigation – settings popup', () => {
 		});
 
 		await page.goto('/');
+		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
 		const dialog = page.getByRole('dialog');
@@ -323,6 +336,7 @@ test.describe('Navigation – error state regression', () => {
 		});
 
 		await page.goto('/datasources');
+		await waitForLayoutReady(page);
 
 		// Page should still render the heading without crashing
 		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible({
@@ -343,6 +357,7 @@ test.describe('Navigation – error state regression', () => {
 		);
 
 		await page.goto('/monitoring');
+		await waitForLayoutReady(page);
 
 		// Page structure should still render
 		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible({
@@ -373,6 +388,7 @@ test.describe('Navigation – error state regression', () => {
 test.describe('Navigation – chat panel smoke', () => {
 	test('chat trigger opens panel and close button dismisses it', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await expect(trigger).toBeVisible();
@@ -390,6 +406,7 @@ test.describe('Navigation – chat panel smoke', () => {
 
 	test('chat panel closes via Escape key', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 
 		await page.getByRole('button', { name: 'AI Assistant' }).click();
 		const panel = page.locator('#chat-panel');
@@ -401,6 +418,7 @@ test.describe('Navigation – chat panel smoke', () => {
 
 	test('chat panel toggle: second click closes the panel', async ({ page }) => {
 		await page.goto('/');
+		await waitForAppShell(page);
 
 		const trigger = page.getByRole('button', { name: 'AI Assistant' });
 		await trigger.click();
