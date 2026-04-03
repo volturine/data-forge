@@ -129,16 +129,16 @@ async def confirm(request: Request, body: ConfirmRequest, user: User = Depends(g
         raise HTTPException(status_code=404, detail='Token not found or expired')
 
     try:
-        result = await call_tool(request.app, entry['method'], entry['path'], entry['args'], entry.get('context'))
+        result = await call_tool(request.app, entry.method, entry.path, entry.args, entry.context)
     except ValueError as exc:
         return {
             'status': 'validation_error',
             'valid': False,
             'errors': [{'path': '$', 'message': str(exc), 'validator': 'path_params'}],
-            'tool_id': entry['tool_id'],
-            'args': entry['args'],
+            'tool_id': entry.tool_id,
+            'args': entry.args,
         }
-    return {'status': 'executed', 'result': result, 'tool_id': entry['tool_id']}
+    return {'status': 'executed', 'result': result, 'tool_id': entry.tool_id}
 
 
 @router.post('/capabilities')

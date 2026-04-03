@@ -7,8 +7,9 @@ import os
 import sqlite3
 from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, TypeVar, cast
 from urllib.parse import unquote, urlparse
 
 import polars as pl
@@ -23,10 +24,23 @@ from modules.compute.step_converter import convert_step_format
 T = TypeVar('T')
 
 
+class DatasourceSourceType(StrEnum):
+    FILE = 'file'
+    DATABASE = 'database'
+    DUCKDB = 'duckdb'
+    ICEBERG = 'iceberg'
+    ANALYSIS = 'analysis'
+
+
+class IcebergReader(StrEnum):
+    NATIVE = 'native'
+    PYICEBERG = 'pyiceberg'
+
+
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
-    source_type: Literal['file', 'database', 'duckdb', 'iceberg', 'analysis'] = 'file'
+    source_type: DatasourceSourceType = DatasourceSourceType.FILE
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
     file_path: str | None = None
@@ -51,7 +65,7 @@ class DatasourceParams(OperationParams):
     snapshot_id: str | None = None
     snapshot_timestamp_ms: int | None = None
     storage_options: dict | None = None
-    reader: str | None = None
+    reader: IcebergReader | None = None
 
 
 class DatasourceHandler(OperationHandler):
@@ -68,7 +82,7 @@ class DatasourceHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
-        loader = self.SOURCE_LOADERS.get(validated.source_type)
+        loader = self.SOURCE_LOADERS.get(validated.source_type.value)
         if not loader:
             allowed = ', '.join(sorted(self.SOURCE_LOADERS))
             raise ValueError(f'Unsupported source type: {validated.source_type}. Allowed: {allowed}')
@@ -84,7 +98,7 @@ class DatasourceHandler(OperationHandler):
         **_,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
-        loader = self.SOURCE_LOADERS.get(validated.source_type)
+        loader = self.SOURCE_LOADERS.get(validated.source_type.value)
         if not loader:
             allowed = ', '.join(sorted(self.SOURCE_LOADERS))
             raise ValueError(f'Unsupported source type: {validated.source_type}. Allowed: {allowed}')
@@ -169,14 +183,14 @@ class DatasourceHandler(OperationHandler):
             if snapshot is None:
                 raise ValueError('Iceberg snapshot not found for the selected timestamp')
             snapshot_value = snapshot.snapshot_id
-        reader_override: Literal['native', 'pyiceberg'] = 'native' if config.reader == 'native' else 'pyiceberg'
+        reader_override = IcebergReader.NATIVE if config.reader == IcebergReader.NATIVE else IcebergReader.PYICEBERG
         if snapshot_value is not None:
             return scan_iceberg_snapshot(metadata_path, snapshot_value, config.storage_options)
         return pl.scan_iceberg(
             metadata_path,
             snapshot_id=snapshot_value,
             storage_options=config.storage_options,
-            reader_override=reader_override,
+            reader_override=reader_override.value,
         )
 
     async def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
@@ -359,8 +373,9 @@ async def _build_tab_pipeline(
     for step in steps:
         step_id = step.get('id') or 'step'
         backend_step = convert_step_format(step)
-        right_source_id = backend_step.get('params', {}).get('right_source')
-        right_lf = cache.get(right_source_id) if right_source_id else None
+        right_source_raw = backend_step.params.get('right_source')
+        right_source_id = right_source_raw if isinstance(right_source_raw, str) else None
+        right_lf = cache.get(right_source_id) if right_source_id is not None else None
         base_frame = PolarsComputeEngine._apply_step(
             base_frame,
             backend_step,

@@ -62,14 +62,14 @@ def test_db_session(test_engine):
 
 @pytest.fixture(scope='function')
 def test_user() -> User:
-    from modules.auth.models import User
+    from modules.auth.models import User, UserStatus
 
     now = datetime.now(UTC)
     return User(
         id=uuid.uuid4().hex,
         email='test@example.com',
         display_name='Test User',
-        status='active',
+        status=UserStatus.ACTIVE,
         email_verified=True,
         has_password=True,
         preferences={},
@@ -300,7 +300,7 @@ def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_p
 
 @pytest.fixture(scope='function')
 def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
-    from modules.analysis.models import Analysis, AnalysisDataSource
+    from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
 
     analysis_id = str(uuid.uuid4())
     tab1_result_id = str(uuid.uuid4())
@@ -340,7 +340,7 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
         name='Test Analysis',
         description='Test analysis description',
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=now,
         updated_at=now,
     )
@@ -361,7 +361,7 @@ def sample_analysis(test_db_session: Session, sample_datasource: DataSource) -> 
 
 @pytest.fixture(scope='function')
 def sample_analyses(test_db_session: Session, sample_datasources: list[DataSource]) -> list[Analysis]:
-    from modules.analysis.models import Analysis, AnalysisDataSource
+    from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
 
     analyses = []
 
@@ -403,7 +403,7 @@ def sample_analyses(test_db_session: Session, sample_datasources: list[DataSourc
             name=f'Analysis {idx + 1}',
             description=f'Analysis {idx + 1} description',
             pipeline_definition=pipeline_definition,
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )

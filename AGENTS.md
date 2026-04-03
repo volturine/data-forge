@@ -112,3 +112,6 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 - Monitoring and modal e2e flows are much more reliable when tests target accessible semantics (`role="tab"`, `role="dialog"`, `aria-label`) instead of DOM order, hover-only buttons, or global `.first()` selectors.
 - Datasource list/read endpoints must stay side-effect free: schema extraction and `schema_cache` backfill belong on write/create paths, not inside `list_datasources()`, or concurrent e2e traffic can trigger transient upload/delete races.
 - Before replying that a PR follow-up is ready, confirm the branch log/diff includes the intended code changes; review notes without a corresponding commit are not enough.
+- When tightening TypeScript config shapes across shared components, keep callback signatures compatible with component contracts (`Record<string, unknown>`) and normalize into stricter typed objects inside handlers.
+- When normalizing config objects, avoid duplicate-key object literals (for example `{ branch, ...normalized }`) because they hide overwrite order; build a single explicit normalized object first.
+- After broad enum/dataclass refactors, rerun focused schema-contract tests immediately; JSON schema often moves enum values under `$defs`/`$ref`, so tests that assert inline enums should resolve refs explicitly instead of assuming inlined `enum`.

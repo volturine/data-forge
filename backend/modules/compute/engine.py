@@ -12,11 +12,12 @@ from queue import Empty
 import polars as pl
 
 from core.exceptions import PipelineValidationError
+from modules.analysis.step_types import is_chart_step_type
 from modules.compute.core.exports import get_export_format
 from modules.compute.operations import HANDLERS
 from modules.compute.operations.datasource import load_datasource
 from modules.compute.operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
-from modules.compute.step_converter import convert_config_to_params, convert_step_format, get_chart_type_for_step
+from modules.compute.step_converter import BackendStep, convert_config_to_params, convert_step_format, get_chart_type_for_step
 from modules.compute.utils import apply_steps, normalize_timezones
 
 logger = logging.getLogger(__name__)
@@ -496,7 +497,7 @@ class PolarsComputeEngine:
                     details={'operation': step.get('type')},
                 ) from e
             progress = (idx + 1) / total_steps
-            step_name = backend_step.get('name', f'Step {idx + 1}')
+            step_name = backend_step.name or f'Step {idx + 1}'
             logger.debug(f'Job {job_id}: Processing {step_name} ({progress:.0%})')
 
             step_id = step.get('id')
@@ -511,8 +512,9 @@ class PolarsComputeEngine:
             else:
                 parent_frame = lf
 
-            right_source_id = backend_step.get('params', {}).get('right_source')
-            right_lf = right_sources.get(right_source_id) if right_source_id else None
+            right_source_raw = backend_step.params.get('right_source')
+            right_source_id = right_source_raw if isinstance(right_source_raw, str) else None
+            right_lf = right_sources.get(right_source_id) if right_source_id is not None else None
 
             step_start = time.perf_counter()
             schema_map[step_id] = PolarsComputeEngine._apply_step(
@@ -598,7 +600,7 @@ class PolarsComputeEngine:
             return lf, None
         last_step = steps[-1]
         last_type = str(last_step.get('type', ''))
-        if last_type != 'chart' and not last_type.startswith('plot_'):
+        if not is_chart_step_type(last_type):
             return lf, None
 
         chart_config = last_step.get('config', {})
@@ -767,15 +769,15 @@ class PolarsComputeEngine:
     @staticmethod
     def _apply_step(
         lf: pl.LazyFrame,
-        step: dict,
+        step: BackendStep,
         right_sources: dict[str, pl.LazyFrame] | None = None,
         right_lf: pl.LazyFrame | None = None,
     ) -> pl.LazyFrame:
         """Apply a single transformation step to the LazyFrame."""
-        operation = step.get('operation')
-        if not isinstance(operation, str) or not operation:
+        operation = step.operation
+        if not operation:
             raise ValueError('Step operation is required')
-        params = step.get('params', {})
+        params = step.params
 
         handler = HANDLERS.get(operation)
 

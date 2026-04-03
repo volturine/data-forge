@@ -1,6 +1,6 @@
 """Select columns operation."""
 
-from typing import Literal
+from enum import StrEnum
 
 import polars as pl
 from pydantic import Field
@@ -9,9 +9,19 @@ from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.operations.type_casting import require_polars_type
 
 
+class PolarsCastType(StrEnum):
+    INT64 = 'Int64'
+    FLOAT64 = 'Float64'
+    BOOLEAN = 'Boolean'
+    STRING = 'String'
+    UTF8 = 'Utf8'
+    DATE = 'Date'
+    DATETIME = 'Datetime'
+
+
 class SelectParams(OperationParams):
     columns: list[str]
-    cast_map: dict[str, Literal['Int64', 'Float64', 'Boolean', 'String', 'Utf8', 'Date', 'Datetime']] = Field(default_factory=dict)
+    cast_map: dict[str, PolarsCastType] = Field(default_factory=dict)
 
 
 class SelectHandler(OperationHandler):
@@ -29,5 +39,5 @@ class SelectHandler(OperationHandler):
         selected = lf.select(validated.columns)
         if not validated.cast_map:
             return selected
-        exprs = [pl.col(col).cast(require_polars_type(dtype)).alias(col) for col, dtype in validated.cast_map.items()]
+        exprs = [pl.col(col).cast(require_polars_type(dtype.value)).alias(col) for col, dtype in validated.cast_map.items()]
         return selected.with_columns(exprs)

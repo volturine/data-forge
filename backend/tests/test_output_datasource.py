@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from sqlmodel import Session
 
 from core.namespace import namespace_paths
-from modules.analysis.models import Analysis
+from modules.analysis.models import Analysis, AnalysisStatus
 from modules.analysis.schemas import AnalysisUpdateSchema, TabDatasourceConfig, TabDatasourceSchema, TabOutputSchema, TabSchema
 from modules.analysis.service import update_analysis
 from modules.compute.service import _upsert_output_datasource, export_data
@@ -371,7 +371,7 @@ class TestRunAnalysisBuildOutputDatasource:
                     }
                 ],
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -426,7 +426,7 @@ class TestRunAnalysisBuildOutputDatasource:
                     }
                 ],
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -532,7 +532,7 @@ class TestRunAnalysisBuildOutputDatasource:
                     }
                 ],
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )

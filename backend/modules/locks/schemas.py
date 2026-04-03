@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -58,18 +58,24 @@ class LockWebsocketRequest(BaseModel):
         return self
 
 
+class LockWebsocketMessageType(StrEnum):
+    CONNECTED = 'connected'
+    STATUS = 'status'
+    ERROR = 'error'
+
+
 class LockWebsocketConnectedMessage(BaseModel):
-    type: Literal['connected'] = 'connected'
+    type: LockWebsocketMessageType = LockWebsocketMessageType.CONNECTED
 
 
 class LockWebsocketStatusMessage(BaseModel):
-    type: Literal['status'] = 'status'
+    type: LockWebsocketMessageType = LockWebsocketMessageType.STATUS
     resource_type: str
     resource_id: str
     lock: LockStatusResponse | None
 
 
 class LockWebsocketErrorMessage(BaseModel):
-    type: Literal['error'] = 'error'
+    type: LockWebsocketMessageType = LockWebsocketMessageType.ERROR
     error: str
     status_code: int = 400

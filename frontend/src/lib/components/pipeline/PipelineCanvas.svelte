@@ -8,7 +8,7 @@
 	import DatasourceNode from './DatasourceNode.svelte';
 	import { css, cx } from '$lib/styles/panda';
 	import { ClipboardPaste, Plus, Eye } from 'lucide-svelte';
-	import { stepTypes } from './utils';
+	import { stepTypes, isChartStep } from './utils';
 
 	export interface ClipboardStep {
 		type: string;
@@ -103,7 +103,7 @@
 				pasteError = 'Clipboard does not contain a valid step';
 				return;
 			}
-			if (!(parsed.type in stepTypes) && !parsed.type.startsWith('plot_')) {
+			if (!(parsed.type in stepTypes) && !isChartStep(parsed.type)) {
 				pasteError = `Unknown step type: ${parsed.type}`;
 				return;
 			}
@@ -136,7 +136,7 @@
 			}
 		}
 
-		if (drag.type === 'chart' || drag.type?.startsWith('plot_')) {
+		if (drag.type && isChartStep(drag.type)) {
 			return true;
 		}
 

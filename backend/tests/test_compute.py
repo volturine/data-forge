@@ -944,7 +944,7 @@ class TestBuildAnalysisPipelinePayloadDerived:
     def test_derived_tab_sources_contain_analysis_id(self, test_db_session, sample_datasource: DataSource):
         from datetime import UTC, datetime
 
-        from modules.analysis.models import Analysis
+        from modules.analysis.models import Analysis, AnalysisStatus
         from modules.compute.service import build_analysis_pipeline_payload
         from modules.datasource.service import create_placeholder_output_datasource
 
@@ -985,7 +985,7 @@ class TestBuildAnalysisPipelinePayloadDerived:
                     },
                 ]
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
         )
         test_db_session.add(analysis)
         create_placeholder_output_datasource(test_db_session, tab1_result_id, analysis_id, 'tab1')

@@ -15,7 +15,7 @@
 	import { GripVertical, Hash, RefreshCw, Copy } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
+	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
@@ -47,9 +47,7 @@
 		onTouchMove
 	}: Props = $props();
 
-	const isChart = $derived(
-		step.type === 'chart' || step.type === 'plot' || step.type.startsWith('plot_')
-	);
+	const isChart = $derived(isChartStep(step.type));
 
 	const chartHeight = $derived(
 		isChart ? (step.config?.chart_height as string | undefined) : undefined

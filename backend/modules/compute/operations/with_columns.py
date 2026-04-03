@@ -2,6 +2,7 @@
 
 import builtins
 from collections.abc import Callable
+from enum import StrEnum
 from functools import partial
 from typing import Any, cast
 
@@ -33,11 +34,17 @@ _DANGEROUS_BUILTINS = frozenset(
 _SAFE_BUILTINS: dict[str, Any] = {name: getattr(builtins, name) for name in dir(builtins) if name not in _DANGEROUS_BUILTINS}
 
 
+class WithColumnsExprType(StrEnum):
+    LITERAL = 'literal'
+    COLUMN = 'column'
+    UDF = 'udf'
+
+
 class WithColumnsExpr(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     name: str
-    type: str
+    type: WithColumnsExprType
     value: Any | None = None
     column: str | None = None
     args: list[str] | None = None
@@ -61,11 +68,11 @@ class WithColumnsHandler(OperationHandler):
         validated = WithColumnsParams.model_validate(params)
         exprs: list[pl.Expr] = []
         for expr in validated.expressions:
-            if expr.type == 'literal':
+            if expr.type == WithColumnsExprType.LITERAL:
                 exprs.append(pl.lit(expr.value).alias(expr.name))
-            elif expr.type == 'column' and expr.column:
+            elif expr.type == WithColumnsExprType.COLUMN and expr.column:
                 exprs.append(pl.col(expr.column).alias(expr.name))
-            elif expr.type == 'udf' and expr.code:
+            elif expr.type == WithColumnsExprType.UDF and expr.code:
                 validate_no_reflection_escape(expr.code, label='UDF code')
                 scope: dict[str, Any] = {'pl': pl, '__builtins__': _SAFE_BUILTINS}
                 local_scope: dict[str, Any] = {}

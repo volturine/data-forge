@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlmodel import Session
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError
-from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+from modules.analysis.pipeline_types import AnalysisPipelineDefinition
 from modules.datasource.models import DataSource
 from modules.engine_runs.models import EngineRun
 from modules.scheduler.models import Schedule
@@ -61,7 +62,7 @@ def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> Da
 def analysis_with_output(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     """Analysis with a tab that has output configuration (for build testing)."""
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: AnalysisPipelineDefinition = {
         'tabs': [
             {
                 'id': 'tab-1',
@@ -107,7 +108,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
         name='Build Test Analysis',
         description='Has output config',
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=now,
         updated_at=now,
     )
@@ -510,7 +511,7 @@ class TestGetBuildOrder:
                     }
                 ]
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -543,7 +544,7 @@ class TestGetBuildOrder:
                     }
                 ]
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -579,7 +580,7 @@ class TestRunAnalysisBuild:
             name='Empty',
             description='',
             pipeline_definition={},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -669,7 +670,7 @@ class TestRunAnalysisBuild:
         output_b = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        pipeline: dict[str, object] = {
+        pipeline: AnalysisPipelineDefinition = {
             'tabs': [
                 {
                     'id': 'tab-a',
@@ -714,7 +715,7 @@ class TestRunAnalysisBuild:
             name='Multi DS',
             description='',
             pipeline_definition=pipeline,
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -1014,7 +1015,7 @@ class TestGetBuildOrderNoDuplicateInDegree:
             name='Upstream',
             description='',
             pipeline_definition={'tabs': []},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -1026,7 +1027,7 @@ class TestGetBuildOrderNoDuplicateInDegree:
             name='Downstream',
             description='',
             pipeline_definition={'tabs': []},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )

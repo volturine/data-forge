@@ -1,6 +1,7 @@
 import type { Schema } from '$lib/types/schema';
 import type { PipelineStep } from '$lib/types/analysis';
 import type { ColumnInfo } from '$lib/types/schema';
+import { isChartStep } from '$lib/components/pipeline/utils';
 import {
 	emptySchema,
 	unionByName,
@@ -443,6 +444,6 @@ const TRANSFORMERS: Record<string, SchemaTransformer> = {
 };
 
 export function getStepTransform(step: PipelineStep): SchemaTransformer {
-	if (step.type.startsWith('plot_')) return passthrough;
+	if (isChartStep(step.type)) return passthrough;
 	return TRANSFORMERS[step.type] ?? passthrough;
 }

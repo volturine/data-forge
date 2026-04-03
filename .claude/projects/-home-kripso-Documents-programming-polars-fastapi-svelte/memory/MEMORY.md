@@ -1,1 +1,2 @@
 - [Prefer dicts over lists of tuples](feedback_prefer_dicts.md) — use dict/dataclass for named mappings, not list[tuple]
+- [Explicit over implicit code](feedback_explicit_code.md) — dataclasses, typed dicts, Literal types, named helpers over scattered string checks

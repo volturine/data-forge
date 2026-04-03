@@ -4,10 +4,36 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from main import app
-from modules.analysis.models import Analysis, AnalysisDataSource
+from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
 from modules.datasource.models import DataSource
 from modules.locks.models import ResourceLock
+
+
+def _schema_enum_values(schema: dict, field_name: str) -> list[str]:
+    field_schema = schema.get('properties', {}).get(field_name, {})
+    if field_schema.get('type') == 'array':
+        item_schema = field_schema.get('items', {})
+        enum_values = item_schema.get('enum')
+        if enum_values is not None:
+            return enum_values
+        ref = item_schema.get('$ref')
+        if isinstance(ref, str):
+            return schema.get('$defs', {}).get(ref.split('/')[-1], {}).get('enum', [])
+        return []
+    enum_values = field_schema.get('enum')
+    if enum_values is not None:
+        return enum_values
+    ref = field_schema.get('$ref')
+    if isinstance(ref, str):
+        return schema.get('$defs', {}).get(ref.split('/')[-1], {}).get('enum', [])
+    return []
+
+
+def test_analysis_response_schema_uses_analysis_status_enum() -> None:
+    schema = AnalysisResponseSchema.model_json_schema()
+    assert _schema_enum_values(schema, 'status') == [item.value for item in AnalysisStatus]
 
 
 class TestAnalysisCreate:

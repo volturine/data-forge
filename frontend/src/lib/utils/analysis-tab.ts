@@ -1,4 +1,10 @@
-import type { AnalysisTab, AnalysisTabDatasource, AnalysisTabOutput } from '$lib/types/analysis';
+import type {
+	AnalysisTab,
+	AnalysisTabDatasource,
+	AnalysisTabDatasourceConfig,
+	AnalysisTabOutput
+} from '$lib/types/analysis';
+import { isRecord } from '$lib/utils/json';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -55,12 +61,12 @@ export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab 
 	};
 	const datasource = tab.datasource ?? fallbackDatasource;
 	const config = datasource.config ?? { branch: defaultBranch };
-	const branch = cleanBranch((config as Record<string, unknown>).branch);
+	const branch = cleanBranch(config.branch);
 	const normalizedDatasource: AnalysisTabDatasource = {
 		...datasource,
 		config: { ...config, branch }
 	};
-	const output = (tab.output ?? {}) as AnalysisTabOutput;
+	const output = (tab.output ?? {}) as Partial<AnalysisTabOutput>;
 	const outputId =
 		typeof output.result_id === 'string' && isUuid(output.result_id) ? output.result_id : null;
 	if (!outputId) {
@@ -72,10 +78,9 @@ export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab 
 		typeof output.filename === 'string' && output.filename ? output.filename : null;
 	const defaults = buildOutputConfig({ outputId, name: existingName, branch });
 	const icebergRaw = output.iceberg;
-	const iceberg =
-		icebergRaw && typeof icebergRaw === 'object' && !Array.isArray(icebergRaw)
-			? { ...(defaults.iceberg as Record<string, unknown>), ...icebergRaw }
-			: defaults.iceberg;
+	const iceberg = isRecord(icebergRaw)
+		? { ...(defaults.iceberg ?? {}), ...icebergRaw }
+		: defaults.iceberg;
 	const filename = existingName ? toSlug(existingName) : defaults.filename;
 	const normalizedOutput: AnalysisTabOutput = {
 		...defaults,
@@ -84,9 +89,10 @@ export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab 
 		filename,
 		iceberg
 	};
+	const normalizedConfig: AnalysisTabDatasourceConfig = normalizedDatasource.config;
 	return {
 		...tab,
-		datasource: normalizedDatasource,
+		datasource: { ...normalizedDatasource, config: normalizedConfig },
 		output: normalizedOutput
 	};
 }

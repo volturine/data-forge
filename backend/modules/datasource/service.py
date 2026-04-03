@@ -34,6 +34,7 @@ from modules.datasource.schemas import (
     FileListItem,
     FileListResponse,
     SchemaDiff,
+    SchemaDiffStatus,
     SchemaInfo,
     SnapshotCompareResponse,
     SnapshotPreview,
@@ -1244,7 +1245,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='removed',
+                status=SchemaDiffStatus.REMOVED,
                 type_a=str(schema_a[name]),
                 type_b=None,
             )
@@ -1254,7 +1255,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='added',
+                status=SchemaDiffStatus.ADDED,
                 type_a=None,
                 type_b=str(schema_b[name]),
             )
@@ -1268,7 +1269,7 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='type_changed',
+                status=SchemaDiffStatus.TYPE_CHANGED,
                 type_a=dtype_a,
                 type_b=dtype_b,
             )

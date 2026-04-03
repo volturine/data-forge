@@ -1,29 +1,32 @@
 // This file is auto-generated. Do not edit manually. Run 'just generate-step-types' to regenerate.
 // Generated from backend/modules/analysis/step_schemas.py
 
+export type CastMapType = 'Int64' | 'Float64' | 'Boolean' | 'String' | 'Utf8' | 'Date' | 'Datetime';
+
 export interface SelectConfig {
 	columns?: string[];
-	cast_map?: Record<
-		string,
-		'Int64' | 'Float64' | 'Boolean' | 'String' | 'Utf8' | 'Date' | 'Datetime'
-	>;
+	cast_map?: Record<string, CastMapType>;
 }
 
 export interface DropConfig {
 	columns?: string[];
 }
 
+export type FilterValueType = 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
+
 export interface FilterConditionSchema {
 	column: string;
 	operator: string;
 	value?: string | number | boolean | string[] | null;
-	value_type?: 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
+	value_type?: FilterValueType;
 	compare_column?: string | null;
 }
 
+export type FilterLogic = 'AND' | 'OR';
+
 export interface FilterConfig {
 	conditions?: FilterConditionSchema[];
-	logic?: 'AND' | 'OR';
+	logic?: FilterLogic;
 }
 
 export interface AggregationSchema {
@@ -51,9 +54,11 @@ export interface ExpressionConfig {
 	column_name?: string;
 }
 
+export type WithColumnsExprType = 'literal' | 'column' | 'udf';
+
 export interface WithColumnsExprSchema {
 	name: string;
-	type?: 'literal' | 'column' | 'udf';
+	type?: WithColumnsExprType;
 	value?: string | number | null;
 	column?: string | null;
 	args?: string[] | null;
@@ -121,8 +126,10 @@ export interface JoinColumnSchema {
 	right_column: string;
 }
 
+export type JoinHow = 'inner' | 'left' | 'right' | 'outer' | 'cross';
+
 export interface JoinConfig {
-	how?: 'inner' | 'left' | 'right' | 'outer' | 'cross';
+	how?: JoinHow;
 	right_source?: string;
 	join_columns?: JoinColumnSchema[];
 	right_columns?: string[];
@@ -144,40 +151,60 @@ export interface DownloadConfig {
 	filename?: string;
 }
 
+export type OverlayChartType = 'line' | 'area' | 'bar' | 'scatter';
+
+export type YAxisPosition = 'left' | 'right';
+
 export interface OverlaySchema {
-	chart_type?: 'line' | 'area' | 'bar' | 'scatter';
+	chart_type?: OverlayChartType;
 	y_column?: string;
 	aggregation?: string;
-	y_axis_position?: 'left' | 'right';
+	y_axis_position?: YAxisPosition;
 }
 
+export type ReferenceAxis = 'x' | 'y';
+
 export interface ReferenceLineSchema {
-	axis?: 'x' | 'y';
+	axis?: ReferenceAxis;
 	value?: number | null;
 	label?: string;
 	color?: string;
 }
 
+export type ChartType =
+	| 'bar'
+	| 'horizontal_bar'
+	| 'area'
+	| 'heatgrid'
+	| 'histogram'
+	| 'scatter'
+	| 'line'
+	| 'pie'
+	| 'boxplot';
+
+export type SortDirection = 'asc' | 'desc';
+
+export type StackMode = 'grouped' | 'stacked' | '100%';
+
+export type AxisScale = 'linear' | 'log';
+
+export type LegendPosition = 'top' | 'bottom' | 'left' | 'right' | 'none';
+
+export type ChartHeight = 'small' | 'medium' | 'large' | 'xlarge';
+
+export type ChartWidth = 'normal' | 'wide' | 'full';
+
 export interface ChartConfig {
-	chart_type?:
-		| 'bar'
-		| 'horizontal_bar'
-		| 'area'
-		| 'heatgrid'
-		| 'histogram'
-		| 'scatter'
-		| 'line'
-		| 'pie'
-		| 'boxplot';
+	chart_type?: ChartType;
 	x_column?: string;
 	y_column?: string;
 	bins?: number;
 	aggregation?: string;
 	group_column?: string | null;
 	group_sort_by?: string | null;
-	group_sort_order?: 'asc' | 'desc';
+	group_sort_order?: SortDirection;
 	group_sort_column?: string | null;
-	stack_mode?: 'grouped' | 'stacked' | '100%';
+	stack_mode?: StackMode;
 	area_opacity?: number;
 	date_bucket?: string | null;
 	date_ordinal?: string | null;
@@ -185,30 +212,34 @@ export interface ChartConfig {
 	selection_enabled?: boolean;
 	area_selection_enabled?: boolean;
 	sort_by?: string | null;
-	sort_order?: 'asc' | 'desc';
+	sort_order?: SortDirection;
 	sort_column?: string | null;
 	x_axis_label?: string | null;
 	y_axis_label?: string | null;
-	y_axis_scale?: 'linear' | 'log';
+	y_axis_scale?: AxisScale;
 	y_axis_min?: number | null;
 	y_axis_max?: number | null;
 	display_units?: string;
 	decimal_places?: number;
-	legend_position?: 'top' | 'bottom' | 'left' | 'right' | 'none';
+	legend_position?: LegendPosition;
 	title?: string | null;
 	series_colors?: string[];
 	overlays?: OverlaySchema[];
 	reference_lines?: ReferenceLineSchema[];
-	chart_height?: 'small' | 'medium' | 'large' | 'xlarge';
-	chart_width?: 'normal' | 'wide' | 'full';
+	chart_height?: ChartHeight;
+	chart_width?: ChartWidth;
 }
 
+export type NotificationMethod = 'email' | 'telegram';
+
+export type RecipientSource = 'manual' | 'column';
+
 export interface NotificationConfig {
-	method?: 'email' | 'telegram';
+	method?: NotificationMethod;
 	recipient?: string;
 	subscriber_ids?: string[];
 	bot_token?: string;
-	recipient_source?: 'manual' | 'column';
+	recipient_source?: RecipientSource;
 	recipient_column?: string;
 	input_columns?: string[];
 	output_column?: string;
@@ -218,8 +249,10 @@ export interface NotificationConfig {
 	timeout_seconds?: number;
 }
 
+export type AIProvider = 'ollama' | 'openai';
+
 export interface AIConfig {
-	provider?: 'ollama' | 'openai';
+	provider?: AIProvider;
 	model?: string;
 	input_columns?: string[];
 	output_column?: string;

@@ -18,47 +18,73 @@ Backend format:
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
+from modules.analysis.step_types import ChartType, chart_type_for_step, normalize_step_type
 from modules.compute.operations.filter import normalize_filter_conditions
 
 logger = logging.getLogger(__name__)
 
 
-CHART_STEP_TYPES: dict[str, str] = {
-    'plot_bar': 'bar',
-    'plot_horizontal_bar': 'horizontal_bar',
-    'plot_area': 'area',
-    'plot_heatgrid': 'heatgrid',
-    'plot_histogram': 'histogram',
-    'plot_scatter': 'scatter',
-    'plot_line': 'line',
-    'plot_pie': 'pie',
-    'plot_boxplot': 'boxplot',
-}
+@dataclass(frozen=True, slots=True)
+class FrontendStep:
+    id: str
+    type: str
+    config: dict[str, object] = field(default_factory=dict)
+    depends_on: tuple[str, ...] = ()
+    is_applied: bool | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, object]) -> 'FrontendStep':
+        step_type = payload.get('type')
+        if not isinstance(step_type, str) or not step_type:
+            raise ValueError('Step must have a type field')
+
+        step_id = payload.get('id')
+        raw_config = payload.get('config')
+        raw_deps = payload.get('depends_on')
+        raw_applied = payload.get('is_applied')
+
+        config = raw_config if isinstance(raw_config, dict) else {}
+        depends_on = tuple(dep for dep in raw_deps if isinstance(dep, str)) if isinstance(raw_deps, list) else ()
+        is_applied = raw_applied if isinstance(raw_applied, bool) else None
+
+        return cls(
+            id=str(step_id) if step_id is not None else 'Unknown Step',
+            type=step_type,
+            config=config,
+            depends_on=depends_on,
+            is_applied=is_applied,
+        )
 
 
-def get_chart_type_for_step(step_type: str) -> str | None:
-    return CHART_STEP_TYPES.get(step_type)
+@dataclass(frozen=True, slots=True)
+class BackendStep:
+    name: str
+    operation: str
+    params: dict[str, object]
 
 
-def convert_step_format(frontend_step: dict) -> dict:
+def get_chart_type_for_step(step_type: str) -> ChartType | None:
+    return chart_type_for_step(step_type)
+
+
+def convert_step_format(frontend_step: Mapping[str, object] | FrontendStep) -> BackendStep:
     """Convert frontend step format to backend engine format."""
-    step_type = frontend_step.get('type')
-    if not step_type:
-        raise ValueError('Step must have a type field')
-
-    config = frontend_step.get('config', {})
+    parsed = frontend_step if isinstance(frontend_step, FrontendStep) else FrontendStep.from_mapping(frontend_step)
+    step_type = parsed.type
+    config = parsed.config
     chart_type = get_chart_type_for_step(step_type)
     if chart_type:
         config = {**config, 'chart_type': chart_type}
-    normalized_type = 'chart' if step_type.startswith('plot_') else step_type
+    normalized_type = normalize_step_type(step_type)
 
-    return {
-        'name': frontend_step.get('id', 'Unknown Step'),
-        'operation': normalized_type,
-        'params': convert_config_to_params(normalized_type, config),
-    }
+    return BackendStep(
+        name=parsed.id or 'Unknown Step',
+        operation=normalized_type,
+        params=convert_config_to_params(normalized_type, config),
+    )
 
 
 def convert_filter_config(config: dict) -> dict:

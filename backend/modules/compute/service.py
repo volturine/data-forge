@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict, cast
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -26,6 +27,7 @@ from modules.compute.operations.datasource import (
     resolve_iceberg_branch_metadata_path,
     resolve_iceberg_metadata_path,
 )
+from modules.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
 from modules.compute.utils import apply_steps, await_engine_result, find_step_index, resolve_applied_target
 from modules.datasource.models import DataSource
 from modules.datasource.source_types import DataSourceType
@@ -39,6 +41,23 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class HealthCheckDetail:
+    name: str
+    passed: bool
+    message: str
+    critical: bool
+
+
+class BuildContext(TypedDict, total=False):
+    status: BuildStatus
+    analysis_name: str
+    row_count: int
+    duration_ms: int
+    healthcheck_summary: str | None
+    healthcheck_details: list[HealthCheckDetail] | None
+
+
+@dataclass(frozen=True)
 class ExportDatasourceResult:
     datasource_id: str
     datasource_name: str
@@ -48,9 +67,9 @@ class ExportDatasourceResult:
 def _resolve_build_status(
     hc_results: list[HealthCheckResult],
     checks: list[HealthCheck] | None = None,
-) -> tuple[str, str | None, list[dict] | None]:
+) -> tuple[BuildStatus, str | None, list[HealthCheckDetail] | None]:
     if not hc_results:
-        return 'success', None, None
+        return BuildStatus.SUCCESS, None, None
 
     name_map = {c.id: c.name for c in checks} if checks else {}
     critical_map = {c.id: c.critical for c in checks} if checks else {}
@@ -58,32 +77,41 @@ def _resolve_build_status(
     failed = [r for r in hc_results if not r.passed]
 
     if not failed:
-        return 'success', f'{total}/{total} passed', None
+        return BuildStatus.SUCCESS, f'{total}/{total} passed', None
 
     details = [
-        {
-            'name': name_map.get(r.healthcheck_id, r.healthcheck_id),
-            'passed': r.passed,
-            'message': r.message,
-            'critical': critical_map.get(r.healthcheck_id, False),
-        }
+        HealthCheckDetail(
+            name=name_map.get(r.healthcheck_id, r.healthcheck_id),
+            passed=r.passed,
+            message=r.message,
+            critical=critical_map.get(r.healthcheck_id, False),
+        )
         for r in hc_results
     ]
-    return 'warning', f'{len(failed)}/{total} failed', details
+    return BuildStatus.WARNING, f'{len(failed)}/{total} failed', details
 
 
-def _build_subscriber_message(context: dict[str, object]) -> str:
-    status = str(context.get('status', 'unknown'))
+def _coerce_build_status(status: object) -> BuildStatus:
+    if isinstance(status, BuildStatus):
+        return status
+    try:
+        return BuildStatus(str(status))
+    except ValueError as exc:
+        raise ValueError(f'Unsupported build status: {status}') from exc
+
+
+def _build_subscriber_message(context: BuildContext) -> str:
+    status = _coerce_build_status(context.get('status', BuildStatus.SUCCESS))
     analysis_name = str(context.get('analysis_name', ''))
     row_count = str(context.get('row_count', ''))
     duration = str(context.get('duration_ms', ''))
     hc_summary = context.get('healthcheck_summary')
     hc_details = context.get('healthcheck_details')
 
-    if status == 'warning':
+    if status == BuildStatus.WARNING:
         msg = f'Build complete: {analysis_name}\nStatus: built successfully, health checks failed'
     else:
-        msg = f'Build complete: {analysis_name}\nStatus: {status}'
+        msg = f'Build complete: {analysis_name}\nStatus: {status.value}'
 
     if hc_summary:
         msg += f'\nHealth checks: {hc_summary}'
@@ -98,10 +126,8 @@ def _build_subscriber_message(context: dict[str, object]) -> str:
     if isinstance(hc_details, list):
         lines = []
         for detail in hc_details:
-            icon = '\u2713' if detail.get('passed') else '\u2717'
-            name = detail.get('name', '?')
-            message = detail.get('message', '')
-            lines.append(f'  {icon} {name}: {message} ')
+            icon = '\u2713' if detail.passed else '\u2717'
+            lines.append(f'  {icon} {detail.name}: {detail.message} ')
         hc_tail = '\n'.join(lines)
 
     if not hc_tail:
@@ -202,7 +228,7 @@ def _send_pipeline_notifications(
             if excluded:
                 pairs = [(cid, token) for cid, token in pairs if cid not in excluded]
             if pairs:
-                msg = _build_subscriber_message(context)
+                msg = _build_subscriber_message(cast(BuildContext, context))
                 for cid, token in pairs:
                     if not token:
                         continue
@@ -670,7 +696,7 @@ def preview_step(
             analysis_id=run_analysis_id,
             datasource_id=datasource_id,
             kind='preview',
-            status='success',
+            status=ComputeRunStatus.SUCCESS,
             request_json=request_payload,
             result_json=result_meta,
             created_at=started_at,
@@ -701,7 +727,7 @@ def preview_step(
             analysis_id=run_analysis_id,
             datasource_id=datasource_id,
             kind='preview',
-            status='failed',
+            status=ComputeRunStatus.FAILED,
             request_json=request_payload,
             error_message=str(exc),
             created_at=started_at,
@@ -872,7 +898,7 @@ def get_step_row_count(
             analysis_id=analysis_id_value,
             datasource_id=datasource_id,
             kind='row_count',
-            status='success',
+            status=ComputeRunStatus.SUCCESS,
             request_json=request_payload,
             result_json={'row_count': row_count},
             created_at=started_at,
@@ -894,7 +920,7 @@ def get_step_row_count(
             analysis_id=analysis_id_value,
             datasource_id=datasource_id,
             kind='row_count',
-            status='failed',
+            status=ComputeRunStatus.FAILED,
             request_json=request_payload,
             error_message=str(exc),
             created_at=started_at,
@@ -1171,7 +1197,7 @@ def export_data(
             analysis_id=analysis_id_value,
             datasource_id=ds_id,
             kind=run_kind,
-            status='success',
+            status=ComputeRunStatus.SUCCESS,
             request_json=request_payload,
             result_json=result_meta,
             created_at=started_at,
@@ -1192,7 +1218,7 @@ def export_data(
             analysis_id=analysis_id_value,
             datasource_id=datasource_id,
             kind=run_kind,
-            status='failed',
+            status=ComputeRunStatus.FAILED,
             request_json=request_payload,
             error_message=str(exc),
             created_at=started_at,
@@ -1333,7 +1359,7 @@ def download_step(
             analysis_id=analysis_id_value,
             datasource_id=datasource_id,
             kind='download',
-            status='success',
+            status=ComputeRunStatus.SUCCESS,
             request_json=request_payload,
             result_json={'filename': f'{filename}{ext}', 'format': export_format},
             created_at=started_at,
@@ -1353,7 +1379,7 @@ def download_step(
             analysis_id=analysis_id_value,
             datasource_id=datasource_id,
             kind='download',
-            status='failed',
+            status=ComputeRunStatus.FAILED,
             request_json=request_payload,
             error_message=str(exc),
             created_at=started_at,
@@ -1470,14 +1496,14 @@ def run_analysis_build_from_payload(session: Session, manager: ProcessManager, p
             else:
                 if required_tabs and str(tab_id) != str(selected_tab_id):
                     tabs_built += 1
-                    results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'success'})
+                    results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': BuildTabStatus.SUCCESS})
                     continue
                 raise ValueError(f'Tab {tab_id} missing output configuration')
 
             tabs_built += 1
-            results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'success'})
+            results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': BuildTabStatus.SUCCESS})
         except Exception as e:
-            results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': 'failed', 'error': str(e)})
+            results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': BuildTabStatus.FAILED, 'error': str(e)})
 
     return {'analysis_id': analysis_id or '', 'tabs_built': tabs_built, 'results': results}
 

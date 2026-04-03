@@ -165,8 +165,17 @@ def _json_schema_type_to_ts(
     return 'unknown'
 
 
-def _schema_to_ts_interface(name: str, schema: dict[str, Any], defs: dict[str, Any]) -> str:
-    """Render a JSON Schema object as a TypeScript interface."""
+def _schema_to_ts_declaration(name: str, schema: dict[str, Any], defs: dict[str, Any]) -> str:
+    """Render a JSON Schema object as a TypeScript declaration."""
+    if 'enum' in schema:
+        enum_type = _json_schema_type_to_ts(schema, defs, set(), name)
+        return f'export type {name} = {enum_type};'
+
+    schema_type = schema.get('type')
+    if schema_type != 'object' and 'properties' not in schema:
+        value_type = _json_schema_type_to_ts(schema, defs, set(), name)
+        return f'export type {name} = {value_type};'
+
     properties: dict[str, Any] = schema.get('properties', {})
     required_fields: set[str] = set(schema.get('required', []))
 
@@ -198,6 +207,9 @@ def _collect_refs(schema: dict[str, Any]) -> list[str]:
     items = schema.get('items')
     if isinstance(items, dict):
         refs.extend(_collect_refs(items))
+    additional = schema.get('additionalProperties')
+    if isinstance(additional, dict):
+        refs.extend(_collect_refs(additional))
     return refs
 
 
@@ -228,10 +240,10 @@ def generate() -> str:
                 continue
             if ref_name in all_defs:
                 emitted_defs.add(ref_name)
-                body.append(_schema_to_ts_interface(ref_name, all_defs[ref_name], all_defs))
+                body.append(_schema_to_ts_declaration(ref_name, all_defs[ref_name], all_defs))
                 body.append('')
 
-        body.append(_schema_to_ts_interface(ts_name, schema, all_defs))
+        body.append(_schema_to_ts_declaration(ts_name, schema, all_defs))
         body.append('')
 
     return '\n'.join(header + body)

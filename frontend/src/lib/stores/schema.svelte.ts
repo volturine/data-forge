@@ -8,6 +8,7 @@ import {
 	type StepConfig
 } from '$lib/utils/transform';
 import { resolveColumnType } from '$lib/utils/column-types';
+import { isChartStep } from '$lib/components/pipeline/utils';
 import { hashPipeline } from '$lib/utils/hash';
 import { applySteps } from '$lib/utils/pipeline';
 import { SvelteMap } from 'svelte/reactivity';
@@ -51,13 +52,7 @@ export class SchemaStore {
 				output = input;
 			} else if (entry && (step.type === 'pivot' || step.type === 'unpivot')) {
 				output = entry.schema;
-			} else if (
-				entry?.hash !== null &&
-				entry?.hash === currentHash &&
-				step.type !== 'chart' &&
-				step.type !== 'plot' &&
-				!step.type.startsWith('plot_')
-			) {
+			} else if (entry?.hash !== null && entry?.hash === currentHash && !isChartStep(step.type)) {
 				output = entry.schema;
 			} else if (step.type === 'join') {
 				const rightSource = typeof config.right_source === 'string' ? config.right_source : '';

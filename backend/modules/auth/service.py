@@ -24,18 +24,26 @@ from core.exceptions import (
     TokenExpiredError,
     TokenInvalidError,
 )
-from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+from modules.auth.models import (
+    AuthProvider,
+    AuthProviderName,
+    User,
+    UserSession,
+    UserStatus,
+    VerificationToken,
+    VerificationTokenType,
+)
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-_PASSWORD_PROVIDER = 'password'
+_PASSWORD_PROVIDER = AuthProviderName.PASSWORD
 _PBKDF2_ALG = 'sha256'
 _PBKDF2_ITERATIONS = 200_000
-_EMAIL_VERIFY = 'email_verify'
-_PASSWORD_RESET = 'password_reset'
+_EMAIL_VERIFY = VerificationTokenType.EMAIL_VERIFY
+_PASSWORD_RESET = VerificationTokenType.PASSWORD_RESET
 _RESEND_COOLDOWN_MINUTES = 5
 _DEFAULT_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, 'data-forge-default-user').hex
 _DEFAULT_USER_MARKER = 'env_default_user'
@@ -153,6 +161,18 @@ def _build_default_provider_metadata(password: str) -> dict[str, str]:
     }
 
 
+def _coerce_provider_name(provider: AuthProviderName | str) -> AuthProviderName:
+    if isinstance(provider, AuthProviderName):
+        return provider
+    return AuthProviderName(provider)
+
+
+def _coerce_token_type(token_type: VerificationTokenType | str) -> VerificationTokenType:
+    if isinstance(token_type, VerificationTokenType):
+        return token_type
+    return VerificationTokenType(token_type)
+
+
 def get_default_user(session: Session) -> User | None:
     return get_user_by_id(session, _DEFAULT_USER_ID)
 
@@ -175,7 +195,7 @@ def ensure_default_user(session: Session) -> User:
             id=_DEFAULT_USER_ID,
             email=user_email,
             display_name=desired_name,
-            status='active',
+            status=UserStatus.ACTIVE,
             email_verified=True,
             has_password=True,
             preferences={},
@@ -200,8 +220,8 @@ def ensure_default_user(session: Session) -> User:
     if user.display_name != desired_name:
         user.display_name = desired_name
         changed = True
-    if user.status != 'active':
-        user.status = 'active'
+    if user.status != UserStatus.ACTIVE:
+        user.status = UserStatus.ACTIVE
         changed = True
     if user.email_verified is not True:
         user.email_verified = True
@@ -271,7 +291,7 @@ def create_user(session: Session, email: str, password: str, display_name: str) 
         id=uuid.uuid4().hex,
         email=normalized_email,
         display_name=display_name,
-        status='active',
+        status=UserStatus.ACTIVE,
         email_verified=False,
         has_password=True,
         preferences={},
@@ -303,10 +323,10 @@ def get_user_by_id(session: Session, user_id: str) -> User | None:
     return session.get(User, user_id)
 
 
-def get_user_providers(session: Session, user_id: str) -> list[str]:
+def get_user_providers(session: Session, user_id: str) -> list[AuthProviderName]:
     stmt = select(AuthProvider).where(AuthProvider.user_id == user_id)
     providers = session.exec(stmt).all()
-    return [provider.provider for provider in providers]
+    return [AuthProviderName(provider.provider) for provider in providers]
 
 
 def delete_user_account(session: Session, user_id: str) -> None:
@@ -332,7 +352,7 @@ def update_profile(
     user_id: str,
     display_name: str | None,
     avatar_url: str | None,
-    preferences: dict | None,
+    preferences: dict[str, object] | None,
 ) -> User:
     user = get_user_by_id(session, user_id)
     if not user:
@@ -406,7 +426,7 @@ def validate_session(session: Session, session_id: str) -> User | None:
     user = get_user_by_id(session, user_session.user_id)
     if not user:
         return None
-    if user.status == 'disabled':
+    if user.status == UserStatus.DISABLED:
         return None
     user.last_login_at = now
     user.updated_at = now
@@ -441,9 +461,9 @@ def revoke_all_sessions(session: Session, user_id: str) -> None:
 def link_provider(
     session: Session,
     user_id: str,
-    provider: str,
+    provider: AuthProviderName,
     provider_subject: str,
-    metadata: dict | None,
+    metadata: dict[str, object] | None,
 ) -> AuthProvider:
     existing = session.exec(
         select(AuthProvider).where(
@@ -472,16 +492,17 @@ def link_provider(
 
 def find_or_create_oauth_user(
     session: Session,
-    provider: str,
+    provider: AuthProviderName,
     provider_subject: str,
     email: str,
     display_name: str,
     avatar_url: str | None,
 ) -> User:
+    provider_name = _coerce_provider_name(provider)
     normalized_email = email.strip().lower()
     existing = session.exec(
         select(AuthProvider).where(
-            AuthProvider.provider == provider,
+            AuthProvider.provider == provider_name,
             AuthProvider.provider_subject == provider_subject,
         )
     ).first()
@@ -495,7 +516,7 @@ def find_or_create_oauth_user(
         link_provider(
             session=session,
             user_id=matched_email.id,
-            provider=provider,
+            provider=provider_name,
             provider_subject=provider_subject,
             metadata={'email': normalized_email, 'avatar_url': avatar_url},
         )
@@ -514,7 +535,7 @@ def find_or_create_oauth_user(
         email=normalized_email,
         display_name=display_name or normalized_email.split('@')[0],
         avatar_url=avatar_url,
-        status='active',
+        status=UserStatus.ACTIVE,
         email_verified=True,
         has_password=False,
         preferences={},
@@ -525,7 +546,7 @@ def find_or_create_oauth_user(
     provider_row = AuthProvider(
         id=uuid.uuid4().hex,
         user_id=user.id,
-        provider=provider,
+        provider=provider_name,
         provider_subject=provider_subject,
         provider_metadata={'email': normalized_email, 'avatar_url': avatar_url},
         created_at=now,
@@ -536,12 +557,13 @@ def find_or_create_oauth_user(
     return user
 
 
-def unlink_provider(session: Session, user_id: str, provider: str) -> None:
+def unlink_provider(session: Session, user_id: str, provider: AuthProviderName) -> None:
+    provider_name = _coerce_provider_name(provider)
     providers_stmt = select(AuthProvider).where(AuthProvider.user_id == user_id)
     providers = session.exec(providers_stmt).all()
     if len(providers) <= 1:
         raise ProviderUnlinkError()
-    provider_row = next((row for row in providers if row.provider == provider), None)
+    provider_row = next((row for row in providers if row.provider == provider_name), None)
     if not provider_row:
         return
     if provider_row.provider == _PASSWORD_PROVIDER:
@@ -557,14 +579,20 @@ def unlink_provider(session: Session, user_id: str, provider: str) -> None:
     session.commit()
 
 
-def create_verification_token(session: Session, user_id: str, token_type: str, ttl_hours: int = 24) -> str:
+def create_verification_token(
+    session: Session,
+    user_id: str,
+    token_type: VerificationTokenType,
+    ttl_hours: int = 24,
+) -> str:
+    token_type_value = _coerce_token_type(token_type)
     now = _utcnow()
     raw = secrets.token_urlsafe(32)
     token = VerificationToken(
         id=uuid.uuid4().hex,
         user_id=user_id,
         token=raw,
-        token_type=token_type,
+        token_type=token_type_value,
         created_at=now,
         expires_at=now + timedelta(hours=ttl_hours),
         used=False,
@@ -574,10 +602,11 @@ def create_verification_token(session: Session, user_id: str, token_type: str, t
     return raw
 
 
-def validate_verification_token(session: Session, token: str, token_type: str) -> str:
+def validate_verification_token(session: Session, token: str, token_type: VerificationTokenType) -> str:
+    token_type_value = _coerce_token_type(token_type)
     stmt = select(VerificationToken).where(
         VerificationToken.token == token,
-        VerificationToken.token_type == token_type,
+        VerificationToken.token_type == token_type_value,
     )
     row = session.exec(stmt).first()
     if not row:

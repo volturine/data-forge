@@ -1,54 +1,146 @@
 from __future__ import annotations
 
-from typing import Literal
+from enum import StrEnum
+from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-StepType = Literal[
-    'select',
-    'drop',
-    'filter',
-    'groupby',
-    'join',
-    'union_by_name',
-    'unpivot',
-    'explode',
-    'pivot',
-    'sample',
-    'limit',
-    'topk',
-    'view',
-    'export',
-    'download',
-    'chart',
-    'notification',
-    'ai',
-    'datasource',
-    'sort',
-    'rename',
-    'expression',
-    'with_columns',
-    'fill_null',
-    'deduplicate',
-    'string_transform',
-    'timeseries',
-    'plot_bar',
-    'plot_horizontal_bar',
-    'plot_area',
-    'plot_heatgrid',
-    'plot_histogram',
-    'plot_scatter',
-    'plot_line',
-    'plot_pie',
-    'plot_boxplot',
-]
+from modules.analysis.step_types import ChartType, StepType, is_plot_alias_step_type, is_step_type
+from modules.compute.operations.strings import StringTransformMethod
+from modules.compute.operations.timeseries import DurationUnit, TimeComponent, TimeDirection, TimeseriesOperationType
+from modules.compute.operations.with_columns import WithColumnsExprType
+
+__all__ = ['StepType', 'get_step_catalog', 'get_config_model', 'validate_step']
+
+
+class StepCategory(StrEnum):
+    TRANSFORM = 'transform'
+    AGGREGATE = 'aggregate'
+    RESHAPE = 'reshape'
+    IO = 'io'
+    VISUALIZATION = 'visualization'
+    ADVANCED = 'advanced'
+
+
+class CastMapType(StrEnum):
+    INT64 = 'Int64'
+    FLOAT64 = 'Float64'
+    BOOLEAN = 'Boolean'
+    STRING = 'String'
+    UTF8 = 'Utf8'
+    DATE = 'Date'
+    DATETIME = 'Datetime'
+
+
+class FilterValueType(StrEnum):
+    STRING = 'string'
+    NUMBER = 'number'
+    DATE = 'date'
+    DATETIME = 'datetime'
+    COLUMN = 'column'
+    BOOLEAN = 'boolean'
+
+
+class FilterLogic(StrEnum):
+    AND = 'AND'
+    OR = 'OR'
+
+
+class JoinHow(StrEnum):
+    INNER = 'inner'
+    LEFT = 'left'
+    RIGHT = 'right'
+    OUTER = 'outer'
+    CROSS = 'cross'
+
+
+class OverlayChartType(StrEnum):
+    LINE = 'line'
+    AREA = 'area'
+    BAR = 'bar'
+    SCATTER = 'scatter'
+
+
+class YAxisPosition(StrEnum):
+    LEFT = 'left'
+    RIGHT = 'right'
+
+
+class ReferenceAxis(StrEnum):
+    X = 'x'
+    Y = 'y'
+
+
+class SortDirection(StrEnum):
+    ASC = 'asc'
+    DESC = 'desc'
+
+
+class StackMode(StrEnum):
+    GROUPED = 'grouped'
+    STACKED = 'stacked'
+    STACKED_100 = '100%'
+
+
+class AxisScale(StrEnum):
+    LINEAR = 'linear'
+    LOG = 'log'
+
+
+class LegendPosition(StrEnum):
+    TOP = 'top'
+    BOTTOM = 'bottom'
+    LEFT = 'left'
+    RIGHT = 'right'
+    NONE = 'none'
+
+
+class ChartHeight(StrEnum):
+    SMALL = 'small'
+    MEDIUM = 'medium'
+    LARGE = 'large'
+    XLARGE = 'xlarge'
+
+
+class ChartWidth(StrEnum):
+    NORMAL = 'normal'
+    WIDE = 'wide'
+    FULL = 'full'
+
+
+class NotificationMethod(StrEnum):
+    EMAIL = 'email'
+    TELEGRAM = 'telegram'
+
+
+class RecipientSource(StrEnum):
+    MANUAL = 'manual'
+    COLUMN = 'column'
+
+
+class AIProvider(StrEnum):
+    OLLAMA = 'ollama'
+    OPENAI = 'openai'
+
+
+class StepCatalogEntry(TypedDict):
+    description: str
+    category: str
+    config: type[BaseModel]
+
+
+class StepCatalogItem(TypedDict):
+    type: str
+    description: str
+    category: str
+    config_schema: dict
 
 
 class SelectConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     columns: list[str] = Field(default_factory=list, description='Columns to keep')
-    cast_map: dict[str, Literal['Int64', 'Float64', 'Boolean', 'String', 'Utf8', 'Date', 'Datetime']] = Field(
+    cast_map: dict[str, CastMapType] = Field(
         default_factory=dict,
         description='Optional per-column cast map applied after selection',
     )
@@ -66,7 +158,7 @@ class FilterConditionSchema(BaseModel):
     column: str = Field(description='Column to filter on')
     operator: str = Field(description='Comparison operator')
     value: str | int | float | bool | list[str] | None = ''
-    value_type: Literal['string', 'number', 'date', 'datetime', 'column', 'boolean'] = 'string'
+    value_type: FilterValueType = FilterValueType.STRING
     compare_column: str | None = None
 
 
@@ -77,7 +169,7 @@ class FilterConfig(BaseModel):
         default_factory=list,
         description='Filter conditions to apply',
     )
-    logic: Literal['AND', 'OR'] = 'AND'
+    logic: FilterLogic = FilterLogic.AND
 
 
 class AggregationSchema(BaseModel):
@@ -131,7 +223,7 @@ class WithColumnsExprSchema(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     name: str = Field(description='Output column name')
-    type: Literal['literal', 'column', 'udf'] = 'literal'
+    type: WithColumnsExprType = WithColumnsExprType.LITERAL
     value: str | int | float | None = None
     column: str | None = None
     args: list[str] | None = None
@@ -239,7 +331,7 @@ class JoinColumnSchema(BaseModel):
 class JoinConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    how: Literal['inner', 'left', 'right', 'outer', 'cross'] = 'inner'
+    how: JoinHow = JoinHow.INNER
     right_source: str = Field('', description='Tab ID to join with')
     join_columns: list[JoinColumnSchema] = Field(
         default_factory=list,
@@ -276,16 +368,16 @@ class DownloadConfig(BaseModel):
 class OverlaySchema(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    chart_type: Literal['line', 'area', 'bar', 'scatter'] = 'line'
+    chart_type: OverlayChartType = OverlayChartType.LINE
     y_column: str = ''
     aggregation: str = 'sum'
-    y_axis_position: Literal['left', 'right'] = 'left'
+    y_axis_position: YAxisPosition = YAxisPosition.LEFT
 
 
 class ReferenceLineSchema(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    axis: Literal['x', 'y'] = 'y'
+    axis: ReferenceAxis = ReferenceAxis.Y
     value: float | None = None
     label: str = ''
     color: str = ''
@@ -294,26 +386,16 @@ class ReferenceLineSchema(BaseModel):
 class ChartConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    chart_type: Literal[
-        'bar',
-        'horizontal_bar',
-        'area',
-        'heatgrid',
-        'histogram',
-        'scatter',
-        'line',
-        'pie',
-        'boxplot',
-    ] = Field('bar', description='Visualization type')
+    chart_type: ChartType = Field(ChartType.BAR, description='Visualization type')
     x_column: str = Field('', description='X-axis column')
     y_column: str = Field('', description='Y-axis column')
     bins: int = 10
     aggregation: str = 'sum'
     group_column: str | None = None
     group_sort_by: str | None = None
-    group_sort_order: Literal['asc', 'desc'] = 'asc'
+    group_sort_order: SortDirection = SortDirection.ASC
     group_sort_column: str | None = None
-    stack_mode: Literal['grouped', 'stacked', '100%'] = 'grouped'
+    stack_mode: StackMode = StackMode.GROUPED
     area_opacity: float = 0.35
     date_bucket: str | None = None
     date_ordinal: str | None = None
@@ -321,32 +403,32 @@ class ChartConfig(BaseModel):
     selection_enabled: bool = False
     area_selection_enabled: bool = False
     sort_by: str | None = None
-    sort_order: Literal['asc', 'desc'] = 'asc'
+    sort_order: SortDirection = SortDirection.ASC
     sort_column: str | None = None
     x_axis_label: str | None = ''
     y_axis_label: str | None = ''
-    y_axis_scale: Literal['linear', 'log'] = 'linear'
+    y_axis_scale: AxisScale = AxisScale.LINEAR
     y_axis_min: float | None = None
     y_axis_max: float | None = None
     display_units: str = ''
     decimal_places: int = 2
-    legend_position: Literal['top', 'bottom', 'left', 'right', 'none'] = 'right'
+    legend_position: LegendPosition = LegendPosition.RIGHT
     title: str | None = ''
     series_colors: list[str] = Field(default_factory=list)
     overlays: list[OverlaySchema] = Field(default_factory=list)
     reference_lines: list[ReferenceLineSchema] = Field(default_factory=list)
-    chart_height: Literal['small', 'medium', 'large', 'xlarge'] = 'medium'
-    chart_width: Literal['normal', 'wide', 'full'] = 'normal'
+    chart_height: ChartHeight = ChartHeight.MEDIUM
+    chart_width: ChartWidth = ChartWidth.NORMAL
 
 
 class NotificationConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    method: Literal['email', 'telegram'] = 'email'
+    method: NotificationMethod = NotificationMethod.EMAIL
     recipient: str = ''
     subscriber_ids: list[str] = Field(default_factory=list)
     bot_token: str = ''
-    recipient_source: Literal['manual', 'column'] = 'manual'
+    recipient_source: RecipientSource = RecipientSource.MANUAL
     recipient_column: str = ''
     input_columns: list[str] = Field(
         default_factory=list,
@@ -362,7 +444,7 @@ class NotificationConfig(BaseModel):
 class AIConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    provider: Literal['ollama', 'openai'] = 'ollama'
+    provider: AIProvider = AIProvider.OLLAMA
     model: str = 'llama2'
     input_columns: list[str] = Field(
         default_factory=list,
@@ -384,11 +466,12 @@ class TimeSeriesConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     column: str = Field('', description='Date/time column to operate on')
-    operation_type: str = Field('', description='Temporal operation type')
+    operation_type: TimeseriesOperationType = Field(description='Temporal operation type')
     new_column: str = ''
-    component: str | None = None
+    component: TimeComponent | None = None
     value: int | None = None
-    unit: str | None = None
+    unit: DurationUnit | None = None
+    direction: TimeDirection | None = None
     column2: str | None = None
 
 
@@ -396,7 +479,7 @@ class StringTransformConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     column: str = Field('', description='String column to transform')
-    method: str = Field('', description='String method to apply')
+    method: StringTransformMethod = Field(description='String method to apply')
     new_column: str = ''
     start: int | None = None
     end: int | None = None
@@ -407,7 +490,7 @@ class StringTransformConfig(BaseModel):
     index: int | None = None
 
 
-STEP_CATALOG: dict[str, dict] = {
+STEP_CATALOG: dict[str, StepCatalogEntry] = {
     'select': {
         'description': 'Keep only the specified columns, removing all others.',
         'category': 'transform',
@@ -616,11 +699,11 @@ STEP_CATALOG: dict[str, dict] = {
 }
 
 
-def get_step_catalog() -> list[dict]:
+def get_step_catalog() -> list[StepCatalogItem]:
     """Return the step type catalog for AI discovery."""
-    result = []
+    result: list[StepCatalogItem] = []
     for typ, info in STEP_CATALOG.items():
-        if typ.startswith('plot_'):
+        if is_plot_alias_step_type(typ):
             continue
         result.append(
             {
@@ -635,6 +718,8 @@ def get_step_catalog() -> list[dict]:
 
 def get_config_model(step_type: str) -> type[BaseModel] | None:
     """Return the config model for a step type."""
+    if not is_step_type(step_type):
+        return None
     entry = STEP_CATALOG.get(step_type)
     if not entry:
         return None
@@ -643,7 +728,7 @@ def get_config_model(step_type: str) -> type[BaseModel] | None:
 
 def validate_step(step_type: str, config: dict) -> None:
     """Validate a step type and its config. Raises ValueError on failure."""
-    if step_type not in STEP_CATALOG:
+    if not is_step_type(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
     model = STEP_CATALOG[step_type]['config']
     model.model_validate(config)

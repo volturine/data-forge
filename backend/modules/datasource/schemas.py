@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,9 +45,15 @@ class ColumnStats(BaseModel):
     max: object | None = None
 
 
+class SchemaDiffStatus(StrEnum):
+    ADDED = 'added'
+    REMOVED = 'removed'
+    TYPE_CHANGED = 'type_changed'
+
+
 class SchemaDiff(BaseModel):
     column: str
-    status: Literal['added', 'removed', 'type_changed']
+    status: SchemaDiffStatus
     type_a: str | None = None
     type_b: str | None = None
 

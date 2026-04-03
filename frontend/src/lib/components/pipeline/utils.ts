@@ -26,6 +26,11 @@ import {
 	Trash2,
 	Bell
 } from 'lucide-svelte';
+import {
+	isChartStepType,
+	normalizePipelineStepType,
+	type CanonicalStepType
+} from '$lib/types/pipeline-step';
 
 function truncate(items: string[], max = 3, len = 20): string {
 	if (!items?.length) return '';
@@ -42,7 +47,7 @@ type StepTypeConfig = {
 	summary: (c: Record<string, unknown>) => string;
 };
 
-const stepTypes: Record<string, StepTypeConfig> = {
+const stepTypes = {
 	filter: {
 		label: 'Filter',
 		icon: Filter,
@@ -366,7 +371,11 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			return `${filename}.${format}`;
 		}
 	}
-};
+} satisfies Partial<Record<CanonicalStepType, StepTypeConfig>>;
+
+function hasStepTypeConfig(type: string): type is keyof typeof stepTypes {
+	return type in stepTypes;
+}
 
 const defaultStepType: StepTypeConfig = {
 	label: 'Unknown',
@@ -376,8 +385,26 @@ const defaultStepType: StepTypeConfig = {
 };
 
 function getStepTypeConfig(type: string): StepTypeConfig {
-	if (type.startsWith('plot_')) return stepTypes.chart;
-	return stepTypes[type] ?? defaultStepType;
+	if (isChartStepType(type)) return stepTypes.chart;
+	if (hasStepTypeConfig(type)) {
+		return stepTypes[type];
+	}
+	return defaultStepType;
 }
 
-export { type StepTypeConfig, defaultStepType, stepTypes, getStepTypeConfig };
+function isChartStep(type: string): boolean {
+	return isChartStepType(type);
+}
+
+function normalizeStepType(type: string): string {
+	return normalizePipelineStepType(type);
+}
+
+export {
+	type StepTypeConfig,
+	defaultStepType,
+	stepTypes,
+	getStepTypeConfig,
+	isChartStep,
+	normalizeStepType
+};

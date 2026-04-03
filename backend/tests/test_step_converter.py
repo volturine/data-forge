@@ -1,4 +1,15 @@
-from modules.compute.step_converter import convert_filter_config, convert_groupby_config, convert_rename_config
+import dataclasses
+
+import pytest
+
+from modules.compute.step_converter import (
+    BackendStep,
+    FrontendStep,
+    convert_filter_config,
+    convert_groupby_config,
+    convert_rename_config,
+    convert_step_format,
+)
 
 
 def test_convert_groupby_config_prefers_group_by() -> None:
@@ -82,3 +93,29 @@ def test_convert_filter_config_keeps_valid_conditions_when_placeholders_present(
         ],
         'logic': 'AND',
     }
+
+
+def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
+    step = convert_step_format(
+        {
+            'id': 'step-1',
+            'type': 'plot_scatter',
+            'config': {'x_column': 'age', 'y_column': 'score'},
+            'depends_on': ['step-0'],
+            'is_applied': True,
+        }
+    )
+
+    assert isinstance(step, BackendStep)
+    assert dataclasses.is_dataclass(step)
+    assert step.name == 'step-1'
+    assert step.operation == 'chart'
+    assert step.params['chart_type'] == 'scatter'
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        step.operation = 'filter'  # type: ignore[misc]
+
+
+def test_frontend_step_from_mapping_rejects_missing_type() -> None:
+    with pytest.raises(ValueError, match='Step must have a type field'):
+        FrontendStep.from_mapping({'id': 'step-1'})

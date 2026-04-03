@@ -95,7 +95,8 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
     analysis.pipeline_definition = target.pipeline_definition
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
-    tabs = analysis.pipeline_definition.get('tabs', [])
+    pipeline_definition = analysis.pipeline_definition
+    tabs = pipeline_definition.get('tabs', [])
     for tab in tabs:
         datasource = tab.get('datasource') if isinstance(tab, dict) else None
         if not isinstance(datasource, dict):
@@ -114,7 +115,16 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
     stmt = delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id)  # type: ignore[arg-type]
     session.execute(stmt)
-    datasource_ids = [ds_id for tab in tabs if isinstance(tab.get('datasource'), dict) and (ds_id := tab['datasource'].get('id'))]
+    datasource_ids: list[str] = []
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict):
+            continue
+        datasource_id = datasource.get('id')
+        if datasource_id:
+            datasource_ids.append(str(datasource_id))
     for datasource_id in datasource_ids:
         ds: DataSource | None = session.get(DataSource, datasource_id)
         if not ds:

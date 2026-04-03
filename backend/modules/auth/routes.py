@@ -13,7 +13,7 @@ from core.database import get_settings_db, run_settings_db
 from core.error_handlers import handle_errors
 from core.exceptions import AccountDisabledError, InvalidCredentialsError, OAuthError
 from modules.auth.dependencies import get_current_user
-from modules.auth.models import AuthProvider, User
+from modules.auth.models import AuthProvider, AuthProviderName, User, UserStatus, VerificationTokenType
 from modules.auth.schemas import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -158,7 +158,7 @@ def _request_ip_address(request: Request) -> str | None:
 @handle_errors(operation='register')
 async def register(body: RegisterRequest, request: Request, response: Response, session: Session = Depends(get_settings_db)) -> UserPublic:
     user = create_user(session, body.email, body.password, body.display_name)
-    token = create_verification_token(session, user_id=user.id, token_type='email_verify')
+    token = create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
     await send_verification_email(user.email, token)
     created_session = create_session(
         session,
@@ -176,12 +176,12 @@ async def login(body: LoginRequest, request: Request, response: Response, sessio
     user = get_user_by_email(session, body.email)
     if not user:
         raise InvalidCredentialsError()
-    if user.status == 'disabled':
+    if user.status == UserStatus.DISABLED:
         raise AccountDisabledError()
     password_provider = session.exec(
         select(AuthProvider).where(
             AuthProvider.user_id == user.id,
-            AuthProvider.provider == 'password',
+            AuthProvider.provider == AuthProviderName.PASSWORD,
         )
     ).first()
     if not password_provider:
@@ -229,7 +229,7 @@ async def delete_account_route(
 @router.post('/verify-email', response_model=MessageResponse)
 @handle_errors(operation='verify email')
 async def verify_email(body: VerifyEmailRequest, session: Session = Depends(get_settings_db)) -> MessageResponse:
-    user_id = validate_verification_token(session, token=body.token, token_type='email_verify')
+    user_id = validate_verification_token(session, token=body.token, token_type=VerificationTokenType.EMAIL_VERIFY)
     user = get_user_by_id(session, user_id)
     if not user:
         raise InvalidCredentialsError()
@@ -363,7 +363,7 @@ async def google_oauth_start() -> RedirectResponse:
     }
     url = f'https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(response, provider='google', state=state)
+    _set_oauth_state_cookie(response, provider=AuthProviderName.GOOGLE.value, state=state)
     return response
 
 
@@ -376,7 +376,7 @@ async def google_oauth_callback(
 ) -> RedirectResponse:
     redirect_url = f'{settings.auth_frontend_url}/#/auth/callback'
     response = RedirectResponse(url=redirect_url)
-    _validate_oauth_state(request, response, provider='google', state=params.state)
+    _validate_oauth_state(request, response, provider=AuthProviderName.GOOGLE.value, state=params.state)
     token_payload = {
         'code': params.code,
         'client_id': settings.google_client_id,
@@ -405,7 +405,7 @@ async def google_oauth_callback(
         raise OAuthError('Google user info missing id or email')
     user = find_or_create_oauth_user(
         session=session,
-        provider='google',
+        provider=AuthProviderName.GOOGLE,
         provider_subject=subject,
         email=email,
         display_name=str(info.get('name') or email.split('@')[0]),
@@ -433,7 +433,7 @@ async def github_oauth_start() -> RedirectResponse:
     }
     url = f'https://github.com/login/oauth/authorize?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(response, provider='github', state=state)
+    _set_oauth_state_cookie(response, provider=AuthProviderName.GITHUB.value, state=state)
     return response
 
 
@@ -446,7 +446,7 @@ async def github_oauth_callback(
 ) -> RedirectResponse:
     redirect_url = f'{settings.auth_frontend_url}/#/auth/callback'
     response = RedirectResponse(url=redirect_url)
-    _validate_oauth_state(request, response, provider='github', state=params.state)
+    _validate_oauth_state(request, response, provider=AuthProviderName.GITHUB.value, state=params.state)
     payload = {
         'client_id': settings.github_client_id,
         'client_secret': settings.github_client_secret,
@@ -481,7 +481,7 @@ async def github_oauth_callback(
         raise OAuthError('GitHub account has no verified email')
     user = find_or_create_oauth_user(
         session=session,
-        provider='github',
+        provider=AuthProviderName.GITHUB,
         provider_subject=str(subject),
         email=email,
         display_name=str(gh_user.get('name') or gh_user.get('login') or email.split('@')[0]),
@@ -504,7 +504,11 @@ async def unlink_provider_route(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_settings_db),
 ) -> dict[str, bool]:
-    if provider not in {'google', 'github'}:
+    try:
+        provider_name = AuthProviderName(provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Unsupported provider') from exc
+    if provider_name not in {AuthProviderName.GOOGLE, AuthProviderName.GITHUB}:
         raise HTTPException(status_code=400, detail='Unsupported provider')
-    unlink_provider(session, current_user.id, provider)
+    unlink_provider(session, current_user.id, provider_name)
     return {'success': True}

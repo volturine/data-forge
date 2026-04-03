@@ -10,6 +10,7 @@ from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError, ScheduleValidationError
 from modules.analysis.models import Analysis
+from modules.analysis.pipeline_types import AnalysisTab
 from modules.compute.manager import ProcessManager
 from modules.datasource.models import DataSource
 from modules.datasource.service import is_reingestable_raw_datasource
@@ -73,7 +74,7 @@ def _build_schedule_response(
         if analysis:
             data['analysis_name'] = analysis.name
 
-            if tab_id and isinstance(analysis.pipeline_definition, dict):
+            if tab_id:
                 for tab in analysis.pipeline_definition.get('tabs', []):
                     if tab.get('id') == tab_id:
                         data['tab_name'] = tab.get('name', 'unnamed')
@@ -409,8 +410,7 @@ def execute_schedule(session: Session, manager: ProcessManager, schedule_id: str
         raise ValueError(f'Analysis {analysis_id} not found for datasource {schedule.datasource_id}')
 
     # Find the specific tab that produces this datasource
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
+    tabs = analysis.pipeline_definition.get('tabs', [])
 
     target_tab = None
     for tab in tabs:
@@ -484,7 +484,7 @@ def execute_schedule(session: Session, manager: ProcessManager, schedule_id: str
     }
 
 
-def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
+def _resolve_upstream_tabs(tabs: list[AnalysisTab], target_tab_id: str) -> set[str]:
     """Find all tab IDs that the target tab depends on via lazyframe inputs (including itself)."""
     output_to_tab: dict[str, str] = {}
     tab_input: dict[str, str] = {}
@@ -542,8 +542,7 @@ def run_analysis_build(
 
     pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=datasource_id)
 
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
+    tabs = analysis.pipeline_definition.get('tabs', [])
     if not tabs:
         logger.warning(f'Scheduler: analysis {analysis_id} has no tabs, skipping build')
         return {'analysis_id': analysis_id, 'tabs_built': 0, 'results': []}

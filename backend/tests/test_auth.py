@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -18,10 +19,11 @@ from core.exceptions import (
 )
 from core.namespace import namespace_paths
 from main import app
-from modules.analysis.models import Analysis
+from modules.analysis.models import Analysis, AnalysisStatus
 from modules.auth.dependencies import get_current_user, get_optional_user
-from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+from modules.auth.models import AuthProvider, AuthProviderName, User, UserSession, UserStatus, VerificationToken, VerificationTokenType
 from modules.auth.routes import invalidate_me_cache
+from modules.auth.schemas import UserPublic
 from modules.auth.service import (
     change_password,
     create_session,
@@ -45,6 +47,36 @@ from modules.auth.service import (
 )
 from modules.datasource.models import DataSource
 from modules.udf.models import Udf
+
+
+def _schema_enum_values(schema: dict, field_name: str) -> list[str]:
+    field_schema = schema.get('properties', {}).get(field_name, {})
+    if field_schema.get('type') == 'array':
+        item_schema = field_schema.get('items', {})
+        enum_values = item_schema.get('enum')
+        if enum_values is not None:
+            return enum_values
+        ref = item_schema.get('$ref')
+        if isinstance(ref, str):
+            return schema.get('$defs', {}).get(ref.split('/')[-1], {}).get('enum', [])
+        return []
+    enum_values = field_schema.get('enum')
+    if enum_values is not None:
+        return enum_values
+    ref = field_schema.get('$ref')
+    if isinstance(ref, str):
+        return schema.get('$defs', {}).get(ref.split('/')[-1], {}).get('enum', [])
+    return []
+
+
+def test_user_public_schema_uses_auth_enums() -> None:
+    schema = UserPublic.model_json_schema()
+    assert _schema_enum_values(schema, 'status') == [item.value for item in UserStatus]
+    assert _schema_enum_values(schema, 'providers') == [item.value for item in AuthProviderName]
+
+
+def test_verification_token_type_enum_values() -> None:
+    assert [item.value for item in VerificationTokenType] == ['email_verify', 'password_reset']
 
 
 @pytest.fixture(scope='function')
@@ -146,7 +178,7 @@ class TestUserService:
             assert user is not None
             assert user.display_name == 'Seeded User'
             provider = session.exec(
-                select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'password')
+                select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == AuthProviderName.PASSWORD)
             ).first()
             assert provider is not None
 
@@ -162,13 +194,13 @@ class TestUserService:
         assert user.email_verified is True
         assert user.has_password is True
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'password')
+            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == AuthProviderName.PASSWORD)
         ).first()
         assert provider is not None
         assert provider.provider_subject == 'guest@example.com'
         assert isinstance(provider.provider_metadata, dict)
         assert provider.provider_metadata['managed_by'] == 'env_default_user'
-        assert verify_password('GuestPass123', provider.provider_metadata['password_hash']) is True
+        assert verify_password('GuestPass123', cast(str, provider.provider_metadata['password_hash'])) is True
 
     def test_ensure_default_user_updates_existing_account(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr('core.config.settings.default_user_email', 'first@example.com')
@@ -185,12 +217,12 @@ class TestUserService:
         assert updated.email == 'second@example.com'
         assert updated.display_name == 'Second User'
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == updated.id, AuthProvider.provider == 'password')
+            select(AuthProvider).where(AuthProvider.user_id == updated.id, AuthProvider.provider == AuthProviderName.PASSWORD)
         ).first()
         assert provider is not None
         assert provider.provider_subject == 'second@example.com'
         assert isinstance(provider.provider_metadata, dict)
-        assert verify_password('SecondPass123', provider.provider_metadata['password_hash']) is True
+        assert verify_password('SecondPass123', cast(str, provider.provider_metadata['password_hash'])) is True
 
     def test_ensure_default_user_keeps_email_when_new_env_email_is_taken(
         self,
@@ -212,12 +244,12 @@ class TestUserService:
         assert updated.email == 'default@example.com'
         assert updated.display_name == 'Renamed Default'
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == updated.id, AuthProvider.provider == 'password')
+            select(AuthProvider).where(AuthProvider.user_id == updated.id, AuthProvider.provider == AuthProviderName.PASSWORD)
         ).first()
         assert provider is not None
         assert provider.provider_subject == 'default@example.com'
         assert isinstance(provider.provider_metadata, dict)
-        assert verify_password('ChangedPass123', provider.provider_metadata['password_hash']) is True
+        assert verify_password('ChangedPass123', cast(str, provider.provider_metadata['password_hash'])) is True
 
     def test_create_user_success(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'test@example.com', 'Password123', 'Test User')
@@ -227,7 +259,7 @@ class TestUserService:
         assert user.has_password is True
 
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'password')
+            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == AuthProviderName.PASSWORD)
         ).first()
         assert provider is not None
         assert provider.provider_subject == 'test@example.com'
@@ -280,7 +312,7 @@ class TestUserService:
         change_password(auth_db_session, user.id, 'Password123', 'Newpassword123')
 
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'password')
+            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == AuthProviderName.PASSWORD)
         ).first()
         assert provider is not None
         assert isinstance(provider.provider_metadata, dict)
@@ -335,7 +367,7 @@ class TestUserService:
                         name='Namespace Analysis',
                         description=None,
                         pipeline_definition={'steps': []},
-                        status='draft',
+                        status=AnalysisStatus.DRAFT,
                         created_at=now,
                         updated_at=now,
                         result_path=None,
@@ -463,7 +495,7 @@ class TestOAuthService:
     def test_find_or_create_oauth_user_new(self, auth_db_session: Session) -> None:
         user = find_or_create_oauth_user(
             session=auth_db_session,
-            provider='google',
+            provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-1',
             email='oauth@example.com',
             display_name='OAuth User',
@@ -473,14 +505,14 @@ class TestOAuthService:
         assert user.email == 'oauth@example.com'
         assert user.has_password is False
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'google')
+            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == AuthProviderName.GOOGLE)
         ).first()
         assert provider is not None
 
     def test_find_or_create_oauth_user_existing_provider(self, auth_db_session: Session) -> None:
         user = find_or_create_oauth_user(
             session=auth_db_session,
-            provider='github',
+            provider=AuthProviderName.GITHUB,
             provider_subject='github-subject-1',
             email='oauth@example.com',
             display_name='OAuth User',
@@ -489,7 +521,7 @@ class TestOAuthService:
 
         resolved = find_or_create_oauth_user(
             session=auth_db_session,
-            provider='github',
+            provider=AuthProviderName.GITHUB,
             provider_subject='github-subject-1',
             email='oauth-changed@example.com',
             display_name='Changed Name',
@@ -505,7 +537,7 @@ class TestOAuthService:
 
         resolved = find_or_create_oauth_user(
             session=auth_db_session,
-            provider='google',
+            provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-2',
             email='existing@example.com',
             display_name='OAuth Existing',
@@ -515,29 +547,29 @@ class TestOAuthService:
         assert resolved.id == user.id
         providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
         names = {item.provider for item in providers}
-        assert names == {'password', 'google'}
+        assert names == {AuthProviderName.PASSWORD, AuthProviderName.GOOGLE}
 
     def test_unlink_provider_success(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'existing@example.com', 'Password123', 'Existing User')
         find_or_create_oauth_user(
             session=auth_db_session,
-            provider='google',
+            provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-3',
             email='existing@example.com',
             display_name='OAuth Existing',
             avatar_url=None,
         )
 
-        unlink_provider(auth_db_session, user.id, 'google')
+        unlink_provider(auth_db_session, user.id, AuthProviderName.GOOGLE)
 
         providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
         names = {item.provider for item in providers}
-        assert names == {'password'}
+        assert names == {AuthProviderName.PASSWORD}
 
     def test_unlink_provider_last(self, auth_db_session: Session) -> None:
         user = find_or_create_oauth_user(
             session=auth_db_session,
-            provider='google',
+            provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-4',
             email='oauth-last@example.com',
             display_name='OAuth Last',
@@ -545,13 +577,13 @@ class TestOAuthService:
         )
 
         with pytest.raises(ProviderUnlinkError):
-            unlink_provider(auth_db_session, user.id, 'google')
+            unlink_provider(auth_db_session, user.id, AuthProviderName.GOOGLE)
 
     def test_unlink_provider_preserves_row_when_user_missing(self, auth_db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
         user = create_user(auth_db_session, 'missing-user@example.com', 'Password123', 'Missing User')
         find_or_create_oauth_user(
             session=auth_db_session,
-            provider='google',
+            provider=AuthProviderName.GOOGLE,
             provider_subject='google-subject-5',
             email='missing-user@example.com',
             display_name='Missing User',
@@ -561,32 +593,32 @@ class TestOAuthService:
         monkeypatch.setattr('modules.auth.service.get_user_by_id', lambda _session, _user_id: None)
 
         with pytest.raises(ProviderUnlinkError, match='missing account'):
-            unlink_provider(auth_db_session, user.id, 'google')
+            unlink_provider(auth_db_session, user.id, AuthProviderName.GOOGLE)
 
         providers = auth_db_session.exec(select(AuthProvider).where(AuthProvider.user_id == user.id)).all()
         names = {item.provider for item in providers}
-        assert names == {'password', 'google'}
+        assert names == {AuthProviderName.PASSWORD, AuthProviderName.GOOGLE}
 
 
 class TestVerificationTokenService:
     def test_create_verification_token_returns_valid_token(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'verify-token@example.com', 'Password123', 'Verify Token User')
 
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
 
         assert isinstance(token, str)
         assert len(token) >= 32
         row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
         assert row is not None
         assert row.user_id == user.id
-        assert row.token_type == 'email_verify'
+        assert row.token_type == VerificationTokenType.EMAIL_VERIFY
         assert row.used is False
 
     def test_validate_verification_token_valid(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'validate-token@example.com', 'Password123', 'Validate Token User')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
 
-        resolved_user_id = validate_verification_token(auth_db_session, token=token, token_type='email_verify')
+        resolved_user_id = validate_verification_token(auth_db_session, token=token, token_type=VerificationTokenType.EMAIL_VERIFY)
 
         assert resolved_user_id == user.id
         row = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token == token)).first()
@@ -595,18 +627,18 @@ class TestVerificationTokenService:
 
     def test_validate_verification_token_expired(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'expired-token@example.com', 'Password123', 'Expired Token User')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify', ttl_hours=-1)
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY, ttl_hours=-1)
 
         with pytest.raises(TokenExpiredError):
-            validate_verification_token(auth_db_session, token=token, token_type='email_verify')
+            validate_verification_token(auth_db_session, token=token, token_type=VerificationTokenType.EMAIL_VERIFY)
 
     def test_validate_verification_token_used(self, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'used-token@example.com', 'Password123', 'Used Token User')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
-        validate_verification_token(auth_db_session, token=token, token_type='email_verify')
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
+        validate_verification_token(auth_db_session, token=token, token_type=VerificationTokenType.EMAIL_VERIFY)
 
         with pytest.raises(TokenInvalidError):
-            validate_verification_token(auth_db_session, token=token, token_type='email_verify')
+            validate_verification_token(auth_db_session, token=token, token_type=VerificationTokenType.EMAIL_VERIFY)
 
 
 class TestAuthRoutes:
@@ -823,7 +855,7 @@ class TestAuthRoutes:
         user = create_user(auth_db_session, 'delete-me@example.com', 'Password123', 'Delete Me')
         current_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
         create_session(auth_db_session, user.id, 'pytest-agent-2', '127.0.0.2')
-        create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
+        create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
         now = datetime.now(UTC).replace(tzinfo=None)
         datasource = DataSource(
             id='delete-account-datasource',
@@ -842,7 +874,7 @@ class TestAuthRoutes:
             name='Delete Account Analysis',
             description=None,
             pipeline_definition={'steps': []},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
             result_path=None,
@@ -963,7 +995,7 @@ class TestAuthRoutes:
         row = auth_db_session.exec(
             select(VerificationToken).where(
                 VerificationToken.user_id == user.id,
-                VerificationToken.token_type == 'password_reset',
+                VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET,
             )
         ).first()
         assert row is not None
@@ -978,13 +1010,15 @@ class TestAuthRoutes:
 
         assert response.status_code == 200
         assert response.json()['message'] == 'If the email exists, a password reset link has been sent'
-        rows = auth_db_session.exec(select(VerificationToken).where(VerificationToken.token_type == 'password_reset')).all()
+        rows = auth_db_session.exec(
+            select(VerificationToken).where(VerificationToken.token_type == VerificationTokenType.PASSWORD_RESET)
+        ).all()
         assert len(rows) == 0
 
     def test_reset_password_happy_path(self, auth_client: TestClient, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'reset-happy@example.com', 'Password123', 'Reset Happy User')
         user_session = create_session(auth_db_session, user.id, 'pytest-agent', '127.0.0.1')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='password_reset', ttl_hours=1)
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.PASSWORD_RESET, ttl_hours=1)
 
         response = auth_client.post(
             '/api/v1/auth/reset-password',
@@ -994,7 +1028,7 @@ class TestAuthRoutes:
         assert response.status_code == 200
         assert response.json()['message'] == 'Password reset successful'
         provider = auth_db_session.exec(
-            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == 'password')
+            select(AuthProvider).where(AuthProvider.user_id == user.id, AuthProvider.provider == AuthProviderName.PASSWORD)
         ).first()
         assert provider is not None
         assert isinstance(provider.provider_metadata, dict)
@@ -1010,7 +1044,7 @@ class TestAuthRoutes:
 
     def test_reset_password_with_expired_token(self, auth_client: TestClient, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'reset-expired@example.com', 'Password123', 'Reset Expired User')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='password_reset', ttl_hours=-1)
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.PASSWORD_RESET, ttl_hours=-1)
 
         response = auth_client.post(
             '/api/v1/auth/reset-password',
@@ -1031,7 +1065,7 @@ class TestAuthRoutes:
         user = create_user(auth_db_session, 'reset-revoke@example.com', 'Password123', 'Reset Revoke User')
         first = create_session(auth_db_session, user.id, 'pytest-agent-1', '127.0.0.1')
         second = create_session(auth_db_session, user.id, 'pytest-agent-2', '127.0.0.2')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='password_reset', ttl_hours=1)
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.PASSWORD_RESET, ttl_hours=1)
 
         response = auth_client.post(
             '/api/v1/auth/reset-password',
@@ -1116,7 +1150,7 @@ class TestAuthRoutes:
 
     def test_verify_email_route_happy_path(self, auth_client: TestClient, auth_db_session: Session) -> None:
         user = create_user(auth_db_session, 'verify-route@example.com', 'Password123', 'Verify Route User')
-        token = create_verification_token(auth_db_session, user_id=user.id, token_type='email_verify')
+        token = create_verification_token(auth_db_session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
 
         response = auth_client.post('/api/v1/auth/verify-email', json={'token': token})
 

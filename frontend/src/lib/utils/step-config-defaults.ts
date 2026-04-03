@@ -25,6 +25,12 @@ import type {
 	NotificationConfig,
 	AIConfig
 } from '$lib/types/step-schemas.generated';
+import {
+	chartTypeForStep,
+	isChartStepType,
+	normalizePipelineStepType
+} from '$lib/types/pipeline-step';
+import { cloneJson } from '$lib/utils/json';
 
 // ChartConfigData re-uses the richer PlotConfigData type from operation-config.
 export type ChartConfigData = PlotConfigData;
@@ -205,9 +211,9 @@ const defaultConfigs: Record<string, StepConfig> = {
  * Returns a fresh copy to avoid reference sharing between steps.
  */
 export function getDefaultConfig(stepType: string): StepConfig {
-	const normalizedType = stepType.startsWith('plot_') ? 'chart' : stepType;
+	const normalizedType = normalizePipelineStepType(stepType);
 	const defaults = defaultConfigs[normalizedType];
-	return defaults ? JSON.parse(JSON.stringify(defaults)) : {};
+	return defaults ? cloneJson(defaults) : {};
 }
 
 /**
@@ -216,13 +222,12 @@ export function getDefaultConfig(stepType: string): StepConfig {
  * Preserves all existing config fields while adding any missing defaults.
  */
 export function normalizeConfig(stepType: string, config: Record<string, unknown>): StepConfig {
-	const normalizedType = stepType.startsWith('plot_') ? 'chart' : stepType;
+	const normalizedType = normalizePipelineStepType(stepType);
 	const defaults = getDefaultConfig(normalizedType);
 
-	if (stepType.startsWith('plot_')) {
-		const chartType = stepType.replace('plot_', '');
-		const chartConfig = { ...config, chart_type: chartType };
-		return { ...defaults, ...chartConfig };
+	if (isChartStepType(stepType)) {
+		const chartAliasType = chartTypeForStep(stepType);
+		config = chartAliasType ? { ...config, chart_type: chartAliasType } : config;
 	}
 	if (stepType === 'export') {
 		const cleaned = { ...config } as Record<string, unknown>;

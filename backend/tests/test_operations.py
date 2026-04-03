@@ -12,10 +12,10 @@ from modules.compute.operations.join import JoinHandler
 from modules.compute.operations.pivot import PivotHandler
 from modules.compute.operations.select import SelectHandler
 from modules.compute.operations.sort import SortHandler
-from modules.compute.operations.strings import StringTransformHandler
-from modules.compute.operations.timeseries import TimeseriesHandler
+from modules.compute.operations.strings import StringTransformHandler, StringTransformMethod
+from modules.compute.operations.timeseries import TimeComponent, TimeseriesHandler, TimeseriesOperationType
 from modules.compute.operations.union import UnionByNameHandler
-from modules.compute.operations.with_columns import WithColumnsHandler
+from modules.compute.operations.with_columns import WithColumnsExprType, WithColumnsHandler
 
 
 def _frame() -> pl.LazyFrame:
@@ -368,11 +368,26 @@ def test_timeseries_extract_dayofweek():
 
 def test_timeseries_unsupported_operation():
     handler = TimeseriesHandler()
-    with pytest.raises(ValueError, match='Unsupported timeseries operation'):
+    with pytest.raises(ValidationError, match='operation_type'):
         handler(
             _frame(),
             {'column': 'date', 'operation_type': 'bogus', 'new_column': 'x'},
         ).collect()
+
+
+def test_timeseries_accepts_enum_fields() -> None:
+    handler = TimeseriesHandler()
+    lf = handler(
+        _frame(),
+        {
+            'column': 'date',
+            'operation_type': TimeseriesOperationType.EXTRACT,
+            'new_column': 'dow',
+            'component': TimeComponent.DAYOFWEEK,
+        },
+    )
+    result = lf.collect()['dow'].to_list()
+    assert all(isinstance(v, int) for v in result)
 
 
 def test_timeseries_add_missing_value():
@@ -414,6 +429,15 @@ def test_timeseries_truncate_missing_unit():
 def test_string_transform_uppercase():
     handler = StringTransformHandler()
     lf = handler(_frame(), {'column': 'name', 'method': 'uppercase', 'new_column': 'name_upper'})
+    assert lf.collect()['name_upper'].to_list()[0] == 'ALICE'
+
+
+def test_string_transform_accepts_enum_method() -> None:
+    handler = StringTransformHandler()
+    lf = handler(
+        _frame(),
+        {'column': 'name', 'method': StringTransformMethod.UPPERCASE, 'new_column': 'name_upper'},
+    )
     assert lf.collect()['name_upper'].to_list()[0] == 'ALICE'
 
 
@@ -480,6 +504,15 @@ def test_with_columns_zero_arg_udf_uses_row_count(monkeypatch: pytest.MonkeyPatc
     assert result is not None
     assert called['int_range'] == 1
     assert called['lit'] == 0
+
+
+def test_with_columns_accepts_enum_expression_type() -> None:
+    handler = WithColumnsHandler()
+    lf = handler(
+        pl.DataFrame({'id': [1]}).lazy(),
+        {'expressions': [{'name': 'copy_id', 'type': WithColumnsExprType.COLUMN, 'column': 'id'}]},
+    )
+    assert lf.collect()['copy_id'].to_list() == [1]
 
 
 def test_expression_rejects_dunder_escape() -> None:

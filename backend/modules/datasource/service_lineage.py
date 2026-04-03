@@ -1,4 +1,6 @@
 from collections import deque
+from enum import StrEnum
+from typing import TypedDict
 
 from sqlalchemy import select
 from sqlmodel import Session
@@ -8,13 +10,50 @@ from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.datasource.models import DataSource
 
 
+class LineageNodeType(StrEnum):
+    DATASOURCE = 'datasource'
+    ANALYSIS = 'analysis'
+
+
+class LineageNodeKind(StrEnum):
+    INTERNAL = 'internal'
+    OUTPUT = 'output'
+    SOURCE = 'source'
+    ANALYSIS = 'analysis'
+
+
+class LineageEdgeType(StrEnum):
+    CHAINS = 'chains'
+    PRODUCES = 'produces'
+    CONSUMES_INTERNAL = 'consumes_internal'
+    USES = 'uses'
+
+
+class LineageNode(TypedDict):
+    id: str
+    type: LineageNodeType
+    node_kind: LineageNodeKind
+    name: str
+    source_type: str | None
+    branch: str | None
+    status: str | None
+
+
+LineageEdge = TypedDict('LineageEdge', {'from': str, 'to': str, 'type': LineageEdgeType})
+
+
+class LineageGraph(TypedDict):
+    nodes: list[LineageNode]
+    edges: list[LineageEdge]
+
+
 def build_lineage(
     session: Session,
     target_datasource_id: str | None = None,
     branch: str | None = None,
     include_internals: bool = False,
     mode: str = 'full',
-) -> dict:
+) -> LineageGraph:
     datasources = session.execute(select(DataSource)).scalars().all()
     analyses = session.execute(select(Analysis)).scalars().all()
     deps = session.execute(select(AnalysisDataSource)).scalars().all()
@@ -50,9 +89,9 @@ def build_lineage(
         if producer in consumers:
             internal_ids.add(ds.id)
 
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
-    edge_keys: set[tuple[str, str, str]] = set()
+    nodes: dict[str, LineageNode] = {}
+    edges: list[LineageEdge] = []
+    edge_keys: set[tuple[str, str, LineageEdgeType]] = set()
 
     def datasource_key(datasource_id: str) -> str:
         return f'datasource:{datasource_id}'
@@ -60,12 +99,12 @@ def build_lineage(
     def analysis_key(analysis_id: str) -> str:
         return f'analysis:{analysis_id}'
 
-    def classify_datasource(ds: DataSource) -> str:
+    def classify_datasource(ds: DataSource) -> LineageNodeKind:
         if ds.id in internal_ids:
-            return 'internal'
+            return LineageNodeKind.INTERNAL
         if ds.created_by_analysis_id:
-            return 'output'
-        return 'source'
+            return LineageNodeKind.OUTPUT
+        return LineageNodeKind.SOURCE
 
     def datasource_branch(ds: DataSource) -> str | None:
         if target_datasource_id and ds.id == target_datasource_id and branch is not None:
@@ -84,11 +123,12 @@ def build_lineage(
         node_branch = datasource_branch(ds)
         nodes[node_id] = {
             'id': node_id,
-            'type': 'datasource',
+            'type': LineageNodeType.DATASOURCE,
             'node_kind': classify_datasource(ds),
             'name': ds.name,
             'source_type': ds.source_type,
             'branch': node_branch,
+            'status': None,
         }
         return node_id
 
@@ -98,14 +138,16 @@ def build_lineage(
             return node_id
         nodes[node_id] = {
             'id': node_id,
-            'type': 'analysis',
-            'node_kind': 'analysis',
+            'type': LineageNodeType.ANALYSIS,
+            'node_kind': LineageNodeKind.ANALYSIS,
             'name': analysis.name,
             'status': analysis.status,
+            'source_type': None,
+            'branch': None,
         }
         return node_id
 
-    def add_edge(from_id: str, to_id: str, edge_type: str) -> None:
+    def add_edge(from_id: str, to_id: str, edge_type: LineageEdgeType) -> None:
         key = (from_id, to_id, edge_type)
         if key in edge_keys:
             return
@@ -121,7 +163,7 @@ def build_lineage(
         if not analysis:
             continue
         analysis_node_id = add_analysis_node(analysis)
-        edge_type = 'chains' if ds.id in internal_ids else 'produces'
+        edge_type = LineageEdgeType.CHAINS if ds.id in internal_ids else LineageEdgeType.PRODUCES
         add_edge(analysis_node_id, ds_node_id, edge_type)
 
     for analysis in analyses:
@@ -136,7 +178,7 @@ def build_lineage(
         analysis_node_id = add_analysis_node(analysis)
         producer_id = datasource.created_by_analysis_id
         same_analysis_internal = datasource.id in internal_ids and producer_id == analysis.id
-        edge_type = 'consumes_internal' if same_analysis_internal else 'uses'
+        edge_type = LineageEdgeType.CONSUMES_INTERNAL if same_analysis_internal else LineageEdgeType.USES
         add_edge(ds_node_id, analysis_node_id, edge_type)
 
     if mode in {'upstream', 'downstream'} and target_datasource_id:
@@ -145,9 +187,9 @@ def build_lineage(
             return {'nodes': [], 'edges': []}
 
         include_internal_edges = include_internals
-        lineage_types = {'uses', 'produces'}
+        lineage_types = {LineageEdgeType.USES, LineageEdgeType.PRODUCES}
         if include_internal_edges:
-            lineage_types.update({'chains', 'consumes_internal'})
+            lineage_types.update({LineageEdgeType.CHAINS, LineageEdgeType.CONSUMES_INTERNAL})
 
         forward_adj: dict[str, set[str]] = {}
         reverse_adj: dict[str, set[str]] = {}
@@ -176,12 +218,12 @@ def build_lineage(
         edges = [edge for edge in edges if edge['from'] in reachable and edge['to'] in reachable]
 
     if not include_internals:
-        internal_node_ids = {node_id for node_id, node in nodes.items() if node.get('node_kind') == 'internal'}
+        internal_node_ids = {node_id for node_id, node in nodes.items() if node.get('node_kind') == LineageNodeKind.INTERNAL}
         nodes = {node_id: node for node_id, node in nodes.items() if node_id not in internal_node_ids}
         edges = [
             edge
             for edge in edges
-            if edge['type'] not in {'chains', 'consumes_internal'}
+            if edge['type'] not in {LineageEdgeType.CHAINS, LineageEdgeType.CONSUMES_INTERNAL}
             and edge['from'] not in internal_node_ids
             and edge['to'] not in internal_node_ids
         ]

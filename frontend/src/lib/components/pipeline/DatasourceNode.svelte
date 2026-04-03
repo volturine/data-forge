@@ -1,19 +1,6 @@
 <script lang="ts">
 	import type { DataSource } from '$lib/types/datasource';
-	type TabDatasource = {
-		id: string;
-		analysis_tab_id: string | null;
-		config: { branch: string } & Record<string, unknown>;
-	};
-
-	type TabOutput = {
-		result_id: string;
-		format: string;
-		filename: string;
-		build_mode?: string;
-		iceberg?: Record<string, unknown>;
-		[key: string]: unknown;
-	};
+	import type { AnalysisTab, AnalysisTabDatasource } from '$lib/types/analysis';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { getDatasource } from '$lib/api/datasource';
@@ -40,19 +27,12 @@
 	import type { SourceType } from '$lib/utils/file-types';
 	import { css, cx, input, label, row, rowBetween, divider, muted } from '$lib/styles/panda';
 
-	type ActiveTab = {
-		id: string;
-		name: string;
-		datasource: TabDatasource;
-		output: TabOutput;
-	};
-
 	interface Props {
 		datasource: DataSource | null;
 		datasourceLabel?: string | null;
 		tabName?: string;
 		analysisId?: string;
-		activeTab?: ActiveTab | null;
+		activeTab?: AnalysisTab | null;
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
 	}
@@ -137,19 +117,20 @@
 	const resolvedDatasource = $derived(datasourceQuery.data ?? datasource);
 	const outputId = $derived(activeTab?.output.result_id ?? null);
 	const isOutputSource = $derived(activeTab?.datasource?.id === outputId && !!outputId);
-	function ensureBranch(config: Record<string, unknown> | null | undefined, fallback: string) {
+	function ensureBranch(
+		config: AnalysisTabDatasource['config'] | null | undefined,
+		fallback: string
+	): AnalysisTabDatasource['config'] {
 		const branch = fallback.trim();
-		return { ...(config ?? {}), branch } as {
-			branch: string;
-		} & Record<string, unknown>;
+		return { ...(config ?? { branch }), branch };
 	}
 
 	function updateTimeTravelUi(updates: { open?: boolean; month?: string; day?: string }) {
 		const active = activeTab;
 		if (!active) return;
-		const branch = active?.datasource?.config?.branch as string;
+		const branch = active.datasource.config.branch;
 		const nextConfig = ensureBranch(active?.datasource?.config, branch ?? '');
-		const currentUi = (nextConfig.time_travel_ui as Record<string, unknown>) ?? {};
+		const currentUi = nextConfig.time_travel_ui ?? {};
 		nextConfig.time_travel_ui = { ...currentUi, ...updates };
 		const tab = active;
 		analysisStore.updateTab(active.id, {
@@ -163,8 +144,17 @@
 	function updateSnapshotConfig(nextConfig: Record<string, unknown>) {
 		const active = activeTab;
 		if (!active) return;
-		const branch = active?.datasource?.config?.branch as string;
-		const config = ensureBranch(nextConfig, branch ?? '');
+		const branch = active.datasource.config.branch;
+		const config = ensureBranch(
+			{
+				...nextConfig,
+				branch:
+					typeof nextConfig.branch === 'string' && nextConfig.branch.trim()
+						? nextConfig.branch
+						: branch
+			},
+			branch ?? ''
+		);
 		const tab = active;
 		analysisStore.updateTab(active.id, {
 			datasource: {
@@ -215,12 +205,22 @@
 
 	const analysisSourceId = $derived(resolvedDatasource?.created_by_analysis_id ?? null);
 	const isDerived = $derived(!!activeTab?.datasource?.analysis_tab_id);
+	type DatasourceBadgeType = SourceType | 'analysis' | 'derived';
+	function getDatasourceBranches(ds: DataSource | null | undefined): string[] {
+		const raw = ds?.config?.branches;
+		if (!Array.isArray(raw)) return [];
+		return raw.filter((branch): branch is string => typeof branch === 'string' && !!branch.trim());
+	}
+	function getDatasourceFilePath(ds: DataSource | null | undefined): string {
+		const path = ds?.config?.file_path;
+		return typeof path === 'string' ? path : '';
+	}
 	const sourceType = $derived(
 		(isDerived
 			? 'derived'
 			: analysisSourceId
 				? 'analysis'
-				: (resolvedDatasource?.source_type ?? 'file')) as string
+				: (resolvedDatasource?.source_type ?? 'file')) as DatasourceBadgeType
 	);
 	const isDragActive = $derived(drag.active);
 	const snapshotConfig = $derived(activeTab?.datasource?.config ?? {});
@@ -492,7 +492,7 @@
 									<FileTypeBadge sourceType="derived" size="sm" showIcon={true} />
 								{:else if datasource.source_type === 'file'}
 									<FileTypeBadge
-										path={(datasource.config?.file_path as string) ?? ''}
+										path={getDatasourceFilePath(datasource)}
 										size="sm"
 										showIcon={true}
 									/>
@@ -539,7 +539,7 @@
 							</div>
 							<div class={css({ minWidth: 'colMd', flexShrink: '0' })}>
 								<BranchPicker
-									branches={(resolvedDatasource?.config?.branches as string[] | undefined) ?? []}
+									branches={getDatasourceBranches(resolvedDatasource)}
 									value={branchValue}
 									placeholder="master"
 									onChange={applyBranchValue}

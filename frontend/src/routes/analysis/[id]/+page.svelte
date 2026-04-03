@@ -28,6 +28,7 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import { isChartStep } from '$lib/components/pipeline/utils';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
 	import { hashPipeline } from '$lib/utils/hash';
@@ -515,7 +516,7 @@
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
-		const isChart = type === 'chart' || type.startsWith('plot_');
+		const isChart = isChartStep(type);
 		if (type === 'view') {
 			return { ...base, is_applied: true } as PipelineStep;
 		}

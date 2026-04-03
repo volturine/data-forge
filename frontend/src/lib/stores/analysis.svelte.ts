@@ -12,15 +12,17 @@ import {
 } from '$lib/utils/analysis-tab';
 import { normalizeDtype } from '$lib/utils/transform';
 import { normalizeConfig } from '$lib/utils/step-config-defaults';
+import { isChartStep, normalizeStepType } from '$lib/components/pipeline/utils';
 import { track } from '$lib/utils/audit-log';
+import { cloneJson } from '$lib/utils/json';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, errAsync, ok } from 'neverthrow';
 import type { ApiError } from '$lib/api/client';
 import { idbGet, idbSet } from '$lib/utils/indexeddb';
 
-function cloneConfig(config: unknown): Record<string, unknown> {
-	return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+function cloneConfig<T extends Record<string, unknown>>(config: T): T {
+	return cloneJson(config);
 }
 
 async function loadPreviewRuns(map: SvelteMap<string, boolean>): Promise<void> {
@@ -217,7 +219,7 @@ export class AnalysisStore {
 						: [];
 			return {
 				...step,
-				type: step.type.startsWith('plot_') ? 'chart' : step.type,
+				type: normalizeStepType(step.type),
 				config: normalizeConfig(step.type, step.config as Record<string, unknown>) as Record<
 					string,
 					unknown
@@ -263,7 +265,7 @@ export class AnalysisStore {
 
 		const nextPipeline = [...this.activeTab.steps];
 		step.depends_on = parentId ? [parentId] : [];
-		const isChart = step.type === 'chart' || step.type.startsWith('plot_');
+		const isChart = isChartStep(step.type);
 
 		if (nextId) {
 			const nextStepIndex = nextPipeline.findIndex((item) => item.id === nextId);
@@ -429,7 +431,7 @@ export class AnalysisStore {
 		const movingStep = { ...steps[fromIndex] };
 		const oldDeps = movingStep.depends_on ?? [];
 		const oldParentId = oldDeps[0] ?? null;
-		const isChart = movingStep.type === 'chart' || movingStep.type.startsWith('plot_');
+		const isChart = isChartStep(movingStep.type);
 
 		// Find the step that depended on the moving step (if any)
 		const dependentStep = isChart ? null : steps.find((s) => s.depends_on?.includes(stepId));
