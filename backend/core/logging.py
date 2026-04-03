@@ -13,7 +13,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from fastapi import Request, Response
@@ -41,6 +41,10 @@ _SENSITIVE_FIELDS = {
 }
 _SENSITIVE_PATHS = ('/api/v1/auth', '/api/v1/settings', '/api/v1/ai/chat', '/api/v1/ai/models', '/api/v1/ai/test')
 _REDACTED = '[REDACTED]'
+
+
+class RequestLogWriter(Protocol):
+    def write_request_log(self, payload: dict[str, Any]) -> None: ...
 
 
 def _adapt_datetime(value: datetime) -> str:
@@ -262,13 +266,13 @@ class SqliteLogWriter:
         if not rows:
             return
         try:
-            with self._lock_for_insert():
+            with self._lock_for_insert() as conn:
                 if kind == 'request_logs':
-                    self._insert_request_logs(rows, day)
+                    self._insert_request_logs(conn, rows, day)
                 elif kind == 'app_logs':
-                    self._insert_app_logs(rows, day)
+                    self._insert_app_logs(conn, rows, day)
                 elif kind == 'client_logs':
-                    self._insert_client_logs(rows, day)
+                    self._insert_client_logs(conn, rows, day)
         except Exception as e:
             _logger.error(f'Failed to insert {len(rows)} rows to {kind}/{day}: {e}', exc_info=True)
 
@@ -282,96 +286,84 @@ class SqliteLogWriter:
         finally:
             conn.close()
 
-    def _insert_request_logs(self, rows: list[dict[str, Any]], day: date) -> None:
+    def _insert_request_logs(self, conn: sqlite3.Connection, rows: list[dict[str, Any]], day: date) -> None:
         day_str = day.isoformat()
-        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
-        try:
-            conn.executemany(
-                """INSERT INTO request_logs
-                   (ts, method, path, status, duration_ms, request_id, client_id,
-                    user_agent, ip, referer, error, request_json, response_json,
-                    chunk_index, day)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                [
-                    (
-                        r.get('ts'),
-                        r.get('method'),
-                        r.get('path'),
-                        r.get('status'),
-                        r.get('duration_ms'),
-                        r.get('request_id'),
-                        r.get('client_id'),
-                        r.get('user_agent'),
-                        r.get('ip'),
-                        r.get('referer'),
-                        r.get('error'),
-                        r.get('request_json'),
-                        r.get('response_json'),
-                        r.get('chunk_index'),
-                        day_str,
-                    )
-                    for r in rows
-                ],
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.executemany(
+            """INSERT INTO request_logs
+               (ts, method, path, status, duration_ms, request_id, client_id,
+                user_agent, ip, referer, error, request_json, response_json,
+                chunk_index, day)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    r.get('ts'),
+                    r.get('method'),
+                    r.get('path'),
+                    r.get('status'),
+                    r.get('duration_ms'),
+                    r.get('request_id'),
+                    r.get('client_id'),
+                    r.get('user_agent'),
+                    r.get('ip'),
+                    r.get('referer'),
+                    r.get('error'),
+                    r.get('request_json'),
+                    r.get('response_json'),
+                    r.get('chunk_index'),
+                    day_str,
+                )
+                for r in rows
+            ],
+        )
+        conn.commit()
 
-    def _insert_app_logs(self, rows: list[dict[str, Any]], day: date) -> None:
+    def _insert_app_logs(self, conn: sqlite3.Connection, rows: list[dict[str, Any]], day: date) -> None:
         day_str = day.isoformat()
-        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
-        try:
-            conn.executemany(
-                """INSERT INTO app_logs 
-                   (ts, level, logger, message, module, func, line, extra_json, day)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                [
-                    (
-                        r.get('ts'),
-                        r.get('level'),
-                        r.get('logger'),
-                        r.get('message'),
-                        r.get('module'),
-                        r.get('func'),
-                        r.get('line'),
-                        r.get('extra_json'),
-                        day_str,
-                    )
-                    for r in rows
-                ],
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.executemany(
+            """INSERT INTO app_logs 
+               (ts, level, logger, message, module, func, line, extra_json, day)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    r.get('ts'),
+                    r.get('level'),
+                    r.get('logger'),
+                    r.get('message'),
+                    r.get('module'),
+                    r.get('func'),
+                    r.get('line'),
+                    r.get('extra_json'),
+                    day_str,
+                )
+                for r in rows
+            ],
+        )
+        conn.commit()
 
-    def _insert_client_logs(self, rows: list[dict[str, Any]], day: date) -> None:
+    def _insert_client_logs(self, conn: sqlite3.Connection, rows: list[dict[str, Any]], day: date) -> None:
         day_str = day.isoformat()
-        conn = sqlite3.connect(str(self._db_path), timeout=30.0)
-        try:
-            conn.executemany(
-                """INSERT INTO client_logs 
-                   (ts, event, action, page, target, form_id, fields_json, client_id, session_id, meta_json, day)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                [
-                    (
-                        r.get('ts'),
-                        r.get('event'),
-                        r.get('action'),
-                        r.get('page'),
-                        r.get('target'),
-                        r.get('form_id'),
-                        r.get('fields_json'),
-                        r.get('client_id'),
-                        r.get('session_id'),
-                        r.get('meta_json'),
-                        day_str,
-                    )
-                    for r in rows
-                ],
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.executemany(
+            """INSERT INTO client_logs 
+               (ts, event, action, page, target, form_id, fields_json, client_id, session_id, meta_json, day)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    r.get('ts'),
+                    r.get('event'),
+                    r.get('action'),
+                    r.get('page'),
+                    r.get('target'),
+                    r.get('form_id'),
+                    r.get('fields_json'),
+                    r.get('client_id'),
+                    r.get('session_id'),
+                    r.get('meta_json'),
+                    day_str,
+                )
+                for r in rows
+            ],
+        )
+        conn.commit()
 
 
 class SqliteLogHandler(logging.Handler):
@@ -402,7 +394,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        writer: SqliteLogWriter | None = None,
+        writer: RequestLogWriter | None = None,
         get_time: Callable[[], float] | None = None,
         max_body_size: int = 0,
     ):
@@ -420,13 +412,15 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         content_length = int(request.headers.get('content-length', 0))
         should_log_body = self.max_body_size == 0 or content_length <= self.max_body_size
-        body = await request.body() if should_log_body else b''
-        body_for_log = body if should_log_body else None
+        body_for_log: bytes | None = None
+        if should_log_body:
+            body = await request.body()
+            body_for_log = body
 
-        async def receive():
-            return {'type': 'http.request', 'body': body, 'more_body': False}
+            async def receive():
+                return {'type': 'http.request', 'body': body, 'more_body': False}
 
-        request = Request(request.scope, receive)
+            request = Request(request.scope, receive)
         try:
             response = await call_next(request)
         except Exception as exc:
@@ -450,29 +444,27 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         if stream is not None:
 
             async def stream_wrapper():
-                index = 0
+                first_chunk: bytes | None = None
                 logged = False
-                async for chunk in stream:
-                    logged = True
-                    part = None
-                    if index == 0:
-                        raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
-                        if self.max_body_size == 0 or len(raw) <= self.max_body_size:
-                            part = raw
-                    req_body = request_body if index == 0 else None
-                    self._log_request(
-                        request,
-                        response,
-                        duration_ms,
-                        request_id,
-                        req_body,
-                        part,
-                        chunk_index=index,
-                    )
-                    index += 1
-                    yield chunk
-                if not logged:
-                    self._log_request(request, response, duration_ms, request_id, request_body, None, chunk_index=0)
+                try:
+                    async for chunk in stream:
+                        if first_chunk is None:
+                            raw = chunk.encode('utf-8') if isinstance(chunk, str) else bytes(chunk)
+                            if self.max_body_size == 0 or len(raw) <= self.max_body_size:
+                                first_chunk = raw
+                        yield chunk
+                finally:
+                    if not logged:
+                        self._log_request(
+                            request,
+                            response,
+                            duration_ms,
+                            request_id,
+                            request_body,
+                            first_chunk,
+                            chunk_index=0,
+                        )
+                        logged = True
 
             headers = dict(response.headers)
             headers.pop('content-length', None)

@@ -1,6 +1,6 @@
 from collections import deque
 from enum import StrEnum
-from typing import TypedDict
+from typing import Any, TypeAlias
 
 from sqlalchemy import select
 from sqlmodel import Session
@@ -29,22 +29,9 @@ class LineageEdgeType(StrEnum):
     USES = 'uses'
 
 
-class LineageNode(TypedDict):
-    id: str
-    type: LineageNodeType
-    node_kind: LineageNodeKind
-    name: str
-    source_type: str | None
-    branch: str | None
-    status: str | None
-
-
-LineageEdge = TypedDict('LineageEdge', {'from': str, 'to': str, 'type': LineageEdgeType})
-
-
-class LineageGraph(TypedDict):
-    nodes: list[LineageNode]
-    edges: list[LineageEdge]
+LineageNode: TypeAlias = dict[str, Any]
+LineageEdge: TypeAlias = dict[str, Any]
+LineageGraph: TypeAlias = dict[str, list[dict[str, Any]]]
 
 
 def build_lineage(

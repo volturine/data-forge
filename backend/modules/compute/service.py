@@ -5,11 +5,11 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import cast
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -48,13 +48,7 @@ class HealthCheckDetail:
     critical: bool
 
 
-class BuildContext(TypedDict, total=False):
-    status: BuildStatus
-    analysis_name: str
-    row_count: int
-    duration_ms: int
-    healthcheck_summary: str | None
-    healthcheck_details: list[HealthCheckDetail] | None
+BuildContext = Mapping[str, object]
 
 
 @dataclass(frozen=True)

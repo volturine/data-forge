@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TypedDict
+from typing import TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -123,17 +123,8 @@ class AIProvider(StrEnum):
     OPENAI = 'openai'
 
 
-class StepCatalogEntry(TypedDict):
-    description: str
-    category: str
-    config: type[BaseModel]
-
-
-class StepCatalogItem(TypedDict):
-    type: str
-    description: str
-    category: str
-    config_schema: dict
+StepCatalogEntry: TypeAlias = dict[str, str | type[BaseModel]]
+StepCatalogItem: TypeAlias = dict[str, str | dict[str, object]]
 
 
 class SelectConfig(BaseModel):
@@ -705,12 +696,13 @@ def get_step_catalog() -> list[StepCatalogItem]:
     for typ, info in STEP_CATALOG.items():
         if is_plot_alias_step_type(typ):
             continue
+        config_model = cast(type[BaseModel], info['config'])
         result.append(
             {
                 'type': typ,
-                'description': info['description'],
-                'category': info['category'],
-                'config_schema': info['config'].model_json_schema(),
+                'description': cast(str, info['description']),
+                'category': cast(str, info['category']),
+                'config_schema': cast(dict[str, object], config_model.model_json_schema()),
             }
         )
     return result
@@ -723,12 +715,12 @@ def get_config_model(step_type: str) -> type[BaseModel] | None:
     entry = STEP_CATALOG.get(step_type)
     if not entry:
         return None
-    return entry['config']
+    return cast(type[BaseModel], entry['config'])
 
 
 def validate_step(step_type: str, config: dict) -> None:
     """Validate a step type and its config. Raises ValueError on failure."""
     if not is_step_type(step_type):
         raise ValueError(f"Unknown step type '{step_type}'")
-    model = STEP_CATALOG[step_type]['config']
+    model = cast(type[BaseModel], STEP_CATALOG[step_type]['config'])
     model.model_validate(config)
