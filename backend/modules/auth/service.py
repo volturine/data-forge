@@ -4,7 +4,6 @@ import hmac
 import logging
 import os
 import secrets
-import smtplib
 import uuid
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
@@ -24,6 +23,7 @@ from core.exceptions import (
     TokenExpiredError,
     TokenInvalidError,
 )
+from core.smtp import send_smtp_message
 from modules.auth.models import (
     AuthProvider,
     AuthProviderName,
@@ -128,11 +128,7 @@ def validate_password(password: str) -> None:
 
 
 def _send_smtp_message(host: str, port: int, smtp_user: str, password: str, msg: EmailMessage) -> None:
-    with smtplib.SMTP(host, port, timeout=10) as server:
-        server.starttls()
-        if password:
-            server.login(smtp_user, password)
-        server.send_message(msg)
+    send_smtp_message(host, port, smtp_user, password, msg)
 
 
 def _normalize_default_user_email(email: str) -> str:

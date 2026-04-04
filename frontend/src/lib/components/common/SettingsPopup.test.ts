@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import SettingsPopup from './SettingsPopup.svelte';
 
 const mockGetSettings = vi.fn();
@@ -106,6 +106,40 @@ describe('SettingsPopup', () => {
 		test('shows close button', () => {
 			renderPopup();
 			expect(screen.getByLabelText('Close settings')).toBeInTheDocument();
+		});
+	});
+
+	describe('collapsible sections', () => {
+		test('all category toggles are expanded by default', () => {
+			renderPopup();
+			expect(screen.getByRole('button', { name: 'AI Providers' })).toHaveAttribute(
+				'aria-expanded',
+				'true'
+			);
+			expect(screen.getByRole('button', { name: 'SMTP' })).toHaveAttribute('aria-expanded', 'true');
+			expect(screen.getByRole('button', { name: 'Telegram' })).toHaveAttribute(
+				'aria-expanded',
+				'true'
+			);
+			expect(screen.getByRole('button', { name: 'Debug' })).toHaveAttribute(
+				'aria-expanded',
+				'true'
+			);
+		});
+
+		test('SMTP section can collapse and expand', async () => {
+			renderPopup();
+			const smtpToggle = screen.getByRole('button', { name: 'SMTP' });
+			const smtpHost = screen.getByPlaceholderText('smtp.example.com');
+			expect(smtpHost).toBeVisible();
+
+			await fireEvent.click(smtpToggle);
+			expect(smtpToggle).toHaveAttribute('aria-expanded', 'false');
+			expect(smtpHost).not.toBeVisible();
+
+			await fireEvent.click(smtpToggle);
+			expect(smtpToggle).toHaveAttribute('aria-expanded', 'true');
+			expect(smtpHost).toBeVisible();
 		});
 	});
 

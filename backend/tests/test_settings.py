@@ -224,12 +224,9 @@ class TestTestSmtp:
         assert data['success'] is False
         assert 'not configured' in data['message'].lower()
 
-    @patch('modules.settings.routes.smtplib.SMTP')
-    def test_success(self, mock_smtp_cls: MagicMock, client: TestClient, monkeypatch) -> None:
+    @patch('modules.settings.routes.send_smtp_message')
+    def test_success(self, mock_send_smtp: MagicMock, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_server = MagicMock()
-        mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
-        mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
         # Configure SMTP first
         client.put(
@@ -249,11 +246,12 @@ class TestTestSmtp:
         assert resp.status_code == 200
         data = resp.json()
         assert data['success'] is True
+        mock_send_smtp.assert_called_once()
 
-    @patch('modules.settings.routes.smtplib.SMTP')
-    def test_failure(self, mock_smtp_cls: MagicMock, client: TestClient, monkeypatch) -> None:
+    @patch('modules.settings.routes.send_smtp_message')
+    def test_failure(self, mock_send_smtp: MagicMock, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
-        mock_smtp_cls.side_effect = ConnectionRefusedError('Connection refused')
+        mock_send_smtp.side_effect = ConnectionRefusedError('Connection refused')
 
         client.put(
             '/api/v1/settings',

@@ -4,6 +4,7 @@ from typing import Final
 
 import httpx
 
+from core.smtp import send_smtp_message
 from modules.settings.service import (
     get_resolved_smtp,
     get_resolved_telegram_settings,
@@ -68,13 +69,7 @@ class NotificationService:
                 filename=attachment.filename,
             )
 
-        import smtplib
-
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            if password:
-                server.login(user, password)
-            server.send_message(msg)
+        send_smtp_message(host, port, user, password, msg)
 
     def send_telegram(
         self,
