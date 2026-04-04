@@ -99,6 +99,7 @@ test.describe('Navigation – settings popup', () => {
 		await expect(dialog.getByText('Debug', { exact: true })).toBeVisible();
 
 		// Verify SMTP form fields are present
+		await dialog.getByRole('button', { name: 'SMTP' }).click();
 		await expect(dialog.locator('#smtp-host')).toBeVisible();
 		await expect(dialog.locator('#smtp-port')).toBeVisible();
 
@@ -140,6 +141,7 @@ test.describe('Navigation – settings popup', () => {
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
 		// Debug section has the IndexedDB Inspector toggle
+		await dialog.getByRole('button', { name: 'Debug' }).click();
 		await expect(dialog.getByText('IndexedDB Inspector')).toBeVisible();
 		await expect(dialog.getByRole('switch', { name: /Toggle IndexedDB/i })).toBeVisible();
 	});
@@ -152,6 +154,7 @@ test.describe('Navigation – settings popup', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
+		await dialog.getByRole('button', { name: 'Telegram' }).click();
 		await expect(dialog.getByRole('switch', { name: /Toggle Telegram bot/i })).toBeVisible();
 	});
 
@@ -238,6 +241,7 @@ test.describe('Navigation – settings popup', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
+		await dialog.getByRole('button', { name: 'SMTP' }).click();
 		await dialog.locator('[data-testid="settings-smtp-test-recipient"]').fill('test@example.com');
 		await dialog.locator('[data-testid="settings-smtp-test-button"]').click();
 
@@ -264,6 +268,7 @@ test.describe('Navigation – settings popup', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
+		await dialog.getByRole('button', { name: 'SMTP' }).click();
 		await dialog.locator('[data-testid="settings-smtp-test-recipient"]').fill('test@example.com');
 		await dialog.locator('[data-testid="settings-smtp-test-button"]').click();
 
@@ -278,6 +283,7 @@ test.describe('Navigation – settings popup', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
+		await dialog.getByRole('button', { name: 'SMTP' }).click();
 		const testBtn = dialog.locator('[data-testid="settings-smtp-test-button"]');
 		await expect(testBtn).toBeDisabled();
 	});
@@ -292,6 +298,7 @@ test.describe('Navigation – settings popup', () => {
 		const dialog = page.getByRole('dialog');
 		await expect(dialog).toBeVisible({ timeout: 5_000 });
 
+		await dialog.getByRole('button', { name: 'Telegram' }).click();
 		const toggle = dialog.getByRole('switch', { name: /Toggle Telegram bot/i });
 		const initial = await toggle.getAttribute('aria-checked');
 
@@ -321,6 +328,7 @@ test.describe('Navigation – settings popup', () => {
 		await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
 
 		// Loading state should clear even on failure — form fields should still render
+		await dialog.getByRole('button', { name: 'SMTP' }).click();
 		await expect(dialog.locator('#smtp-host')).toBeVisible({ timeout: 5_000 });
 	});
 });

@@ -74,6 +74,17 @@ function renderPopup(props: Record<string, unknown> = {}) {
 	});
 }
 
+function renderPopupExpanded(props: Record<string, unknown> = {}) {
+	const view = renderPopup(props);
+	for (const name of ['AI Providers', 'SMTP', 'Telegram', 'Debug'] as const) {
+		const toggle = screen.getByRole('button', { name });
+		if (toggle.getAttribute('aria-expanded') === 'false') {
+			toggle.click();
+		}
+	}
+	return view;
+}
+
 beforeEach(() => {
 	statusQueryState = { data: undefined, error: null, isLoading: false, isFetching: false };
 	subscribersQueryState = { data: undefined, error: null, isLoading: false, isFetching: false };
@@ -110,36 +121,40 @@ describe('SettingsPopup', () => {
 	});
 
 	describe('collapsible sections', () => {
-		test('all category toggles are expanded by default', () => {
+		test('all category toggles are collapsed by default', () => {
 			renderPopup();
 			expect(screen.getByRole('button', { name: 'AI Providers' })).toHaveAttribute(
 				'aria-expanded',
-				'true'
+				'false'
 			);
-			expect(screen.getByRole('button', { name: 'SMTP' })).toHaveAttribute('aria-expanded', 'true');
+			expect(screen.getByRole('button', { name: 'SMTP' })).toHaveAttribute(
+				'aria-expanded',
+				'false'
+			);
 			expect(screen.getByRole('button', { name: 'Telegram' })).toHaveAttribute(
 				'aria-expanded',
-				'true'
+				'false'
 			);
 			expect(screen.getByRole('button', { name: 'Debug' })).toHaveAttribute(
 				'aria-expanded',
-				'true'
+				'false'
 			);
 		});
 
 		test('SMTP section can collapse and expand', async () => {
 			renderPopup();
 			const smtpToggle = screen.getByRole('button', { name: 'SMTP' });
+			expect(smtpToggle).toHaveAttribute('aria-expanded', 'false');
+
+			await fireEvent.click(smtpToggle);
+			expect(smtpToggle).toHaveAttribute('aria-expanded', 'true');
+
 			const smtpHost = screen.getByPlaceholderText('smtp.example.com');
 			expect(smtpHost).toBeVisible();
 
 			await fireEvent.click(smtpToggle);
 			expect(smtpToggle).toHaveAttribute('aria-expanded', 'false');
 			expect(smtpHost).not.toBeVisible();
-
-			await fireEvent.click(smtpToggle);
-			expect(smtpToggle).toHaveAttribute('aria-expanded', 'true');
-			expect(smtpHost).toBeVisible();
 		});
 	});
 
@@ -150,22 +165,22 @@ describe('SettingsPopup', () => {
 		});
 
 		test('shows Host input', () => {
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByPlaceholderText('smtp.example.com')).toBeInTheDocument();
 		});
 
 		test('shows Port input', () => {
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByDisplayValue('587')).toBeInTheDocument();
 		});
 
 		test('shows Test button', () => {
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByRole('button', { name: 'Test SMTP' })).toBeInTheDocument();
 		});
 
 		test('test button is disabled without recipient', () => {
-			renderPopup();
+			renderPopupExpanded();
 			const btn = screen.getByRole('button', { name: 'Test SMTP' });
 			expect(btn).toBeDisabled();
 		});
@@ -178,25 +193,25 @@ describe('SettingsPopup', () => {
 		});
 
 		test('shows Bot token input', () => {
-			renderPopup();
+			renderPopupExpanded();
 			const el = document.getElementById('telegram-bot-token');
 			expect(el).toBeInTheDocument();
 			expect(el).toHaveAttribute('type', 'password');
 		});
 
 		test('shows Enable Bot toggle', () => {
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByLabelText('Toggle Telegram bot')).toBeInTheDocument();
 		});
 
 		test('toggle has switch role', () => {
-			renderPopup();
+			renderPopupExpanded();
 			const toggle = screen.getByLabelText('Toggle Telegram bot');
 			expect(toggle).toHaveAttribute('role', 'switch');
 		});
 
 		test('toggle shows unchecked by default', () => {
-			renderPopup();
+			renderPopupExpanded();
 			const toggle = screen.getByLabelText('Toggle Telegram bot');
 			expect(toggle).toHaveAttribute('aria-checked', 'false');
 		});
@@ -214,7 +229,7 @@ describe('SettingsPopup', () => {
 				isLoading: false,
 				isFetching: false
 			};
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByText(/Subscribers appear here after users send/)).toBeInTheDocument();
 		});
 
@@ -225,7 +240,7 @@ describe('SettingsPopup', () => {
 				isLoading: false,
 				isFetching: false
 			};
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByText('Bot running')).toBeInTheDocument();
 			expect(screen.getByText('3 subscribers')).toBeInTheDocument();
 		});
@@ -237,7 +252,7 @@ describe('SettingsPopup', () => {
 				isLoading: false,
 				isFetching: false
 			};
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByText('Bot stopped')).toBeInTheDocument();
 			expect(screen.getByText('1 subscriber')).toBeInTheDocument();
 		});
@@ -250,12 +265,12 @@ describe('SettingsPopup', () => {
 		});
 
 		test('shows IndexedDB Inspector toggle', () => {
-			renderPopup();
+			renderPopupExpanded();
 			expect(screen.getByLabelText('Toggle IndexedDB inspector')).toBeInTheDocument();
 		});
 
 		test('IDB toggle has switch role', () => {
-			renderPopup();
+			renderPopupExpanded();
 			const toggle = screen.getByLabelText('Toggle IndexedDB inspector');
 			expect(toggle).toHaveAttribute('role', 'switch');
 			expect(toggle).toHaveAttribute('aria-checked', 'false');

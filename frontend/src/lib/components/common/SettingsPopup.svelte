@@ -72,10 +72,10 @@
 	let testingProvider = $state<string | null>(null);
 	let smtpTestTo = $state('');
 	let feedback = $state<{ type: 'success' | 'error'; message: string } | null>(null);
-	let aiProvidersCollapsed = $state(false);
-	let smtpCollapsed = $state(false);
-	let telegramCollapsed = $state(false);
-	let debugCollapsed = $state(false);
+	let aiProvidersCollapsed = $state(true);
+	let smtpCollapsed = $state(true);
+	let telegramCollapsed = $state(true);
+	let debugCollapsed = $state(true);
 
 	const sectionToggle = css({
 		display: 'flex',
@@ -98,6 +98,10 @@
 		if (!open) return;
 		loading = true;
 		feedback = null;
+		aiProvidersCollapsed = true;
+		smtpCollapsed = true;
+		telegramCollapsed = true;
+		debugCollapsed = true;
 		smtp_password_dirty = false;
 		telegram_bot_token_dirty = false;
 		openrouter_api_key_dirty = false;
@@ -396,8 +400,10 @@
 
 			<div
 				id="settings-ai-providers"
-				hidden={aiProvidersCollapsed}
-				class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}
+				class={cx(
+					css({ display: 'flex', flexDirection: 'column', gap: '4' }),
+					aiProvidersCollapsed ? css({ display: 'none' }) : ''
+				)}
 			>
 				<div
 					class={css({
@@ -622,8 +628,10 @@
 
 			<div
 				id="settings-smtp"
-				hidden={smtpCollapsed}
-				class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+				class={cx(
+					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
+					smtpCollapsed ? css({ display: 'none' }) : ''
+				)}
 			>
 				<div
 					class={css({
@@ -765,8 +773,10 @@
 
 			<div
 				id="settings-telegram"
-				hidden={telegramCollapsed}
-				class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+				class={cx(
+					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
+					telegramCollapsed ? css({ display: 'none' }) : ''
+				)}
 			>
 				<label class={label({ variant: 'wrapper' })}>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Bot token</span>
@@ -939,7 +949,7 @@
 				/>
 			</button>
 
-			<div id="settings-debug" hidden={debugCollapsed}>
+			<div id="settings-debug" class={debugCollapsed ? css({ display: 'none' }) : ''}>
 				<div class={rowBetween}>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}> IndexedDB Inspector </span>
