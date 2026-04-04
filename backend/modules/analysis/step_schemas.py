@@ -121,6 +121,8 @@ class RecipientSource(StrEnum):
 class AIProvider(StrEnum):
     OLLAMA = 'ollama'
     OPENAI = 'openai'
+    OPENROUTER = 'openrouter'
+    HUGGINGFACE = 'huggingface'
 
 
 StepCatalogEntry: TypeAlias = dict[str, str | type[BaseModel]]
@@ -442,10 +444,15 @@ class AIConfig(BaseModel):
         description='Columns to feed into the prompt',
     )
     output_column: str = 'ai_result'
+    error_column: str = 'ai_error'
     prompt_template: str = 'Classify this text: {{text}}'
     batch_size: int = 10
+    max_retries: int = 3
+    rate_limit_rpm: int | None = None
     endpoint_url: str = ''
     api_key: str = ''
+    temperature: float = 0.7
+    max_tokens: int | None = None
     request_options: dict | None = None
 
 

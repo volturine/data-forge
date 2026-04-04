@@ -333,10 +333,15 @@ def convert_ai_config(config: dict) -> dict:
         'model': config.get('model', 'llama2'),
         'input_columns': input_columns,
         'output_column': config.get('output_column') or config.get('outputColumn') or 'ai_result',
+        'error_column': config.get('error_column') or config.get('errorColumn') or 'ai_error',
         'prompt_template': config.get('prompt_template') or config.get('promptTemplate') or 'Classify this text: {{text}}',
         'batch_size': config.get('batch_size', 10),
+        'max_retries': config.get('max_retries', config.get('maxRetries', 3)),
+        'rate_limit_rpm': config.get('rate_limit_rpm', config.get('rateLimitRpm')),
         'endpoint_url': config.get('endpoint_url') or config.get('endpointUrl'),
         'api_key': config.get('api_key') or config.get('apiKey'),
+        'temperature': config.get('temperature', 0.7),
+        'max_tokens': config.get('max_tokens', config.get('maxTokens')),
         'request_options': raw_options,
     }
     return result

@@ -249,17 +249,22 @@ export interface NotificationConfig {
 	timeout_seconds?: number;
 }
 
-export type AIProvider = 'ollama' | 'openai';
+export type AIProvider = 'ollama' | 'openai' | 'openrouter' | 'huggingface';
 
 export interface AIConfig {
 	provider?: AIProvider;
 	model?: string;
 	input_columns?: string[];
 	output_column?: string;
+	error_column?: string;
 	prompt_template?: string;
 	batch_size?: number;
+	max_retries?: number;
+	rate_limit_rpm?: number | null;
 	endpoint_url?: string;
 	api_key?: string;
+	temperature?: number;
+	max_tokens?: number | null;
 	request_options?: Record<string, unknown> | null;
 }
 

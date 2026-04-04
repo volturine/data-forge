@@ -9,7 +9,7 @@ import {
 	listSessions,
 	confirmTool
 } from '$lib/api/chat';
-import type { ChatEvent, OpenRouterModel, ChatSessionInfo } from '$lib/api/chat';
+import type { ChatEvent, ChatModel, ChatSessionInfo } from '$lib/api/chat';
 import { getSettings, updateSettings, isMasked } from '$lib/api/settings';
 import type { AppSettings } from '$lib/api/settings';
 import { listTools } from '$lib/api/mcp';
@@ -88,11 +88,13 @@ export class ChatStore {
 	provider = $state('openrouter');
 	model = $state('openai/gpt-4o-mini');
 	apiKey = $state('');
+	endpointUrl = $state('');
+	organizationId = $state('');
 	systemPrompt = $state('');
 	mode = $state<AgentMode>('plan');
 	settings = $state<AppSettings | null>(null);
 	tools = $state<MCPTool[]>([]);
-	models = $state<OpenRouterModel[]>([]);
+	models = $state<ChatModel[]>([]);
 	modelsLoading = $state(false);
 	disabledTools = $state<SvelteSet<string>>(new SvelteSet());
 	disabledTags = $state<SvelteSet<string>>(new SvelteSet());
@@ -281,10 +283,7 @@ export class ChatStore {
 		settingsResult.match(
 			(s) => {
 				this.settings = s;
-				if (s.openrouter_api_key && !isMasked(s.openrouter_api_key)) {
-					this.apiKey = s.openrouter_api_key;
-				}
-				this.configured = !!s.openrouter_api_key;
+				this._applyProviderDefaults();
 			},
 			() => {}
 		);
@@ -298,10 +297,19 @@ export class ChatStore {
 
 	async loadModels(): Promise<void> {
 		this.modelsLoading = true;
-		const result = await listModels(this.apiKey || undefined);
+		const result = await listModels(
+			this.provider,
+			this.apiKey || undefined,
+			this.endpointUrl || undefined,
+			this.organizationId || undefined
+		);
 		result.match(
 			(m) => {
-				this.models = m;
+				this.models = m.map((item) => ({
+					id: item.id || item.name,
+					name: item.name || item.id,
+					context_length: Number(item.context_length ?? 0)
+				}));
 			},
 			() => {}
 		);
@@ -320,10 +328,75 @@ export class ChatStore {
 
 	async configure(apiKey: string): Promise<void> {
 		this.apiKey = apiKey;
-		this.configured = true;
+		this._refreshConfigured();
 		this.error = null;
 		this._savePrefs();
-		await updateSettings({ openrouter_api_key: apiKey });
+		if (this.provider === 'openrouter') {
+			await updateSettings({ openrouter_api_key: apiKey });
+		} else if (this.provider === 'openai') {
+			await updateSettings({ openai_api_key: apiKey });
+		} else if (this.provider === 'huggingface') {
+			await updateSettings({ huggingface_api_token: apiKey });
+		}
+	}
+
+	setProvider(provider: 'openrouter' | 'openai' | 'ollama' | 'huggingface'): void {
+		this.provider = provider;
+		this.models = [];
+		this._applyProviderDefaults();
+		if (this.sessionId) {
+			void updateSession(this.sessionId, {
+				provider: this.provider,
+				model: this.model,
+				api_key: this.apiKey || undefined
+			});
+		}
+	}
+
+	private _refreshConfigured(): void {
+		if (this.provider === 'openrouter') {
+			this.configured = this.apiKey.length > 0;
+			return;
+		}
+		if (this.provider === 'huggingface') {
+			this.configured = this.apiKey.length > 0;
+			return;
+		}
+		// OpenAI can be self-hosted without key; Ollama requires no key.
+		this.configured = true;
+	}
+
+	private _applyProviderDefaults(): void {
+		const s = this.settings;
+		if (!s) {
+			this._refreshConfigured();
+			return;
+		}
+		if (this.provider === 'openrouter') {
+			this.model = s.openrouter_default_model || this.model || 'openai/gpt-4o-mini';
+			this.apiKey = s.openrouter_api_key && !isMasked(s.openrouter_api_key) ? s.openrouter_api_key : '';
+			this.endpointUrl = 'https://openrouter.ai/api/v1';
+			this.organizationId = '';
+		} else if (this.provider === 'openai') {
+			this.model = s.openai_default_model || 'gpt-4o-mini';
+			this.apiKey = s.openai_api_key && !isMasked(s.openai_api_key) ? s.openai_api_key : '';
+			this.endpointUrl = s.openai_endpoint_url || 'https://api.openai.com';
+			this.organizationId = s.openai_organization_id || '';
+		} else if (this.provider === 'ollama') {
+			this.model = s.ollama_default_model || 'llama3.2';
+			this.apiKey = '';
+			this.endpointUrl = s.ollama_endpoint_url || 'http://localhost:11434';
+			this.organizationId = '';
+		} else {
+			this.model = s.huggingface_default_model || 'google/flan-t5-base';
+			this.apiKey =
+				s.huggingface_api_token && !isMasked(s.huggingface_api_token)
+					? s.huggingface_api_token
+					: '';
+			this.endpointUrl = 'https://api-inference.huggingface.co';
+			this.organizationId = '';
+		}
+		this._refreshConfigured();
 	}
 
 	async startSession(): Promise<void> {

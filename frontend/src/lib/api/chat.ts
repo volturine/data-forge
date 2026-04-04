@@ -73,12 +73,13 @@ export interface SendMessagePayload {
 }
 
 export interface UpdateSessionPayload {
+	provider?: string;
 	model?: string;
 	system_prompt?: string;
 	api_key?: string;
 }
 
-export interface OpenRouterModel {
+export interface ChatModel {
 	id: string;
 	name: string;
 	context_length: number;
@@ -156,10 +157,17 @@ export function closeSession(sessionId: string): ResultAsync<SessionActionRespon
 	});
 }
 
-export function listModels(apiKey?: string): ResultAsync<OpenRouterModel[], ApiError> {
-	const body: Record<string, string> = {};
+export function listModels(
+	provider: string,
+	apiKey?: string,
+	endpointUrl?: string,
+	organizationId?: string
+): ResultAsync<ChatModel[], ApiError> {
+	const body: Record<string, string> = { provider };
 	if (apiKey) body.api_key = apiKey;
-	return apiRequest<OpenRouterModel[]>('/v1/ai/chat/models', {
+	if (endpointUrl) body.endpoint_url = endpointUrl;
+	if (organizationId) body.organization_id = organizationId;
+	return apiRequest<ChatModel[]>('/v1/ai/chat/models', {
 		method: 'POST',
 		body: JSON.stringify(body)
 	});

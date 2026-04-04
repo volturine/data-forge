@@ -184,13 +184,18 @@ const defaultConfigs: Record<string, StepConfig> = {
 
 	ai: {
 		provider: 'ollama',
-		model: 'llama2',
+		model: 'llama3.2',
 		input_columns: [],
 		output_column: 'ai_result',
+		error_column: 'ai_error',
 		prompt_template: 'Classify this text: {{text}}',
 		batch_size: 10,
+		max_retries: 3,
+		rate_limit_rpm: null,
 		endpoint_url: '',
 		api_key: '',
+		temperature: 0.7,
+		max_tokens: null,
 		request_options: null
 	} satisfies AIConfig,
 

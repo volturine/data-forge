@@ -42,6 +42,8 @@ def _masked_settings_response(row: AppSettings) -> SettingsResponse:
     smtp_password = _read_secret(row, 'smtp_password')
     telegram_bot_token = _read_secret(row, 'telegram_bot_token')
     openrouter_api_key = _read_secret(row, 'openrouter_api_key')
+    openai_api_key = _read_secret(row, 'openai_api_key')
+    huggingface_api_token = _read_secret(row, 'huggingface_api_token')
     return SettingsResponse(
         smtp_host=row.smtp_host,
         smtp_port=row.smtp_port,
@@ -51,6 +53,14 @@ def _masked_settings_response(row: AppSettings) -> SettingsResponse:
         telegram_bot_enabled=row.telegram_bot_enabled,
         openrouter_api_key=mask_secret(openrouter_api_key),
         openrouter_default_model=row.openrouter_default_model,
+        openai_api_key=mask_secret(openai_api_key),
+        openai_endpoint_url=row.openai_endpoint_url,
+        openai_default_model=row.openai_default_model,
+        openai_organization_id=row.openai_organization_id,
+        ollama_endpoint_url=row.ollama_endpoint_url,
+        ollama_default_model=row.ollama_default_model,
+        huggingface_api_token=mask_secret(huggingface_api_token),
+        huggingface_default_model=row.huggingface_default_model,
         public_idb_debug=row.public_idb_debug,
     )
 
@@ -111,6 +121,38 @@ def seed_settings_from_env(session: Session) -> None:
     if not row.openrouter_default_model and app_settings.openrouter_default_model:
         row.openrouter_default_model = app_settings.openrouter_default_model
         changed = True
+    if not row.openai_api_key and app_settings.openai_api_key:
+        try:
+            _write_secret(row, 'openai_api_key', app_settings.openai_api_key)
+            changed = True
+        except SettingsConfigurationError:
+            bootstrap_complete = False
+            logger.warning('Skipping OpenAI key bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
+    if not row.openai_endpoint_url and app_settings.openai_base_url:
+        row.openai_endpoint_url = app_settings.openai_base_url
+        changed = True
+    if not row.openai_default_model and app_settings.openai_default_model:
+        row.openai_default_model = app_settings.openai_default_model
+        changed = True
+    if not row.openai_organization_id and app_settings.openai_organization_id:
+        row.openai_organization_id = app_settings.openai_organization_id
+        changed = True
+    if not row.ollama_endpoint_url and app_settings.ollama_base_url:
+        row.ollama_endpoint_url = app_settings.ollama_base_url
+        changed = True
+    if not row.ollama_default_model and app_settings.ollama_default_model:
+        row.ollama_default_model = app_settings.ollama_default_model
+        changed = True
+    if not row.huggingface_api_token and app_settings.huggingface_api_token:
+        try:
+            _write_secret(row, 'huggingface_api_token', app_settings.huggingface_api_token)
+            changed = True
+        except SettingsConfigurationError:
+            bootstrap_complete = False
+            logger.warning('Skipping Hugging Face token bootstrap because SETTINGS_ENCRYPTION_KEY is not set')
+    if not row.huggingface_default_model and app_settings.huggingface_default_model:
+        row.huggingface_default_model = app_settings.huggingface_default_model
+        changed = True
     if row.env_bootstrap_complete != bootstrap_complete:
         row.env_bootstrap_complete = bootstrap_complete
         changed = True
@@ -132,7 +174,13 @@ def get_settings(session: Session) -> SettingsResponse:
         session.refresh(row)
 
     migrated = False
-    for field in ('smtp_password', 'telegram_bot_token', 'openrouter_api_key'):
+    for field in (
+        'smtp_password',
+        'telegram_bot_token',
+        'openrouter_api_key',
+        'openai_api_key',
+        'huggingface_api_token',
+    ):
         stored = str(getattr(row, field, '') or '')
         if should_migrate_secret(stored):
             _read_secret(row, field)
@@ -160,13 +208,29 @@ def update_settings(session: Session, data: SettingsUpdate) -> SettingsResponse:
     smtp_password = _resolve_updated_secret(row, 'smtp_password', data.smtp_password)
     telegram_bot_token = _resolve_updated_secret(row, 'telegram_bot_token', data.telegram_bot_token)
     openrouter_api_key = _resolve_updated_secret(row, 'openrouter_api_key', data.openrouter_api_key)
+    openai_api_key = _resolve_updated_secret(row, 'openai_api_key', data.openai_api_key)
+    huggingface_api_token = _resolve_updated_secret(row, 'huggingface_api_token', data.huggingface_api_token)
     _write_secret(row, 'smtp_password', smtp_password)
     _write_secret(row, 'telegram_bot_token', telegram_bot_token)
     _write_secret(row, 'openrouter_api_key', openrouter_api_key)
+    _write_secret(row, 'openai_api_key', openai_api_key)
+    _write_secret(row, 'huggingface_api_token', huggingface_api_token)
     if data.telegram_bot_enabled is not None:
         row.telegram_bot_enabled = data.telegram_bot_enabled
     if data.openrouter_default_model is not None:
         row.openrouter_default_model = data.openrouter_default_model
+    if data.openai_endpoint_url is not None:
+        row.openai_endpoint_url = data.openai_endpoint_url
+    if data.openai_default_model is not None:
+        row.openai_default_model = data.openai_default_model
+    if data.openai_organization_id is not None:
+        row.openai_organization_id = data.openai_organization_id
+    if data.ollama_endpoint_url is not None:
+        row.ollama_endpoint_url = data.ollama_endpoint_url
+    if data.ollama_default_model is not None:
+        row.ollama_default_model = data.ollama_default_model
+    if data.huggingface_default_model is not None:
+        row.huggingface_default_model = data.huggingface_default_model
     row.env_bootstrap_complete = True
     if data.public_idb_debug is not None:
         row.public_idb_debug = data.public_idb_debug
@@ -225,6 +289,64 @@ def get_resolved_openrouter_key() -> str:
         if row:
             return _read_secret(row, 'openrouter_api_key')
         return ''
+
+    return run_settings_db(_read)
+
+
+def get_resolved_openai_settings() -> dict[str, str]:
+    from core.database import run_settings_db
+
+    def _read(session: Session) -> dict[str, str]:
+        row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
+        if not row:
+            return {
+                'api_key': '',
+                'endpoint_url': 'https://api.openai.com',
+                'default_model': 'gpt-4o-mini',
+                'organization_id': '',
+            }
+        return {
+            'api_key': _read_secret(row, 'openai_api_key'),
+            'endpoint_url': row.openai_endpoint_url or 'https://api.openai.com',
+            'default_model': row.openai_default_model or 'gpt-4o-mini',
+            'organization_id': row.openai_organization_id or '',
+        }
+
+    return run_settings_db(_read)
+
+
+def get_resolved_ollama_settings() -> dict[str, str]:
+    from core.database import run_settings_db
+
+    def _read(session: Session) -> dict[str, str]:
+        row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
+        if not row:
+            return {
+                'endpoint_url': 'http://localhost:11434',
+                'default_model': 'llama3.2',
+            }
+        return {
+            'endpoint_url': row.ollama_endpoint_url or 'http://localhost:11434',
+            'default_model': row.ollama_default_model or 'llama3.2',
+        }
+
+    return run_settings_db(_read)
+
+
+def get_resolved_huggingface_settings() -> dict[str, str]:
+    from core.database import run_settings_db
+
+    def _read(session: Session) -> dict[str, str]:
+        row = session.exec(select(AppSettings).where(AppSettings.id == 1)).first()
+        if not row:
+            return {
+                'api_token': '',
+                'default_model': 'google/flan-t5-base',
+            }
+        return {
+            'api_token': _read_secret(row, 'huggingface_api_token'),
+            'default_model': row.huggingface_default_model or 'google/flan-t5-base',
+        }
 
     return run_settings_db(_read)
 

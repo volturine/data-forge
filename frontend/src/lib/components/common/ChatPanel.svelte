@@ -44,6 +44,7 @@
 	let toolsOpen = $state(false);
 	let sessionsOpen = $state(false);
 	let apiKeyDraft = $state('');
+	let providerDraft = $state('openrouter');
 	let modelDraft = $state('');
 	let systemPromptDraft = $state('');
 	let modelSearch = $state('');
@@ -371,7 +372,7 @@
 	function toggleModelPicker() {
 		modelPickerOpen = !modelPickerOpen;
 		modelPickerSearch = '';
-		if (modelPickerOpen && chatStore.apiKey && chatStore.models.length === 0) {
+		if (modelPickerOpen && chatStore.models.length === 0) {
 			void chatStore.loadModels();
 		}
 	}
@@ -481,7 +482,7 @@
 			configOpen = !configOpen;
 			toolsOpen = false;
 			sessionsOpen = false;
-			if (configOpen && chatStore.apiKey && chatStore.models.length === 0) {
+			if (configOpen && chatStore.models.length === 0) {
 				void chatStore.loadModels();
 			}
 		} else if (panel === 'tools') {
@@ -500,12 +501,16 @@
 
 	function openConfig() {
 		apiKeyDraft = chatStore.apiKey;
+		providerDraft = chatStore.provider;
 		modelDraft = chatStore.model;
 		systemPromptDraft = chatStore.systemPrompt;
 		togglePanel('config');
 	}
 
 	async function saveConfig() {
+		chatStore.setProvider(
+			providerDraft as 'openrouter' | 'openai' | 'ollama' | 'huggingface'
+		);
 		chatStore.model = modelDraft;
 		chatStore.systemPrompt = systemPromptDraft;
 		await chatStore.configure(apiKeyDraft);
@@ -513,6 +518,9 @@
 	}
 
 	function handleLoadModels() {
+		chatStore.setProvider(
+			providerDraft as 'openrouter' | 'openai' | 'ollama' | 'huggingface'
+		);
 		chatStore.apiKey = apiKeyDraft;
 		void chatStore.loadModels();
 	}
@@ -867,6 +875,21 @@
 					...(maximized ? { flexShrink: '1', maxHeight: '55vh' } : { flex: '1' })
 				})}
 			>
+				<div>
+					<label class={label()} for="chat-provider">Provider</label>
+					<select
+						id="chat-provider"
+						class={input()}
+						bind:value={providerDraft}
+						disabled={!!chatStore.sessionId}
+					>
+						<option value="openrouter">OpenRouter</option>
+						<option value="openai">OpenAI</option>
+						<option value="ollama">Ollama</option>
+						<option value="huggingface">Hugging Face</option>
+					</select>
+				</div>
+
 				<div>
 					<label class={label()} for="chat-key">API Key</label>
 					<div class={css({ display: 'flex', gap: '1' })}>
@@ -2259,6 +2282,38 @@
 					color: 'fg.muted'
 				})}
 			>
+				<select
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.panel',
+						color: 'fg.muted',
+						fontSize: '10px',
+						fontFamily: 'mono',
+						paddingX: '1',
+						paddingY: '0.5',
+						height: '20px',
+						flexShrink: '0'
+					})}
+					value={chatStore.provider}
+					onchange={(event) => {
+						const provider = (event.currentTarget as HTMLSelectElement).value as
+							| 'openrouter'
+							| 'openai'
+							| 'ollama'
+							| 'huggingface';
+						chatStore.setProvider(provider);
+						if (chatStore.models.length === 0) {
+							void chatStore.loadModels();
+						}
+					}}
+					title="Chat provider"
+				>
+					<option value="openrouter">OpenRouter</option>
+					<option value="openai">OpenAI</option>
+					<option value="ollama">Ollama</option>
+					<option value="huggingface">HF</option>
+				</select>
+
 				<button
 					class={css({
 						display: 'flex',
@@ -2426,9 +2481,7 @@
 							</div>
 						{:else if pickerModels.length === 0}
 							<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.muted' })}>
-								{chatStore.models.length === 0
-									? 'No models loaded \u2014 set API key first'
-									: 'No matches'}
+								{chatStore.models.length === 0 ? 'No models loaded' : 'No matches'}
 							</div>
 						{:else}
 							{#each pickerModels.slice(0, 30) as m (m.id)}

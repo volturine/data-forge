@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from core.error_handlers import handle_errors
 from core.namespace import get_namespace
+from modules.ai.service import get_ai_client
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
@@ -45,6 +46,7 @@ class CreateSessionRequest(BaseModel):
 class UpdateSessionRequest(BaseModel):
     """Request body to update session settings."""
 
+    provider: str | None = None
     model: str | None = None
     system_prompt: str | None = None
     api_key: str | None = None
@@ -61,16 +63,30 @@ class MessageRequest(BaseModel):
 class ChatModelsRequest(BaseModel):
     """Request body to list chat models."""
 
+    provider: str = 'openrouter'
     api_key: str = ''
+    endpoint_url: str | None = None
+    organization_id: str | None = None
 
 
-def _resolve_api_key(session_key: str) -> str:
-    """Return session key if set, otherwise fall back to global settings key."""
+def _resolve_api_key(provider: str, session_key: str) -> str:
+    """Return session key if set, otherwise fall back to provider defaults."""
     if session_key:
         return session_key
-    from modules.settings.service import get_resolved_openrouter_key
+    normalized = provider.strip().lower()
+    if normalized == 'openrouter':
+        from modules.settings.service import get_resolved_openrouter_key
 
-    return get_resolved_openrouter_key()
+        return get_resolved_openrouter_key()
+    if normalized == 'openai':
+        from modules.settings.service import get_resolved_openai_settings
+
+        return get_resolved_openai_settings()['api_key']
+    if normalized in {'huggingface', 'huggingface-api'}:
+        from modules.settings.service import get_resolved_huggingface_settings
+
+        return get_resolved_huggingface_settings()['api_token']
+    return ''
 
 
 def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | None:
@@ -271,8 +287,9 @@ async def _run_agent_turn(
     """Run one agent turn: send message, handle tool calls, push SSE events."""
     from modules.mcp.routes import get_registry
 
-    api_key = _resolve_api_key(session.api_key)
-    if not api_key:
+    provider_name = session.provider.strip().lower()
+    api_key = _resolve_api_key(provider_name, session.api_key)
+    if provider_name in {'openrouter', 'huggingface', 'huggingface-api'} and not api_key:
         session.push_event({'type': 'error', 'content': 'No API key configured'})
         session.push_event({'type': 'done'})
         await session.set_busy(False)
@@ -287,18 +304,41 @@ async def _run_agent_turn(
     session.add_message('user', user_content)
     session.push_event({'type': 'message', 'role': 'user', 'content': user_content})
 
-    registry = get_registry(app)
-    if tool_ids:
-        id_set = set(tool_ids)
-        registry = [t for t in registry if t['id'] in id_set]
-    safe_tools = [t for t in registry if t['safety'] == 'safe']
-    mutating_tools = [t for t in registry if t['safety'] == 'mutating']
-    all_tools = safe_tools + mutating_tools
-
-    tool_system_msg = {'role': 'system', 'content': _build_tool_system_message(all_tools)} if all_tools else None
-
-    use_text_format = True  # becomes False once native function calling is confirmed
     try:
+        if provider_name != 'openrouter':
+            prompt_lines: list[str] = []
+            for msg in session.messages:
+                role = str(msg.get('role', 'user')).lower()
+                if role not in {'system', 'user', 'assistant'}:
+                    continue
+                content = str(msg.get('content') or '')
+                if not content:
+                    continue
+                prompt_lines.append(f'{role}: {content}')
+            prompt_lines.append('assistant:')
+            prompt = '\n'.join(prompt_lines)
+            client = get_ai_client(provider_name, api_key=api_key)
+            assistant_content = await asyncio.to_thread(
+                client.generate,
+                prompt,
+                model=session.model,
+                options=None,
+            )
+            session.append_message({'role': 'assistant', 'content': assistant_content})
+            session.push_event({'type': 'message', 'role': 'assistant', 'content': assistant_content})
+            return
+
+        registry = get_registry(app)
+        if tool_ids:
+            id_set = set(tool_ids)
+            registry = [t for t in registry if t['id'] in id_set]
+        safe_tools = [t for t in registry if t['safety'] == 'safe']
+        mutating_tools = [t for t in registry if t['safety'] == 'mutating']
+        all_tools = safe_tools + mutating_tools
+
+        tool_system_msg = {'role': 'system', 'content': _build_tool_system_message(all_tools)} if all_tools else None
+        use_text_format = True  # becomes False once native function calling is confirmed
+
         turn = 0
         while True:
             turn += 1
@@ -468,6 +508,8 @@ def update_session(session_id: str, body: UpdateSessionRequest, user: User = Dep
     session = session_store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail='Session not found')
+    if body.provider is not None:
+        session.provider = body.provider
     if body.model is not None:
         session.model = body.model
     if body.api_key is not None:
@@ -607,14 +649,20 @@ def delete_session(session_id: str, user: User = Depends(get_current_user)) -> d
 @router.post('/models')
 @handle_errors('list chat models')
 async def get_models(body: ChatModelsRequest, user: User = Depends(get_current_user)) -> list[dict]:
-    """List models available from OpenRouter. Uses provided key or falls back to global."""
+    """List models available for a chat provider."""
     del user
-    from modules.settings.service import get_resolved_openrouter_key
-
-    key = body.api_key or get_resolved_openrouter_key()
-    if not key:
-        raise HTTPException(status_code=400, detail='No API key configured')
+    key = _resolve_api_key(body.provider, body.api_key)
     try:
-        return await list_models(key)
-    except OpenRouterError as exc:
+        if body.provider == 'openrouter':
+            if not key:
+                raise HTTPException(status_code=400, detail='No API key configured')
+            return await list_models(key)
+        client = get_ai_client(
+            body.provider,
+            endpoint_url=body.endpoint_url,
+            api_key=key or None,
+            organization_id=body.organization_id,
+        )
+        return await asyncio.to_thread(client.list_models)
+    except (OpenRouterError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

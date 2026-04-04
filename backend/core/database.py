@@ -136,6 +136,24 @@ def _run_settings_migrations(db_engine: Engine) -> None:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
         if 'openrouter_default_model' not in settings_columns:
             pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_default_model TEXT NOT NULL DEFAULT ''")
+        if 'openai_api_key' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN openai_api_key TEXT NOT NULL DEFAULT ''")
+        if 'openai_endpoint_url' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN openai_endpoint_url TEXT NOT NULL DEFAULT 'https://api.openai.com'")
+        if 'openai_default_model' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN openai_default_model TEXT NOT NULL DEFAULT 'gpt-4o-mini'")
+        if 'openai_organization_id' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN openai_organization_id TEXT NOT NULL DEFAULT ''")
+        if 'ollama_endpoint_url' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN ollama_endpoint_url TEXT NOT NULL DEFAULT 'http://localhost:11434'")
+        if 'ollama_default_model' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN ollama_default_model TEXT NOT NULL DEFAULT 'llama3.2'")
+        if 'huggingface_api_token' not in settings_columns:
+            pending.append("ALTER TABLE app_settings ADD COLUMN huggingface_api_token TEXT NOT NULL DEFAULT ''")
+        if 'huggingface_default_model' not in settings_columns:
+            pending.append(
+                "ALTER TABLE app_settings ADD COLUMN huggingface_default_model TEXT NOT NULL DEFAULT 'google/flan-t5-base'"
+            )
         if 'env_bootstrap_complete' not in settings_columns:
             pending.append('ALTER TABLE app_settings ADD COLUMN env_bootstrap_complete BOOLEAN NOT NULL DEFAULT 1')
 
