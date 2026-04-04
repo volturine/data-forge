@@ -113,6 +113,8 @@ def _log_app_error(exc: AppError, status: int) -> None:
     extra = {'error_code': exc.error_code, 'details': exc.details}
     if status >= 500:
         logger.error(msg, extra=extra, exc_info=True)
+    elif isinstance(exc, (InvalidIdError, DataSourceSnapshotError, PipelineValidationError)):
+        logger.info(msg, extra=extra)
     else:
         logger.warning(msg, extra=extra)
 

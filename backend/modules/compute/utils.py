@@ -108,10 +108,14 @@ def _engine_result_to_dict(result: EngineResult | dict[str, Any]) -> dict[str, A
     if isinstance(result, dict):
         raw_step_timings = result.get('step_timings')
         raw_query_plan = result.get('query_plan')
+        raw_error_kind = result.get('error_kind')
+        raw_error_details = result.get('error_details')
         return {
             'job_id': result.get('job_id'),
             'data': result.get('data'),
             'error': result.get('error'),
+            'error_kind': raw_error_kind if isinstance(raw_error_kind, str) else None,
+            'error_details': raw_error_details if isinstance(raw_error_details, dict) else {},
             'step_timings': raw_step_timings if isinstance(raw_step_timings, dict) else {},
             'query_plan': raw_query_plan if isinstance(raw_query_plan, str) else None,
         }
@@ -120,6 +124,8 @@ def _engine_result_to_dict(result: EngineResult | dict[str, Any]) -> dict[str, A
         'job_id': result.job_id,
         'data': result.data,
         'error': result.error,
+        'error_kind': result.error_kind,
+        'error_details': result.error_details or {},
         'step_timings': result.step_timings,
         'query_plan': result.query_plan,
     }
@@ -132,6 +138,8 @@ def await_engine_result(engine: ComputeEngine, timeout: int, job_id: str | None 
             return {
                 'data': None,
                 'error': 'Compute process died unexpectedly.',
+                'error_kind': 'engine_process_died',
+                'error_details': {},
                 'job_id': job_id,
             }
         remaining = deadline - time.monotonic()

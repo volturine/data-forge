@@ -100,6 +100,25 @@ class TestLockRoutes:
         assert response.status_code == 200
         assert response.json()['owner_id'] == owner.id
 
+    def test_release_with_stale_token_is_idempotent(self, client, test_db_session, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        acquire = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-5'},
+        )
+        assert acquire.status_code == 200
+
+        release = client.request(
+            'DELETE',
+            '/api/v1/locks/analysis/analysis-5',
+            json={'lock_token': 'wrong-token'},
+        )
+        assert release.status_code == 200
+        assert release.json() == {'released': False}
+
+        lock = test_db_session.get(ResourceLock, ('analysis', 'analysis-5'))
+        assert lock is not None
+
 
 class TestLockWebsocket:
     def test_watch_receives_initial_and_release_updates(self, client, monkeypatch) -> None:

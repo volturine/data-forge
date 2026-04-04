@@ -340,6 +340,43 @@ class TestAnalysisCreate:
         assert len(result['pipeline_definition']['tabs']) == 2
         assert result['pipeline_definition']['tabs'][1]['datasource']['id'] == tab1_result_id
 
+    def test_create_analysis_does_not_create_output_datasource_until_build(
+        self,
+        client,
+        sample_datasource: DataSource,
+        test_db_session,
+    ):
+        output_id = str(uuid.uuid4())
+        payload = {
+            'name': 'Output Placeholder Analysis',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': output_id,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'placeholder_out',
+                    },
+                    'steps': [],
+                },
+            ],
+        }
+
+        response = client.post('/api/v1/analysis', json=payload)
+
+        assert response.status_code == 200
+
+        output_ds = test_db_session.get(DataSource, output_id)
+        assert output_ds is None
+
     def test_create_analysis_sets_owner_id_when_optional_user_present(
         self,
         client,

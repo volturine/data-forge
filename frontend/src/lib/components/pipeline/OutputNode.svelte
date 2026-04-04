@@ -8,7 +8,7 @@
 	import type { Subscriber } from '$lib/api/settings';
 	import type { BuildResponse } from '$lib/api/compute';
 	import { getSubscribers } from '$lib/api/settings';
-	import { getDatasource, updateDatasource } from '$lib/api/datasource';
+	import { listDatasources, updateDatasource } from '$lib/api/datasource';
 	import { buildAnalysisWithPayload } from '$lib/api/compute';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -53,6 +53,8 @@
 	let notifyOpen = $state(false);
 	let scheduleOpen = $state(false);
 	let healthOpen = $state(false);
+	let probeOutputDatasource = $state(false);
+	let lastOutputDatasourceId = $state<string | null>(null);
 	let editingName = $state(false);
 	let draftName = $state('');
 	let modeMenuOpen = $state(false);
@@ -125,19 +127,21 @@
 		};
 	});
 	const canQueryOutput = $derived(isUuid(outputDatasourceId));
+	const shouldQueryOutputDatasource = $derived(
+		canQueryOutput && (probeOutputDatasource || healthOpen || scheduleOpen)
+	);
 
 	const outputDatasourceQuery = createQuery(() => ({
 		queryKey: ['datasource', outputDatasourceId],
 		queryFn: async () => {
 			if (!outputDatasourceId) return null;
-			const result = await getDatasource(outputDatasourceId);
+			const result = await listDatasources(true);
 			if (result.isErr()) {
-				if (result.error.status === 404) return null;
 				throw new Error(result.error.message);
 			}
-			return result.value;
+			return result.value.find((ds) => ds.id === outputDatasourceId) ?? null;
 		},
-		enabled: canQueryOutput
+		enabled: shouldQueryOutputDatasource
 	}));
 	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
 	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
@@ -311,6 +315,10 @@
 
 	async function toggleHidden() {
 		if (!outputDatasourceId || toggling) return;
+		if (!hasOutputDatasource) {
+			probeOutputDatasource = true;
+			return;
+		}
 		toggling = true;
 		const result = await updateDatasource(outputDatasourceId, { is_hidden: !hidden });
 		result.match(
@@ -364,6 +372,7 @@
 				if (failed?.error) {
 					error = failed.error;
 				}
+				probeOutputDatasource = true;
 				queryClient.invalidateQueries({ queryKey: ['engine-runs', analysisId] });
 				queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
@@ -391,6 +400,14 @@
 		return () => {
 			window.removeEventListener('mousedown', handleOutside, true);
 		};
+	});
+
+	// Reset datasource probing when tab/output target changes.
+	$effect(() => {
+		const currentOutputId = outputDatasourceId;
+		if (lastOutputDatasourceId === currentOutputId) return;
+		lastOutputDatasourceId = currentOutputId;
+		probeOutputDatasource = false;
 	});
 </script>
 
@@ -635,7 +652,7 @@
 							_hover: { color: 'fg.primary' }
 						})}
 						onclick={toggleHidden}
-						disabled={toggling}
+						disabled={toggling || !hasOutputDatasource}
 						data-testid="output-visibility-toggle"
 						title={hidden
 							? 'Hidden from other analyses — click to make visible'
@@ -1096,7 +1113,7 @@
 				</button>
 
 				{#if healthOpen}
-					{#if canQueryOutput}
+					{#if canQueryOutput && hasOutputDatasource}
 						<div
 							class={css({
 								marginTop: '2',
@@ -1119,7 +1136,11 @@
 								color: 'fg.tertiary'
 							})}
 						>
-							Save this analysis to create an output datasource before adding health checks.
+							{#if canQueryOutput}
+								Build this output once to materialize its datasource before adding health checks.
+							{:else}
+								Save this analysis to create an output datasource before adding health checks.
+							{/if}
 						</div>
 					{/if}
 				{/if}
@@ -1162,7 +1183,7 @@
 					{/if}
 				</button>
 
-				{#if scheduleOpen && canQueryOutput}
+				{#if scheduleOpen && canQueryOutput && hasOutputDatasource}
 					<div
 						class={css({
 							marginTop: '2',
@@ -1172,6 +1193,24 @@
 						})}
 					>
 						<ScheduleManager datasourceId={outputDatasourceId ?? undefined} compact />
+					</div>
+				{:else if scheduleOpen}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							borderStyle: 'dashed',
+							padding: '3',
+							textAlign: 'center',
+							fontSize: 'xs',
+							color: 'fg.tertiary'
+						})}
+					>
+						{#if canQueryOutput}
+							Build this output once to materialize its datasource before adding schedules.
+						{:else}
+							Save this analysis to create an output datasource before adding schedules.
+						{/if}
 					</div>
 				{/if}
 			</div>

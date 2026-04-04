@@ -144,7 +144,7 @@ async def heartbeat_lock(
 
 
 @router.delete('/{resource_type}/{resource_id}', response_model=schemas.LockReleaseResponse, mcp=True)
-@handle_errors(operation='release lock', value_error_status=409)
+@handle_errors(operation='release lock')
 async def release_lock(
     resource_type: str,
     resource_id: str,

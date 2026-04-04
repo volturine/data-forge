@@ -85,6 +85,8 @@ class EngineResult:
     job_id: str | None
     data: dict[str, Any] | None
     error: str | None
+    error_kind: str | None = None
+    error_details: dict[str, Any] | None = None
     step_timings: dict[str, float] = field(default_factory=dict)
     query_plan: str | None = None
 

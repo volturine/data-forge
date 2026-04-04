@@ -19,14 +19,11 @@ from sqlalchemy import select
 from sqlmodel import Session, col
 
 from core.config import settings
-from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError
+from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError, PipelineValidationError
 from core.namespace import get_namespace, namespace_paths
 from modules.analysis.models import Analysis
 from modules.compute.manager import ProcessManager
-from modules.compute.operations.datasource import (
-    resolve_iceberg_branch_metadata_path,
-    resolve_iceberg_metadata_path,
-)
+from modules.compute.operations.datasource import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path
 from modules.compute.schemas import BuildStatus, BuildTabStatus, ComputeRunStatus
 from modules.compute.utils import apply_steps, await_engine_result, find_step_index, resolve_applied_target
 from modules.datasource.models import DataSource
@@ -95,6 +92,94 @@ def _coerce_build_status(status: object) -> BuildStatus:
         return BuildStatus(str(status))
     except ValueError as exc:
         raise ValueError(f'Unsupported build status: {status}') from exc
+
+
+def _raise_engine_failure(
+    result_data: dict,
+    *,
+    operation: str,
+    datasource_id: str,
+    failure_prefix: str,
+) -> None:
+    error = result_data.get('error')
+    if not error:
+        return
+
+    error_text = str(error)
+    error_kind = result_data.get('error_kind')
+    raw_error_details = result_data.get('error_details')
+    error_details = raw_error_details if isinstance(raw_error_details, dict) else {}
+
+    if error_kind == 'pipeline_validation':
+        validation_details = error_details.get('details')
+        details = dict(validation_details) if isinstance(validation_details, dict) else {}
+        details['operation'] = operation
+        details['datasource_id'] = datasource_id
+        raise PipelineValidationError(error_text, details=details)
+
+    if error_kind == 'value_error':
+        raise PipelineValidationError(
+            error_text,
+            details={
+                'operation': operation,
+                'datasource_id': datasource_id,
+                **error_details,
+            },
+        )
+
+    if error_kind == 'datasource_metadata_missing':
+        snapshot_details: dict[str, object] = {
+            'operation': operation,
+            'datasource_id': datasource_id,
+        }
+        metadata_path = error_details.get('metadata_path')
+        if isinstance(metadata_path, str):
+            snapshot_details['metadata_path'] = metadata_path
+        raise DataSourceSnapshotError(
+            'Datasource output is not available for this branch yet. Build the producing analysis first.',
+            details=snapshot_details,
+        )
+
+    raise PipelineExecutionError(
+        f'{failure_prefix} failed: {error_text}',
+        details={
+            'operation': operation,
+            'datasource_id': datasource_id,
+            'error_kind': error_kind,
+            **error_details,
+        },
+    )
+
+
+def _preflight_datasource_for_compute(
+    config: dict,
+    *,
+    operation: str,
+    datasource_id: str,
+) -> None:
+    source_type = str(config.get('source_type') or '')
+    if source_type != DataSourceType.ICEBERG and source_type != str(DataSourceType.ICEBERG):
+        return
+
+    metadata_path = config.get('metadata_path')
+    if not isinstance(metadata_path, str) or not metadata_path.strip():
+        raise PipelineValidationError(
+            'Iceberg datasource requires metadata_path',
+            details={'operation': operation, 'datasource_id': datasource_id},
+        )
+    branch = config.get('branch')
+    branch_value = str(branch) if isinstance(branch, str) and branch else None
+    try:
+        resolved_metadata_path = resolve_iceberg_branch_metadata_path(metadata_path, branch_value)
+    except ValueError as exc:
+        message = str(exc)
+        if 'Iceberg metadata_path not found' in message:
+            raise DataSourceSnapshotError(
+                'Datasource output is not available for this branch yet. Build the producing analysis first.',
+                details={'operation': operation, 'datasource_id': datasource_id, 'metadata_path': metadata_path},
+            ) from exc
+        raise
+    config['metadata_path'] = resolved_metadata_path
 
 
 def _build_subscriber_message(context: BuildContext) -> str:
@@ -619,6 +704,11 @@ def preview_step(
         analysis_id_value = f'__preview__{datasource_id}'
 
     config: dict = datasource_config
+    _preflight_datasource_for_compute(
+        config,
+        operation='preview',
+        datasource_id=datasource_id,
+    )
 
     run_analysis_id = analysis_id_value
 
@@ -672,12 +762,12 @@ def preview_step(
         result_data = await_engine_result(engine, timeout, job_id=job_id)
         step_timings = result_data.get('step_timings', {}) if isinstance(result_data, dict) else {}
         query_plan = result_data.get('query_plan') if isinstance(result_data, dict) else None
-        error = result_data.get('error')
-        if error:
-            raise PipelineExecutionError(
-                f'Preview failed: {error}',
-                details={'operation': 'preview', 'datasource_id': datasource_id},
-            )
+        _raise_engine_failure(
+            result_data,
+            operation='preview',
+            datasource_id=datasource_id,
+            failure_prefix='Preview',
+        )
 
         data = result_data.get('data', {})
         result_meta = _build_preview_result_metadata(
@@ -767,6 +857,11 @@ def get_step_schema(
         raise ValueError('Schema fetch requires analysis_id')
 
     config: dict = datasource_config
+    _preflight_datasource_for_compute(
+        config,
+        operation='schema',
+        datasource_id=datasource_id,
+    )
 
     steps = apply_steps(steps)
 
@@ -789,12 +884,12 @@ def get_step_schema(
     )
 
     result_data = await_engine_result(engine, timeout, job_id=job_id)
-    error = result_data.get('error')
-    if error:
-        raise PipelineExecutionError(
-            f'Schema fetch failed: {error}',
-            details={'operation': 'schema', 'datasource_id': datasource_id},
-        )
+    _raise_engine_failure(
+        result_data,
+        operation='schema',
+        datasource_id=datasource_id,
+        failure_prefix='Schema fetch',
+    )
 
     data = result_data.get('data', {})
     schema = data.get('schema', {})
@@ -838,6 +933,11 @@ def get_step_row_count(
         analysis_id_value = f'__row_count__{datasource_id}'
 
     config: dict = datasource_config
+    _preflight_datasource_for_compute(
+        config,
+        operation='row_count',
+        datasource_id=datasource_id,
+    )
     branch = _resolve_branch_value(config)
 
     request_payload = _ensure_request_branch(
@@ -879,12 +979,12 @@ def get_step_row_count(
         result_data = await_engine_result(engine, timeout, job_id=job_id)
         step_timings = result_data.get('step_timings', {}) if isinstance(result_data, dict) else {}
         query_plan = result_data.get('query_plan') if isinstance(result_data, dict) else None
-        error = result_data.get('error')
-        if error:
-            raise PipelineExecutionError(
-                f'Row count failed: {error}',
-                details={'operation': 'row_count', 'datasource_id': datasource_id},
-            )
+        _raise_engine_failure(
+            result_data,
+            operation='row_count',
+            datasource_id=datasource_id,
+            failure_prefix='Row count',
+        )
 
         data = result_data.get('data', {})
         row_count = data.get('row_count', 0)
@@ -966,6 +1066,11 @@ def export_data(
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Export requires datasource_config')
+    _preflight_datasource_for_compute(
+        datasource_config,
+        operation='export',
+        datasource_id=datasource_id,
+    )
 
     branch = _resolve_branch_value(datasource_config)
     existing_output_ds = session.get(DataSource, result_id)
@@ -1024,12 +1129,12 @@ def export_data(
         result_data = await_engine_result(engine, timeout, job_id=job_id)
         step_timings = result_data.get('step_timings', {}) if isinstance(result_data, dict) else {}
         query_plan = result_data.get('query_plan') if isinstance(result_data, dict) else None
-        error = result_data.get('error')
-        if error:
-            raise PipelineExecutionError(
-                f'Export failed: {error}',
-                details={'operation': 'export', 'datasource_id': datasource_id, 'export_format': 'parquet'},
-            )
+        _raise_engine_failure(
+            result_data,
+            operation='export',
+            datasource_id=datasource_id,
+            failure_prefix='Export',
+        )
 
         data = result_data.get('data', {})
         row_count = data.get('row_count', 0)
@@ -1169,6 +1274,8 @@ def export_data(
             'branch': branch_name,
             'namespace_name': get_namespace(),
         }
+        if tab_id:
+            iceberg_ds_config['analysis_tab_id'] = str(tab_id)
         iceberg_ds_config = _set_snapshot_metadata(iceberg_ds_config, snapshot_id, snapshot_timestamp_ms)
         output_hidden = existing_output_ds.is_hidden if existing_output_ds else True
         schema_cache = data.get('schema', {})
@@ -1264,6 +1371,11 @@ def download_step(
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Download requires datasource_config')
+    _preflight_datasource_for_compute(
+        datasource_config,
+        operation='download',
+        datasource_id=datasource_id,
+    )
 
     if not analysis_id_value:
         analysis_id_value = f'__download__{datasource_id}'
@@ -1327,12 +1439,12 @@ def download_step(
         result_data = await_engine_result(engine, timeout, job_id=job_id)
         step_timings = result_data.get('step_timings', {}) if isinstance(result_data, dict) else {}
         query_plan = result_data.get('query_plan') if isinstance(result_data, dict) else None
-        error = result_data.get('error')
-        if error:
-            raise PipelineExecutionError(
-                f'Download failed: {error}',
-                details={'operation': 'download', 'datasource_id': datasource_id},
-            )
+        _raise_engine_failure(
+            result_data,
+            operation='download',
+            datasource_id=datasource_id,
+            failure_prefix='Download',
+        )
 
         data = result_data.get('data', {})
         df_data = data.get('data', [])

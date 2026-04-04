@@ -7,6 +7,7 @@ from core.database import get_db
 from core.error_handlers import handle_errors
 from core.validation import DataSourceId, parse_datasource_id
 from modules.mcp.router import MCPRouter
+from modules.settings.service import get_resolved_telegram_settings
 from modules.telegram import service
 from modules.telegram.schemas import (
     BotStatusResponse,
@@ -24,12 +25,11 @@ def bot_status(session: Session = Depends(get_db)) -> BotStatusResponse:
     """Get Telegram bot status: whether the bot is running, token is configured, and active subscriber count."""
     subs = service.list_subscribers(session)
     active = sum(1 for s in subs if s.is_active)
-    from modules.settings.service import get_settings
-
-    settings = get_settings(session)
-    token_configured = bool(settings.telegram_bot_token)
+    telegram_settings = get_resolved_telegram_settings()
+    token_configured = bool(telegram_settings['token'])
+    running = bool(telegram_settings['enabled'])
     return BotStatusResponse(
-        running=token_configured,
+        running=running,
         token_configured=token_configured,
         subscriber_count=active,
     )

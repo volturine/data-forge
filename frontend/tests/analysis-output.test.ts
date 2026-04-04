@@ -152,17 +152,23 @@ test.describe('Analyses – output node interactions', () => {
 				timeout: 3_000
 			});
 
-			// Open Health Checks section — shows health checks manager
+			// Open Health Checks section — prompts to build first when output datasource is not materialized
 			await healthToggle.click();
-			await expect(page.getByText(/No health checks configured/i)).toBeVisible({ timeout: 5_000 });
+			await expect(
+				page.getByText(
+					/Build this output once to materialize its datasource before adding health checks/i
+				)
+			).toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'analysis/output', 'output-sections-health-open');
 
 			// Close Health Checks
 			await healthToggle.click();
-			await expect(page.getByText(/No health checks configured/i)).not.toBeVisible({
-				timeout: 3_000
-			});
+			await expect(
+				page.getByText(
+					/Build this output once to materialize its datasource before adding health checks/i
+				)
+			).not.toBeVisible({ timeout: 3_000 });
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);

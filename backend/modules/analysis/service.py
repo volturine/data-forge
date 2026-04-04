@@ -62,7 +62,6 @@ def _validate_analysis_payload(
             expected = tab_output_map.get(str(ds.analysis_tab_id))
             if expected != ds.id:
                 raise ValueError(f"Datasource id '{ds.id}' does not match output.result_id of tab '{ds.analysis_tab_id}'")
-            datasource_ids.append(ds.id)
             continue
         datasource_row = session.get(DataSource, ds.id)
         if datasource_row:

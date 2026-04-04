@@ -59,6 +59,7 @@
 	} from 'lucide-svelte';
 
 	const analysisId = $derived($page.params.id ?? null);
+	const validAnalysisId = $derived(analysisId && isUuid(analysisId) ? analysisId : null);
 	let lastAnalysisId = $state<string | null>(null);
 
 	let selectedStepId = $state<string | null>(null);
@@ -117,7 +118,7 @@
 
 	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
 	$effect(() => {
-		const id = analysisId;
+		const id = validAnalysisId;
 		if (!id) return;
 
 		lockOwner = null;
@@ -152,7 +153,7 @@
 		};
 	});
 
-	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
+	const storageKey = $derived(validAnalysisId ? `analysis-draft:${validAnalysisId}` : null);
 
 	// Timer: $derived can't schedule schema refresh.
 	$effect(() => {
@@ -294,7 +295,8 @@
 		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
-			const result = await getAnalysisWithHeaders(analysisId);
+			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
+			const result = await getAnalysisWithHeaders(validAnalysisId);
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
@@ -315,7 +317,8 @@
 		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
-			const result = await listAnalysisVersions(analysisId);
+			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
+			const result = await listAnalysisVersions(validAnalysisId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -350,8 +353,8 @@
 
 	// Network: $derived can't fetch engine defaults.
 	$effect(() => {
-		if (!analysisId || analysisStore.engineDefaults) return;
-		spawnEngine(analysisId).match(
+		if (!validAnalysisId || analysisStore.engineDefaults) return;
+		spawnEngine(validAnalysisId).match(
 			(status) => {
 				if (status.defaults) {
 					analysisStore.setEngineDefaults(status.defaults);
@@ -361,7 +364,7 @@
 				track({
 					event: 'engine_error',
 					action: 'spawn',
-					target: analysisId,
+					target: validAnalysisId,
 					meta: { message: err.message }
 				});
 			}
@@ -370,19 +373,19 @@
 
 	// Network: $derived can't hydrate inferred schemas for expression/with_columns steps.
 	$effect(() => {
-		if (!analysisId) return;
+		if (!validAnalysisId) return;
 		const tab = analysisStore.activeTab;
 		if (!tab) return;
 		const pipeline = analysisStore.pipeline;
 		if (!pipeline.length) return;
 		const analysisPayload = buildAnalysisPipelinePayload(
-			analysisId,
+			validAnalysisId,
 			analysisStore.tabs,
 			datasourceStore.datasources
 		);
 		if (!analysisPayload) return;
 		const pipelineHash = hashPipeline(applySteps(pipeline));
-		const gate = `${analysisId}:${tab.id}:${pipelineHash}`;
+		const gate = `${validAnalysisId}:${tab.id}:${pipelineHash}`;
 		if (hydratedGates.has(gate)) return;
 		hydratedGates = new Set([...hydratedGates, gate]);
 
@@ -392,7 +395,7 @@
 		);
 		for (const step of targets) {
 			getStepSchema({
-				analysis_id: analysisId,
+				analysis_id: validAnalysisId,
 				analysis_pipeline: analysisPayload,
 				tab_id: tab.id,
 				target_step_id: step.id
@@ -414,15 +417,15 @@
 	const datasourceId = $derived(activeTab?.datasource?.id ?? null);
 	const schemaKey = $derived.by(() => {
 		const tab = activeTab;
-		if (!tab || !analysisId) return undefined;
+		if (!tab || !validAnalysisId) return undefined;
 		const sourceTabId = tab.datasource.analysis_tab_id;
-		if (sourceTabId) return `output:${analysisId}:${String(sourceTabId)}`;
+		if (sourceTabId) return `output:${validAnalysisId}:${String(sourceTabId)}`;
 		if (tab.datasource.id) return tab.datasource.id;
 		return undefined;
 	});
 	const analysisTabName = $derived.by(() => {
 		const tab = activeTab;
-		if (!tab || !analysisId) return null;
+		if (!tab || !validAnalysisId) return null;
 		const sourceTabId = tab.datasource.analysis_tab_id;
 		if (!sourceTabId) return null;
 		const sourceTab = analysisStore.tabs.find((item) => item.id === String(sourceTabId));
@@ -440,8 +443,12 @@
 		if (existingSchema) return;
 
 		const analysisTabId = activeTab?.datasource?.analysis_tab_id ?? null;
-		const analysisPayload = analysisId
-			? buildAnalysisPipelinePayload(analysisId, analysisStore.tabs, datasourceStore.datasources)
+		const analysisPayload = validAnalysisId
+			? buildAnalysisPipelinePayload(
+					validAnalysisId,
+					analysisStore.tabs,
+					datasourceStore.datasources
+				)
 			: null;
 
 		if (analysisTabId) {
@@ -449,7 +456,7 @@
 			isLoadingSchema = true;
 			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema({
-				analysis_id: analysisId ?? undefined,
+				analysis_id: validAnalysisId ?? undefined,
 				analysis_pipeline: analysisPayload,
 				tab_id: targetTabId,
 				target_step_id: 'source'

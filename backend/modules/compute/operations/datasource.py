@@ -37,6 +37,12 @@ class IcebergReader(StrEnum):
     PYICEBERG = 'pyiceberg'
 
 
+class IcebergMetadataPathNotFoundError(ValueError):
+    def __init__(self, metadata_path: str):
+        self.metadata_path = metadata_path
+        super().__init__(f'Iceberg metadata_path not found: {metadata_path}')
+
+
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
@@ -470,7 +476,7 @@ def resolve_iceberg_metadata_path(metadata_path: str) -> str:
             return str(path)
         raise ValueError('Iceberg metadata_path must be a table directory or metadata.json')
     if not path.exists():
-        raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
+        raise IcebergMetadataPathNotFoundError(metadata_path)
     if not path.is_dir():
         raise ValueError(f'Iceberg metadata_path must be a file or directory: {metadata_path}')
     if path.name == 'metadata':

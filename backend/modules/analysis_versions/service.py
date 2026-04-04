@@ -97,6 +97,20 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
 
     pipeline_definition = analysis.pipeline_definition
     tabs = pipeline_definition.get('tabs', [])
+    tab_output_map: dict[str, str] = {}
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        tab_id = tab.get('id')
+        output = tab.get('output')
+        if not isinstance(output, dict):
+            raise AnalysisValidationError('Analysis tab missing output configuration')
+        output_id = output.get('result_id')
+        if not output_id:
+            raise AnalysisValidationError('Analysis tab missing output.result_id')
+        if tab_id:
+            tab_output_map[str(tab_id)] = str(output_id)
+
     for tab in tabs:
         datasource = tab.get('datasource') if isinstance(tab, dict) else None
         if not isinstance(datasource, dict):
@@ -104,7 +118,14 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
         datasource_id = datasource.get('id')
         if not datasource_id:
             raise AnalysisValidationError('Analysis tab missing datasource.id')
-        if not session.get(DataSource, datasource_id):
+        analysis_tab_id = datasource.get('analysis_tab_id')
+        if analysis_tab_id is not None:
+            expected = tab_output_map.get(str(analysis_tab_id))
+            if expected != str(datasource_id):
+                raise AnalysisValidationError(
+                    f"Datasource id '{datasource_id}' does not match output.result_id of tab '{analysis_tab_id}'",
+                )
+        elif not session.get(DataSource, datasource_id):
             raise DataSourceNotFoundError(str(datasource_id))
         output = tab.get('output') if isinstance(tab, dict) else None
         if not isinstance(output, dict):
@@ -122,10 +143,12 @@ def restore_version(session: Session, analysis_id: str, version: int) -> Analysi
         datasource = tab.get('datasource')
         if not isinstance(datasource, dict):
             continue
+        if datasource.get('analysis_tab_id') is not None:
+            continue
         datasource_id = datasource.get('id')
         if datasource_id:
             datasource_ids.append(str(datasource_id))
-    for datasource_id in datasource_ids:
+    for datasource_id in set(datasource_ids):
         ds: DataSource | None = session.get(DataSource, datasource_id)
         if not ds:
             raise DataSourceNotFoundError(datasource_id)

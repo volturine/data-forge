@@ -217,6 +217,23 @@ def create_placeholder_output_datasource(
         raise ValueError(f'result_id must be a valid UUID, got: {result_id!r}') from None
     existing = session.get(DataSource, result_id)
     if existing:
+        existing_owner = existing.created_by_analysis_id
+        if existing_owner is not None and str(existing_owner) != analysis_id:
+            raise ValueError(
+                f"Output result_id '{result_id}' is already owned by analysis '{existing_owner}', "
+                f"cannot reuse it in analysis '{analysis_id}'",
+            )
+        if existing_owner is None and existing.created_by != 'analysis':
+            raise ValueError(
+                f"Output result_id '{result_id}' conflicts with an existing datasource not managed by analysis outputs",
+            )
+        next_config = dict(existing.config) if isinstance(existing.config, dict) else {}
+        next_config['analysis_tab_id'] = analysis_tab_id
+        existing.config = next_config
+        existing.created_by_analysis_id = analysis_id
+        existing.created_by = 'analysis'
+        session.add(existing)
+        session.flush()
         return
     datasource = DataSource(
         id=result_id,
@@ -225,7 +242,7 @@ def create_placeholder_output_datasource(
         config={'analysis_tab_id': analysis_tab_id},
         created_by_analysis_id=analysis_id,
         created_by='analysis',
-        is_hidden=False,
+        is_hidden=True,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
     session.add(datasource)

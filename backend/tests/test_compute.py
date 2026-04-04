@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketState
 
 from core.dependencies import get_manager
 from core.exceptions import PipelineValidationError
+from core.namespace import namespace_paths
 from main import app
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.manager import ProcessManager
@@ -53,6 +54,17 @@ def test_run_compute_clears_inherited_polars_env_for_auto_values(monkeypatch) ->
 
     assert 'POLARS_MAX_THREADS' not in os.environ
     assert 'POLARS_STREAMING_CHUNK_SIZE' not in os.environ
+
+
+def test_classify_engine_error_marks_missing_metadata_files_as_snapshot_unavailable() -> None:
+    exc = FileNotFoundError(
+        2,
+        'No such file or directory',
+        '/tmp/x/master/metadata/00001-snapshot.metadata.json',
+    )
+    kind, details = PolarsComputeEngine._classify_engine_error(exc)
+    assert kind == 'datasource_metadata_missing'
+    assert details == {}
 
 
 class TestComputePreview:
@@ -275,6 +287,8 @@ class TestComputePreview:
             {
                 'data': None,
                 'error': 'Invalid operation type',
+                'error_kind': 'value_error',
+                'error_details': {},
             },
         ]
 
@@ -284,8 +298,8 @@ class TestComputePreview:
 
         response = client.post('/api/v1/compute/preview', json=payload)
 
-        # Failed pipeline execution returns 500
-        assert response.status_code in [404, 500]
+        # Invalid operations are request/pipeline validation errors.
+        assert response.status_code == 400
 
     def test_preview_step_datasource_not_found(self, client):
         missing_id = str(uuid.uuid4())
@@ -326,7 +340,116 @@ class TestComputePreview:
 
         response = client.post('/api/v1/compute/preview', json=payload)
 
-        assert response.status_code == 500
+        assert response.status_code == 400
+
+    def test_preview_step_missing_metadata_returns_conflict(self, client, sample_datasource: DataSource):
+        payload = {
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
+                        'steps': [{'id': 'step1', 'type': 'view', 'config': {}}],
+                    },
+                ],
+                'sources': {
+                    sample_datasource.id: {
+                        'source_type': sample_datasource.source_type,
+                        **sample_datasource.config,
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
+                },
+            },
+            'target_step_id': 'step1',
+        }
+
+        mock_manager = MagicMock()
+        mock_engine = MagicMock()
+        mock_engine.preview.return_value = 'preview-job-125'
+        mock_engine.get_result.side_effect = [
+            None,
+            {
+                'data': None,
+                'error': 'Iceberg metadata_path not found: /tmp/path',
+                'error_kind': 'datasource_metadata_missing',
+                'error_details': {'metadata_path': '/tmp/path'},
+            },
+        ]
+
+        mock_manager.get_engine.return_value = None
+        mock_manager.get_or_create_engine.return_value = mock_engine
+        app.dependency_overrides[get_manager] = lambda: mock_manager
+
+        response = client.post('/api/v1/compute/preview', json=payload)
+
+        assert response.status_code == 409
+
+    def test_preview_step_missing_metadata_preflight_skips_engine(self, client):
+        missing_id = str(uuid.uuid4())
+        missing_metadata_path = str(namespace_paths().clean_dir / str(uuid.uuid4()))
+        payload = {
+            'analysis_id': 'analysis-id',
+            'analysis_pipeline': {
+                'analysis_id': 'analysis-id',
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'datasource': {
+                            'id': missing_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': 'out-1',
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'out',
+                        },
+                        'steps': [{'id': 'step1', 'type': 'view', 'config': {}}],
+                    },
+                ],
+                'sources': {
+                    missing_id: {
+                        'source_type': 'iceberg',
+                        'metadata_path': missing_metadata_path,
+                        'branch': 'master',
+                    },
+                    'out-1': {
+                        'source_type': 'analysis',
+                        'analysis_id': 'analysis-id',
+                        'analysis_tab_id': 'tab1',
+                    },
+                },
+            },
+            'target_step_id': 'step1',
+        }
+
+        mock_manager = MagicMock()
+        mock_engine = MagicMock()
+        mock_manager.get_engine.return_value = None
+        mock_manager.get_or_create_engine.return_value = mock_engine
+        app.dependency_overrides[get_manager] = lambda: mock_manager
+
+        response = client.post('/api/v1/compute/preview', json=payload)
+
+        assert response.status_code == 409
+        mock_engine.preview.assert_not_called()
 
     def test_preview_step_specific_target(self, client, sample_datasource: DataSource):
         payload = {

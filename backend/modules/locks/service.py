@@ -117,6 +117,11 @@ def release_lock(
     owner_id: str,
     lock_token: str,
 ) -> bool:
+    """Release lock if caller still owns the active token.
+
+    DELETE is idempotent: stale, missing, or superseded lock tokens return False
+    rather than raising API conflicts.
+    """
     now = _utcnow()
     lock = get_lock(session, resource_type, resource_id)
     if lock is None:
@@ -126,7 +131,7 @@ def release_lock(
         session.commit()
         return False
     if lock.owner_id != owner_id or lock.lock_token != lock_token:
-        raise ValueError(f'{resource_type} {resource_id} lock is owned by another owner')
+        return False
     session.delete(lock)
     session.commit()
     return True

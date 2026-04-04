@@ -16,7 +16,7 @@ from modules.analysis.step_types import is_chart_step_type
 from modules.compute.core.base import EngineResult, ExportCommand, PreviewCommand, RowCountCommand, SchemaCommand, ShutdownCommand
 from modules.compute.core.exports import get_export_format
 from modules.compute.operations import HANDLERS
-from modules.compute.operations.datasource import load_datasource
+from modules.compute.operations.datasource import IcebergMetadataPathNotFoundError, load_datasource
 from modules.compute.operations.plot import ChartParams, compute_chart_data, compute_overlay_datasets
 from modules.compute.step_converter import BackendStep, convert_config_to_params, convert_step_format, get_chart_type_for_step
 from modules.compute.utils import apply_steps, normalize_timezones
@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 
 
 class PolarsComputeEngine:
+    @staticmethod
+    def _classify_engine_error(exc: Exception) -> tuple[str, dict[str, object]]:
+        if isinstance(exc, PipelineValidationError):
+            return 'pipeline_validation', {'details': exc.details}
+        if isinstance(exc, IcebergMetadataPathNotFoundError):
+            return 'datasource_metadata_missing', {'metadata_path': exc.metadata_path}
+        if isinstance(exc, FileNotFoundError):
+            return 'datasource_metadata_missing', {}
+        if isinstance(exc, OSError) and getattr(exc, 'errno', None) == 2:
+            return 'datasource_metadata_missing', {}
+        message = str(exc)
+        if (
+            ('Failed to open local file' in message or 'No such file or directory' in message)
+            and '/metadata/' in message
+            and '.metadata.json' in message
+        ):
+            return 'datasource_metadata_missing', {}
+        if isinstance(exc, ValueError):
+            return 'value_error', {}
+        return 'execution_error', {}
+
     def __init__(self, analysis_id: str, resource_config: dict | None = None):
         self.analysis_id = analysis_id
         self.resource_config = resource_config or {}
@@ -201,6 +222,8 @@ class PolarsComputeEngine:
                 error=(
                     f'Compute process died unexpectedly (exit code: {exit_code}). This may be due to out of memory or another system error.'
                 ),
+                error_kind='engine_process_died',
+                error_details={'exit_code': exit_code},
             )
 
         expected = job_id or self.current_job_id
@@ -379,12 +402,18 @@ class PolarsComputeEngine:
                     )
 
                 except Exception as e:
-                    logger.error(f'Job {job_id}: Failed with error: {e}', exc_info=True)
+                    error_kind, error_details = PolarsComputeEngine._classify_engine_error(e)
+                    if error_kind in {'pipeline_validation', 'datasource_metadata_missing', 'value_error'}:
+                        logger.info('Job %s failed (%s): %s', job_id, error_kind, e)
+                    else:
+                        logger.error(f'Job {job_id}: Failed with error: {e}', exc_info=True)
                     result_queue.put(
                         EngineResult(
                             job_id=job_id,
                             data=None,
                             error=str(e),
+                            error_kind=error_kind,
+                            error_details=error_details,
                         )
                     )
 
@@ -395,6 +424,8 @@ class PolarsComputeEngine:
                         job_id=None,
                         data=None,
                         error=f'Compute loop error: {e!s}',
+                        error_kind='compute_loop_error',
+                        error_details={},
                     )
                 )
 

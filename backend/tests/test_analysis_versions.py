@@ -498,3 +498,75 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
     response = client.post(f'/api/v1/analysis/{analysis_id}/versions/1/restore')
 
     assert response.status_code == 200
+
+
+def test_restore_version_with_derived_tab_uses_internal_output_mapping(test_db_session, client, sample_datasource: DataSource):
+    analysis_id = str(uuid.uuid4())
+    output_id = str(uuid.uuid4())
+    derived_output_id = str(uuid.uuid4())
+    pipeline_definition = {
+        'steps': [],
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'result_id': output_id,
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'source_output',
+                },
+                'steps': [],
+            },
+            {
+                'id': 'tab-2',
+                'name': 'Derived',
+                'parent_id': 'tab-1',
+                'datasource': {
+                    'id': output_id,
+                    'analysis_tab_id': 'tab-1',
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'result_id': derived_output_id,
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'derived_output',
+                },
+                'steps': [],
+            },
+        ],
+    }
+    analysis = Analysis(
+        id=analysis_id,
+        name='Derived Restore',
+        description=None,
+        pipeline_definition=pipeline_definition,
+        status=AnalysisStatus.DRAFT,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    version = AnalysisVersion(
+        id='version-restore-derived',
+        analysis_id=analysis_id,
+        version=1,
+        name='Derived Restore',
+        description=None,
+        pipeline_definition=pipeline_definition,
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(analysis)
+    test_db_session.add(version)
+    test_db_session.commit()
+
+    response = client.post(f'/api/v1/analysis/{analysis_id}/versions/1/restore')
+
+    assert response.status_code == 200
+    output_ds = test_db_session.get(DataSource, output_id)
+    assert output_ds is None

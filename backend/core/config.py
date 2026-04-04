@@ -143,6 +143,7 @@ class Settings(BaseSettings):
 
     # Logging level (debug, info, warning, error)
     log_level: str = Field(default='info', alias='LOG_LEVEL')
+    uvicorn_access_log: bool = Field(default=True, alias='UVICORN_ACCESS_LOG')
 
     # Timezone handling
     timezone: str = Field(default='UTC', alias='TIMEZONE')
