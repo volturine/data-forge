@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 /**
  * Wait for the app shell to finish hydrating by confirming the Settings
@@ -190,4 +190,17 @@ export async function openSchemaTabAndWait(page: Page, timeout = 15_000): Promis
 	await expect(
 		config.locator('[data-schema-column], :text("No schema information available")').first()
 	).toBeVisible({ timeout });
+}
+
+/**
+ * Wait for the settings popup form to finish loading.
+ *
+ * The SettingsPopup component shows a spinner while fetching GET /settings
+ * and only renders the form (including the Save button) once loading
+ * completes — success or failure. The Save button is the strongest
+ * readiness signal: it sits at the bottom of the form branch and proves
+ * the entire settings form tree has rendered.
+ */
+export async function waitForSettingsForm(dialog: Locator, timeout = 10_000): Promise<void> {
+	await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
 }

@@ -3,6 +3,7 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -369,15 +370,17 @@ class TestTelegramBot:
         assert sub.is_active is True
         assert sub.id == original_id
 
-    def test_poll_lock_prevents_concurrent_get_updates(self) -> None:
+    def test_poll_lock_prevents_concurrent_get_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_do_get_updates returns None when lock is held by another caller."""
         bot = TelegramBot()
-        bot._poll_lock.acquire()
-        try:
+        lock = MagicMock()
+        lock.acquire.return_value = False
+        monkeypatch.setattr(bot, '_poll_lock', lock)
+
+        with patch('modules.telegram.bot.httpx.get') as mock_get:
             result = bot._do_get_updates('tok', {'offset': 0, 'timeout': 5}, timeout=5)
-            assert result is None
-        finally:
-            bot._poll_lock.release()
+        assert result is None
+        mock_get.assert_not_called()
 
     def test_offset_tracked_per_token(self) -> None:
         """Offsets are tracked independently per bot token."""

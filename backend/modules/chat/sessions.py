@@ -158,9 +158,9 @@ class SessionStore:
         self._live: dict[str, LiveSession] = {}
 
     def _db(self) -> DbSession:
-        from core.database import settings_engine
+        from core.database import get_settings_engine
 
-        return DbSession(settings_engine)
+        return DbSession(get_settings_engine())
 
     def create(self, provider: str, model: str, api_key: str, system_prompt: str = '') -> LiveSession:
         sid = secrets.token_urlsafe(16)

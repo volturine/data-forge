@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -29,6 +31,38 @@ def _settings():
     from core.config import settings
 
     return settings
+
+
+def _settings_tables() -> list[Any]:
+    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+    from modules.chat.sessions import ChatSession
+    from modules.settings.models import AppSettings
+
+    table_names = {
+        AppSettings.__tablename__,
+        ChatSession.__tablename__,
+        User.__tablename__,
+        AuthProvider.__tablename__,
+        UserSession.__tablename__,
+        VerificationToken.__tablename__,
+    }
+    return [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
+
+
+def _reset_settings_state(engine: Engine) -> None:
+    from modules.chat.sessions import session_store
+    from modules.settings.service import invalidate_resolved_settings_cache
+
+    for live in session_store._live.values():
+        live.cancel_task()
+        live.close_stream()
+    session_store._live.clear()
+
+    with engine.begin() as conn:
+        for table in reversed(_settings_tables()):
+            conn.execute(table.delete())
+
+    invalidate_resolved_settings_cache()
 
 
 @pytest.fixture(scope='function')
@@ -127,34 +161,34 @@ def isolate_data_dir(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, 'log_sqlite_path', log_dir, raising=False)
 
 
-@pytest.fixture(autouse=True, scope='function')
-def isolate_settings_engine(isolate_data_dir, monkeypatch):
+@pytest.fixture(scope='session')
+def shared_settings_engine() -> Generator[Engine, None, None]:
     from core import database
-    from core.database import _run_settings_migrations
-    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
-    from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
 
-    settings = _settings()
-    settings_db_path = settings.data_dir / 'app.db'
-    settings_url = f'sqlite:///{settings_db_path}'
     engine = create_engine(
-        settings_url,
+        'sqlite:///:memory:',
         echo=False,
         connect_args={'check_same_thread': False},
         poolclass=StaticPool,
     )
-    AppSettings.metadata.create_all(engine)
-    ChatSession.metadata.create_all(engine)
-    User.metadata.create_all(engine)
-    AuthProvider.metadata.create_all(engine)
-    UserSession.metadata.create_all(engine)
-    VerificationToken.metadata.create_all(engine)
-    _run_settings_migrations(engine)
-    monkeypatch.setattr(settings, 'database_url', settings_url, raising=False)
-    monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
+    AppSettings.metadata.create_all(engine, tables=_settings_tables())
+    original = database.settings_engine
+    database.settings_engine = engine
     yield engine
+    database.settings_engine = original
     engine.dispose()
+
+
+@pytest.fixture(autouse=True, scope='function')
+def isolate_settings_engine(isolate_data_dir, shared_settings_engine):
+    from core import database
+
+    database.clear_settings_engine_override()
+    _reset_settings_state(shared_settings_engine)
+    yield shared_settings_engine
+    database.clear_settings_engine_override()
+    _reset_settings_state(shared_settings_engine)
 
 
 @pytest.fixture(autouse=True, scope='function')

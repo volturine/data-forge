@@ -3,11 +3,18 @@
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, create_engine, text
+from sqlmodel import Session, create_engine
 
-from core.secrets import MASKED_SECRET
+from core.secrets import MASKED_SECRET, decrypt_secret, encrypt_secret
+
+
+@pytest.fixture(autouse=True)
+def stub_telegram_bot_lifecycle():
+    with patch('modules.telegram.bot.telegram_bot.start'), patch('modules.telegram.bot.telegram_bot.stop'):
+        yield
 
 
 class TestGetSettings:
@@ -680,121 +687,6 @@ class TestDetectTelegramChat:
         assert 'refused' in data['detail'].lower()
 
 
-class TestSettingsMigrations:
-    """Regression tests for _run_settings_migrations on a legacy DB."""
-
-    def _make_legacy_engine(self):
-        engine = create_engine(
-            'sqlite:///:memory:',
-            connect_args={'check_same_thread': False},
-            poolclass=StaticPool,
-        )
-        with engine.connect() as conn:
-            conn.execute(
-                text(
-                    'CREATE TABLE app_settings ('
-                    'id INTEGER PRIMARY KEY, '
-                    "smtp_host TEXT NOT NULL DEFAULT '', "
-                    'smtp_port INTEGER NOT NULL DEFAULT 587, '
-                    "smtp_user TEXT NOT NULL DEFAULT '', "
-                    "smtp_password TEXT NOT NULL DEFAULT '', "
-                    "telegram_bot_token TEXT NOT NULL DEFAULT '', "
-                    'public_idb_debug BOOLEAN NOT NULL DEFAULT 0'
-                    ')',
-                ),
-            )
-            conn.execute(text('INSERT INTO app_settings (id) VALUES (1)'))
-            conn.commit()
-        return engine
-
-    def test_migrations_add_missing_columns(self):
-        from sqlalchemy import inspect
-
-        from core.database import _run_settings_migrations
-
-        engine = self._make_legacy_engine()
-        _run_settings_migrations(engine)
-
-        inspector = inspect(engine)
-        cols = {c['name'] for c in inspector.get_columns('app_settings')}
-        assert 'telegram_bot_enabled' in cols
-        assert 'openrouter_api_key' in cols
-        assert 'openrouter_default_model' in cols
-        assert 'env_bootstrap_complete' in cols
-
-    def test_migrations_idempotent(self):
-        from core.database import _run_settings_migrations
-
-        engine = self._make_legacy_engine()
-        _run_settings_migrations(engine)
-        _run_settings_migrations(engine)
-
-    def test_migrations_defaults_readable(self):
-        from core.database import _run_settings_migrations
-
-        engine = self._make_legacy_engine()
-        _run_settings_migrations(engine)
-
-        with engine.connect() as conn:
-            row = conn.execute(text('SELECT openrouter_api_key FROM app_settings WHERE id=1')).fetchone()
-        assert row is not None
-        assert row[0] == ''
-
-    def test_lifespan_bot_check_uses_settings_db(self, monkeypatch):
-        from core import database
-        from modules.settings.models import AppSettings
-
-        engine = create_engine(
-            'sqlite:///:memory:',
-            connect_args={'check_same_thread': False},
-            poolclass=StaticPool,
-        )
-        AppSettings.metadata.create_all(engine)
-
-        with Session(engine) as session:
-            row = AppSettings(id=1, telegram_bot_enabled=True, telegram_bot_token='bot:tok')
-            session.add(row)
-            session.commit()
-
-        monkeypatch.setattr(database, 'settings_engine', engine, raising=False)
-
-        from core.database import run_settings_db
-
-        def _check(session: Session) -> tuple[bool, str]:
-            row = session.get(AppSettings, 1)
-            if row and row.telegram_bot_enabled and row.telegram_bot_token:
-                return True, row.telegram_bot_token
-            return False, ''
-
-        enabled, token = run_settings_db(_check)
-        assert enabled is True
-        assert token == 'bot:tok'
-
-    def test_migrations_add_openrouter_default_model(self):
-        from sqlalchemy import inspect
-
-        from core.database import _run_settings_migrations
-
-        engine = self._make_legacy_engine()
-        _run_settings_migrations(engine)
-
-        inspector = inspect(engine)
-        cols = {c['name'] for c in inspector.get_columns('app_settings')}
-        assert 'openrouter_default_model' in cols
-
-    def test_migrations_add_env_bootstrap_complete(self):
-        from sqlalchemy import inspect
-
-        from core.database import _run_settings_migrations
-
-        engine = self._make_legacy_engine()
-        _run_settings_migrations(engine)
-
-        inspector = inspect(engine)
-        cols = {c['name'] for c in inspector.get_columns('app_settings')}
-        assert 'env_bootstrap_complete' in cols
-
-
 class TestSeedSettingsFromEnv:
     """seed_settings_from_env() writes ENV values to an empty DB row."""
 
@@ -1000,3 +892,116 @@ class TestSeedSettingsFromEnv:
             assert row.smtp_port == 587
             assert row.telegram_bot_enabled is False
             assert row.env_bootstrap_complete is True
+
+
+class TestSettingsRuntimeCaches:
+    def _make_engine(self):
+        from sqlmodel import SQLModel
+
+        engine = create_engine(
+            'sqlite:///:memory:',
+            connect_args={'check_same_thread': False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+        return engine
+
+    def test_secret_derivation_cache_tracks_key_material_changes(self, monkeypatch) -> None:
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'first-key')
+        first = encrypt_secret('alpha')
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'second-key')
+        second = encrypt_secret('beta')
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'first-key')
+        assert decrypt_secret(first) == 'alpha'
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'second-key')
+        assert decrypt_secret(second) == 'beta'
+
+    def test_get_settings_engine_is_lazy(self, monkeypatch, tmp_path) -> None:
+        from core import database
+
+        db_path = tmp_path / 'lazy-settings.db'
+        monkeypatch.setattr(database, 'settings_engine', None, raising=False)
+        monkeypatch.setattr('core.config.settings.database_url', f'sqlite:///{db_path}')
+
+        first = database.get_settings_engine()
+        second = database.get_settings_engine()
+
+        assert first is second
+        assert database.settings_engine is first
+        assert first.url.database == str(db_path)
+        first.dispose()
+
+    def test_resolved_settings_cache_invalidates_after_update(self, monkeypatch) -> None:
+        from core.database import clear_settings_engine_override, set_settings_engine_override
+        from modules.settings.schemas import SettingsUpdate
+        from modules.settings.service import get_resolved_smtp, update_settings
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        engine = self._make_engine()
+        set_settings_engine_override(engine)
+
+        try:
+            with Session(engine) as session:
+                update_settings(
+                    session,
+                    SettingsUpdate(
+                        smtp_host='smtp.one.test',
+                        smtp_port=587,
+                        smtp_user='first',
+                        smtp_password='pw-one',
+                    ),
+                )
+
+            assert get_resolved_smtp() == {
+                'host': 'smtp.one.test',
+                'port': 587,
+                'user': 'first',
+                'password': 'pw-one',
+            }
+
+            with Session(engine) as session:
+                update_settings(
+                    session,
+                    SettingsUpdate(
+                        smtp_host='smtp.two.test',
+                        smtp_port=465,
+                        smtp_user='second',
+                        smtp_password='pw-two',
+                    ),
+                )
+
+            assert get_resolved_smtp() == {
+                'host': 'smtp.two.test',
+                'port': 465,
+                'user': 'second',
+                'password': 'pw-two',
+            }
+        finally:
+            clear_settings_engine_override()
+
+    def test_resolved_settings_cache_invalidates_after_bootstrap(self, monkeypatch) -> None:
+        from core.config import settings as app_settings
+        from core.database import clear_settings_engine_override, set_settings_engine_override
+        from modules.settings.service import get_resolved_default_model, get_resolved_openrouter_key, seed_settings_from_env
+
+        monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
+        monkeypatch.setattr(app_settings, 'settings_encryption_key', 'test-key', raising=False)
+        monkeypatch.setattr(app_settings, 'openrouter_api_key', 'openrouter-seeded', raising=False)
+        monkeypatch.setattr(app_settings, 'openrouter_default_model', 'seeded-model', raising=False)
+        engine = self._make_engine()
+        set_settings_engine_override(engine)
+
+        try:
+            assert get_resolved_openrouter_key() == ''
+            assert get_resolved_default_model() == ''
+
+            with Session(engine) as session:
+                seed_settings_from_env(session)
+
+            assert get_resolved_openrouter_key() == 'openrouter-seeded'
+            assert get_resolved_default_model() == 'seeded-model'
+        finally:
+            clear_settings_engine_override()

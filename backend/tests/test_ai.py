@@ -491,7 +491,10 @@ class TestAIHandler:
             AIError('API timeout'),
         ]
 
-        with patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client):
+        with (
+            patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client),
+            patch('modules.compute.operations.ai.time.sleep'),
+        ):
             result = handler(
                 df.lazy(),
                 {

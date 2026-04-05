@@ -400,10 +400,8 @@
 
 			<div
 				id="settings-ai-providers"
-				class={cx(
-					css({ display: 'flex', flexDirection: 'column', gap: '4' }),
-					aiProvidersCollapsed ? css({ display: 'none' }) : ''
-				)}
+				class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}
+				hidden={aiProvidersCollapsed}
 			>
 				<div
 					class={css({
@@ -628,10 +626,8 @@
 
 			<div
 				id="settings-smtp"
-				class={cx(
-					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
-					smtpCollapsed ? css({ display: 'none' }) : ''
-				)}
+				class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+				hidden={smtpCollapsed}
 			>
 				<div
 					class={css({
@@ -773,10 +769,8 @@
 
 			<div
 				id="settings-telegram"
-				class={cx(
-					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
-					telegramCollapsed ? css({ display: 'none' }) : ''
-				)}
+				class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
+				hidden={telegramCollapsed}
 			>
 				<label class={label({ variant: 'wrapper' })}>
 					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Bot token</span>
@@ -949,7 +943,7 @@
 				/>
 			</button>
 
-			<div id="settings-debug" class={debugCollapsed ? css({ display: 'none' }) : ''}>
+			<div id="settings-debug" hidden={debugCollapsed}>
 				<div class={rowBetween}>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}> IndexedDB Inspector </span>

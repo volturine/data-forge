@@ -182,7 +182,7 @@ class Settings(BaseSettings):
     # Frontend debug panels
     public_idb_debug: bool = Field(default=False, alias='PUBLIC_IDB_DEBUG')
 
-    settings_encryption_key: str = Field(default='your-encryption-key-here', alias='SETTINGS_ENCRYPTION_KEY')
+    settings_encryption_key: str = Field(default='', alias='SETTINGS_ENCRYPTION_KEY')
 
     # AI configuration
     ollama_base_url: str = Field(default='http://localhost:11434', alias='OLLAMA_BASE_URL')

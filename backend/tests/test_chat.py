@@ -3,12 +3,53 @@
 import asyncio
 import json
 import re
+import time
+from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from modules.chat.sessions import ChatSession, LiveSession, SessionStore
+
+
+def _session_history(session_id: str) -> list[dict]:
+    from modules.chat.sessions import session_store
+
+    live = session_store.get(session_id)
+    assert live is not None
+    return live.get_history()
+
+
+def _done_count(history: list[dict]) -> int:
+    return sum(event.get('type') == 'done' for event in history)
+
+
+def _wait_for_history(session_id: str, predicate: Callable[[list[dict]], bool], *, timeout: float = 0.5) -> list[dict]:
+    deadline = time.monotonic() + timeout
+    while True:
+        history = _session_history(session_id)
+        if predicate(history):
+            return history
+        if time.monotonic() >= deadline:
+            raise AssertionError(f'Timed out waiting for history condition for session {session_id}')
+        time.sleep(0.005)
+
+
+async def _wait_for_history_async(
+    session_id: str,
+    predicate: Callable[[list[dict]], bool],
+    *,
+    timeout: float = 0.5,
+) -> list[dict]:
+    deadline = time.monotonic() + timeout
+    while True:
+        history = _session_history(session_id)
+        if predicate(history):
+            return history
+        if time.monotonic() >= deadline:
+            raise AssertionError(f'Timed out waiting for history condition for session {session_id}')
+        await asyncio.sleep(0.005)
 
 
 class TestLiveSession:
@@ -408,7 +449,7 @@ class TestChatRoutes:
 
         with patch('modules.chat.routes.chat_with_tools', new=AsyncMock(return_value=mock_response)):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
-            await asyncio.sleep(0.05)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         hist = client.get(f'/api/v1/ai/chat/history/{sid}')
         assert hist.status_code == 200
@@ -434,9 +475,9 @@ class TestChatRoutes:
 
         with patch('modules.chat.routes.chat_with_tools', new=AsyncMock(return_value=mock_response)):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'first'})
-            await asyncio.sleep(0.05)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'second'})
-            await asyncio.sleep(0.05)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 2)
 
         hist = client.get(f'/api/v1/ai/chat/history/{sid}')
         events = hist.json()['history']
@@ -466,7 +507,7 @@ class TestChatRoutes:
 
         with patch('modules.chat.routes.chat_with_tools', new=AsyncMock(return_value=mock_response)):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hello'})
-            await asyncio.sleep(0.05)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         hist = client.get(f'/api/v1/ai/chat/history/{sid}')
         assert hist.status_code == 200
@@ -609,9 +650,7 @@ class TestToolIdFiltering:
                 '/api/v1/ai/chat/message',
                 json={'session_id': sid, 'content': 'hi', 'tool_ids': ['get_config']},
             )
-            import time
-
-            time.sleep(0.1)
+            _wait_for_history(sid, lambda history: _done_count(history) >= 1)
 
         assert send_resp.status_code == 200
         assert len(captured_tools) == 1
@@ -640,9 +679,7 @@ class TestToolIdFiltering:
                 '/api/v1/ai/chat/message',
                 json={'session_id': sid, 'content': 'hi'},
             )
-            import time
-
-            time.sleep(0.1)
+            _wait_for_history(sid, lambda history: _done_count(history) >= 1)
 
         assert send_resp.status_code == 200
         assert len(captured_tools) == 1
@@ -671,9 +708,7 @@ class TestToolIdFiltering:
                 '/api/v1/ai/chat/message',
                 json={'session_id': sid, 'content': 'hi', 'tool_ids': []},
             )
-            import time
-
-            time.sleep(0.1)
+            _wait_for_history(sid, lambda history: _done_count(history) >= 1)
 
         assert send_resp.status_code == 200
         assert len(captured_tools) == 1
@@ -702,9 +737,7 @@ class TestToolIdFiltering:
                 '/api/v1/ai/chat/message',
                 json={'session_id': sid, 'content': 'hi', 'tool_ids': ['get_config', 'post_datasource']},
             )
-            import time
-
-            time.sleep(0.1)
+            _wait_for_history(sid, lambda history: _done_count(history) >= 1)
 
         assert send_resp.status_code == 200
         assert len(captured_tools) == 1
@@ -786,7 +819,7 @@ class TestToolValidationInChat:
             patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -818,7 +851,7 @@ class TestToolValidationInChat:
             patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -850,7 +883,7 @@ class TestToolValidationInChat:
             patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -913,7 +946,7 @@ class TestUnsupportedSchemaInChat:
             patch('modules.mcp.routes.get_registry', return_value=UNSUPPORTED_SCHEMA_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -946,7 +979,7 @@ class TestUnsupportedSchemaInChat:
             patch('modules.mcp.routes.get_registry', return_value=UNSUPPORTED_SCHEMA_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -997,7 +1030,7 @@ class TestProductionHardening:
             patch('modules.mcp.routes.get_registry', return_value=SAMPLE_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -1028,7 +1061,7 @@ class TestProductionHardening:
             patch('modules.mcp.routes.get_registry', return_value=SAMPLE_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -1055,7 +1088,7 @@ class TestProductionHardening:
             patch('modules.mcp.routes.get_registry', return_value=SAMPLE_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -1434,7 +1467,7 @@ class TestMalformedToolArgs:
             patch('modules.mcp.routes.get_registry', return_value=MALFORMED_ARGS_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -1467,7 +1500,7 @@ class TestMalformedToolArgs:
             patch('modules.mcp.routes.get_registry', return_value=MALFORMED_ARGS_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -1489,7 +1522,7 @@ class TestMalformedToolArgs:
             patch('modules.mcp.routes.get_registry', return_value=MALFORMED_ARGS_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'hi'})
-            await asyncio.sleep(0.15)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
@@ -1558,7 +1591,7 @@ class TestBugFixes:
             patch('modules.mcp.routes.get_registry', return_value=VALIDATION_REGISTRY),
         ):
             client.post('/api/v1/ai/chat/message', json={'session_id': sid, 'content': 'go'})
-            await asyncio.sleep(0.2)
+            await _wait_for_history_async(sid, lambda history: _done_count(history) >= 1)
 
         from modules.chat.sessions import session_store
 
