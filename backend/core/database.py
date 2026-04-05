@@ -1,8 +1,8 @@
-import asyncio
+import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from threading import Lock
-from typing import Any, Concatenate, ParamSpec, TypeVar
+from typing import Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -37,7 +37,7 @@ settings_engine: Engine | None = None
 _settings_engine_lock = Lock()
 
 _namespace_engines: OrderedDict[str, Engine] = OrderedDict()
-_namespace_engines_lock = asyncio.Lock()
+_namespace_engines_lock = threading.Lock()
 _MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
@@ -46,14 +46,6 @@ _settings_engine_override: Engine | None = None
 
 P = ParamSpec('P')
 T = TypeVar('T')
-
-
-def _run_async(value: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(value)
-    raise RuntimeError('Cannot synchronously access namespace database while the event loop is running')
 
 
 def set_engine_override(test_engine: Engine):
@@ -83,7 +75,7 @@ def clear_settings_engine_override():
 
 
 def get_db():
-    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
+    engine_to_use = _engine_override or _get_namespace_engine()
     with Session(engine_to_use) as session:
         yield session
 
@@ -95,7 +87,7 @@ def get_settings_db():
 
 
 def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
+    engine_to_use = _engine_override or _get_namespace_engine()
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
 
@@ -127,7 +119,7 @@ async def init_db() -> None:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
         namespace_paths(namespace)
-        await _init_namespace_db(namespace)
+        _init_namespace_db(namespace)
 
 
 def _init_settings_db() -> None:
@@ -155,9 +147,9 @@ def _init_settings_db() -> None:
     invalidate_resolved_settings_cache()
 
 
-async def _get_namespace_engine() -> Engine:
+def _get_namespace_engine() -> Engine:
     namespace = get_namespace()
-    async with _namespace_engines_lock:
+    with _namespace_engines_lock:
         if namespace in _namespace_engines:
             _namespace_engines.move_to_end(namespace)
             return _namespace_engines[namespace]
@@ -172,8 +164,8 @@ async def _get_namespace_engine() -> Engine:
         return engine
 
 
-async def _init_namespace_db(namespace: str) -> None:
-    async with _namespace_engines_lock:
+def _init_namespace_db(namespace: str) -> None:
+    with _namespace_engines_lock:
         _init_namespace_db_unlocked(namespace)
 
 

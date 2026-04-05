@@ -4,6 +4,8 @@ import polars as pl
 
 from modules.compute.core.base import OperationHandler, OperationParams
 
+_MAX_AUTO_PIVOT_VALUES = 200
+
 
 class PivotAggregateFunction(StrEnum):
     FIRST = 'first'
@@ -25,6 +27,15 @@ class PivotParams(OperationParams):
 
 
 class PivotHandler(OperationHandler):
+    @staticmethod
+    def _auto_on_columns(lf: pl.LazyFrame, pivot_column: str) -> list[str]:
+        values = lf.select(pl.col(pivot_column)).unique().limit(_MAX_AUTO_PIVOT_VALUES + 1).collect().to_series().sort().to_list()
+        if len(values) > _MAX_AUTO_PIVOT_VALUES:
+            raise ValueError(
+                f'Pivot requires explicit on_columns when {pivot_column!r} has more than {_MAX_AUTO_PIVOT_VALUES} distinct values'
+            )
+        return values
+
     @staticmethod
     def _pivot_with_aggregate(
         lf: pl.LazyFrame,
@@ -66,10 +77,10 @@ class PivotHandler(OperationHandler):
             raise ValueError('Pivot requires at least one index column')
 
         # on_columns expects unique *values* from the pivot column, not column names.
-        # When not provided, compute from the data.
+        # When not provided, compute from the data with a hard limit.
         on_columns = validated.on_columns or params.get('onColumns')
         if not on_columns:
-            on_columns = lf.select(validated.columns).collect().to_series().unique().sort().to_list()
+            on_columns = self._auto_on_columns(lf, validated.columns)
 
         return self._pivot_with_aggregate(
             lf,

@@ -1,5 +1,6 @@
 """Tests for the settings module — GET/PUT settings, test SMTP/Telegram."""
 
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -53,6 +54,33 @@ class TestGetSettings:
         assert data['smtp_password'] == MASKED_SECRET
         assert data['telegram_bot_token'] == MASKED_SECRET
         assert data['public_idb_debug'] is True
+
+
+class TestConfigRoute:
+    def test_config_endpoint_returns_cached_frontend_config(self, client: TestClient) -> None:
+        resp = client.get('/api/v1/config')
+        assert resp.status_code == 200
+        data = resp.json()
+        assert 'default_namespace' in data
+        assert 'auth_required' in data
+
+
+class TestNamespaceDatabaseConcurrency:
+    def test_run_db_is_safe_across_concurrent_threads(self) -> None:
+        from core.database import run_db
+        from core.namespace import reset_namespace, set_namespace_context
+
+        def call() -> int:
+            token = set_namespace_context('alpha')
+            try:
+                return run_db(lambda session: 1)
+            finally:
+                reset_namespace(token)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(lambda _: call(), range(8)))
+
+        assert results == [1] * 8
 
 
 class TestUpdateSettings:

@@ -6,10 +6,10 @@
 	"scripts": {
 		"predev": "svelte-kit sync && panda codegen && panda cssgen",
 		"dev": "vite dev",
-		"build": "panda cssgen && vite build",
+		"build": "svelte-kit sync && panda cssgen && vite build",
 		"preview": "vite preview",
-		"prepare": "panda codegen && panda cssgen && svelte-kit sync || echo ''",
-		"panda:codegen": "panda codegen",
+		"prepare": "svelte-kit sync && panda codegen && panda cssgen || echo ''",
+		"panda:codegen": "svelte-kit sync && panda codegen",
 		"panda:watch": "panda codegen --watch",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
