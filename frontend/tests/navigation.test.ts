@@ -94,14 +94,12 @@ test.describe('Navigation – settings popup', () => {
 		await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
 		await waitForSettingsForm(dialog);
 
-		// Wait for async settings load to complete before asserting section content.
-		await expect(dialog.locator('#smtp-host')).toBeVisible();
-		await expect(dialog.locator('#smtp-port')).toBeVisible();
+		// Sections are collapsed by default; assert toggles first, then expand SMTP
+		// before checking its contents.
 		await expect(dialog.getByText('SMTP', { exact: true })).toBeVisible();
 		await expect(dialog.getByText('Telegram', { exact: true })).toBeVisible();
 		await expect(dialog.getByText('Debug', { exact: true })).toBeVisible();
 
-		// Verify SMTP form fields are present
 		await dialog.getByRole('button', { name: 'SMTP' }).click();
 		await expect(dialog.locator('#smtp-host')).toBeVisible();
 		await expect(dialog.locator('#smtp-port')).toBeVisible();
