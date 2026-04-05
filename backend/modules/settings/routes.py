@@ -1,15 +1,15 @@
 """Settings API routes — GET/PUT settings, test SMTP/Telegram."""
 
 import logging
-import smtplib
 from email.message import EmailMessage
 
-import httpx
 from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
+from core import http as http_client
 from core.database import get_settings_db
 from core.error_handlers import handle_errors
+from core.smtp import send_smtp_message
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.config.routes import invalidate_config_cache
@@ -92,11 +92,7 @@ def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> 
     msg.set_content('This is a test email from your application.')
 
     try:
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            if password:
-                server.login(smtp_user, password)
-            server.send_message(msg)
+        send_smtp_message(host, port, smtp_user, password, msg)
         return TestResult(success=True, message=f'Test email sent to {body.to}')
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -112,7 +108,7 @@ def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_us
         return TestResult(success=False, message='Telegram bot token not configured')
 
     try:
-        resp = httpx.post(
+        resp = http_client.post(
             f'https://api.telegram.org/bot{token}/sendMessage',
             json={
                 'chat_id': body.chat_id,

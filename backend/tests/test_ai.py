@@ -268,14 +268,14 @@ class TestOllamaClient:
         mock_response.json.return_value = {'models': [{'name': 'llama2'}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch('modules.ai.service.httpx.get', return_value=mock_response):
+        with patch('modules.ai.service.http_client.get', return_value=mock_response):
             result = client.test_connection()
             assert result['ok'] is True
             assert '1 model(s)' in result['detail']
 
     def test_test_connection_failure(self):
         client = OllamaClient('http://localhost:11434')
-        with patch('modules.ai.service.httpx.get', side_effect=ConnectionError('refused')):
+        with patch('modules.ai.service.http_client.get', side_effect=ConnectionError('refused')):
             result = client.test_connection()
             assert result['ok'] is False
 
@@ -353,13 +353,13 @@ class TestOpenAIClient:
         mock_response.json.return_value = {'data': [{'id': 'gpt-4o'}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch('modules.ai.service.httpx.get', return_value=mock_response):
+        with patch('modules.ai.service.http_client.get', return_value=mock_response):
             result = client.test_connection()
             assert result['ok'] is True
 
     def test_test_connection_failure(self):
         client = OpenAIClient('sk-test')
-        with patch('modules.ai.service.httpx.get', side_effect=Exception('timeout')):
+        with patch('modules.ai.service.http_client.get', side_effect=Exception('timeout')):
             result = client.test_connection()
             assert result['ok'] is False
 
@@ -491,7 +491,10 @@ class TestAIHandler:
             AIError('API timeout'),
         ]
 
-        with patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client):
+        with (
+            patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client),
+            patch('modules.compute.operations.ai.time.sleep'),
+        ):
             result = handler(
                 df.lazy(),
                 {

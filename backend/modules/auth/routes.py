@@ -3,11 +3,11 @@ import secrets
 import time
 from urllib.parse import urlencode
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
+from core import http as http_client
 from core.config import settings
 from core.database import get_settings_db, run_settings_db
 from core.error_handlers import handle_errors
@@ -384,21 +384,22 @@ async def google_oauth_callback(
         'redirect_uri': settings.google_redirect_uri,
         'grant_type': 'authorization_code',
     }
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        token_resp = await client.post('https://oauth2.googleapis.com/token', data=token_payload)
-        if token_resp.status_code != 200:
-            raise OAuthError('Google token exchange failed')
-        token_data = token_resp.json()
-        access_token = token_data.get('access_token')
-        if not isinstance(access_token, str) or not access_token:
-            raise OAuthError('Google access token missing')
-        info_resp = await client.get(
-            'https://www.googleapis.com/oauth2/v2/userinfo',
-            headers={'Authorization': f'Bearer {access_token}'},
-        )
-        if info_resp.status_code != 200:
-            raise OAuthError('Failed to fetch Google user info')
-        info = info_resp.json()
+    client = http_client.get_async_client()
+    token_resp = await client.post('https://oauth2.googleapis.com/token', data=token_payload, timeout=15.0)
+    if token_resp.status_code != 200:
+        raise OAuthError('Google token exchange failed')
+    token_data = token_resp.json()
+    access_token = token_data.get('access_token')
+    if not isinstance(access_token, str) or not access_token:
+        raise OAuthError('Google access token missing')
+    info_resp = await client.get(
+        'https://www.googleapis.com/oauth2/v2/userinfo',
+        headers={'Authorization': f'Bearer {access_token}'},
+        timeout=15.0,
+    )
+    if info_resp.status_code != 200:
+        raise OAuthError('Failed to fetch Google user info')
+    info = info_resp.json()
     subject = info.get('id')
     email = info.get('email')
     if not isinstance(subject, str) or not isinstance(email, str):
@@ -454,23 +455,23 @@ async def github_oauth_callback(
         'redirect_uri': settings.github_redirect_uri,
     }
     headers = {'Accept': 'application/json'}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        token_resp = await client.post('https://github.com/login/oauth/access_token', data=payload, headers=headers)
-        if token_resp.status_code != 200:
-            raise OAuthError('GitHub token exchange failed')
-        token_data = token_resp.json()
-        access_token = token_data.get('access_token')
-        if not isinstance(access_token, str) or not access_token:
-            raise OAuthError('GitHub access token missing')
-        auth_headers = {'Authorization': f'Bearer {access_token}', 'Accept': 'application/json'}
-        user_resp = await client.get('https://api.github.com/user', headers=auth_headers)
-        if user_resp.status_code != 200:
-            raise OAuthError('Failed to fetch GitHub user profile')
-        gh_user = user_resp.json()
-        emails_resp = await client.get('https://api.github.com/user/emails', headers=auth_headers)
-        if emails_resp.status_code != 200:
-            raise OAuthError('Failed to fetch GitHub email')
-        emails = emails_resp.json()
+    client = http_client.get_async_client()
+    token_resp = await client.post('https://github.com/login/oauth/access_token', data=payload, headers=headers, timeout=15.0)
+    if token_resp.status_code != 200:
+        raise OAuthError('GitHub token exchange failed')
+    token_data = token_resp.json()
+    access_token = token_data.get('access_token')
+    if not isinstance(access_token, str) or not access_token:
+        raise OAuthError('GitHub access token missing')
+    auth_headers = {'Authorization': f'Bearer {access_token}', 'Accept': 'application/json'}
+    user_resp = await client.get('https://api.github.com/user', headers=auth_headers, timeout=15.0)
+    if user_resp.status_code != 200:
+        raise OAuthError('Failed to fetch GitHub user profile')
+    gh_user = user_resp.json()
+    emails_resp = await client.get('https://api.github.com/user/emails', headers=auth_headers, timeout=15.0)
+    if emails_resp.status_code != 200:
+        raise OAuthError('Failed to fetch GitHub email')
+    emails = emails_resp.json()
     subject = gh_user.get('id')
     if not isinstance(subject, int):
         raise OAuthError('GitHub user id missing')

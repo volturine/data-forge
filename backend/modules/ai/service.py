@@ -4,6 +4,7 @@ from collections.abc import Sequence
 
 import httpx
 
+from core import http as http_client
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _retry_request(
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
-            response = httpx.request(method, url, json=payload, headers=headers, timeout=_TIMEOUT)
+            response = http_client.request(method, url, json=payload, headers=headers, timeout=_TIMEOUT)
             response.raise_for_status()
             return response
         except httpx.TimeoutException as exc:
@@ -88,7 +89,7 @@ class OllamaClient(AIClient):
 
     def test_connection(self) -> dict:
         try:
-            response = httpx.get(f'{self.base_url}/api/tags', timeout=_TIMEOUT)
+            response = http_client.get(f'{self.base_url}/api/tags', timeout=_TIMEOUT)
             response.raise_for_status()
             models = response.json().get('models', [])
             return {'ok': True, 'detail': f'{len(models)} model(s) available'}
@@ -144,7 +145,7 @@ class OpenAIClient(AIClient):
 
     def test_connection(self) -> dict:
         try:
-            response = httpx.get(
+            response = http_client.get(
                 f'{self.base_url}/v1/models',
                 headers=self._headers(),
                 timeout=_TIMEOUT,
@@ -205,7 +206,7 @@ class OpenRouterClient(AIClient):
 
     def test_connection(self) -> dict:
         try:
-            response = httpx.get(f'{self.base_url}/models', headers=self._headers(), timeout=_TIMEOUT)
+            response = http_client.get(f'{self.base_url}/models', headers=self._headers(), timeout=_TIMEOUT)
             response.raise_for_status()
             models = response.json().get('data', [])
             return {'ok': True, 'detail': f'{len(models)} model(s) available'}
@@ -285,7 +286,7 @@ class HuggingFaceClient(AIClient):
         if not self.api_token:
             return {'ok': False, 'detail': 'Hugging Face API token is required'}
         try:
-            response = httpx.get(
+            response = http_client.get(
                 'https://huggingface.co/api/whoami-v2',
                 headers=self._headers(),
                 timeout=_TIMEOUT,

@@ -12,26 +12,49 @@ from pydantic import BaseModel, ConfigDict, Field
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.operations._validation import validate_no_reflection_escape
 
-# Builtins allowed inside UDF code — system-access and reflection functions are excluded.
-# Reflection functions (getattr/setattr/delattr/vars/dir) are blocked to prevent
-# attribute-chain escapes even when __builtins__ is otherwise restricted.
-_DANGEROUS_BUILTINS = frozenset(
+# Builtins allowed inside UDF code.
+# Keep this as a narrow allowlist so aliased introspection helpers cannot escape the sandbox.
+_ALLOWED_BUILTINS = frozenset(
     {
-        'open',
-        'exec',
-        'eval',
-        'compile',
-        '__import__',
-        'input',
-        'breakpoint',
-        'getattr',
-        'setattr',
-        'delattr',
-        'vars',
-        'dir',
+        'abs',
+        'all',
+        'any',
+        'ArithmeticError',
+        'bool',
+        'complex',
+        'dict',
+        'divmod',
+        'enumerate',
+        'Exception',
+        'filter',
+        'float',
+        'frozenset',
+        'hash',
+        'int',
+        'isinstance',
+        'issubclass',
+        'len',
+        'list',
+        'map',
+        'max',
+        'min',
+        'pow',
+        'range',
+        'repr',
+        'reversed',
+        'round',
+        'set',
+        'slice',
+        'sorted',
+        'str',
+        'sum',
+        'tuple',
+        'TypeError',
+        'ValueError',
+        'zip',
     },
 )
-_SAFE_BUILTINS: dict[str, Any] = {name: getattr(builtins, name) for name in dir(builtins) if name not in _DANGEROUS_BUILTINS}
+_SAFE_BUILTINS: dict[str, Any] = {name: getattr(builtins, name) for name in _ALLOWED_BUILTINS}
 
 
 class WithColumnsExprType(StrEnum):

@@ -14,10 +14,12 @@ from core.dependencies import get_manager
 from core.exceptions import PipelineValidationError
 from core.namespace import namespace_paths
 from main import app
+from modules.compute.core.base import EngineResult
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import _analysis_stack_var
 from modules.compute.routes import _safe_close_websocket
+from modules.compute.utils import await_engine_result
 from modules.datasource.models import DataSource
 from modules.engine_runs.models import EngineRun
 
@@ -65,6 +67,64 @@ def test_classify_engine_error_marks_missing_metadata_files_as_snapshot_unavaila
     kind, details = PolarsComputeEngine._classify_engine_error(exc)
     assert kind == 'datasource_metadata_missing'
     assert details == {}
+
+
+def test_await_engine_result_returns_immediate_result_before_poll_loop() -> None:
+    calls: list[tuple[str, float]] = []
+
+    class ReadyEngine:
+        analysis_id = 'analysis'
+        resource_config: dict[str, int] = {}
+        effective_resources: dict[str, int] = {}
+        current_job_id: str | None = None
+
+        @property
+        def process_id(self) -> int | None:
+            return None
+
+        def start(self) -> None:
+            raise AssertionError('start should not be called')
+
+        def is_process_alive(self) -> bool:
+            calls.append(('alive', -1))
+            return False
+
+        def check_health(self) -> bool:
+            return True
+
+        def preview(self, *_args, **_kwargs) -> str:
+            raise AssertionError('preview should not be called')
+
+        def export(self, *_args, **_kwargs) -> str:
+            raise AssertionError('export should not be called')
+
+        def get_schema(self, *_args, **_kwargs) -> str:
+            raise AssertionError('get_schema should not be called')
+
+        def get_row_count(self, *_args, **_kwargs) -> str:
+            raise AssertionError('get_row_count should not be called')
+
+        def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
+            calls.append(('result', timeout))
+            if timeout == 0:
+                return EngineResult(job_id=job_id, data={'ok': True}, error=None)
+            raise AssertionError('poll loop should not run when result is already available')
+
+        def shutdown(self) -> None:
+            raise AssertionError('shutdown should not be called')
+
+    result = await_engine_result(ReadyEngine(), timeout=1, job_id='job-1')
+
+    assert result == {
+        'job_id': 'job-1',
+        'data': {'ok': True},
+        'error': None,
+        'error_kind': None,
+        'error_details': {},
+        'step_timings': {},
+        'query_plan': None,
+    }
+    assert calls == [('result', 0)]
 
 
 class TestComputePreview:
@@ -921,14 +981,18 @@ def test_spawn_engine_preserves_requested_config_during_conflicting_restarts():
 
 
 def test_spawn_engine_evicts_oldest_idle_when_limit_reached(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
     from core.config import settings
 
     manager = ProcessManager(engine_factory=FakeEngine)
     manager._get_defaults = lambda: {'max_threads': 0, 'max_memory_mb': 0, 'streaming_chunk_size': 0}
     monkeypatch.setattr(settings, 'max_concurrent_engines', 2)
     manager.spawn_engine('a')
-    time.sleep(0.01)
     manager.spawn_engine('b')
+    info = manager.get_engine_info('a')
+    assert info is not None
+    info.last_activity = datetime.now(UTC) - timedelta(seconds=1)
     manager.spawn_engine('c')
     engines = set(manager.list_engines())
     assert engines == {'b', 'c'}

@@ -17,6 +17,7 @@ from core.config import settings
 from core.database import get_settings_db, init_db, run_db
 from core.error_handlers import app_error_handler, generic_error_handler, validation_error_handler
 from core.exceptions import AppError
+from core.http import close_clients
 from core.logging import RequestLoggingMiddleware, configure_logging
 from core.namespace import list_namespaces, namespace_paths, reset_namespace, set_namespace_context
 from modules.compute.manager import ProcessManager
@@ -199,6 +200,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.wait_for(scheduler_task, timeout=5)
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(chat_sweep_task, timeout=5)
+    await close_clients()
 
     # Cleanup compute processes on shutdown
     logger.info('Shutting down compute processes...')

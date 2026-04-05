@@ -2,10 +2,10 @@ import logging
 import re
 from enum import StrEnum
 
-import httpx
 import polars as pl
 from pydantic import ConfigDict, Field, model_validator
 
+from core import http as http_client
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.notification.service import notification_service
 from modules.settings.service import get_resolved_telegram_settings
@@ -133,7 +133,7 @@ class NotificationHandler(OperationHandler):
                             )
                         elif validated.bot_token:
                             for cid in recipients:
-                                httpx.post(
+                                http_client.post(
                                     f'https://api.telegram.org/bot{validated.bot_token}/sendMessage',
                                     json={'chat_id': cid, 'text': message, 'parse_mode': 'HTML'},
                                     timeout=validated.timeout_seconds,

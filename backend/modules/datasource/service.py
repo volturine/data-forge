@@ -45,6 +45,11 @@ from modules.engine_runs import service as engine_run_service
 logger = logging.getLogger(__name__)
 
 
+def _open_excel_workbook(file_path: Path, *, table_name: str | None) -> Any:
+    # Table metadata is unavailable in openpyxl read_only mode.
+    return load_workbook(file_path, read_only=table_name is None, data_only=True)
+
+
 def _prepare_clean_target(clean_dir: Path, datasource_id: str, branch: str) -> Path:
     target = clean_dir / datasource_id / branch
     target.mkdir(parents=True, exist_ok=True)
@@ -310,7 +315,7 @@ def build_excel_preview(
     cell_range: str | None = None,
     preview_rows: int = 100,
 ) -> ExcelPreviewResult:
-    workbook = load_workbook(file_path, read_only=False, data_only=True)
+    workbook = _open_excel_workbook(file_path, table_name=table_name)
     try:
         resolved = _resolve_excel_bounds(
             workbook,
@@ -356,7 +361,7 @@ def resolve_excel_selection(
     named_range: str | None = None,
     cell_range: str | None = None,
 ) -> tuple[str, int, int, int, int]:
-    workbook = load_workbook(file_path, read_only=False, data_only=True)
+    workbook = _open_excel_workbook(file_path, table_name=table_name)
     try:
         target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
         if not target_sheet:

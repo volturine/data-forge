@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from core import http as http_client
 from modules.chat.tool_contract import format_output_hint
 
 logger = logging.getLogger(__name__)
@@ -59,26 +60,27 @@ async def chat_with_tools(
         payload['tools'] = [_mcp_tool_to_openai(t) for t in tools]
         payload['tool_choice'] = 'auto'
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(
-            f'{_OPENROUTER_BASE}/chat/completions',
-            headers=_headers(api_key),
-            content=json.dumps(payload),
-        )
-        if not resp.is_success:
-            raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
-        return resp.json()  # type: ignore[no-any-return]
+    client = http_client.get_async_client()
+    resp = await client.post(
+        f'{_OPENROUTER_BASE}/chat/completions',
+        headers=_headers(api_key),
+        content=json.dumps(payload),
+        timeout=_TIMEOUT,
+    )
+    if not resp.is_success:
+        raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
+    return resp.json()  # type: ignore[no-any-return]
 
 
 async def list_models(api_key: str) -> list[dict]:
     """List models available on OpenRouter."""
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.get(f'{_OPENROUTER_BASE}/models', headers=_headers(api_key))
-        if not resp.is_success:
-            logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
-            raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
-        data = resp.json()
-        return [
-            {'id': m.get('id', ''), 'name': m.get('name', m.get('id', '')), 'context_length': m.get('context_length', 0)}
-            for m in data.get('data', [])
-        ]
+    client = http_client.get_async_client()
+    resp = await client.get(f'{_OPENROUTER_BASE}/models', headers=_headers(api_key), timeout=_TIMEOUT)
+    if not resp.is_success:
+        logger.error('list_models failed: %d %s', resp.status_code, resp.text[:500])
+        raise OpenRouterError(f'OpenRouter returned {resp.status_code}: {resp.text[:500]}')
+    data = resp.json()
+    return [
+        {'id': m.get('id', ''), 'name': m.get('name', m.get('id', '')), 'context_length': m.get('context_length', 0)}
+        for m in data.get('data', [])
+    ]

@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Final
 
-import httpx
-
+from core import http as http_client
+from core.smtp import send_smtp_message
 from modules.settings.service import (
     get_resolved_smtp,
     get_resolved_telegram_settings,
@@ -68,13 +68,7 @@ class NotificationService:
                 filename=attachment.filename,
             )
 
-        import smtplib
-
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            if password:
-                server.login(user, password)
-            server.send_message(msg)
+        send_smtp_message(host, port, user, password, msg)
 
     def send_telegram(
         self,
@@ -91,7 +85,7 @@ class NotificationService:
         if not token:
             raise ValueError('Telegram bot token not configured')
         base = f'{_TELEGRAM_BASE_URL}/bot{token}'
-        response = httpx.post(
+        response = http_client.post(
             f'{base}/sendMessage',
             json={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'},
             timeout=20,
@@ -99,7 +93,7 @@ class NotificationService:
         response.raise_for_status()
 
         for attachment in attachments or []:
-            file_response = httpx.post(
+            file_response = http_client.post(
                 f'{base}/sendDocument',
                 data={'chat_id': chat_id},
                 files={'document': (attachment.filename, attachment.content, attachment.content_type)},

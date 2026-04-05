@@ -133,6 +133,9 @@ def _engine_result_to_dict(result: EngineResult | dict[str, Any]) -> dict[str, A
 
 def await_engine_result(engine: ComputeEngine, timeout: int, job_id: str | None = None) -> dict:
     deadline = time.monotonic() + timeout
+    result = engine.get_result(timeout=0, job_id=job_id)
+    if result is not None:
+        return _engine_result_to_dict(result)
     while True:
         if not engine.is_process_alive():
             return {

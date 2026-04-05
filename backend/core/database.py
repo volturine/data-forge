@@ -1,7 +1,8 @@
-import asyncio
+import threading
 from collections import OrderedDict
 from collections.abc import Callable
-from typing import Any, Concatenate, ParamSpec, TypeVar
+from threading import Lock
+from typing import Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -22,15 +23,21 @@ def _enable_sqlite_pragmas(engine: Engine) -> None:
         cursor.close()
 
 
-settings_engine = create_engine(
-    settings.database_url,
-    echo=settings.debug,
-    connect_args={},
-)
-_enable_sqlite_pragmas(settings_engine)
+def _create_settings_engine() -> Engine:
+    engine = create_engine(
+        settings.database_url,
+        echo=settings.debug,
+        connect_args={},
+    )
+    _enable_sqlite_pragmas(engine)
+    return engine
+
+
+settings_engine: Engine | None = None
+_settings_engine_lock = Lock()
 
 _namespace_engines: OrderedDict[str, Engine] = OrderedDict()
-_namespace_engines_lock = asyncio.Lock()
+_namespace_engines_lock = threading.Lock()
 _MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
@@ -39,14 +46,6 @@ _settings_engine_override: Engine | None = None
 
 P = ParamSpec('P')
 T = TypeVar('T')
-
-
-def _run_async(value: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(value)
-    raise RuntimeError('Cannot synchronously access namespace database while the event loop is running')
 
 
 def set_engine_override(test_engine: Engine):
@@ -62,35 +61,55 @@ def clear_engine_override():
 def set_settings_engine_override(test_engine: Engine):
     global _settings_engine_override
     _settings_engine_override = test_engine
+    from modules.settings.service import invalidate_resolved_settings_cache
+
+    invalidate_resolved_settings_cache()
 
 
 def clear_settings_engine_override():
     global _settings_engine_override
     _settings_engine_override = None
+    from modules.settings.service import invalidate_resolved_settings_cache
+
+    invalidate_resolved_settings_cache()
 
 
 def get_db():
-    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
+    engine_to_use = _engine_override or _get_namespace_engine()
     with Session(engine_to_use) as session:
         yield session
 
 
 def get_settings_db():
-    engine_to_use = _settings_engine_override or settings_engine
+    engine_to_use = get_settings_engine()
     with Session(engine_to_use) as session:
         yield session
 
 
 def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    engine_to_use = _engine_override or _run_async(_get_namespace_engine())
+    engine_to_use = _engine_override or _get_namespace_engine()
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
 
 
 def run_settings_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    engine_to_use = _settings_engine_override or settings_engine
+    engine_to_use = get_settings_engine()
     with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
+
+
+def get_settings_engine() -> Engine:
+    global settings_engine
+
+    if _settings_engine_override is not None:
+        return _settings_engine_override
+    if settings_engine is not None:
+        return settings_engine
+
+    with _settings_engine_lock:
+        if settings_engine is None:
+            settings_engine = _create_settings_engine()
+        return settings_engine
 
 
 async def init_db() -> None:
@@ -100,7 +119,7 @@ async def init_db() -> None:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
         namespace_paths(namespace)
-        await _init_namespace_db(namespace)
+        _init_namespace_db(namespace)
 
 
 def _init_settings_db() -> None:
@@ -108,119 +127,29 @@ def _init_settings_db() -> None:
     from modules.auth.service import ensure_default_user
     from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
-    from modules.settings.service import seed_settings_from_env
+    from modules.settings.service import invalidate_resolved_settings_cache, seed_settings_from_env
 
-    AppSettings.metadata.create_all(settings_engine)
-    ChatSession.metadata.create_all(settings_engine)
-    User.metadata.create_all(settings_engine)
-    AuthProvider.metadata.create_all(settings_engine)
-    UserSession.metadata.create_all(settings_engine)
-    VerificationToken.metadata.create_all(settings_engine)
-    _run_settings_migrations(settings_engine)
-    with Session(settings_engine) as session:
+    engine_to_use = get_settings_engine()
+    table_names = {
+        AppSettings.__tablename__,
+        ChatSession.__tablename__,
+        User.__tablename__,
+        AuthProvider.__tablename__,
+        UserSession.__tablename__,
+        VerificationToken.__tablename__,
+    }
+    tables = [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
+
+    AppSettings.metadata.create_all(engine_to_use, tables=tables)
+    with Session(engine_to_use) as session:
         seed_settings_from_env(session)
         ensure_default_user(session)
+    invalidate_resolved_settings_cache()
 
 
-def _run_settings_migrations(db_engine: Engine) -> None:
-    from sqlalchemy import inspect, text as sa_text
-
-    inspector = inspect(db_engine)
-    pending: list[str] = []
-
-    if inspector.has_table('app_settings'):
-        settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
-        if 'telegram_bot_enabled' not in settings_columns:
-            pending.append('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0')
-        if 'openrouter_api_key' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_api_key TEXT NOT NULL DEFAULT ''")
-        if 'openrouter_default_model' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN openrouter_default_model TEXT NOT NULL DEFAULT ''")
-        if 'openai_api_key' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN openai_api_key TEXT NOT NULL DEFAULT ''")
-        if 'openai_endpoint_url' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN openai_endpoint_url TEXT NOT NULL DEFAULT 'https://api.openai.com'")
-        if 'openai_default_model' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN openai_default_model TEXT NOT NULL DEFAULT 'gpt-4o-mini'")
-        if 'openai_organization_id' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN openai_organization_id TEXT NOT NULL DEFAULT ''")
-        if 'ollama_endpoint_url' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN ollama_endpoint_url TEXT NOT NULL DEFAULT 'http://localhost:11434'")
-        if 'ollama_default_model' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN ollama_default_model TEXT NOT NULL DEFAULT 'llama3.2'")
-        if 'huggingface_api_token' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN huggingface_api_token TEXT NOT NULL DEFAULT ''")
-        if 'huggingface_default_model' not in settings_columns:
-            pending.append("ALTER TABLE app_settings ADD COLUMN huggingface_default_model TEXT NOT NULL DEFAULT 'google/flan-t5-base'")
-        if 'env_bootstrap_complete' not in settings_columns:
-            pending.append('ALTER TABLE app_settings ADD COLUMN env_bootstrap_complete BOOLEAN NOT NULL DEFAULT 1')
-
-    if inspector.has_table('chat_sessions'):
-        chat_columns = {col['name'] for col in inspector.get_columns('chat_sessions')}
-        if 'system_prompt' not in chat_columns:
-            pending.append("ALTER TABLE chat_sessions ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''")
-
-    if pending:
-        with db_engine.connect() as conn:
-            for sql in pending:
-                conn.execute(sa_text(sql))
-            conn.commit()
-
-
-def _run_namespace_migrations(db_engine: Engine) -> None:
-    from sqlalchemy import inspect, text as sa_text
-
-    inspector = inspect(db_engine)
-    pending: list[str] = []
-
-    if inspector.has_table('engine_runs'):
-        columns = {col['name'] for col in inspector.get_columns('engine_runs')}
-        if 'triggered_by' not in columns:
-            pending.append('ALTER TABLE engine_runs ADD COLUMN triggered_by TEXT')
-
-    if inspector.has_table('datasources'):
-        ds_columns = {col['name'] for col in inspector.get_columns('datasources')}
-        if 'is_hidden' not in ds_columns:
-            pending.append('ALTER TABLE datasources ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT 0')
-        if 'created_by' not in ds_columns:
-            pending.append("ALTER TABLE datasources ADD COLUMN created_by TEXT NOT NULL DEFAULT 'import'")
-        if 'owner_id' not in ds_columns:
-            pending.append('ALTER TABLE datasources ADD COLUMN owner_id TEXT')
-
-    if inspector.has_table('analyses'):
-        analysis_columns = {col['name'] for col in inspector.get_columns('analyses')}
-        if 'owner_id' not in analysis_columns:
-            pending.append('ALTER TABLE analyses ADD COLUMN owner_id TEXT')
-
-    if inspector.has_table('udfs'):
-        udf_columns = {col['name'] for col in inspector.get_columns('udfs')}
-        if 'owner_id' not in udf_columns:
-            pending.append('ALTER TABLE udfs ADD COLUMN owner_id TEXT')
-
-    if inspector.has_table('schedules'):
-        sched_columns = {col['name'] for col in inspector.get_columns('schedules')}
-        if 'datasource_id' not in sched_columns:
-            pending.append('ALTER TABLE schedules ADD COLUMN datasource_id TEXT')
-        if 'depends_on' not in sched_columns:
-            pending.append('ALTER TABLE schedules ADD COLUMN depends_on TEXT')
-        if 'trigger_on_datasource_id' not in sched_columns:
-            pending.append('ALTER TABLE schedules ADD COLUMN trigger_on_datasource_id TEXT')
-
-    if inspector.has_table('healthchecks'):
-        hc_columns = {col['name'] for col in inspector.get_columns('healthchecks')}
-        if 'critical' not in hc_columns:
-            pending.append('ALTER TABLE healthchecks ADD COLUMN critical BOOLEAN NOT NULL DEFAULT 0')
-
-    if pending:
-        with db_engine.connect() as conn:
-            for sql in pending:
-                conn.execute(sa_text(sql))
-            conn.commit()
-
-
-async def _get_namespace_engine() -> Engine:
+def _get_namespace_engine() -> Engine:
     namespace = get_namespace()
-    async with _namespace_engines_lock:
+    with _namespace_engines_lock:
         if namespace in _namespace_engines:
             _namespace_engines.move_to_end(namespace)
             return _namespace_engines[namespace]
@@ -235,8 +164,8 @@ async def _get_namespace_engine() -> Engine:
         return engine
 
 
-async def _init_namespace_db(namespace: str) -> None:
-    async with _namespace_engines_lock:
+def _init_namespace_db(namespace: str) -> None:
+    with _namespace_engines_lock:
         _init_namespace_db_unlocked(namespace)
 
 
@@ -261,16 +190,20 @@ def _init_namespace_db_unlocked(namespace: str) -> None:
     from modules.telegram.models import TelegramListener, TelegramSubscriber
     from modules.udf.models import Udf
 
-    Analysis.metadata.create_all(namespace_engine)
-    AnalysisDataSource.metadata.create_all(namespace_engine)
-    AnalysisVersion.metadata.create_all(namespace_engine)
-    DataSource.metadata.create_all(namespace_engine)
-    EngineRun.metadata.create_all(namespace_engine)
-    HealthCheck.metadata.create_all(namespace_engine)
-    HealthCheckResult.metadata.create_all(namespace_engine)
-    ResourceLock.metadata.create_all(namespace_engine)
-    Schedule.metadata.create_all(namespace_engine)
-    TelegramListener.metadata.create_all(namespace_engine)
-    TelegramSubscriber.metadata.create_all(namespace_engine)
-    Udf.metadata.create_all(namespace_engine)
-    _run_namespace_migrations(namespace_engine)
+    table_names = {
+        Analysis.__tablename__,
+        AnalysisDataSource.__tablename__,
+        AnalysisVersion.__tablename__,
+        DataSource.__tablename__,
+        EngineRun.__tablename__,
+        HealthCheck.__tablename__,
+        HealthCheckResult.__tablename__,
+        ResourceLock.__tablename__,
+        Schedule.__tablename__,
+        TelegramListener.__tablename__,
+        TelegramSubscriber.__tablename__,
+        Udf.__tablename__,
+    }
+    tables = [table for table in Analysis.metadata.sorted_tables if table.name in table_names]
+
+    Analysis.metadata.create_all(namespace_engine, tables=tables)

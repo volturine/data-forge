@@ -66,7 +66,7 @@ def generate_uuid(count: int = Query(default=1, ge=1, le=20)) -> UuidResponse:
 
 @router.get('', response_model=FrontendConfig, mcp=True)
 @handle_errors(operation='get config')
-async def get_config() -> FrontendConfig:
+def get_config() -> FrontendConfig:
     """Get application configuration: timeouts, logging settings, feature flags, and default namespace."""
     global _config_cache, _config_cache_time  # noqa: PLW0603
 

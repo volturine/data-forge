@@ -529,6 +529,15 @@ def test_with_columns_rejects_reflection_escape() -> None:
         )
 
 
+def test_with_columns_rejects_aliased_globals_escape() -> None:
+    handler = WithColumnsHandler()
+    with pytest.raises(NameError, match='globals'):
+        handler(
+            pl.DataFrame({'id': [1]}).lazy(),
+            {'expressions': [{'name': 'bad', 'type': 'udf', 'code': 'global g\ng = globals\ndef udf():\n    return len(g())'}]},
+        )
+
+
 def test_union_by_name_handler():
     handler = UnionByNameHandler()
     left = pl.DataFrame({'id': [1]}).lazy()
@@ -551,6 +560,36 @@ def test_pivot_handler():
     )
     result = lf.collect()
     assert 'x' in result.columns
+
+
+def test_pivot_handler_auto_discovers_on_columns_for_small_cardinality():
+    handler = PivotHandler()
+    lf = handler(
+        pl.DataFrame({'idx': ['a', 'a'], 'col': ['x', 'y'], 'val': [1, 2]}).lazy(),
+        {
+            'index': ['idx'],
+            'columns': 'col',
+            'values': 'val',
+            'aggregate_function': 'first',
+        },
+    )
+    result = lf.collect()
+    assert result.columns == ['idx', 'x', 'y']
+
+
+def test_pivot_handler_rejects_unbounded_auto_discovery(monkeypatch: pytest.MonkeyPatch):
+    handler = PivotHandler()
+    monkeypatch.setattr('modules.compute.operations.pivot._MAX_AUTO_PIVOT_VALUES', 2)
+    with pytest.raises(ValueError, match='requires explicit on_columns'):
+        handler(
+            pl.DataFrame({'idx': ['a', 'a', 'a'], 'col': ['x', 'y', 'z'], 'val': [1, 2, 3]}).lazy(),
+            {
+                'index': ['idx'],
+                'columns': 'col',
+                'values': 'val',
+                'aggregate_function': 'first',
+            },
+        )
 
 
 def test_select_and_sort_handlers():

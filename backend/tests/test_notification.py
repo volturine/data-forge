@@ -455,7 +455,7 @@ class TestNotificationHandler:
         lf = pl.DataFrame({'msg': ['hi']}).lazy()
 
         with (
-            patch('modules.compute.operations.notification.httpx') as mock_httpx,
+            patch('modules.compute.operations.notification.http_client.post') as mock_post,
             patch('modules.compute.operations.notification.notification_service') as mock_svc,
             patch('modules.compute.operations.notification.get_resolved_telegram_settings') as mock_settings,
         ):
@@ -473,8 +473,8 @@ class TestNotificationHandler:
             collected = result.collect()
         assert collected['notification_status'].to_list() == ['sent']
         mock_svc.send_telegram.assert_not_called()
-        mock_httpx.post.assert_called_once()
-        call_args = mock_httpx.post.call_args
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
         assert 'custom-token-123' in call_args.args[0]
         assert call_args.kwargs['json']['chat_id'] == '12345'
 
@@ -483,7 +483,7 @@ class TestNotificationHandler:
         lf = pl.DataFrame({'msg': ['test']}).lazy()
 
         with (
-            patch('modules.compute.operations.notification.httpx') as mock_httpx,
+            patch('modules.compute.operations.notification.http_client.post') as mock_post,
             patch('modules.compute.operations.notification.notification_service') as mock_svc,
             patch('modules.compute.operations.notification.get_resolved_telegram_settings') as mock_settings,
         ):
@@ -501,8 +501,8 @@ class TestNotificationHandler:
             collected = result.collect()
         assert collected['notification_status'].to_list() == ['sent']
         mock_svc.send_telegram.assert_not_called()
-        assert mock_httpx.post.call_count == 2
-        sent_ids = [c.kwargs['json']['chat_id'] for c in mock_httpx.post.call_args_list]
+        assert mock_post.call_count == 2
+        sent_ids = [c.kwargs['json']['chat_id'] for c in mock_post.call_args_list]
         assert sent_ids == ['aaa', 'bbb']
 
 

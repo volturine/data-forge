@@ -4,6 +4,8 @@ import time
 
 import httpx
 
+from core import http as http_client
+
 logger = logging.getLogger(__name__)
 
 _TELEGRAM_BASE = 'https://api.telegram.org'
@@ -140,7 +142,7 @@ class TelegramBot:
         if not acquired:
             return None
         try:
-            return httpx.get(
+            return http_client.get(
                 f'{_TELEGRAM_BASE}/bot{token}/getUpdates',
                 params=params,
                 timeout=timeout,
@@ -150,7 +152,7 @@ class TelegramBot:
 
     def get_updates(self, token: str, params: dict[str, int], timeout: float) -> httpx.Response:
         with self._poll_lock:
-            return httpx.get(
+            return http_client.get(
                 f'{_TELEGRAM_BASE}/bot{token}/getUpdates',
                 params=params,
                 timeout=timeout,
@@ -161,7 +163,7 @@ class TelegramBot:
 
     def _clear_webhook(self, token: str) -> None:
         try:
-            httpx.post(
+            http_client.post(
                 f'{_TELEGRAM_BASE}/bot{token}/deleteWebhook',
                 json={'drop_pending_updates': False},
                 timeout=10,
@@ -229,7 +231,7 @@ class TelegramBot:
 
     def _send_message(self, chat_id: str, text: str) -> None:
         try:
-            httpx.post(
+            http_client.post(
                 f'{_TELEGRAM_BASE}/bot{self._token}/sendMessage',
                 json={'chat_id': chat_id, 'text': text},
                 timeout=10,

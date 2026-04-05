@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+from functools import lru_cache
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -30,8 +31,17 @@ def _require_key_material() -> str:
     return material
 
 
+@lru_cache(maxsize=8)
+def _derive_key_for_material(material: str) -> bytes:
+    return hashlib.sha256(material.encode('utf-8')).digest()
+
+
 def _derive_key() -> bytes:
-    return hashlib.sha256(_require_key_material().encode('utf-8')).digest()
+    return _derive_key_for_material(_require_key_material())
+
+
+def clear_key_cache() -> None:
+    _derive_key_for_material.cache_clear()
 
 
 def _decode_payload(payload: str) -> bytes:

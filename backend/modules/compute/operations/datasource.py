@@ -1,15 +1,14 @@
 import asyncio
 import contextvars
 import hashlib
-import inspect
 import json
 import os
 import sqlite3
 from collections import deque
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from threading import Lock
 from urllib.parse import unquote, urlparse
 
 import polars as pl
@@ -20,8 +19,6 @@ from core.namespace import namespace_paths
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.iceberg_reader import scan_iceberg_snapshot
 from modules.compute.step_converter import convert_step_format
-
-T = TypeVar('T')
 
 
 class DatasourceSourceType(StrEnum):
@@ -76,10 +73,7 @@ class DatasourceParams(OperationParams):
 
 class DatasourceHandler(OperationHandler):
     FILE_LOADERS: dict[str, Callable[[str, dict], pl.LazyFrame]] = {}
-    SOURCE_LOADERS: dict[
-        str,
-        Callable[['DatasourceHandler', DatasourceParams], pl.LazyFrame | Awaitable[pl.LazyFrame]],
-    ] = {}
+    SOURCE_LOADERS: dict[str, Callable[['DatasourceHandler', DatasourceParams], pl.LazyFrame]] = {}
 
     def __call__(
         self,
@@ -92,10 +86,7 @@ class DatasourceHandler(OperationHandler):
         if not loader:
             allowed = ', '.join(sorted(self.SOURCE_LOADERS))
             raise ValueError(f'Unsupported source type: {validated.source_type}. Allowed: {allowed}')
-        result = loader(self, validated)
-        if inspect.isawaitable(result):
-            return _await_sync(result)
-        return result
+        return loader(self, validated)
 
     async def call_async(
         self,
@@ -103,15 +94,7 @@ class DatasourceHandler(OperationHandler):
         params: dict,
         **_,
     ) -> pl.LazyFrame:
-        validated = DatasourceParams.model_validate(params)
-        loader = self.SOURCE_LOADERS.get(validated.source_type.value)
-        if not loader:
-            allowed = ', '.join(sorted(self.SOURCE_LOADERS))
-            raise ValueError(f'Unsupported source type: {validated.source_type}. Allowed: {allowed}')
-        result = loader(self, validated)
-        if inspect.isawaitable(result):
-            return await result
-        return result
+        return await asyncio.to_thread(self.__call__, lf, params)
 
     @staticmethod
     def _csv_opts(opts: dict | None) -> dict:
@@ -199,12 +182,12 @@ class DatasourceHandler(OperationHandler):
             reader_override=reader_override.value,
         )
 
-    async def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
+    def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
         pipeline = config.analysis_pipeline
         if isinstance(pipeline, dict):
             pipeline_id = pipeline.get('analysis_id')
             if pipeline_id:
-                return await _load_analysis_pipeline(pipeline, str(pipeline_id), config.analysis_tab_id)
+                return _load_analysis_pipeline(pipeline, str(pipeline_id), config.analysis_tab_id)
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
 
 
@@ -214,7 +197,7 @@ _analysis_stack_var: contextvars.ContextVar[tuple[tuple[str, str | None], ...]] 
 )
 _ANALYSIS_CACHE: dict[str, pl.LazyFrame] = {}
 _ANALYSIS_CACHE_KEYS: deque[str] = deque()
-_ANALYSIS_CACHE_LOCK = asyncio.Lock()
+_ANALYSIS_CACHE_LOCK = Lock()
 _ANALYSIS_CACHE_MAX = 20
 
 
@@ -222,15 +205,7 @@ def _get_analysis_stack() -> tuple[tuple[str, str | None], ...]:
     return _analysis_stack_var.get()
 
 
-def _await_sync(value: Awaitable[T]) -> T:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(cast(Coroutine[Any, Any, T], value))
-    raise RuntimeError('Cannot synchronously load an async datasource while the event loop is running')
-
-
-async def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
+def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
     stack = _get_analysis_stack()
     stack_key = (analysis_id, tab_id)
     if stack_key in stack:
@@ -238,11 +213,11 @@ async def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str 
     token = _analysis_stack_var.set((*stack, stack_key))
     try:
         cache_key = _analysis_cache_key(pipeline, tab_id)
-        cached = await _get_analysis_cache(cache_key)
+        cached = _get_analysis_cache(cache_key)
         if cached is not None:
             return cached
-        frame = await _build_analysis_from_pipeline(pipeline, tab_id)
-        await _store_analysis_cache(cache_key, frame)
+        frame = _build_analysis_from_pipeline(pipeline, tab_id)
+        _store_analysis_cache(cache_key, frame)
         return frame
     finally:
         _analysis_stack_var.reset(token)
@@ -259,13 +234,13 @@ def _analysis_cache_key(pipeline: dict, tab_id: str | None) -> str:
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
 
-async def _get_analysis_cache(key: str) -> pl.LazyFrame | None:
-    async with _ANALYSIS_CACHE_LOCK:
+def _get_analysis_cache(key: str) -> pl.LazyFrame | None:
+    with _ANALYSIS_CACHE_LOCK:
         return _ANALYSIS_CACHE.get(key)
 
 
-async def _store_analysis_cache(key: str, frame: pl.LazyFrame) -> None:
-    async with _ANALYSIS_CACHE_LOCK:
+def _store_analysis_cache(key: str, frame: pl.LazyFrame) -> None:
+    with _ANALYSIS_CACHE_LOCK:
         if key in _ANALYSIS_CACHE:
             return
         _ANALYSIS_CACHE[key] = frame
@@ -330,7 +305,7 @@ def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     return ordered
 
 
-async def _build_tab_pipeline(
+def _build_tab_pipeline(
     tab: dict,
     sources: dict,
     pipeline: dict,
@@ -363,7 +338,7 @@ async def _build_tab_pipeline(
         if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
             merged = {**merged, 'analysis_pipeline': pipeline}
 
-        base_frame = await load_datasource_async(merged)
+        base_frame = load_datasource(merged)
 
     steps = tab.get('steps', [])
     if not isinstance(steps, list):
@@ -372,7 +347,7 @@ async def _build_tab_pipeline(
     from modules.compute.utils import apply_steps
 
     steps = apply_steps(steps)
-    additional = await _collect_analysis_sources(steps, sources, pipeline, cache)
+    additional = _collect_analysis_sources(steps, sources, pipeline, cache)
 
     from modules.compute.engine import PolarsComputeEngine
 
@@ -398,7 +373,7 @@ async def _build_tab_pipeline(
     return base_frame
 
 
-async def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -> pl.LazyFrame:
+def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -> pl.LazyFrame:
     tabs = pipeline.get('tabs', [])
     if not isinstance(tabs, list) or not tabs:
         raise ValueError('Analysis pipeline missing tabs')
@@ -416,7 +391,7 @@ async def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | N
     cache: dict[str, pl.LazyFrame] = {}
     last_frame: pl.LazyFrame | None = None
     for tab in chain:
-        last_frame = await _build_tab_pipeline(tab, sources, pipeline, cache)
+        last_frame = _build_tab_pipeline(tab, sources, pipeline, cache)
 
     if last_frame is None:
         raise ValueError('Analysis pipeline did not produce a LazyFrame')
@@ -424,7 +399,7 @@ async def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | N
     return last_frame
 
 
-async def _collect_analysis_sources(
+def _collect_analysis_sources(
     steps: list[dict],
     sources: dict,
     pipeline: dict,
@@ -457,7 +432,7 @@ async def _collect_analysis_sources(
             next_config = raw
             if analysis_id and next_config.get('source_type') == 'analysis' and str(next_config.get('analysis_id')) == analysis_id:
                 next_config = {**next_config, 'analysis_pipeline': pipeline}
-            additional[str(source_id)] = await load_datasource_async(next_config)
+            additional[str(source_id)] = load_datasource(next_config)
 
     return additional
 
@@ -650,4 +625,4 @@ def load_datasource(config: dict) -> pl.LazyFrame:
 
 
 async def load_datasource_async(config: dict) -> pl.LazyFrame:
-    return await DatasourceHandler().call_async(pl.LazyFrame(), config)
+    return await asyncio.to_thread(load_datasource, config)

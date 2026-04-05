@@ -29,6 +29,7 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('log_client_flush_cooldown_ms', 1, None),
     ('upload_max_file_size_bytes', 0, None),
 ]
+_PLACEHOLDER_ENCRYPTION_KEYS = {'your-encryption-key-here'}
 
 
 def _default_data_dir() -> Path:
@@ -333,7 +334,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def _validate_encryption_key(self) -> 'Settings':
-        if self.auth_required and not self.settings_encryption_key:
+        encryption_key = self.settings_encryption_key.strip()
+        if self.auth_required and (not encryption_key or encryption_key in _PLACEHOLDER_ENCRYPTION_KEYS):
             import warnings
 
             warnings.warn(
