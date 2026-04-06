@@ -26,7 +26,22 @@ from modules.udf.seed import ensure_udf_seeds
 
 logger = logging.getLogger(__name__)
 
-frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
+# Detect Nuitka compiled binary vs running from source.
+# In Nuitka-compiled code, __compiled__ is a C-level built-in constant set to True.
+# In a regular Python interpreter it is not defined, raising NameError.
+try:
+    _NUITKA_COMPILED: bool = __compiled__  # type: ignore[name-defined]  # noqa: F821
+except NameError:
+    _NUITKA_COMPILED = False
+
+if _NUITKA_COMPILED:
+    # In a Nuitka onefile binary, data files are extracted alongside __file__
+    # into the temporary extraction directory.
+    frontend_build_dir = Path(__file__).parent / 'frontend' / 'build'
+else:
+    # In a regular source checkout, the frontend build lives two levels up
+    # from backend/main.py at <repo_root>/frontend/build.
+    frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 
 async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
@@ -350,13 +365,21 @@ async def serve_static_or_index(full_path: str) -> FileResponse:
 
 
 if __name__ == '__main__':
+    import multiprocessing
+
     import uvicorn
 
+    # Required for multiprocessing 'spawn' context in frozen (Nuitka onefile) executables.
+    multiprocessing.freeze_support()
+
+    # In a Nuitka compiled binary there are no source files for uvicorn to watch,
+    # so pass the app object directly and disable hot reload.
+    # In source mode, the string form 'main:app' is required for --reload to work.
     uvicorn.run(
-        'main:app',
+        app if _NUITKA_COMPILED else 'main:app',
         host='0.0.0.0',
         port=settings.port,
-        reload=settings.debug,
+        reload=False if _NUITKA_COMPILED else settings.debug,
         log_level=settings.log_level,
         access_log=settings.uvicorn_access_log,
     )

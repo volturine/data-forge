@@ -2,7 +2,7 @@ import contextlib
 import logging
 import multiprocessing as mp
 import os
-import resource
+import sys
 import time
 import uuid
 from collections import deque
@@ -313,7 +313,9 @@ class PolarsComputeEngine:
         else:
             os.environ.pop('POLARS_STREAMING_CHUNK_SIZE', None)
 
-        if max_memory_mb > 0:
+        if max_memory_mb > 0 and sys.platform != 'win32':
+            import resource
+
             memory_bytes = max_memory_mb * 1024 * 1024
             try:
                 resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))

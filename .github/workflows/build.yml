@@ -1,0 +1,132 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: SvelteKit sync
+        working-directory: frontend
+        run: bun x svelte-kit sync
+
+      - name: Panda codegen
+        working-directory: frontend
+        run: bun run panda:codegen
+
+      - name: Build
+        working-directory: frontend
+        run: bun run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+          retention-days: 1
+
+  binary:
+    name: Build binary (${{ matrix.platform }})
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            binary: app-linux-x86_64
+          - os: macos-latest
+            platform: macos-arm64
+            binary: app-macos-arm64
+          - os: windows-latest
+            platform: windows-x86_64
+            binary: app-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Install Nuitka
+        working-directory: backend
+        run: uv pip install nuitka ordered-set zstandard
+
+      - name: Build binary
+        working-directory: backend
+        shell: bash
+        run: |
+          uv run python -m nuitka \
+            --standalone \
+            --onefile \
+            --assume-yes-for-downloads \
+            --enable-plugin=multiprocessing \
+            --include-package=api \
+            --include-package=modules \
+            --include-package=core \
+            --include-package=uvicorn \
+            --include-package-data=polars \
+            --include-package-data=duckdb \
+            --include-package-data=alembic \
+            --include-data-dir=../frontend/build=frontend/build \
+            --output-filename=${{ matrix.binary }} \
+            main.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: backend/${{ matrix.binary }}
+          retention-days: 7
+
+  release:
+    name: Create release
+    needs: binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: "app-*"
