@@ -14,7 +14,7 @@ import { normalizeDtype } from '$lib/utils/transform';
 import { normalizeConfig } from '$lib/utils/step-config-defaults';
 import { isChartStep, normalizeStepType } from '$lib/components/pipeline/utils';
 import { track } from '$lib/utils/audit-log';
-import { cloneJson } from '$lib/utils/json';
+import { cloneJson, isRecord } from '$lib/utils/json';
 import { schemaStore } from '$lib/stores/schema.svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { ResultAsync, errAsync, ok } from 'neverthrow';
@@ -23,6 +23,21 @@ import { idbGet, idbSet } from '$lib/utils/indexeddb';
 
 function cloneConfig<T extends Record<string, unknown>>(config: T): T {
 	return cloneJson(config);
+}
+
+function slugifyOutputName(name: string): string {
+	const trimmed = name.trim();
+	if (!trimmed) return 'export';
+	return trimmed.replace(/\s+/g, '_').toLowerCase();
+}
+
+function nextDuplicateTabName(tabs: AnalysisTab[], sourceName: string): string {
+	const base = `${sourceName} Copy`;
+	const existing = new Set(tabs.map((tab) => tab.name));
+	if (!existing.has(base)) return base;
+	let suffix = 2;
+	while (existing.has(`${base} ${suffix}`)) suffix += 1;
+	return `${base} ${suffix}`;
 }
 
 async function loadPreviewRuns(map: SvelteMap<string, boolean>): Promise<void> {
@@ -238,6 +253,73 @@ export class AnalysisStore {
 		const newTab = { ...tab, steps: tab.steps ?? [] };
 		this.tabs = [...this.tabs, newTab];
 		this.activeTabId = newTab.id;
+	}
+
+	duplicateTab(tabId: string): AnalysisTab | null {
+		const sourceIndex = this.tabs.findIndex((tab) => tab.id === tabId);
+		if (sourceIndex < 0) return null;
+		const sourceTab = this.tabs[sourceIndex];
+		if (!sourceTab) return null;
+
+		const nextName = nextDuplicateTabName(this.tabs, sourceTab.name);
+		const nextTabId = `tab-${crypto.randomUUID()}`;
+		const nextOutputId = crypto.randomUUID();
+		const nextFilename = slugifyOutputName(nextName);
+		const sourceOutput = cloneJson(sourceTab.output);
+		const sourceIceberg = sourceOutput.iceberg;
+
+		const stepIdMap: Record<string, string> = {};
+		for (const step of sourceTab.steps) {
+			stepIdMap[step.id] = crypto.randomUUID();
+		}
+
+		const duplicatedSteps: PipelineStep[] = [];
+		for (const step of sourceTab.steps) {
+			const mappedStepId = stepIdMap[step.id];
+			if (!mappedStepId) return null;
+			const dependsOn: string[] = [];
+			for (const depId of step.depends_on ?? []) {
+				const mappedDepId = stepIdMap[depId];
+				if (!mappedDepId) return null;
+				dependsOn.push(mappedDepId);
+			}
+			duplicatedSteps.push({
+				...step,
+				id: mappedStepId,
+				config: cloneJson(step.config),
+				depends_on: dependsOn
+			});
+		}
+
+		const duplicatedOutput = {
+			...sourceOutput,
+			result_id: nextOutputId,
+			filename: nextFilename
+		};
+		if (isRecord(sourceIceberg)) {
+			duplicatedOutput.iceberg = {
+				...sourceIceberg,
+				table_name: nextFilename
+			};
+		}
+
+		const duplicatedTab: AnalysisTab = {
+			...sourceTab,
+			id: nextTabId,
+			name: nextName,
+			datasource: {
+				...sourceTab.datasource,
+				config: cloneJson(sourceTab.datasource.config)
+			},
+			output: duplicatedOutput,
+			steps: duplicatedSteps
+		};
+
+		const nextTabs = [...this.tabs];
+		nextTabs.splice(sourceIndex + 1, 0, duplicatedTab);
+		this.tabs = nextTabs;
+		this.activeTabId = duplicatedTab.id;
+		return duplicatedTab;
 	}
 
 	removeTab(id: string): void {

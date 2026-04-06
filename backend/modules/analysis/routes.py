@@ -349,3 +349,24 @@ async def derive_tab(
     The source tab must have a computed output.result_id. The new tab starts with no steps.
     """
     return service.derive_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)
+
+
+class DuplicateTabBody(BaseModel):
+    name: str | None = Field(None, description='Name for the duplicated tab. Defaults to "<source> Copy".')
+
+
+@router.post('/{analysis_id}/tabs/{tab_id}/duplicate', mcp=True)
+@handle_errors(operation='duplicate tab', value_error_status=400)
+async def duplicate_tab(
+    analysis_id: AnalysisId,
+    tab_id: str,
+    data: DuplicateTabBody,
+    _lock: None = Depends(require_analysis_lock),
+    session: Session = Depends(get_db),
+):
+    """Duplicate a tab inside the same analysis.
+
+    The duplicate is inserted immediately after the source tab, keeps the same datasource and step logic,
+    and receives fresh tab/step/output IDs so it can evolve independently.
+    """
+    return service.duplicate_tab(session, parse_analysis_id(analysis_id), tab_id, data.name)

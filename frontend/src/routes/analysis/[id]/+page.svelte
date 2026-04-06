@@ -859,6 +859,24 @@
 		markUnsaved();
 	}
 
+	function handleDuplicateTab(tabId: string) {
+		if (editorReadOnly) return;
+		const duplicated = analysisStore.duplicateTab(tabId);
+		if (!duplicated) {
+			flashTabError(
+				'Failed to duplicate tab because the source pipeline dependencies are invalid.'
+			);
+			return;
+		}
+		markUnsaved();
+	}
+
+	function handleDuplicateActiveTab() {
+		const currentTabId = analysisStore.activeTab?.id;
+		if (!currentTabId) return;
+		handleDuplicateTab(currentTabId);
+	}
+
 	function handleRenameSourceTab(nextName: string) {
 		if (editorReadOnly) return;
 		const active = activeTab;
@@ -1460,6 +1478,7 @@
 						onMoveStep={handleMoveStep}
 						onChangeDatasource={() => openDatasourceModal('change')}
 						onRenameTab={handleRenameSourceTab}
+						onDuplicateTab={handleDuplicateActiveTab}
 						readOnly={editorReadOnly}
 					/>
 				</div>

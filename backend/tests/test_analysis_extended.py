@@ -584,3 +584,90 @@ class TestDeriveTab:
             json={'tabs': tabs},
         )
         assert update_resp.status_code == 200
+
+
+class TestDuplicateTab:
+    """Tests for POST /api/v1/analysis/{id}/tabs/{tab_id}/duplicate."""
+
+    def test_duplicate_tab_inserts_adjacent_and_generates_copy_name(self, client, sample_analysis: Analysis):
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
+        assert response.status_code == 200
+        duplicated = response.json()
+        assert duplicated['name'] == 'Source Copy'
+        assert duplicated['id'] != 'tab1'
+        assert duplicated['output']['result_id'] != sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
+
+        read_back = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        assert read_back.status_code == 200
+        tabs = read_back.json()['pipeline_definition']['tabs']
+        source_idx = next(i for i, tab in enumerate(tabs) if tab['id'] == 'tab1')
+        duplicate_idx = next(i for i, tab in enumerate(tabs) if tab['id'] == duplicated['id'])
+        assert duplicate_idx == source_idx + 1
+
+        second_response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
+        assert second_response.status_code == 200
+        assert second_response.json()['name'] == 'Source Copy 2'
+
+    def test_duplicate_tab_rewrites_step_ids_and_dependencies(self, client, sample_analysis: Analysis):
+        current = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        assert current.status_code == 200
+        tabs = current.json()['pipeline_definition']['tabs']
+        tabs[0]['steps'].append(
+            {
+                'id': 'step2',
+                'type': 'filter',
+                'config': {'column': 'age', 'operator': '>', 'value': 40},
+                'depends_on': ['step1'],
+            }
+        )
+        update = client.put(f'/api/v1/analysis/{sample_analysis.id}', json={'tabs': tabs})
+        assert update.status_code == 200
+
+        response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
+        assert response.status_code == 200
+        duplicated = response.json()
+        assert len(duplicated['steps']) == 2
+
+        first_step = duplicated['steps'][0]
+        second_step = duplicated['steps'][1]
+        assert first_step['id'] != 'step1'
+        assert second_step['id'] != 'step2'
+        assert second_step['depends_on'] == [first_step['id']]
+
+    def test_duplicate_derived_tab_preserves_upstream_reference(self, client, sample_analysis: Analysis):
+        derived_response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive', json={'name': 'Derived 1'})
+        assert derived_response.status_code == 200
+        derived = derived_response.json()
+
+        source_result_id = sample_analysis.pipeline_definition['tabs'][0]['output']['result_id']
+
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/{derived["id"]}/duplicate',
+            json={},
+        )
+        assert response.status_code == 200
+        duplicated = response.json()
+        assert duplicated['datasource']['analysis_tab_id'] == 'tab1'
+        assert duplicated['datasource']['id'] == source_result_id
+        assert duplicated['output']['result_id'] != derived['output']['result_id']
+
+    def test_duplicate_does_not_rewire_existing_dependents(self, client, sample_analysis: Analysis):
+        derived_response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/derive', json={'name': 'D1'})
+        assert derived_response.status_code == 200
+        derived = derived_response.json()
+
+        duplicate_response = client.post(f'/api/v1/analysis/{sample_analysis.id}/tabs/tab1/duplicate', json={})
+        assert duplicate_response.status_code == 200
+
+        read_back = client.get(f'/api/v1/analysis/{sample_analysis.id}')
+        assert read_back.status_code == 200
+        tabs = read_back.json()['pipeline_definition']['tabs']
+        dependent = next(tab for tab in tabs if tab['id'] == derived['id'])
+        assert dependent['datasource']['analysis_tab_id'] == 'tab1'
+
+    def test_duplicate_tab_nonexistent_tab(self, client, sample_analysis: Analysis):
+        response = client.post(
+            f'/api/v1/analysis/{sample_analysis.id}/tabs/nonexistent/duplicate',
+            json={},
+        )
+        assert response.status_code == 400

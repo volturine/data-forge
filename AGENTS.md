@@ -115,3 +115,4 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 - When tightening TypeScript config shapes across shared components, keep callback signatures compatible with component contracts (`Record<string, unknown>`) and normalize into stricter typed objects inside handlers.
 - When normalizing config objects, avoid duplicate-key object literals (for example `{ branch, ...normalized }`) because they hide overwrite order; build a single explicit normalized object first.
 - After broad enum/dataclass refactors, rerun focused schema-contract tests immediately; JSON schema often moves enum values under `$defs`/`$ref`, so tests that assert inline enums should resolve refs explicitly instead of assuming inlined `enum`.
+- In Svelte store modules, avoid native mutable collections like `Map`/`Set` in reactive code paths; prefer `SvelteMap`/`SvelteSet` (or plain objects/arrays) to satisfy `svelte/prefer-svelte-reactivity` and keep lint clean.

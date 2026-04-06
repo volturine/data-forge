@@ -1,4 +1,6 @@
+import re
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -499,3 +501,102 @@ def derive_tab(
     session.commit()
     session.refresh(analysis)
     return new_tab
+
+
+def _slugify_output_name(name: str) -> str:
+    stripped = name.strip()
+    if not stripped:
+        return 'export'
+    return re.sub(r'\s+', '_', stripped).lower()
+
+
+def _next_duplicate_tab_name(tabs: list[PipelineTab], source_name: str) -> str:
+    base = f'{source_name} Copy'
+    existing = {tab.name for tab in tabs}
+    if base not in existing:
+        return base
+
+    suffix = 2
+    while True:
+        candidate = f'{base} {suffix}'
+        if candidate not in existing:
+            return candidate
+        suffix += 1
+
+
+def duplicate_tab(
+    session: Session,  # type: ignore[type-arg]
+    analysis_id: str,
+    tab_id: str,
+    name: str | None = None,
+) -> PipelineTab:
+    """Duplicate an existing tab in-place with fresh tab/step/output identities."""
+    analysis = session.get(Analysis, analysis_id)
+    if not analysis:
+        raise AnalysisNotFoundError(analysis_id)
+
+    pipeline = analysis.pipeline
+    source = pipeline.find_tab(tab_id)
+
+    new_tab_id = f'tab-{uuid.uuid4()!s}'
+    next_name = name.strip() if isinstance(name, str) and name.strip() else _next_duplicate_tab_name(pipeline.tabs, source.name)
+
+    step_id_map: dict[str, str] = {}
+    duplicated_steps: list[PipelineStep] = []
+    for step in source.steps:
+        next_step_id = str(uuid.uuid4())
+        step_id_map[step.id] = next_step_id
+        duplicated_steps.append(
+            PipelineStep(
+                id=next_step_id,
+                type=step.type,
+                config=deepcopy(step.config),
+                depends_on=[],
+                is_applied=step.is_applied,
+            )
+        )
+
+    for duplicated_step, source_step in zip(duplicated_steps, source.steps, strict=True):
+        rewritten_deps: list[str] = []
+        for dep_id in source_step.depends_on:
+            mapped = step_id_map.get(dep_id)
+            if not mapped:
+                raise ValueError(f"Unable to rewrite dependency '{dep_id}' while duplicating tab '{tab_id}'")
+            rewritten_deps.append(mapped)
+        duplicated_step.depends_on = rewritten_deps
+
+    duplicated_output = TabOutput.from_dict(source.output.to_dict())
+    duplicated_output.result_id = str(uuid.uuid4())
+    duplicated_output.filename = _slugify_output_name(next_name)
+
+    iceberg = duplicated_output.extra.get('iceberg')
+    if isinstance(iceberg, dict):
+        duplicated_output.extra['iceberg'] = {
+            **iceberg,
+            'table_name': duplicated_output.filename,
+        }
+
+    duplicated_tab = PipelineTab(
+        id=new_tab_id,
+        name=next_name,
+        parent_id=source.parent_id,
+        datasource=TabDatasource(
+            id=source.datasource.id,
+            config=deepcopy(source.datasource.config),
+            analysis_tab_id=source.datasource.analysis_tab_id,
+        ),
+        output=duplicated_output,
+        steps=duplicated_steps,
+    )
+
+    source_idx = next((idx for idx, tab in enumerate(pipeline.tabs) if tab.id == tab_id), -1)
+    if source_idx < 0:
+        raise ValueError(f'Tab {tab_id} not found')
+
+    pipeline.tabs.insert(source_idx + 1, duplicated_tab)
+    analysis.pipeline_definition = pipeline.to_dict()
+    flag_modified(analysis, 'pipeline_definition')
+    analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    session.commit()
+    session.refresh(analysis)
+    return duplicated_tab

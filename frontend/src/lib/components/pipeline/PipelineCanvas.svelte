@@ -32,6 +32,7 @@
 		onMoveStep: (stepId: string, target: DropTarget) => void;
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
+		onDuplicateTab?: () => void;
 		readOnly?: boolean;
 	}
 
@@ -51,6 +52,7 @@
 		onMoveStep,
 		onChangeDatasource: _onChangeDatasource,
 		onRenameTab: _onRenameTab,
+		onDuplicateTab: _onDuplicateTab,
 		readOnly = false
 	}: Props = $props();
 
@@ -367,6 +369,7 @@
 			{activeTab}
 			onChangeDatasource={_onChangeDatasource}
 			onRenameTab={_onRenameTab}
+			onDuplicateTab={_onDuplicateTab}
 			{readOnly}
 		/>
 		{#if shouldShowInsert(0)}

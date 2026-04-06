@@ -7,6 +7,7 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { track } from '$lib/utils/audit-log';
 	import {
+		Copy,
 		FileText,
 		Database,
 		Layers,
@@ -35,6 +36,7 @@
 		activeTab?: AnalysisTab | null;
 		onChangeDatasource?: () => void;
 		onRenameTab?: (name: string) => void;
+		onDuplicateTab?: () => void;
 		readOnly?: boolean;
 	}
 
@@ -46,6 +48,7 @@
 		activeTab: activeTabRaw,
 		onChangeDatasource,
 		onRenameTab,
+		onDuplicateTab,
 		readOnly = false
 	}: Props = $props();
 
@@ -325,18 +328,45 @@
 					source
 				</span>
 			</div>
-			<span
+			<button
 				class={css({
+					display: 'inline-flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '1',
 					borderWidth: '1',
 					backgroundColor: 'bg.tertiary',
 					color: 'fg.faint',
 					paddingX: '1.5',
-					paddingY: '0.5',
+					paddingY: '0',
+					minHeight: 'iconMd',
 					fontSize: '3xs',
+					fontWeight: 'medium',
+					lineHeight: 'normal',
 					textTransform: 'uppercase',
-					letterSpacing: 'widest'
-				})}>root</span
+					letterSpacing: 'widest',
+					cursor: 'pointer',
+					_hover: {
+						color: 'fg.primary',
+						backgroundColor: 'bg.hover'
+					}
+				})}
+				onclick={onDuplicateTab}
+				disabled={readOnly || !onDuplicateTab}
+				type="button"
+				title="Duplicate tab"
+				aria-label="Duplicate tab"
 			>
+				<Copy size={9} class={css({ display: 'block', flexShrink: '0' })} />
+				<span
+					class={css({
+						display: 'inline-flex',
+						alignItems: 'center',
+						lineHeight: '1',
+						transform: 'translateY(1px)'
+					})}>copy</span
+				>
+			</button>
 		</div>
 
 		<!-- Tab Section -->

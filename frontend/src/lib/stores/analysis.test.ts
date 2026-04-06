@@ -152,6 +152,94 @@ describe('AnalysisStore.addTab', () => {
 	});
 });
 
+describe('AnalysisStore.duplicateTab', () => {
+	let store: InstanceType<typeof AnalysisStore>;
+
+	beforeEach(() => {
+		store = new AnalysisStore();
+		store.setTabs([
+			makeTab({
+				id: 'tab-source',
+				name: 'Source',
+				datasource: {
+					id: 'ds-source',
+					analysis_tab_id: null,
+					config: { branch: 'dev', time_travel_snapshot_id: 'snap-1' }
+				},
+				output: {
+					result_id: '550e8400-e29b-41d4-a716-446655440001',
+					format: 'parquet',
+					filename: 'source_output',
+					iceberg: { namespace: 'outputs', table_name: 'source_output', branch: 'dev' }
+				},
+				steps: [
+					makeStep({ id: 'A', depends_on: [], config: { threshold: 1 } }),
+					makeStep({ id: 'B', depends_on: ['A'], config: { threshold: 2 } })
+				]
+			}),
+			makeTab({
+				id: 'tab-other',
+				name: 'Other',
+				output: {
+					result_id: '550e8400-e29b-41d4-a716-446655440002',
+					format: 'parquet',
+					filename: 'other'
+				}
+			})
+		]);
+	});
+
+	test('duplicates tab adjacent to source and activates duplicate', () => {
+		const duplicated = store.duplicateTab('tab-source');
+		expect(duplicated).not.toBeNull();
+		expect(store.tabs.map((tab) => tab.id)).toHaveLength(3);
+		expect(store.tabs[1]?.id).toBe(duplicated?.id);
+		expect(store.activeTabId).toBe(duplicated?.id);
+		expect(duplicated?.output.result_id).not.toBe(store.tabs[0]?.output.result_id);
+	});
+
+	test('rewrites duplicated step ids and depends_on references', () => {
+		const duplicated = store.duplicateTab('tab-source');
+		expect(duplicated).not.toBeNull();
+		const source = store.tabs[0]!;
+		const copy = duplicated!;
+		expect(copy.steps).toHaveLength(2);
+		expect(copy.steps[0]?.id).not.toBe(source.steps[0]?.id);
+		expect(copy.steps[1]?.id).not.toBe(source.steps[1]?.id);
+		expect(copy.steps[1]?.depends_on).toEqual([copy.steps[0]?.id]);
+	});
+
+	test('preserves derived datasource reference and regenerates output table identity', () => {
+		store.tabs[0] = {
+			...store.tabs[0]!,
+			datasource: {
+				id: '550e8400-e29b-41d4-a716-446655440010',
+				analysis_tab_id: 'tab-upstream',
+				config: { branch: 'master' }
+			}
+		};
+		const duplicated = store.duplicateTab('tab-source');
+		expect(duplicated).not.toBeNull();
+		expect(duplicated?.datasource.id).toBe('550e8400-e29b-41d4-a716-446655440010');
+		expect(duplicated?.datasource.analysis_tab_id).toBe('tab-upstream');
+		expect(duplicated?.output.filename).toBe('source_copy');
+		expect(duplicated?.output.iceberg?.table_name).toBe('source_copy');
+	});
+
+	test('assigns incrementing copy names for repeated duplicates', () => {
+		const first = store.duplicateTab('tab-source');
+		const second = store.duplicateTab('tab-source');
+		expect(first?.name).toBe('Source Copy');
+		expect(second?.name).toBe('Source Copy 2');
+	});
+
+	test('returns null when source tab does not exist', () => {
+		const duplicated = store.duplicateTab('missing');
+		expect(duplicated).toBeNull();
+		expect(store.tabs).toHaveLength(2);
+	});
+});
+
 describe('AnalysisStore.removeTab', () => {
 	let store: InstanceType<typeof AnalysisStore>;
 
