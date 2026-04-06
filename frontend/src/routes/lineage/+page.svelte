@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { getLineage, type LineageNode, type LineageResponse } from '$lib/api/lineage';
+	import {
+		getLineage,
+		type LineageNode,
+		type LineageResponse,
+		type LineageMode,
+		type NodeKind
+	} from '$lib/api/lineage';
 	import { listDatasources } from '$lib/api/datasource';
 	import LineageGraph from '$lib/components/common/LineageGraph.svelte';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
@@ -14,8 +20,21 @@
 		LayoutGrid,
 		RotateCcw,
 		ZoomIn,
-		ZoomOut
+		ZoomOut,
+		Layers,
+		GitBranch
 	} from 'lucide-svelte';
+	import {
+		css,
+		cx,
+		button,
+		input,
+		row,
+		divider,
+		muted,
+		toggleButton,
+		chip
+	} from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 	type LineageGraphApi = {
@@ -26,6 +45,8 @@
 
 	let selectedDatasourceId = $state<string>('');
 	let selectedBranch = $state<string>('');
+	let lineageMode = $state<LineageMode>('full');
+	let internals = $state(false);
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources'],
@@ -36,7 +57,7 @@
 		}
 	}));
 
-	const outputDatasources = $derived.by(() =>
+	const outputDatasources = $derived(
 		(datasourcesQuery.data ?? []).filter((ds) => ds.created_by === 'analysis')
 	);
 
@@ -60,9 +81,14 @@
 	});
 
 	const query = createQuery(() => ({
-		queryKey: ['lineage', selectedDatasourceId, selectedBranch],
+		queryKey: ['lineage', selectedDatasourceId, selectedBranch, lineageMode, internals],
 		queryFn: async () => {
-			const result = await getLineage(selectedDatasourceId || null, selectedBranch || null);
+			const result = await getLineage({
+				target: selectedDatasourceId || null,
+				branch: selectedBranch || null,
+				mode: lineageMode,
+				internals
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -81,7 +107,6 @@
 		selectedNode = null;
 	}
 
-	// Parse raw ID from prefixed node ID ("datasource:uuid" or "analysis:uuid")
 	const selectedRawId = $derived(
 		selectedNode ? selectedNode.id.split(':').slice(1).join(':') : null
 	);
@@ -113,18 +138,69 @@
 		const target = event.currentTarget as HTMLSelectElement;
 		selectedBranch = target.value;
 	}
+
+	const kindLabel: Record<NodeKind, string> = {
+		source: 'Source',
+		output: 'Output',
+		internal: 'Internal',
+		analysis: 'Analysis'
+	};
+
+	const modeOptions: Array<{ value: LineageMode; label: string }> = [
+		{ value: 'full', label: 'Full' },
+		{ value: 'upstream', label: 'Upstream' },
+		{ value: 'downstream', label: 'Downstream' }
+	];
 </script>
 
-<div class="flex h-full flex-col">
-	<header class="border-b border-tertiary bg-bg-primary px-6 py-3">
-		<h1 class="m-0 text-lg">Data Lineage</h1>
+<div class={css({ display: 'flex', height: '100%', flexDirection: 'column' })}>
+	<header
+		class={css({
+			backgroundColor: 'bg.primary',
+			paddingX: '6',
+			paddingY: '3'
+		})}
+	>
+		<h1 class={css({ margin: '0', fontSize: 'lg' })}>Data Lineage</h1>
 	</header>
 
-	<div class="lineage-page">
-		<div class="lineage-toolbar-row">
-			<div class="flex items-center gap-2">
+	<div
+		class={css({
+			display: 'grid',
+			gridTemplateColumns: '384px minmax(0, 1fr)',
+			gridTemplateRows: 'auto minmax(0, 1fr)',
+			minHeight: '0',
+			flex: '1',
+			position: 'relative'
+		})}
+	>
+		<div
+			class={cx(
+				row,
+				css({
+					gridColumn: '1 / -1',
+					gridRow: '1',
+					gap: '1',
+					paddingX: '3',
+					paddingY: '1.5',
+					borderBottomWidth: '1',
+					background: 'bg.primary',
+					flexWrap: 'wrap'
+				})
+			)}
+		>
+			<div class={cx(row, css({ gap: '2' }))}>
 				<select
-					class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+					class={cx(
+						input(),
+						css({
+							fontSize: 'xs',
+							paddingX: '2',
+							paddingY: '1'
+						})
+					)}
+					id="lineage-ds"
+					aria-label="Output datasource"
 					value={selectedDatasourceId}
 					onchange={handleDatasourceChange}
 				>
@@ -134,7 +210,16 @@
 					{/each}
 				</select>
 				<select
-					class="text-xs border border-tertiary bg-bg-primary px-2 py-1"
+					class={cx(
+						input(),
+						css({
+							fontSize: 'xs',
+							paddingX: '2',
+							paddingY: '1'
+						})
+					)}
+					id="lineage-branch"
+					aria-label="Branch"
 					value={selectedBranch}
 					onchange={handleBranchChange}
 					disabled={!selectedDatasourceId}
@@ -148,51 +233,140 @@
 					{/if}
 				</select>
 			</div>
-			<span class="mr-2 text-xs text-fg-muted">Layout</span>
+
+			<div
+				class={css({
+					marginX: '2',
+					height: 'iconSm',
+					width: 'px',
+					backgroundColor: 'bg.muted'
+				})}
+			></div>
+
+			<div class={cx(row, css({ gap: '0' }))}>
+				{#each modeOptions as opt, i (opt.value)}
+					<button
+						class={toggleButton({
+							active: lineageMode === opt.value,
+							radius: i === 0 ? 'left' : i === modeOptions.length - 1 ? 'right' : undefined
+						})}
+						onclick={() => {
+							lineageMode = opt.value;
+						}}
+						title={`${opt.label} lineage`}
+					>
+						<span class={css({ fontSize: 'xs' })}>{opt.label}</span>
+					</button>
+				{/each}
+			</div>
+
 			<button
-				class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"
+				class={button({ variant: internals ? 'primary' : 'ghost', size: 'sm' })}
+				onclick={() => {
+					internals = !internals;
+				}}
+				title="Toggle internal nodes"
+				aria-pressed={internals}
+			>
+				<Layers size={14} />
+				<span class={css({ fontSize: 'xs' })}>Internals</span>
+			</button>
+
+			<div
+				class={css({
+					marginX: '2',
+					height: 'iconSm',
+					width: 'px',
+					backgroundColor: 'bg.muted'
+				})}
+			></div>
+
+			<span class={css({ marginRight: '2', fontSize: 'xs', color: 'fg.muted' })}>Layout</span>
+			<button
+				class={layoutMode === 'horizontal'
+					? button({ variant: 'primary', size: 'sm' })
+					: button({ variant: 'ghost', size: 'sm' })}
 				onclick={() => setLayout('horizontal')}
 				title="Horizontal tree layout"
 			>
 				<ArrowRight size={14} />
-				<span class="text-xs">Horizontal</span>
+				<span class={css({ fontSize: 'xs' })}>Horizontal</span>
 			</button>
 			<button
-				class="btn-sm {layoutMode === 'vertical' ? 'btn-primary' : 'btn-ghost'}"
+				class={layoutMode === 'vertical'
+					? button({ variant: 'primary', size: 'sm' })
+					: button({ variant: 'ghost', size: 'sm' })}
 				onclick={() => setLayout('vertical')}
 				title="Vertical tree layout"
 			>
 				<ArrowDown size={14} />
-				<span class="text-xs">Vertical</span>
+				<span class={css({ fontSize: 'xs' })}>Vertical</span>
 			</button>
 			<button
-				class="btn-sm {layoutMode === 'grid' ? 'btn-primary' : 'btn-ghost'}"
+				class={layoutMode === 'grid'
+					? button({ variant: 'primary', size: 'sm' })
+					: button({ variant: 'ghost', size: 'sm' })}
 				onclick={() => setLayout('grid')}
 				title="Grid layout"
 			>
 				<LayoutGrid size={14} />
-				<span class="text-xs">Grid</span>
+				<span class={css({ fontSize: 'xs' })}>Grid</span>
 			</button>
 
-			<div class="mx-2 h-4 w-px bg-border-primary"></div>
+			<div
+				class={css({
+					marginX: '2',
+					height: 'iconSm',
+					width: 'px',
+					backgroundColor: 'bg.muted'
+				})}
+			></div>
 
-			<button class="btn-sm btn-ghost" onclick={zoomIn} title="Zoom in">
+			<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomIn} title="Zoom in">
 				<ZoomIn size={14} />
 			</button>
-			<button class="btn-sm btn-ghost" onclick={zoomOut} title="Zoom out">
+			<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomOut} title="Zoom out">
 				<ZoomOut size={14} />
 			</button>
-			<button class="btn-sm btn-ghost" onclick={resetView} title="Reset view">
+			<button
+				class={button({ variant: 'ghost', size: 'sm' })}
+				onclick={resetView}
+				title="Reset view"
+			>
 				<RotateCcw size={14} />
 			</button>
 
-			<span class="ml-auto text-xs text-fg-muted">{zoomPercent}%</span>
+			<span class={css({ marginLeft: 'auto', fontSize: 'xs', color: 'fg.muted' })}>
+				{zoomPercent}%
+			</span>
 		</div>
 
-		<aside class="lineage-panel">
-			<div class="flex items-center gap-3 border-b border-tertiary px-4 py-3">
+		<aside
+			class={css({
+				gridColumn: '1',
+				gridRow: '2',
+				minHeight: '0',
+				borderRightWidth: '1',
+				background: 'bg.primary',
+				boxShadow: 'popover',
+				display: 'flex',
+				flexDirection: 'column',
+				zIndex: '10'
+			})}
+		>
+			<div
+				class={cx(
+					row,
+					css({
+						gap: '3',
+						borderBottomWidth: '1',
+						paddingX: '4',
+						paddingY: '3'
+					})
+				)}
+			>
 				{#if selectedNode}
-					<div class="flex items-center gap-2 text-fg-muted">
+					<div class={cx(row, css({ gap: '2', color: 'fg.muted' }))}>
 						{#if selectedType === 'datasource'}
 							<Database size={16} />
 						{:else}
@@ -200,17 +374,32 @@
 						{/if}
 					</div>
 				{/if}
-				<div class="min-w-0 flex-1">
-					<div class="text-xs uppercase tracking-wide text-fg-muted">
-						{selectedNode ? (selectedType === 'datasource' ? 'Datasource' : 'Analysis') : 'Details'}
+				<div class={css({ minWidth: '0', flex: '1' })}>
+					<div
+						class={css({
+							fontSize: 'xs',
+							textTransform: 'uppercase',
+							letterSpacing: 'wide',
+							color: 'fg.muted'
+						})}
+					>
+						{selectedNode ? kindLabel[selectedNode.node_kind] : 'Details'}
 					</div>
-					<div class="truncate text-sm font-semibold text-fg-primary">
+					<div
+						class={css({
+							textOverflow: 'ellipsis',
+							overflow: 'hidden',
+							whiteSpace: 'nowrap',
+							fontSize: 'sm',
+							fontWeight: 'semibold'
+						})}
+					>
 						{selectedNode ? selectedNode.name : 'Select a node'}
 					</div>
 				</div>
 				{#if selectedNode}
 					<button
-						class="btn-ghost btn-sm p-1"
+						class={cx(button({ variant: 'ghost', size: 'sm' }), css({ padding: '1' }))}
 						onclick={closePanel}
 						title="Close panel"
 						aria-label="Close panel"
@@ -220,48 +409,112 @@
 				{/if}
 			</div>
 
-			<div class="flex-1 overflow-y-auto p-4">
+			<div class={css({ flex: '1', overflowY: 'auto', padding: '4' })}>
 				{#if selectedNode}
-					<div class="mb-4 space-y-2">
+					<div
+						class={css({ marginBottom: '4', display: 'flex', flexDirection: 'column', gap: '2' })}
+					>
+						<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+							<span class={muted}>Kind</span>
+							<span
+								class={chip({ tone: selectedNode.node_kind === 'internal' ? 'neutral' : 'accent' })}
+							>
+								{kindLabel[selectedNode.node_kind]}
+							</span>
+						</div>
 						{#if selectedNode.source_type}
-							<div class="flex items-center justify-between text-sm">
-								<span class="text-fg-muted">Source</span>
-								<span class="text-fg-primary">{selectedNode.source_type}</span>
+							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+								<span class={muted}>Source</span>
+								<span>{selectedNode.source_type}</span>
 							</div>
 						{/if}
 						{#if selectedNode.status}
-							<div class="flex items-center justify-between text-sm">
-								<span class="text-fg-muted">Status</span>
-								<span class="text-fg-primary">{selectedNode.status}</span>
+							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+								<span class={muted}>Status</span>
+								<span>{selectedNode.status}</span>
 							</div>
 						{/if}
-						<div class="flex items-center justify-between text-sm">
-							<span class="text-fg-muted">ID</span>
-							<span class="truncate pl-4 text-xs text-fg-tertiary">{selectedRawId}</span>
+						{#if selectedNode.branch}
+							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+								<span class={muted}>Branch</span>
+								<div class={cx(row, css({ gap: '1' }))}>
+									<GitBranch size={12} />
+									<span>{selectedNode.branch}</span>
+								</div>
+							</div>
+						{/if}
+						<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
+							<span class={muted}>ID</span>
+							<span
+								class={css({
+									textOverflow: 'ellipsis',
+									overflow: 'hidden',
+									whiteSpace: 'nowrap',
+									paddingLeft: '4',
+									fontSize: 'xs',
+									color: 'fg.tertiary'
+								})}
+							>
+								{selectedRawId}
+							</span>
 						</div>
 					</div>
 
 					{#if selectedType === 'datasource' && selectedRawId}
-						<div class="border-t border-tertiary pt-4">
-							<h3 class="mb-3 text-sm font-semibold text-fg-primary">Schedules</h3>
+						<div
+							class={cx(
+								divider,
+								css({
+									paddingTop: '4'
+								})
+							)}
+						>
+							<h3
+								class={css({
+									marginBottom: '3',
+									fontSize: 'sm',
+									fontWeight: 'semibold'
+								})}
+							>
+								Schedules
+							</h3>
 							<ScheduleManager datasourceId={selectedRawId} compact />
 						</div>
 					{/if}
 				{:else}
-					<p class="text-sm text-fg-tertiary">Click a node to view details and schedules.</p>
+					<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+						Click a node to view details and schedules.
+					</p>
 				{/if}
 			</div>
 		</aside>
 
-		<div class="lineage-canvas">
+		<div
+			class={css({
+				gridColumn: '2',
+				gridRow: '2',
+				minHeight: '0',
+				minWidth: '0',
+				overflow: 'hidden',
+				position: 'relative'
+			})}
+		>
 			{#if query.isLoading}
-				<div class="flex h-full items-center justify-center gap-2 text-fg-tertiary">
-					<Loader size={16} class="spin" />
+				<div
+					class={cx(
+						row,
+						css({ height: '100%', justifyContent: 'center', gap: '2', color: 'fg.tertiary' })
+					)}
+				>
+					<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
 					Loading lineage...
 				</div>
 			{:else if query.isError}
-				<div class="flex h-full items-center justify-center">
-					<p class="text-sm text-error-fg">Failed to load lineage.</p>
+				<div
+					data-testid="lineage-load-error"
+					class={cx(row, css({ height: '100%', justifyContent: 'center' }))}
+				>
+					<p class={css({ fontSize: 'sm', color: 'fg.error' })}>Failed to load lineage.</p>
 				</div>
 			{:else}
 				<LineageGraph
@@ -275,6 +528,72 @@
 					}}
 					panelOffset={panelWidth}
 				/>
+
+				<!-- Legend -->
+				<div
+					class={css({
+						position: 'absolute',
+						bottom: '3',
+						right: '3',
+						display: 'flex',
+						gap: '3',
+						paddingX: '3',
+						paddingY: '2',
+						background: 'bg.primary',
+						borderWidth: '1',
+						fontSize: 'xs',
+						color: 'fg.muted',
+						zIndex: '5'
+					})}
+				>
+					<div class={cx(row, css({ gap: '1.5' }))}>
+						<div
+							class={css({
+								width: '3',
+								height: '3',
+								borderLeftWidth: '3',
+								borderLeftColor: 'accent.primary'
+							})}
+						></div>
+						<span>Source</span>
+					</div>
+					<div class={cx(row, css({ gap: '1.5' }))}>
+						<div
+							class={css({
+								width: '3',
+								height: '3',
+								borderLeftWidth: '3',
+								borderLeftColor: 'fg.success'
+							})}
+						></div>
+						<span>Output</span>
+					</div>
+					<div class={cx(row, css({ gap: '1.5' }))}>
+						<div
+							class={css({
+								width: '3',
+								height: '3',
+								borderLeftWidth: '3',
+								borderLeftColor: 'fg.warning'
+							})}
+						></div>
+						<span>Analysis</span>
+					</div>
+					{#if internals}
+						<div class={cx(row, css({ gap: '1.5' }))}>
+							<div
+								class={css({
+									width: '3',
+									height: '3',
+									borderWidth: '1',
+									borderStyle: 'dashed',
+									borderColor: 'fg.faint'
+								})}
+							></div>
+							<span>Internal</span>
+						</div>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	</div>

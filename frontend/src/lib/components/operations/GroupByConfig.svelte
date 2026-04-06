@@ -2,6 +2,8 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import { css, stepConfig, cx, divider, label, input } from '$lib/styles/panda';
 
 	const uid = $props.id();
 
@@ -12,7 +14,7 @@
 	}
 
 	interface GroupByConfigData {
-		groupBy: string[];
+		group_by: string[];
 		aggregations: Aggregation[];
 	}
 
@@ -21,7 +23,7 @@
 		config?: GroupByConfigData;
 	}
 
-	let { schema, config = $bindable({ groupBy: [], aggregations: [] }) }: Props = $props();
+	let { schema, config = $bindable({ group_by: [], aggregations: [] }) }: Props = $props();
 
 	const safeAggregations = $derived(config.aggregations ?? []);
 
@@ -71,23 +73,51 @@
 	}
 </script>
 
-<div class="config-panel" role="region" aria-label="Group by configuration">
-	<div class="form-section" role="group" aria-labelledby="{uid}-columns-heading">
-		<h4 id="{uid}-columns-heading">Group By Columns</h4>
+<div class={stepConfig()} role="region" aria-label="Group by configuration">
+	<div
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
+
+			border: 'none'
+		})}
+		role="group"
+		aria-labelledby="{uid}-columns-heading"
+	>
+		<span id="{uid}-columns-heading"><SectionHeader>Group By Columns</SectionHeader></span>
 		<MultiSelectColumnDropdown
 			{schema}
-			value={config.groupBy ?? []}
-			onChange={(val) => (config.groupBy = val)}
+			value={config.group_by ?? []}
+			onChange={(val) => (config.group_by = val)}
 			showSelectAll={false}
 			placeholder="Select group by columns..."
 		/>
 	</div>
 
-	<div class="form-section" role="group" aria-labelledby="{uid}-agg-heading">
-		<h4 id="{uid}-agg-heading">Aggregations</h4>
+	<div
+		class={cx(
+			divider,
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				backgroundColor: 'transparent',
 
-		<div class="flex flex-wrap gap-2 mb-5" role="group" aria-label="Add aggregation form">
-			<div class="flex-2 min-w-40">
+				border: 'none',
+				paddingTop: '5'
+			})
+		)}
+		role="group"
+		aria-labelledby="{uid}-agg-heading"
+	>
+		<span id="{uid}-agg-heading"><SectionHeader>Aggregations</SectionHeader></span>
+
+		<div
+			class={css({ display: 'flex', flexWrap: 'wrap', gap: '2', marginBottom: '5' })}
+			role="group"
+			aria-label="Add aggregation form"
+		>
+			<div class={css({ flex: '2', minWidth: 'inputSm' })}>
 				<ColumnDropdown
 					{schema}
 					value={newAggregation.column}
@@ -96,11 +126,13 @@
 				/>
 			</div>
 
-			<label for="{uid}-agg-function" class="sr-only">Aggregation function</label>
+			<label for="{uid}-agg-function" class={label({ variant: 'hidden' })}
+				>Aggregation function</label
+			>
 			<select
 				id="{uid}-agg-function"
 				data-testid="agg-function-select"
-				class="flex-1 min-w-30"
+				class={cx(input(), css({ flex: '1', minWidth: 'fieldMd' }))}
 				bind:value={newAggregation.function}
 			>
 				{#each aggregationFunctions as func (func)}
@@ -111,7 +143,7 @@
 			<input
 				id="{uid}-agg-alias"
 				type="text"
-				class="flex-2 min-w-40"
+				class={cx(input(), css({ flex: '2', minWidth: 'inputSm' }))}
 				bind:value={newAggregation.alias}
 				placeholder="Alias (optional)"
 			/>
@@ -120,7 +152,20 @@
 				id="{uid}-agg-add"
 				data-testid="agg-add-button"
 				type="button"
-				class="px-4 py-2 border border-transparent cursor-pointer accent-btn hover:opacity-90 disabled:bg-muted disabled:text-fg-muted disabled:border-tertiary disabled:cursor-not-allowed"
+				class={css({
+					backgroundColor: 'accent.primary',
+					color: 'fg.inverse',
+					borderWidth: '1',
+					paddingX: '4',
+					paddingY: '2',
+					cursor: 'pointer',
+					_hover: { opacity: '0.9' },
+					_disabled: {
+						backgroundColor: 'bg.muted',
+						color: 'fg.muted',
+						cursor: 'not-allowed'
+					}
+				})}
 				onclick={addAggregation}
 				disabled={!newAggregation.column}
 				aria-label="Add aggregation"
@@ -132,20 +177,37 @@
 		{#if safeAggregations.length > 0}
 			<div
 				id="aggregations-list"
-				class="flex flex-col gap-3"
+				class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}
 				role="list"
 				aria-label="Configured aggregations"
 			>
 				{#each safeAggregations as agg, i (i)}
-					<div class="flex justify-between items-center p-3 item-row" role="listitem">
-						<span class="text-sm font-mono text-fg-primary">
+					<div
+						class={css({
+							backgroundColor: 'transparent',
+							border: 'none',
+							borderBottomWidth: '1',
+							display: 'flex',
+							justifyContent: 'space-between',
+							alignItems: 'center',
+							padding: '3',
+							_last: { borderBottom: 'none' }
+						})}
+						role="listitem"
+					>
+						<span class={css({ fontSize: 'sm', fontFamily: 'mono' })}>
 							{agg.function}({agg.column}) as {agg.alias}
 						</span>
 						<button
 							id={`agg-btn-remove-${i}`}
 							data-testid={`agg-remove-button-${i}`}
 							type="button"
-							class="remove-btn remove-pill px-3 py-1 text-sm cursor-pointer"
+							class={css({
+								backgroundColor: 'bg.error',
+								color: 'fg.error',
+								borderWidth: '1',
+								borderColor: 'border.error'
+							})}
 							onclick={() => removeAggregation(i)}
 							aria-label={`Remove aggregation ${agg.alias}`}
 						>

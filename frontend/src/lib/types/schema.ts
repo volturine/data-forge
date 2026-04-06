@@ -40,12 +40,12 @@ export function unionByName(schemas: Schema[], _allowMissing: boolean = true): S
 			if (columnMap.has(col.name)) {
 				const existing = columnMap.get(col.name)!;
 				existing.nullable = existing.nullable || col.nullable;
-			} else {
-				columnMap.set(col.name, {
-					dtype: col.dtype,
-					nullable: col.nullable
-				});
+				continue;
 			}
+			columnMap.set(col.name, {
+				dtype: col.dtype,
+				nullable: col.nullable
+			});
 		}
 	}
 
@@ -176,9 +176,9 @@ export function outerJoinSchema(
 				nullable: lcol.nullable || rcol.nullable
 			});
 			rightSeen.add(rcol.name);
-		} else {
-			result.push({ ...lcol });
+			continue;
 		}
+		result.push({ ...lcol });
 	}
 
 	if (right) {

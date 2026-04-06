@@ -4,6 +4,7 @@
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { css, cx, spinner, row, muted } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -43,27 +44,27 @@
 	let snapshotList = $state<
 		Array<{ id: string; timestamp: number; operation?: string | null; is_current?: boolean }>
 	>([]);
-	let selectedSnapshotId = $state<string | null>(null);
-	let selectedSnapshotLabel = $state<string | null>(null);
+	let timeTravelId = $state<string | null>(null);
+	let timeTravelLabel = $state<string | null>(null);
 	let missingSnapshotId = $state<string | null>(null);
-	let calendarDays = $state<Array<{ key: string; day: number; count: number; inMonth: boolean }>>(
-		[]
-	);
+	const calendarDays = $derived.by(() => computeCalendarDays(snapshotMonth, filteredSnapshotList));
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
 	let buildRuns = $state<EngineRun[]>([]);
-	const runSnapshotMap = $derived.by(() =>
-		buildSnapshotMap(buildRuns, toSnapshotRefs(snapshotList))
-	);
+	const runSnapshotMap = $derived(buildSnapshotMap(buildRuns, toSnapshotRefs(snapshotList)));
 	const filteredSnapshotList = $derived.by(() => {
 		if (!showBuildPreviews) return snapshotList;
+		if (buildRuns.length === 0) return snapshotList;
+		if (runSnapshotMap.size === 0) return snapshotList;
 		const mapped = new SvelteMap<string, boolean>();
 		for (const snap of runSnapshotMap.values()) {
 			if (!snap) continue;
 			mapped.set(snap, true);
 		}
-		return snapshotList.filter((snap) => mapped.has(snap.id));
+		const result = snapshotList.filter((snap) => mapped.has(snap.id));
+		if (result.length === 0) return snapshotList;
+		return result;
 	});
 	const filteredSnapshots = $derived(
 		selectedDay
@@ -71,7 +72,15 @@
 			: []
 	);
 
-	// Subscription: $derived can't sync state from config.
+	const currentSnapshot = $derived(snapshotList.find((snap) => snap.is_current) ?? null);
+	const isLatest = $derived.by(() => {
+		if (!timeTravelId) return true;
+		if (snapshotList.length === 0) return true;
+		if (currentSnapshot && timeTravelId === currentSnapshot.id) return true;
+		return false;
+	});
+
+	// Subscription: $derived can't sync state from config — config is external and may change at any time.
 	$effect(() => {
 		const ui = (datasourceConfig.time_travel_ui as Record<string, unknown>) ?? {};
 		if (persistOpen && !hasOpened) {
@@ -85,34 +94,25 @@
 		if (nextMonth !== undefined) snapshotMonth = nextMonth;
 		const nextDay = ui.day as string | undefined;
 		if (nextDay !== undefined) selectedDay = nextDay;
-		const configSnapshot = datasourceConfig.snapshot_id as string | null | undefined;
-		if (configSnapshot !== undefined) {
-			selectedSnapshotId = configSnapshot ?? null;
+		const configTravelId = datasourceConfig.time_travel_snapshot_id as string | null | undefined;
+		if (configTravelId !== undefined) {
+			timeTravelId = configTravelId ?? null;
 		}
-		const ts = datasourceConfig.snapshot_timestamp_ms as number | null;
-		if (selectedSnapshotId && ts) {
-			selectedSnapshotLabel = formatSnapshotLabel(ts);
-		} else {
-			selectedSnapshotLabel = null;
-		}
-		missingSnapshotId = selectedSnapshotId;
-		if (snapshotsOpen && snapshotMonth) {
-			buildCalendar(snapshotMonth);
-		}
+		const ts = datasourceConfig.time_travel_snapshot_timestamp_ms as number | null;
+		timeTravelLabel = timeTravelId && ts ? formatSnapshotLabel(ts) : null;
 	});
 
 	let lastDatasourceId = $state<string | null>(null);
-	// Subscription: $derived can't reset snapshot state.
+	// Subscription: $derived can't reset snapshot state on datasource switch.
 	$effect(() => {
 		if (datasourceId === lastDatasourceId) return;
 		lastDatasourceId = datasourceId;
 		snapshotList = [];
 		snapshotsError = null;
 		snapshotsLoading = false;
-		calendarDays = [];
 		selectedDay = '';
-		selectedSnapshotId = null;
-		selectedSnapshotLabel = null;
+		timeTravelId = null;
+		timeTravelLabel = null;
 		snapshotMonth = '';
 		snapshotsOpen = false;
 		hasOpened = false;
@@ -156,8 +156,12 @@
 			}))
 			.sort((a, b) => b.timestamp - a.timestamp);
 		snapshotList = list;
-		if (selectedSnapshotId && list.some((snap) => snap.id === selectedSnapshotId)) {
+		if (!timeTravelId) {
 			missingSnapshotId = null;
+		} else if (list.some((snap) => snap.id === timeTravelId)) {
+			missingSnapshotId = null;
+		} else {
+			missingSnapshotId = timeTravelId;
 		}
 		const monthSource = showBuildPreviews ? filteredSnapshotList : list;
 		const monthOptions = Array.from(
@@ -175,11 +179,11 @@
 		}
 	}
 
-	function buildCalendar(monthKey: string) {
-		if (!monthKey) {
-			calendarDays = [];
-			return;
-		}
+	function computeCalendarDays(
+		monthKey: string,
+		snapshots: Array<{ timestamp: number }>
+	): Array<{ key: string; day: number; count: number; inMonth: boolean }> {
+		if (!monthKey) return [];
 		const [yearStr, monthStr] = monthKey.split('-');
 		const year = Number(yearStr);
 		const month = Number(monthStr) - 1;
@@ -193,7 +197,7 @@
 		}
 
 		const counts = new SvelteMap<string, number>();
-		for (const snap of filteredSnapshotList) {
+		for (const snap of snapshots) {
 			const key = formatSnapshotKey(snap.timestamp);
 			counts.set(key, (counts.get(key) ?? 0) + 1);
 		}
@@ -203,7 +207,7 @@
 			days.push({ key, day, count, inMonth: true });
 		}
 
-		calendarDays = days;
+		return days;
 	}
 
 	function updateUi(updates: { open?: boolean; month?: string; day?: string }) {
@@ -219,10 +223,9 @@
 		snapshotMonth = monthKey;
 		selectedDay = '';
 		updateUi({ month: monthKey, day: '' });
-		buildCalendar(monthKey);
 	}
 
-	// Subscription: $derived can't clear day selection.
+	// Subscription: $derived can't clear day selection when filtered list changes.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		if (!filteredSnapshotList.length) return;
@@ -235,21 +238,11 @@
 		updateUi({ day: '' });
 	});
 
-	// Subscription: $derived can't rebuild calendar.
-	$effect(() => {
-		if (!snapshotsOpen) return;
-		if (!snapshotMonth) return;
-		buildCalendar(snapshotMonth);
-	});
-
-	// Subscription: $derived can't select month on open.
+	// Subscription: $derived can't select month on open when snapshot list changes.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		const source = showBuildPreviews ? filteredSnapshotList : snapshotList;
-		if (!source.length) {
-			calendarDays = [];
-			return;
-		}
+		if (!source.length) return;
 		const monthOptions = Array.from(
 			new Set(source.map((snap) => formatSnapshotKey(snap.timestamp).slice(0, 7)))
 		).sort((a, b) => (a > b ? -1 : 1));
@@ -315,18 +308,18 @@
 	}
 
 	function setSnapshot(snapshotId: string | null, timestampMs?: number) {
-		selectedSnapshotId = snapshotId;
+		timeTravelId = snapshotId;
 		const nextConfig = { ...datasourceConfig };
 		if (snapshotId === null) {
-			delete nextConfig.snapshot_id;
-			delete nextConfig.snapshot_timestamp_ms;
-			selectedSnapshotLabel = null;
+			delete nextConfig.time_travel_snapshot_id;
+			delete nextConfig.time_travel_snapshot_timestamp_ms;
+			timeTravelLabel = null;
 			missingSnapshotId = null;
 		} else {
-			nextConfig.snapshot_id = snapshotId;
-			if (timestampMs) {
-				nextConfig.snapshot_timestamp_ms = timestampMs;
-				selectedSnapshotLabel = formatSnapshotLabel(timestampMs);
+			nextConfig.time_travel_snapshot_id = snapshotId;
+			if (timestampMs != null) {
+				nextConfig.time_travel_snapshot_timestamp_ms = timestampMs;
+				timeTravelLabel = formatSnapshotLabel(timestampMs);
 			}
 			missingSnapshotId = null;
 		}
@@ -383,9 +376,6 @@
 		if (!snapshotsLoading) {
 			loadSnapshots();
 		}
-		if (snapshotMonth) {
-			buildCalendar(snapshotMonth);
-		}
 		if (showBuildPreviews && !buildRuns.length) {
 			loadBuildRuns();
 		}
@@ -404,7 +394,7 @@
 		};
 	}
 
-	// DOM: $derived can't handle outside click.
+	// DOM: $derived can't handle outside click listener lifecycle.
 	$effect(() => {
 		if (!snapshotsOpen) return;
 		const handleOutside = (event: MouseEvent) => {
@@ -443,7 +433,7 @@
 					updateUi({ open: true });
 				}
 				loadSnapshots();
-				if (selectedSnapshotId === snapshotId) {
+				if (timeTravelId === snapshotId) {
 					setSnapshot(null);
 				}
 			},
@@ -457,30 +447,76 @@
 
 <div>
 	<button
-		class="engine-header flex w-full cursor-pointer items-center justify-between border border-tertiary bg-secondary p-2 px-3 hover:bg-tertiary"
+		class={cx(
+			'engine-header',
+			css({
+				display: 'flex',
+				width: '100%',
+				cursor: 'pointer',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				borderWidth: '1',
+				backgroundColor: 'bg.secondary',
+				padding: '2',
+				paddingX: '3',
+				_hover: { backgroundColor: 'bg.tertiary' }
+			})
+		)}
 		onclick={toggleSnapshots}
 		type="button"
 		bind:this={triggerRef}
 	>
-		<div class="flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted">
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				gap: '2',
+				fontSize: 'xs',
+				textTransform: 'uppercase',
+				letterSpacing: 'wide',
+				color: 'fg.muted'
+			})}
+		>
 			<Clock size={12} />
 			<span>{label}</span>
 		</div>
-		<div class="flex items-center gap-2">
-			{#if selectedSnapshotId}
+		<div class={cx(row, css({ gap: '2' }))}>
+			{#if isLatest}
 				<span
-					class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-muted"
-				>
-					{selectedSnapshotId}
-				</span>
-			{:else}
-				<span
-					class="border border-accent-primary bg-accent-bg px-1.5 py-0.5 text-[10px] uppercase text-accent-primary"
+					class={css({
+						borderWidth: '1',
+						borderColor: 'border.accent',
+						backgroundColor: 'bg.accent',
+						paddingX: '1.5',
+						paddingY: '0.5',
+						fontSize: '2xs',
+						textTransform: 'uppercase',
+						color: 'accent.primary'
+					})}
 				>
 					Latest
 				</span>
+			{:else}
+				<span
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						paddingX: '1.5',
+						paddingY: '0.5',
+						fontSize: '2xs',
+						textTransform: 'uppercase',
+						color: 'fg.muted',
+						maxWidth: '120px',
+						overflow: 'hidden',
+						textOverflow: 'ellipsis',
+						whiteSpace: 'nowrap'
+					})}
+					title={timeTravelId}
+				>
+					{timeTravelId}
+				</span>
 			{/if}
-			<span class="chevron flex items-center text-fg-muted" class:expanded={snapshotsOpen}>
+			<span class={cx(muted, row, snapshotsOpen && css({ transform: 'rotate(180deg)' }))}>
 				<ChevronDown size={12} />
 			</span>
 		</div>
@@ -488,24 +524,56 @@
 
 	{#if snapshotsOpen}
 		<div
-			class="snapshot-picker__popover fixed z-overlay border border-tertiary bg-primary p-2 shadow flex flex-col gap-2"
+			class={css({
+				left: 'var(--popover-left)',
+				top: 'var(--popover-top)',
+				width: 'var(--popover-width)',
+				position: 'fixed',
+				zIndex: 'overlay',
+				borderWidth: '1',
+				backgroundColor: 'bg.primary',
+				padding: '2',
+				boxShadow: 'sm',
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '2'
+			})}
 			bind:this={popoverRef}
 			use:portal={popoverRect}
 		>
-			<div class="flex items-center justify-between border border-tertiary bg-secondary px-2 py-1">
-				<div class="text-xs text-fg-muted text-left">
-					{#if selectedSnapshotId}
-						Current: #{selectedSnapshotId}
-						{#if selectedSnapshotLabel}
-							· {selectedSnapshotLabel}
-						{/if}
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					borderWidth: '1',
+					backgroundColor: 'bg.secondary',
+					paddingX: '2',
+					paddingY: '1'
+				})}
+			>
+				<div class={css({ fontSize: 'xs', color: 'fg.muted', textAlign: 'left' })}>
+					{#if isLatest}
+						Selected: Latest{#if currentSnapshot}
+							· #{currentSnapshot.id}{/if}
 					{:else}
-						Current: Latest
+						Selected: #{timeTravelId}
+						{#if timeTravelLabel}
+							· {timeTravelLabel}
+						{/if}
 					{/if}
 				</div>
-				{#if selectedSnapshotId}
+				{#if !isLatest}
 					<button
-						class="border border-tertiary bg-primary px-2 py-1 text-[10px] uppercase text-fg-secondary"
+						class={css({
+							borderWidth: '1',
+							backgroundColor: 'bg.primary',
+							paddingX: '2',
+							paddingY: '1',
+							fontSize: '2xs',
+							textTransform: 'uppercase',
+							color: 'fg.secondary'
+						})}
 						onclick={() => setSnapshot(null)}
 						type="button"
 					>
@@ -514,10 +582,27 @@
 				{/if}
 			</div>
 			{#if missingSnapshotId}
-				<div class="border border-warning bg-warning-bg px-2 py-1 text-[10px] text-warning-fg">
+				<div
+					class={css({
+						borderWidth: '1',
+						borderColor: 'border.warning',
+						backgroundColor: 'bg.warning',
+						paddingX: '2',
+						paddingY: '1',
+						fontSize: '2xs',
+						color: 'fg.warning'
+					})}
+				>
 					Selected snapshot #{missingSnapshotId} no longer exists.
 					<button
-						class="ml-2 border border-warning px-1.5 py-0.5"
+						class={css({
+							marginLeft: '2',
+							borderWidth: '1',
+							borderColor: 'border.warning',
+							backgroundColor: 'bg.primary',
+							paddingX: '1.5',
+							paddingY: '0.5'
+						})}
 						onclick={() => setSnapshot(null)}
 						type="button"
 					>
@@ -527,32 +612,58 @@
 			{/if}
 
 			{#if deleteError}
-				<div class="text-xs text-error-fg">{deleteError}</div>
+				<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{deleteError}</div>
 			{/if}
 
 			{#if snapshotsLoading}
-				<div class="flex items-center gap-2 text-xs text-fg-tertiary">
-					<div class="spinner-sm"></div>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						fontSize: 'xs',
+						color: 'fg.tertiary'
+					})}
+				>
+					<div class={spinner({ size: 'sm' })}></div>
 					Loading snapshots...
 				</div>
 			{:else if snapshotsError}
-				<div class="text-xs text-error-fg">{snapshotsError}</div>
+				<div class={css({ fontSize: 'xs', color: 'fg.error' })}>{snapshotsError}</div>
 			{:else if snapshotList.length === 0}
-				<div class="text-xs text-fg-tertiary">No snapshots found.</div>
+				<div class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>No snapshots found.</div>
 			{:else}
-				<div class="flex gap-2">
-					<div class="flex flex-1 flex-col gap-2">
-						<div class="flex items-center gap-2">
+				<div class={css({ display: 'flex', gap: '2' })}>
+					<div class={css({ display: 'flex', flex: '1', flexDirection: 'column', gap: '2' })}>
+						<div class={cx(row, css({ gap: '2' }))}>
 							<button
-								class="border border-tertiary bg-secondary px-2 py-1 text-xs"
+								class={css({
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '2',
+									paddingY: '1',
+									fontSize: 'xs'
+								})}
 								onclick={() => shiftMonth(-1)}
 								type="button"
 							>
 								←
 							</button>
-							<span class="text-xs font-mono text-fg-secondary">{snapshotMonth}</span>
+							<span
+								class={css({
+									fontSize: 'xs',
+									fontFamily: 'mono',
+									color: 'fg.secondary'
+								})}>{snapshotMonth}</span
+							>
 							<button
-								class="border border-tertiary bg-secondary px-2 py-1 text-xs"
+								class={css({
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '2',
+									paddingY: '1',
+									fontSize: 'xs'
+								})}
 								onclick={() => shiftMonth(1)}
 								type="button"
 							>
@@ -560,50 +671,120 @@
 							</button>
 						</div>
 
-						<div class="grid grid-cols-7 gap-1 border border-tertiary p-2">
+						<div
+							class={css({
+								display: 'grid',
+								gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+								gap: '1',
+								borderWidth: '1',
+								padding: '2'
+							})}
+						>
 							{#each ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'] as day (day)}
-								<div class="text-[10px] text-fg-tertiary text-center">{day}</div>
+								<div class={css({ fontSize: '2xs', color: 'fg.tertiary', textAlign: 'center' })}>
+									{day}
+								</div>
 							{/each}
 							{#each calendarDays as day (day.key)}
 								{#if day.inMonth}
 									<button
-										class="relative h-9 border border-tertiary text-xs hover:bg-tertiary"
-										class:bg-tertiary={selectedDay === day.key}
-										onclick={() => selectDay(day.key)}
+										class={cx(
+											css({
+												position: 'relative',
+												height: 'rowXl',
+												borderWidth: '1',
+												backgroundColor: 'transparent',
+												fontSize: 'xs'
+											}),
+											day.count > 0
+												? css({
+														backgroundColor: 'bg.muted',
+														_hover: { backgroundColor: 'bg.hover' }
+													})
+												: css({ cursor: 'default', opacity: '0.4' }),
+											selectedDay === day.key ? css({ backgroundColor: 'bg.tertiary' }) : ''
+										)}
+										onclick={() => day.count > 0 && selectDay(day.key)}
 										type="button"
 									>
-										<span>{day.day}</span>
+										<span
+											class={day.count > 0
+												? css({ color: 'fg.secondary' })
+												: css({ color: 'fg.tertiary' })}>{day.day}</span
+										>
 										{#if day.count > 0}
 											<span
-												class="absolute right-1 top-1 bg-accent-bg px-1 text-[9px] text-accent-primary"
+												class={css({
+													position: 'absolute',
+													right: '1',
+													top: '1',
+													backgroundColor: 'bg.accent',
+													paddingX: '1',
+													fontSize: '2xs',
+													color: 'accent.primary'
+												})}
 											>
 												{day.count}
 											</span>
 										{/if}
 									</button>
 								{:else}
-									<div class="h-9"></div>
+									<div class={css({ height: 'rowXl' })}></div>
 								{/if}
 							{/each}
 						</div>
 					</div>
-					<div class="w-50 max-h-56 overflow-y-auto overflow-x-hidden border border-tertiary">
+					<div
+						class={css({
+							width: 'listSm',
+							maxHeight: 'previewMd',
+							overflowY: 'auto',
+							overflowX: 'hidden',
+							borderWidth: '1'
+						})}
+					>
 						{#if selectedDay}
 							{#each filteredSnapshots as snap (snap.id)}
 								<div
-									class="flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-xs hover:bg-tertiary"
-									class:bg-tertiary={selectedSnapshotId === snap.id ||
-										(!selectedSnapshotId && snap.is_current)}
+									class={cx(
+										css({
+											display: 'flex',
+											width: '100%',
+											alignItems: 'center',
+											justifyContent: 'space-between',
+											gap: '2',
+											paddingX: '2',
+											paddingY: '1',
+											textAlign: 'left',
+											fontSize: 'xs',
+											_hover: { backgroundColor: 'bg.tertiary' }
+										}),
+										timeTravelId === snap.id || (!timeTravelId && snap.is_current)
+											? css({ backgroundColor: 'bg.tertiary' })
+											: ''
+									)}
 								>
 									<button
-										class="flex flex-1 items-center justify-start gap-2 bg-transparent p-0 text-left"
+										class={css({
+											display: 'flex',
+											flex: '1',
+											alignItems: 'center',
+											justifyContent: 'flex-start',
+											gap: '2',
+											backgroundColor: 'transparent',
+											padding: '0',
+											textAlign: 'left'
+										})}
 										onclick={() => setSnapshot(snap.id, snap.timestamp)}
 										type="button"
 									>
 										<span
-											class="font-mono"
-											class:text-fg-secondary={selectedSnapshotId !== snap.id}
-											class:text-fg-primary={selectedSnapshotId === snap.id}
+											class={cx(
+												css({ fontFamily: 'mono' }),
+												timeTravelId === snap.id
+													? css({ color: 'fg.primary' })
+													: css({ color: 'fg.secondary' })
+											)}
 										>
 											{formatSnapshotTime(snap.timestamp)}
 										</span>
@@ -611,7 +792,15 @@
 									{#if showDelete && !snap.is_current}
 										{#if deleteConfirmId === snap.id}
 											<button
-												class="border border-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-secondary"
+												class={css({
+													borderWidth: '1',
+													backgroundColor: 'bg.primary',
+													paddingX: '1.5',
+													paddingY: '0.5',
+													fontSize: '2xs',
+													textTransform: 'uppercase',
+													color: 'fg.secondary'
+												})}
 												onclick={() => deleteSnapshot(snap.id)}
 												disabled={deleteLoading}
 												type="button"
@@ -620,7 +809,16 @@
 												{:else}Confirm{/if}
 											</button>
 											<button
-												class="ml-1 border border-tertiary px-1.5 py-0.5 text-[10px] uppercase text-fg-secondary"
+												class={css({
+													marginLeft: '1',
+													borderWidth: '1',
+													backgroundColor: 'bg.primary',
+													paddingX: '1.5',
+													paddingY: '0.5',
+													fontSize: '2xs',
+													textTransform: 'uppercase',
+													color: 'fg.secondary'
+												})}
 												onclick={() => (deleteConfirmId = null)}
 												type="button"
 											>
@@ -628,7 +826,13 @@
 											</button>
 										{:else}
 											<button
-												class="border border-tertiary p-1 text-fg-tertiary hover:text-error-fg"
+												class={css({
+													borderWidth: '1',
+													backgroundColor: 'bg.primary',
+													padding: '1',
+													color: 'fg.tertiary',
+													_hover: { color: 'fg.error' }
+												})}
 												onclick={() => (deleteConfirmId = snap.id)}
 												type="button"
 												aria-label="Delete snapshot"
@@ -640,7 +844,9 @@
 								</div>
 							{/each}
 						{:else}
-							<div class="p-2 text-xs text-fg-tertiary">Select a day to view builds.</div>
+							<div class={css({ padding: '2', fontSize: 'xs', color: 'fg.tertiary' })}>
+								Select a day to view builds.
+							</div>
 						{/if}
 					</div>
 				</div>

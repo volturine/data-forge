@@ -1,26 +1,43 @@
 """Select columns operation."""
 
+from enum import StrEnum
+
 import polars as pl
+from pydantic import Field
 
 from modules.compute.core.base import OperationHandler, OperationParams
+from modules.compute.operations.type_casting import require_polars_type
+
+
+class PolarsCastType(StrEnum):
+    INT64 = 'Int64'
+    FLOAT64 = 'Float64'
+    BOOLEAN = 'Boolean'
+    STRING = 'String'
+    UTF8 = 'Utf8'
+    DATE = 'Date'
+    DATETIME = 'Datetime'
 
 
 class SelectParams(OperationParams):
     columns: list[str]
+    cast_map: dict[str, PolarsCastType] = Field(default_factory=dict)
 
 
 class SelectHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'select'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = SelectParams.model_validate(params)
-        return lf.select(validated.columns)
+        missing = sorted(set(validated.cast_map) - set(validated.columns))
+        if missing:
+            cols = ', '.join(missing)
+            raise ValueError(f'cast_map keys must reference selected columns. Unknown keys: {cols}')
+        selected = lf.select(validated.columns)
+        if not validated.cast_map:
+            return selected
+        exprs = [pl.col(col).cast(require_polars_type(dtype.value)).alias(col) for col, dtype in validated.cast_map.items()]
+        return selected.with_columns(exprs)

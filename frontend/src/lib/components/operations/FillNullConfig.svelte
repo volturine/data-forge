@@ -2,6 +2,9 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import { css, cx, stepConfig, divider, label, input } from '$lib/styles/panda';
 
 	interface FillNullConfigData {
 		strategy: string;
@@ -32,15 +35,27 @@
 	const currentStrategy = $derived(strategies.find((s) => s.value === config.strategy));
 </script>
 
-<div class="config-panel" role="region" aria-label="Fill null configuration">
-	<div class="form-section" role="group" aria-labelledby="fill-strategy-heading">
-		<h4 id="fill-strategy-heading">Fill Strategy</h4>
-		<label for="fill-select-strategy" class="sr-only">Select fill strategy</label>
+<div class={stepConfig()} role="region" aria-label="Fill null configuration">
+	<div
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
+
+			border: 'none'
+		})}
+		role="group"
+		aria-labelledby="fill-strategy-heading"
+	>
+		<span id="fill-strategy-heading"><SectionHeader>Fill Strategy</SectionHeader></span>
+		<label for="fill-select-strategy" class={label({ variant: 'hidden' })}
+			>Select fill strategy</label
+		>
 		<select
 			id="fill-select-strategy"
 			data-testid="fill-strategy-select"
 			bind:value={config.strategy}
-			class="mb-2 w-full"
+			class={cx(input(), css({ marginBottom: '2' }))}
 		>
 			{#each strategies as strategy (strategy.value)}
 				<option value={strategy.value}>{strategy.label}</option>
@@ -49,15 +64,33 @@
 	</div>
 
 	{#if currentStrategy?.needsValue}
-		<div class="form-section" role="group" aria-labelledby="fill-value-heading">
-			<h4 id="fill-value-heading">Fill Value</h4>
-			<label for="fill-input-value" class="sr-only">Fill value</label>
+		<div
+			class={cx(
+				css({
+					marginBottom: '0',
+					paddingBottom: '5',
+					backgroundColor: 'transparent',
+
+					border: 'none'
+				}),
+				cx(
+					divider,
+					css({
+						paddingTop: '5'
+					})
+				)
+			)}
+			role="group"
+			aria-labelledby="fill-value-heading"
+		>
+			<span id="fill-value-heading"><SectionHeader>Fill Value</SectionHeader></span>
+			<label for="fill-input-value" class={label({ variant: 'hidden' })}>Fill value</label>
 			<input
 				id="fill-value"
 				type="text"
 				bind:value={config.value}
 				placeholder="Enter value (e.g., 0, N/A)"
-				class="mb-2 w-full"
+				class={cx(input(), css({ marginBottom: '2' }))}
 			/>
 			<ColumnTypeDropdown
 				value={config.value_type ?? 'Utf8'}
@@ -67,8 +100,26 @@
 		</div>
 	{/if}
 
-	<div class="form-section" role="group" aria-labelledby="target-columns-heading">
-		<h4 id="target-columns-heading">Target Columns</h4>
+	<div
+		class={cx(
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				backgroundColor: 'transparent',
+
+				border: 'none'
+			}),
+			cx(
+				divider,
+				css({
+					paddingTop: '5'
+				})
+			)
+		)}
+		role="group"
+		aria-labelledby="target-columns-heading"
+	>
+		<span id="target-columns-heading"><SectionHeader>Target Columns</SectionHeader></span>
 		<MultiSelectColumnDropdown
 			{schema}
 			value={config.columns ?? []}
@@ -78,9 +129,7 @@
 		/>
 
 		{#if !config.columns || config.columns.length === 0}
-			<div id="fill-no-columns-info" class="info-box">
-				No columns selected - will apply to all columns
-			</div>
+			<Callout>No columns selected - will apply to all columns</Callout>
 		{/if}
 	</div>
 </div>

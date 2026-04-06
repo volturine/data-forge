@@ -1,6 +1,9 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import { css, cx, label, stepConfig, divider } from '$lib/styles/panda';
 
 	interface DeduplicateConfigData {
 		subset: string[] | null;
@@ -21,18 +24,33 @@
 	];
 </script>
 
-<div class="config-panel" role="region" aria-label="Deduplicate configuration">
-	<div class="form-section" role="radiogroup" aria-labelledby="keep-strategy-heading">
-		<h4 id="keep-strategy-heading">Keep Strategy</h4>
-		<div class="flex flex-col gap-1">
+<div class={stepConfig()} role="region" aria-label="Deduplicate configuration">
+	<div
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
+
+			border: 'none'
+		})}
+		role="radiogroup"
+		aria-labelledby="keep-strategy-heading"
+	>
+		<span id="keep-strategy-heading"><SectionHeader>Keep Strategy</SectionHeader></span>
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 			{#each keepStrategies as strategy (strategy.value)}
-				<label class="flex cursor-pointer items-center gap-3 py-2 hover:text-fg-primary">
+				<label
+					class={cx(
+						label({ variant: 'checkbox' }),
+						css({ paddingY: '2', _hover: { color: 'fg.primary' } })
+					)}
+				>
 					<input
 						type="radio"
 						name="keep-strategy"
 						bind:group={config.keep}
 						value={strategy.value}
-						class="mr-2 cursor-pointer"
+						class={css({ marginRight: '2', cursor: 'pointer' })}
 					/>
 					<span>{strategy.label}</span>
 				</label>
@@ -40,9 +58,39 @@
 		</div>
 	</div>
 
-	<div class="form-section" role="group" aria-labelledby="column-subset-heading">
-		<h4 id="column-subset-heading">Column Subset</h4>
-		<div class="form-label">Columns to check for duplicates</div>
+	<div
+		class={cx(
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				backgroundColor: 'transparent',
+
+				border: 'none'
+			}),
+			cx(
+				divider,
+				css({
+					paddingTop: '5'
+				})
+			)
+		)}
+		role="group"
+		aria-labelledby="column-subset-heading"
+	>
+		<span id="column-subset-heading"><SectionHeader>Column Subset</SectionHeader></span>
+		<div
+			class={css({
+				display: 'block',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider'
+			})}
+		>
+			Columns to check for duplicates
+		</div>
 		<MultiSelectColumnDropdown
 			{schema}
 			value={config.subset ?? []}
@@ -51,11 +99,11 @@
 		/>
 
 		{#if config.subset && config.subset.length > 0}
-			<div class="info-box mt-2" aria-live="polite">
+			<Callout>
 				Checking {config.subset.length} column{config.subset.length !== 1 ? 's' : ''} for duplicates
-			</div>
+			</Callout>
 		{:else}
-			<div class="info-box mt-2">No columns selected - will check all columns for duplicates</div>
+			<Callout>No columns selected - will check all columns for duplicates</Callout>
 		{/if}
 	</div>
 </div>

@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import sqlite3
 import uuid
 from collections.abc import Callable
@@ -15,22 +16,25 @@ from openpyxl.utils.cell import get_column_letter, range_boundaries
 from pyiceberg.catalog import load_catalog
 from pyiceberg.table import Table
 from sqlalchemy import select, update
+from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
 from core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError, FileError
 from core.namespace import get_namespace, namespace_paths
-from modules.compute.operations.datasource import load_datasource, resolve_iceberg_branch_metadata_path
+from modules.compute.operations.datasource import load_datasource
 from modules.datasource.models import DataSource
 from modules.datasource.schemas import (
     ColumnSchema,
     ColumnStats,
     ColumnStatsResponse,
     CSVOptions,
+    DataSourceListItem,
     DataSourceResponse,
     DataSourceUpdate,
     FileListItem,
     FileListResponse,
     SchemaDiff,
+    SchemaDiffStatus,
     SchemaInfo,
     SnapshotCompareResponse,
     SnapshotPreview,
@@ -39,6 +43,11 @@ from modules.datasource.source_types import FILE_BASED_CATEGORIES, SOURCE_TYPE_C
 from modules.engine_runs import service as engine_run_service
 
 logger = logging.getLogger(__name__)
+
+
+def _open_excel_workbook(file_path: Path, *, table_name: str | None) -> Any:
+    # Table metadata is unavailable in openpyxl read_only mode.
+    return load_workbook(file_path, read_only=table_name is None, data_only=True)
 
 
 def _prepare_clean_target(clean_dir: Path, datasource_id: str, branch: str) -> Path:
@@ -68,6 +77,7 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
         if build_mode == 'incremental':
             table.append(arrow_table)
         else:
+            _sync_iceberg_schema(table, arrow_table.schema)
             table.overwrite(arrow_table)
         return table
     table = catalog.create_table(identifier, schema=arrow_table.schema, location=str(table_path))
@@ -91,23 +101,21 @@ def _build_iceberg_config(paths, target_path: Path, branch: str, source_config: 
     }
 
 
-def _validate_clean_iceberg_path(metadata_path: str) -> tuple[str, str]:
-    resolved = Path(metadata_path)
-    if not resolved.name.endswith('.metadata.json'):
-        raise DataSourceValidationError('Iceberg metadata_path must point to a metadata.json file')
-    table_root = resolved.parents[1]
-    uuid_dir = table_root.parent
-    clean_dir = namespace_paths().clean_dir
-    if uuid_dir.parent != clean_dir:
-        raise DataSourceValidationError('Iceberg datasource must be stored under the clean directory')
-    try:
-        uuid.UUID(uuid_dir.name)
-    except ValueError as exc:
-        raise DataSourceValidationError('Iceberg datasource path must include a UUID directory') from exc
-    branch_name = table_root.name
-    if not branch_name:
-        raise DataSourceValidationError('Iceberg datasource path is missing a branch name')
-    return str(table_root), branch_name
+def _sync_iceberg_schema(table: Table, new_schema: Any) -> None:
+    from modules.compute.iceberg_reader import sync_iceberg_schema
+
+    sync_iceberg_schema(table, new_schema)
+
+
+def _set_snapshot_metadata(config: dict[str, Any], snapshot: Any | None) -> None:
+    if snapshot is None:
+        return
+    snapshot_id = str(snapshot.snapshot_id)
+    snapshot_timestamp_ms = int(snapshot.timestamp_ms)
+    config['current_snapshot_id'] = snapshot_id
+    config['current_snapshot_timestamp_ms'] = snapshot_timestamp_ms
+    config['snapshot_id'] = snapshot_id
+    config['snapshot_timestamp_ms'] = snapshot_timestamp_ms
 
 
 def create_file_datasource(
@@ -126,6 +134,7 @@ def create_file_datasource(
     table_name: str | None = None,
     named_range: str | None = None,
     cell_range: str | None = None,
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     resolved_path = Path(os.path.realpath(Path(file_path).resolve()))
@@ -140,39 +149,6 @@ def create_file_datasource(
         raise ValueError(f'Path must be a file for type: {file_type}')
     if file_type == 'parquet' and not (resolved_path.is_file() or resolved_path.is_dir()):
         raise ValueError('Parquet path must be a file or directory')
-
-    config = {
-        'source_type': DataSourceType.FILE,
-        'file_path': str(resolved_path),
-        'file_type': file_type,
-        'options': options or {},
-        'csv_options': csv_options.model_dump() if csv_options else None,
-        'sheet_name': sheet_name,
-        'start_row': start_row,
-        'start_col': start_col,
-        'end_col': end_col,
-        'end_row': end_row,
-        'has_header': has_header,
-        'table_name': table_name,
-        'named_range': named_range,
-        'cell_range': cell_range,
-    }
-    try:
-        lazy = load_datasource(config)
-    except Exception as exc:
-        raise DataSourceValidationError(
-            f'Failed to load file datasource for ingestion: {exc}',
-            details={'file_path': str(resolved_path), 'file_type': file_type},
-        ) from exc
-    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, 'master')
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
-    iceberg_config = _build_iceberg_config(paths, target_path, branch='master', source_config=config)
-    current_snapshot = snapshot.current_snapshot() if snapshot else None
-    if current_snapshot:
-        snapshot_id = current_snapshot.snapshot_id
-        snapshot_ts = current_snapshot.timestamp_ms
-        iceberg_config['snapshot_id'] = str(snapshot_id)
-        iceberg_config['snapshot_timestamp_ms'] = int(snapshot_ts)
 
     file_config = {
         'file_path': str(resolved_path),
@@ -189,11 +165,25 @@ def create_file_datasource(
         'named_range': named_range,
         'cell_range': cell_range,
     }
+    config = {'source_type': DataSourceType.FILE, **file_config}
+    try:
+        lazy = load_datasource(config)
+    except Exception as exc:
+        raise DataSourceValidationError(
+            f'Failed to load file datasource for ingestion: {exc}',
+            details={'file_path': str(resolved_path), 'file_type': file_type},
+        ) from exc
+    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, 'master')
+    snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
+    iceberg_config = _build_iceberg_config(paths, target_path, branch='master', source_config=config)
+    current_snapshot = snapshot.current_snapshot() if snapshot else None
+    _set_snapshot_metadata(iceberg_config, current_snapshot)
     datasource = DataSource(
         id=datasource_id,
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -217,10 +207,51 @@ def create_file_datasource(
         ) from e
 
     logger.info(f'Created iceberg datasource {datasource_id} ({name}) from file {file_path}')
-    response = DataSourceResponse.model_validate(datasource)
-    response.config['source'] = file_config
-    response.config.update(file_config)
-    return response
+    return DataSourceResponse.model_validate(datasource)
+
+
+def create_placeholder_output_datasource(
+    session: Session,
+    result_id: str,
+    analysis_id: str,
+    analysis_tab_id: str,
+) -> None:
+    try:
+        uuid.UUID(result_id)
+    except ValueError:
+        raise ValueError(f'result_id must be a valid UUID, got: {result_id!r}') from None
+    existing = session.get(DataSource, result_id)
+    if existing:
+        existing_owner = existing.created_by_analysis_id
+        if existing_owner is not None and str(existing_owner) != analysis_id:
+            raise ValueError(
+                f"Output result_id '{result_id}' is already owned by analysis '{existing_owner}', "
+                f"cannot reuse it in analysis '{analysis_id}'",
+            )
+        if existing_owner is None and existing.created_by != 'analysis':
+            raise ValueError(
+                f"Output result_id '{result_id}' conflicts with an existing datasource not managed by analysis outputs",
+            )
+        next_config = dict(existing.config) if isinstance(existing.config, dict) else {}
+        next_config['analysis_tab_id'] = analysis_tab_id
+        existing.config = next_config
+        existing.created_by_analysis_id = analysis_id
+        existing.created_by = 'analysis'
+        session.add(existing)
+        session.flush()
+        return
+    datasource = DataSource(
+        id=result_id,
+        name=result_id,
+        source_type=DataSourceType.ANALYSIS,
+        config={'analysis_tab_id': analysis_tab_id},
+        created_by_analysis_id=analysis_id,
+        created_by='analysis',
+        is_hidden=True,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    session.add(datasource)
+    session.flush()
 
 
 def create_analysis_datasource(
@@ -237,9 +268,7 @@ def create_analysis_datasource(
     if not analysis:
         raise ValueError(f'Analysis {analysis_id} not found')
     datasource_id = str(uuid.uuid4())
-    config = {
-        'analysis_id': analysis_id,
-    }
+    config = {}
     if analysis_tab_id:
         config['analysis_tab_id'] = analysis_tab_id
 
@@ -286,36 +315,39 @@ def build_excel_preview(
     cell_range: str | None = None,
     preview_rows: int = 100,
 ) -> ExcelPreviewResult:
-    workbook = load_workbook(file_path, read_only=False, data_only=True)
-    resolved = _resolve_excel_bounds(
-        workbook,
-        sheet_name,
-        start_row,
-        start_col,
-        end_col,
-        end_row,
-        table_name,
-        named_range,
-        cell_range,
-    )
-    sheet = workbook[resolved.sheet_name]
+    workbook = _open_excel_workbook(file_path, table_name=table_name)
+    try:
+        resolved = _resolve_excel_bounds(
+            workbook,
+            sheet_name,
+            start_row,
+            start_col,
+            end_col,
+            end_row,
+            table_name,
+            named_range,
+            cell_range,
+        )
+        sheet = workbook[resolved.sheet_name]
 
-    end_row_value = resolved.end_row
-    if end_row_value is None:
-        end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-    _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
+        end_row_value = resolved.end_row
+        if end_row_value is None:
+            end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+        _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
 
-    preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
-    rows = _collect_preview_rows(sheet, resolved.start_row, resolved.start_col, resolved.end_col, preview_end_row)
-    return ExcelPreviewResult(
-        preview=rows,
-        detected_end_row=end_row_value,
-        sheet_name=resolved.sheet_name,
-        start_row=resolved.start_row,
-        start_col=resolved.start_col,
-        end_col=resolved.end_col,
-        end_row=end_row_value,
-    )
+        preview_end_row = min(resolved.start_row + preview_rows - 1, end_row_value)
+        rows = _collect_preview_rows(sheet, resolved.start_row, resolved.start_col, resolved.end_col, preview_end_row)
+        return ExcelPreviewResult(
+            preview=rows,
+            detected_end_row=end_row_value,
+            sheet_name=resolved.sheet_name,
+            start_row=resolved.start_row,
+            start_col=resolved.start_col,
+            end_col=resolved.end_col,
+            end_row=end_row_value,
+        )
+    finally:
+        workbook.close()
 
 
 def resolve_excel_selection(
@@ -329,27 +361,30 @@ def resolve_excel_selection(
     named_range: str | None = None,
     cell_range: str | None = None,
 ) -> tuple[str, int, int, int, int]:
-    workbook = load_workbook(file_path, read_only=False, data_only=True)
-    target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
-    if not target_sheet:
-        raise ValueError('No sheets found in file')
-    resolved = _resolve_excel_bounds(
-        workbook,
-        target_sheet,
-        start_row,
-        start_col,
-        end_col,
-        end_row,
-        table_name,
-        named_range,
-        cell_range,
-    )
-    sheet = workbook[resolved.sheet_name]
-    end_row_value = resolved.end_row
-    if end_row_value is None:
-        end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-    _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
-    return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
+    workbook = _open_excel_workbook(file_path, table_name=table_name)
+    try:
+        target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
+        if not target_sheet:
+            raise ValueError('No sheets found in file')
+        resolved = _resolve_excel_bounds(
+            workbook,
+            target_sheet,
+            start_row,
+            start_col,
+            end_col,
+            end_row,
+            table_name,
+            named_range,
+            cell_range,
+        )
+        sheet = workbook[resolved.sheet_name]
+        end_row_value = resolved.end_row
+        if end_row_value is None:
+            end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+        _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
+        return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
+    finally:
+        workbook.close()
 
 
 @dataclass
@@ -497,7 +532,7 @@ def _detect_end_row(sheet, start_row: int, start_col: int, end_col: int) -> int:
     if max_row <= start_row:
         return start_row
     for row_index in range(start_row + 1, max_row + 1):
-        values = []
+        values: list[object | None] = []
         for cell in sheet.iter_rows(min_row=row_index, max_row=row_index, min_col=start_col + 1, max_col=end_col + 1):
             values = [c.value for c in cell]
         if all(value is None or str(value).strip() == '' for value in values):
@@ -530,6 +565,7 @@ def create_database_datasource(
     connection_string: str,
     query: str,
     branch: str = 'master',
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
     datasource_id = str(uuid.uuid4())
     branch_name = branch
@@ -544,7 +580,7 @@ def create_database_datasource(
                 'source_type': DataSourceType.DATABASE,
                 'connection_string': connection_string,
                 'query': query,
-            }
+            },
         )
     except Exception as exc:
         if connection_string.startswith('postgresql://'):
@@ -553,6 +589,7 @@ def create_database_datasource(
                 name=name,
                 source_type=DataSourceType.DATABASE,
                 config=source_config,
+                owner_id=owner_id,
                 created_at=datetime.now(UTC).replace(tzinfo=None),
             )
             session.add(datasource)
@@ -569,17 +606,14 @@ def create_database_datasource(
     snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
     iceberg_config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source_config)
     current_snapshot = snapshot.current_snapshot() if snapshot else None
-    if current_snapshot:
-        snapshot_id = current_snapshot.snapshot_id
-        snapshot_ts = current_snapshot.timestamp_ms
-        iceberg_config['snapshot_id'] = str(snapshot_id)
-        iceberg_config['snapshot_timestamp_ms'] = int(snapshot_ts)
+    _set_snapshot_metadata(iceberg_config, current_snapshot)
 
     datasource = DataSource(
         id=datasource_id,
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -594,86 +628,61 @@ def create_database_datasource(
 def create_iceberg_datasource(
     session: Session,
     name: str,
-    metadata_path: str,
-    snapshot_id: str | None = None,
-    snapshot_timestamp_ms: int | None = None,
-    storage_options: dict | None = None,
-    reader: str | None = None,
-    catalog_type: str | None = None,
-    catalog_uri: str | None = None,
-    warehouse: str | None = None,
-    namespace: str | None = None,
-    table: str | None = None,
-    branch: str | None = None,
+    source: dict,
+    branch: str = 'master',
+    owner_id: str | None = None,
 ) -> DataSourceResponse:
-    datasource_id = str(uuid.uuid4())
-
-    normalized_path = _normalize_iceberg_path(metadata_path)
-    try:
-        resolved_metadata = resolve_iceberg_branch_metadata_path(normalized_path, None)
-    except ValueError as exc:
-        raise DataSourceValidationError(str(exc), details={'metadata_path': metadata_path}) from exc
-
-    snapshot_value = snapshot_id
-    if snapshot_id:
-        try:
-            int(snapshot_id)
-        except (TypeError, ValueError) as exc:
-            raise DataSourceValidationError('Snapshot ID must be an integer', details={'snapshot_id': snapshot_id}) from exc
-
-    config = {
-        'metadata_path': normalized_path,
-        'snapshot_id': snapshot_value,
-        'snapshot_timestamp_ms': snapshot_timestamp_ms,
-        'storage_options': storage_options,
-        'reader': reader,
-    }
-    paths = namespace_paths()
-    catalog_config = {
-        'type': catalog_type or 'sql',
-        'uri': catalog_uri or f'sqlite:///{paths.clean_dir / "catalog.db"}',
-        'warehouse': warehouse or f'file://{paths.clean_dir}',
-    }
-    namespace_value = namespace or 'clean'
-    table_value = table
-    if not table_value:
-        table_value = Path(resolved_metadata).parent.parent.name
-    try:
-        catalog = load_catalog('local', **catalog_config)
-        catalog.create_namespace_if_not_exists(namespace_value)
-        identifier = f'{namespace_value}.{table_value}'
-        if catalog.table_exists(identifier):
-            existing = catalog.load_table(identifier)
-            if existing.metadata_location != resolved_metadata:
-                raise DataSourceValidationError(
-                    'Iceberg catalog table already exists with different metadata',
-                    details={'metadata_path': normalized_path, 'namespace': namespace_value, 'table': table_value},
-                )
-        else:
-            catalog.register_table(identifier, resolved_metadata)
-    except Exception as exc:
+    source_type = source.get('source_type') if isinstance(source, dict) else None
+    if source_type not in {DataSourceType.FILE, DataSourceType.DATABASE}:
         raise DataSourceValidationError(
-            f'Failed to register Iceberg table in catalog: {exc}',
-            details={'metadata_path': normalized_path, 'namespace': namespace_value, 'table': table_value},
-        ) from exc
-    config['catalog_type'] = catalog_config['type']
-    config['catalog_uri'] = catalog_config['uri']
-    config['warehouse'] = catalog_config['warehouse']
-    table_root, branch_from_path = _validate_clean_iceberg_path(resolved_metadata)
-    if branch and branch != branch_from_path:
-        raise DataSourceValidationError('Iceberg branch does not match table path')
-    config['metadata_path'] = table_root
-    resolved_branch = branch or branch_from_path
-    config['branch'] = resolved_branch
-    config['namespace'] = namespace_value
-    config['table'] = table_value
-    config['namespace_name'] = get_namespace()
+            'Iceberg datasource source_type is not supported for ingestion',
+            details={'source_type': source_type},
+        )
+    if source_type == DataSourceType.DATABASE:
+        connection_string = source.get('connection_string')
+        query = source.get('query')
+        if not connection_string or not query:
+            raise DataSourceValidationError(
+                'Datasource source is missing connection details',
+                details={'source_type': source_type},
+            )
+        try:
+            lazy = load_datasource(
+                {
+                    'source_type': DataSourceType.DATABASE,
+                    'connection_string': connection_string,
+                    'query': query,
+                },
+            )
+        except Exception as exc:
+            raise DataSourceConnectionError(
+                'Failed to query database datasource',
+                details={'source_type': source_type},
+            ) from exc
+    else:
+        try:
+            lazy = load_datasource(source)
+        except Exception as exc:
+            raise DataSourceConnectionError(
+                'Failed to read file datasource',
+                details={'source_type': source_type},
+            ) from exc
+
+    datasource_id = str(uuid.uuid4())
+    paths = namespace_paths()
+    branch_name = branch or 'master'
+    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
+    snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
+    config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source)
+    current_snapshot = snapshot.current_snapshot() if snapshot else None
+    _set_snapshot_metadata(config, current_snapshot)
 
     datasource = DataSource(
         id=datasource_id,
         name=name,
         source_type=DataSourceType.ICEBERG,
         config=config,
+        owner_id=owner_id,
         created_at=datetime.now(UTC).replace(tzinfo=None),
     )
 
@@ -681,14 +690,13 @@ def create_iceberg_datasource(
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource_id, name, DataSourceType.ICEBERG, config, branch=resolved_branch)
+    _log_datasource_create(session, datasource_id, name, DataSourceType.ICEBERG, config, branch=branch_name)
 
     try:
         schema_info = _extract_schema(datasource)
         datasource.schema_cache = schema_info.model_dump()
         session.commit()
         session.refresh(datasource)
-        logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
     except Exception as e:
         session.rollback()
         raise DataSourceValidationError(
@@ -696,7 +704,7 @@ def create_iceberg_datasource(
             details={'datasource_id': datasource_id},
         ) from e
 
-    logger.info(f'Created Iceberg datasource {datasource_id} ({name})')
+    logger.info(f'Created Iceberg datasource {datasource_id} ({name}) from source {source_type}')
     return DataSourceResponse.model_validate(datasource)
 
 
@@ -721,7 +729,8 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
             'Datasource source is not refreshable',
             details={'datasource_id': datasource_id, 'source_type': source_type},
         )
-    branch = source.get('branch', 'master')
+    branch_raw = datasource.config.get('branch', source.get('branch', 'master'))
+    branch = branch_raw if isinstance(branch_raw, str) and branch_raw else 'master'
     if source_type == DataSourceType.DATABASE:
         connection_string = source.get('connection_string')
         query = source.get('query')
@@ -736,7 +745,7 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
                     'source_type': DataSourceType.DATABASE,
                     'connection_string': connection_string,
                     'query': query,
-                }
+                },
             )
         except Exception as exc:
             raise DataSourceConnectionError(
@@ -758,27 +767,109 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
             details={'datasource_id': datasource_id},
         )
     paths = namespace_paths()
-    target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch)
-    snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
+    target_path = Path(metadata_path)
+    if target_path.name != branch:
+        target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch)
+    snapshot = _write_iceberg_table(lazy, target_path, build_mode='full')
 
+    next_config = dict(datasource.config)
     current_snapshot = snapshot.current_snapshot() if snapshot else None
-    if current_snapshot:
-        snapshot_id = current_snapshot.snapshot_id
-        snapshot_ts = current_snapshot.timestamp_ms
-        datasource.config['snapshot_id'] = str(snapshot_id)
-        datasource.config['snapshot_timestamp_ms'] = int(snapshot_ts)
-    datasource.config['branch'] = branch
-    datasource.config['source'] = source
-    datasource.config['refresh'] = {
+    _set_snapshot_metadata(next_config, current_snapshot)
+    next_config['branch'] = branch
+    next_config['metadata_path'] = str(target_path)
+    next_config['source'] = source
+    next_config['refresh'] = {
         'refreshed_at': datetime.now(UTC).replace(tzinfo=None).isoformat(),
     }
+    datasource.config = next_config
     datasource.schema_cache = None
     session.add(datasource)
     session.commit()
     session.refresh(datasource)
 
-    _log_datasource_create(session, datasource.id, datasource.name, DataSourceType.ICEBERG, datasource.config, branch=branch)
+    _log_datasource_update(session, datasource.id, datasource.name, datasource.config, branch=branch)
     return DataSourceResponse.model_validate(datasource)
+
+
+def refresh_datasource_for_schedule(session: Session, datasource_id: str) -> DataSourceResponse:
+    datasource = session.get(DataSource, datasource_id)
+    if not datasource:
+        raise DataSourceNotFoundError(datasource_id)
+
+    if is_reingestable_raw_datasource(datasource):
+        return refresh_external_datasource(session, datasource_id)
+
+    schema = _extract_schema(datasource)
+    next_config = dict(datasource.config) if isinstance(datasource.config, dict) else {}
+    next_config['refresh'] = {
+        'refreshed_at': datetime.now(UTC).replace(tzinfo=None).isoformat(),
+        'mode': 'schedule_schema_refresh',
+    }
+
+    datasource.config = next_config
+    datasource.schema_cache = schema.model_dump()
+    session.add(datasource)
+    session.commit()
+    session.refresh(datasource)
+
+    payload = engine_run_service.create_engine_run_payload(
+        analysis_id=None,
+        datasource_id=datasource.id,
+        kind='datasource_update',
+        status='success',
+        request_json={
+            'name': datasource.name,
+            'source_type': datasource.source_type,
+            'mode': 'schedule_schema_refresh',
+            'config': datasource.config,
+        },
+        result_json={
+            'datasource_id': datasource.id,
+            'datasource_name': datasource.name,
+            'schema_columns': len(schema.columns),
+            'row_count': schema.row_count,
+        },
+        triggered_by='schedule',
+    )
+    engine_run_service.create_engine_run(session, payload)
+    return DataSourceResponse.model_validate(datasource)
+
+
+def is_reingestable_raw_datasource(datasource: DataSource) -> bool:
+    if datasource.source_type != DataSourceType.ICEBERG:
+        return False
+    if datasource.created_by == 'analysis':
+        return False
+    if not isinstance(datasource.config, dict):
+        return False
+    source = datasource.config.get('source')
+    if not isinstance(source, dict):
+        return False
+    source_type = source.get('source_type')
+    return source_type in {DataSourceType.FILE, DataSourceType.DATABASE}
+
+
+def _log_datasource_update(
+    session: Session,
+    datasource_id: str,
+    name: str,
+    config: dict,
+    branch: str,
+) -> None:
+    payload = engine_run_service.create_engine_run_payload(
+        analysis_id=None,
+        datasource_id=datasource_id,
+        kind='datasource_update',
+        status='success',
+        request_json={
+            'name': name,
+            'source_type': DataSourceType.ICEBERG.value,
+            'config': config,
+            'iceberg_options': {'branch': branch},
+        },
+        result_json=_build_datasource_result_json(datasource_id, name, DataSourceType.ICEBERG, config),
+    )
+    engine_run_service.create_engine_run(session, payload)
 
 
 def _log_datasource_create(
@@ -800,9 +891,33 @@ def _log_datasource_create(
             'config': config,
             'iceberg_options': {'branch': branch},
         },
-        result_json={'datasource_id': datasource_id, 'datasource_name': name},
+        result_json=_build_datasource_result_json(datasource_id, name, source_type, config),
     )
     engine_run_service.create_engine_run(session, payload)
+
+
+def _build_datasource_result_json(
+    datasource_id: str,
+    name: str,
+    source_type: DataSourceType,
+    config: dict,
+) -> dict[str, str]:
+    result = {'datasource_id': datasource_id, 'datasource_name': name}
+    if source_type != DataSourceType.ICEBERG:
+        return result
+    source = config.get('source')
+    if not isinstance(source, dict):
+        return result
+    source_type_value = source.get('source_type')
+    if source_type_value not in {DataSourceType.FILE, DataSourceType.FILE.value, DataSourceType.DATABASE, DataSourceType.DATABASE.value}:
+        return result
+    snapshot_id = config.get('current_snapshot_id')
+    if snapshot_id is None:
+        snapshot_id = config.get('snapshot_id')
+    if snapshot_id is None:
+        return result
+    result['snapshot_id'] = str(snapshot_id)
+    return result
 
 
 def get_datasource_schema(
@@ -846,7 +961,7 @@ def get_datasource_schema(
         session.execute(
             update(DataSource)
             .where(DataSource.id == datasource_id)  # type: ignore[arg-type]
-            .values(schema_cache=schema_cache)
+            .values(schema_cache=schema_cache),
         )
         session.commit()
         datasource.schema_cache = schema_cache
@@ -856,38 +971,12 @@ def get_datasource_schema(
 
 
 def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dict[str, str | None]:
-    sample_values: dict[str, str | None] = {}
     columns = lazy.collect_schema().names()
-
-    # Build expressions to get first non-null for each column
     exprs = [pl.col(col).drop_nulls().first().alias(col) for col in columns]
-
-    # Limit scan to max_rows for performance
     result = lazy.head(max_rows).select(exprs).collect()
-
-    if result.height > 0:
-        for col in columns:
-            val = result[col][0]
-            sample_values[col] = str(val) if val is not None else None
-
-    return sample_values
-
-
-def _get_first_non_null_samples_eager(frame: pl.DataFrame, max_rows: int = 1000) -> dict[str, str | None]:
-    sample_values: dict[str, str | None] = {}
-    columns = frame.columns
-
-    # Limit to max_rows for performance
-    subset = frame.head(max_rows)
-
-    for name in columns:
-        non_null = subset[name].drop_nulls()
-        if non_null.len() > 0:
-            sample_values[name] = str(non_null[0])
-        else:
-            sample_values[name] = None
-
-    return sample_values
+    if result.height == 0:
+        return dict.fromkeys(columns)
+    return {col: (str(result[col][0]) if result[col][0] is not None else None) for col in columns}
 
 
 def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> SchemaInfo:
@@ -898,28 +987,13 @@ def _extract_schema(datasource: DataSource, sheet_name: str | None = None) -> Sc
             'Unsupported datasource type for schema extraction',
             details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
         ) from exc
-    handlers = _schema_handlers()
-    handler = handlers.get(source_type)
+    handler = _SCHEMA_HANDLERS.get(source_type)
     if not handler:
         raise DataSourceConnectionError(
             'Unsupported datasource type for schema extraction',
             details={'datasource_id': datasource.id, 'source_type': datasource.source_type},
         )
     return handler(datasource, sheet_name)
-
-
-def _schema_handlers() -> dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]]:
-    handlers: dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]] = {
-        DataSourceType.ANALYSIS: _schema_from_analysis,
-        DataSourceType.DATABASE: _schema_from_database,
-    }
-    file_handler = _schema_from_file
-    for source_type in SOURCE_TYPE_CATEGORY:
-        if source_type in handlers:
-            continue
-        if SOURCE_TYPE_CATEGORY[source_type] in FILE_BASED_CATEGORIES:
-            handlers[source_type] = file_handler
-    return handlers
 
 
 def _schema_from_analysis(datasource: DataSource, sheet_name: str | None) -> SchemaInfo:
@@ -952,7 +1026,7 @@ def _schema_from_database(datasource: DataSource, sheet_name: str | None) -> Sch
     schema = frame.schema
     row_count = frame.height
 
-    sample_values = _get_first_non_null_samples_eager(frame)
+    sample_values = _get_first_non_null_samples(frame.lazy())
 
     columns = [
         ColumnSchema(
@@ -986,10 +1060,7 @@ def _schema_from_file(datasource: DataSource, sheet_name: str | None) -> SchemaI
 
     schema = lazy.collect_schema()
     row_count = lazy.select(pl.len()).collect().item()
-    sheet_names = None
-
     sample_values = _get_first_non_null_samples(lazy)
-
     columns = [
         ColumnSchema(
             name=name,
@@ -999,14 +1070,25 @@ def _schema_from_file(datasource: DataSource, sheet_name: str | None) -> SchemaI
         )
         for name, dtype in schema.items()
     ]
+    return SchemaInfo(columns=columns, row_count=row_count)
 
-    return SchemaInfo(columns=columns, row_count=row_count, sheet_names=sheet_names)
+
+_SCHEMA_HANDLERS: dict[DataSourceType, Callable[[DataSource, str | None], SchemaInfo]] = {
+    DataSourceType.ANALYSIS: _schema_from_analysis,
+    DataSourceType.DATABASE: _schema_from_database,
+    **{
+        source_type: _schema_from_file
+        for source_type in SOURCE_TYPE_CATEGORY
+        if SOURCE_TYPE_CATEGORY[source_type] in FILE_BASED_CATEGORIES
+        and source_type not in {DataSourceType.ANALYSIS, DataSourceType.DATABASE}
+    },
+}
 
 
 def list_data_files(path: str | None) -> FileListResponse:
-    base_dir = namespace_paths().base_dir.resolve()
+    base_dir = Path(os.path.realpath(namespace_paths().base_dir))
     target = Path(path) if path else base_dir
-    resolved = target.resolve()
+    resolved = Path(os.path.realpath(target))
     if base_dir not in resolved.parents and base_dir != resolved:
         raise ValueError(f'Path must be inside data directory: {base_dir}')
     if not resolved.exists():
@@ -1171,7 +1253,7 @@ def _build_snapshot_stats(lazy: pl.LazyFrame, schema: pl.Schema) -> list[ColumnS
                 unique_count=unique_count,
                 min=min_val,
                 max=max_val,
-            )
+            ),
         )
     return results
 
@@ -1185,20 +1267,20 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='removed',
+                status=SchemaDiffStatus.REMOVED,
                 type_a=str(schema_a[name]),
                 type_b=None,
-            )
+            ),
         )
 
     for name in sorted(cols_b - cols_a):
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='added',
+                status=SchemaDiffStatus.ADDED,
                 type_a=None,
                 type_b=str(schema_b[name]),
-            )
+            ),
         )
 
     for name in sorted(cols_a & cols_b):
@@ -1209,28 +1291,13 @@ def _build_schema_diff(schema_a: pl.Schema, schema_b: pl.Schema) -> list[SchemaD
         diffs.append(
             SchemaDiff(
                 column=name,
-                status='type_changed',
+                status=SchemaDiffStatus.TYPE_CHANGED,
                 type_a=dtype_a,
                 type_b=dtype_b,
-            )
+            ),
         )
 
     return diffs
-
-
-def _normalize_iceberg_path(metadata_path: str) -> str:
-    path = Path(metadata_path)
-    if path.suffix == '.db':
-        raise DataSourceValidationError('Iceberg metadata_path must be a table directory, not catalog.db')
-    normalized = path if path.name.endswith('.metadata.json') else path
-    parts = [normalized, *normalized.parents]
-    if any(part.is_symlink() for part in parts):
-        raise DataSourceValidationError('Iceberg metadata_path cannot be a symlink')
-    resolved = normalized.resolve()
-    data_root = Path(os.path.realpath(namespace_paths().base_dir.resolve()))
-    if data_root not in resolved.parents and data_root != resolved:
-        raise DataSourceValidationError('Iceberg metadata_path must be inside data directory')
-    return str(resolved)
 
 
 def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
@@ -1244,37 +1311,17 @@ def get_datasource(session: Session, datasource_id: str) -> DataSourceResponse:
     return response
 
 
-def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceResponse]:
-    query = select(DataSource)
+def list_datasources(session: Session, include_hidden: bool = False) -> list[DataSourceListItem]:
+    query = select(DataSource).options(
+        defer(DataSource.schema_cache),  # type: ignore[arg-type]
+    )
     if not include_hidden:
         # SQLModel field typed as bool; == creates SA expression at runtime
         query = query.where(col(DataSource.is_hidden) == False)  # type: ignore[arg-type]  # noqa: E712
-    result = session.execute(query)
-    datasources = result.scalars().all()
-
-    # Populate schema_cache for datasources that don't have it
+    datasources = session.execute(query).scalars().all()
+    results: list[DataSourceListItem] = []
     for ds in datasources:
-        if ds.schema_cache is not None:
-            continue
-        if ds.source_type == 'analysis' or ds.created_by == 'analysis':
-            continue
-        try:
-            schema_info = _extract_schema(ds)
-            schema_cache = schema_info.model_dump()
-        except Exception as e:
-            logger.warning(f'Failed to extract schema for datasource {ds.id}: {e}')
-            continue
-        session.execute(
-            update(DataSource)
-            .where(DataSource.id == ds.id)  # type: ignore[arg-type]
-            .values(schema_cache=schema_cache)
-        )
-        session.commit()
-        ds.schema_cache = schema_cache
-        logger.info(f'Populated schema cache for datasource {ds.id}')
-    results: list[DataSourceResponse] = []
-    for ds in datasources:
-        item = DataSourceResponse.model_validate(ds)
+        item = DataSourceListItem.model_validate(ds)
         item.output_of_tab_id = ds.config.get('analysis_tab_id') if isinstance(ds.config, dict) else None
         results.append(item)
     return results
@@ -1304,6 +1351,23 @@ def update_datasource(
             raise DataSourceValidationError(
                 'Datasource schemas are read-only and cannot be modified',
                 details={'datasource_id': datasource_id},
+            )
+
+        protected_snapshot_keys = {
+            'snapshot_id',
+            'snapshot_timestamp_ms',
+            'current_snapshot_id',
+            'current_snapshot_timestamp_ms',
+            'time_travel_snapshot_id',
+            'time_travel_snapshot_timestamp_ms',
+            'time_travel_ui',
+        }
+        for key in protected_snapshot_keys:
+            if key not in update.config:
+                continue
+            raise DataSourceValidationError(
+                'Snapshot metadata fields are system-managed and cannot be modified',
+                details={'datasource_id': datasource_id, 'field': key},
             )
 
         immutable_keys = {
@@ -1410,13 +1474,15 @@ def update_datasource(
         branch = datasource.config.get('branch', 'master') if isinstance(datasource.config, dict) else 'master'
         update_request = update.model_dump(exclude_none=True)
         update_request['iceberg_options'] = {'branch': branch}
+        source_type = DataSourceType(datasource.source_type)
+        result_json = _build_datasource_result_json(datasource_id, datasource.name, source_type, datasource.config)
         run_payload = engine_run_service.create_engine_run_payload(
             analysis_id=None,
             datasource_id=datasource_id,
             kind='datasource_update',
             status='success',
             request_json=update_request,
-            result_json={'datasource_id': datasource_id, 'datasource_name': datasource.name},
+            result_json=result_json,
         )
         engine_run_service.create_engine_run(session, run_payload)
 
@@ -1511,7 +1577,7 @@ def get_column_stats(
                 'q25': series.quantile(0.25),
                 'q75': series.quantile(0.75),
                 'histogram': _compute_histogram(non_null),
-            }
+            },
         )
         return ColumnStatsResponse.model_validate(stats)
 
@@ -1524,7 +1590,7 @@ def get_column_stats(
                 'max_length': length_series.max(),
                 'avg_length': length_series.mean(),
                 'top_values': (series.value_counts().sort('count', descending=True).head(5).to_dicts()),
-            }
+            },
         )
         return ColumnStatsResponse.model_validate(stats)
 
@@ -1533,7 +1599,7 @@ def get_column_stats(
             {
                 'min': series.min(),
                 'max': series.max(),
-            }
+            },
         )
         return ColumnStatsResponse.model_validate(stats)
 
@@ -1551,7 +1617,7 @@ def get_column_stats(
             {
                 'true_count': true_count,
                 'false_count': false_count,
-            }
+            },
         )
         return ColumnStatsResponse.model_validate(stats)
 
@@ -1565,32 +1631,90 @@ def delete_datasource(session: Session, datasource_id: str) -> None:
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
-    # Delete associated file if it's a file datasource
-    if datasource.source_type == 'file' and 'file_path' in datasource.config:
-        file_path = Path(datasource.config['file_path'])
-        if file_path.exists():
-            try:
-                # Check if file is accessible before deletion
-                if not file_path.is_file():
-                    logger.warning(f'Path exists but is not a file: {file_path}')
-                else:
-                    file_path.unlink()
-                    logger.info(f'Deleted file: {file_path}')
-            except PermissionError as e:
-                logger.error(f'Permission denied when deleting file {file_path}: {e}')
-                raise FileError(
-                    f'Permission denied when deleting file: {file_path}',
-                    error_code='FILE_PERMISSION_DENIED',
-                    details={'file_path': str(file_path)},
-                )
-            except OSError as e:
-                logger.error(f'OS error when deleting file {file_path}: {e}')
-                raise FileError(
-                    f'Failed to delete file: {file_path}',
-                    error_code='FILE_DELETE_ERROR',
-                    details={'file_path': str(file_path), 'error': str(e)},
-                )
+    _delete_datasource_files(datasource)
 
     session.delete(datasource)
     session.commit()
     logger.info(f'Deleted datasource {datasource_id}')
+
+
+def _delete_file_path(file_path: str) -> None:
+    path = Path(file_path)
+    if not path.exists():
+        return
+    try:
+        if not path.is_file():
+            logger.warning(f'Path exists but is not a file: {path}')
+            return
+        path.unlink()
+        logger.info(f'Deleted file: {path}')
+    except PermissionError as exc:
+        logger.error(f'Permission denied when deleting file {path}: {exc}')
+        raise FileError(
+            f'Permission denied when deleting file: {path}',
+            error_code='FILE_PERMISSION_DENIED',
+            details={'file_path': str(path)},
+        ) from exc
+    except OSError as exc:
+        logger.error(f'OS error when deleting file {path}: {exc}')
+        raise FileError(
+            f'Failed to delete file: {path}',
+            error_code='FILE_DELETE_ERROR',
+            details={'file_path': str(path), 'error': str(exc)},
+        ) from exc
+
+
+def _iceberg_cleanup_root(metadata_path: str) -> Path | None:
+    path = Path(os.path.realpath(metadata_path))
+    start = path if path.is_dir() else path.parent
+    paths = namespace_paths()
+    clean_dir = Path(os.path.realpath(paths.clean_dir))
+    exports_dir = Path(os.path.realpath(paths.exports_dir))
+
+    for candidate in [start, *start.parents]:
+        if candidate.parent == clean_dir or candidate.parent == exports_dir:
+            return candidate
+        if candidate in (clean_dir, exports_dir):
+            return None
+    return None
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    resolved_path = Path(os.path.realpath(path))
+    resolved_root = Path(os.path.realpath(root))
+    return resolved_root in resolved_path.parents or resolved_root == resolved_path
+
+
+def _delete_datasource_files(datasource: DataSource) -> None:
+    if datasource.source_type == DataSourceType.FILE and 'file_path' in datasource.config:
+        _delete_file_path(str(datasource.config['file_path']))
+
+    if datasource.source_type == DataSourceType.ICEBERG and isinstance(datasource.config, dict):
+        config = datasource.config
+        metadata_path = config.get('metadata_path')
+        if isinstance(metadata_path, str):
+            root = _iceberg_cleanup_root(metadata_path)
+            if root:
+                try:
+                    if root.exists() and root.is_dir():
+                        shutil.rmtree(root)
+                        logger.info(f'Deleted Iceberg directory: {root}')
+                except OSError as exc:
+                    logger.error(f'OS error when deleting Iceberg directory {root}: {exc}')
+                    raise FileError(
+                        f'Failed to delete Iceberg directory: {root}',
+                        error_code='FILE_DELETE_ERROR',
+                        details={'path': str(root), 'error': str(exc)},
+                    ) from exc
+
+        source = config.get('source')
+        if not isinstance(source, dict):
+            return
+        if source.get('source_type') != DataSourceType.FILE:
+            return
+        file_path = source.get('file_path')
+        if not isinstance(file_path, str):
+            return
+        if not _is_within(Path(file_path), namespace_paths().upload_dir):
+            return
+        _delete_file_path(file_path)

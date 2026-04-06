@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock, patch
 
 from modules.compute.engine import PolarsComputeEngine
-from modules.compute.utils import apply_pipeline_steps, resolve_applied_target
+from modules.compute.utils import apply_steps, resolve_applied_target
 
 
-def test_apply_pipeline_steps_skips_disabled_and_relinks():
+def test_apply_steps_skips_disabled_and_relinks():
     steps = [
         {
             'id': 's1',
@@ -16,7 +16,7 @@ def test_apply_pipeline_steps_skips_disabled_and_relinks():
         {'id': 's3', 'type': 'select', 'config': {'columns': ['col']}, 'depends_on': ['s2']},
     ]
 
-    applied = apply_pipeline_steps(steps)
+    applied = apply_steps(steps)
     assert [step['id'] for step in applied] == ['s1', 's3']
     assert applied[1].get('depends_on') == ['s1']
 
@@ -53,5 +53,5 @@ def test_build_pipeline_skips_disabled_step(mock_apply_step: MagicMock, mock_loa
     result = PolarsComputeEngine.build_pipeline({}, steps, 'job-1')
     assert result == fake_lf
     assert mock_apply_step.call_count == 2
-    called_ops = [call.args[1].get('operation') for call in mock_apply_step.call_args_list]
+    called_ops = [call.args[1].operation for call in mock_apply_step.call_args_list]
     assert called_ops == ['filter', 'select']

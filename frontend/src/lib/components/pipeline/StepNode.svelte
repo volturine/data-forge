@@ -7,21 +7,21 @@
 	import {
 		previewStepData,
 		getStepRowCount,
-		type StepPreviewRequest,
-		type StepPreviewResponse,
-		type StepRowCountRequest
+		downloadStep,
+		type StepPreviewResponse
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import { GripVertical, Hash, RefreshCw } from 'lucide-svelte';
+	import { GripVertical, Hash, RefreshCw, Copy } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
+	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { SvelteMap } from 'svelte/reactivity';
+	import { css, cx, spinner, button, divider } from '$lib/styles/panda';
 
 	interface Props {
 		step: PipelineStep;
@@ -33,48 +33,61 @@
 		onDelete: (id: string) => void;
 		onToggleApply: (id: string) => void;
 		onTouchMove: (stepId: string, target: DropTarget) => void;
+		readOnly?: boolean;
 	}
 
 	let {
 		step,
-		index,
+		index: _index,
 		analysisId,
 		datasourceId,
 		allSteps = [],
 		onEdit,
 		onDelete,
 		onToggleApply,
-		onTouchMove
+		onTouchMove,
+		readOnly = false
 	}: Props = $props();
 
-	const isChart = $derived(
-		step.type === 'chart' || step.type === 'plot' || step.type.startsWith('plot_')
+	const isChart = $derived(isChartStep(step.type));
+
+	const chartHeight = $derived(
+		isChart ? (step.config?.chart_height as string | undefined) : undefined
 	);
+
+	const nodeWidthClass = $derived.by(() => {
+		return css({ width: '60%' });
+	});
+
+	const chartHeightPx = $derived.by(() => {
+		if (chartHeight === 'small') return 260;
+		if (chartHeight === 'large') return 520;
+		if (chartHeight === 'xlarge') return 680;
+		return 380;
+	});
 
 	// Derived values from declarative config
 	const stepConfig = $derived(getStepTypeConfig(step.type));
 	const Icon = $derived(stepConfig.icon);
 	const label = $derived(stepConfig.label);
 	const summary = $derived(stepConfig.summary(step.config as Record<string, unknown>));
-	const isApplied = $derived(
-		(step as PipelineStep & { is_applied?: boolean }).is_applied !== false
-	);
+	const isApplied = $derived(step.is_applied !== false);
 
 	// Chart preview query (only for chart/plot steps) — run after apply
 	const chartPipeline = $derived(applySteps(allSteps));
 	const chartPipelineKey = $derived(hashPipeline(chartPipeline));
 	const chartDatasourceConfig = $derived.by(() => {
 		if (!isChart) return {};
-		return (
-			buildDatasourceConfig({
-				analysisId: analysisId ?? null,
-				tab: analysisStore.activeTab ?? null,
-				tabs: analysisStore.tabs,
-				datasources: datasourceStore.datasources
-			}) ??
-			analysisStore.activeTab?.datasource_config ??
-			{}
-		);
+		const config = buildDatasourceConfig({
+			analysisId: analysisId ?? null,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
+		});
+		if (config) return config;
+		const active = analysisStore.activeTab;
+		if (!active) return {};
+		return active.datasource.config;
 	});
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
@@ -95,25 +108,21 @@
 			JSON.stringify(chartDatasourceConfig)
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
-				string,
-				unknown
-			> | null;
 			const result = await previewStepData({
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: analysisPipeline!,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: step.id,
 				row_limit: 5000,
 				page: 1,
-				resource_config: resourceConfig,
-				datasource_config: chartDatasourceConfig
-			} as unknown as StepPreviewRequest);
+				resource_config: analysisStore.resourceConfig
+			});
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
+		retry: false,
 		enabled:
 			isChart &&
 			isApplied &&
@@ -124,47 +133,46 @@
 	}));
 
 	const rowCounts = new SvelteMap<string, number>();
+
 	const rowCountLoads = new SvelteMap<string, boolean>();
 	const rowCountErrors = new SvelteMap<string, string>();
 
-	const rowCountPipeline = $derived.by(() => applySteps(allSteps));
-	const rowCountPipelineKey = $derived.by(() => hashPipeline(rowCountPipeline));
+	const rowCountPipeline = $derived(applySteps(allSteps));
+	const rowCountPipelineKey = $derived(hashPipeline(rowCountPipeline));
 	const rowCountDatasourceConfig = $derived.by(() => {
-		return (
-			buildDatasourceConfig({
-				analysisId: analysisId ?? null,
-				tab: analysisStore.activeTab ?? null,
-				tabs: analysisStore.tabs,
-				datasources: datasourceStore.datasources
-			}) ??
-			analysisStore.activeTab?.datasource_config ??
-			{}
-		);
+		const config = buildDatasourceConfig({
+			analysisId: analysisId ?? null,
+			tab: analysisStore.activeTab ?? null,
+			tabs: analysisStore.tabs,
+			datasources: datasourceStore.datasources
+		});
+		if (config) return config;
+		const active = analysisStore.activeTab;
+		if (!active) return {};
+		return active.datasource.config;
 	});
 	const rowCountKey = $derived.by(() => {
 		const configKey = JSON.stringify(rowCountDatasourceConfig ?? {});
 		return `${analysisId ?? ''}:${datasourceId ?? ''}:${step.id}:${rowCountPipelineKey}:${configKey}`;
 	});
-	const rowCount = $derived.by(() => rowCounts.get(rowCountKey) ?? null);
-	const isLoadingRowCount = $derived.by(() => rowCountLoads.get(rowCountKey) ?? false);
-	const rowCountError = $derived.by(() => rowCountErrors.get(rowCountKey) ?? null);
+	const rowCount = $derived(rowCounts.get(rowCountKey) ?? null);
+	const isLoadingRowCount = $derived(rowCountLoads.get(rowCountKey) ?? false);
+	const rowCountError = $derived(rowCountErrors.get(rowCountKey) ?? null);
 	const rowCountLabel = $derived.by(() => {
 		if (rowCount === null) return '';
 		return `${rowCount.toLocaleString()} rows`;
 	});
 
 	async function calculateRowCount() {
-		if (!analysisId || !datasourceId) return;
-		if (!analysisPipeline) return;
+		if (!analysisId || !analysisPipeline) return;
 		if (isLoadingRowCount) return;
 		rowCountLoads.set(rowCountKey, true);
 		rowCountErrors.delete(rowCountKey);
 		const result = await getStepRowCount({
-			analysis_pipeline: analysisPipeline,
+			analysis_pipeline: analysisPipeline!,
 			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id,
-			datasource_config: rowCountDatasourceConfig
-		} as StepRowCountRequest);
+			target_step_id: step.id
+		});
 		rowCountLoads.set(rowCountKey, false);
 		if (result.isErr()) {
 			rowCountErrors.set(rowCountKey, result.error.message);
@@ -173,6 +181,30 @@
 		rowCounts.set(rowCountKey, result.value.row_count);
 		rowCountErrors.delete(rowCountKey);
 	}
+
+	let copyFeedback = $state(false);
+	let copyTimer = $state<number | null>(null);
+
+	async function copyStepToClipboard() {
+		const payload = JSON.stringify({
+			type: step.type,
+			config: step.config,
+			is_applied: step.is_applied
+		});
+		await navigator.clipboard.writeText(payload).catch(() => {});
+		copyFeedback = true;
+		if (copyTimer !== null) window.clearTimeout(copyTimer);
+		copyTimer = window.setTimeout(() => {
+			copyFeedback = false;
+			copyTimer = null;
+		}, 1200);
+	}
+
+	$effect(() => {
+		return () => {
+			if (copyTimer !== null) window.clearTimeout(copyTimer);
+		};
+	});
 
 	let dragging = $state(false);
 	let clickConsumed = $state(false);
@@ -196,7 +228,23 @@
 		clickConsumed = false;
 	}
 
+	async function handleDownload() {
+		if (!analysisId || !analysisPipeline) return;
+
+		downloadStep({
+			analysis_id: analysisId,
+			target_step_id: step.id,
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			format:
+				(step.config?.format as 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel' | 'duckdb') ??
+				'csv',
+			filename: (step.config?.filename as string) ?? 'download'
+		});
+	}
+
 	function startDrag(event: PointerEvent) {
+		if (readOnly) return;
 		const target = event.currentTarget as HTMLElement | null;
 		const handle = target?.closest('[data-drag-handle]');
 		if (!handle) return;
@@ -209,10 +257,10 @@
 			longPressTimer = window.setTimeout(() => {
 				initiateDrag(event);
 			}, longPressDelay);
-		} else {
-			// For mouse/trackpad, start drag immediately
-			initiateDrag(event);
+			return;
 		}
+		// For mouse/trackpad, start drag immediately
+		initiateDrag(event);
 	}
 
 	function initiateDrag(event: PointerEvent) {
@@ -222,7 +270,7 @@
 		if (event.cancelable) {
 			event.preventDefault();
 		}
-		drag.startMove(step.id, step.type, event.pointerId, event.clientX, event.clientY);
+		drag.startMove(step.id, step.type, event.pointerId, event.clientX, event.clientY, onTouchMove);
 		if (event.currentTarget instanceof HTMLElement) {
 			event.currentTarget.setPointerCapture(event.pointerId);
 			drag.setCapturedElement(event.currentTarget, event.pointerId);
@@ -256,10 +304,7 @@
 
 	function finishDrag(): void {
 		if (dragging && drag.active) {
-			if (drag.target && drag.stepId && drag.valid) {
-				onTouchMove(drag.stepId, drag.target);
-			}
-			drag.end();
+			drag.commit();
 		}
 		const wasDragging = dragging;
 		dragging = false;
@@ -270,19 +315,76 @@
 </script>
 
 <div
-	class="step-node relative w-[60%]"
-	class:view-node={step.type === 'view'}
-	class:opacity-40={isDragging}
-	class:grayscale-50={isDragging}
-	class:drag-target={isOtherDragging}
+	class={cx(
+		'step-node',
+		nodeWidthClass,
+		isDragging &&
+			css({
+				opacity: '0.4',
+				filter: 'grayscale(1)'
+			}),
+		css({
+			position: 'relative',
+			contentVisibility: 'auto',
+			containIntrinsicSize: isChart || step.type === 'view' ? 'auto 600px' : 'auto 200px',
+			...(step.type === 'view' || isChart ? { width: '85%', minWidth: 'listLg' } : {})
+		})
+	)}
+	data-step-id={step.id}
+	data-step-type={step.type}
 >
-	<div class="absolute left-1/2 -top-1 z-2 h-2 w-2 -translate-x-1/2 border-2 connector-dot"></div>
-
-	<div class="step-content card-base border hover:border-tertiary" role="listitem">
-		<div class="flex items-center gap-2 px-4 py-3 border-b border-tertiary">
+	<div
+		class={cx(
+			'step-content',
+			css({
+				borderWidth: '1',
+				backgroundColor: 'bg.primary'
+			}),
+			isOtherDragging &&
+				css({
+					borderStyle: 'dashed',
+					opacity: '0.7',
+					transform: 'scale(0.98)'
+				})
+		)}
+		role="listitem"
+	>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				gap: '2',
+				paddingX: '4',
+				paddingY: '3',
+				borderBottomWidth: '1'
+			})}
+		>
 			<button
-				class="drag-handle flex shrink-0 cursor-grab items-center justify-center border-none bg-transparent p-0.5 opacity-30 select-none text-fg-muted hover:opacity-100 hover:bg-hover active:cursor-grabbing"
-				class:dragging
+				class={cx(
+					'drag-handle',
+					css({
+						display: 'flex',
+						flexShrink: '0',
+						cursor: readOnly ? 'not-allowed' : 'grab',
+						alignItems: 'center',
+						justifyContent: 'center',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0.5',
+						opacity: '0.3',
+						userSelect: 'none',
+						color: 'fg.muted',
+						_hover: { opacity: '1', backgroundColor: 'bg.hover' },
+						_active: { cursor: readOnly ? 'not-allowed' : 'grabbing' },
+						...(dragging
+							? {
+									WebkitUserSelect: 'none',
+									WebkitTouchCallout: 'none',
+									touchAction: 'none'
+								}
+							: {})
+					})
+				)}
 				title="Drag to reorder"
 				type="button"
 				onpointerdown={startDrag}
@@ -291,54 +393,167 @@
 				onpointercancel={finishDrag}
 				onclick={handleClick}
 				data-drag-handle="true"
+				disabled={readOnly}
 			>
 				<GripVertical size={14} />
 			</button>
 
-			<Icon size={13} class="shrink-0 text-fg-muted" />
-			<span class="flex-1 text-xs font-semibold uppercase tracking-wide">{label}</span>
-			<span class="shrink-0 text-[0.625rem] text-fg-faint">#{index + 1}</span>
+			<Icon size={13} class={css({ flexShrink: '0', color: 'fg.muted' })} />
+			<span
+				class={css({
+					flex: '1',
+					fontSize: 'xs',
+					fontWeight: 'semibold',
+					textTransform: 'uppercase',
+					letterSpacing: 'wide'
+				})}
+			>
+				{label}
+			</span>
+			<button
+				class={css({
+					flexShrink: '0',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					cursor: 'pointer',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0.5',
+					color: copyFeedback ? 'fg.success' : 'fg.faint',
+					_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
+				})}
+				onclick={copyStepToClipboard}
+				type="button"
+				title="Copy step to clipboard"
+			>
+				<Copy size={11} />
+			</button>
 		</div>
 
-		<div class="px-4 py-3">
+		<div class={css({ paddingX: '4', paddingY: '3' })}>
 			<div
-				class="step-summary px-3 py-2 text-[0.6875rem] bg-secondary text-fg-tertiary leading-relaxed"
-				class:inactive={!isApplied}
+				class={cx(
+					'step-summary',
+					css({
+						paddingX: '3',
+						paddingY: '2',
+						fontSize: 'xs2',
+						backgroundColor: 'bg.secondary',
+						color: 'fg.tertiary',
+						lineHeight: 'relaxed',
+						...(!isApplied
+							? {
+									backgroundColor: 'bg.secondary',
+									color: 'fg.muted',
+									border: '1px dashed'
+								}
+							: {})
+					})
+				)}
 			>
 				{summary}
 			</div>
 		</div>
 
-		<div class="flex gap-0 border-t border-tertiary">
+		<div
+			class={cx(
+				divider,
+				css({
+					display: 'flex',
+					gap: '0'
+				})
+			)}
+		>
 			<button
-				class="action-btn flex-1 cursor-pointer border-none bg-transparent py-2.5 font-medium uppercase tracking-widest text-[0.5625rem] text-fg-muted hover:bg-hover hover:text-fg-primary"
-				class:inactive={!isApplied}
+				class={cx(
+					'action-btn',
+					css({
+						flex: '1',
+						cursor: 'pointer',
+						border: 'none',
+						backgroundColor: 'transparent',
+						paddingY: '2.5',
+						fontWeight: 'medium',
+						textTransform: 'uppercase',
+						letterSpacing: 'widest',
+						fontSize: '3xs',
+						color: 'fg.muted',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+						...(!isApplied
+							? {
+									borderStyle: 'dashed',
+									color: 'fg.muted',
+									_hover: {
+										backgroundColor: 'bg.tertiary',
+										color: 'fg.secondary'
+									}
+								}
+							: {})
+					})
+				)}
 				onclick={() => onToggleApply(step.id)}
 				type="button"
 				title={isApplied ? 'Disable step' : 'Enable step'}
+				data-action="toggle"
+				disabled={readOnly}
 			>
 				{isApplied ? 'disable' : 'enable'}
 			</button>
-			<div class="w-px bg-border-primary shrink-0"></div>
+			<div class={css({ width: 'px', backgroundColor: 'bg.muted', flexShrink: '0' })}></div>
 			<button
-				class="action-btn flex-1 cursor-pointer border-none bg-transparent py-2.5 text-[0.5625rem] font-medium uppercase tracking-widest text-fg-muted hover:bg-hover hover:text-fg-primary"
+				class={cx(
+					'action-btn',
+					css({
+						flex: '1',
+						cursor: 'pointer',
+						border: 'none',
+						backgroundColor: 'transparent',
+						paddingY: '2.5',
+						fontSize: '3xs',
+						fontWeight: 'medium',
+						textTransform: 'uppercase',
+						letterSpacing: 'widest',
+						color: 'fg.muted',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})
+				)}
 				onclick={() => onEdit(step.id)}
 				type="button"
+				data-action="edit"
+				disabled={readOnly}
 			>
 				edit
 			</button>
-			<div class="w-px bg-border-primary shrink-0"></div>
+			<div class={css({ width: 'px', backgroundColor: 'bg.muted', flexShrink: '0' })}></div>
 			<button
-				class="action-btn danger flex-1 cursor-pointer border-none bg-transparent py-2.5 text-[0.5625rem] font-medium uppercase tracking-widest text-fg-muted hover:bg-error hover:text-error"
+				class={cx(
+					'action-btn',
+					css({
+						flex: '1',
+						cursor: 'pointer',
+						border: 'none',
+						backgroundColor: 'transparent',
+						paddingY: '2.5',
+						fontSize: '3xs',
+						fontWeight: 'medium',
+						textTransform: 'uppercase',
+						letterSpacing: 'widest',
+						color: 'fg.muted',
+						_hover: { backgroundColor: 'bg.error', color: 'fg.error' }
+					})
+				)}
 				onclick={() => onDelete(step.id)}
 				type="button"
+				data-action="delete"
+				disabled={readOnly}
 			>
 				delete
 			</button>
 		</div>
 
 		{#if step.type === 'view' && datasourceId && analysisId}
-			<div class="border-t border-tertiary">
+			<div class={divider}>
 				<InlineDataTable
 					{analysisId}
 					{datasourceId}
@@ -349,13 +564,41 @@
 			</div>
 		{/if}
 
+		{#if step.type === 'download' && datasourceId && analysisId}
+			<div
+				class={cx(
+					divider,
+					css({
+						padding: '3'
+					})
+				)}
+			>
+				<button
+					class={cx(button({ variant: 'primary' }), css({ width: '100%' }))}
+					onclick={() => handleDownload()}
+					disabled={!isApplied}
+				>
+					Download File
+				</button>
+			</div>
+		{/if}
+
 		{#if isChart && datasourceId && analysisId}
-			<div class="border-t border-tertiary">
+			<div class={divider}>
 				{#if !isApplied}
 					<div
-						class="chart-placeholder flex h-75 items-center justify-center text-[0.6875rem] text-fg-muted"
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							fontSize: 'xs2',
+							color: 'fg.muted',
+							border: '1px dashed',
+							backgroundColor: 'bg.primary'
+						})}
+						style:height="{chartHeightPx}px"
 					>
-						<Icon size={14} class="mr-2" />
+						<Icon size={14} class={css({ marginRight: '2' })} />
 						{#if ((step.config?.x_column as string | undefined) ?? '') === ''}
 							<span>Configure chart to preview</span>
 						{:else}
@@ -363,12 +606,31 @@
 						{/if}
 					</div>
 				{:else if chartQuery.isFetching}
-					<div class="flex items-center justify-center gap-2 py-5 text-[0.6875rem] text-fg-muted">
-						<span class="spinner spinner-sm"></span>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							gap: '2',
+							paddingY: '5',
+							fontSize: 'xs2',
+							color: 'fg.muted'
+						})}
+					>
+						<span class={spinner({ size: 'sm' })}></span>
 						Loading chart...
 					</div>
 				{:else if chartQuery.error}
-					<div class="border-t border-error bg-error p-3 text-xs text-error">
+					<div
+						class={css({
+							borderTopWidth: '1',
+							borderTopColor: 'border.error',
+							backgroundColor: 'bg.error',
+							padding: '3',
+							fontSize: 'xs',
+							color: 'fg.error'
+						})}
+					>
 						{chartQuery.error.message}
 					</div>
 				{:else if chartQuery.data}
@@ -386,29 +648,64 @@
 							| 'boxplot') ?? 'bar'}
 						config={step.config}
 						metadata={chartQuery.data.metadata}
+						height={chartHeightPx}
 					/>
 				{/if}
 			</div>
 		{/if}
 
-		<div class="flex items-center px-4 py-2.5 border-t border-tertiary">
+		<div
+			class={cx(
+				divider,
+				css({
+					display: 'flex',
+					alignItems: 'center',
+					paddingX: '4',
+					paddingY: '2.5'
+				})
+			)}
+		>
 			{#if rowCount !== null}
 				{#key `${rowCountKey}:${rowCount}`}
-					<span class="flex items-center gap-1 text-[0.625rem] text-fg-faint">
+					<span
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							gap: '1',
+							fontSize: '2xs',
+							color: 'fg.faint'
+						})}
+						data-testid="step-row-count"
+					>
 						<Hash size={9} />
 						{rowCountLabel}
 					</span>
 				{/key}
 			{:else}
 				<button
-					class="calc-rows-btn flex cursor-pointer items-center gap-1 border border-tertiary bg-transparent text-fg-muted px-2 py-0.5 text-[0.5625rem] disabled:cursor-not-allowed disabled:opacity-70 hover:bg-hover hover:text-fg-primary"
+					class={css({
+						display: 'flex',
+						cursor: 'pointer',
+						alignItems: 'center',
+						gap: '1',
+						borderWidth: '1',
+						backgroundColor: 'transparent',
+						color: 'fg.muted',
+						paddingX: '2',
+						paddingY: '0.5',
+						fontSize: '3xs',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+						_disabled: { cursor: 'not-allowed', opacity: '0.7' }
+					})}
 					onclick={calculateRowCount}
 					disabled={isLoadingRowCount}
 					type="button"
 					aria-label="Calculate row count"
+					data-action="count-rows"
+					data-testid="step-row-count-button"
 				>
 					{#if isLoadingRowCount}
-						<RefreshCw size={9} class="spinning" />
+						<RefreshCw size={9} class={css({ animation: 'spin 1s linear infinite' })} />
 						<span>counting...</span>
 					{:else}
 						<Hash size={9} />
@@ -418,13 +715,20 @@
 			{/if}
 		</div>
 		{#if rowCountError}
-			<div class="border-t border-error bg-error px-4 py-2 text-xs text-error">
+			<div
+				class={css({
+					borderTopWidth: '1',
+					borderTopColor: 'border.error',
+					backgroundColor: 'bg.error',
+					paddingX: '4',
+					paddingY: '2',
+					fontSize: 'xs',
+					color: 'fg.error'
+				})}
+				data-testid="step-row-count-error"
+			>
 				{rowCountError}
 			</div>
 		{/if}
 	</div>
-
-	<div
-		class="absolute left-1/2 -bottom-1 z-2 h-2 w-2 -translate-x-1/2 border-2 connector-dot"
-	></div>
 </div>

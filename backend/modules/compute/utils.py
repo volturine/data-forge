@@ -1,15 +1,17 @@
 import time
+from typing import Any
 
 import polars as pl
 
 from core.config import settings
 from core.exceptions import EngineTimeoutError, StepNotFoundError
+from modules.compute.core.base import ComputeEngine, EngineResult
 
 
-def find_step_index(pipeline_steps: list[dict], target_step_id: str) -> int:
+def find_step_index(steps: list[dict], target_step_id: str) -> int:
     if target_step_id == 'source':
         return -1
-    for idx, step in enumerate(pipeline_steps):
+    for idx, step in enumerate(steps):
         if step.get('id') == target_step_id:
             return idx
     raise StepNotFoundError(target_step_id)
@@ -19,24 +21,18 @@ def is_step_applied(step: dict) -> bool:
     return step.get('is_applied') is not False
 
 
-def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
-    applied = [step for step in pipeline_steps if is_step_applied(step)]
+def _build_step_map(steps: list[dict]) -> dict[str, dict]:
+    return {str(s['id']): s for s in steps if s.get('id')}
+
+
+def apply_steps(steps: list[dict]) -> list[dict]:
+    applied = [step for step in steps if is_step_applied(step)]
     if not applied:
         return []
 
-    step_map: dict[str, dict] = {}
-    for step in pipeline_steps:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        step_map[str(step_id)] = step
+    step_map = _build_step_map(steps)
 
-    applied_ids: set[str] = set()
-    for step in applied:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        applied_ids.add(str(step_id))
+    applied_ids = {str(s['id']) for s in applied if s.get('id')}
 
     def resolve_parent(step_id: str, seen: set[str] | None = None) -> str | None:
         step = step_map.get(step_id)
@@ -54,9 +50,7 @@ def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
         visited = seen or set()
         if parent_id in visited:
             return None
-        next_seen = set(visited)
-        next_seen.add(parent_id)
-        return resolve_parent(parent_id, next_seen)
+        return resolve_parent(parent_id, visited | {parent_id})
 
     next_steps: list[dict] = []
     for step in applied:
@@ -73,16 +67,11 @@ def apply_pipeline_steps(pipeline_steps: list[dict]) -> list[dict]:
     return next_steps
 
 
-def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> str:
+def resolve_applied_target(steps: list[dict], target_step_id: str) -> str:
     if target_step_id == 'source':
         return 'source'
 
-    step_map: dict[str, dict] = {}
-    for step in pipeline_steps:
-        step_id = step.get('id')
-        if not step_id:
-            continue
-        step_map[str(step_id)] = step
+    step_map = _build_step_map(steps)
 
     if target_step_id not in step_map:
         return 'source'
@@ -95,7 +84,7 @@ def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> s
     while True:
         if current is None:
             return 'source'
-        step = step_map.get(current) or {}
+        step = step_map.get(current)
         if not step:
             return 'source'
         deps = step.get('depends_on') or []
@@ -114,13 +103,46 @@ def resolve_applied_target(pipeline_steps: list[dict], target_step_id: str) -> s
         current = parent_id
 
 
-def await_engine_result(engine, timeout: int, job_id: str | None = None) -> dict:
+def _engine_result_to_dict(result: EngineResult | dict[str, Any]) -> dict[str, Any]:
+    """Normalize compute engine result payloads for service-layer consumption."""
+    if isinstance(result, dict):
+        raw_step_timings = result.get('step_timings')
+        raw_query_plan = result.get('query_plan')
+        raw_error_kind = result.get('error_kind')
+        raw_error_details = result.get('error_details')
+        return {
+            'job_id': result.get('job_id'),
+            'data': result.get('data'),
+            'error': result.get('error'),
+            'error_kind': raw_error_kind if isinstance(raw_error_kind, str) else None,
+            'error_details': raw_error_details if isinstance(raw_error_details, dict) else {},
+            'step_timings': raw_step_timings if isinstance(raw_step_timings, dict) else {},
+            'query_plan': raw_query_plan if isinstance(raw_query_plan, str) else None,
+        }
+
+    return {
+        'job_id': result.job_id,
+        'data': result.data,
+        'error': result.error,
+        'error_kind': result.error_kind,
+        'error_details': result.error_details or {},
+        'step_timings': result.step_timings,
+        'query_plan': result.query_plan,
+    }
+
+
+def await_engine_result(engine: ComputeEngine, timeout: int, job_id: str | None = None) -> dict:
     deadline = time.monotonic() + timeout
+    result = engine.get_result(timeout=0, job_id=job_id)
+    if result is not None:
+        return _engine_result_to_dict(result)
     while True:
         if not engine.is_process_alive():
             return {
                 'data': None,
                 'error': 'Compute process died unexpectedly.',
+                'error_kind': 'engine_process_died',
+                'error_details': {},
                 'job_id': job_id,
             }
         remaining = deadline - time.monotonic()
@@ -128,19 +150,13 @@ def await_engine_result(engine, timeout: int, job_id: str | None = None) -> dict
             raise EngineTimeoutError(f'Operation timed out after {timeout} seconds', timeout)
 
         poll_timeout = min(0.1, max(0.01, remaining))
-        result_data = engine.get_result(timeout=poll_timeout, job_id=job_id)
-        if result_data:
-            return result_data
+        result = engine.get_result(timeout=poll_timeout, job_id=job_id)
+        if result is not None:
+            return _engine_result_to_dict(result)
 
 
 def build_datasource_config(datasource, overrides: dict | None = None) -> dict:
-    base = {
-        'source_type': datasource.source_type,
-        **datasource.config,
-    }
-    if not overrides:
-        return base
-    return {**base, **overrides}
+    return {'source_type': datasource.source_type, **datasource.config, **(overrides or {})}
 
 
 def normalize_timezones(lf: pl.LazyFrame, schema: pl.Schema | None = None) -> pl.LazyFrame:
@@ -154,10 +170,8 @@ def normalize_timezones(lf: pl.LazyFrame, schema: pl.Schema | None = None) -> pl
         if not isinstance(dtype, pl.Datetime):
             continue
         tz = dtype.time_zone
-        if tz is None:
-            exprs.append(pl.col(name).dt.replace_time_zone(settings.timezone).alias(name))
-            continue
-        exprs.append(pl.col(name).dt.convert_time_zone(settings.timezone).alias(name))
+        expr = pl.col(name).dt.replace_time_zone(settings.timezone) if tz is None else pl.col(name).dt.convert_time_zone(settings.timezone)
+        exprs.append(expr.alias(name))
 
     if not exprs:
         return lf

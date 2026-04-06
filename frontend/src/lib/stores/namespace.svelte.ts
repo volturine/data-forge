@@ -26,13 +26,11 @@ export async function setNamespace(value: string): Promise<void> {
 	await idbSet(NAMESPACE_KEY, value);
 }
 
-export function useNamespace() {
-	return {
-		get value() {
-			return getNamespace();
-		},
-		async set(value: string) {
-			await setNamespace(value);
-		}
-	};
-}
+export const useNamespace = () => ({
+	get value() {
+		return getNamespace();
+	},
+	async set(value: string) {
+		await setNamespace(value);
+	}
+});

@@ -1,6 +1,7 @@
 <script lang="ts">
-	import type { LineageNode, LineageResponse } from '$lib/api/lineage';
+	import type { LineageNode, LineageResponse, NodeKind, EdgeType } from '$lib/api/lineage';
 	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from 'lucide-svelte';
+	import { css, cx, button } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 
@@ -28,7 +29,6 @@
 	const nodeHeight = 72;
 
 	/* ---------- non-reactive position map ---------- */
-	// Plain Map for positions — NOT reactive. Used by deterministic layouts.
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- intentionally non-reactive for layout computation
 	const physicsMap = new Map<string, { x: number; y: number; vx: number; vy: number }>();
 
@@ -48,7 +48,13 @@
 	let panStart: { x: number; y: number; px: number; py: number } | null = null;
 
 	const layoutNodes = $derived.by(() => {
-		const next = [] as Array<{ id: string; label: string; meta: string | null; type: string }>;
+		const next = [] as Array<{
+			id: string;
+			label: string;
+			meta: string | null;
+			type: string;
+			kind: NodeKind;
+		}>;
 		for (const node of nodes) {
 			const meta =
 				node.type === 'datasource'
@@ -60,11 +66,28 @@
 				id: node.id,
 				label: node.name,
 				meta,
-				type: node.type
+				type: node.type,
+				kind: node.node_kind
 			});
 		}
 		return next;
 	});
+
+	/* ---------- node kind → border color ---------- */
+	const kindBorderColor: Record<NodeKind, string> = {
+		source: 'var(--colors-accent-primary)',
+		output: 'var(--colors-fg-success)',
+		internal: 'var(--colors-fg-faint)',
+		analysis: 'var(--colors-fg-warning)'
+	};
+
+	/* ---------- edge type → stroke config ---------- */
+	const edgeStroke: Record<EdgeType, { color: string; dash: string }> = {
+		uses: { color: 'var(--colors-canvas-lineage-edge)', dash: '' },
+		produces: { color: 'var(--colors-fg-success)', dash: '' },
+		chains: { color: 'var(--colors-fg-faint)', dash: '6 4' },
+		consumes_internal: { color: 'var(--colors-fg-faint)', dash: '6 4' }
+	};
 
 	/* ---------- topological sort for tree layouts ---------- */
 	function topoSort(): string[][] {
@@ -97,7 +120,6 @@
 			}
 			queue = next;
 		}
-		// add any remaining (cycles)
 		const remaining = layoutNodes.filter((n) => !visited.has(n.id)).map((n) => n.id);
 		if (remaining.length > 0) layers.push(remaining);
 		return layers;
@@ -121,28 +143,22 @@
 				});
 				idx += 1;
 			}
-		} else {
-			const layers = topoSort();
-			for (let li = 0; li < layers.length; li += 1) {
-				const layer = layers[li];
-				for (let ni = 0; ni < layer.length; ni += 1) {
-					const id = layer[ni];
-					if (mode === 'horizontal') {
-						physicsMap.set(id, {
-							x: 80 + li * gap,
-							y: 80 + ni * (rowGap + nodeHeight),
-							vx: 0,
-							vy: 0
-						});
-					} else {
-						physicsMap.set(id, {
-							x: 80 + ni * gap,
-							y: 80 + li * (rowGap + nodeHeight),
-							vx: 0,
-							vy: 0
-						});
-					}
-				}
+			return;
+		}
+		const layers = topoSort();
+		for (let li = 0; li < layers.length; li += 1) {
+			const layer = layers[li];
+			for (let ni = 0; ni < layer.length; ni += 1) {
+				const id = layer[ni];
+				physicsMap.set(id, {
+					x: mode === 'horizontal' ? 80 + li * gap : 80 + ni * gap,
+					y:
+						mode === 'horizontal'
+							? 80 + ni * (rowGap + nodeHeight)
+							: 80 + li * (rowGap + nodeHeight),
+					vx: 0,
+					vy: 0
+				});
 			}
 		}
 		syncSnapshot();
@@ -224,7 +240,6 @@
 		const pos = physicsMap.get(id);
 		if (!pos) return;
 		dragId = id;
-		// Account for pan and scale when computing offset
 		dragOffset = {
 			x: event.clientX / scale - pan.x / scale - pos.x,
 			y: event.clientY / scale - pan.y / scale - pos.y
@@ -259,7 +274,6 @@
 		dragOffset = null;
 
 		if (!wasDrag) {
-			// This was a click, not a drag
 			const node = nodes.find((n) => n.id === clickedId);
 			if (node && onnodeclick) onnodeclick(node);
 		}
@@ -267,9 +281,8 @@
 		wasDrag = false;
 	}
 
-	/* ---------- pan (any click on canvas background, or middle/right-click anywhere) ---------- */
+	/* ---------- pan ---------- */
 	function startPan(event: PointerEvent) {
-		// Allow left-click pan only on canvas background (not on nodes)
 		if (event.button === 0) {
 			const target = event.target as HTMLElement;
 			if (target.closest('.lineage-node')) return;
@@ -298,7 +311,6 @@
 		event.preventDefault();
 		const delta = event.deltaY > 0 ? 0.9 : 1.1;
 		const next = clamp(scale * delta, 0.2, 3);
-		// Zoom toward cursor position
 		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
 		const mx = event.clientX - rect.left;
 		const my = event.clientY - rect.top;
@@ -358,7 +370,7 @@
 		zoomPercent = Math.round(scale * 100);
 	});
 
-	const transform = $derived(`translate(${pan.x}px, ${pan.y}px) scale(${scale})`);
+	const _transform = $derived(`translate(${pan.x}px, ${pan.y}px) scale(${scale})`);
 
 	function setPosition(node: HTMLElement, coords: { x: number; y: number }) {
 		node.style.left = `${coords.x}px`;
@@ -370,63 +382,112 @@
 			}
 		};
 	}
+
+	const kindLabel: Record<NodeKind, string> = {
+		source: 'Source',
+		output: 'Output',
+		internal: 'Internal',
+		analysis: 'Analysis'
+	};
 </script>
 
 {#if nodes.length === 0}
-	<div class="flex h-full items-center justify-center">
-		<p class="text-sm text-fg-tertiary">No lineage data available.</p>
+	<div
+		class={css({
+			display: 'flex',
+			height: '100%',
+			alignItems: 'center',
+			justifyContent: 'center'
+		})}
+	>
+		<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>No lineage data available.</p>
 	</div>
 {:else}
-	<div class="flex h-full flex-col">
+	<div class={css({ display: 'flex', height: '100%', flexDirection: 'column' })}>
 		{#if showToolbar}
 			<!-- Toolbar -->
-			<div class="flex items-center gap-1 border-b border-tertiary bg-bg-primary px-3 py-1.5">
-				<span class="mr-2 text-xs text-fg-muted">Layout</span>
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					borderBottomWidth: '1',
+					backgroundColor: 'bg.primary',
+					paddingX: '3',
+					paddingY: '1.5'
+				})}
+			>
+				<span class={css({ marginRight: '2', fontSize: 'xs', color: 'fg.muted' })}> Layout </span>
 				<button
-					class="btn-sm {layoutMode === 'horizontal' ? 'btn-primary' : 'btn-ghost'}"
+					class={layoutMode === 'horizontal'
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
 					onclick={() => setLayout('horizontal')}
 					title="Horizontal tree layout"
 				>
 					<ArrowRight size={14} />
-					<span class="text-xs">Horizontal</span>
+					<span class={css({ fontSize: 'xs' })}>Horizontal</span>
 				</button>
 				<button
-					class="btn-sm {layoutMode === 'vertical' ? 'btn-primary' : 'btn-ghost'}"
+					class={layoutMode === 'vertical'
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
 					onclick={() => setLayout('vertical')}
 					title="Vertical tree layout"
 				>
 					<ArrowDown size={14} />
-					<span class="text-xs">Vertical</span>
+					<span class={css({ fontSize: 'xs' })}>Vertical</span>
 				</button>
 				<button
-					class="btn-sm {layoutMode === 'grid' ? 'btn-primary' : 'btn-ghost'}"
+					class={layoutMode === 'grid'
+						? button({ variant: 'primary', size: 'sm' })
+						: button({ variant: 'ghost', size: 'sm' })}
 					onclick={() => setLayout('grid')}
 					title="Grid layout"
 				>
 					<LayoutGrid size={14} />
-					<span class="text-xs">Grid</span>
+					<span class={css({ fontSize: 'xs' })}>Grid</span>
 				</button>
 
-				<div class="mx-2 h-4 w-px bg-border-primary"></div>
+				<div
+					class={css({
+						marginX: '2',
+						height: 'iconSm',
+						width: 'px',
+						backgroundColor: 'bg.muted'
+					})}
+				></div>
 
-				<button class="btn-sm btn-ghost" onclick={zoomIn} title="Zoom in">
+				<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomIn} title="Zoom in">
 					<ZoomIn size={14} />
 				</button>
-				<button class="btn-sm btn-ghost" onclick={zoomOut} title="Zoom out">
+				<button class={button({ variant: 'ghost', size: 'sm' })} onclick={zoomOut} title="Zoom out">
 					<ZoomOut size={14} />
 				</button>
-				<button class="btn-sm btn-ghost" onclick={resetView} title="Reset view">
+				<button
+					class={button({ variant: 'ghost', size: 'sm' })}
+					onclick={resetView}
+					title="Reset view"
+				>
 					<RotateCcw size={14} />
 				</button>
 
-				<span class="ml-auto text-xs text-fg-muted">{zoomPercent}%</span>
+				<span class={css({ marginLeft: 'auto', fontSize: 'xs', color: 'fg.muted' })}>
+					{zoomPercent}%
+				</span>
 			</div>
 		{/if}
 
 		<!-- Canvas -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="isolate relative flex-1 overflow-hidden bg-bg-secondary"
+			class={css({
+				isolation: 'isolate',
+				position: 'relative',
+				flex: '1',
+				overflow: 'hidden',
+				backgroundColor: 'bg.secondary'
+			})}
 			bind:clientWidth={viewWidth}
 			bind:clientHeight={viewHeight}
 			onpointerdown={startPan}
@@ -437,7 +498,11 @@
 			oncontextmenu={(e) => e.preventDefault()}
 		>
 			<!-- Transformed layer -->
-			<svg class="pointer-events-none absolute inset-0" width={canvasWidth} height={canvasHeight}>
+			<svg
+				class={css({ pointerEvents: 'none', position: 'absolute', inset: '0' })}
+				width={canvasWidth}
+				height={canvasHeight}
+			>
 				<defs>
 					<marker
 						id="lineage-arrow"
@@ -447,19 +512,47 @@
 						refY="5"
 						orient="auto"
 					>
-						<path d="M0,0 L10,5 L0,10 Z" fill="var(--lineage-edge)" />
+						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-primary)" />
+					</marker>
+					<marker
+						id="lineage-arrow-success"
+						markerWidth="10"
+						markerHeight="10"
+						refX="8"
+						refY="5"
+						orient="auto"
+					>
+						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-success)" />
+					</marker>
+					<marker
+						id="lineage-arrow-faint"
+						markerWidth="10"
+						markerHeight="10"
+						refX="8"
+						refY="5"
+						orient="auto"
+					>
+						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-faint)" />
 					</marker>
 				</defs>
 				{#each edges as edge (edge.from + edge.to)}
 					{@const from = positionSnapshot[edge.from]}
 					{@const to = positionSnapshot[edge.to]}
+					{@const stroke = edgeStroke[edge.type] ?? edgeStroke.uses}
+					{@const marker =
+						edge.type === 'produces'
+							? 'url(#lineage-arrow-success)'
+							: edge.type === 'chains' || edge.type === 'consumes_internal'
+								? 'url(#lineage-arrow-faint)'
+								: 'url(#lineage-arrow)'}
 					{#if from && to}
 						<path
 							d={`M ${from.x + nodeWidth} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth + 60} ${from.y + nodeHeight / 2} ${to.x - 60} ${to.y + nodeHeight / 2} ${to.x} ${to.y + nodeHeight / 2}`}
 							fill="none"
-							stroke="var(--lineage-edge)"
+							stroke={stroke.color}
 							stroke-width="1.5"
-							marker-end="url(#lineage-arrow)"
+							stroke-dasharray={stroke.dash}
+							marker-end={marker}
 						/>
 					{/if}
 				{/each}
@@ -467,9 +560,33 @@
 
 			{#each layoutNodes as node (node.id)}
 				{@const pos = positionSnapshot[node.id]}
+				{@const isInternal = node.kind === 'internal'}
 				{#if pos}
 					<div
-						class="absolute flex flex-col gap-1 border px-4 py-3 shadow-sm lineage-node"
+						class={cx(
+							'lineage-node',
+							css({
+								width: '240px',
+								background: 'canvas.lineageNode',
+								cursor: 'grab',
+								transition: 'box-shadow 160ms ease, transform 160ms ease',
+								_active: {
+									cursor: 'grabbing',
+									boxShadow: 'panel'
+								},
+								position: 'absolute',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '1',
+								borderWidth: '1',
+								paddingX: '4',
+								paddingY: '3',
+								boxShadow: 'sm',
+								borderLeftWidth: isInternal ? '1' : '3'
+							})
+						)}
+						style:border-left-color={kindBorderColor[node.kind]}
+						style:border-style={isInternal ? 'dashed' : 'solid'}
 						use:setPosition={pos}
 						onpointerdown={(event) => {
 							if (event.button === 0) startDrag(event, node.id);
@@ -479,16 +596,34 @@
 						onpointercancel={stopDrag}
 						role="button"
 						tabindex="0"
-						aria-label={`${node.type} ${node.label}`}
+						aria-label={`${node.kind} ${node.label}`}
 					>
-						<div class="text-xs uppercase tracking-wide text-fg-muted">
-							{node.type === 'datasource' ? 'Datasource' : 'Analysis'}
+						<div
+							class={css({
+								fontSize: 'xs',
+								textTransform: 'uppercase',
+								letterSpacing: 'wide',
+								color: isInternal ? 'fg.faint' : 'fg.muted'
+							})}
+						>
+							{kindLabel[node.kind]}
 						</div>
-						<div class="truncate text-sm font-semibold text-fg-primary">
+						<div
+							class={css({
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap',
+								fontSize: 'sm',
+								fontWeight: 'semibold',
+								color: isInternal ? 'fg.tertiary' : 'fg.primary'
+							})}
+						>
 							{node.label}
 						</div>
 						{#if node.meta}
-							<div class="text-xs text-fg-tertiary">{node.meta}</div>
+							<div class={css({ fontSize: 'xs', color: isInternal ? 'fg.faint' : 'fg.tertiary' })}>
+								{node.meta}
+							</div>
 						{/if}
 					</div>
 				{/if}

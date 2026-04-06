@@ -14,19 +14,39 @@ class SettingsResponse(BaseModel):
     smtp_password: str
     telegram_bot_token: str
     telegram_bot_enabled: bool
+    openrouter_api_key: str
+    openrouter_default_model: str
+    openai_api_key: str
+    openai_endpoint_url: str
+    openai_default_model: str
+    openai_organization_id: str
+    ollama_endpoint_url: str
+    ollama_default_model: str
+    huggingface_api_token: str
+    huggingface_default_model: str
     public_idb_debug: bool
 
 
 class SettingsUpdate(BaseModel):
     """Settings update payload from the frontend."""
 
-    smtp_host: str = ''
-    smtp_port: int = 587
-    smtp_user: str = ''
-    smtp_password: str = ''
-    telegram_bot_token: str = ''
-    telegram_bot_enabled: bool = False
-    public_idb_debug: bool = False
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    telegram_bot_token: str | None = None
+    telegram_bot_enabled: bool | None = None
+    openrouter_api_key: str | None = None
+    openrouter_default_model: str | None = None
+    openai_api_key: str | None = None
+    openai_endpoint_url: str | None = None
+    openai_default_model: str | None = None
+    openai_organization_id: str | None = None
+    ollama_endpoint_url: str | None = None
+    ollama_default_model: str | None = None
+    huggingface_api_token: str | None = None
+    huggingface_default_model: str | None = None
+    public_idb_debug: bool | None = None
 
 
 class TestSmtpRequest(BaseModel):

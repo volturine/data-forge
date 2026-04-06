@@ -1,5 +1,7 @@
 import logging
 import uuid
+from collections import deque
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import croniter  # type: ignore[import-untyped]
@@ -8,7 +10,10 @@ from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError, ScheduleValidationError
 from modules.analysis.models import Analysis
+from modules.analysis.pipeline_types import PipelineTab
+from modules.compute.manager import ProcessManager
 from modules.datasource.models import DataSource
+from modules.datasource.service import is_reingestable_raw_datasource
 from modules.engine_runs.models import EngineRun
 from modules.scheduler.models import Schedule
 from modules.scheduler.schemas import ScheduleCreate, ScheduleResponse, ScheduleUpdate
@@ -16,29 +21,38 @@ from modules.scheduler.schemas import ScheduleCreate, ScheduleResponse, Schedule
 logger = logging.getLogger(__name__)
 
 
-def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[str, str | None]:
-    """Resolve a datasource to its producing analysis and tab.
+def is_schedule_target_eligible(datasource: DataSource) -> bool:
+    """Schedules can target any existing datasource."""
+    return datasource is not None
 
-    Returns: (analysis_id, tab_id) - tab_id may be None
+
+def _resolve_schedule_target(session: Session, datasource_id: str) -> tuple[str, str | None, str | None]:
+    """Resolve schedule execution path and optional analysis provenance.
+
+    Returns: (target_kind, analysis_id, tab_id)
+    target_kind: analysis | raw | datasource
     """
     datasource = session.get(DataSource, datasource_id)
     if not datasource:
         raise DataSourceNotFoundError(datasource_id)
 
     analysis_id = datasource.created_by_analysis_id
-    if not analysis_id:
-        raise ScheduleValidationError('Datasource has no provenance (not created by analysis)', details={'datasource_id': datasource_id})
+    if datasource.created_by == 'analysis' and analysis_id:
+        tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
+        return 'analysis', analysis_id, tab_id
 
-    # Tab ID is stored in config
-    tab_id = None
-    if isinstance(datasource.config, dict):
-        tab_id = datasource.config.get('analysis_tab_id')
+    if is_reingestable_raw_datasource(datasource):
+        return 'raw', None, None
 
-    return analysis_id, tab_id
+    return 'datasource', None, None
 
 
-def _enrich_schedule_response(session: Session, schedule: Schedule) -> ScheduleResponse:
-    """Enrich schedule with resolved analysis/tab info from datasource provenance."""
+def _build_schedule_response(
+    schedule: Schedule,
+    datasource: DataSource | None,
+    analysis: Analysis | None,
+) -> ScheduleResponse:
+    """Build a schedule response from preloaded related models."""
     data = {
         'id': schedule.id,
         'datasource_id': schedule.datasource_id,
@@ -51,34 +65,47 @@ def _enrich_schedule_response(session: Session, schedule: Schedule) -> ScheduleR
         'created_at': schedule.created_at,
     }
 
-    # Resolve provenance from datasource
-    datasource = session.get(DataSource, schedule.datasource_id)
     if datasource:
         data['analysis_id'] = datasource.created_by_analysis_id
 
-        # Tab ID is stored in config
-        tab_id = None
-        if isinstance(datasource.config, dict):
-            tab_id = datasource.config.get('analysis_tab_id')
+        tab_id = datasource.config.get('analysis_tab_id') if isinstance(datasource.config, dict) else None
         data['tab_id'] = tab_id
 
-        # Get analysis name
-        if datasource.created_by_analysis_id:
-            analysis = session.get(Analysis, datasource.created_by_analysis_id)
-            if analysis:
-                data['analysis_name'] = analysis.name
+        if analysis:
+            data['analysis_name'] = analysis.name
 
-                # Get tab name from pipeline definition
-                if tab_id and analysis.pipeline_definition:
-                    pipeline = analysis.pipeline_definition
-                    if isinstance(pipeline, dict):
-                        tabs = pipeline.get('tabs', [])
-                        for tab in tabs:
-                            if tab.get('id') == tab_id:
-                                data['tab_name'] = tab.get('name', 'unnamed')
-                                break
+            if tab_id:
+                for ptab in analysis.pipeline.tabs:
+                    if ptab.id == tab_id:
+                        data['tab_name'] = ptab.name or 'unnamed'
+                        break
 
     return ScheduleResponse.model_validate(data)
+
+
+def _enrich_schedule_response(session: Session, schedule: Schedule) -> ScheduleResponse:
+    """Enrich schedule with resolved analysis/tab info from datasource provenance."""
+    datasource = session.get(DataSource, schedule.datasource_id)
+    analysis = None
+    if datasource and datasource.created_by_analysis_id:
+        analysis = session.get(Analysis, datasource.created_by_analysis_id)
+    return _build_schedule_response(schedule, datasource, analysis)
+
+
+def _enrich_schedule_response_batch(
+    schedules: Sequence[Schedule],
+    ds_map: dict[str, DataSource],
+    analysis_map: dict[str, Analysis],
+) -> list[ScheduleResponse]:
+    """Enrich schedules using preloaded datasource and analysis maps."""
+    responses: list[ScheduleResponse] = []
+    for schedule in schedules:
+        datasource = ds_map.get(schedule.datasource_id)
+        analysis = None
+        if datasource and datasource.created_by_analysis_id:
+            analysis = analysis_map.get(datasource.created_by_analysis_id)
+        responses.append(_build_schedule_response(schedule, datasource, analysis))
+    return responses
 
 
 def list_schedules(
@@ -88,29 +115,36 @@ def list_schedules(
     """List schedules with optional filtering by target datasource."""
     query = select(Schedule)
     if datasource_id:
-        query = query.where(Schedule.datasource_id == datasource_id)  # type: ignore[arg-type]
+        query = query.where(col(Schedule.datasource_id) == datasource_id)
     result = session.execute(query)
     schedules = result.scalars().all()
-    return [_enrich_schedule_response(session, schedule) for schedule in schedules]
+    datasource_ids = {schedule.datasource_id for schedule in schedules}
+
+    ds_map: dict[str, DataSource] = {}
+    if datasource_ids:
+        datasources = session.execute(select(DataSource).where(col(DataSource.id).in_(list(datasource_ids)))).scalars().all()
+        ds_map = {str(datasource.id): datasource for datasource in datasources}
+
+    analysis_ids = {datasource.created_by_analysis_id for datasource in ds_map.values() if datasource.created_by_analysis_id}
+
+    analysis_map: dict[str, Analysis] = {}
+    if analysis_ids:
+        analyses = session.execute(select(Analysis).where(col(Analysis.id).in_(list(analysis_ids)))).scalars().all()
+        analysis_map = {str(analysis.id): analysis for analysis in analyses}
+
+    return _enrich_schedule_response_batch(schedules, ds_map, analysis_map)
 
 
 def create_schedule(session: Session, payload: ScheduleCreate) -> ScheduleResponse:
-    """Create a new schedule targeting a specific dataset.
+    """Create a new schedule targeting a specific datasource.
 
-    The datasource must be an analysis output (created_by='analysis').
-    The analysis_id and tab_id are resolved from the datasource at execution time,
-    not stored in the schedule.
+    analysis_id and tab_id are resolved from datasource provenance at execution time.
     """
-    # Validate datasource exists and is an analysis output
+    # Validate datasource exists
     datasource = session.get(DataSource, payload.datasource_id)
     if not datasource:
         raise DataSourceNotFoundError(payload.datasource_id)
-    if datasource.created_by != 'analysis':
-        raise ScheduleValidationError(
-            'Schedules can only be created for analysis-output datasources',
-            details={'datasource_id': payload.datasource_id, 'created_by': datasource.created_by},
-        )
-    if not datasource.created_by_analysis_id:
+    if datasource.created_by == 'analysis' and not datasource.created_by_analysis_id:
         raise ScheduleValidationError('Datasource has no analysis provenance', details={'datasource_id': payload.datasource_id})
 
     # Validate dependency if provided
@@ -155,10 +189,6 @@ def update_schedule(session: Session, schedule_id: str, payload: ScheduleUpdate)
         datasource = session.get(DataSource, payload.datasource_id)
         if not datasource:
             raise DataSourceNotFoundError(payload.datasource_id)
-        if datasource.created_by != 'analysis':
-            raise ScheduleValidationError(
-                'Schedules can only target analysis-output datasources', details={'datasource_id': payload.datasource_id}
-            )
         # Update backward-compat analysis_id
         schedule.analysis_id = datasource.created_by_analysis_id
 
@@ -214,32 +244,38 @@ def get_build_order(session: Session, analysis_id: str) -> list[str]:
 
     deps = (
         session.execute(
-            select(AnalysisDataSource).where(AnalysisDataSource.analysis_id.in_(list(graph.keys())))  # type: ignore[arg-type, attr-defined]
+            select(AnalysisDataSource).where(AnalysisDataSource.analysis_id.in_(list(graph.keys()))),  # type: ignore[arg-type, attr-defined]
         )
         .scalars()
         .all()
     )
+    dep_ds_ids = [dep.datasource_id for dep in deps]
+    datasources_by_id: dict[str, DataSource] = {}
+    if dep_ds_ids:
+        ds_rows = session.execute(select(DataSource).where(col(DataSource.id).in_(dep_ds_ids))).scalars().all()
+        datasources_by_id = {str(ds.id): ds for ds in ds_rows}
     for dep in deps:
-        datasource = session.get(DataSource, dep.datasource_id)
+        datasource = datasources_by_id.get(dep.datasource_id)
         if not datasource or not datasource.created_by_analysis_id:
             continue
         upstream = datasource.created_by_analysis_id
         if upstream not in graph or dep.analysis_id not in graph:
             continue
-        graph.setdefault(upstream, set()).add(dep.analysis_id)
-        in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
+        edges = graph.setdefault(upstream, set())
+        is_new = dep.analysis_id not in edges
+        edges.add(dep.analysis_id)
+        if is_new:
+            in_degree[dep.analysis_id] = in_degree.get(dep.analysis_id, 0) + 1
 
-    queue = [aid for aid, degree in in_degree.items() if degree == 0]
+    queue = deque(aid for aid, degree in in_degree.items() if degree == 0)
     ordered: list[str] = []
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         ordered.append(node)
         for neighbor in graph.get(node, set()):
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)
-    if analysis_id in ordered:
-        return ordered
     return ordered
 
 
@@ -269,7 +305,7 @@ def _is_triggered_by_datasource(
         .where(EngineRun.status == 'success')  # type: ignore[arg-type]
         .where(EngineRun.kind.in_(['datasource_update', 'datasource_create']))  # type: ignore[arg-type, attr-defined]
         .order_by(EngineRun.created_at.desc())  # type: ignore[arg-type, attr-defined]
-        .limit(1)
+        .limit(1),
     )
     latest = result.scalar_one_or_none()
     if not latest:
@@ -284,13 +320,17 @@ def _is_triggered_by_datasource(
 def get_due_schedules(session: Session) -> list[Schedule]:
     """Return all enabled schedules that are due to run."""
     result = session.execute(
-        select(Schedule).where(col(Schedule.enabled) == True)  # type: ignore[arg-type]  # noqa: E712
+        select(Schedule).where(col(Schedule.enabled) == True),  # type: ignore[arg-type]  # noqa: E712
     )
     schedules = result.scalars().all()
+    ds_ids = [sched.datasource_id for sched in schedules]
+    valid_ds_ids: set[str] = set()
+    if ds_ids:
+        id_rows = session.execute(select(col(DataSource.id)).where(col(DataSource.id).in_(ds_ids))).all()
+        valid_ds_ids = {str(row[0]) for row in id_rows}
     due: list[Schedule] = []
     for sched in schedules:
-        datasource = session.get(DataSource, sched.datasource_id)
-        if not datasource:
+        if sched.datasource_id not in valid_ds_ids:
             continue
         if should_run(sched.cron_expression, sched.last_run):
             due.append(sched)
@@ -316,16 +356,16 @@ def mark_schedule_run(session: Session, schedule_id: str) -> None:
     session.commit()
 
 
-def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'schedule') -> dict:
+def execute_schedule(session: Session, manager: ProcessManager, schedule_id: str, triggered_by: str = 'schedule') -> dict:
     """Execute a schedule by building its target dataset.
 
     The datasource determines which analysis and tab to run.
     The LATEST version of the analysis is always used.
 
     BUILD BEHAVIOR:
-    - Single execution builds the target tab
-    - Lazyframe inputs: Query plan automatically includes upstream tab logic (single query)
-    - Exported inputs: Uses current snapshot data (may be stale, that's OK)
+    - Analysis provenance datasource: build the producing analysis tab
+    - Reingestable raw iceberg datasource: refresh external source into iceberg
+    - Other datasources: refresh schema/cache from current source and log update run
 
     Returns build results.
     """
@@ -336,7 +376,33 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
         raise ValueError(f'Schedule {schedule_id} not found')
 
     # Resolve target at execution time
-    analysis_id, _ = _resolve_schedule_target(session, schedule.datasource_id)
+    target_kind, analysis_id, _ = _resolve_schedule_target(session, schedule.datasource_id)
+
+    if target_kind == 'raw':
+        from modules.datasource import service as datasource_service
+
+        refreshed = datasource_service.refresh_external_datasource(session, schedule.datasource_id)
+        return {
+            'schedule_id': schedule_id,
+            'datasource_id': schedule.datasource_id,
+            'analysis_id': None,
+            'tab_id': None,
+            'tab_name': refreshed.name,
+            'status': 'success',
+        }
+
+    if target_kind == 'datasource':
+        from modules.datasource import service as datasource_service
+
+        refreshed = datasource_service.refresh_datasource_for_schedule(session, schedule.datasource_id)
+        return {
+            'schedule_id': schedule_id,
+            'datasource_id': schedule.datasource_id,
+            'analysis_id': None,
+            'tab_id': None,
+            'tab_name': refreshed.name,
+            'status': 'success',
+        }
 
     # Get the LATEST analysis version
     analysis = session.get(Analysis, analysis_id)
@@ -344,73 +410,56 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
         raise ValueError(f'Analysis {analysis_id} not found for datasource {schedule.datasource_id}')
 
     # Find the specific tab that produces this datasource
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
+    pipeline = analysis.pipeline
 
-    target_tab = None
-    for tab in tabs:
-        if tab.get('output_datasource_id') == schedule.datasource_id:
-            target_tab = tab
-            break
+    target_tab = next(
+        (t for t in pipeline.tabs if t.output.result_id == schedule.datasource_id),
+        None,
+    )
 
     if not target_tab:
         raise ValueError(f'No tab found in analysis {analysis_id} that produces datasource {schedule.datasource_id}')
 
-    tab_id = target_tab.get('id', 'unknown')
-    tab_name = target_tab.get('name', 'unnamed')
-    tab_datasource_id = target_tab.get('datasource_id')
-    steps = target_tab.get('steps', [])
-    datasource_config = target_tab.get('datasource_config')
+    tab_id = target_tab.id or 'unknown'
+    tab_name = target_tab.name or 'unnamed'
 
-    if not tab_datasource_id:
+    if not target_tab.datasource.id:
         raise ValueError(f'Tab {tab_id} has no input datasource')
 
-    # Extract output config
-    output_config = None
-    if isinstance(datasource_config, dict):
-        output_config = datasource_config.get('output')
-
-    if not output_config:
+    if not target_tab.output.filename:
         raise ValueError(f'Tab {tab_id} missing output configuration')
 
     # Determine target step
-    target_step_id = 'source'
-    if steps:
-        target_step_id = steps[-1].get('id', 'source')
+    target_step_id = target_tab.steps[-1].id if target_tab.steps else 'source'
 
     # Build the tab (single execution - query plan handles lazyframe deps automatically)
-    datasource_type = 'iceberg'
-    export_format = 'parquet'
-    filename = output_config.get('filename', f'{tab_name}_out')
+    filename = target_tab.output.filename or f'{tab_name}_out'
 
     iceberg_options = None
-    iceberg_cfg = output_config.get('iceberg')
-    if iceberg_cfg and isinstance(iceberg_cfg, dict):
+    output_raw = target_tab.output.to_dict()
+    iceberg_cfg = output_raw.get('iceberg')
+    if isinstance(iceberg_cfg, dict):
         iceberg_options = {
             'table_name': iceberg_cfg.get('table_name', 'exported_data'),
             'namespace': iceberg_cfg.get('namespace', 'outputs'),
             'branch': iceberg_cfg.get('branch', 'master'),
         }
 
-    tab_build_mode = output_config.get('build_mode', 'full') if isinstance(output_config, dict) else 'full'
+    tab_build_mode = output_raw.get('build_mode', 'full')
 
     logger.info(f'Schedule {schedule_id}: Building tab {tab_name} mode={tab_build_mode} (lazyframe deps auto-resolved in query plan)')
 
     pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=schedule.datasource_id)
     compute_service.export_data(
         session=session,
+        manager=manager,
         target_step_id=target_step_id,
         analysis_pipeline=pipeline_payload,
-        export_format=export_format,
         filename=filename,
-        destination='datasource',
-        datasource_type=datasource_type,
         iceberg_options=iceberg_options,
-        duckdb_options=None,
-        datasource_config=datasource_config,
         analysis_id=analysis_id,
         triggered_by=triggered_by,
-        output_datasource_id=schedule.datasource_id,
+        result_id=schedule.datasource_id,
         tab_id=str(tab_id),
         build_mode=tab_build_mode,
     )
@@ -425,24 +474,21 @@ def execute_schedule(session: Session, schedule_id: str, triggered_by: str = 'sc
     }
 
 
-def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
+def _resolve_upstream_tabs(tabs: list[PipelineTab], target_tab_id: str) -> set[str]:
     """Find all tab IDs that the target tab depends on via lazyframe inputs (including itself)."""
     output_to_tab: dict[str, str] = {}
     tab_input: dict[str, str] = {}
 
     for tab in tabs:
-        tid = tab.get('id')
-        output_id = tab.get('output_datasource_id')
-        input_id = tab.get('datasource_id')
-        if tid and output_id:
-            output_to_tab[output_id] = tid
-        if tid and input_id:
-            tab_input[tid] = input_id
+        if tab.id and tab.output.result_id:
+            output_to_tab[tab.output.result_id] = tab.id
+        if tab.id and tab.datasource.id:
+            tab_input[tab.id] = tab.datasource.id
 
     required: set[str] = set()
-    queue = [target_tab_id]
+    queue: deque[str] = deque([target_tab_id])
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in required:
             continue
         required.add(current)
@@ -458,6 +504,7 @@ def _resolve_upstream_tabs(tabs: list[dict], target_tab_id: str) -> set[str]:
 def run_analysis_build(
     session: Session,
     analysis_id: str,
+    manager: ProcessManager | None = None,
     datasource_id: str | None = None,
     triggered_by: str = 'schedule',
     tab_id: str | None = None,
@@ -480,24 +527,23 @@ def run_analysis_build(
 
     pipeline_payload = compute_service.build_analysis_pipeline_payload(session, analysis, datasource_id=datasource_id)
 
-    pipeline = analysis.pipeline_definition
-    tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
-    if not tabs:
+    pipeline = analysis.pipeline
+    if not pipeline.tabs:
         logger.warning(f'Scheduler: analysis {analysis_id} has no tabs, skipping build')
         return {'analysis_id': analysis_id, 'tabs_built': 0, 'results': []}
 
-    required_tabs = _resolve_upstream_tabs(tabs, tab_id) if tab_id else None
+    required_tabs = _resolve_upstream_tabs(pipeline.tabs, tab_id) if tab_id else None
 
     results: list[dict] = []
     tabs_built = 0
 
-    for tab in tabs:
-        current_tab_id = tab.get('id', 'unknown')
-        tab_name = tab.get('name', 'unnamed')
-        tab_datasource_id = tab.get('datasource_id')
-        tab_output_id = tab.get('output_datasource_id')
-        steps = tab.get('steps', [])
-        datasource_config = tab.get('datasource_config')
+    for tab in pipeline.tabs:
+        current_tab_id = tab.id or 'unknown'
+        tab_name = tab.name or 'unnamed'
+        tab_datasource_id = tab.datasource.id
+        tab_output_id = tab.output.result_id
+        has_output = bool(tab.output.filename)
+        steps = tab.steps
 
         if not tab_datasource_id:
             continue
@@ -508,49 +554,36 @@ def run_analysis_build(
         if datasource_id and tab_output_id != datasource_id:
             continue
 
-        # Extract output config if present
-        output_config = None
-        if isinstance(datasource_config, dict):
-            output_config = datasource_config.get('output')
-
         # Determine the target step (last step, or 'source' if no steps)
-        target_step_id = 'source'
-        if steps:
-            target_step_id = steps[-1].get('id', 'source')
+        target_step_id = steps[-1].id if steps else 'source'
 
         try:
-            if output_config is not None:
+            if has_output:
                 # Tab has export config — run full export (Iceberg-only)
-                datasource_type = 'iceberg'
-                export_format = 'parquet'
-                filename = output_config.get('filename', f'{tab_name}_out')
+                filename = tab.output.filename or f'{tab_name}_out'
 
-                iceberg_options = None
-                iceberg_cfg = output_config.get('iceberg')
-                if iceberg_cfg and isinstance(iceberg_cfg, dict):
-                    iceberg_options = {
+                iceberg_cfg = tab.output.to_dict().get('iceberg')
+                iceberg_options = (
+                    {
                         'table_name': iceberg_cfg.get('table_name', 'exported_data'),
                         'namespace': iceberg_cfg.get('namespace', 'outputs'),
                         'branch': iceberg_cfg.get('branch', 'master'),
                     }
-
-                duckdb_options = None
+                    if isinstance(iceberg_cfg, dict)
+                    else None
+                )
 
                 compute_service.export_data(
                     session=session,
+                    manager=manager,  # type: ignore[arg-type]
                     target_step_id=target_step_id,
                     analysis_pipeline=pipeline_payload,
-                    export_format=export_format,
                     filename=filename,
-                    destination='datasource',
-                    datasource_type=datasource_type,
                     iceberg_options=iceberg_options,
-                    duckdb_options=duckdb_options,
-                    datasource_config=datasource_config,
                     analysis_id=analysis_id,
                     triggered_by=triggered_by,
-                    output_datasource_id=tab.get('output_datasource_id'),
-                    tab_id=str(current_tab_id),
+                    result_id=tab.output.result_id,
+                    tab_id=current_tab_id,
                 )
             else:
                 if required_tabs and current_tab_id != tab_id:

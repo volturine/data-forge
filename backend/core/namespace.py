@@ -29,10 +29,6 @@ def normalize_namespace(value: str | None) -> str:
     return raw
 
 
-def set_namespace(value: str | None) -> None:
-    _NAMESPACE.set(normalize_namespace(value))
-
-
 def set_namespace_context(value: str | None) -> Token:
     return _NAMESPACE.set(normalize_namespace(value))
 

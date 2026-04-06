@@ -2,15 +2,19 @@
 
 import os
 import tempfile
+import uuid
 from unittest.mock import patch
 
 import polars as pl
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 
+from modules.analysis.models import AnalysisDataSource
 from modules.compute.engine import PolarsComputeEngine
 from modules.compute.operations.notification import NotificationHandler, NotificationParams
 from modules.compute.operations.plot import ChartHandler, ChartParams, compute_chart_data
+from modules.datasource.models import DataSource
 from modules.engine_runs.schemas import EngineRunResponseSchema
 
 # ---------------------------------------------------------------------------
@@ -46,7 +50,7 @@ class TestEngineRunProgressDefault:
             'analysis_id': None,
             'datasource_id': 'ds-1',
             'kind': 'preview',
-            'status': 'running',
+            'status': 'success',
             'request_json': {},
             'result_json': None,
             'error_message': None,
@@ -105,7 +109,7 @@ class TestNotificationHandler:
                     'recipient': 'test@test.com',
                     'input_columns': ['a'],
                     'unknown_field': 'bad',
-                }
+                },
             )
 
     def test_defaults(self):
@@ -115,7 +119,7 @@ class TestNotificationHandler:
                 'method': 'email',
                 'recipient': 'test@test.com',
                 'input_columns': ['col'],
-            }
+            },
         )
         assert params.subject_template == 'Notification'
         assert params.output_column == 'notification_status'
@@ -139,7 +143,7 @@ def _chart_frame() -> pl.LazyFrame:
             'value': [10.0, 20.0, 30.0, 40.0, 50.0],
             'group': ['x', 'y', 'x', 'y', 'x'],
             'group_rank': ['b', 'a', 'b', 'a', 'b'],
-        }
+        },
     ).lazy()
 
 
@@ -149,7 +153,7 @@ class TestChartParams:
             {
                 'chart_type': 'bar',
                 'x_column': 'category',
-            }
+            },
         )
         assert params.aggregation == 'sum'
         assert params.bins == 10
@@ -170,7 +174,7 @@ class TestChartParams:
                     'chart_type': 'bar',
                     'x_column': 'category',
                     'unknown': True,
-                }
+                },
             )
 
     def test_group_sort_fields(self):
@@ -181,7 +185,7 @@ class TestChartParams:
                 'group_column': 'group',
                 'group_sort_by': 'value',
                 'group_sort_order': 'desc',
-            }
+            },
         )
         assert params.group_sort_by == 'value'
         assert params.group_sort_order == 'desc'
@@ -199,9 +203,9 @@ class TestChartParams:
                             'aggregation': 'sum',
                             'y_axis_position': 'left',
                             'extra': True,
-                        }
+                        },
                     ],
-                }
+                },
             )
 
     def test_reference_line_validation(self):
@@ -214,9 +218,9 @@ class TestChartParams:
                         {
                             'axis': 'z',
                             'value': 1,
-                        }
+                        },
                     ],
-                }
+                },
             )
 
     def test_reference_line_value_optional(self):
@@ -228,9 +232,9 @@ class TestChartParams:
                     {
                         'axis': 'y',
                         'value': None,
-                    }
+                    },
                 ],
-            }
+            },
         )
         assert params.reference_lines[0].value is None
 
@@ -239,7 +243,7 @@ class TestChartParams:
             {
                 'chart_type': 'bar',
                 'x_column': 'category',
-            }
+            },
         )
         assert params.pan_zoom_enabled is False
         assert params.selection_enabled is False
@@ -365,7 +369,7 @@ class TestChartDataBar:
             {
                 'category': ['A', 'A', 'A', 'B', 'B', 'B'],
                 'value': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            }
+            },
         ).lazy()
         result = (
             compute_chart_data(
@@ -388,7 +392,7 @@ class TestChartDataBar:
             {
                 'category': ['A', 'A', 'A', 'B', 'B', 'B'],
                 'value': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            }
+            },
         ).lazy()
         result = (
             compute_chart_data(
@@ -462,7 +466,7 @@ class TestChartDataBar:
                     '2024-02-01T00:00:00',
                 ],
                 'value': [1, 2, 3],
-            }
+            },
         ).lazy()
         result = (
             compute_chart_data(
@@ -633,7 +637,7 @@ class TestChartDataPie:
                     '2024-01-08T00:00:00',
                 ],
                 'value': [5, 7],
-            }
+            },
         ).lazy()
         result = compute_chart_data(
             lf,
@@ -754,7 +758,7 @@ class TestChartDataScatter:
             {
                 'x': list(range(10000)),
                 'y': list(range(10000)),
-            }
+            },
         ).lazy()
         result = compute_chart_data(
             lf,
@@ -774,7 +778,7 @@ class TestChartDataBoxplot:
             {
                 'cat': ['A'] * 100 + ['B'] * 100,
                 'val': list(range(100)) + list(range(50, 150)),
-            }
+            },
         ).lazy()
         result = (
             compute_chart_data(
@@ -873,3 +877,231 @@ class TestStepTimingLabels:
             assert 'select_2' in timings
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# ChartParams sort_by / group_sort_by coercion
+# ---------------------------------------------------------------------------
+
+
+class TestChartParamsSortByCoercion:
+    def test_invalid_sort_by_coerces_to_none(self):
+        params = ChartParams.model_validate({'chart_type': 'bar', 'x_column': 'cat', 'sort_by': 'rank'})
+        assert params.sort_by is None
+
+    def test_invalid_group_sort_by_coerces_to_none(self):
+        params = ChartParams.model_validate({'chart_type': 'bar', 'x_column': 'cat', 'group_sort_by': 'total'})
+        assert params.group_sort_by is None
+
+    def test_valid_sort_by_preserved(self):
+        params = ChartParams.model_validate({'chart_type': 'bar', 'x_column': 'cat', 'sort_by': 'y'})
+        assert params.sort_by == 'y'
+
+    def test_valid_group_sort_by_preserved(self):
+        params = ChartParams.model_validate({'chart_type': 'bar', 'x_column': 'cat', 'group_sort_by': 'value'})
+        assert params.group_sort_by == 'value'
+
+    def test_invalid_sort_by_does_not_raise_in_compute(self):
+        lf = pl.DataFrame({'cat': ['A', 'B'], 'val': [1.0, 2.0]}).lazy()
+        result = compute_chart_data(lf, {'chart_type': 'bar', 'x_column': 'cat', 'y_column': 'val', 'sort_by': 'rank'}).collect()
+        assert result.height == 2
+
+
+# ---------------------------------------------------------------------------
+# Analysis datasource deduplication on create
+# ---------------------------------------------------------------------------
+
+
+class TestAnalysisDatasourceDedupe:
+    def test_duplicate_datasource_across_tabs_inserts_one_row(self, client, sample_datasource: DataSource, test_db_session):
+        shared_id = sample_datasource.id
+        payload = {
+            'name': 'Dedup Test',
+            'description': '',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Tab 1',
+                    'parent_id': None,
+                    'datasource': {'id': shared_id, 'analysis_tab_id': None, 'config': {'branch': 'master'}},
+                    'output': {'result_id': str(uuid.uuid4()), 'format': 'parquet', 'filename': 'out1'},
+                    'steps': [],
+                },
+                {
+                    'id': 'tab2',
+                    'name': 'Tab 2',
+                    'parent_id': None,
+                    'datasource': {'id': shared_id, 'analysis_tab_id': None, 'config': {'branch': 'master'}},
+                    'output': {'result_id': str(uuid.uuid4()), 'format': 'parquet', 'filename': 'out2'},
+                    'steps': [],
+                },
+            ],
+        }
+        response = client.post('/api/v1/analysis', json=payload)
+        assert response.status_code == 200
+        analysis_id = response.json()['id']
+        rows = test_db_session.execute(select(AnalysisDataSource).where(AnalysisDataSource.analysis_id == analysis_id)).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].datasource_id == shared_id
+
+
+# ---------------------------------------------------------------------------
+# Security audit fixes — PR #30
+# ---------------------------------------------------------------------------
+
+
+class TestSafeBuiltinsUdf:
+    """UDF execution sandbox must not allow attribute-chain escapes."""
+
+    def _run_udf(self, code: str):
+        # exec() here is intentional: we are verifying that the _SAFE_BUILTINS
+        # sandbox correctly blocks dangerous builtins. The code strings are
+        # hard-coded in each test — no user input reaches this helper.
+        from typing import Any
+
+        import polars as pl
+
+        from modules.compute.operations.with_columns import _SAFE_BUILTINS
+
+        scope: dict[str, Any] = {'pl': pl, '__builtins__': _SAFE_BUILTINS}
+        local_scope: dict[str, Any] = {}
+        exec(code, scope, local_scope)  # noqa: S102
+        udf = local_scope.get('udf') or scope.get('udf')
+        return udf() if udf else None
+
+    def test_getattr_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return getattr([], "__class__")')
+
+    def test_setattr_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf():\n    class C: pass\n    setattr(C, "x", 1)\n    return C.x')
+
+    def test_vars_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return vars()')
+
+    def test_dir_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return dir([])')
+
+    def test_open_blocked(self):
+        with pytest.raises((NameError, TypeError)):
+            self._run_udf('def udf(): return open("/etc/passwd")')
+
+    def test_dunder_escape_blocked_before_exec(self):
+        from modules.compute.operations.with_columns import WithColumnsHandler
+
+        handler = WithColumnsHandler()
+        with pytest.raises(ValueError, match='forbidden dunder access'):
+            handler(
+                pl.DataFrame({'id': [1]}).lazy(),
+                {'expressions': [{'name': 'bad', 'type': 'udf', 'code': 'def udf():\n    return [].__class__'}]},
+            )
+
+    def test_safe_arithmetic_works(self):
+        result = self._run_udf('def udf(): return 2 + 2')
+        assert result == 4
+
+    def test_safe_len_works(self):
+        result = self._run_udf('def udf(): return len([1, 2, 3])')
+        assert result == 3
+
+
+class TestValidateRegexPattern:
+    """Shared _validation.validate_regex_pattern helper."""
+
+    def test_valid_pattern_passes(self):
+        from modules.compute.operations._validation import validate_regex_pattern
+
+        validate_regex_pattern(r'\d+')
+
+    def test_invalid_pattern_raises(self):
+        from modules.compute.operations._validation import validate_regex_pattern
+
+        with pytest.raises(ValueError, match='Invalid regex pattern'):
+            validate_regex_pattern(r'[unclosed')
+
+
+class TestAssertSelectOnly:
+    """SQL read-only guard in datasource operations."""
+
+    def _check(self, query: str):
+        from modules.compute.operations.datasource import _assert_select_only
+
+        _assert_select_only(query)
+
+    def test_select_allowed(self):
+        self._check('SELECT * FROM t')
+
+    def test_select_leading_whitespace(self):
+        self._check('  SELECT * FROM t')
+
+    def test_with_cte_allowed(self):
+        self._check('WITH cte AS (SELECT 1) SELECT * FROM cte')
+
+    def test_insert_rejected(self):
+        with pytest.raises(ValueError, match='Only SELECT'):
+            self._check('INSERT INTO t VALUES (1)')
+
+    def test_drop_rejected(self):
+        with pytest.raises(ValueError, match='Only SELECT'):
+            self._check('DROP TABLE t')
+
+    def test_empty_rejected(self):
+        with pytest.raises(ValueError, match='Only SELECT'):
+            self._check('')
+
+
+class TestParseDatetimeString:
+    """_parse_datetime_string fallback format coverage."""
+
+    def test_iso8601(self):
+        from datetime import datetime
+
+        from modules.compute.operations.filter import _parse_datetime_string
+
+        dt = _parse_datetime_string('2024-06-15T12:30:00')
+        assert dt == datetime(2024, 6, 15, 12, 30, 0)
+
+    def test_z_suffix(self):
+        from modules.compute.operations.filter import _parse_datetime_string
+
+        dt = _parse_datetime_string('2024-06-15T12:30:00Z')
+        assert dt.year == 2024 and dt.month == 6 and dt.day == 15
+
+    def test_space_separated(self):
+        from datetime import datetime
+
+        from modules.compute.operations.filter import _parse_datetime_string
+
+        dt = _parse_datetime_string('2024-06-15 12:30:00')
+        assert dt == datetime(2024, 6, 15, 12, 30, 0)
+
+    def test_invalid_raises(self):
+        from modules.compute.operations.filter import _parse_datetime_string
+
+        with pytest.raises(ValueError, match='Cannot parse datetime string'):
+            _parse_datetime_string('not-a-date')
+
+
+class TestCoerceValueNumber:
+    """coerce_value handles scientific notation strings correctly."""
+
+    def test_integer_string(self):
+        from modules.compute.operations.filter import coerce_value
+
+        assert coerce_value('42', 'number') == 42
+        assert isinstance(coerce_value('42', 'number'), int)
+
+    def test_float_string(self):
+        from modules.compute.operations.filter import coerce_value
+
+        assert coerce_value('3.14', 'number') == pytest.approx(3.14)
+
+    def test_scientific_notation(self):
+        from modules.compute.operations.filter import coerce_value
+
+        val = coerce_value('1e5', 'number')
+        assert val == pytest.approx(100000.0)
+        assert isinstance(val, float)  # '1e5' contains 'e', must stay float

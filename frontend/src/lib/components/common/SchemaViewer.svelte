@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { css, cx, row, muted } from '$lib/styles/panda';
 
 	interface Props {
 		schema: Schema;
@@ -9,17 +10,52 @@
 	let { schema }: Props = $props();
 </script>
 
-<div class="schema-viewer overflow-hidden border bg-panel border-tertiary">
-	<div class="flex justify-between items-center px-5 py-4 border-b border-tertiary bg-tertiary">
-		<h3 class="m-0 text-lg font-semibold text-fg-primary">Schema</h3>
+<div
+	class={cx(
+		'schema-viewer',
+		css({
+			overflow: 'hidden',
+			borderWidth: '1',
+			backgroundColor: 'bg.primary'
+		})
+	)}
+>
+	<div
+		class={cx(
+			row,
+			css({
+				justifyContent: 'space-between',
+				paddingX: '5',
+				paddingY: '4',
+				borderBottomWidth: '1',
+				backgroundColor: 'bg.tertiary'
+			})
+		)}
+	>
+		<h3 class={css({ margin: '0', fontSize: 'lg', fontWeight: 'semibold' })}>Schema</h3>
 		{#if schema.row_count !== null}
-			<span class="text-sm text-fg-muted">{schema.row_count.toLocaleString()} rows</span>
+			<span class={css({ fontSize: 'sm', color: 'fg.muted' })}>
+				{schema.row_count.toLocaleString()} rows
+			</span>
 		{/if}
 	</div>
 
-	<div class="max-h-125 overflow-y-auto">
+	<div class={css({ maxHeight: 'listTall', overflowY: 'auto' })}>
 		<div
-			class="schema-header-grid grid gap-4 px-5 py-3 border-b text-xs font-semibold uppercase tracking-wider border-tertiary text-fg-muted bg-tertiary"
+			class={css({
+				display: 'grid',
+				gridTemplateColumns: '2fr 1.5fr 1fr',
+				gap: '4',
+				paddingX: '5',
+				paddingY: '3',
+				borderBottomWidth: '1',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider',
+				color: 'fg.muted',
+				backgroundColor: 'bg.tertiary'
+			})}
 		>
 			<div>Column</div>
 			<div>Type</div>
@@ -28,19 +64,27 @@
 
 		{#each schema.columns as column (column.name)}
 			<div
-				class="schema-header-grid grid gap-4 px-5 py-3.5 border-b last:border-b-0 border-tertiary hover:bg-hover"
+				class={css({
+					display: 'grid',
+					gridTemplateColumns: '2fr 1.5fr 1fr',
+					gap: '4',
+					paddingX: '5',
+					paddingY: '3.5',
+					borderBottomWidth: '1',
+					_hover: { backgroundColor: 'bg.hover' }
+				})}
 			>
-				<div class="flex items-center gap-2 font-medium text-fg-primary">
-					<span class="font-mono text-sm">{column.name}</span>
+				<div class={cx(row, css({ gap: '2', fontWeight: 'medium' }))}>
+					<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}>{column.name}</span>
 				</div>
-				<div class="flex items-center">
+				<div class={row}>
 					<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
 				</div>
-				<div class="flex items-center text-sm">
+				<div class={cx(row, css({ fontSize: 'sm' }))}>
 					{#if column.nullable}
-						<span class="text-fg-muted">Yes</span>
+						<span class={muted}>Yes</span>
 					{:else}
-						<span class="font-medium text-fg-secondary">No</span>
+						<span class={css({ fontWeight: 'medium', color: 'fg.secondary' })}>No</span>
 					{/if}
 				</div>
 			</div>

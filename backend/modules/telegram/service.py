@@ -23,7 +23,7 @@ def get_subscriber_by_chat(session: Session, chat_id: str, bot_token: str) -> Te
         session.execute(
             select(TelegramSubscriber)
             .where(TelegramSubscriber.chat_id == chat_id)  # type: ignore[arg-type]
-            .where(TelegramSubscriber.bot_token == bot_token)  # type: ignore[arg-type]
+            .where(TelegramSubscriber.bot_token == bot_token),  # type: ignore[arg-type]
         )
         .scalars()
         .first()
@@ -57,14 +57,13 @@ def deactivate_subscriber(session: Session, subscriber_id: int) -> None:
     if not sub:
         return
     sub.is_active = False
-    listeners = (
+    for listener in (
         session.execute(
-            select(TelegramListener).where(TelegramListener.subscriber_id == subscriber_id)  # type: ignore[arg-type]
+            select(TelegramListener).where(TelegramListener.subscriber_id == subscriber_id),  # type: ignore[arg-type]
         )
         .scalars()
         .all()
-    )
-    for listener in listeners:
+    ):
         session.delete(listener)
     session.add(sub)
     session.commit()
@@ -74,7 +73,7 @@ def delete_subscriber(session: Session, subscriber_id: int) -> None:
     # Delete listeners first
     listeners = (
         session.execute(
-            select(TelegramListener).where(TelegramListener.subscriber_id == subscriber_id)  # type: ignore[arg-type]
+            select(TelegramListener).where(TelegramListener.subscriber_id == subscriber_id),  # type: ignore[arg-type]
         )
         .scalars()
         .all()
@@ -106,7 +105,7 @@ def add_listener(session: Session, data: ListenerCreate) -> ListenerResponse:
         session.execute(
             select(TelegramListener)
             .where(TelegramListener.subscriber_id == data.subscriber_id)  # type: ignore[arg-type]
-            .where(TelegramListener.datasource_id == data.datasource_id)  # type: ignore[arg-type]
+            .where(TelegramListener.datasource_id == data.datasource_id),  # type: ignore[arg-type]
         )
         .scalars()
         .first()
@@ -131,7 +130,7 @@ def remove_listener(session: Session, listener_id: int) -> None:
 def auto_populate_listeners(session: Session, datasource_id: str) -> list[ListenerResponse]:
     subs = (
         session.execute(
-            select(TelegramSubscriber).where(TelegramSubscriber.is_active == True)  # type: ignore[arg-type]  # noqa: E712
+            select(TelegramSubscriber).where(TelegramSubscriber.is_active == True),  # type: ignore[arg-type]  # noqa: E712
         )
         .scalars()
         .all()
@@ -146,7 +145,7 @@ def auto_populate_listeners(session: Session, datasource_id: str) -> list[Listen
 def get_notification_chat_ids(session: Session, datasource_id: str) -> list[tuple[str, str]]:
     listeners = (
         session.execute(
-            select(TelegramListener).where(TelegramListener.datasource_id == datasource_id)  # type: ignore[arg-type]
+            select(TelegramListener).where(TelegramListener.datasource_id == datasource_id),  # type: ignore[arg-type]
         )
         .scalars()
         .all()
@@ -158,7 +157,7 @@ def get_notification_chat_ids(session: Session, datasource_id: str) -> list[tupl
         session.execute(
             select(TelegramSubscriber)
             .where(TelegramSubscriber.id.in_(sub_ids))  # type: ignore[union-attr]
-            .where(TelegramSubscriber.is_active == True)  # type: ignore[arg-type]  # noqa: E712
+            .where(TelegramSubscriber.is_active == True),  # type: ignore[arg-type]  # noqa: E712
         )
         .scalars()
         .all()

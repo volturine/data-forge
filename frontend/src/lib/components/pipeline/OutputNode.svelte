@@ -1,18 +1,25 @@
 <script lang="ts">
-	import type { AnalysisTab } from '$lib/types/analysis';
+	import type {
+		AnalysisTab,
+		AnalysisTabIcebergConfig,
+		AnalysisTabNotificationConfig,
+		AnalysisTabOutput
+	} from '$lib/types/analysis';
 	import type { Subscriber } from '$lib/api/settings';
 	import type { BuildResponse } from '$lib/api/compute';
 	import { getSubscribers } from '$lib/api/settings';
-	import { getDatasource, updateDatasource } from '$lib/api/datasource';
+	import { listDatasources, updateDatasource } from '$lib/api/datasource';
 	import { buildAnalysisWithPayload } from '$lib/api/compute';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import { isUuid } from '$lib/utils/analysis-tab';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import { css, cx, chip, input, label, row, rowBetween, muted } from '$lib/styles/panda';
 	import {
 		Bell,
 		CalendarClock,
@@ -35,9 +42,10 @@
 		analysisId?: string;
 		datasourceId?: string;
 		activeTab?: AnalysisTab | null;
+		readOnly?: boolean;
 	}
 
-	let { analysisId, datasourceId, activeTab = null }: Props = $props();
+	let { analysisId, datasourceId, activeTab = null, readOnly = false }: Props = $props();
 
 	const queryClient = useQueryClient();
 	let toggling = $state(false);
@@ -46,25 +54,47 @@
 	let notifyOpen = $state(false);
 	let scheduleOpen = $state(false);
 	let healthOpen = $state(false);
+	let probeOutputDatasource = $state(false);
+	let lastOutputDatasourceId = $state<string | null>(null);
 	let editingName = $state(false);
 	let draftName = $state('');
 	let modeMenuOpen = $state(false);
 	let modeMenuRef = $state<HTMLElement>();
 	let modeTriggerRef = $state<HTMLButtonElement>();
 
-	const defaultBranch = $derived.by(() => {
-		const current = analysisStore.current?.pipeline_definition ?? {};
-		const branch = (current as Record<string, unknown>).output_branch as string | undefined;
-		const next = branch ?? '';
-		return next.trim().length > 0 ? next : 'master';
+	const outputConfig = $derived.by(() => {
+		const tab = activeTab;
+		const output = tab?.output ?? null;
+		const icebergRaw = output?.iceberg;
+		const defaultName = tab?.name ? tab.name.trim() : 'export';
+		const tableName =
+			icebergRaw?.table_name || defaultName.replace(/\s+/g, '_').toLowerCase() || 'export';
+		const branch =
+			typeof icebergRaw?.branch === 'string'
+				? icebergRaw.branch
+				: (tab?.datasource?.config?.branch ?? '');
+		const namespace = icebergRaw?.namespace || 'outputs';
+		return {
+			format: 'parquet',
+			filename: output?.filename || tableName,
+			build_mode: output?.build_mode || 'full',
+			iceberg: {
+				namespace,
+				table_name: tableName,
+				branch
+			},
+			notification: output?.notification ?? null
+		};
 	});
-	const branchValue = $derived.by(() => {
-		const next = outputConfig.iceberg.branch ?? defaultBranch;
-		return next.trim().length > 0 ? next : defaultBranch;
-	});
+
+	const branchValue = $derived(outputConfig.iceberg.branch);
+	function extractBranches(config: Record<string, unknown> | null | undefined): string[] {
+		const raw = config?.branches;
+		if (!Array.isArray(raw)) return [];
+		return raw.filter((branch): branch is string => typeof branch === 'string' && !!branch.trim());
+	}
 	const branchOptions = $derived.by(() => {
-		const branches = (outputDatasourceQuery.data?.config?.branches as string[] | undefined) ?? [];
-		const cleaned = branches.map((branch) => branch.trim()).filter((branch) => branch.length > 0);
+		const cleaned = extractBranches(outputDatasourceQuery.data?.config);
 		const current = branchValue.trim();
 		if (!current) return cleaned;
 		if (cleaned.includes(current)) return cleaned;
@@ -72,11 +102,50 @@
 	});
 	const idPrefix = $derived(`output-${analysisId ?? datasourceId ?? 'node'}`);
 
-	const outputDatasourceId = $derived(activeTab?.output_datasource_id ?? null);
-	const outputDatasource = $derived(
-		outputDatasourceId ? (datasourceStore.getDatasource(outputDatasourceId) ?? null) : null
+	const outputDatasourceId = $derived(activeTab?.output?.result_id ?? null);
+	const outputDefaults = $derived.by(() => {
+		const tab = activeTab;
+		if (!tab) return null;
+		const output = tab.output;
+		const icebergRaw = output?.iceberg;
+		const defaultName = tab.name ? tab.name.trim() : 'export';
+		const tableName =
+			icebergRaw?.table_name || defaultName.replace(/\s+/g, '_').toLowerCase() || 'export';
+		const namespace = icebergRaw?.namespace || 'outputs';
+		const branch =
+			typeof icebergRaw?.branch === 'string'
+				? icebergRaw.branch
+				: (tab.datasource.config.branch ?? '');
+		return {
+			format: 'parquet',
+			filename: output?.filename || tableName,
+			build_mode: output?.build_mode || 'full',
+			iceberg: {
+				namespace,
+				table_name: tableName,
+				branch
+			}
+		};
+	});
+	const canQueryOutput = $derived(isUuid(outputDatasourceId));
+	const shouldQueryOutputDatasource = $derived(
+		canQueryOutput && (probeOutputDatasource || healthOpen || scheduleOpen)
 	);
-	const canQueryOutput = $derived(!!outputDatasourceId && !!outputDatasource);
+
+	const outputDatasourceQuery = createQuery(() => ({
+		queryKey: ['datasource', outputDatasourceId],
+		queryFn: async () => {
+			if (!outputDatasourceId) return null;
+			const result = await listDatasources(true);
+			if (result.isErr()) {
+				throw new Error(result.error.message);
+			}
+			return result.value.find((ds) => ds.id === outputDatasourceId) ?? null;
+		},
+		enabled: shouldQueryOutputDatasource
+	}));
+	const hasOutputDatasource = $derived(outputDatasourceQuery.data != null);
+	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
 
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['healthchecks', outputDatasourceId],
@@ -86,7 +155,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const healthResultsQuery = createQuery(() => ({
@@ -97,7 +166,7 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const healthCount = $derived(healthChecksQuery.data?.length ?? 0);
@@ -124,23 +193,11 @@
 			if (result.isErr()) return [];
 			return result.value;
 		},
-		enabled: canQueryOutput
+		enabled: canQueryOutput && hasOutputDatasource
 	}));
 
 	const scheduleCount = $derived(schedulesQuery.data?.length ?? 0);
 	const enabledSchedules = $derived((schedulesQuery.data ?? []).filter((s) => s.enabled).length);
-
-	const outputDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', outputDatasourceId],
-		queryFn: async () => {
-			if (!outputDatasourceId) return null;
-			const result = await getDatasource(outputDatasourceId);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: canQueryOutput
-	}));
-	const hidden = $derived(outputDatasourceQuery.data?.is_hidden ?? true);
 
 	const canTelegram = $derived(configStore.telegramEnabled);
 
@@ -155,35 +212,6 @@
 		enabled: canTelegram
 	}));
 
-	const outputConfig = $derived.by(() => {
-		const tab = activeTab;
-		const base = (tab?.datasource_config ?? {}) as Record<string, unknown>;
-		const output = (base.output as Record<string, unknown> | undefined) ?? {};
-		const icebergRaw = (output.iceberg as Record<string, unknown> | undefined) ?? {};
-		const defaultName = tab?.name ? tab.name.trim() : 'export';
-		const tableName =
-			(icebergRaw.table_name as string) ||
-			defaultName.replace(/\s+/g, '_').toLowerCase() ||
-			'export';
-		const branch =
-			typeof icebergRaw.branch === 'string' && icebergRaw.branch.trim().length > 0
-				? icebergRaw.branch.trim()
-				: defaultBranch;
-		const namespace = typeof icebergRaw.namespace === 'string' ? icebergRaw.namespace : '';
-		return {
-			datasource_type: 'iceberg',
-			format: 'parquet',
-			filename: (output.filename as string) || tableName,
-			build_mode: (output.build_mode as string) || 'full',
-			iceberg: {
-				namespace: namespace || 'outputs',
-				table_name: tableName,
-				branch
-			},
-			notification: (output.notification as Record<string, unknown> | undefined) ?? null
-		};
-	});
-
 	const notifyConfig = $derived.by(() => {
 		const n = outputConfig.notification;
 		if (!n) {
@@ -196,7 +224,7 @@
 		return {
 			enabled: true,
 			body_template:
-				(n.body_template as string) ||
+				(typeof n.body_template === 'string' ? n.body_template : undefined) ||
 				'Analysis: {{analysis_name}}\nStatus: {{status}}\nDuration: {{duration_ms}}ms\nRows: {{row_count}}'
 		};
 	});
@@ -207,47 +235,54 @@
 
 	const selectedCount = $derived(activeSubscribers.length);
 
-	function updateOutputConfig(patch: Record<string, unknown>) {
+	function updateOutputConfig(patch: Partial<AnalysisTabOutput>) {
+		if (readOnly) return;
 		const tab = activeTab;
 		if (!tab) return;
-		const next = { ...tab.datasource_config } as Record<string, unknown>;
-		const currentOutput = (next.output as Record<string, unknown> | undefined) ?? {};
-		next.output = { ...currentOutput, ...patch };
-		analysisStore.updateTab(tab.id, { datasource_config: next });
+		const currentOutput = tab.output;
+		const fallback = outputDefaults ?? {
+			result_id: tab.output.result_id,
+			format: 'parquet',
+			filename: 'export',
+			build_mode: 'full',
+			iceberg: { namespace: 'outputs', table_name: 'export', branch: '' }
+		};
+		const nextOutput: AnalysisTabOutput = { ...fallback, ...currentOutput, ...patch };
+		analysisStore.updateTab(tab.id, {
+			output: nextOutput
+		});
 	}
 
-	function updateIcebergConfig(patch: Record<string, unknown>) {
+	function updateIcebergConfig(patch: Partial<AnalysisTabIcebergConfig>) {
+		if (readOnly) return;
 		const current = outputConfig.iceberg ?? {};
 		updateOutputConfig({ iceberg: { ...current, ...patch } });
 	}
 
 	function ensureOutputConfig(): void {
+		if (readOnly) return;
 		const tab = activeTab;
 		if (!tab) return;
-		const base = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const output = (base.output as Record<string, unknown> | undefined) ?? null;
-		if (output) return;
-		const defaultName = tab.name ? tab.name.trim() : 'export';
-		const tableName = defaultName.replace(/\s+/g, '_').toLowerCase() || 'export';
-		updateOutputConfig({
-			datasource_type: 'iceberg',
-			format: 'parquet',
-			filename: tableName,
-			build_mode: 'full',
-			iceberg: {
-				namespace: 'outputs',
-				table_name: tableName,
-				branch: defaultBranch
-			}
+		const defaults = outputDefaults;
+		if (!defaults) return;
+		const currentOutput = tab.output;
+		const merged: AnalysisTabOutput = { ...defaults, ...currentOutput };
+		analysisStore.updateTab(tab.id, {
+			output: merged
 		});
 	}
 
 	function startNameEdit() {
+		if (readOnly) return;
 		draftName = outputConfig.iceberg.table_name;
 		editingName = true;
 	}
 
 	function commitNameEdit() {
+		if (readOnly) {
+			editingName = false;
+			return;
+		}
 		if (draftName.trim()) {
 			updateIcebergConfig({ table_name: draftName.trim() });
 		}
@@ -259,20 +294,18 @@
 	}
 
 	function applyGlobalBranchValue(next: string) {
-		ensureOutputConfig();
+		if (readOnly) return;
 		const tab = activeTab;
 		if (!tab) return;
-		const base = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const output = (base.output as Record<string, unknown> | undefined) ?? {};
-		const iceberg = (output.iceberg as Record<string, unknown> | undefined) ?? {};
-		const trimmed = next.trim();
-		const branch = trimmed.length > 0 ? trimmed : defaultBranch;
-		analysisStore.setOutputBranch(branch);
+		const output = tab.output ?? {};
+		const iceberg = output.iceberg;
+		const branch = next.trim();
+		if (!branch) return;
 		updateOutputConfig({ iceberg: { ...iceberg, branch } });
 	}
 
 	function toggleNotification() {
-		ensureOutputConfig();
+		if (readOnly) return;
 		if (notifyConfig.enabled) {
 			updateOutputConfig({ notification: null });
 			return;
@@ -286,14 +319,19 @@
 		});
 	}
 
-	function updateNotification(patch: Record<string, unknown>) {
-		ensureOutputConfig();
+	function updateNotification(patch: Partial<AnalysisTabNotificationConfig>) {
+		if (readOnly) return;
 		const current = outputConfig.notification ?? {};
 		updateOutputConfig({ notification: { ...current, ...patch } });
 	}
 
 	async function toggleHidden() {
+		if (readOnly) return;
 		if (!outputDatasourceId || toggling) return;
+		if (!hasOutputDatasource) {
+			probeOutputDatasource = true;
+			return;
+		}
 		toggling = true;
 		const result = await updateDatasource(outputDatasourceId, { is_hidden: !hidden });
 		result.match(
@@ -310,7 +348,7 @@
 	}
 
 	async function handleManualBuild() {
-		if (!analysisId || building) return;
+		if (!analysisId || building || readOnly) return;
 		building = true;
 		error = null;
 		ensureOutputConfig();
@@ -329,7 +367,9 @@
 			datasourceStore.datasources
 		);
 		if (!pipeline) {
-			error = 'Unable to build analysis payload.';
+			error = datasourceStore.loaded
+				? 'Unable to build analysis payload.'
+				: 'Datasources are still loading. Please try again.';
 			building = false;
 			return;
 		}
@@ -345,6 +385,7 @@
 				if (failed?.error) {
 					error = failed.error;
 				}
+				probeOutputDatasource = true;
 				queryClient.invalidateQueries({ queryKey: ['engine-runs', analysisId] });
 				queryClient.invalidateQueries({ queryKey: ['datasource', outputDatasourceId] });
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
@@ -373,39 +414,121 @@
 			window.removeEventListener('mousedown', handleOutside, true);
 		};
 	});
+
+	// Reset datasource probing when tab/output target changes.
+	$effect(() => {
+		const currentOutputId = outputDatasourceId;
+		if (lastOutputDatasourceId === currentOutputId) return;
+		lastOutputDatasourceId = currentOutputId;
+		probeOutputDatasource = false;
+	});
 </script>
 
-<div class="step-node relative w-[60%]">
-	<div class="node-content border border-tertiary bg-primary">
+<div
+	class={css({
+		contentVisibility: 'auto',
+		containIntrinsicSize: 'auto 200px',
+		position: 'relative',
+		width: '60%'
+	})}
+>
+	<div
+		class={css({
+			borderWidth: '1',
+			backgroundColor: 'bg.primary'
+		})}
+	>
 		<!-- Header: icon + label + badge (mirrors DatasourceNode) -->
-		<div class="flex items-center justify-between px-4 py-3 border-b border-tertiary">
-			<div class="flex items-center gap-2">
-				<div class="flex h-5 w-5 items-center justify-center bg-accent text-bg-primary">
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				paddingX: '4',
+				paddingY: '3',
+				borderBottomWidth: '1'
+			})}
+		>
+			<div class={cx(row, css({ gap: '2' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						height: 'iconMd',
+						width: 'iconMd',
+						alignItems: 'center',
+						justifyContent: 'center',
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse'
+					})}
+				>
 					<Database size={12} />
 				</div>
-				<span class="text-xs font-semibold uppercase tracking-wide">output</span>
+				<span
+					class={css({
+						fontSize: 'xs',
+						fontWeight: 'semibold',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide'
+					})}
+				>
+					output
+				</span>
 			</div>
 			<span
-				class="border border-tertiary bg-tertiary px-1.5 py-0.5 text-[0.5625rem] uppercase tracking-widest text-fg-faint"
-				>sink</span
+				class={cx(
+					chip({ tone: 'neutral' }),
+					css({
+						borderWidth: '1',
+						letterSpacing: 'widest',
+						color: 'fg.faint'
+					})
+				)}>sink</span
 			>
 		</div>
 
 		<!-- Export Name (same info-row pattern as DatasourceNode tab name) -->
 		<div
-			class="mx-4 mt-4 mb-3 flex items-center justify-between border border-tertiary bg-secondary p-2 px-3"
+			class={css({
+				marginX: '4',
+				marginTop: '4',
+				marginBottom: '3',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				borderWidth: '1',
+				backgroundColor: 'bg.secondary',
+				paddingY: '2',
+				paddingX: '3'
+			})}
 		>
 			<div
-				class="info-label flex items-center gap-2 text-[0.625rem] uppercase tracking-widest text-fg-faint"
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '2',
+					fontSize: '2xs',
+					textTransform: 'uppercase',
+					letterSpacing: 'widest',
+					color: 'fg.faint'
+				})}
 			>
-				<Pencil size={11} class="opacity-50" />
+				<Pencil size={11} class={css({ opacity: '0.5' })} />
 				<span>Table name</span>
 			</div>
-			<div class="flex items-center gap-2">
+			<div class={cx(row, css({ gap: '2' }))}>
 				{#if editingName}
-					<div class="flex items-center gap-1">
+					<div class={cx(row, css({ gap: '1' }))}>
 						<input
-							class="min-w-25 border border-tertiary bg-primary px-2 py-0.5 text-sm outline-none"
+							class={cx(
+								input(),
+								css({
+									minWidth: 'fieldSm',
+									paddingX: '2',
+									paddingY: '0.5',
+									fontSize: 'sm'
+								})
+							)}
+							id="output-node-name"
 							bind:value={draftName}
 							onkeydown={(e) => {
 								if (e.key === 'Enter') commitNameEdit();
@@ -414,54 +537,138 @@
 							aria-label="Edit export name"
 						/>
 						<button
-							class="icon-btn save inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-accent-primary text-success bg-primary p-0 leading-none hover:bg-success hover:text-fg-primary"
+							class={css({
+								display: 'inline-flex',
+								height: 'iconMd',
+								width: 'iconMd',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								color: 'fg.success',
+								backgroundColor: 'bg.primary',
+								padding: '0',
+								lineHeight: '1',
+								_hover: { backgroundColor: 'bg.success', color: 'fg.primary' }
+							})}
 							onclick={commitNameEdit}
 							type="button"
 							aria-label="Save"
 						>
-							<Check size={12} class="shrink-0" />
+							<Check size={12} class={css({ flexShrink: '0' })} />
 						</button>
 						<button
-							class="icon-btn cancel inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-error text-error bg-primary p-0 leading-none hover:bg-error hover:text-fg-primary"
+							class={css({
+								display: 'inline-flex',
+								height: 'iconMd',
+								width: 'iconMd',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								borderColor: 'border.error',
+								color: 'fg.error',
+								backgroundColor: 'bg.primary',
+								padding: '0',
+								lineHeight: '1',
+								_hover: { backgroundColor: 'bg.error', color: 'fg.primary' }
+							})}
 							onclick={cancelNameEdit}
 							type="button"
 							aria-label="Cancel"
 						>
-							<X size={12} class="shrink-0" />
+							<X size={12} class={css({ flexShrink: '0' })} />
 						</button>
 					</div>
 				{:else}
-					<span class="text-sm font-medium">{outputConfig.iceberg.table_name}</span>
-					<button
-						class="icon-btn edit inline-flex h-5 w-5 cursor-pointer items-center justify-center border border-tertiary text-fg-muted bg-primary p-0 opacity-50 leading-none hover:border-tertiary hover:text-fg-primary hover:bg-tertiary hover:opacity-100"
-						onclick={startNameEdit}
-						type="button"
-						aria-label="Edit export name"
+					<span
+						class={css({ fontSize: 'sm', fontWeight: 'medium' })}
+						data-testid="output-table-name-inline"
 					>
-						<Pencil size={12} class="shrink-0" />
-					</button>
+						{outputConfig.iceberg.table_name}
+					</span>
+					{#if !readOnly}
+						<button
+							class={css({
+								display: 'inline-flex',
+								height: 'iconMd',
+								width: 'iconMd',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								color: 'fg.muted',
+								backgroundColor: 'bg.primary',
+								padding: '0',
+								opacity: '0.5',
+								lineHeight: '1',
+								_hover: {
+									backgroundColor: 'bg.tertiary',
+									opacity: '1'
+								}
+							})}
+							onclick={startNameEdit}
+							type="button"
+							aria-label="Edit export name"
+						>
+							<Pencil size={12} class={css({ flexShrink: '0' })} />
+						</button>
+					{/if}
 				{/if}
 			</div>
 		</div>
 
 		<!-- Output Details (mirrors DatasourceNode dataset card) -->
-		<div class="mx-4 mb-3">
+		<div class={css({ marginX: '4', marginBottom: '3' })}>
 			<div
-				class="info-label mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-fg-muted"
+				class={css({
+					marginBottom: '2',
+					display: 'flex',
+					alignItems: 'center',
+					gap: '2',
+					fontSize: 'xs',
+					textTransform: 'uppercase',
+					letterSpacing: 'wide',
+					color: 'fg.muted'
+				})}
 			>
-				<Database size={12} class="opacity-60" />
+				<Database size={12} class={css({ opacity: '0.6' })} />
 				<span>Output</span>
 			</div>
-			<div class="flex flex-col gap-2 border border-tertiary bg-tertiary p-3">
-				<div class="flex items-center justify-between">
-					<span class="text-sm font-semibold">{outputConfig.iceberg.table_name}</span>
+			<div
+				class={css({
+					display: 'flex',
+					flexDirection: 'column',
+					gap: '2',
+					borderWidth: '1',
+					backgroundColor: 'bg.tertiary',
+					padding: '3'
+				})}
+			>
+				<div class={rowBetween}>
+					<span
+						class={css({ fontSize: 'sm', fontWeight: 'semibold' })}
+						data-testid="output-table-name-card"
+					>
+						{outputConfig.iceberg.table_name}
+					</span>
 					<button
 						type="button"
-						class="flex items-center gap-1 border border-tertiary bg-secondary px-2 py-0.5 text-[10px] hover:text-fg-primary"
-						class:text-fg-muted={hidden}
-						class:text-success-fg={!hidden}
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							gap: '1',
+							borderWidth: '1',
+							backgroundColor: 'bg.secondary',
+							paddingX: '2',
+							paddingY: '0.5',
+							fontSize: '2xs',
+							color: hidden ? 'fg.muted' : 'fg.success',
+							_hover: { color: 'fg.primary' }
+						})}
 						onclick={toggleHidden}
-						disabled={toggling}
+						disabled={readOnly || toggling || !hasOutputDatasource}
+						data-testid="output-visibility-toggle"
 						title={hidden
 							? 'Hidden from other analyses — click to make visible'
 							: 'Visible to other analyses — click to hide'}
@@ -475,80 +682,255 @@
 						{/if}
 					</button>
 				</div>
-				<div class="grid grid-cols-2 gap-2 border-t border-tertiary pt-2">
-					<div class="column-select relative" bind:this={modeMenuRef}>
-						<button
-							type="button"
-							class="column-trigger w-full"
-							onclick={() => (modeMenuOpen = !modeMenuOpen)}
-							aria-expanded={modeMenuOpen}
-							bind:this={modeTriggerRef}
+				<div
+					class={css({
+						display: 'grid',
+						gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+						gap: '2',
+						borderTopWidth: '1',
+						paddingTop: '2'
+					})}
+				>
+					{#if readOnly}
+						<div
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								borderWidth: '1',
+								backgroundColor: 'bg.secondary',
+								paddingX: '3',
+								paddingY: '2',
+								fontSize: 'sm'
+							})}
 						>
-							<span class="column-label">{outputConfig.build_mode}</span>
-							<ChevronDown size={14} class="chevron" />
-						</button>
-						{#if modeMenuOpen}
-							<div class="column-menu" role="listbox">
-								<div class="column-options">
-									{#each ['full', 'incremental', 'recreate'] as mode (mode)}
-										<button
-											type="button"
-											class="column-option"
-											class:selected={outputConfig.build_mode === mode}
-											onclick={() => {
-												updateOutputConfig({ build_mode: mode });
-												modeMenuOpen = false;
-											}}
-											role="option"
-											aria-selected={outputConfig.build_mode === mode}
-										>
-											<span>{mode}</span>
-										</button>
-									{/each}
+							<span class={css({ color: 'fg.muted' })}>Build mode</span>
+							<span>{outputConfig.build_mode}</span>
+						</div>
+						<div
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								borderWidth: '1',
+								backgroundColor: 'bg.secondary',
+								paddingX: '3',
+								paddingY: '2',
+								fontSize: 'sm'
+							})}
+						>
+							<span class={css({ color: 'fg.muted' })}>Branch</span>
+							<span>{branchValue || 'master'}</span>
+						</div>
+					{:else}
+						<div
+							class={cx(
+								css({
+									position: 'relative',
+									display: 'flex',
+									flexDirection: 'column',
+									gap: '2',
+									minWidth: 'inputSm'
+								}),
+								css({ position: 'relative' })
+							)}
+							bind:this={modeMenuRef}
+						>
+							<button
+								type="button"
+								class={cx(
+									css({
+										display: 'flex',
+										alignItems: 'center',
+										gap: '2',
+										paddingX: '3',
+										paddingY: '2',
+										borderWidth: '1',
+										backgroundColor: 'bg.secondary',
+										cursor: 'pointer',
+										justifyContent: 'space-between',
+										fontSize: 'sm',
+										_focusVisible: {
+											outline: '2px solid {colors.accent.secondary}',
+											outlineOffset: '2px'
+										}
+									}),
+									css({ width: '100%' })
+								)}
+								onclick={() => (modeMenuOpen = !modeMenuOpen)}
+								aria-expanded={modeMenuOpen}
+								bind:this={modeTriggerRef}
+								data-testid="output-mode-trigger"
+							>
+								<span
+									class={css({
+										flex: '1',
+										textAlign: 'left',
+										minWidth: '0',
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap'
+									})}>{outputConfig.build_mode}</span
+								>
+								<ChevronDown size={14} class={muted} />
+							</button>
+							{#if modeMenuOpen}
+								<div
+									class={css({
+										position: 'absolute',
+										zIndex: 'dropdown',
+										top: 'calc(100% + 6px)',
+										left: '0',
+										minWidth: '100%',
+										width: '100%',
+										maxWidth: '100%',
+										backgroundColor: 'bg.primary',
+										borderWidth: '1',
+										padding: '2',
+										display: 'flex',
+										flexDirection: 'column',
+										gap: '2'
+									})}
+									role="listbox"
+									data-testid="output-mode-listbox"
+								>
+									<div
+										class={css({
+											display: 'flex',
+											flexDirection: 'column',
+											gap: '2',
+											maxHeight: 'dropdown',
+											overflowY: 'auto',
+											overflowX: 'hidden',
+											padding: '2',
+											scrollbarWidth: 'thin',
+											scrollbarColor: '{colors.border.primary} transparent'
+										})}
+									>
+										{#each ['full', 'incremental', 'recreate'] as mode (mode)}
+											<button
+												type="button"
+												class={cx(
+													css({
+														minWidth: '0',
+														width: '100%',
+														paddingX: '3',
+														paddingY: '2',
+														borderWidth: '1',
+														borderColor: 'transparent',
+														background: 'transparent',
+														textAlign: 'left',
+														display: 'flex',
+														alignItems: 'center',
+														justifyContent: 'flex-start',
+														gap: '2',
+														cursor: 'pointer',
+														fontSize: 'sm',
+														'& span': { minWidth: '0', overflowWrap: 'anywhere' },
+														_hover: { backgroundColor: 'bg.hover' }
+													}),
+													outputConfig.build_mode === mode && css({ backgroundColor: 'bg.hover' })
+												)}
+												onclick={() => {
+													updateOutputConfig({ build_mode: mode });
+													modeMenuOpen = false;
+												}}
+												role="option"
+												aria-selected={outputConfig.build_mode === mode}
+												data-testid={`output-mode-option-${mode}`}
+											>
+												<span>{mode}</span>
+											</button>
+										{/each}
+									</div>
 								</div>
-							</div>
-						{/if}
-					</div>
-					<BranchPicker
-						branches={branchOptions}
-						value={branchValue}
-						placeholder="Branch"
-						allowCreate={true}
-						onChange={applyGlobalBranchValue}
-					/>
+							{/if}
+						</div>
+						<BranchPicker
+							branches={branchOptions}
+							value={branchValue}
+							placeholder="Branch"
+							allowCreate={true}
+							onChange={applyGlobalBranchValue}
+						/>
+					{/if}
 				</div>
 			</div>
 		</div>
 
 		<!-- Build Action -->
-		<div class="mx-4 mb-3">
+		<div class={css({ marginX: '4', marginBottom: '3' })}>
 			<button
-				class="flex w-full cursor-pointer items-center justify-center gap-2 border border-tertiary bg-secondary p-2 px-3 text-xs font-medium text-fg-secondary hover:border-accent-primary hover:bg-tertiary hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-50 [&:hover_svg]:opacity-100"
+				class={css({
+					display: 'flex',
+					width: '100%',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '2',
+					borderWidth: '1',
+					backgroundColor: 'bg.secondary',
+					paddingY: '2',
+					paddingX: '3',
+					fontSize: 'xs',
+					fontWeight: 'medium',
+					color: 'fg.secondary',
+					_hover: {
+						backgroundColor: 'bg.tertiary',
+						'& svg': { opacity: '1' }
+					},
+					_disabled: { cursor: 'not-allowed', opacity: '0.5' }
+				})}
 				onclick={handleManualBuild}
-				disabled={!analysisId || building}
+				disabled={!analysisId || building || readOnly}
 				title="Run analysis build"
 				type="button"
+				data-testid="output-build-button"
 			>
 				{#if building}
-					<Loader size={14} class="spin opacity-70" />
-					<span>building...</span>
+					<Loader size={14} class={css({ opacity: '0.7' })} />
+					<span data-testid="output-building">building...</span>
 				{:else}
-					<Play size={14} class="opacity-70" />
+					<Play size={14} class={css({ opacity: '0.7' })} />
 					<span>build</span>
 				{/if}
 			</button>
 		</div>
 
 		<!-- Collapsible Sections -->
-		<div class="flex flex-col gap-3 border-t border-tertiary pt-3 mx-4 mb-3">
+		<div
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3',
+				borderTopWidth: '1',
+				paddingTop: '3',
+				marginX: '4',
+				marginBottom: '3'
+			})}
+		>
 			<!-- Build Notification Section -->
 			<div>
 				<button
 					type="button"
-					class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+					class={css({
+						display: 'flex',
+						height: 'iconLg',
+						width: '100%',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
 					onclick={() => (notifyOpen = !notifyOpen)}
+					data-testid="output-notify-toggle"
 				>
-					<span class="flex items-center gap-2">
+					<span class={cx(row, css({ gap: '2' }))}>
 						{#if notifyOpen}
 							<ChevronDown size={12} />
 						{:else}
@@ -558,76 +940,171 @@
 						<span>Build Notification</span>
 					</span>
 					{#if notifyConfig.enabled}
-						<span class="bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
+						<span class={chip({ tone: 'accent' })}>
 							{selectedCount}/{activeSubscribers.length}
 						</span>
 					{/if}
 				</button>
 
 				{#if notifyOpen}
-					<div class="mt-2 flex flex-col gap-2 pl-5">
-						<label class="flex cursor-pointer items-center gap-2 text-xs">
-							<input type="checkbox" checked={notifyConfig.enabled} onchange={toggleNotification} />
+					<div
+						class={css({
+							marginTop: '2',
+							display: 'flex',
+							flexDirection: 'column',
+							gap: '2',
+							paddingLeft: '5'
+						})}
+					>
+						<label class={cx(label({ variant: 'checkbox' }), css({ gap: '2', fontSize: 'xs' }))}>
+							<input
+								name="notify_enabled"
+								type="checkbox"
+								checked={notifyConfig.enabled}
+								onchange={toggleNotification}
+								disabled={readOnly}
+							/>
 							<span>Notify subscribers on build</span>
 						</label>
 
 						{#if notifyConfig.enabled}
-							<div class="flex flex-col gap-2">
+							<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 								{#if !canTelegram}
-									<div class="border border-warning bg-warning-bg p-2 text-[10px] text-warning-fg">
+									<div
+										class={css({
+											borderWidth: '1',
+											borderColor: 'border.warning',
+											backgroundColor: 'bg.warning',
+											padding: '2',
+											fontSize: '2xs',
+											color: 'fg.warning'
+										})}
+									>
 										Telegram not enabled. Enable bot in global settings.
 									</div>
 								{:else}
-									<div class="flex flex-col gap-1">
-										<span class="text-[10px] uppercase text-fg-muted">Recipients</span>
-										<div class="max-h-32 overflow-y-auto border border-tertiary bg-secondary">
+									<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+										<span
+											class={css({
+												fontSize: '2xs',
+												textTransform: 'uppercase',
+												color: 'fg.muted'
+											})}
+										>
+											Recipients
+										</span>
+										<div
+											class={css({
+												maxHeight: 'colMd',
+												overflowY: 'auto',
+												borderWidth: '1',
+												backgroundColor: 'bg.secondary'
+											})}
+										>
 											{#if subscribersQuery.isPending}
-												<div class="p-2 text-center text-[10px] text-fg-muted">Loading...</div>
+												<div
+													class={css({
+														padding: '2',
+														textAlign: 'center',
+														fontSize: '2xs',
+														color: 'fg.muted'
+													})}
+												>
+													Loading...
+												</div>
 											{:else if subscribersQuery.isError}
-												<div class="p-2 text-center text-[10px] text-error">
+												<div
+													class={css({
+														padding: '2',
+														textAlign: 'center',
+														fontSize: '2xs',
+														color: 'fg.error'
+													})}
+												>
 													Failed to load subscribers
 												</div>
 											{:else if activeSubscribers.length === 0}
-												<div class="p-2 text-center text-[10px] text-fg-muted">
+												<div
+													class={css({
+														padding: '2',
+														textAlign: 'center',
+														fontSize: '2xs',
+														color: 'fg.muted'
+													})}
+												>
 													No subscribers. Users can subscribe via /subscribe in Telegram.
 												</div>
 											{:else}
 												{#each activeSubscribers as sub (sub.id)}
 													<div
-														class="flex items-center gap-2 border-b border-tertiary px-2 py-1.5 last:border-b-0"
+														class={css({
+															display: 'flex',
+															alignItems: 'center',
+															gap: '2',
+															borderBottomWidth: '1',
+															paddingX: '2',
+															paddingY: '1.5',
+															'&:last-child': { borderBottomWidth: '0' }
+														})}
 													>
-														<span class="truncate text-xs text-fg-primary">{sub.title}</span>
-														<span class="ml-auto shrink-0 text-[10px] text-fg-muted">
+														<span
+															class={css({
+																overflow: 'hidden',
+																textOverflow: 'ellipsis',
+																whiteSpace: 'nowrap',
+																fontSize: 'xs',
+																color: 'fg.primary'
+															})}
+														>
+															{sub.title}
+														</span>
+														<span
+															class={css({
+																marginLeft: 'auto',
+																flexShrink: '0',
+																fontSize: '2xs',
+																color: 'fg.muted'
+															})}
+														>
 															{sub.chat_id}
 														</span>
 													</div>
 												{/each}
 											{/if}
 										</div>
-										<span class="text-[10px] text-fg-muted">
+										<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
 											All active subscribers receive build notifications.
 										</span>
 									</div>
 								{/if}
 
-								<div class="flex flex-col gap-1">
+								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 									<label
-										class="text-[10px] uppercase text-fg-muted"
+										class={cx(label(), css({ fontSize: '2xs' }))}
 										for={`${idPrefix}-notify-body`}
 									>
 										Message Template
 									</label>
 									<textarea
-										class="resource-input border border-tertiary bg-secondary p-1 px-2 text-xs text-fg-primary"
+										class={cx(
+											input(),
+											css({
+												backgroundColor: 'bg.secondary',
+												paddingY: '1',
+												paddingX: '2',
+												fontSize: 'xs'
+											})
+										)}
 										id={`${idPrefix}-notify-body`}
 										rows="3"
 										value={notifyConfig.body_template}
+										disabled={readOnly}
 										oninput={(e) =>
 											updateNotification({
 												body_template: e.currentTarget.value
 											})}
 									></textarea>
-									<span class="text-[10px] text-fg-muted">
+									<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
 										&#123;&#123;analysis_name&#125;&#125;, &#123;&#123;status&#125;&#125;,
 										&#123;&#123;duration_ms&#125;&#125;, &#123;&#123;row_count&#125;&#125;
 									</span>
@@ -642,10 +1119,24 @@
 			<div>
 				<button
 					type="button"
-					class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+					class={css({
+						display: 'flex',
+						height: 'iconLg',
+						width: '100%',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
 					onclick={() => (healthOpen = !healthOpen)}
+					data-testid="output-health-toggle"
 				>
-					<span class="flex items-center gap-2">
+					<span class={cx(row, css({ gap: '2' }))}>
 						{#if healthOpen}
 							<ChevronDown size={12} />
 						{:else}
@@ -656,11 +1147,15 @@
 					</span>
 					{#if healthCount > 0}
 						<span
-							class="px-1.5 py-0.5 text-[10px] {healthPassed === true
-								? 'bg-success-bg text-success-fg'
-								: healthPassed === false
-									? 'bg-error-bg text-error-fg'
-									: 'bg-accent-bg text-accent-primary'}"
+							class={cx(
+								css({ paddingX: '1.5', paddingY: '0.5', fontSize: '2xs' }),
+								healthPassed === true &&
+									css({ backgroundColor: 'bg.success', color: 'fg.success' }),
+								healthPassed === false && css({ backgroundColor: 'bg.error', color: 'fg.error' }),
+								healthPassed !== true &&
+									healthPassed !== false &&
+									css({ backgroundColor: 'bg.accent', color: 'accent.primary' })
+							)}
 						>
 							{healthCount}
 						</span>
@@ -668,15 +1163,48 @@
 				</button>
 
 				{#if healthOpen}
-					{#if canQueryOutput}
-						<div class="mt-2 border border-tertiary bg-primary p-2">
+					{#if readOnly}
+						<div
+							class={css({
+								marginTop: '2',
+								borderWidth: '1',
+								borderStyle: 'dashed',
+								padding: '3',
+								textAlign: 'center',
+								fontSize: 'xs',
+								color: 'fg.tertiary'
+							})}
+						>
+							Analysis is locked. Health checks are read-only from this view.
+						</div>
+					{:else if canQueryOutput && hasOutputDatasource}
+						<div
+							class={css({
+								marginTop: '2',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2'
+							})}
+						>
 							<HealthChecksManager datasourceId={outputDatasourceId ?? undefined} compact />
 						</div>
 					{:else}
 						<div
-							class="mt-2 border border-dashed border-tertiary p-3 text-center text-xs text-fg-tertiary"
+							class={css({
+								marginTop: '2',
+								borderWidth: '1',
+								borderStyle: 'dashed',
+								padding: '3',
+								textAlign: 'center',
+								fontSize: 'xs',
+								color: 'fg.tertiary'
+							})}
 						>
-							Save this analysis to create an output datasource before adding health checks.
+							{#if canQueryOutput}
+								Build this output once to materialize its datasource before adding health checks.
+							{:else}
+								Save this analysis to create an output datasource before adding health checks.
+							{/if}
 						</div>
 					{/if}
 				{/if}
@@ -686,10 +1214,24 @@
 			<div>
 				<button
 					type="button"
-					class="flex h-6 w-full cursor-pointer items-center justify-between border-none bg-transparent p-0 text-xs text-fg-tertiary hover:text-fg-primary"
+					class={css({
+						display: 'flex',
+						height: 'iconLg',
+						width: '100%',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'fg.tertiary',
+						_hover: { color: 'fg.primary' }
+					})}
 					onclick={() => (scheduleOpen = !scheduleOpen)}
+					data-testid="output-schedule-toggle"
 				>
-					<span class="flex items-center gap-2">
+					<span class={cx(row, css({ gap: '2' }))}>
 						{#if scheduleOpen}
 							<ChevronDown size={12} />
 						{:else}
@@ -699,22 +1241,74 @@
 						<span>Schedules</span>
 					</span>
 					{#if scheduleCount > 0}
-						<span class="bg-accent-bg px-1.5 py-0.5 text-[10px] text-accent-primary">
+						<span class={chip({ tone: 'accent' })}>
 							{enabledSchedules}/{scheduleCount}
 						</span>
 					{/if}
 				</button>
 
-				{#if scheduleOpen && canQueryOutput}
-					<div class="mt-2 border border-tertiary bg-primary p-2">
+				{#if scheduleOpen && readOnly}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							borderStyle: 'dashed',
+							padding: '3',
+							textAlign: 'center',
+							fontSize: 'xs',
+							color: 'fg.tertiary'
+						})}
+					>
+						Analysis is locked. Schedules are read-only from this view.
+					</div>
+				{:else if scheduleOpen && canQueryOutput && hasOutputDatasource}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							backgroundColor: 'bg.primary',
+							padding: '2'
+						})}
+					>
 						<ScheduleManager datasourceId={outputDatasourceId ?? undefined} compact />
+					</div>
+				{:else if scheduleOpen}
+					<div
+						class={css({
+							marginTop: '2',
+							borderWidth: '1',
+							borderStyle: 'dashed',
+							padding: '3',
+							textAlign: 'center',
+							fontSize: 'xs',
+							color: 'fg.tertiary'
+						})}
+					>
+						{#if canQueryOutput}
+							Build this output once to materialize its datasource before adding schedules.
+						{:else}
+							Save this analysis to create an output datasource before adding schedules.
+						{/if}
 					</div>
 				{/if}
 			</div>
 		</div>
 
 		{#if error}
-			<div class="mt-3 border border-error bg-error p-2 text-xs text-error">{error}</div>
+			<div
+				class={css({
+					marginTop: '3',
+					borderWidth: '1',
+					borderColor: 'border.error',
+					backgroundColor: 'bg.error',
+					padding: '2',
+					fontSize: 'xs',
+					color: 'fg.error'
+				})}
+				data-testid="output-build-error"
+			>
+				{error}
+			</div>
 		{/if}
 	</div>
 </div>

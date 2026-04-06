@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.ext.mutable import MutableDict
@@ -13,5 +14,5 @@ class AnalysisVersion(SQLModel, table=True):  # type: ignore[call-arg]
     version: int = Field(sa_column=Column(Integer, nullable=False))
     name: str = Field(sa_column=Column(String, nullable=False))
     description: str | None = Field(default=None, sa_column=Column(String, nullable=True))
-    pipeline_definition: dict = Field(sa_column=Column(MutableDict.as_mutable(JSON), nullable=False))
+    pipeline_definition: dict[str, Any] = Field(sa_column=Column(MutableDict.as_mutable(JSON), nullable=False))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

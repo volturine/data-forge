@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
+	import { css, cx, input } from '$lib/styles/panda';
 
 	interface StepType {
 		type: string;
@@ -11,9 +12,10 @@
 	interface Props {
 		onAddStep: (type: string) => void;
 		onInsertStep: (type: string, target: DropTarget) => void;
+		readOnly?: boolean;
 	}
 
-	let { onAddStep, onInsertStep }: Props = $props();
+	let { onAddStep, onInsertStep, readOnly = false }: Props = $props();
 
 	let dragImageEl = $state<HTMLImageElement | null>(null);
 	let dragging = $state(false);
@@ -26,6 +28,7 @@
 	const dragThreshold = 8;
 
 	function handleClick(stepType: string) {
+		if (readOnly) return;
 		if (dragging || clickConsumed) {
 			clickConsumed = false;
 			return;
@@ -34,6 +37,7 @@
 	}
 
 	function startDrag(event: PointerEvent, stepType: string) {
+		if (readOnly) return;
 		const target = event.currentTarget as HTMLElement | null;
 		const handle = target?.closest('[data-drag-handle]');
 		if (!handle) return;
@@ -46,10 +50,10 @@
 			longPressTimer = window.setTimeout(() => {
 				initiateDrag(event, stepType);
 			}, longPressDelay);
-		} else {
-			// For mouse/trackpad, start drag immediately
-			initiateDrag(event, stepType);
+			return;
 		}
+		// For mouse/trackpad, start drag immediately
+		initiateDrag(event, stepType);
 	}
 
 	function initiateDrag(event: PointerEvent, stepType: string) {
@@ -110,7 +114,6 @@
 		Brush,
 		Calculator,
 		Calendar,
-		CircleHelp,
 		Dices,
 		Eye,
 		Filter,
@@ -127,7 +130,8 @@
 		Trash2,
 		BarChart4,
 		Bell,
-		Sparkles
+		Sparkles,
+		Download
 	} from 'lucide-svelte';
 
 	const stepTypes: StepType[] = [
@@ -181,18 +185,6 @@
 		{ type: 'limit', label: 'Limit', icon: Scissors, description: 'Keep first N rows' },
 		{ type: 'topk', label: 'Top K', icon: Trophy, description: 'Get top K rows by column' },
 		{
-			type: 'null_count',
-			label: 'Null Count',
-			icon: CircleHelp,
-			description: 'Count null values per column'
-		},
-		{
-			type: 'value_counts',
-			label: 'Value Counts',
-			icon: BarChart3,
-			description: 'Get value frequencies'
-		},
-		{
 			type: 'chart',
 			label: 'Chart',
 			icon: BarChart4,
@@ -211,30 +203,115 @@
 			label: 'Union By Name',
 			icon: LayoutGrid,
 			description: 'Union rows from multiple datasources'
+		},
+		{
+			type: 'download',
+			label: 'Download',
+			icon: Download,
+			description: 'Download data in various formats'
 		}
 	];
 
-	// Quick insert selected type
-	let selectedType = $state<string | null>(null);
+	// Search/filter
+	let search = $state('');
+	const filtered = $derived.by(() => {
+		const q = search.trim().toLowerCase();
+		if (!q) return stepTypes;
+		return stepTypes.filter(
+			(s) =>
+				s.label.toLowerCase().includes(q) ||
+				s.type.toLowerCase().includes(q) ||
+				s.description.toLowerCase().includes(q)
+		);
+	});
 </script>
 
-<div class="step-library flex h-full min-h-0 w-full flex-col overflow-hidden bg-primary">
+<div
+	class={css({
+		display: 'flex',
+		height: '100%',
+		minHeight: '0',
+		width: '100%',
+		flexDirection: 'column',
+		overflow: 'hidden',
+		backgroundColor: 'bg.primary',
+		contain: 'content'
+	})}
+>
 	<img
-		class="drag-preview pointer-events-none fixed -left-2500 -top-2500 h-px w-px opacity-0"
+		class={css({
+			pointerEvents: 'none',
+			position: 'fixed',
+			left: '-2500px',
+			top: '-2500px',
+			height: 'px',
+			width: 'px',
+			opacity: '0'
+		})}
 		alt=""
 		bind:this={dragImageEl}
 	/>
-	<div class="shrink-0 px-5 pt-5 pb-3">
-		<h3 class="m-0 text-xs font-semibold uppercase tracking-widest text-fg-muted">Operations</h3>
+	<div class={css({ flexShrink: '0', paddingX: '5', paddingTop: '5', paddingBottom: '3' })}>
+		<h3
+			class={css({
+				margin: '0',
+				marginBottom: '3',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				textTransform: 'uppercase',
+				letterSpacing: 'widest',
+				color: 'fg.muted'
+			})}
+		>
+			Operations
+		</h3>
+		<input
+			type="text"
+			placeholder="Search operations..."
+			bind:value={search}
+			class={cx(
+				input(),
+				css({
+					width: '100%',
+					fontSize: 'xs',
+					backgroundColor: 'bg.secondary'
+				})
+			)}
+		/>
 	</div>
 	<div
-		class="step-list flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto overflow-x-hidden px-3 pb-3"
+		class={css({
+			display: 'flex',
+			minHeight: '0',
+			flex: '1',
+			flexDirection: 'column',
+			gap: '0',
+			overflowY: 'auto',
+			overflowX: 'hidden',
+			paddingX: '3',
+			paddingBottom: '3'
+		})}
 		role="list"
 	>
-		{#each stepTypes as stepType (stepType.type)}
+		{#each filtered as stepType (stepType.type)}
 			<button
-				class="step-button relative flex cursor-grab items-center justify-start gap-3 border border-transparent bg-transparent px-3 py-2.5 text-left hover:bg-bg-hover"
-				class:dragging
+				class={css({
+					position: 'relative',
+					display: 'flex',
+					cursor: readOnly ? 'not-allowed' : 'grab',
+					alignItems: 'center',
+					justifyContent: 'flex-start',
+					gap: '3',
+					borderWidth: '1',
+					borderColor: 'transparent',
+					backgroundColor: 'transparent',
+					paddingX: '3',
+					paddingY: '2.5',
+					textAlign: 'left',
+					_hover: { backgroundColor: 'bg.hover' },
+					_active: { cursor: readOnly ? 'not-allowed' : 'grabbing' },
+					...(dragging ? { userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'none' } : {})
+				})}
 				onclick={() => handleClick(stepType.type)}
 				onpointerdown={(event) => startDrag(event, stepType.type)}
 				onpointermove={handlePointerMove}
@@ -243,57 +320,34 @@
 				type="button"
 				data-step={stepType.type}
 				data-drag-handle="true"
+				disabled={readOnly}
 			>
-				<stepType.icon size={15} class="shrink-0 text-fg-muted" data-drag-handle="true" />
-				<div class="flex min-w-0 flex-col items-start gap-0">
-					<span class="text-xs font-medium text-fg-primary">{stepType.label}</span>
-					<span class="truncate text-[0.625rem] text-fg-faint">{stepType.description}</span>
+				<stepType.icon
+					size={15}
+					class={css({ flexShrink: '0', color: 'fg.muted' })}
+					data-drag-handle="true"
+				/>
+				<div
+					class={css({
+						display: 'flex',
+						minWidth: '0',
+						flexDirection: 'column',
+						alignItems: 'flex-start',
+						gap: '0'
+					})}
+				>
+					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>{stepType.label}</span>
+					<span
+						class={css({
+							overflow: 'hidden',
+							textOverflow: 'ellipsis',
+							whiteSpace: 'nowrap',
+							fontSize: '2xs',
+							color: 'fg.faint'
+						})}>{stepType.description}</span
+					>
 				</div>
 			</button>
 		{/each}
-	</div>
-
-	<div class="shrink-0 border-t border-tertiary px-4 py-3">
-		<h4 class="m-0 mb-2 text-[0.625rem] uppercase tracking-widest text-fg-faint">Quick Insert</h4>
-		<div class="flex flex-col gap-2">
-			<select
-				class="border border-tertiary bg-bg-secondary px-3 py-2 text-xs text-fg-primary"
-				value={selectedType ?? ''}
-				onchange={(event) => (selectedType = event.currentTarget.value || null)}
-			>
-				<option value="">Select operation...</option>
-				{#each stepTypes as stepType (stepType.type)}
-					<option value={stepType.type}>{stepType.label}</option>
-				{/each}
-			</select>
-			<div class="grid grid-cols-2 gap-2">
-				<button
-					class="fallback-btn cursor-pointer border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-secondary hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40"
-					type="button"
-					disabled={!selectedType}
-					onclick={() => {
-						if (selectedType) {
-							onAddStep(selectedType);
-							selectedType = null;
-						}
-					}}
-				>
-					Add to end
-				</button>
-				<button
-					class="fallback-btn cursor-pointer border border-tertiary bg-transparent px-3 py-1.5 text-xs text-fg-secondary hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40"
-					type="button"
-					disabled={!selectedType}
-					onclick={() => {
-						if (selectedType) {
-							onInsertStep(selectedType, { index: 0, parentId: null, nextId: null });
-							selectedType = null;
-						}
-					}}
-				>
-					Insert at start
-				</button>
-			</div>
-		</div>
 	</div>
 </div>

@@ -1,122 +1,261 @@
-import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi.testclient import TestClient
-
-from modules.locks import service as lock_service
-from modules.locks.models import Lock
-
-
-def test_acquire_lock_creates_lock(test_db_session):
-    resource_id = str(uuid.uuid4())
-    response = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
-
-    assert response.resource_id == resource_id
-    assert response.client_id == 'client-a'
-    lock = test_db_session.get(Lock, resource_id)
-    assert lock is not None
-    assert lock.client_id == 'client-a'
+from core.database import run_settings_db
+from modules.auth.service import ensure_default_user
+from modules.locks.models import ResourceLock
 
 
-def test_acquire_lock_reuses_same_client(test_db_session):
-    resource_id = str(uuid.uuid4())
-    first = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
-    second = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-b')
+class TestLockRoutes:
+    def test_acquire_heartbeat_release_status_flow(self, client, test_db_session, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
+        acquire = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-1'},
+        )
 
-    assert first.lock_token != second.lock_token
-    lock = test_db_session.get(Lock, resource_id)
-    assert lock is not None
-    assert lock.client_signature == 'sig-b'
+        assert acquire.status_code == 200
+        body = acquire.json()
+        assert body['resource_type'] == 'analysis'
+        assert body['resource_id'] == 'analysis-1'
+        assert body['owner_id'] == owner.id
+        assert body['is_expired'] is False
+
+        status = client.get('/api/v1/locks/analysis/analysis-1')
+        assert status.status_code == 200
+        assert status.json()['lock_token'] == body['lock_token']
+
+        heartbeat = client.post(
+            '/api/v1/locks/analysis/analysis-1/heartbeat',
+            json={'lock_token': body['lock_token']},
+        )
+        assert heartbeat.status_code == 200
+        assert heartbeat.json()['lock_token'] == body['lock_token']
+
+        release = client.request(
+            'DELETE',
+            '/api/v1/locks/analysis/analysis-1',
+            json={'lock_token': body['lock_token']},
+        )
+        assert release.status_code == 200
+        assert release.json() == {'released': True}
+
+        assert test_db_session.get(ResourceLock, ('analysis', 'analysis-1')) is None
+
+    def test_no_auth_reacquire_ignores_client_id(self, client, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
+        first = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-2'},
+            headers={'X-Client-Id': 'owner-1'},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-2'},
+            headers={'X-Client-Id': 'owner-2'},
+        )
+        assert second.status_code == 200
+        assert second.json()['owner_id'] == owner.id
+        assert second.json()['lock_token'] != first.json()['lock_token']
+
+    def test_expired_lock_replacement(self, client, test_db_session, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
+        now = datetime.now(UTC).replace(tzinfo=None)
+        lock = ResourceLock(
+            resource_type='analysis',
+            resource_id='analysis-3',
+            owner_id='other-owner',
+            lock_token='expired-token',
+            acquired_at=now - timedelta(minutes=2),
+            expires_at=now - timedelta(seconds=1),
+            last_heartbeat=now - timedelta(minutes=1),
+        )
+        test_db_session.add(lock)
+        test_db_session.commit()
+
+        acquire = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-3'},
+            headers={'X-Client-Id': 'owner-1'},
+        )
+        assert acquire.status_code == 200
+        body = acquire.json()
+        assert body['owner_id'] == owner.id
+        assert body['lock_token'] != 'expired-token'
+
+    def test_no_auth_resolves_default_user_when_auth_disabled(self, client, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
+
+        response = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-4'},
+            headers={'X-Client-Id': 'anon-client'},
+        )
+
+        assert response.status_code == 200
+        assert response.json()['owner_id'] == owner.id
+
+    def test_release_with_stale_token_is_idempotent(self, client, test_db_session, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        acquire = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-5'},
+        )
+        assert acquire.status_code == 200
+
+        release = client.request(
+            'DELETE',
+            '/api/v1/locks/analysis/analysis-5',
+            json={'lock_token': 'wrong-token'},
+        )
+        assert release.status_code == 200
+        assert release.json() == {'released': False}
+
+        lock = test_db_session.get(ResourceLock, ('analysis', 'analysis-5'))
+        assert lock is not None
 
 
-def test_acquire_lock_blocks_other_client(test_db_session):
-    resource_id = str(uuid.uuid4())
-    lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+class TestLockWebsocket:
+    def test_watch_receives_initial_and_release_updates(self, client, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
 
-    try:
-        lock_service.acquire_lock(test_db_session, resource_id, 'client-b', 'sig-b')
-    except ValueError as exc:
-        assert 'locked by another client' in str(exc)
-    else:
-        raise AssertionError('Expected ValueError for conflicting lock acquisition')
+        acquire = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-ws-1'},
+        )
+        token = acquire.json()['lock_token']
 
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            connected = websocket.receive_json()
+            websocket.send_json({'action': 'watch', 'resource_type': 'analysis', 'resource_id': 'analysis-ws-1'})
+            initial = websocket.receive_json()
 
-def test_acquire_lock_replaces_expired_lock(test_db_session):
-    resource_id = str(uuid.uuid4())
-    lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
-    lock = test_db_session.get(Lock, resource_id)
-    assert lock is not None
-    lock.expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
-    test_db_session.add(lock)
-    test_db_session.commit()
+            release = client.request(
+                'DELETE',
+                '/api/v1/locks/analysis/analysis-ws-1',
+                json={'lock_token': token},
+            )
+            updated = websocket.receive_json()
 
-    response = lock_service.acquire_lock(test_db_session, resource_id, 'client-b', 'sig-b')
-    assert response.client_id == 'client-b'
+        assert connected == {'type': 'connected'}
+        assert initial['type'] == 'status'
+        assert initial['resource_type'] == 'analysis'
+        assert initial['resource_id'] == 'analysis-ws-1'
+        assert initial['lock']['owner_id'] == owner.id
+        assert initial['lock']['lock_token'] == token
+        assert release.status_code == 200
+        assert updated == {
+            'type': 'status',
+            'resource_type': 'analysis',
+            'resource_id': 'analysis-ws-1',
+            'lock': None,
+        }
 
+    def test_watch_with_lock_token_heartbeats_default_owner_without_client_id(
+        self,
+        client,
+        test_db_session,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
 
-def test_heartbeat_extends_lock(test_db_session):
-    resource_id = str(uuid.uuid4())
-    response = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
-    lock = test_db_session.get(Lock, resource_id)
-    assert lock is not None
-    original_expiry = lock.expires_at
+        acquire = client.post(
+            '/api/v1/locks',
+            json={'resource_type': 'analysis', 'resource_id': 'analysis-ws-2', 'ttl_seconds': 5},
+        )
+        body = acquire.json()
 
-    heartbeat = lock_service.heartbeat(test_db_session, resource_id, 'client-a', response.lock_token)
-    assert heartbeat.client_id == 'client-a'
-    refreshed = test_db_session.get(Lock, resource_id)
-    assert refreshed is not None
-    assert refreshed.expires_at >= original_expiry
+        lock = test_db_session.get(ResourceLock, ('analysis', 'analysis-ws-2'))
+        assert lock is not None
+        expires_before = lock.expires_at
 
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            assert websocket.receive_json() == {'type': 'connected'}
+            websocket.send_json(
+                {
+                    'action': 'watch',
+                    'resource_type': 'analysis',
+                    'resource_id': 'analysis-ws-2',
+                    'lock_token': body['lock_token'],
+                    'ttl_seconds': 30,
+                },
+            )
+            status = websocket.receive_json()
 
-def test_release_lock_removes_lock(test_db_session):
-    resource_id = str(uuid.uuid4())
-    response = lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+            test_db_session.expire_all()
+            refreshed = test_db_session.get(ResourceLock, ('analysis', 'analysis-ws-2'))
+            assert refreshed is not None
+            refreshed_expires_at = refreshed.expires_at
+            refreshed_last_heartbeat = refreshed.last_heartbeat
 
-    lock_service.release_lock(test_db_session, resource_id, 'client-a', response.lock_token)
-    assert test_db_session.get(Lock, resource_id) is None
+            websocket.send_json({'action': 'ping', 'ttl_seconds': 45})
+            pinged = websocket.receive_json()
 
+            test_db_session.expire_all()
+            updated = test_db_session.get(ResourceLock, ('analysis', 'analysis-ws-2'))
 
-def test_get_lock_status_reports_locked(test_db_session):
-    resource_id = str(uuid.uuid4())
-    lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+        assert updated is not None
+        assert status['type'] == 'status'
+        assert status['lock']['owner_id'] == owner.id
+        assert status['lock']['lock_token'] == body['lock_token']
+        assert refreshed_expires_at > expires_before
+        assert refreshed_expires_at - refreshed_last_heartbeat == timedelta(seconds=30)
+        assert pinged['type'] == 'status'
+        assert pinged['lock']['owner_id'] == owner.id
+        assert pinged['lock']['lock_token'] == body['lock_token']
+        assert updated.expires_at > refreshed_expires_at
+        assert updated.last_heartbeat >= refreshed_last_heartbeat
+        assert updated.expires_at - updated.last_heartbeat == timedelta(seconds=45)
 
-    status = lock_service.get_lock_status(test_db_session, resource_id, 'client-a')
-    assert status.locked is True
-    assert status.locked_by_me is True
-    assert status.client_id == 'client-a'
+    def test_ping_without_watch_returns_error(self, client, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
 
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            assert websocket.receive_json() == {'type': 'connected'}
+            websocket.send_json({'action': 'ping'})
+            error = websocket.receive_json()
 
-def test_validate_lock_rejects_invalid_token(test_db_session):
-    resource_id = str(uuid.uuid4())
-    lock_service.acquire_lock(test_db_session, resource_id, 'client-a', 'sig-a')
+        assert error == {
+            'type': 'error',
+            'error': 'watch must be called before ping',
+            'status_code': 400,
+        }
 
-    try:
-        lock_service.validate_lock(test_db_session, resource_id, 'client-a', 'bad-token')
-    except ValueError as exc:
-        assert 'Invalid lock token' in str(exc)
-    else:
-        raise AssertionError('Expected ValueError for invalid lock token')
+    def test_status_lookup_cleanup_notifies_watchers(self, client, test_db_session, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
 
+        now = datetime.now(UTC).replace(tzinfo=None)
+        lock = ResourceLock(
+            resource_type='analysis',
+            resource_id='analysis-ws-3',
+            owner_id='owner-1',
+            lock_token='expired-token',
+            acquired_at=now - timedelta(minutes=2),
+            expires_at=now - timedelta(seconds=1),
+            last_heartbeat=now - timedelta(minutes=1),
+        )
+        test_db_session.add(lock)
+        test_db_session.commit()
 
-def test_locks_endpoints_smoke(client: TestClient):
-    resource_id = str(uuid.uuid4())
-    payload = {'client_id': 'client-a', 'client_signature': 'sig-a'}
-    acquire = client.post(f'/api/v1/locks/{resource_id}/acquire', json=payload)
-    assert acquire.status_code == 200
-    lock_token = acquire.json()['lock_token']
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            assert websocket.receive_json() == {'type': 'connected'}
+            websocket.send_json({'action': 'watch', 'resource_type': 'analysis', 'resource_id': 'analysis-ws-3'})
+            status = websocket.receive_json()
 
-    heartbeat = client.post(
-        f'/api/v1/locks/{resource_id}/heartbeat',
-        json={'client_id': 'client-a', 'lock_token': lock_token},
-    )
-    assert heartbeat.status_code == 200
+        assert status == {
+            'type': 'status',
+            'resource_type': 'analysis',
+            'resource_id': 'analysis-ws-3',
+            'lock': None,
+        }
 
-    status = client.get(f'/api/v1/locks/{resource_id}', params={'client_id': 'client-a'})
-    assert status.status_code == 200
-    assert status.json()['locked'] is True
-
-    release = client.post(
-        f'/api/v1/locks/{resource_id}/release',
-        json={'client_id': 'client-a', 'lock_token': lock_token},
-    )
-    assert release.status_code == 200
+        lookup = client.get('/api/v1/locks/analysis/analysis-ws-3')
+        assert lookup.status_code == 200
+        assert lookup.json() is None

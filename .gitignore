@@ -4,3 +4,7 @@
 /data/
 .opencode/opencode.jsonc
 .vscode/mcp.json
+
+# Playwright artifacts (safety net for stray outputs)
+test-results/
+playwright-report/

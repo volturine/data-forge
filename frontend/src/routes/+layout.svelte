@@ -1,37 +1,73 @@
 <script lang="ts">
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import favicon from '$lib/assets/favicon.svg';
-	import { Sun, Moon, Settings } from 'lucide-svelte';
-	import EngineMonitor from '$lib/components/common/EngineMonitor.svelte';
-	import IndexedDbButton from '$lib/components/common/IndexedDbButton.svelte';
+	import { css, spinner } from '$lib/styles/panda';
+	import { PanelLeftClose } from 'lucide-svelte';
 	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
+	import EnginesPopup from '$lib/components/common/EnginesPopup.svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
-	import { initializeStores } from '$lib/stores/context.svelte';
+	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
+	import Sidebar from '$lib/components/shell/Sidebar.svelte';
+	import { chatStore } from '$lib/stores/chat.svelte';
 	import { initNamespace, setNamespace, useNamespace } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import { installAuditListeners, setAuditPage, track } from '$lib/utils/audit-log';
 	import { untrack } from 'svelte';
-	import '$lib/../app.css';
+	import 'styled-system/styles.css';
 
 	let { children } = $props();
-
-	// Initialize stores via context API for SSR safety
-	// This creates fresh store instances per request, preventing state leakage
-	initializeStores();
 
 	const themeAttribute =
 		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
 	let settingsOpen = $state(false);
+	let enginesOpen = $state(false);
+	let sidebarCollapsed = $state(false);
+	let sidebarHovered = $state(false);
 	const currentPath = $derived(page.url.pathname);
+
+	const authPaths = [
+		'/login',
+		'/register',
+		'/callback',
+		'/verify',
+		'/forgot-password',
+		'/reset-password'
+	];
+	const onAuthPage = $derived(authPaths.some((p) => currentPath.startsWith(p)));
+
+	// Network: resolve auth eagerly in parallel with config fetch.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		untrack(() => void authStore.resolve());
+	});
+
+	const ready = $derived(
+		configStore.config !== null && (!configStore.authRequired || authStore.resolved)
+	);
+
+	// Navigation: $derived can't redirect; side effect redirects unauthenticated users.
+	$effect(() => {
+		if (!ready) return;
+		if (!configStore.authRequired) {
+			if (onAuthPage) void goto(resolve('/'));
+			return;
+		}
+		if (authStore.authenticated) return;
+		if (onAuthPage) return;
+		void goto(resolve('/login'));
+	});
 
 	// DOM: $derived can't sync theme to DOM/storage.
 	$effect(() => {
 		document.documentElement.setAttribute('data-theme', theme);
+		document.body.setAttribute('data-theme', theme);
 		void idbSet('theme', theme);
 	});
 
@@ -39,6 +75,11 @@
 		void idbGet<'light' | 'dark'>('theme').then((value) => {
 			if (!value) return;
 			theme = value;
+		});
+
+		void idbGet<boolean>('sidebar_collapsed').then((value) => {
+			if (value === null) return;
+			sidebarCollapsed = value;
 		});
 	}
 
@@ -58,7 +99,13 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		if (!configStore.config) return;
-		installAuditListeners();
+		const cleanup = installAuditListeners();
+		return cleanup;
+	});
+
+	// Cleanup: $derived can't teardown singleton resources.
+	$effect(() => {
+		return () => chatStore.destroy();
 	});
 
 	// Subscription: $derived can't update audit page.
@@ -94,15 +141,19 @@
 		};
 	});
 
-	// Shift-scroll handling is now scoped to DataTable only.
-
 	function toggleTheme() {
 		theme = theme === 'light' ? 'dark' : 'light';
+	}
+
+	function toggleSidebar() {
+		sidebarCollapsed = !sidebarCollapsed;
+		void idbSet('sidebar_collapsed', sidebarCollapsed);
 	}
 
 	const namespaceState = useNamespace();
 	let namespaceOpen = $state(false);
 	let namespaceTrigger = $state<HTMLButtonElement>();
+	let enginesTrigger = $state<HTMLButtonElement>();
 	const namespaceDraft = $derived(namespaceState.value);
 
 	async function handleNamespaceSelect(value: string) {
@@ -115,24 +166,28 @@
 		namespaceOpen = true;
 	}
 
+	async function handleSignOut() {
+		await authStore.logout();
+		void goto(resolve('/login'));
+	}
+
+	function handleOpenChat() {
+		if (chatStore.open) {
+			chatStore.close();
+			return;
+		}
+		void chatStore.open_panel();
+	}
+
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
-				staleTime: 0,
-				gcTime: 0,
-				refetchOnMount: 'always',
+				staleTime: 30_000,
+				refetchOnWindowFocus: false,
 				retry: 1
 			}
 		}
 	});
-
-	const navItems = [
-		{ href: '/', label: 'Analyses' },
-		{ href: '/datasources', label: 'Data Sources' },
-		{ href: '/monitoring', label: 'Monitoring' },
-		{ href: '/lineage', label: 'Lineage' },
-		{ href: '/udfs', label: 'UDF Library' }
-	];
 </script>
 
 <svelte:head>
@@ -147,77 +202,99 @@
 </svelte:head>
 
 <QueryClientProvider client={queryClient}>
-	<div class="flex h-screen flex-col">
-		<header class="sticky top-0 z-header bg-panel">
-			<div class="mx-auto flex max-w-300 items-center gap-6 px-6 py-3">
-				<div class="flex items-center gap-2">
+	{#if !ready && !onAuthPage}
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				height: '100vh',
+				backgroundColor: 'bg.secondary'
+			})}
+		>
+			<div class={spinner()}></div>
+		</div>
+	{:else if onAuthPage && configStore.authRequired}
+		{@render children()}
+	{:else}
+		<div class={css({ display: 'flex', height: '100vh' })}>
+			<div
+				class={css({ position: 'relative', flexShrink: 0 })}
+				onmouseenter={() => (sidebarHovered = true)}
+				onmouseleave={() => (sidebarHovered = false)}
+				role="presentation"
+			>
+				<Sidebar
+					collapsed={sidebarCollapsed}
+					onToggle={toggleSidebar}
+					{theme}
+					onToggleTheme={toggleTheme}
+					onOpenSettings={() => (settingsOpen = true)}
+					onOpenEngines={() => (enginesOpen = true)}
+					onOpenChat={handleOpenChat}
+					onOpenNamespace={openNamespace}
+					onSignOut={handleSignOut}
+					namespace={namespaceDraft}
+					authenticated={authStore.authenticated}
+					authRequired={configStore.authRequired}
+					avatarUrl={authStore.user?.avatar_url ?? null}
+					bind:namespaceTrigger
+					bind:enginesTrigger
+				/>
+
+				{#if !sidebarCollapsed}
 					<button
-						class="flex items-center gap-1 text-base font-semibold no-underline bg-transparent border-none p-0"
-						onclick={openNamespace}
+						class={css({
+							position: 'absolute',
+							top: '0.5',
+							right: '-8',
+							zIndex: 'popover',
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							cursor: 'pointer',
+							backgroundColor: 'transparent',
+							padding: '3',
+							borderWidth: '1',
+							borderRadius: 'sm',
+							color: 'fg.muted',
+							opacity: sidebarHovered ? 1 : 0,
+							transitionProperty: 'opacity, color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_hover: { color: 'fg.primary' }
+						})}
+						onclick={toggleSidebar}
+						aria-label="Collapse sidebar"
 						type="button"
-						aria-label="Select namespace"
-						bind:this={namespaceTrigger}
 					>
-						<span class="text-fg-primary">analysis</span>
-						<span class="text-fg-muted">/</span>
-						<span class="text-fg-tertiary">{namespaceDraft}</span>
+						<PanelLeftClose size={16} />
 					</button>
-				</div>
-
-				<nav class="flex items-center gap-1">
-					{#each navItems as item (item.href)}
-						<a
-							href={resolve(item.href as '/')}
-							class="nav-link border border-transparent px-3 py-1.5 text-sm text-fg-tertiary no-underline hover:text-fg-primary"
-							class:active={currentPath === item.href ||
-								(currentPath.startsWith('/analysis') && item.href === '/') ||
-								(currentPath.startsWith('/udfs') && item.href === '/udfs') ||
-								(currentPath.startsWith('/monitoring') && item.href === '/monitoring') ||
-								(currentPath.startsWith('/lineage') && item.href === '/lineage')}
-						>
-							{item.label}
-						</a>
-					{/each}
-				</nav>
-
-				<div class="ml-auto flex items-center gap-2">
-					<EngineMonitor />
-					<IndexedDbButton />
-					<button
-						class="flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
-						onclick={() => (settingsOpen = true)}
-						title="Settings"
-						aria-label="Settings"
-					>
-						<Settings size={16} />
-					</button>
-					<button
-						class="theme-toggle flex items-center justify-center border border-tertiary bg-bg-primary p-2 text-fg-secondary hover:bg-bg-hover hover:text-fg-primary"
-						onclick={toggleTheme}
-						title="Toggle theme"
-						aria-label="Toggle theme"
-					>
-						{#if theme === 'light'}
-							<Sun size={16} />
-						{:else}
-							<Moon size={16} />
-						{/if}
-					</button>
-				</div>
+				{/if}
 			</div>
-		</header>
 
-		<main class="min-h-0 flex-1 overflow-y-auto bg-bg-secondary">
-			{@render children()}
-		</main>
-	</div>
+			<main
+				class={css({
+					minHeight: '0',
+					minWidth: '0',
+					flex: '1',
+					overflowY: 'auto',
+					backgroundColor: 'bg.secondary'
+				})}
+			>
+				{@render children()}
+			</main>
+		</div>
 
-	<SettingsPopup bind:open={settingsOpen} />
-	<NamespacePickerModal
-		open={namespaceOpen}
-		selected={namespaceDraft}
-		onSelect={handleNamespaceSelect}
-		onClose={() => (namespaceOpen = false)}
-		anchor={namespaceTrigger}
-	/>
+		<SettingsPopup bind:open={settingsOpen} />
+		<EnginesPopup bind:open={enginesOpen} anchor={enginesTrigger} />
+		<NamespacePickerModal
+			open={namespaceOpen}
+			selected={namespaceDraft}
+			onSelect={handleNamespaceSelect}
+			onClose={() => (namespaceOpen = false)}
+			anchor={namespaceTrigger}
+		/>
+		<ChatPanel />
+	{/if}
 </QueryClientProvider>

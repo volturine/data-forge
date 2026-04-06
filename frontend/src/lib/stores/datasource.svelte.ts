@@ -11,20 +11,23 @@ export class DatasourceStore {
 	datasources = $state<DataSource[]>([]);
 	schemas = $state(new SvelteMap<string, SchemaInfo>());
 	loading = $state(false);
+	loaded = $state(false);
 	error = $state<string | null>(null);
 
 	async loadDatasources(includeHidden: boolean = false): Promise<void> {
 		this.loading = true;
 		this.error = null;
 
-		listDatasources(includeHidden).match(
+		await listDatasources(includeHidden).match(
 			(datasources) => {
 				this.datasources = datasources;
 				this.loading = false;
+				this.loaded = true;
 			},
 			(err) => {
 				this.error = err.message;
 				this.loading = false;
+				this.loaded = true;
 			}
 		);
 	}
@@ -56,9 +59,7 @@ export class DatasourceStore {
 			throw new Error('Schema must be fetched via analysis output');
 		}
 
-		const result = sheetName
-			? await getDatasourceSchema(id, { sheetName, refresh: true })
-			: await getDatasourceSchema(id, { refresh: true });
+		const result = await getDatasourceSchema(id, { sheetName, refresh: true });
 		return result.match(
 			(schema) => {
 				if (!sheetName) {
@@ -76,7 +77,7 @@ export class DatasourceStore {
 		this.loading = true;
 		this.error = null;
 
-		deleteDatasourceApi(id).match(
+		await deleteDatasourceApi(id).match(
 			() => {
 				this.datasources = this.datasources.filter((ds) => ds.id !== id);
 				this.schemas.delete(id);
@@ -94,11 +95,8 @@ export class DatasourceStore {
 	}
 
 	clearSchemaCache(id?: string): void {
-		if (id) {
-			this.schemas.delete(id);
-		} else {
-			this.schemas.clear();
-		}
+		if (id) this.schemas.delete(id);
+		else this.schemas.clear();
 	}
 
 	reset(): void {
@@ -106,6 +104,7 @@ export class DatasourceStore {
 		this.schemas.clear();
 		this.error = null;
 		this.loading = false;
+		this.loaded = false;
 	}
 }
 

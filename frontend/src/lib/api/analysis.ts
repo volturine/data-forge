@@ -8,20 +8,14 @@ import { apiRequest, apiRequestWithHeaders } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
-export function createAnalysis(data: AnalysisCreate): ResultAsync<Analysis, ApiError> {
-	return apiRequest<Analysis>('/v1/analysis', {
-		method: 'POST',
-		body: JSON.stringify(data)
-	});
-}
+export const createAnalysis = (data: AnalysisCreate): ResultAsync<Analysis, ApiError> =>
+	apiRequest<Analysis>('/v1/analysis', { method: 'POST', body: JSON.stringify(data) });
 
-export function listAnalyses(): ResultAsync<AnalysisGalleryItem[], ApiError> {
-	return apiRequest<AnalysisGalleryItem[]>('/v1/analysis');
-}
+export const listAnalyses = (): ResultAsync<AnalysisGalleryItem[], ApiError> =>
+	apiRequest<AnalysisGalleryItem[]>('/v1/analysis');
 
-export function getAnalysis(id: string): ResultAsync<Analysis, ApiError> {
-	return apiRequest<Analysis>(`/v1/analysis/${id}`);
-}
+export const getAnalysis = (id: string): ResultAsync<Analysis, ApiError> =>
+	apiRequest<Analysis>(`/v1/analysis/${id}`);
 
 export function getAnalysisWithHeaders(
 	id: string
@@ -33,42 +27,54 @@ export function getAnalysisWithHeaders(
 	}));
 }
 
-export function updateAnalysis(id: string, data: AnalysisUpdate): ResultAsync<Analysis, ApiError> {
-	return apiRequest<Analysis>(`/v1/analysis/${id}`, {
+export function updateAnalysis(
+	id: string,
+	data: AnalysisUpdate,
+	version?: string | null
+): ResultAsync<{ analysis: Analysis; version: string | null }, ApiError> {
+	const headers: Record<string, string> = {};
+	if (version) headers['If-Match'] = version;
+	return apiRequestWithHeaders<Analysis>(`/v1/analysis/${id}`, {
 		method: 'PUT',
-		body: JSON.stringify(data)
-	});
+		body: JSON.stringify(data),
+		headers
+	}).map(({ data: analysis, headers: h }) => ({
+		analysis,
+		version: h.get('X-Analysis-Version')
+	}));
 }
 
-export function listAnalysisVersions(analysisId: string): ResultAsync<AnalysisVersion[], ApiError> {
-	return apiRequest<AnalysisVersion[]>(`/v1/analysis/${analysisId}/versions`);
-}
+export const listAnalysisVersions = (
+	analysisId: string
+): ResultAsync<AnalysisVersion[], ApiError> =>
+	apiRequest<AnalysisVersion[]>(`/v1/analysis/${analysisId}/versions`);
 
-export function restoreAnalysisVersion(
+export const restoreAnalysisVersion = (
 	analysisId: string,
 	version: number
-): ResultAsync<Analysis, ApiError> {
-	return apiRequest<Analysis>(`/v1/analysis/${analysisId}/versions/${version}/restore`, {
+): ResultAsync<Analysis, ApiError> =>
+	apiRequest<Analysis>(`/v1/analysis/${analysisId}/versions/${version}/restore`, {
 		method: 'POST'
 	});
-}
 
-export function renameAnalysisVersion(
+export const renameAnalysisVersion = (
 	analysisId: string,
 	version: number,
 	name: string
-): ResultAsync<AnalysisVersion, ApiError> {
-	return apiRequest<AnalysisVersion>(`/v1/analysis/${analysisId}/versions/${version}`, {
+): ResultAsync<AnalysisVersion, ApiError> =>
+	apiRequest<AnalysisVersion>(`/v1/analysis/${analysisId}/versions/${version}`, {
 		method: 'PATCH',
 		body: JSON.stringify({ name })
 	});
-}
 
-export function deleteAnalysis(id: string): ResultAsync<void, ApiError> {
-	return apiRequest<void>(`/v1/analysis/${id}`, {
-		method: 'DELETE'
-	});
-}
+export const deleteAnalysisVersion = (
+	analysisId: string,
+	version: number
+): ResultAsync<void, ApiError> =>
+	apiRequest<void>(`/v1/analysis/${analysisId}/versions/${version}`, { method: 'DELETE' });
+
+export const deleteAnalysis = (id: string): ResultAsync<void, ApiError> =>
+	apiRequest<void>(`/v1/analysis/${id}`, { method: 'DELETE' });
 
 export type AnalysisVersion = {
 	id: string;
@@ -76,24 +82,21 @@ export type AnalysisVersion = {
 	version: number;
 	name: string;
 	description: string | null;
-	pipeline_definition: Record<string, unknown>;
+	pipeline_definition?: Record<string, unknown>;
 	created_at: string;
 };
 
-export type AnalysisExecuteResponse = {
+export type AnalysisPreviewResponse = {
 	schema: Record<string, string>;
 	rows: Array<Record<string, unknown>>;
 	row_count?: number;
 };
 
-export function executeAnalysis(
+export const previewAnalysis = (
 	analysisId: string,
-	pipeline: Record<string, unknown>,
-	analysisTabId?: string | null
-): ResultAsync<AnalysisExecuteResponse, ApiError> {
-	const params = analysisTabId ? `?analysis_tab_id=${encodeURIComponent(analysisTabId)}` : '';
-	return apiRequest<AnalysisExecuteResponse>(`/v1/analysis/${analysisId}/execute${params}`, {
+	pipeline: Record<string, unknown>
+): ResultAsync<AnalysisPreviewResponse, ApiError> =>
+	apiRequest<AnalysisPreviewResponse>(`/v1/analysis/${analysisId}/preview`, {
 		method: 'POST',
 		body: JSON.stringify({ pipeline })
 	});
-}

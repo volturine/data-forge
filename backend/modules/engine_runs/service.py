@@ -1,5 +1,7 @@
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException as FastAPIHTTPException
 from sqlalchemy import desc, select
@@ -9,17 +11,48 @@ from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import (
     BuildComparisonResponse,
     ColumnDiff,
-    EngineRunCreateSchema,
+    EngineRunKind,
     EngineRunResponseSchema,
+    EngineRunResultSummary,
+    EngineRunStatus,
     RunSummary,
+    SchemaDiffStatus,
     TimingDiff,
 )
 from modules.engine_runs.utils import normalize_step_timings
 
 
+@dataclass(frozen=True, slots=True)
+class EngineRunPayload:
+    analysis_id: str | None
+    datasource_id: str
+    kind: EngineRunKind
+    status: EngineRunStatus
+    request_json: dict[str, Any]
+    result_json: dict[str, Any] | None = None
+    error_message: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = None
+    duration_ms: int | None = None
+    step_timings: dict[str, float] = field(default_factory=dict)
+    query_plan: str | None = None
+    progress: float = 0.0
+    current_step: str | None = None
+    triggered_by: str | None = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+
+def _coerce_kind(kind: EngineRunKind | str) -> EngineRunKind:
+    return kind if isinstance(kind, EngineRunKind) else EngineRunKind(kind)
+
+
+def _coerce_status(status: EngineRunStatus | str) -> EngineRunStatus:
+    return status if isinstance(status, EngineRunStatus) else EngineRunStatus(status)
+
+
 def create_engine_run(
     session: Session,
-    payload: EngineRunCreateSchema,
+    payload: EngineRunPayload,
 ) -> EngineRunResponseSchema:
     run = EngineRun(
         id=payload.id,
@@ -48,33 +81,32 @@ def create_engine_run(
 def create_engine_run_payload(
     analysis_id: str | None,
     datasource_id: str,
-    kind: str,
-    status: str,
-    request_json: dict,
-    result_json: dict | None = None,
+    kind: EngineRunKind | str,
+    status: EngineRunStatus | str,
+    request_json: dict[str, Any],
+    result_json: dict[str, Any] | None = None,
     error_message: str | None = None,
     created_at: datetime | None = None,
     completed_at: datetime | None = None,
     duration_ms: int | None = None,
-    step_timings: dict | None = None,
+    step_timings: dict[str, float] | None = None,
     query_plan: str | None = None,
     progress: float = 0.0,
     current_step: str | None = None,
     triggered_by: str | None = None,
-) -> EngineRunCreateSchema:
-    return EngineRunCreateSchema(
-        id=str(uuid.uuid4()),
+) -> EngineRunPayload:
+    return EngineRunPayload(
         analysis_id=analysis_id,
         datasource_id=datasource_id,
-        kind=kind,
-        status=status,
+        kind=_coerce_kind(kind),
+        status=_coerce_status(status),
         request_json=request_json,
         result_json=result_json,
         error_message=error_message,
         created_at=created_at or datetime.now(UTC),
         completed_at=completed_at,
         duration_ms=duration_ms,
-        step_timings=step_timings or {},
+        step_timings=normalize_step_timings(step_timings),
         query_plan=query_plan,
         progress=progress,
         current_step=current_step,
@@ -86,8 +118,8 @@ def list_engine_runs(
     session: Session,
     analysis_id: str | None = None,
     datasource_id: str | None = None,
-    kind: str | None = None,
-    status: str | None = None,
+    kind: EngineRunKind | str | None = None,
+    status: EngineRunStatus | str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[EngineRunResponseSchema]:
@@ -98,19 +130,16 @@ def list_engine_runs(
     if datasource_id is not None:
         stmt = stmt.where(EngineRun.datasource_id == datasource_id)  # type: ignore[arg-type]
     if kind is not None:
-        stmt = stmt.where(EngineRun.kind == kind)  # type: ignore[arg-type]
+        stmt = stmt.where(EngineRun.kind == _coerce_kind(kind))  # type: ignore[arg-type]
     if status is not None:
-        stmt = stmt.where(EngineRun.status == status)  # type: ignore[arg-type]
+        stmt = stmt.where(EngineRun.status == _coerce_status(status))  # type: ignore[arg-type]
 
     stmt = stmt.order_by(desc(EngineRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
-    result = session.execute(stmt)
-    runs = result.scalars().all()
-    response: list[EngineRunResponseSchema] = []
-    for run in runs:
-        payload = run.model_dump()
-        payload['step_timings'] = normalize_step_timings(run.step_timings)
-        response.append(EngineRunResponseSchema.model_validate(payload))
-    return response
+    runs = session.execute(stmt).scalars().all()
+    return [
+        EngineRunResponseSchema.model_validate({**run.model_dump(), 'step_timings': normalize_step_timings(run.step_timings)})
+        for run in runs
+    ]
 
 
 def compare_engine_runs(
@@ -130,17 +159,17 @@ def compare_engine_runs(
     if datasource_id and (run_a.datasource_id != datasource_id or run_b.datasource_id != datasource_id):
         raise FastAPIHTTPException(status_code=400, detail='Engine runs do not match datasource')
 
-    result_a = run_a.result_json or {}
-    result_b = run_b.result_json or {}
+    result_a = _load_result_summary(run_a.result_json)
+    result_b = _load_result_summary(run_b.result_json)
 
     # Row counts
-    rc_a = _safe_int(result_a.get('row_count'))
-    rc_b = _safe_int(result_b.get('row_count'))
+    rc_a = _safe_int(result_a.row_count)
+    rc_b = _safe_int(result_b.row_count)
     rc_delta = (rc_b - rc_a) if rc_a is not None and rc_b is not None else None
 
     # Schema diff
-    schema_a: dict[str, str] = result_a.get('schema') or {}
-    schema_b: dict[str, str] = result_b.get('schema') or {}
+    schema_a: dict[str, str] = result_a.schema_ or {}
+    schema_b: dict[str, str] = result_b.schema_ or {}
     schema_diff = _compute_schema_diff(schema_a, schema_b)
 
     # Timing diff
@@ -177,6 +206,27 @@ def _safe_int(val: object) -> int | None:
         return None
 
 
+def _load_result_summary(result_json: dict[str, Any] | None) -> EngineRunResultSummary:
+    payload = result_json if isinstance(result_json, dict) else {}
+    schema = payload.get('schema')
+    if not isinstance(schema, dict):
+        schema = {}
+    data = payload.get('data')
+    if not isinstance(data, list):
+        data = None
+    metadata = payload.get('metadata')
+    if not isinstance(metadata, dict):
+        metadata = None
+    return EngineRunResultSummary.model_validate(
+        {
+            'row_count': payload.get('row_count'),
+            'schema': schema,
+            'data': data,
+            'metadata': metadata,
+        },
+    )
+
+
 def _compute_schema_diff(
     schema_a: dict[str, str],
     schema_b: dict[str, str],
@@ -187,17 +237,17 @@ def _compute_schema_diff(
         in_a = col in schema_a
         in_b = col in schema_b
         if in_a and not in_b:
-            diffs.append(ColumnDiff(column=col, status='removed', type_a=schema_a[col]))
+            diffs.append(ColumnDiff(column=col, status=SchemaDiffStatus.REMOVED, type_a=schema_a[col]))
         elif not in_a and in_b:
-            diffs.append(ColumnDiff(column=col, status='added', type_b=schema_b[col]))
+            diffs.append(ColumnDiff(column=col, status=SchemaDiffStatus.ADDED, type_b=schema_b[col]))
         elif schema_a[col] != schema_b[col]:
             diffs.append(
                 ColumnDiff(
                     column=col,
-                    status='type_changed',
+                    status=SchemaDiffStatus.TYPE_CHANGED,
                     type_a=schema_a[col],
                     type_b=schema_b[col],
-                )
+                ),
             )
     return diffs
 

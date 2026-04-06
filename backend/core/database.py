@@ -1,4 +1,7 @@
+import threading
+from collections import OrderedDict
 from collections.abc import Callable
+from threading import Lock
 from typing import Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy import event
@@ -20,17 +23,26 @@ def _enable_sqlite_pragmas(engine: Engine) -> None:
         cursor.close()
 
 
-settings_engine = create_engine(
-    settings.database_url,
-    echo=settings.debug,
-    connect_args={},
-)
-_enable_sqlite_pragmas(settings_engine)
+def _create_settings_engine() -> Engine:
+    engine = create_engine(
+        settings.database_url,
+        echo=settings.debug,
+        connect_args={},
+    )
+    _enable_sqlite_pragmas(engine)
+    return engine
 
-_namespace_engines: dict[str, Engine] = {}
+
+settings_engine: Engine | None = None
+_settings_engine_lock = Lock()
+
+_namespace_engines: OrderedDict[str, Engine] = OrderedDict()
+_namespace_engines_lock = threading.Lock()
+_MAX_NAMESPACE_ENGINES = 50
 
 # Engine override for testing - allows tests to swap the engine used by run_db
 _engine_override: Engine | None = None
+_settings_engine_override: Engine | None = None
 
 P = ParamSpec('P')
 T = TypeVar('T')
@@ -46,6 +58,22 @@ def clear_engine_override():
     _engine_override = None
 
 
+def set_settings_engine_override(test_engine: Engine):
+    global _settings_engine_override
+    _settings_engine_override = test_engine
+    from modules.settings.service import invalidate_resolved_settings_cache
+
+    invalidate_resolved_settings_cache()
+
+
+def clear_settings_engine_override():
+    global _settings_engine_override
+    _settings_engine_override = None
+    from modules.settings.service import invalidate_resolved_settings_cache
+
+    invalidate_resolved_settings_cache()
+
+
 def get_db():
     engine_to_use = _engine_override or _get_namespace_engine()
     with Session(engine_to_use) as session:
@@ -53,7 +81,8 @@ def get_db():
 
 
 def get_settings_db():
-    with Session(settings_engine) as session:
+    engine_to_use = get_settings_engine()
+    with Session(engine_to_use) as session:
         yield session
 
 
@@ -64,130 +93,117 @@ def run_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: 
 
 
 def run_settings_db(func: Callable[Concatenate[Session, P], T], *args: P.args, **kwargs: P.kwargs) -> T:
-    with Session(settings_engine) as session:
+    engine_to_use = get_settings_engine()
+    with Session(engine_to_use) as session:
         return func(session, *args, **kwargs)
 
 
-def init_db() -> None:
+def get_settings_engine() -> Engine:
+    global settings_engine
+
+    if _settings_engine_override is not None:
+        return _settings_engine_override
+    if settings_engine is not None:
+        return settings_engine
+
+    with _settings_engine_lock:
+        if settings_engine is None:
+            settings_engine = _create_settings_engine()
+        return settings_engine
+
+
+async def init_db() -> None:
     _init_settings_db()
     namespaces = list_namespaces()
     if not namespaces:
         namespaces = [settings.default_namespace]
     for namespace in namespaces:
+        namespace_paths(namespace)
         _init_namespace_db(namespace)
 
 
 def _init_settings_db() -> None:
+    from modules.auth.models import AuthProvider, User, UserSession, VerificationToken
+    from modules.auth.service import ensure_default_user
+    from modules.chat.sessions import ChatSession
     from modules.settings.models import AppSettings
+    from modules.settings.service import invalidate_resolved_settings_cache, seed_settings_from_env
 
-    AppSettings.metadata.create_all(settings_engine)
-    _run_settings_migrations(settings_engine)
+    engine_to_use = get_settings_engine()
+    table_names = {
+        AppSettings.__tablename__,
+        ChatSession.__tablename__,
+        User.__tablename__,
+        AuthProvider.__tablename__,
+        UserSession.__tablename__,
+        VerificationToken.__tablename__,
+    }
+    tables = [table for table in AppSettings.metadata.sorted_tables if table.name in table_names]
 
-
-def _run_settings_migrations(db_engine: Engine) -> None:
-    from sqlalchemy import inspect, text as sa_text
-
-    inspector = inspect(db_engine)
-    if not inspector.has_table('app_settings'):
-        return
-
-    settings_columns = {col['name'] for col in inspector.get_columns('app_settings')}
-    with db_engine.connect() as conn:
-        if 'telegram_bot_enabled' not in settings_columns:
-            conn.execute(sa_text('ALTER TABLE app_settings ADD COLUMN telegram_bot_enabled BOOLEAN NOT NULL DEFAULT 0'))
-            conn.commit()
-        if 'smtp_password_encrypted' not in settings_columns:
-            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN smtp_password_encrypted TEXT NOT NULL DEFAULT ''"))
-            conn.commit()
-
-
-def _run_namespace_migrations(db_engine: Engine) -> None:
-    from sqlalchemy import inspect, text as sa_text
-
-    inspector = inspect(db_engine)
-
-    if inspector.has_table('engine_runs'):
-        columns = {col['name'] for col in inspector.get_columns('engine_runs')}
-        with db_engine.connect() as conn:
-            if 'triggered_by' not in columns:
-                conn.execute(sa_text('ALTER TABLE engine_runs ADD COLUMN triggered_by TEXT'))
-                conn.commit()
-
-    if inspector.has_table('datasources'):
-        ds_columns = {col['name'] for col in inspector.get_columns('datasources')}
-        with db_engine.connect() as conn:
-            if 'is_hidden' not in ds_columns:
-                conn.execute(sa_text('ALTER TABLE datasources ADD COLUMN is_hidden BOOLEAN NOT NULL DEFAULT 0'))
-                conn.commit()
-            if 'created_by' not in ds_columns:
-                conn.execute(sa_text("ALTER TABLE datasources ADD COLUMN created_by TEXT NOT NULL DEFAULT 'import'"))
-                conn.commit()
-
-    if inspector.has_table('schedules'):
-        sched_columns = {col['name'] for col in inspector.get_columns('schedules')}
-        with db_engine.connect() as conn:
-            if 'datasource_id' not in sched_columns:
-                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN datasource_id TEXT'))
-                conn.commit()
-            if 'depends_on' not in sched_columns:
-                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN depends_on TEXT'))
-                conn.commit()
-            if 'trigger_on_datasource_id' not in sched_columns:
-                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN trigger_on_datasource_id TEXT'))
-                conn.commit()
-
-    if inspector.has_table('healthchecks'):
-        hc_columns = {col['name'] for col in inspector.get_columns('healthchecks')}
-        with db_engine.connect() as conn:
-            if 'critical' not in hc_columns:
-                conn.execute(sa_text('ALTER TABLE healthchecks ADD COLUMN critical BOOLEAN NOT NULL DEFAULT 0'))
-                conn.commit()
+    AppSettings.metadata.create_all(engine_to_use, tables=tables)
+    with Session(engine_to_use) as session:
+        seed_settings_from_env(session)
+        ensure_default_user(session)
+    invalidate_resolved_settings_cache()
 
 
 def _get_namespace_engine() -> Engine:
     namespace = get_namespace()
-    if namespace in _namespace_engines:
-        return _namespace_engines[namespace]
-    paths = namespace_paths(namespace)
-    engine_to_use = create_engine(
-        f'sqlite:///{paths.db_path}',
-        echo=settings.debug,
-        connect_args={},
-    )
-    _enable_sqlite_pragmas(engine_to_use)
-    _namespace_engines[namespace] = engine_to_use
-    _init_namespace_db(namespace)
-    return engine_to_use
+    with _namespace_engines_lock:
+        if namespace in _namespace_engines:
+            _namespace_engines.move_to_end(namespace)
+            return _namespace_engines[namespace]
+        if len(_namespace_engines) >= _MAX_NAMESPACE_ENGINES:
+            oldest = next(iter(_namespace_engines))
+            _namespace_engines.pop(oldest).dispose()
+        paths = namespace_paths(namespace)
+        engine = create_engine(f'sqlite:///{paths.db_path}', echo=settings.debug, connect_args={})
+        _enable_sqlite_pragmas(engine)
+        _namespace_engines[namespace] = engine
+        _init_namespace_db_unlocked(namespace)
+        return engine
 
 
 def _init_namespace_db(namespace: str) -> None:
-    paths = namespace_paths(namespace)
-    namespace_engine = create_engine(
-        f'sqlite:///{paths.db_path}',
-        echo=settings.debug,
-        connect_args={},
-    )
-    _enable_sqlite_pragmas(namespace_engine)
+    with _namespace_engines_lock:
+        _init_namespace_db_unlocked(namespace)
+
+
+def _init_namespace_db_unlocked(namespace: str) -> None:
+    namespace_engine = _namespace_engines.get(namespace)
+    if not namespace_engine:
+        paths = namespace_paths(namespace)
+        namespace_engine = create_engine(
+            f'sqlite:///{paths.db_path}',
+            echo=settings.debug,
+            connect_args={},
+        )
+        _enable_sqlite_pragmas(namespace_engine)
+        _namespace_engines[namespace] = namespace_engine
     from modules.analysis.models import Analysis, AnalysisDataSource
     from modules.analysis_versions.models import AnalysisVersion
     from modules.datasource.models import DataSource
     from modules.engine_runs.models import EngineRun
     from modules.healthcheck.models import HealthCheck, HealthCheckResult
-    from modules.locks.models import Lock
+    from modules.locks.models import ResourceLock
     from modules.scheduler.models import Schedule
     from modules.telegram.models import TelegramListener, TelegramSubscriber
     from modules.udf.models import Udf
 
-    Analysis.metadata.create_all(namespace_engine)
-    AnalysisDataSource.metadata.create_all(namespace_engine)
-    AnalysisVersion.metadata.create_all(namespace_engine)
-    DataSource.metadata.create_all(namespace_engine)
-    EngineRun.metadata.create_all(namespace_engine)
-    HealthCheck.metadata.create_all(namespace_engine)
-    HealthCheckResult.metadata.create_all(namespace_engine)
-    Lock.metadata.create_all(namespace_engine)
-    Schedule.metadata.create_all(namespace_engine)
-    TelegramListener.metadata.create_all(namespace_engine)
-    TelegramSubscriber.metadata.create_all(namespace_engine)
-    Udf.metadata.create_all(namespace_engine)
-    _run_namespace_migrations(namespace_engine)
+    table_names = {
+        Analysis.__tablename__,
+        AnalysisDataSource.__tablename__,
+        AnalysisVersion.__tablename__,
+        DataSource.__tablename__,
+        EngineRun.__tablename__,
+        HealthCheck.__tablename__,
+        HealthCheckResult.__tablename__,
+        ResourceLock.__tablename__,
+        Schedule.__tablename__,
+        TelegramListener.__tablename__,
+        TelegramSubscriber.__tablename__,
+        Udf.__tablename__,
+    }
+    tables = [table for table in Analysis.metadata.sorted_tables if table.name in table_names]
+
+    Analysis.metadata.create_all(namespace_engine, tables=tables)

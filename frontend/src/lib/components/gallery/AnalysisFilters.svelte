@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Search, X, Trash2 } from 'lucide-svelte';
+	import { css, input, cx, row, label } from '$lib/styles/panda';
 
 	export type SortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc';
 
@@ -26,22 +27,62 @@
 	}: Props = $props();
 </script>
 
-<div class="mb-7 flex flex-wrap items-center gap-4 max-sm:flex-col max-sm:items-stretch">
-	<div class="relative min-w-55 max-w-105 flex-1 max-sm:max-w-none">
+<div
+	class={css({
+		marginBottom: '7',
+		display: 'flex',
+		flexWrap: 'wrap',
+		alignItems: 'center',
+		gap: '4',
+		smDown: { flexDirection: 'column', alignItems: 'stretch' }
+	})}
+>
+	<div
+		class={css({
+			position: 'relative',
+			minWidth: 'dropdown',
+			maxWidth: 'panel',
+			flex: '1',
+			smDown: { maxWidth: 'none' }
+		})}
+	>
 		<Search
-			class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted"
+			class={css({
+				pointerEvents: 'none',
+				position: 'absolute',
+				left: '3',
+				top: '50%',
+				transform: 'translateY(-50%)',
+				color: 'fg.muted'
+			})}
 			size={16}
 		/>
 		<input
 			type="text"
+			id="filters-search"
+			aria-label="Search analyses"
 			placeholder="Search analyses..."
 			value={searchQuery}
 			oninput={(e) => onSearch((e.target as HTMLInputElement).value)}
-			class="search-input input-styled w-full border py-3 pl-10 pr-10 font-mono text-sm"
+			class={input({ variant: 'searchWide' })}
 		/>
 		{#if searchQuery}
 			<button
-				class="clear-btn absolute right-2 top-1/2 flex -translate-y-1/2 cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted"
+				class={cx(
+					row,
+					css({
+						position: 'absolute',
+						right: '2',
+						top: '50%',
+						transform: 'translateY(-50%)',
+						cursor: 'pointer',
+						justifyContent: 'center',
+						borderWidth: '0',
+						backgroundColor: 'transparent',
+						padding: '1',
+						color: 'fg.muted'
+					})
+				)}
 				onclick={() => onSearch('')}
 				aria-label="Clear search"
 			>
@@ -50,15 +91,33 @@
 		{/if}
 	</div>
 
-	<div class="flex items-center gap-2 max-sm:justify-between">
-		<label for="sort-select" class="whitespace-nowrap text-xs font-medium text-fg-muted">
+	<div
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			gap: '2',
+			smDown: { justifyContent: 'space-between' }
+		})}
+	>
+		<label
+			for="sort-select"
+			class={cx(label(), css({ whiteSpace: 'nowrap', fontWeight: 'medium' }))}
+		>
 			Sort:
 		</label>
 		<select
 			id="sort-select"
 			value={sortOption}
 			onchange={(e) => onSort((e.target as HTMLSelectElement).value as SortOption)}
-			class="sort-select input-styled cursor-pointer appearance-none border bg-no-repeat py-2 pl-3 pr-8 font-mono text-sm max-sm:flex-1"
+			class={cx(
+				input(),
+				css({
+					cursor: 'pointer',
+					appearance: 'none',
+					paddingRight: '8',
+					smDown: { flex: '1' }
+				})
+			)}
 		>
 			<option value="newest">Newest</option>
 			<option value="oldest">Oldest</option>
@@ -68,21 +127,57 @@
 	</div>
 
 	{#if selectionCount > 0}
-		<div class="ml-auto flex items-center gap-2">
+		<div class={cx(row, css({ marginLeft: 'auto', gap: '2' }))}>
 			<button
-				class="btn-text flex items-center gap-1 border border-transparent bg-transparent px-3 py-2 text-sm"
+				class={cx(
+					row,
+					css({
+						gap: '1',
+						borderWidth: '1',
+						borderColor: 'transparent',
+						backgroundColor: 'transparent',
+						paddingX: '3',
+						paddingY: '2',
+						fontSize: 'sm'
+					})
+				)}
 				onclick={onSelectAll}
 			>
 				Select All
 			</button>
 			<button
-				class="btn-text flex items-center gap-1 border border-transparent bg-transparent px-3 py-2 text-sm"
+				class={cx(
+					row,
+					css({
+						gap: '1',
+						borderWidth: '1',
+						borderColor: 'transparent',
+						backgroundColor: 'transparent',
+						paddingX: '3',
+						paddingY: '2',
+						fontSize: 'sm'
+					})
+				)}
 				onclick={onClearSelection}
 			>
 				<X size={14} />
 				Clear
 			</button>
-			<button class="btn-danger flex items-center gap-1" onclick={onBulkDelete}>
+			<button
+				class={cx(
+					row,
+					css({
+						gap: '1',
+						backgroundColor: 'bg.error',
+						color: 'fg.error',
+						borderWidth: '1',
+						borderColor: 'border.error',
+						paddingX: '3',
+						paddingY: '2'
+					})
+				)}
+				onclick={onBulkDelete}
+			>
 				<Trash2 size={14} />
 				Delete
 			</button>

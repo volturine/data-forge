@@ -65,7 +65,6 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 ### FR-2 Analysis Editor
 
 - Multi-tab editor with visual pipeline canvas.
-- Editing lock required for write operations.
 - Step operations: add, insert, move, delete, configure.
 - Version history: restore and rename versions.
 - Save persists tabs and pipeline definition.
@@ -143,12 +142,12 @@ Enable users to design and operate end-to-end dataset pipelines visually while k
 ### 6.1 Analysis Model
 
 - Tabs are stored in `Analysis.pipeline_definition.tabs`.
-- Each tab owns `datasource_id`, `datasource_config`, `steps`.
+- Each tab owns `datasource` (id + analysis_tab_id + config), `output`, `output.result_id` (UUID v4), and `steps`.
 
 ### 6.2 Input vs Output Dataset Contract
 
-- `datasource_id` = tab input source.
-- `output_datasource_id` = tab export target dataset.
+- `datasource.id` = tab input source.
+- `output.result_id` = tab export target dataset (must be a valid UUID v4; required, no fallback).
 - Each buildable output is materialized as Iceberg.
 
 ### 6.3 Dependency Contract
@@ -273,8 +272,8 @@ Build that tab (with lazyframe deps auto-resolved)
 
 1. Open analysis page.
 2. Engine status/defaults initialized.
-3. Acquire lock, edit tabs/steps.
-4. Save via `PUT /analysis/{id}` with lock payload.
+3. Switch to editing mode, edit tabs/steps.
+4. Save via `PUT /analysis/{id}`.
 5. Backend persists analysis + version updates.
 
 ### 7.2 Preview

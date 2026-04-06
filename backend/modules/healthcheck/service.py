@@ -7,6 +7,7 @@ import polars as pl
 from sqlalchemy import select
 from sqlmodel import Session
 
+from core.exceptions import HealthcheckNotFoundError, HealthcheckValidationError
 from modules.datasource.models import DataSource
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
 from modules.healthcheck.schemas import HealthCheckCreate, HealthCheckResponse, HealthCheckResultResponse, HealthCheckUpdate
@@ -20,7 +21,7 @@ def list_healthchecks(session: Session, datasource_id: str) -> list[HealthCheckR
     if not datasource:
         return []
     result = session.execute(
-        select(HealthCheck).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type]
+        select(HealthCheck).where(HealthCheck.datasource_id == datasource_id),  # type: ignore[arg-type]
     )
     checks = result.scalars().all()
     return [HealthCheckResponse.model_validate(check) for check in checks]
@@ -51,12 +52,11 @@ def update_healthcheck(
 ) -> HealthCheckResponse:
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
-        raise ValueError('Healthcheck not found')
+        raise HealthcheckNotFoundError(healthcheck_id)
     check_type = payload.check_type or check.check_type
     if check_type == 'row_count':
         _ensure_unique_row_count(session, check.datasource_id, check_type, exclude_id=healthcheck_id)
-    update_data = payload.model_dump(exclude_none=True)
-    for key, value in update_data.items():
+    for key, value in payload.model_dump(exclude_none=True).items():
         setattr(check, key, value)
     session.add(check)
     session.commit()
@@ -67,7 +67,7 @@ def update_healthcheck(
 def delete_healthcheck(session: Session, healthcheck_id: str) -> None:
     check = session.get(HealthCheck, healthcheck_id)
     if not check:
-        raise ValueError('Healthcheck not found')
+        raise HealthcheckNotFoundError(healthcheck_id)
     session.delete(check)
     session.commit()
 
@@ -78,16 +78,16 @@ def list_results(session: Session, datasource_id: str, limit: int = 10) -> list[
     if not datasource:
         return []
     checks = session.execute(
-        select(HealthCheck.id).where(HealthCheck.datasource_id == datasource_id)  # type: ignore[arg-type, call-overload]
+        select(HealthCheck.id).where(HealthCheck.datasource_id == datasource_id),  # type: ignore[arg-type, call-overload]
     )
-    check_ids = [row[0] for row in checks.all()]
+    check_ids = checks.scalars().all()
     if not check_ids:
         return []
     results = session.execute(
         select(HealthCheckResult)
         .where(HealthCheckResult.healthcheck_id.in_(check_ids))  # type: ignore[union-attr, attr-defined]
         .order_by(HealthCheckResult.checked_at.desc())  # type: ignore[union-attr, attr-defined]
-        .limit(limit)
+        .limit(limit),
     )
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
@@ -101,7 +101,7 @@ def list_results_for_check(session: Session, healthcheck_id: str, limit: int = 1
         select(HealthCheckResult)
         .where(HealthCheckResult.healthcheck_id == healthcheck_id)  # type: ignore[arg-type]
         .order_by(HealthCheckResult.checked_at.desc())  # type: ignore[union-attr, attr-defined]
-        .limit(limit)
+        .limit(limit),
     )
     return [HealthCheckResultResponse.model_validate(r) for r in results.scalars().all()]
 
@@ -161,7 +161,11 @@ def _build_expressions(checks: list[HealthCheck], schema_names: set[str]) -> tup
             threshold = float(config.get('threshold', 0))
             if threshold < 0:
                 continue
-            nulls = pl.lit(0.0) if not sorted_names else sum(pl.col(name).null_count().cast(pl.Float64) for name in sorted_names)
+            if not sorted_names:
+                exprs.append(pl.lit(0.0).alias(f'{check.id}__null_pct'))
+                valid.append(check)
+                continue
+            nulls = sum(pl.col(name).null_count().cast(pl.Float64) for name in sorted_names)
             total = pl.len().cast(pl.Float64) * float(len(sorted_names))
             pct = (nulls / total * 100.0).fill_nan(0.0)
             exprs.append(pct.alias(f'{check.id}__null_pct'))
@@ -392,4 +396,4 @@ def _ensure_unique_row_count(
         query = query.where(HealthCheck.id != exclude_id)  # type: ignore[arg-type]
     existing = session.execute(query).scalars().first()
     if existing:
-        raise ValueError('Only one row_count healthcheck is allowed per datasource')
+        raise HealthcheckValidationError('Only one row_count healthcheck is allowed per datasource')

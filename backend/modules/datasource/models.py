@@ -15,4 +15,5 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
     created_by_analysis_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_by: str = Field(default='import', sa_column=Column(String, nullable=False, server_default='import'))
     is_hidden: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default='0'))
+    owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

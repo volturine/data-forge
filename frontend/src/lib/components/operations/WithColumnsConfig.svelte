@@ -9,7 +9,22 @@
 	import UdfPickerModal from '$lib/components/common/UdfPickerModal.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import { Pencil, X } from 'lucide-svelte';
+	import {
+		css,
+		button,
+		emptyText,
+		input,
+		label,
+		stepConfig,
+		cx,
+		row,
+		rowBetween,
+		divider
+	} from '$lib/styles/panda';
 
 	interface WithColumnsExpr {
 		name: string;
@@ -218,17 +233,36 @@
 	);
 </script>
 
-<div class="config-panel" role="region" aria-label="With columns configuration">
-	<h3 class="m-0 mb-5 text-sm uppercase tracking-wider text-fg-muted">With Columns</h3>
+<div class={stepConfig()} role="region" aria-label="With columns configuration">
+	<h3
+		class={css({
+			margin: '0',
+			marginBottom: '5',
+			fontSize: 'sm',
+			textTransform: 'uppercase',
+			letterSpacing: 'wider',
+			color: 'fg.muted'
+		})}
+	>
+		With Columns
+	</h3>
 
-	<div class="flex flex-col gap-3 mb-5">
-		<select bind:value={exprType}>
+	<div class={css({ display: 'flex', flexDirection: 'column', gap: '3', marginBottom: '5' })}>
+		<label class={label()} for="wc-expr-type">Type</label>
+		<select id="wc-expr-type" class={input()} bind:value={exprType}>
 			<option value="column">From column</option>
 			<option value="literal">Literal value</option>
 			<option value="udf">Python UDF</option>
 		</select>
 
-		<input type="text" bind:value={exprName} placeholder="New column name" />
+		<label class={label()} for="wc-expr-name">Column name</label>
+		<input
+			id="wc-expr-name"
+			type="text"
+			class={input()}
+			bind:value={exprName}
+			placeholder="New column name"
+		/>
 
 		{#if exprType === 'column'}
 			<ColumnDropdown
@@ -238,33 +272,44 @@
 				placeholder="Select source column..."
 			/>
 		{:else if exprType === 'literal'}
-			<input type="text" bind:value={exprValue} placeholder="Literal value" />
+			<label class={label()} for="wc-expr-value">Value</label>
+			<input
+				id="wc-expr-value"
+				type="text"
+				class={input()}
+				bind:value={exprValue}
+				placeholder="Literal value"
+			/>
 		{:else}
-			<div class="flex flex-col gap-3">
-				<div class="flex gap-3 items-center">
-					<label class="inline-flex items-center gap-2 text-sm text-fg-secondary">
-						<input type="radio" bind:group={useLibrary} value={false} />
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
+				<div class={cx(row, css({ gap: '3' }))}>
+					<label class={label({ variant: 'inline' })}>
+						<input id="wc-use-lib-no" type="radio" bind:group={useLibrary} value={false} />
 						Inline UDF
 					</label>
-					<label class="inline-flex items-center gap-2 text-sm text-fg-secondary">
-						<input type="radio" bind:group={useLibrary} value={true} />
+					<label class={label({ variant: 'inline' })}>
+						<input id="wc-use-lib-yes" type="radio" bind:group={useLibrary} value={true} />
 						Library UDF
 					</label>
 				</div>
 
 				{#if useLibrary}
-					<div class="flex items-center gap-2">
-						<button type="button" class="btn-secondary btn-sm" onclick={openPicker}>
+					<div class={cx(row, css({ gap: '2' }))}>
+						<button
+							type="button"
+							class={button({ variant: 'secondary', size: 'sm' })}
+							onclick={openPicker}
+						>
 							Select UDF
 						</button>
 						{#if exprUdfId}
 							{@const selectedUdf = (udfQuery.data ?? []).find((item) => item.id === exprUdfId)}
-							<span class="text-xs text-fg-muted">Selected: {selectedUdf?.name ?? exprUdfId}</span>
+							<span class={label()}>Selected: {selectedUdf?.name ?? exprUdfId}</span>
 						{:else}
-							<span class="text-xs text-fg-muted">No UDF selected</span>
+							<span class={label()}>No UDF selected</span>
 						{/if}
 					</div>
-					<span class="text-xs uppercase tracking-wider text-fg-muted">Input columns</span>
+					<span class={label()}>Input columns</span>
 					<MultiSelectColumnDropdown
 						{schema}
 						value={exprArgs}
@@ -272,7 +317,7 @@
 						placeholder="Select input columns..."
 					/>
 				{:else}
-					<span class="text-xs uppercase tracking-wider text-fg-muted">Input columns</span>
+					<span class={label()}>Input columns</span>
 					<MultiSelectColumnDropdown
 						{schema}
 						value={exprArgs}
@@ -280,29 +325,73 @@
 						placeholder="Select input columns..."
 					/>
 
-					<div class="flex items-center justify-between">
-						<span class="text-xs uppercase tracking-wider text-fg-muted">Function</span>
-						<button type="button" class="btn-ghost btn-sm" onclick={openEditor}>Expand</button>
+					<div class={rowBetween}>
+						<label for="wc-expr-code" class={label()}>Function</label>
+						<button
+							type="button"
+							class={button({ variant: 'ghost', size: 'sm' })}
+							onclick={openEditor}>Expand</button
+						>
 					</div>
 					<textarea
-						class="resize-y min-h-25 text-sm font-mono"
+						id="wc-expr-code"
+						class={cx(
+							input(),
+							css({
+								resize: 'vertical',
+								minHeight: 'fieldSm',
+								fontSize: 'sm'
+							})
+						)}
 						rows="5"
 						placeholder="def udf(*args):&#10;    return ..."
 						bind:value={exprCode}
 						oninput={() => (codeEdited = true)}
 					></textarea>
-					<label class="inline-flex items-center gap-2 text-sm mt-2 text-fg-secondary">
-						<input type="checkbox" bind:checked={saveToLibrary} />
+					<label class={cx(label({ variant: 'inline' }), css({ marginTop: '2' }))}>
+						<input id="wc-save-to-lib" type="checkbox" bind:checked={saveToLibrary} />
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
-						<div class="flex flex-col gap-3 mt-3 pt-3 border-t border-tertiary">
-							<input type="text" placeholder="UDF name" bind:value={saveName} />
-							<input type="text" placeholder="Description" bind:value={saveDescription} />
-							<input type="text" placeholder="Tags (comma-separated)" bind:value={saveTags} />
+						<div
+							class={cx(
+								divider,
+								css({
+									display: 'flex',
+									flexDirection: 'column',
+									gap: '3',
+									marginTop: '3',
+									paddingTop: '3'
+								})
+							)}
+						>
+							<label class={label()} for="wc-save-name">Name</label>
+							<input
+								id="wc-save-name"
+								type="text"
+								class={input()}
+								placeholder="UDF name"
+								bind:value={saveName}
+							/>
+							<label class={label()} for="wc-save-desc">Description</label>
+							<input
+								id="wc-save-desc"
+								type="text"
+								class={input()}
+								placeholder="Description"
+								bind:value={saveDescription}
+							/>
+							<label class={label()} for="wc-save-tags">Tags</label>
+							<input
+								id="wc-save-tags"
+								type="text"
+								class={input()}
+								placeholder="Tags (comma-separated)"
+								bind:value={saveTags}
+							/>
 							<button
 								type="button"
-								class="btn-secondary btn-sm"
+								class={button({ variant: 'secondary', size: 'sm' })}
 								onclick={() => saveMutation.mutate()}
 								disabled={!exprCode.trim()}
 							>
@@ -314,37 +403,68 @@
 			</div>
 		{/if}
 
-		<div class="flex gap-3">
+		<div class={css({ display: 'flex', gap: '3' })}>
 			{#if isEditing}
-				<button type="button" class="btn-primary" onclick={saveExpression} disabled={!canAdd}
-					>Save</button
+				<button
+					type="button"
+					class={button({ variant: 'primary' })}
+					onclick={saveExpression}
+					disabled={!canAdd}>Save</button
 				>
-				<button type="button" class="btn-secondary" onclick={cancelEdit}>Cancel</button>
+				<button type="button" class={button({ variant: 'secondary' })} onclick={cancelEdit}
+					>Cancel</button
+				>
 			{:else}
-				<button type="button" class="btn-primary" onclick={addExpression} disabled={!canAdd}
-					>Add</button
+				<button
+					type="button"
+					class={button({ variant: 'primary' })}
+					onclick={addExpression}
+					disabled={!canAdd}>Add</button
 				>
 			{/if}
 		</div>
 	</div>
 
 	{#if (config.expressions ?? []).length > 0}
-		<div class="flex flex-col" role="list">
-			<h4 class="m-0 mb-3">Columns</h4>
+		<div class={css({ display: 'flex', flexDirection: 'column' })} role="list">
+			<SectionHeader>Columns</SectionHeader>
 			{#each config.expressions ?? [] as expr, index (index)}
 				<div
-					class="item item-row flex justify-between items-center py-2"
-					class:editing={editIndex === index}
-					class:border-accent-primary={editIndex === index}
-					class:bg-hover={editIndex === index}
+					class={editIndex === index
+						? css({
+								display: 'flex',
+								justifyContent: 'space-between',
+								alignItems: 'center',
+								paddingY: '2',
+								borderBottomWidth: '1',
+								borderLeftWidth: '2',
+								borderLeftColor: 'border.accent',
+								backgroundColor: 'bg.hover',
+								'&:last-child': { borderBottomWidth: '0' }
+							})
+						: css({
+								display: 'flex',
+								justifyContent: 'space-between',
+								alignItems: 'center',
+								paddingY: '2',
+								borderBottomWidth: '1',
+								backgroundColor: 'transparent',
+								'&:last-child': { borderBottomWidth: '0' }
+							})}
 					role="listitem"
 				>
-					<div class="flex items-center gap-3 min-w-0">
+					<div class={cx(row, css({ gap: '3', minWidth: '0' }))}>
 						<span
-							class="font-semibold max-w-30 overflow-hidden text-ellipsis whitespace-nowrap text-fg-primary"
+							class={css({
+								fontWeight: 'semibold',
+								maxWidth: 'fieldMd',
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap'
+							})}
 							title={expr.name}>{expr.name}</span
 						>
-						<span class="text-xs text-fg-muted">
+						<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 							{expr.type === 'column'
 								? `<- ${expr.column ?? ''}`
 								: expr.type === 'udf'
@@ -352,10 +472,24 @@
 									: `= "${expr.value}"`}
 						</span>
 					</div>
-					<div class="flex gap-1 shrink-0">
+					<div class={css({ display: 'flex', gap: '1', flexShrink: '0' })}>
 						<button
 							type="button"
-							class="w-6 h-6 p-0 inline-flex items-center justify-center bg-transparent cursor-pointer text-base leading-none text-fg-muted border border-transparent"
+							class={css({
+								width: 'iconLg',
+								height: 'iconLg',
+								padding: '0',
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								backgroundColor: 'transparent',
+								cursor: 'pointer',
+								fontSize: 'md',
+								lineHeight: 'none',
+								color: 'fg.muted',
+								borderWidth: '1',
+								borderColor: 'border.transparent'
+							})}
 							onclick={() => editExpression(index)}
 							aria-label="Edit"
 						>
@@ -363,7 +497,26 @@
 						</button>
 						<button
 							type="button"
-							class="btn-remove w-6 h-6 p-0 inline-flex items-center justify-center bg-transparent cursor-pointer text-base leading-none text-fg-muted border border-transparent hover:text-error-fg hover:bg-error hover:border-error"
+							class={css({
+								width: 'iconLg',
+								height: 'iconLg',
+								padding: '0',
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								backgroundColor: 'transparent',
+								cursor: 'pointer',
+								fontSize: 'md',
+								lineHeight: 'none',
+								color: 'fg.muted',
+								borderWidth: '1',
+								borderColor: 'border.transparent',
+								_hover: {
+									color: 'fg.error',
+									backgroundColor: 'bg.error',
+									borderColor: 'border.error'
+								}
+							})}
 							onclick={() => removeExpression(index)}
 							aria-label="Remove"
 						>
@@ -374,28 +527,78 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="py-8 text-center text-xs text-fg-muted">No columns configured yet.</p>
+		<p class={emptyText()}>No columns configured yet.</p>
 	{/if}
 </div>
 
 {#if showEditor}
-	<div class="modal-backdrop" aria-hidden="true"></div>
-	<div class="modal" role="dialog" aria-modal="true" bind:this={modalRef}>
-		<div class="modal-header">
-			<h2>UDF Editor</h2>
-			<button class="modal-close" onclick={() => (showEditor = false)} aria-label="Close">
-				<X size={16} />
-			</button>
-		</div>
-		<div class="modal-body">
+	<div
+		class={css({ position: 'fixed', inset: '0', background: 'bg.overlay', zIndex: 'modal' })}
+		aria-hidden="true"
+	></div>
+	<div
+		class={css({
+			position: 'fixed',
+			left: '50%',
+			top: '50%',
+			transform: 'translate(-50%, -50%)',
+			width: 'min(720px, 92vw)',
+			backgroundColor: 'bg.primary',
+			borderWidth: '1',
+			zIndex: '1001',
+			display: 'flex',
+			flexDirection: 'column',
+			_focus: { outline: 'none' }
+		})}
+		role="dialog"
+		aria-modal="true"
+		bind:this={modalRef}
+	>
+		<PanelHeader>
+			{#snippet title()}UDF Editor{/snippet}
+			{#snippet actions()}
+				<button
+					class={css({
+						background: 'transparent',
+						border: 'none',
+						color: 'fg.muted',
+						cursor: 'pointer',
+						fontSize: 'xl',
+						padding: '1',
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						transition: 'color 160ms ease, background-color 160ms ease',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
+					onclick={() => (showEditor = false)}
+					aria-label="Close"
+				>
+					<X size={16} />
+				</button>
+			{/snippet}
+		</PanelHeader>
+		<div
+			class={css({
+				padding: '4',
+				overflowY: 'auto',
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3'
+			})}
+		>
 			<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
-			<p class="text-sm m-0 text-fg-muted">
+			<p class={css({ fontSize: 'sm', margin: '0', color: 'fg.muted' })}>
 				Define a function named <code>udf</code> that returns a value per row.
 			</p>
 		</div>
-		<div class="modal-footer">
-			<button class="btn-secondary" onclick={() => (showEditor = false)} type="button">Done</button>
-		</div>
+		<PanelFooter>
+			<button
+				class={button({ variant: 'secondary' })}
+				onclick={() => (showEditor = false)}
+				type="button">Done</button
+			>
+		</PanelFooter>
 	</div>
 {/if}
 

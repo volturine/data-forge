@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
+from modules.compute.schemas import BuildStatus
 from modules.compute.service import _build_subscriber_message, _resolve_build_status
 from modules.datasource.models import DataSource
 from modules.healthcheck.models import HealthCheck, HealthCheckResult
@@ -70,7 +71,7 @@ SAMPLE_LF = pl.LazyFrame(
         'id': [1, 2, 3, 4, 5],
         'name': ['a', 'b', None, 'd', 'e'],
         'value': [10.0, 20.0, 30.0, 40.0, 50.0],
-    }
+    },
 )
 
 
@@ -200,6 +201,18 @@ class TestRunHealthchecks:
         assert results[0].passed is True
         assert 'Nulls:' in results[0].message
 
+    def test_null_percentage_zero_column_dataset(self, test_db_session):
+        check = _make_check('ds-1', check_type='null_percentage', config={'threshold': 30})
+        test_db_session.add(check)
+        test_db_session.flush()
+
+        results = run_healthchecks(test_db_session, [check], pl.DataFrame(schema={}).lazy())
+
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert results[0].message == 'Nulls: 0.0% (threshold: 30.0%)'
+        assert results[0].details['actual_percentage'] == 0.0
+
     def test_duplicate_percentage(self, test_db_session):
         check = _make_check('ds-1', check_type='duplicate_percentage', config={'threshold': 10})
         test_db_session.add(check)
@@ -237,7 +250,7 @@ class TestRunHealthchecks:
 class TestResolveBuildStatus:
     def test_no_results(self):
         status, summary, details = _resolve_build_status([])
-        assert status == 'success'
+        assert status is BuildStatus.SUCCESS
         assert summary is None
         assert details is None
 
@@ -247,7 +260,7 @@ class TestResolveBuildStatus:
             HealthCheckResult(id='r2', healthcheck_id='c2', passed=True, message='ok', details={}, checked_at=datetime.now(UTC)),
         ]
         status, summary, details = _resolve_build_status(results)
-        assert status == 'success'
+        assert status is BuildStatus.SUCCESS
         assert summary == '2/2 passed'
         assert details is None
 
@@ -257,7 +270,7 @@ class TestResolveBuildStatus:
             HealthCheckResult(id='r2', healthcheck_id='c2', passed=False, message='bad', details={}, checked_at=datetime.now(UTC)),
         ]
         status, summary, details = _resolve_build_status(results)
-        assert status == 'warning'
+        assert status is BuildStatus.WARNING
         assert summary == '1/2 failed'
         assert details is not None
         assert len(details) == 2
@@ -277,7 +290,7 @@ class TestResolveBuildStatus:
             HealthCheckResult(id='r1', healthcheck_id='c1', passed=False, message='bad', details={}, checked_at=datetime.now(UTC)),
         ]
         status, summary, details = _resolve_build_status(results, [check])
-        assert status == 'warning'
+        assert status is BuildStatus.WARNING
         assert summary == '1/1 failed'
         assert details is not None
 
@@ -297,21 +310,21 @@ class TestResolveBuildStatus:
         ]
         _, _, details = _resolve_build_status(results, [check])
         assert details is not None
-        assert details[0]['name'] == 'Row Guard'
-        assert details[0]['critical'] is False
+        assert details[0].name == 'Row Guard'
+        assert details[0].critical is False
 
 
 class TestBuildSubscriberMessage:
     def test_no_healthchecks(self):
         msg = _build_subscriber_message(
             {
-                'status': 'success',
+                'status': BuildStatus.SUCCESS,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
                 'healthcheck_summary': None,
                 'healthcheck_details': None,
-            }
+            },
         )
         assert 'Status: success' in msg
         assert 'Rows: 100' in msg
@@ -320,13 +333,13 @@ class TestBuildSubscriberMessage:
     def test_all_pass(self):
         msg = _build_subscriber_message(
             {
-                'status': 'success',
+                'status': BuildStatus.SUCCESS,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
                 'healthcheck_summary': '2/2 passed',
                 'healthcheck_details': None,
-            }
+            },
         )
         assert 'Status: success' in msg
         assert '2/2 passed' in msg
@@ -334,7 +347,7 @@ class TestBuildSubscriberMessage:
     def test_some_fail(self):
         msg = _build_subscriber_message(
             {
-                'status': 'warning',
+                'status': BuildStatus.WARNING,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
@@ -343,7 +356,7 @@ class TestBuildSubscriberMessage:
                     {'name': 'check-1', 'passed': True, 'message': 'ok'},
                     {'name': 'check-2', 'passed': False, 'message': 'bad'},
                 ],
-            }
+            },
         )
         assert 'built successfully, health checks failed' in msg
         assert '1/2 failed' in msg
@@ -352,13 +365,13 @@ class TestBuildSubscriberMessage:
         details = [{'name': f'check-{i}', 'passed': False, 'message': 'bad'} for i in range(300)]
         msg = _build_subscriber_message(
             {
-                'status': 'warning',
+                'status': BuildStatus.WARNING,
                 'analysis_name': 'Test',
                 'row_count': '100',
                 'duration_ms': '500',
                 'healthcheck_summary': '300/300 failed',
                 'healthcheck_details': details,
-            }
+            },
         )
         assert len(msg) <= 3815
 
@@ -428,7 +441,7 @@ def test_healthcheck_update_duplicate_row_count(test_db_session, client):
             enabled=True,
             critical=False,
             created_at=datetime.now(UTC),
-        )
+        ),
     )
     test_db_session.commit()
 

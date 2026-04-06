@@ -7,7 +7,7 @@ export class EnginesStore {
 	loading = $state(false);
 	error = $state<string | null>(null);
 
-	private interval: number | null = null;
+	private interval: ReturnType<typeof setInterval> | null = null;
 
 	count = $derived(this.engines.length);
 
@@ -18,13 +18,12 @@ export class EnginesStore {
 		await listEngines().match(
 			(response) => {
 				this.engines = response.engines;
-				this.loading = false;
 			},
 			(err) => {
 				this.error = err.message;
-				this.loading = false;
 			}
 		);
+		this.loading = false;
 	}
 
 	async shutdownEngine(analysisId: string): Promise<void> {
@@ -49,7 +48,7 @@ export class EnginesStore {
 
 		this.fetch();
 
-		this.interval = window.setInterval(() => {
+		this.interval = setInterval(() => {
 			this.fetch();
 		}, configStore.enginePoolingInterval);
 	}

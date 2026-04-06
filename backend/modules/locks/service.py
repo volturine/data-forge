@@ -1,219 +1,150 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
-from sqlmodel import Session, col
+from sqlmodel import Session
 
-from modules.locks.models import Lock
-from modules.locks.schemas import LockResponse, LockStatusResponse
-
-# Lock configuration
-LOCK_TTL_SECONDS = 30  # Lock expires after 30 seconds
-HEARTBEAT_INTERVAL_SECONDS = 10  # Heartbeat every 10 seconds
+from core.config import settings
+from modules.locks.models import ResourceLock
+from modules.locks.schemas import LockStatusResponse
 
 
-def cleanup_expired_locks(session: Session) -> None:
-    """Remove all expired locks."""
-    now = datetime.now(UTC).replace(tzinfo=None)
-    result = session.execute(select(Lock))
-    locks = result.scalars().all()
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
-    for lock in locks:
-        expires_at = lock.expires_at
-        if expires_at < now:
-            session.delete(lock)
 
-    session.commit()
+def _expires_at(now: datetime, ttl_seconds: int | None) -> datetime:
+    ttl = ttl_seconds or settings.lock_ttl_seconds
+    return now + timedelta(seconds=ttl)
+
+
+def _status(lock: ResourceLock, now: datetime | None = None) -> LockStatusResponse:
+    current = now or _utcnow()
+    return LockStatusResponse(
+        resource_type=lock.resource_type,
+        resource_id=lock.resource_id,
+        owner_id=lock.owner_id,
+        lock_token=lock.lock_token,
+        acquired_at=lock.acquired_at,
+        expires_at=lock.expires_at,
+        last_heartbeat=lock.last_heartbeat,
+        is_expired=lock.expires_at <= current,
+    )
+
+
+def get_lock(session: Session, resource_type: str, resource_id: str) -> ResourceLock | None:
+    return session.get(ResourceLock, (resource_type, resource_id))
+
+
+def lookup_lock_status(session: Session, resource_type: str, resource_id: str) -> tuple[LockStatusResponse | None, bool]:
+    lock = get_lock(session, resource_type, resource_id)
+    if lock is None:
+        return None, False
+    now = _utcnow()
+    if lock.expires_at <= now:
+        session.delete(lock)
+        session.commit()
+        return None, True
+    return _status(lock, now), False
+
+
+def get_lock_status(session: Session, resource_type: str, resource_id: str) -> LockStatusResponse | None:
+    status, _ = lookup_lock_status(session, resource_type, resource_id)
+    return status
 
 
 def acquire_lock(
     session: Session,
+    resource_type: str,
     resource_id: str,
-    client_id: str,
-    client_signature: str,
-) -> LockResponse:
-    """Acquire a lock on a resource.
-
-    Raises:
-        ValueError: If resource is already locked by another client.
-    """
-    now = datetime.now(UTC).replace(tzinfo=None)
-    expires_at = now + timedelta(seconds=LOCK_TTL_SECONDS)
-    lock = session.get(Lock, resource_id)
-
-    if not lock:
-        lock = Lock(
+    owner_id: str,
+    ttl_seconds: int | None = None,
+) -> LockStatusResponse:
+    now = _utcnow()
+    lock = get_lock(session, resource_type, resource_id)
+    if lock is None:
+        lock = ResourceLock(
+            resource_type=resource_type,
             resource_id=resource_id,
-            client_id=client_id,
-            client_signature=client_signature,
-            lock_token=str(uuid.uuid4()),
+            owner_id=owner_id,
+            lock_token=uuid.uuid4().hex,
             acquired_at=now,
-            expires_at=expires_at,
+            expires_at=_expires_at(now, ttl_seconds),
             last_heartbeat=now,
         )
         session.add(lock)
         session.commit()
         session.refresh(lock)
-
-    if lock:
-        if lock.expires_at < now:
-            lock.client_id = client_id
-            lock.client_signature = client_signature
-            lock.lock_token = str(uuid.uuid4())
-            lock.acquired_at = now
-            lock.expires_at = expires_at
-            lock.last_heartbeat = now
-            session.commit()
-            session.refresh(lock)
-        elif lock.client_id != client_id:
-            raise ValueError(f'Resource is locked by another client until {lock.expires_at}')
-        else:
-            lock.lock_token = str(uuid.uuid4())
-            lock.client_signature = client_signature
-            lock.acquired_at = now
-            lock.expires_at = expires_at
-            lock.last_heartbeat = now
-            session.commit()
-            session.refresh(lock)
-
-    if not lock:
-        raise ValueError('Failed to acquire lock')
-
-    return LockResponse(
-        resource_id=lock.resource_id,
-        client_id=lock.client_id,
-        lock_token=lock.lock_token,
-        expires_at=lock.expires_at.isoformat(),
-    )
-
-
-def heartbeat(
-    session: Session,
-    resource_id: str,
-    client_id: str,
-    lock_token: str,
-) -> LockResponse:
-    """Extend lock lease via heartbeat.
-
-    Raises:
-        ValueError: If lock doesn't exist, expired, or token/client mismatch.
-    """
-    now = datetime.now(UTC).replace(tzinfo=None)
-
-    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
-    lock = result.scalar_one_or_none()
-
-    if not lock:
-        raise ValueError('Lock not found or expired')
-
-    if lock.lock_token != lock_token:
-        raise ValueError('Invalid lock token')
-
-    if lock.client_id != client_id:
-        raise ValueError('Lock held by another client')
-
-    if lock.expires_at < now:
-        # Lock expired - remove it
-        session.delete(lock)
+        return _status(lock, now)
+    if lock.owner_id == owner_id or lock.expires_at <= now:
+        lock.owner_id = owner_id
+        lock.lock_token = uuid.uuid4().hex
+        lock.acquired_at = now
+        lock.last_heartbeat = now
+        lock.expires_at = _expires_at(now, ttl_seconds)
+        session.add(lock)
         session.commit()
-        raise ValueError('Lock expired')
+        session.refresh(lock)
+        return _status(lock, now)
+    raise ValueError(f'{resource_type} {resource_id} is locked by another owner')
 
-    # Extend lease
-    lock.expires_at = now + timedelta(seconds=LOCK_TTL_SECONDS)
+
+def heartbeat_lock(
+    session: Session,
+    resource_type: str,
+    resource_id: str,
+    owner_id: str,
+    lock_token: str,
+    ttl_seconds: int | None = None,
+) -> LockStatusResponse:
+    now = _utcnow()
+    lock = get_lock(session, resource_type, resource_id)
+    if lock is None or lock.expires_at <= now:
+        raise ValueError(f'{resource_type} {resource_id} lock is not active')
+    if lock.owner_id != owner_id or lock.lock_token != lock_token:
+        raise ValueError(f'{resource_type} {resource_id} lock is owned by another owner')
     lock.last_heartbeat = now
-
+    lock.expires_at = _expires_at(now, ttl_seconds)
+    session.add(lock)
     session.commit()
     session.refresh(lock)
-
-    return LockResponse(
-        resource_id=lock.resource_id,
-        client_id=lock.client_id,
-        lock_token=lock.lock_token,
-        expires_at=lock.expires_at.isoformat(),
-    )
+    return _status(lock, now)
 
 
 def release_lock(
     session: Session,
+    resource_type: str,
     resource_id: str,
-    client_id: str,
+    owner_id: str,
     lock_token: str,
-) -> None:
-    """Release a lock.
+) -> bool:
+    """Release lock if caller still owns the active token.
 
-    Raises:
-        ValueError: If lock doesn't exist or client/token mismatch.
+    DELETE is idempotent: stale, missing, or superseded lock tokens return False
+    rather than raising API conflicts.
     """
-    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
-    lock = result.scalar_one_or_none()
-
-    if not lock:
-        # Already released - not an error
-        return
-
-    if lock.client_id != client_id or lock.lock_token != lock_token:
-        raise ValueError('Cannot release lock held by another client')
-
-    session.delete(lock)
-    session.commit()
-
-
-def clear_lock(session: Session, resource_id: str) -> None:
-    """Remove any lock for a resource (admin cleanup)."""
-    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
-    lock = result.scalar_one_or_none()
-    if not lock:
-        return
-    session.delete(lock)
-    session.commit()
-
-
-def get_lock_status(
-    session: Session,
-    resource_id: str,
-    client_id: str | None = None,
-) -> LockStatusResponse:
-    """Get current lock status for a resource."""
-    # Clean up expired locks first
-    cleanup_expired_locks(session)
-
-    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
-    lock = result.scalar_one_or_none()
-
-    if not lock:
-        return LockStatusResponse(locked=False)
-
-    return LockStatusResponse(
-        locked=True,
-        locked_by_me=client_id is not None and lock.client_id == client_id,
-        client_id=lock.client_id,
-        expires_at=lock.expires_at.isoformat(),
-    )
-
-
-def validate_lock(
-    session: Session,
-    resource_id: str,
-    client_id: str,
-    lock_token: str,
-) -> None:
-    """Validate that a lock is held by the client and not expired."""
-    cleanup_expired_locks(session)
-
-    result = session.execute(select(Lock).where(col(Lock.resource_id) == resource_id))
-    lock = result.scalar_one_or_none()
-
-    if not lock:
-        raise ValueError('Lock not found or expired')
-
-    if lock.client_id != client_id:
-        raise ValueError('Lock held by another client')
-
-    if lock.lock_token != lock_token:
-        raise ValueError('Invalid lock token')
-
-    now = datetime.now(UTC).replace(tzinfo=None)
-    if lock.expires_at < now:
+    now = _utcnow()
+    lock = get_lock(session, resource_type, resource_id)
+    if lock is None:
+        return False
+    if lock.expires_at <= now:
         session.delete(lock)
         session.commit()
-        raise ValueError('Lock expired')
+        return False
+    if lock.owner_id != owner_id or lock.lock_token != lock_token:
+        return False
+    session.delete(lock)
+    session.commit()
+    return True
+
+
+def ensure_mutation_lock(session: Session, resource_type: str, resource_id: str, owner_id: str | None) -> None:
+    now = _utcnow()
+    lock = get_lock(session, resource_type, resource_id)
+    if lock is None:
+        return
+    if lock.expires_at <= now:
+        session.delete(lock)
+        session.commit()
+        return
+    if owner_id != lock.owner_id:
+        raise ValueError(f'{resource_type} {resource_id} is locked by another owner')

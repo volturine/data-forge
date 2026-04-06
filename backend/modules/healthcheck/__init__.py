@@ -9,11 +9,11 @@ from modules.healthcheck.service import (
 )
 
 __all__ = [
-    'router',
     'create_healthcheck',
     'delete_healthcheck',
     'list_healthchecks',
     'list_results',
+    'router',
     'run_healthchecks',
     'update_healthcheck',
 ]

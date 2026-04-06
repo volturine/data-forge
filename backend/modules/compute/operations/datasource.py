@@ -1,11 +1,14 @@
+import asyncio
+import contextvars
 import hashlib
 import json
-import logging
 import os
 import sqlite3
+from collections import deque
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from threading import Lock
 from urllib.parse import unquote, urlparse
 
 import polars as pl
@@ -18,11 +21,29 @@ from modules.compute.iceberg_reader import scan_iceberg_snapshot
 from modules.compute.step_converter import convert_step_format
 
 
+class DatasourceSourceType(StrEnum):
+    FILE = 'file'
+    DATABASE = 'database'
+    DUCKDB = 'duckdb'
+    ICEBERG = 'iceberg'
+    ANALYSIS = 'analysis'
+
+
+class IcebergReader(StrEnum):
+    NATIVE = 'native'
+    PYICEBERG = 'pyiceberg'
+
+
+class IcebergMetadataPathNotFoundError(ValueError):
+    def __init__(self, metadata_path: str):
+        self.metadata_path = metadata_path
+        super().__init__(f'Iceberg metadata_path not found: {metadata_path}')
+
+
 class DatasourceParams(OperationParams):
     model_config = ConfigDict(extra='allow')
 
-    source_type: Literal['file', 'database', 'duckdb', 'iceberg', 'analysis'] = 'file'
-    analysis_id: str | None = None
+    source_type: DatasourceSourceType = DatasourceSourceType.FILE
     analysis_tab_id: str | None = None
     analysis_pipeline: dict | None = None
     file_path: str | None = None
@@ -47,31 +68,33 @@ class DatasourceParams(OperationParams):
     snapshot_id: str | None = None
     snapshot_timestamp_ms: int | None = None
     storage_options: dict | None = None
-    reader: str | None = None
+    reader: IcebergReader | None = None
 
 
 class DatasourceHandler(OperationHandler):
     FILE_LOADERS: dict[str, Callable[[str, dict], pl.LazyFrame]] = {}
     SOURCE_LOADERS: dict[str, Callable[['DatasourceHandler', DatasourceParams], pl.LazyFrame]] = {}
 
-    @property
-    def name(self) -> str:
-        return 'datasource'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = DatasourceParams.model_validate(params)
-        loader = self.SOURCE_LOADERS.get(validated.source_type)
+        loader = self.SOURCE_LOADERS.get(validated.source_type.value)
         if not loader:
             allowed = ', '.join(sorted(self.SOURCE_LOADERS))
             raise ValueError(f'Unsupported source type: {validated.source_type}. Allowed: {allowed}')
         return loader(self, validated)
+
+    async def call_async(
+        self,
+        lf: pl.LazyFrame,
+        params: dict,
+        **_,
+    ) -> pl.LazyFrame:
+        return await asyncio.to_thread(self.__call__, lf, params)
 
     @staticmethod
     def _csv_opts(opts: dict | None) -> dict:
@@ -83,6 +106,7 @@ class DatasourceHandler(OperationHandler):
             'has_header': opts.get('has_header', True),
             'skip_rows': opts.get('skip_rows', 0),
             'encoding': opts.get('encoding', 'utf8'),
+            'try_parse_dates': True,
         }
 
     def _load_file(self, config: DatasourceParams) -> pl.LazyFrame:
@@ -100,6 +124,7 @@ class DatasourceHandler(OperationHandler):
     def _load_database(self, config: DatasourceParams) -> pl.LazyFrame:
         if not config.connection_string or not config.query:
             raise ValueError('Datasource database loading requires connection_string and query')
+        _assert_select_only(config.query)
         if config.connection_string.startswith('sqlite:'):
             parsed = urlparse(config.connection_string)
             if not parsed.path:
@@ -119,6 +144,7 @@ class DatasourceHandler(OperationHandler):
 
         if not config.query:
             raise ValueError('Datasource DuckDB loading requires query')
+        _assert_select_only(config.query)
         conn = (
             duckdb.connect(database=config.db_path, read_only=config.read_only) if config.db_path else duckdb.connect(database=':memory:')
         )
@@ -134,20 +160,10 @@ class DatasourceHandler(OperationHandler):
         snapshot_id = config.snapshot_id
         snapshot_value: int | None = None
         if snapshot_id is not None:
-            from pyiceberg.table import StaticTable
-
             try:
                 snapshot_value = int(snapshot_id)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f'Iceberg snapshot ID must be an integer: {snapshot_id}') from exc
-
-            table = StaticTable.from_metadata(metadata_path)
-            snapshot = table.snapshot_by_id(snapshot_value)
-            if snapshot is None:
-                logger = logging.getLogger(__name__)
-                logger.warning('Iceberg snapshot ID %s not found, falling back to latest snapshot', snapshot_id)
-                snapshot = table.current_snapshot()
-                snapshot_value = snapshot.snapshot_id if snapshot is not None else None
         if snapshot_id is None and config.snapshot_timestamp_ms is not None:
             from pyiceberg.table import StaticTable
 
@@ -156,56 +172,55 @@ class DatasourceHandler(OperationHandler):
             if snapshot is None:
                 raise ValueError('Iceberg snapshot not found for the selected timestamp')
             snapshot_value = snapshot.snapshot_id
-        reader = config.reader
-        reader_override: Literal['native', 'pyiceberg'] = 'pyiceberg'
-        if reader == 'native':
-            reader_override = 'native'
-        if reader == 'pyiceberg':
-            reader_override = 'pyiceberg'
+        reader_override = IcebergReader.NATIVE if config.reader == IcebergReader.NATIVE else IcebergReader.PYICEBERG
         if snapshot_value is not None:
             return scan_iceberg_snapshot(metadata_path, snapshot_value, config.storage_options)
         return pl.scan_iceberg(
             metadata_path,
             snapshot_id=snapshot_value,
             storage_options=config.storage_options,
-            reader_override=reader_override,
+            reader_override=reader_override.value,
         )
 
     def _load_analysis(self, config: DatasourceParams) -> pl.LazyFrame:
-        if not config.analysis_id:
-            raise ValueError('Datasource analysis loading requires analysis_id')
         pipeline = config.analysis_pipeline
         if isinstance(pipeline, dict):
-            analysis_id = str(config.analysis_id)
             pipeline_id = pipeline.get('analysis_id')
             if pipeline_id:
-                pipeline_id = str(pipeline_id)
-            if not pipeline_id or pipeline_id == analysis_id:
-                return _load_analysis_pipeline(pipeline, analysis_id, config.analysis_tab_id)
+                return _load_analysis_pipeline(pipeline, str(pipeline_id), config.analysis_tab_id)
         raise ValueError('analysis_pipeline is required for analysis datasource loading')
 
 
-_ANALYSIS_STACK: list[tuple[str, str | None]] = []
+_analysis_stack_var: contextvars.ContextVar[tuple[tuple[str, str | None], ...]] = contextvars.ContextVar(
+    '_analysis_stack',
+    default=(),
+)
 _ANALYSIS_CACHE: dict[str, pl.LazyFrame] = {}
-_ANALYSIS_CACHE_KEYS: list[str] = []
+_ANALYSIS_CACHE_KEYS: deque[str] = deque()
+_ANALYSIS_CACHE_LOCK = Lock()
 _ANALYSIS_CACHE_MAX = 20
 
 
+def _get_analysis_stack() -> tuple[tuple[str, str | None], ...]:
+    return _analysis_stack_var.get()
+
+
 def _load_analysis_pipeline(pipeline: dict, analysis_id: str, tab_id: str | None) -> pl.LazyFrame:
+    stack = _get_analysis_stack()
     stack_key = (analysis_id, tab_id)
-    if stack_key in _ANALYSIS_STACK:
+    if stack_key in stack:
         raise ValueError('Analysis pipeline contains a circular reference')
-    _ANALYSIS_STACK.append(stack_key)
+    token = _analysis_stack_var.set((*stack, stack_key))
     try:
         cache_key = _analysis_cache_key(pipeline, tab_id)
-        cached = _ANALYSIS_CACHE.get(cache_key)
+        cached = _get_analysis_cache(cache_key)
         if cached is not None:
             return cached
         frame = _build_analysis_from_pipeline(pipeline, tab_id)
         _store_analysis_cache(cache_key, frame)
         return frame
     finally:
-        _ANALYSIS_STACK.pop()
+        _analysis_stack_var.reset(token)
 
 
 def _analysis_cache_key(pipeline: dict, tab_id: str | None) -> str:
@@ -219,15 +234,21 @@ def _analysis_cache_key(pipeline: dict, tab_id: str | None) -> str:
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
 
+def _get_analysis_cache(key: str) -> pl.LazyFrame | None:
+    with _ANALYSIS_CACHE_LOCK:
+        return _ANALYSIS_CACHE.get(key)
+
+
 def _store_analysis_cache(key: str, frame: pl.LazyFrame) -> None:
-    if key in _ANALYSIS_CACHE:
-        return
-    _ANALYSIS_CACHE[key] = frame
-    _ANALYSIS_CACHE_KEYS.append(key)
-    if len(_ANALYSIS_CACHE_KEYS) <= _ANALYSIS_CACHE_MAX:
-        return
-    oldest = _ANALYSIS_CACHE_KEYS.pop(0)
-    _ANALYSIS_CACHE.pop(oldest, None)
+    with _ANALYSIS_CACHE_LOCK:
+        if key in _ANALYSIS_CACHE:
+            return
+        _ANALYSIS_CACHE[key] = frame
+        _ANALYSIS_CACHE_KEYS.append(key)
+        if len(_ANALYSIS_CACHE_KEYS) <= _ANALYSIS_CACHE_MAX:
+            return
+        oldest = _ANALYSIS_CACHE_KEYS.popleft()
+        _ANALYSIS_CACHE.pop(oldest, None)
 
 
 def _resolve_analysis_tab(tabs: list[dict], analysis_tab_id: str | None) -> dict:
@@ -237,17 +258,27 @@ def _resolve_analysis_tab(tabs: list[dict], analysis_tab_id: str | None) -> dict
     if not selected:
         selected = next((tab for tab in tabs if tab.get('steps')), None)
     if not selected:
-        selected = tabs[0]
+        raise ValueError('Analysis pipeline missing tab steps')
     return selected
 
 
 def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
     output_to_tab: dict[str, dict] = {}
     tab_input: dict[str, str] = {}
+    output_map: dict[str, str] = {}
+    for tab in tabs:
+        tab_id = tab.get('id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
+        if not tab_id or not output_id:
+            continue
+        output_map[str(tab_id)] = str(output_id)
     for tab in tabs:
         tid = tab.get('id')
-        output_id = tab.get('output_datasource_id')
-        input_id = tab.get('datasource_id')
+        output = tab.get('output') if isinstance(tab, dict) else None
+        output_id = output.get('result_id') if isinstance(output, dict) else None
+        datasource = tab.get('datasource') if isinstance(tab, dict) else None
+        input_id = datasource.get('id') if isinstance(datasource, dict) else None
         if tid and output_id:
             output_to_tab[str(output_id)] = tab
         if tid and input_id:
@@ -280,9 +311,12 @@ def _build_tab_pipeline(
     pipeline: dict,
     cache: dict[str, pl.LazyFrame],
 ) -> pl.LazyFrame:
-    datasource_id = tab.get('datasource_id')
+    datasource = tab.get('datasource') if isinstance(tab, dict) else None
+    if not isinstance(datasource, dict):
+        raise ValueError('Analysis tab datasource must be a dict')
+    datasource_id = datasource.get('id')
     if not datasource_id:
-        raise ValueError('Analysis tab missing datasource_id')
+        raise ValueError('Analysis tab missing datasource.id')
 
     if datasource_id in cache:
         base_frame = cache[datasource_id]
@@ -291,9 +325,12 @@ def _build_tab_pipeline(
         if not isinstance(datasource_config, dict):
             raise ValueError(f'Analysis pipeline missing datasource config for {datasource_id}')
 
-        overrides = tab.get('datasource_config') or {}
-        if overrides and not isinstance(overrides, dict):
-            raise ValueError('Analysis tab datasource_config must be a dict')
+        overrides = datasource.get('config')
+        if not isinstance(overrides, dict):
+            raise ValueError('Analysis tab datasource.config must be a dict')
+        branch = overrides.get('branch')
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError('Analysis tab datasource.config.branch is required')
 
         merged = {**datasource_config, **overrides}
         analysis_id = pipeline.get('analysis_id')
@@ -307,9 +344,9 @@ def _build_tab_pipeline(
     if not isinstance(steps, list):
         raise ValueError('Analysis tab steps must be a list')
 
-    from modules.compute.utils import apply_pipeline_steps
+    from modules.compute.utils import apply_steps
 
-    steps = apply_pipeline_steps(steps)
+    steps = apply_steps(steps)
     additional = _collect_analysis_sources(steps, sources, pipeline, cache)
 
     from modules.compute.engine import PolarsComputeEngine
@@ -317,8 +354,9 @@ def _build_tab_pipeline(
     for step in steps:
         step_id = step.get('id') or 'step'
         backend_step = convert_step_format(step)
-        right_source_id = backend_step.get('params', {}).get('right_source')
-        right_lf = cache.get(right_source_id) if right_source_id else None
+        right_source_raw = backend_step.params.get('right_source')
+        right_source_id = right_source_raw if isinstance(right_source_raw, str) else None
+        right_lf = cache.get(right_source_id) if right_source_id is not None else None
         base_frame = PolarsComputeEngine._apply_step(
             base_frame,
             backend_step,
@@ -327,7 +365,8 @@ def _build_tab_pipeline(
         )
         cache[step_id] = base_frame
 
-    output_id = tab.get('output_datasource_id')
+    output = tab.get('output') if isinstance(tab, dict) else None
+    output_id = output.get('result_id') if isinstance(output, dict) else None
     if output_id:
         cache[str(output_id)] = base_frame
 
@@ -379,11 +418,7 @@ def _collect_analysis_sources(
         if isinstance(union_sources, str):
             union_sources = [union_sources]
 
-        source_ids = []
-        if right_source_id:
-            source_ids.append(right_source_id)
-        if isinstance(union_sources, list):
-            source_ids.extend(union_sources)
+        source_ids = ([right_source_id] if right_source_id else []) + union_sources
 
         for source_id in source_ids:
             if not source_id:
@@ -405,9 +440,6 @@ def _collect_analysis_sources(
 def resolve_iceberg_metadata_path(metadata_path: str) -> str:
     normalized = _strip_file_scheme(metadata_path)
     path = Path(normalized)
-    parts = [path, *path.parents]
-    if any(part.is_symlink() for part in parts):
-        raise ValueError('Iceberg metadata_path cannot be a symlink')
     resolved = path.resolve()
     data_root = Path(os.path.realpath(namespace_paths().base_dir.resolve()))
     if data_root not in resolved.parents and data_root != resolved:
@@ -419,7 +451,7 @@ def resolve_iceberg_metadata_path(metadata_path: str) -> str:
             return str(path)
         raise ValueError('Iceberg metadata_path must be a table directory or metadata.json')
     if not path.exists():
-        raise ValueError(f'Iceberg metadata_path not found: {metadata_path}')
+        raise IcebergMetadataPathNotFoundError(metadata_path)
     if not path.is_dir():
         raise ValueError(f'Iceberg metadata_path must be a file or directory: {metadata_path}')
     if path.name == 'metadata':
@@ -499,7 +531,7 @@ def _read_excel_bounds(config: DatasourceParams) -> pl.LazyFrame:
             min_col=start_col + 1,
             max_col=end_col + 1,
             values_only=True,
-        )
+        ),
     )
 
     if not rows:
@@ -581,5 +613,16 @@ def _has_bounds(config: DatasourceParams) -> bool:
     return config.start_row is not None and config.start_col is not None and config.end_col is not None and config.end_row is not None
 
 
+def _assert_select_only(query: str) -> None:
+    """Reject queries that are not read-only SELECT statements."""
+    first_token = query.strip().split()[0].upper() if query.strip() else ''
+    if first_token not in ('SELECT', 'WITH'):
+        raise ValueError('Only SELECT queries (including CTEs starting with WITH) are permitted for database datasources')
+
+
 def load_datasource(config: dict) -> pl.LazyFrame:
     return DatasourceHandler()(pl.LazyFrame(), config)
+
+
+async def load_datasource_async(config: dict) -> pl.LazyFrame:
+    return await asyncio.to_thread(load_datasource, config)

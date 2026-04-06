@@ -8,6 +8,7 @@ import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+import { websocketRequest } from './websocket';
 
 export interface StepPreviewRequest {
 	analysis_id?: string;
@@ -17,7 +18,6 @@ export interface StepPreviewRequest {
 	row_limit?: number;
 	page?: number;
 	resource_config?: EngineResourceConfig | null;
-	datasource_config?: Record<string, unknown> | null;
 }
 
 export type StepPreviewResourceConfig = StepPreviewRequest['resource_config'];
@@ -36,10 +36,12 @@ export interface StepPreviewResponse {
 export function previewStepData(
 	request: StepPreviewRequest
 ): ResultAsync<StepPreviewResponse, ApiError> {
-	return apiRequest<StepPreviewResponse>('/v1/compute/preview', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'preview', request, () =>
+		apiRequest<StepPreviewResponse>('/v1/compute/preview', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }
 
 // Engine lifecycle functions
@@ -96,18 +98,13 @@ export interface ExportRequest {
 	tab_id?: string | null;
 	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'duckdb';
 	filename?: string;
-	destination: 'download' | 'filesystem' | 'datasource';
-	datasource_type?: 'iceberg' | 'duckdb' | 'file';
+	destination: 'download' | 'datasource';
 	iceberg_options?: {
 		table_name?: string;
 		namespace?: string;
 		branch: string;
 	};
-	duckdb_options?: {
-		table_name?: string;
-	};
-	datasource_config?: Record<string, unknown> | null;
-	output_datasource_id?: string | null;
+	result_id: string;
 }
 
 export interface ExportResponse {
@@ -115,7 +112,6 @@ export interface ExportResponse {
 	filename: string;
 	format: string;
 	destination: string;
-	file_path: string | null;
 	message: string | null;
 	datasource_id: string | null;
 	datasource_name?: string | null;
@@ -128,18 +124,40 @@ export function exportData(request: ExportRequest): ResultAsync<Blob | ExportRes
 			body: JSON.stringify(request)
 		}).andThen((blob) => {
 			const filename = request.filename ?? 'export';
-			if (request.format) {
-				const ext = request.format.startsWith('.') ? request.format : `.${request.format}`;
-				downloadBlob(blob, `${filename}${ext}`);
-				return okAsync(blob);
-			}
-			downloadBlob(blob, filename);
+			const ext = request.format
+				? request.format.startsWith('.')
+					? request.format
+					: `.${request.format}`
+				: '';
+			downloadBlob(blob, `${filename}${ext}`);
 			return okAsync(blob);
 		});
 	}
 	return apiRequest<ExportResponse>('/v1/compute/export', {
 		method: 'POST',
 		body: JSON.stringify(request)
+	});
+}
+
+export interface DownloadRequest {
+	analysis_id?: string;
+	target_step_id: string;
+	analysis_pipeline: AnalysisPipelinePayload;
+	tab_id?: string | null;
+	format?: 'csv' | 'parquet' | 'json' | 'ndjson' | 'excel' | 'duckdb';
+	filename?: string;
+}
+
+export function downloadStep(request: DownloadRequest): ResultAsync<Blob, ApiError> {
+	return apiBlobRequest('/v1/compute/download', {
+		method: 'POST',
+		body: JSON.stringify(request)
+	}).andThen((blob) => {
+		const filename = request.filename ?? 'download';
+		const format = request.format ?? 'csv';
+		const ext = format.startsWith('.') ? format : `.${format}`;
+		downloadBlob(blob, `${filename}${ext}`);
+		return okAsync(blob);
 	});
 }
 
@@ -159,7 +177,6 @@ export interface StepSchemaRequest {
 	target_step_id: string;
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: string | null;
-	datasource_config?: Record<string, unknown> | null;
 }
 
 export interface StepSchemaResponse {
@@ -171,19 +188,15 @@ export interface StepSchemaResponse {
 export function getStepSchema(
 	request: StepSchemaRequest
 ): ResultAsync<StepSchemaResponse, ApiError> {
-	return apiRequest<StepSchemaResponse>('/v1/compute/schema', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'schema', request, () =>
+		apiRequest<StepSchemaResponse>('/v1/compute/schema', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }
 
-export interface StepRowCountRequest {
-	analysis_id?: string;
-	target_step_id: string;
-	analysis_pipeline: AnalysisPipelinePayload;
-	tab_id?: string | null;
-	datasource_config?: Record<string, unknown> | null;
-}
+export type StepRowCountRequest = StepSchemaRequest;
 
 export interface StepRowCountResponse {
 	step_id: string;
@@ -193,10 +206,12 @@ export interface StepRowCountResponse {
 export function getStepRowCount(
 	request: StepRowCountRequest
 ): ResultAsync<StepRowCountResponse, ApiError> {
-	return apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'row_count', request, () =>
+		apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }
 
 export interface BuildTabResult {
@@ -220,8 +235,10 @@ export interface BuildRequest {
 export function buildAnalysisWithPayload(
 	request: BuildRequest
 ): ResultAsync<BuildResponse, ApiError> {
-	return apiRequest<BuildResponse>('/v1/compute/build', {
-		method: 'POST',
-		body: JSON.stringify(request)
-	});
+	return websocketRequest('/v1/compute/ws', 'build', request, () =>
+		apiRequest<BuildResponse>('/v1/compute/build', {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
+	);
 }

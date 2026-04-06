@@ -3,6 +3,7 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -229,7 +230,7 @@ class TestTelegramBot:
         assert bot.running is False
         assert bot.token == ''
 
-    @patch('modules.telegram.bot.httpx.get')
+    @patch('modules.telegram.bot.http_client.get')
     def test_start_stop(self, mock_get: MagicMock) -> None:
         # Make getUpdates return empty so the loop doesn't process anything
         mock_resp = MagicMock()
@@ -252,7 +253,7 @@ class TestTelegramBot:
             'message': {
                 'text': '/subscribe',
                 'chat': {'id': 42, 'first_name': 'TestUser'},
-            }
+            },
         }
 
         with patch.object(bot, '_send_message') as mock_send:
@@ -275,7 +276,7 @@ class TestTelegramBot:
             'message': {
                 'text': '/unsubscribe',
                 'chat': {'id': 43, 'first_name': 'Unsub'},
-            }
+            },
         }
 
         with patch.object(bot, '_send_message'):
@@ -293,7 +294,7 @@ class TestTelegramBot:
             'message': {
                 'text': '/start',
                 'chat': {'id': 44, 'first_name': 'Starter'},
-            }
+            },
         }
 
         with patch.object(bot, '_send_message') as mock_send:
@@ -309,7 +310,7 @@ class TestTelegramBot:
             bot._handle_update({'update_id': 1})
             mock_send.assert_not_called()
 
-    @patch('modules.telegram.bot.httpx.post')
+    @patch('modules.telegram.bot.http_client.post')
     def test_send_message(self, mock_post: MagicMock) -> None:
         bot = TelegramBot()
         bot._token = 'tok-test'
@@ -319,7 +320,7 @@ class TestTelegramBot:
         assert call_kwargs[1]['json']['chat_id'] == '123'
         assert call_kwargs[1]['json']['text'] == 'hello'
 
-    @patch('modules.telegram.bot.httpx.post', side_effect=Exception('network'))
+    @patch('modules.telegram.bot.http_client.post', side_effect=Exception('network'))
     def test_send_message_failure_no_raise(self, mock_post: MagicMock) -> None:
         bot = TelegramBot()
         bot._token = 'tok-test'
@@ -336,7 +337,7 @@ class TestTelegramBot:
             bot._handle_update(
                 {
                     'message': {'text': '/subscribe', 'chat': {'id': 50, 'first_name': 'Cycler'}},
-                }
+                },
             )
         test_db_session.expire_all()
         sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
@@ -349,7 +350,7 @@ class TestTelegramBot:
             bot._handle_update(
                 {
                     'message': {'text': '/unsubscribe', 'chat': {'id': 50, 'first_name': 'Cycler'}},
-                }
+                },
             )
         test_db_session.expire_all()
         sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
@@ -361,7 +362,7 @@ class TestTelegramBot:
             bot._handle_update(
                 {
                     'message': {'text': '/subscribe', 'chat': {'id': 50, 'first_name': 'Cycler'}},
-                }
+                },
             )
         test_db_session.expire_all()
         sub = get_subscriber_by_chat(test_db_session, '50', 'tok-cycle')
@@ -369,15 +370,17 @@ class TestTelegramBot:
         assert sub.is_active is True
         assert sub.id == original_id
 
-    def test_poll_lock_prevents_concurrent_get_updates(self) -> None:
+    def test_poll_lock_prevents_concurrent_get_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_do_get_updates returns None when lock is held by another caller."""
         bot = TelegramBot()
-        bot._poll_lock.acquire()
-        try:
+        lock = MagicMock()
+        lock.acquire.return_value = False
+        monkeypatch.setattr(bot, '_poll_lock', lock)
+
+        with patch('modules.telegram.bot.http_client.get') as mock_get:
             result = bot._do_get_updates('tok', {'offset': 0, 'timeout': 5}, timeout=5)
-            assert result is None
-        finally:
-            bot._poll_lock.release()
+        assert result is None
+        mock_get.assert_not_called()
 
     def test_offset_tracked_per_token(self) -> None:
         """Offsets are tracked independently per bot token."""
@@ -388,7 +391,7 @@ class TestTelegramBot:
         assert bot.get_offset('tok-a') == 100
         assert bot.get_offset('tok-b') == 200
 
-    @patch('modules.telegram.bot.httpx.get')
+    @patch('modules.telegram.bot.http_client.get')
     def test_409_clears_webhook_and_retries(self, mock_get: MagicMock) -> None:
         """409 response triggers webhook clear and does not immediately crash."""
         bot = TelegramBot()

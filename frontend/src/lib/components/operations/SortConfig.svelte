@@ -2,19 +2,24 @@
 	import type { Schema } from '$lib/types/schema';
 	import { X, Plus, ArrowUp, ArrowDown } from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
+	import { css, emptyText, stepConfig } from '$lib/styles/panda';
 
 	const uid = $props.id();
 
 	interface Props {
 		schema: Schema;
-		config?: { columns: string[]; descending: boolean[] };
+		config?: { columns: string[]; descending: boolean[] | boolean };
 	}
 
 	let { schema, config = $bindable({ columns: [], descending: [] }) }: Props = $props();
 
-	const safeConfig = $derived({
+	const safeConfig: { columns: string[]; descending: boolean[] } = $derived({
 		columns: config?.columns ?? [],
-		descending: config?.descending ?? []
+		descending: Array.isArray(config?.descending)
+			? config.descending
+			: (config?.columns ?? []).map(() => (config?.descending as boolean) ?? false)
 	});
 
 	let newColumn = $state('');
@@ -50,10 +55,32 @@
 	);
 </script>
 
-<div class="config-panel" role="region" aria-label="Sort configuration">
-	<div class="flex gap-2 items-center mb-8 flex-wrap" role="group" aria-label="Add sort rule form">
-		<div class="flex-2 min-w-50">
-			<span class="sr-only">Select column to sort</span>
+<div class={stepConfig()} role="region" aria-label="Sort configuration">
+	<div
+		class={css({
+			display: 'flex',
+			gap: '2',
+			alignItems: 'center',
+			marginBottom: '8',
+			flexWrap: 'wrap'
+		})}
+		role="group"
+		aria-label="Add sort rule form"
+	>
+		<div class={css({ flex: '2', minWidth: 'listSm' })}>
+			<span
+				class={css({
+					position: 'absolute',
+					width: 'px',
+					height: 'px',
+					padding: '0',
+					margin: '-1px',
+					overflow: 'hidden',
+					clip: 'rect(0, 0, 0, 0)',
+					whiteSpace: 'nowrap',
+					border: '0'
+				})}>Select column to sort</span
+			>
 			<ColumnDropdown
 				{schema}
 				value={newColumn}
@@ -63,40 +90,53 @@
 			/>
 		</div>
 
-		<div class="sort-direction-group flex" role="group" aria-label="Sort direction">
-			<button
-				id="{uid}-ascending"
-				data-testid="sort-ascending-button"
-				type="button"
-				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer text-fg-secondary hover:bg-secondary hover:text-fg-primary"
-				class:active={!newDescending}
+		<div
+			class={css({
+				display: 'flex',
+				gap: 'px',
+				backgroundColor: 'bg.muted',
+				padding: 'px'
+			})}
+			role="group"
+			aria-label="Sort direction"
+		>
+			<ToggleButton
+				active={!newDescending}
+				radius="left"
 				onclick={() => (newDescending = false)}
-				title="Ascending"
-				aria-pressed={!newDescending}
-				aria-label="Sort ascending"
+				ariaLabel="Sort ascending"
+				ariaPressed={!newDescending}
 			>
 				<ArrowUp size={14} aria-hidden="true" />
-			</button>
-			<button
-				id="{uid}-descending"
-				data-testid="sort-descending-button"
-				type="button"
-				class="sort-btn flex items-center justify-center w-8 h-8 p-0 cursor-pointer text-fg-secondary hover:bg-secondary hover:text-fg-primary"
-				class:active={newDescending}
+			</ToggleButton>
+			<ToggleButton
+				active={newDescending}
+				radius="right"
 				onclick={() => (newDescending = true)}
-				title="Descending"
-				aria-pressed={newDescending}
-				aria-label="Sort descending"
+				ariaLabel="Sort descending"
+				ariaPressed={newDescending}
 			>
 				<ArrowDown size={14} aria-hidden="true" />
-			</button>
+			</ToggleButton>
 		</div>
 
 		<button
 			id="{uid}-add"
 			data-testid="sort-add-button"
 			type="button"
-			class="flex items-center gap-1 py-2 px-4 border-none cursor-pointer whitespace-nowrap bg-accent-bg text-accent-primary disabled:bg-border-tertiary disabled:cursor-not-allowed disabled:text-fg-muted"
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				gap: '1',
+				paddingY: '2',
+				paddingX: '4',
+				border: 'none',
+				cursor: 'pointer',
+				whiteSpace: 'nowrap',
+				backgroundColor: 'bg.accent',
+				color: 'accent.primary',
+				_disabled: { backgroundColor: 'bg.muted', cursor: 'not-allowed', color: 'fg.muted' }
+			})}
 			onclick={addSortRule}
 			disabled={!newColumn}
 			aria-label="Add sort rule"
@@ -108,51 +148,73 @@
 
 	{#if safeConfig.columns.length > 0}
 		<div id="sort-rules-list" role="region" aria-labelledby="sort-order-heading">
-			<h4 id="sort-order-heading" class="mt-0 mb-3">Sort Order</h4>
+			<span id="sort-order-heading"><SectionHeader>Sort Order</SectionHeader></span>
 			{#each safeConfig.columns as column, i (column)}
 				<div
-					class="flex justify-between items-center py-2 border-b border-tertiary last:border-b-0"
+					class={css({
+						display: 'flex',
+						justifyContent: 'space-between',
+						alignItems: 'center',
+						paddingY: '2',
+						borderBottomWidth: '1',
+						'&:last-child': { borderBottomWidth: '0' }
+					})}
 					role="group"
 					aria-label={`Sort rule ${i + 1}: ${column}`}
 				>
-					<span class="font-medium">{column}</span>
+					<span class={css({ fontWeight: 'medium' })}>{column}</span>
 
 					<div
-						class="sort-direction-group flex items-center"
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							gap: 'px',
+							backgroundColor: 'bg.muted',
+							padding: 'px'
+						})}
 						role="group"
 						aria-label={`Sort direction for ${column}`}
 					>
-						<button
-							id={`sort-btn-asc-${i}`}
-							data-testid={`sort-ascending-rule-${i}`}
-							type="button"
-							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
-							class:active={!safeConfig.descending[i]}
+						<ToggleButton
+							active={!safeConfig.descending[i]}
+							radius="left"
 							onclick={() => setDirection(i, false)}
-							title="Ascending"
-							aria-pressed={!safeConfig.descending[i]}
-							aria-label={`Sort ${column} ascending`}
+							ariaLabel={`Sort ${column} ascending`}
+							ariaPressed={!safeConfig.descending[i]}
 						>
 							<ArrowUp size={12} aria-hidden="true" />
-						</button>
-						<button
-							id={`sort-btn-desc-${i}`}
-							data-testid={`sort-descending-rule-${i}`}
-							type="button"
-							class="sort-btn flex items-center justify-center w-7 h-7 p-0 cursor-pointer text-fg-secondary hover:bg-tertiary hover:text-fg-primary"
-							class:active={safeConfig.descending[i]}
+						</ToggleButton>
+						<ToggleButton
+							active={safeConfig.descending[i]}
+							radius="right"
 							onclick={() => setDirection(i, true)}
-							title="Descending"
-							aria-pressed={safeConfig.descending[i]}
-							aria-label={`Sort ${column} descending`}
+							ariaLabel={`Sort ${column} descending`}
+							ariaPressed={safeConfig.descending[i]}
 						>
 							<ArrowDown size={12} aria-hidden="true" />
-						</button>
+						</ToggleButton>
 						<button
 							id={`sort-btn-remove-${i}`}
 							data-testid={`sort-remove-rule-${i}`}
 							type="button"
-							class="flex items-center justify-center w-7 h-7 p-0 bg-transparent cursor-pointer text-fg-secondary border border-transparent hover:bg-error! hover:text-error-fg! hover:border-error!"
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								width: 'row',
+								height: 'row',
+								padding: '0',
+								backgroundColor: 'transparent',
+								cursor: 'pointer',
+								color: 'fg.secondary',
+								borderWidth: '1',
+								borderColor: 'border.transparent',
+								_hover: {
+									backgroundColor: 'bg.error!',
+									color: 'fg.error!',
+									borderColor: 'border.error'
+								}
+							})}
 							onclick={() => removeSortRule(i)}
 							title="Remove"
 							aria-label={`Remove sort rule for ${column}`}
@@ -164,7 +226,7 @@
 			{/each}
 		</div>
 	{:else}
-		<p id="sort-empty-state" class="py-8 text-center text-xs text-fg-muted" role="status">
+		<p id="sort-empty-state" class={emptyText()} role="status">
 			No sort rules configured. Add a column to sort by.
 		</p>
 	{/if}

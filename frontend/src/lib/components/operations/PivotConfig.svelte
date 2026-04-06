@@ -2,6 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import type { PivotConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import { css, cx, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface Props {
 		schema: Schema;
@@ -12,7 +13,7 @@
 
 	let {
 		schema,
-		config = $bindable({ index: [], columns: '', values: '', aggregate_function: 'first' }),
+		config = $bindable({ index: [], columns: '', values: null, aggregate_function: 'first' }),
 		onRefreshSchema,
 		isRefreshing = false
 	}: Props = $props();
@@ -30,45 +31,76 @@
 	function toggleIndexColumn(columnName: string) {
 		const base = Array.isArray(config.index) ? config.index : [];
 		const idx = base.indexOf(columnName);
-		if (idx > -1) {
-			config.index = base.filter((_, i) => i !== idx);
-		} else {
-			config.index = [...base, columnName];
-		}
+		config.index = idx > -1 ? base.filter((_, i) => i !== idx) : [...base, columnName];
 	}
 </script>
 
-<div class="config-panel" role="region" aria-label="Pivot configuration">
-	<div class="mb-5">
-		<label for="pivot-column"
-			>Pivot Column <span class="text-xs text-fg-muted">(values become new columns)</span></label
+<div class={stepConfig()} role="region" aria-label="Pivot configuration">
+	<div class={css({ marginBottom: '5' })}>
+		<div
+			class={css({
+				display: 'block',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider'
+			})}
 		>
+			Pivot Column <span class={css({ fontSize: 'xs', color: 'fg.muted' })}
+				>(values become new columns)</span
+			>
+		</div>
 		<ColumnDropdown
 			{schema}
 			value={config.columns ?? ''}
 			onChange={(val) => (config.columns = val)}
 			placeholder="Select column..."
 		/>
-		<span id="pivot-column-help" class="text-xs text-fg-muted"
+		<span id="pivot-column-help" class={css({ fontSize: 'xs', color: 'fg.muted' })}
 			>Select the column whose unique values will become new columns</span
 		>
 	</div>
 
-	<div class="mb-5" role="group" aria-labelledby="index-columns-label">
-		<span id="index-columns-label" class="group-label"
-			>Index Columns <span class="text-xs text-fg-muted">(rows)</span></span
+	<div class={css({ marginBottom: '5' })} role="group" aria-labelledby="index-columns-label">
+		<span
+			id="index-columns-label"
+			class={css({
+				display: 'block',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider'
+			})}>Index Columns <span class={css({ fontSize: 'xs', color: 'fg.muted' })}>(rows)</span></span
 		>
-		<div class="chip-grid grid gap-3 p-2 max-h-37.5 overflow-y-auto">
+		<div
+			class={css({
+				gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+				border: 'none',
+				backgroundColor: 'transparent',
+				display: 'grid',
+				gap: '3',
+				padding: '2',
+				maxHeight: 'inputSm',
+				overflowY: 'auto'
+			})}
+		>
 			{#each schema.columns as column (column.name)}
 				<label
-					class="checkbox-label flex items-center gap-3 px-2 py-1 cursor-pointer text-sm hover:bg-hover"
+					class={cx(
+						label({ variant: 'checkbox' }),
+						css({ paddingX: '2', paddingY: '1', _hover: { backgroundColor: 'bg.hover' } })
+					)}
 				>
 					<input
 						id={`pivot-checkbox-index-${column.name}`}
 						data-testid={`pivot-index-checkbox-${column.name}`}
 						type="checkbox"
 						name="pivot-index"
-						class="accent-primary"
+						class={css({ accentColor: 'token(colors.accent.primary)' })}
 						checked={safeIndex.includes(column.name)}
 						onchange={() => toggleIndexColumn(column.name)}
 						aria-label={`Include ${column.name} as index column`}
@@ -78,14 +110,30 @@
 			{/each}
 		</div>
 		{#if safeIndex.length > 0}
-			<div id="pivot-index-summary" class="mt-2 text-xs text-fg-muted" aria-live="polite">
+			<div
+				id="pivot-index-summary"
+				class={css({ marginTop: '2', fontSize: 'xs', color: 'fg.muted' })}
+				aria-live="polite"
+			>
 				{safeIndex.length} selected
 			</div>
 		{/if}
 	</div>
 
-	<div class="mb-5">
-		<label for="pivot-select-values">Values Column</label>
+	<div class={css({ marginBottom: '5' })}>
+		<div
+			class={css({
+				display: 'block',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider'
+			})}
+		>
+			Values Column
+		</div>
 		<ColumnDropdown
 			{schema}
 			value={config.values ?? ''}
@@ -94,11 +142,12 @@
 		/>
 	</div>
 
-	<div class="mb-5">
-		<label for="pivot-select-agg">Aggregation</label>
+	<div class={css({ marginBottom: '5' })}>
+		<label class={label()} for="pivot-select-agg">Aggregation</label>
 		<select
 			id="pivot-select-agg"
 			data-testid="pivot-agg-select"
+			class={input()}
 			bind:value={config.aggregate_function}
 		>
 			{#each aggregateFunctions as func (func)}
@@ -108,11 +157,27 @@
 	</div>
 
 	{#if onRefreshSchema}
-		<div class="mb-5">
+		<div class={css({ marginBottom: '5' })}>
 			<button
 				id="pivot-btn-refresh"
 				data-testid="pivot-refresh-button"
-				class="w-full py-2 px-3 border-none text-sm font-medium cursor-pointer flex items-center justify-center gap-2 accent-btn hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+				class={css({
+					backgroundColor: 'accent.primary',
+					color: 'fg.inverse',
+					borderWidth: '1',
+					width: 'full',
+					paddingY: '2',
+					paddingX: '3',
+					fontSize: 'sm',
+					fontWeight: 'medium',
+					cursor: 'pointer',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '2',
+					_hover: { opacity: '0.9' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+				})}
 				onclick={onRefreshSchema}
 				disabled={!isConfigValid || isRefreshing}
 				type="button"
@@ -120,7 +185,14 @@
 			>
 				{#if isRefreshing}
 					<span
-						class="h-3.5 w-3.5 border-2 border-current border-t-transparent animate-spin"
+						class={css({
+							width: 'iconXs',
+							height: 'iconXs',
+							borderWidth: '2',
+							borderColor: 'currentColor',
+							borderTopColor: 'transparent',
+							animation: 'spin 0.8s linear infinite'
+						})}
 						aria-hidden="true"
 					></span>
 					Refreshing...
@@ -128,7 +200,9 @@
 					Refresh Output Columns
 				{/if}
 			</button>
-			<p class="text-xs mt-1 text-fg-muted">Click to compute the resulting columns after pivot</p>
+			<p class={css({ fontSize: 'xs', marginTop: '1', color: 'fg.muted' })}>
+				Click to compute the resulting columns after pivot
+			</p>
 		</div>
 	{/if}
 </div>

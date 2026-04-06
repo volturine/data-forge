@@ -1,7 +1,7 @@
 ---
 description: Fast repo search and code exploration — no edits
 mode: subagent
-model: opencode/minimax-m2.5-free
+model: github-copilot/claude-sonnet-4.6
 name: explorer
 tools:
   edit: false
@@ -22,6 +22,7 @@ commands.
 - Map dependencies between modules
 - Identify existing conventions and patterns
 - Answer "where is X?" and "how does Y work?" questions
+- Map API contracts — what the backend exposes and what the frontend consumes
 
 ## How to search
 

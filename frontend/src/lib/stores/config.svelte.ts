@@ -84,6 +84,10 @@ export class ConfigStore {
 	get telegramEnabled(): boolean {
 		return this.config?.telegram_enabled ?? false;
 	}
+
+	get authRequired(): boolean {
+		return this.config?.auth_required ?? true;
+	}
 }
 
 export const configStore = new ConfigStore();

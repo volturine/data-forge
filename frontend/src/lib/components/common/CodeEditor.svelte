@@ -2,6 +2,7 @@
 	import { EditorView, basicSetup } from 'codemirror';
 	import { EditorState } from '@codemirror/state';
 	import { python } from '@codemirror/lang-python';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		value?: string;
@@ -14,20 +15,23 @@
 	let skipUpdate = false;
 	let programmatic = false;
 
+	const CURSOR_COLOR = 'var(--colors-fg-muted)';
+	const SELECTION_COLOR = 'var(--colors-bg-muted)';
+
 	const theme = EditorView.theme(
 		{
-			'.cm-cursor': { borderLeftColor: '#2f333b' },
+			'.cm-cursor': { borderLeftColor: CURSOR_COLOR },
 			'.cm-scroller': {
 				fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 			},
 			'.cm-selectionMatch': {
-				backgroundColor: '#2f3b52'
+				backgroundColor: SELECTION_COLOR
 			},
 			'&.cm-focused .cm-selectionBackground': {
-				backgroundColor: '#2f3b52'
+				backgroundColor: SELECTION_COLOR
 			},
 			'.cm-selectionBackground': {
-				backgroundColor: '#2f3b52'
+				backgroundColor: SELECTION_COLOR
 			}
 		},
 		{ dark: true }
@@ -77,6 +81,13 @@
 	});
 </script>
 
-<div class="overflow-hidden border bg-tertiary border-tertiary" style:height>
-	<div class="h-full" use:init></div>
+<div
+	class={css({
+		overflow: 'hidden',
+		borderWidth: '1',
+		backgroundColor: 'bg.tertiary'
+	})}
+	style:height
+>
+	<div class={css({ height: 'full' })} use:init></div>
 </div>

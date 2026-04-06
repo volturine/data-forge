@@ -8,31 +8,43 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import {
-		acquireLock,
-		releaseLock,
-		checkLockStatus,
-		hasLock
-	} from '$lib/stores/lockManager.svelte';
+		buildOutputConfig,
+		ensureTabDefaults,
+		formatPipelineErrors,
+		generateOutputName,
+		isUuid,
+		validatePipelineTabs
+	} from '$lib/utils/analysis-tab';
 	import {
 		getAnalysisWithHeaders,
 		listAnalysisVersions,
 		restoreAnalysisVersion,
-		renameAnalysisVersion
+		renameAnalysisVersion,
+		deleteAnalysisVersion
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { getStepSchema, spawnEngine } from '$lib/api/compute';
+	import { acquireLock, releaseLock, watchLock, type LockWatcher } from '$lib/api/locks';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import { isChartStep } from '$lib/components/pipeline/utils';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
+	import { hashPipeline } from '$lib/utils/hash';
+	import { applySteps } from '$lib/utils/pipeline';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
-	import PipelineCanvas from '$lib/components/pipeline/PipelineCanvas.svelte';
+	import PipelineCanvas, {
+		type ClipboardStep
+	} from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
+	import { css, cx, spinner, button, input, row } from '$lib/styles/panda';
 	import {
 		ChevronDown,
 		ChevronLeft,
@@ -42,10 +54,12 @@
 		PanelBottom,
 		Pencil,
 		Plus,
+		Trash2,
 		X
 	} from 'lucide-svelte';
 
 	const analysisId = $derived($page.params.id ?? null);
+	const validAnalysisId = $derived(analysisId && isUuid(analysisId) ? analysisId : null);
 	let lastAnalysisId = $state<string | null>(null);
 
 	let selectedStepId = $state<string | null>(null);
@@ -54,38 +68,117 @@
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
 	});
 	let isSaving = $state(false);
+	let saveError = $state('');
+	let tabError = $state('');
+	let tabErrorTimer = $state<number | null>(null);
+
+	function flashTabError(msg: string) {
+		tabError = msg;
+		if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+		tabErrorTimer = window.setTimeout(() => {
+			tabError = '';
+			tabErrorTimer = null;
+		}, 5000);
+	}
+
+	// Cleanup: $derived can't clear pending timers on destroy.
+	$effect(() => {
+		return () => {
+			if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+		};
+	});
+
 	let draftLoaded = $state(false);
 	let isDirty = $state(false);
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
-	let schemaRefreshTimer: number | null = null;
+	let hydratedGates = $state(new Set<string>());
 
-	const storageKey = $derived(analysisId ? `analysis-draft:${analysisId}` : null);
+	let lockMode = $state<'pending' | 'owned' | 'other'>('pending');
+	let lockOwner = $state<string | null>(null);
+	const userId = $derived(authStore.user?.id ?? null);
+	let lockedByOther = $derived(
+		lockMode === 'other' && lockOwner !== null && (userId === null || lockOwner !== userId)
+	);
+	const editorReadOnly = $derived(lockMode !== 'owned');
+
+	function releaseCurrentLock(id: string, token: string): void {
+		releaseLock('analysis', id, token).match(
+			() => {},
+			() => {}
+		);
+	}
+
+	function startWatcher(id: string, token: string | null): LockWatcher {
+		return watchLock({
+			resourceType: 'analysis',
+			resourceId: id,
+			token,
+			onStatus: (lock) => {
+				lockOwner = lock?.owner_id ?? null;
+			}
+		});
+	}
+
+	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
+	$effect(() => {
+		const id = validAnalysisId;
+		if (!id) return;
+
+		lockMode = 'pending';
+		lockOwner = null;
+
+		let token: string | null = null;
+		let watcher: LockWatcher | null = null;
+		let alive = true;
+
+		acquireLock('analysis', id).match(
+			(status) => {
+				if (!alive) {
+					releaseCurrentLock(id, status.lock_token);
+					return;
+				}
+				token = status.lock_token;
+				lockMode = 'owned';
+				lockOwner = status.owner_id;
+				watcher = startWatcher(id, token);
+			},
+			(error) => {
+				if (!alive) return;
+				if (error.status === 409) {
+					lockMode = 'other';
+					watcher = startWatcher(id, null);
+				}
+			}
+		);
+
+		return () => {
+			alive = false;
+			watcher?.close();
+			if (token) releaseCurrentLock(id, token);
+			lockMode = 'pending';
+			lockOwner = null;
+		};
+	});
+
+	const storageKey = $derived(validAnalysisId ? `analysis-draft:${validAnalysisId}` : null);
 
 	// Timer: $derived can't schedule schema refresh.
 	$effect(() => {
 		if (!analysisId) return;
-		if (schemaRefreshTimer) window.clearTimeout(schemaRefreshTimer);
 		if (lastAnalysisId !== analysisId) {
-			if (lastAnalysisId && hasLock(lastAnalysisId)) {
-				void releaseLock(lastAnalysisId);
-			}
-			stopLockCheck();
 			analysisStore.reset();
 			schemaStore.reset();
 			selectedStepId = null;
-			isEditingMode = false;
+			hydratedGates = new Set();
 			lastAnalysisId = analysisId;
 		}
 		draftLoaded = false;
-		schemaRefreshTimer = window.setTimeout(() => {
-			void datasourceStore.loadDatasources();
-		}, 1500);
 	});
 
 	// Storage: $derived can't hydrate from IndexedDB.
 	$effect(() => {
-		if (!storageKey || draftLoaded) return;
+		if (!storageKey || draftLoaded || editorReadOnly) return;
 		if (!analysisStore.tabs.length) return;
 		const serverVersion = lastLoadedVersion ?? analysisStore.current?.version ?? null;
 		if (!serverVersion) {
@@ -93,10 +186,7 @@
 			return;
 		}
 
-		// Only restore draft if we have an active lock (user was in editing mode)
-		// If no lock, discard draft and load saved state
-		if (!analysisId || !hasLock(analysisId)) {
-			// Clear stale draft
+		if (!analysisId) {
 			void idbDelete(storageKey);
 			draftLoaded = true;
 			return;
@@ -129,7 +219,8 @@
 				draftLoaded = true;
 				return;
 			}
-			analysisStore.setTabs(parsed.tabs);
+			const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
+			analysisStore.setTabs(sanitized);
 			analysisStore.activeTabId = parsed.activeTabId;
 			analysisStore.setResourceConfig(parsed.resourceConfig);
 			analysisStore.setEngineDefaults(parsed.engineDefaults);
@@ -145,9 +236,8 @@
 
 	// Timer: $derived can't debounce draft persistence.
 	$effect(() => {
-		if (!storageKey || !draftLoaded) return;
+		if (!storageKey || !draftLoaded || editorReadOnly) return;
 		if (!analysisStore.tabs.length) return;
-		if (!isEditingMode) return;
 		const payload = {
 			analysisId,
 			version: analysisStore.current?.version ?? null,
@@ -165,16 +255,17 @@
 		draftTimer = window.setTimeout(() => {
 			void idbSet(storageKey, JSON.stringify(payload));
 		}, 400);
+		return () => {
+			if (draftTimer) window.clearTimeout(draftTimer);
+		};
 	});
 
 	// Subscription: $derived can't sync store side effects.
 	$effect(() => {
 		if (!analysisId) return;
-		if (!isEditingMode) return;
 		isDirty = analysisStore.isDirty();
 	});
 	let isLoadingSchema = $state(false);
-	const HEARTBEAT_INTERVAL_MS = 10000;
 	let showDatasourceModal = $state(false);
 	let modalMode = $state<'add' | 'change'>('add');
 	let modalSource = $state<'datasource' | 'analysis'>('datasource');
@@ -183,39 +274,37 @@
 	let configPosition = $state<'right' | 'bottom'>('right');
 	let bottomPaneHeight = $state(300);
 	let isResizingBottomPane = $state(false);
-	let isEditingMode = $state(false);
-	let showModeDropdown = $state(false);
 	let showVersionModal = $state(false);
 	let versionError = $state<string | null>(null);
 	let editingVersionId = $state<string | null>(null);
 	let editingVersionName = $state('');
-	let keepaliveInterval: number | null = null;
 
 	// Responsive: auto-collapse panes on narrow screens
 	const isNarrowScreen = new MediaQuery('max-width: 900px');
 	const isMobileScreen = new MediaQuery('max-width: 600px');
 
-	// Auto-collapse left pane on narrow screens when entering edit mode
 	// Subscription: $derived can't auto-collapse on media query.
 	$effect(() => {
-		if (isEditingMode && isNarrowScreen.current && !leftPaneCollapsed) {
+		if (isNarrowScreen.current && !leftPaneCollapsed) {
 			leftPaneCollapsed = true;
 		}
 	});
 
-	// Auto-collapse right pane on very narrow screens
 	// Subscription: $derived can't auto-collapse on media query.
 	$effect(() => {
-		if (isEditingMode && isMobileScreen.current && !rightPaneCollapsed) {
+		if (isMobileScreen.current && !rightPaneCollapsed) {
 			rightPaneCollapsed = true;
 		}
 	});
 
 	const analysisQuery = createQuery(() => ({
 		queryKey: ['analysis', analysisId],
+		enabled: !!analysisId,
+		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
-			const result = await getAnalysisWithHeaders(analysisId);
+			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
+			const result = await getAnalysisWithHeaders(validAnalysisId);
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
@@ -227,17 +316,45 @@
 			isDirty = false;
 			return result.value.analysis;
 		},
-		staleTime: 0,
-		refetchOnMount: 'always',
 		retry: false
 	}));
 
+	let resetForRemoteLock = $state(false);
+
+	// Locking: another owner means this view must snap back to persisted backend state.
+	$effect(() => {
+		if (!lockedByOther) {
+			resetForRemoteLock = false;
+			return;
+		}
+		if (resetForRemoteLock) return;
+		resetForRemoteLock = true;
+
+		showDatasourceModal = false;
+		showVersionModal = false;
+		versionError = null;
+		editingVersionId = null;
+		saveError = '';
+		tabError = '';
+		isDirty = false;
+		analysisStore.setResourceConfig(null);
+
+		if (storageKey) {
+			void idbDelete(storageKey);
+		}
+		if (analysisQuery.data) {
+			void analysisQuery.refetch();
+		}
+	});
+
 	const versionsQuery = createQuery(() => ({
 		queryKey: ['analysis-versions', analysisId],
-		enabled: false,
+		enabled: showVersionModal,
+		staleTime: 0,
 		queryFn: async () => {
 			if (!analysisId) throw new Error('Analysis ID is required');
-			const result = await listAnalysisVersions(analysisId);
+			if (!validAnalysisId) throw new Error('Invalid analysis ID format');
+			const result = await listAnalysisVersions(validAnalysisId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		}
@@ -258,16 +375,22 @@
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
-			// Sync to store in query success instead of effect
 			datasourceStore.datasources = result.value;
 			return result.value;
 		}
 	}));
 
+	// Sync: $derived can't write to an external store.
+	$effect(() => {
+		if (datasourcesQuery.isSuccess || datasourcesQuery.isError) {
+			datasourceStore.loaded = true;
+		}
+	});
+
 	// Network: $derived can't fetch engine defaults.
 	$effect(() => {
-		if (!analysisId || analysisStore.engineDefaults) return;
-		spawnEngine(analysisId).match(
+		if (!validAnalysisId || analysisStore.engineDefaults) return;
+		spawnEngine(validAnalysisId).match(
 			(status) => {
 				if (status.defaults) {
 					analysisStore.setEngineDefaults(status.defaults);
@@ -277,37 +400,74 @@
 				track({
 					event: 'engine_error',
 					action: 'spawn',
-					target: analysisId,
+					target: validAnalysisId,
 					meta: { message: err.message }
 				});
 			}
 		);
 	});
 
-	const datasourceId = $derived(analysisStore.activeTab?.datasource_id ?? undefined);
-	const schemaKey = $derived.by(() => {
+	// Network: $derived can't hydrate inferred schemas for expression/with_columns steps.
+	$effect(() => {
+		if (!validAnalysisId) return;
 		const tab = analysisStore.activeTab;
-		if (!tab || !analysisId) return undefined;
-		if (tab.datasource_id) return tab.datasource_id;
-		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const cfgAnalysisId = config.analysis_id as string | null | undefined;
-		const cfgTabId = config.analysis_tab_id as string | null | undefined;
-		if (!cfgAnalysisId || !cfgTabId) return undefined;
-		if (String(cfgAnalysisId) !== String(analysisId)) return undefined;
-		return `output:${analysisId}:${String(cfgTabId)}`;
+		if (!tab) return;
+		const pipeline = analysisStore.pipeline;
+		if (!pipeline.length) return;
+		const analysisPayload = buildAnalysisPipelinePayload(
+			validAnalysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+		if (!analysisPayload) return;
+		const pipelineHash = hashPipeline(applySteps(pipeline));
+		const gate = `${validAnalysisId}:${tab.id}:${pipelineHash}`;
+		if (hydratedGates.has(gate)) return;
+		hydratedGates = new Set([...hydratedGates, gate]);
+
+		const targets = pipeline.filter(
+			(step) =>
+				(step.type === 'expression' || step.type === 'with_columns') && step.is_applied !== false
+		);
+		for (const step of targets) {
+			getStepSchema({
+				analysis_id: validAnalysisId,
+				analysis_pipeline: analysisPayload,
+				tab_id: tab.id,
+				target_step_id: step.id
+			}).match(
+				(res) => schemaStore.syncPreviewSchema(step.id, res, pipelineHash),
+				(err) => {
+					track({
+						event: 'schema_error',
+						action: 'hydrate',
+						target: step.id,
+						meta: { message: err.message }
+					});
+				}
+			);
+		}
+	});
+
+	const activeTab = $derived(analysisStore.activeTab);
+	const datasourceId = $derived(activeTab?.datasource?.id ?? null);
+	const schemaKey = $derived.by(() => {
+		const tab = activeTab;
+		if (!tab || !validAnalysisId) return undefined;
+		const sourceTabId = tab.datasource.analysis_tab_id;
+		if (sourceTabId) return `output:${validAnalysisId}:${String(sourceTabId)}`;
+		if (tab.datasource.id) return tab.datasource.id;
+		return undefined;
 	});
 	const analysisTabName = $derived.by(() => {
-		const tab = analysisStore.activeTab;
-		if (!tab || !analysisId) return null;
-		const config = (tab.datasource_config ?? {}) as Record<string, unknown>;
-		const cfgAnalysisId = config.analysis_id as string | null | undefined;
-		const cfgTabId = config.analysis_tab_id as string | null | undefined;
-		if (!cfgAnalysisId || !cfgTabId) return null;
-		if (String(cfgAnalysisId) !== String(analysisId)) return null;
-		const sourceTab = analysisStore.tabs.find((item) => item.id === String(cfgTabId));
+		const tab = activeTab;
+		if (!tab || !validAnalysisId) return null;
+		const sourceTabId = tab.datasource.analysis_tab_id;
+		if (!sourceTabId) return null;
+		const sourceTab = analysisStore.tabs.find((item) => item.id === String(sourceTabId));
 		return sourceTab?.name ?? null;
 	});
-	const previewDatasourceId = $derived.by(() => datasourceId ?? schemaKey ?? undefined);
+	const previewDatasourceId = $derived(datasourceId ?? schemaKey ?? null);
 
 	// Network: $derived can't load schema via network calls.
 	$effect(() => {
@@ -318,30 +478,21 @@
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
 		if (existingSchema) return;
 
-		const current = datasourcesQuery.data?.find((ds) => ds.id === datasourceIdValue) ?? null;
-		const activeTabConfig = (analysisStore.activeTab?.datasource_config ?? {}) as Record<
-			string,
-			unknown
-		>;
-		const analysisSourceId =
-			(activeTabConfig.analysis_id as string | null) ??
-			(current?.config?.analysis_id as string | null) ??
-			null;
-		const analysisTabId =
-			(activeTabConfig.analysis_tab_id as string | null) ??
-			(current?.config?.analysis_tab_id as string | null) ??
-			null;
-		const analysisPayload =
-			analysisSourceId && analysisId && analysisSourceId === analysisId
-				? buildAnalysisPipelinePayload(analysisId, analysisStore.tabs, datasourceStore.datasources)
-				: null;
+		const analysisTabId = activeTab?.datasource?.analysis_tab_id ?? null;
+		const analysisPayload = validAnalysisId
+			? buildAnalysisPipelinePayload(
+					validAnalysisId,
+					analysisStore.tabs,
+					datasourceStore.datasources
+				)
+			: null;
 
-		if (analysisSourceId) {
+		if (analysisTabId) {
 			if (!analysisPayload) return;
 			isLoadingSchema = true;
-			const targetTabId = analysisTabId ?? analysisStore.activeTab?.id ?? null;
+			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema({
-				analysis_id: analysisSourceId,
+				analysis_id: validAnalysisId ?? undefined,
 				analysis_pipeline: analysisPayload,
 				tab_id: targetTabId,
 				target_step_id: 'source'
@@ -362,7 +513,7 @@
 					track({
 						event: 'schema_error',
 						action: 'analysis_source_schema',
-						target: analysisSourceId,
+						target: analysisId ?? '',
 						meta: { message: error.message }
 					});
 					isLoadingSchema = false;
@@ -372,6 +523,9 @@
 		}
 
 		if (!datasourcesQuery.data || !datasourceIdValue) return;
+		if (!isUuid(datasourceIdValue)) return;
+		const ds = datasourcesQuery.data.find((d) => d.id === datasourceIdValue);
+		if (ds?.source_type === 'analysis') return;
 		isLoadingSchema = true;
 		getDatasourceSchema(datasourceIdValue).match(
 			(schema) => {
@@ -398,37 +552,30 @@
 	});
 	const datasourceLabel = $derived(analysisTabName ?? currentDatasource?.name ?? null);
 
-	function makeId() {
-		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-			return crypto.randomUUID();
-		}
-		return 'id-' + Math.random().toString(16).slice(2) + Date.now().toString(16);
-	}
-
 	function buildStep(type: string): PipelineStep {
 		const base: PipelineStep = {
-			id: makeId(),
+			id: crypto.randomUUID(),
 			type,
 			config: getDefaultConfig(type) as Record<string, unknown>,
 			depends_on: []
 		};
-		const isChart = type === 'chart' || type.startsWith('plot_');
+		const isChart = isChartStep(type);
 		if (type === 'view') {
-			return { ...base, is_applied: true } as PipelineStep & { is_applied: boolean };
+			return { ...base, is_applied: true } as PipelineStep;
 		}
 		if (isChart) {
-			return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
+			return { ...base, is_applied: false } as PipelineStep;
 		}
-		return { ...base, is_applied: false } as PipelineStep & { is_applied: boolean };
+		return { ...base, is_applied: false } as PipelineStep;
 	}
 
 	function markUnsaved() {
-		if (!isEditingMode) return;
+		if (editorReadOnly) return;
 		isDirty = true;
 	}
 
 	function handleAddStep(type: string) {
-		if (!isEditingMode) return;
+		if (editorReadOnly) return;
 		const step = buildStep(type);
 		analysisStore.addStep(step);
 		selectedStepId = step.id;
@@ -437,7 +584,7 @@
 	}
 
 	function handleInsertStep(type: string, target: DropTarget) {
-		if (!isEditingMode) return;
+		if (editorReadOnly) return;
 		const step = buildStep(type);
 		const inserted = analysisStore.insertStep(step, target.index, target.parentId, target.nextId);
 		if (inserted) {
@@ -447,8 +594,25 @@
 		}
 	}
 
+	function handlePasteStep(payload: ClipboardStep, target: DropTarget) {
+		if (editorReadOnly) return;
+		const step: PipelineStep = {
+			id: crypto.randomUUID(),
+			type: payload.type,
+			config: JSON.parse(JSON.stringify(payload.config)),
+			depends_on: [],
+			is_applied: payload.is_applied
+		};
+		const inserted = analysisStore.insertStep(step, target.index, target.parentId, target.nextId);
+		if (inserted) {
+			selectedStepId = step.id;
+			rightPaneCollapsed = false;
+			markUnsaved();
+		}
+	}
+
 	function handleMoveStep(stepId: string, target: DropTarget) {
-		if (!isEditingMode) return;
+		if (editorReadOnly) return;
 		analysisStore.moveStep(stepId, target.index, target.parentId, target.nextId);
 		markUnsaved();
 	}
@@ -459,7 +623,7 @@
 	}
 
 	function handleDeleteStep(stepId: string) {
-		if (!isEditingMode) return;
+		if (editorReadOnly) return;
 		analysisStore.removeStep(stepId);
 		if (selectedStepId === stepId) {
 			selectedStepId = null;
@@ -468,21 +632,26 @@
 	}
 
 	function handleToggleStep(stepId: string) {
-		if (!isEditingMode) return;
+		if (editorReadOnly) return;
 		const step = analysisStore.pipeline.find((item) => item.id === stepId);
 		if (!step) return;
-		const next = (step as PipelineStep & { is_applied?: boolean }).is_applied === false;
-		analysisStore.updateStep(stepId, { is_applied: next } as Partial<PipelineStep> & {
-			is_applied: boolean;
-		});
+		const next = step.is_applied === false;
+		analysisStore.updateStep(stepId, { is_applied: next } as Partial<PipelineStep>);
 		markUnsaved();
 	}
 
 	async function handleSave() {
-		if (isSaving) return;
+		if (isSaving || editorReadOnly) return;
 
 		isSaving = true;
+		saveError = '';
 
+		const errors = validatePipelineTabs(analysisStore.tabs);
+		if (errors.length) {
+			saveError = `Failed to save pipeline: ${formatPipelineErrors(errors)}`;
+			isSaving = false;
+			return;
+		}
 		analysisStore.save().match(
 			() => {
 				isDirty = false;
@@ -495,53 +664,22 @@
 				}
 			},
 			(error) => {
-				alert(`Failed to save pipeline: ${error.message}`);
+				if (error.status === 409) {
+					saveError = 'This analysis is locked by another user. Refresh to see the latest version.';
+				} else if (error.status === 412) {
+					saveError =
+						'Analysis was modified elsewhere since you loaded it. Discard your changes and reload.';
+				} else {
+					saveError = `Failed to save pipeline: ${error.message}`;
+				}
 				isSaving = false;
 			}
 		);
 	}
 
-	async function setMode(mode: 'editing' | 'viewing') {
-		showModeDropdown = false;
-
-		if (!analysisId) return;
-
-		if (mode === 'editing' && !isEditingMode) {
-			const success = await acquireLock(analysisId);
-			if (success) {
-				isEditingMode = true;
-				startLockCheck();
-			} else {
-				alert('This analysis is currently being edited by another user. Please try again later.');
-			}
-		} else if (mode === 'viewing' && isEditingMode) {
-			// Release lock
-			await releaseLock(analysisId);
-			stopLockCheck();
-			isEditingMode = false;
-
-			// Clear draft - unsaved changes are discarded
-			if (storageKey) {
-				void idbDelete(storageKey);
-			}
-
-			// Reset to saved state
-			if (analysisQuery.data) {
-				const currentTabId = analysisStore.activeTabId;
-				await analysisStore.loadAnalysis(analysisId);
-				// Restore the tab that was active before switching to viewing mode
-				if (currentTabId && analysisStore.tabs.some((t) => t.id === currentTabId)) {
-					analysisStore.activeTabId = currentTabId;
-				}
-				isDirty = false;
-			}
-		}
-	}
-
 	async function discardChanges() {
-		showModeDropdown = false;
 		if (!analysisId) return;
-		if (isSaving) return;
+		if (isSaving || editorReadOnly) return;
 		if (storageKey) {
 			void idbDelete(storageKey);
 		}
@@ -555,42 +693,6 @@
 			isDirty = false;
 		}
 	}
-
-	function startLockCheck() {
-		if (keepaliveInterval || !analysisId) return;
-		keepaliveInterval = window.setInterval(async () => {
-			if (isEditingMode && !hasLock(analysisId!)) {
-				alert(
-					'Your editing session has expired or been taken by another user. Please save your work and reload the page.'
-				);
-				isEditingMode = false;
-				stopLockCheck();
-			}
-		}, HEARTBEAT_INTERVAL_MS);
-	}
-
-	function stopLockCheck() {
-		if (keepaliveInterval) {
-			window.clearInterval(keepaliveInterval);
-			keepaliveInterval = null;
-		}
-	}
-
-	// Subscription: $derived can't manage lock teardown.
-	$effect(() => {
-		return () => {
-			if (analysisId && hasLock(analysisId)) {
-				void releaseLock(analysisId);
-			}
-			stopLockCheck();
-		};
-	});
-
-	// Network: $derived can't check lock status on mount.
-	$effect(() => {
-		if (!analysisId) return;
-		checkLockStatus(analysisId);
-	});
 
 	function toggleConfigPosition() {
 		configPosition = configPosition === 'right' ? 'bottom' : 'right';
@@ -632,17 +734,26 @@
 	}
 
 	function handleAddTab(datasourceId: string, name: string) {
-		const tab: AnalysisTab = {
-			id: `tab-${datasourceId}-${Date.now()}`,
-			output_datasource_id: makeId(),
+		if (editorReadOnly) return;
+		const tabId = `tab-${datasourceId}-${Date.now()}`;
+		const output = buildOutputConfig({
+			outputId: crypto.randomUUID(),
+			name: generateOutputName(),
+			branch: 'master'
+		});
+		analysisStore.addTab({
+			id: tabId,
 			name,
-			type: 'datasource',
 			parent_id: null,
-			datasource_id: datasourceId,
+			datasource: {
+				id: datasourceId,
+				analysis_tab_id: null,
+				config: { branch: 'master' }
+			},
+			output,
 			steps: buildInitialSteps()
-		};
-		analysisStore.addTab(tab);
-		analysisStore.setActiveTab(tab.id);
+		});
+		analysisStore.setActiveTab(tabId);
 		showDatasourceModal = false;
 		markUnsaved();
 	}
@@ -653,40 +764,48 @@
 		name: string,
 		sourceTabId: string | null
 	) {
+		if (editorReadOnly) return;
 		if (
 			modalMode === 'change' &&
 			analysisId &&
 			sourceAnalysisId === analysisId &&
 			sourceTabId === analysisStore.activeTabId
 		) {
-			alert('Select a different tab to avoid using the current tab as its own source.');
+			flashTabError('Select a different tab to avoid using the current tab as its own source.');
 			return;
 		}
-		const tab: AnalysisTab = {
-			id: `tab-analysis-${datasourceId}-${Date.now()}`,
-			output_datasource_id: makeId(),
+		const tabId = `tab-analysis-${datasourceId}-${Date.now()}`;
+		const output = buildOutputConfig({
+			outputId: crypto.randomUUID(),
+			name: generateOutputName(),
+			branch: 'master'
+		});
+		analysisStore.addTab({
+			id: tabId,
 			name,
-			type: 'datasource',
 			parent_id: null,
-			datasource_id: datasourceId,
-			datasource_config: sourceTabId
-				? { analysis_id: sourceAnalysisId, analysis_tab_id: sourceTabId }
-				: { analysis_id: sourceAnalysisId },
+			datasource: {
+				id: datasourceId,
+				analysis_tab_id: sourceTabId,
+				config: { branch: 'master' }
+			},
+			output,
 			steps: buildInitialSteps()
-		};
-		analysisStore.addTab(tab);
-		analysisStore.setActiveTab(tab.id);
+		});
+		analysisStore.setActiveTab(tabId);
+		if (analysisId && sourceTabId) {
+			analysisStore.sourceSchemas.delete(`output:${analysisId}:${String(sourceTabId)}`);
+		}
 		showDatasourceModal = false;
 		markUnsaved();
 	}
 
-	function handleChangeDatasource(datasourceId: string, name: string) {
-		const active = analysisStore.activeTab;
+	function handleChangeDatasource(datasourceId: string) {
+		if (editorReadOnly) return;
+		const active = activeTab;
 		if (!active) return;
 		analysisStore.updateTab(active.id, {
-			datasource_id: datasourceId,
-			datasource_config: null,
-			name
+			datasource: { ...active.datasource, id: datasourceId, analysis_tab_id: null }
 		});
 		if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
 		showDatasourceModal = false;
@@ -698,65 +817,51 @@
 		name: string,
 		source: 'datasource' | 'analysis'
 	) {
+		if (editorReadOnly) return;
 		if (source === 'analysis') {
+			if (!analysisId) return;
 			const analysisTabId = datasourceId;
-			const analysisMatch = datasourcesQuery.data?.find((item) => {
-				if (item.source_type !== 'analysis') return false;
-				if (item.config?.analysis_tab_id !== analysisTabId) return false;
-				return String(item.config?.analysis_id ?? '') === String(analysisId ?? '');
-			});
+			const sourceTab = analysisStore.tabs.find((item) => item.id === String(analysisTabId));
+			const outputId =
+				typeof sourceTab?.output.result_id === 'string' ? sourceTab.output.result_id : null;
+			if (!outputId) {
+				flashTabError('Selected analysis tab is missing an output datasource.');
+				return;
+			}
 			if (modalMode === 'change') {
-				const active = analysisStore.activeTab;
+				const active = activeTab;
 				if (!active) return;
 				analysisStore.updateTab(active.id, {
-					datasource_id: analysisMatch?.id ?? null,
-					datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
-					name
+					datasource: {
+						...active.datasource,
+						id: outputId,
+						analysis_tab_id: analysisTabId
+					}
 				});
 				if (schemaKey) analysisStore.sourceSchemas.delete(schemaKey);
 				showDatasourceModal = false;
 				markUnsaved();
 				return;
 			}
-			if (analysisMatch) {
-				handleAddAnalysisTab(
-					analysisMatch.id,
-					String(analysisMatch.config?.analysis_id ?? ''),
-					name,
-					analysisTabId
-				);
-				return;
-			}
-			const tab: AnalysisTab = {
-				id: `tab-analysis-${Date.now()}`,
-				output_datasource_id: makeId(),
-				name,
-				type: 'datasource',
-				parent_id: null,
-				datasource_id: null,
-				datasource_config: { analysis_id: analysisId, analysis_tab_id: analysisTabId },
-				steps: buildInitialSteps()
-			};
-			analysisStore.addTab(tab);
-			analysisStore.setActiveTab(tab.id);
-			showDatasourceModal = false;
-			markUnsaved();
+			handleAddAnalysisTab(outputId as string, analysisId, name, analysisTabId);
 			return;
 		}
 		if (modalMode === 'change') {
-			handleChangeDatasource(datasourceId, name);
+			handleChangeDatasource(datasourceId);
 			return;
 		}
 		handleAddTab(datasourceId, name);
 	}
 
 	function handleRemoveTab(tabId: string) {
+		if (editorReadOnly) return;
 		analysisStore.removeTab(tabId);
 		markUnsaved();
 	}
 
 	function handleRenameSourceTab(nextName: string) {
-		const active = analysisStore.activeTab;
+		if (editorReadOnly) return;
+		const active = activeTab;
 		if (!active) return;
 		const trimmed = nextName.trim();
 		if (!trimmed || trimmed === active.name) return;
@@ -765,24 +870,21 @@
 	}
 
 	function openDatasourceModal(mode: 'add' | 'change' = 'add') {
+		if (editorReadOnly) return;
 		modalMode = mode;
-		const config = (analysisStore.activeTab?.datasource_config ?? {}) as Record<string, unknown>;
-		const sourceType = config.analysis_tab_id ? 'analysis' : 'datasource';
+		const sourceType = activeTab?.datasource.analysis_tab_id ? 'analysis' : 'datasource';
 		modalSource = sourceType;
 		showDatasourceModal = true;
 	}
 
 	function closeDatasourceModal() {
 		showDatasourceModal = false;
+		tabError = '';
 	}
 
 	function openVersionModal() {
-		showModeDropdown = false;
 		versionError = null;
 		showVersionModal = true;
-		versionsQuery.refetch().catch(() => {
-			versionError = 'Failed to load version history';
-		});
 	}
 
 	function closeVersionModal() {
@@ -804,25 +906,30 @@
 	}
 
 	async function handleRestoreVersion(version: number) {
-		if (!analysisId) return;
+		if (!analysisId || editorReadOnly) return;
 		versionError = null;
 		const result = await restoreAnalysisVersion(analysisId, version);
 		if (result.isErr()) {
 			versionError = result.error.message;
 			return;
 		}
+		schemaStore.reset();
+		analysisStore.previewRuns.clear();
 		analysisStore.applyAnalysis(result.value);
+		lastLoadedVersion = result.value.version ?? lastLoadedVersion;
+		selectedStepId = null;
 		showVersionModal = false;
 		isDirty = false;
 	}
 
 	function startRenameVersion(id: string, name: string) {
+		if (editorReadOnly) return;
 		editingVersionId = id;
 		editingVersionName = name;
 	}
 
 	async function commitRenameVersion(version: number) {
-		if (!analysisId || !editingVersionId) return;
+		if (!analysisId || !editingVersionId || editorReadOnly) return;
 		const trimmed = editingVersionName.trim();
 		if (!trimmed) {
 			editingVersionId = null;
@@ -831,51 +938,146 @@
 		const result = await renameAnalysisVersion(analysisId, version, trimmed);
 		if (result.isErr()) {
 			versionError = result.error.message;
-		} else {
-			versionsQuery.refetch();
+			editingVersionId = null;
+			return;
 		}
+		versionsQuery.refetch();
 		editingVersionId = null;
+	}
+
+	async function handleDeleteVersion(version: number) {
+		if (!analysisId || editorReadOnly) return;
+		versionError = null;
+		const result = await deleteAnalysisVersion(analysisId, version);
+		if (result.isErr()) {
+			versionError = result.error.message;
+			return;
+		}
+		versionsQuery.refetch();
 	}
 </script>
 
 {#if analysisQuery.isLoading}
-	<div class="flex h-full items-center justify-center">
-		<div class="spinner"></div>
+	<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+		<div class={spinner()}></div>
 	</div>
 {:else if analysisQuery.isError}
-	<div class="error-box flex h-full flex-col items-center justify-center text-center gap-4">
+	<div
+		data-testid="analysis-load-error"
+		class={cx(
+			row,
+			css({
+				paddingX: '2.5',
+				paddingY: '3',
+				border: 'none',
+				borderLeftWidth: '2',
+
+				fontSize: 'xs',
+				lineHeight: '1.5',
+				backgroundColor: 'transparent',
+				borderLeftColor: 'border.error',
+				color: 'fg.error',
+				height: '100%',
+				flexDirection: 'column',
+				justifyContent: 'center',
+				textAlign: 'center',
+				gap: '4'
+			})
+		)}
+	>
 		<div
-			class="flex items-center justify-center text-xl font-bold w-13 h-13 border border-tertiary"
+			class={cx(
+				row,
+				css({
+					justifyContent: 'center',
+					fontSize: 'xl',
+					fontWeight: 'bold',
+					width: 'logoLg',
+					height: 'logoLg',
+					borderWidth: '1'
+				})
+			)}
 		>
 			!
 		</div>
-		<h2 class="m-0">Error loading analysis</h2>
-		<p class="m-0">
+		<h2 class={css({ margin: '0' })}>Error loading analysis</h2>
+		<p class={css({ margin: '0' })}>
 			{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}
 		</p>
-		<button class="btn-primary mt-4" onclick={() => goto(resolve('/analysis/new'))} type="button">
+		<button
+			class={cx(button({ variant: 'primary' }), css({ marginTop: '4' }))}
+			onclick={() => goto(resolve('/analysis/new'))}
+			type="button"
+		>
 			Create analysis
 		</button>
 	</div>
 {:else if analysisQuery.data}
 	<div
-		class="analysis-page flex h-full flex-col bg-secondary"
-		class:resizing={isResizingBottomPane}
+		class={css({
+			display: 'flex',
+			height: '100%',
+			flexDirection: 'column',
+			backgroundColor: 'bg.secondary',
+			...(isResizingBottomPane ? { userSelect: 'none', cursor: 'ns-resize' } : {})
+		})}
 	>
 		<header
-			class="analysis-header flex items-stretch sticky top-0 h-11 bg-panel border-b border-tertiary"
+			class={css({
+				display: 'flex',
+				alignItems: 'stretch',
+				position: 'sticky',
+				top: '0',
+				height: 'headerSm',
+				backgroundColor: 'bg.primary',
+				zIndex: 'header'
+			})}
 		>
 			<div
-				class="header-left flex items-center h-full box-border border-r border-tertiary panel-width"
+				class={cx(
+					row,
+					css({
+						height: '100%',
+						boxSizing: 'border-box',
+						borderRightWidth: '1',
+						width: 'operationsPanel',
+						transitionProperty: 'width, visibility',
+						transitionDuration: 'normal'
+					})
+				)}
 			>
-				<div class="flex-1 flex flex-col min-w-0 overflow-hidden px-5">
+				<div
+					class={css({
+						flex: '1',
+						display: 'flex',
+						flexDirection: 'column',
+						minWidth: '0',
+						overflow: 'hidden',
+						paddingX: '5'
+					})}
+				>
 					<h1
-						contenteditable={isEditingMode}
-						class="editable-title m-0 text-xs font-semibold uppercase whitespace-nowrap overflow-hidden text-ellipsis outline-none text-fg-primary tracking-[0.04em]"
-						class:cursor-text={isEditingMode}
-						class:cursor-default={!isEditingMode}
+						contenteditable={!editorReadOnly}
+						class={css({
+							margin: '0',
+							fontSize: 'xs',
+							fontWeight: 'semibold',
+							textTransform: 'uppercase',
+							whiteSpace: 'nowrap',
+							overflow: 'hidden',
+							textOverflow: 'ellipsis',
+							outline: 'none',
+							letterSpacing: 'wide2',
+							cursor: editorReadOnly ? 'default' : 'text',
+							_focus: {
+								backgroundColor: 'bg.hover',
+
+								paddingX: '1',
+								marginX: 'calc({spacing.1} * -1)'
+							}
+						})}
 						onblur={(e) => {
-							if (!isEditingMode) {
+							if (editorReadOnly) {
 								e.currentTarget.textContent = analysisQuery.data.name;
 								return;
 							}
@@ -892,19 +1094,44 @@
 					</h1>
 					{#if analysisQuery.data.description}
 						<span
-							class="text-[0.625rem] whitespace-nowrap overflow-hidden text-ellipsis text-fg-faint tracking-[0.02em]"
-							>{analysisQuery.data.description}</span
+							class={css({
+								fontSize: '2xs',
+								whiteSpace: 'nowrap',
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								color: 'fg.faint',
+								letterSpacing: 'tight2'
+							})}>{analysisQuery.data.description}</span
 						>
 					{/if}
 				</div>
 			</div>
-			<div class="flex-1 min-w-0 overflow-hidden flex items-center justify-center gap-0">
+			<div
+				class={cx(
+					row,
+					css({ flex: '1', minWidth: '0', overflow: 'hidden', justifyContent: 'center', gap: '0' })
+				)}
+			>
 				<button
-					class="collapse-arrow collapse-arrow-left h-full flex items-center justify-center px-2 bg-panel border-none cursor-pointer shrink-0 text-fg-faint hover:text-fg-primary hover:bg-hover"
-					class:collapsed={leftPaneCollapsed}
-					onclick={() => (leftPaneCollapsed = !leftPaneCollapsed)}
+					class={css({
+						height: '100%',
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						paddingX: '2',
+						backgroundColor: 'bg.primary',
+						border: 'none',
+						cursor: 'pointer',
+						flexShrink: '0',
+						color: 'fg.faint',
+						_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
+					})}
+					onclick={() => {
+						leftPaneCollapsed = !leftPaneCollapsed;
+						rightPaneCollapsed = !rightPaneCollapsed;
+					}}
 					type="button"
-					title={leftPaneCollapsed ? 'Expand operations' : 'Collapse operations'}
+					title={leftPaneCollapsed ? 'Expand panels' : 'Collapse panels'}
 				>
 					{#if leftPaneCollapsed}
 						<ChevronRight size={12} />
@@ -912,40 +1139,87 @@
 						<ChevronLeft size={12} />
 					{/if}
 				</button>
-				<div class="flex-1 overflow-hidden flex items-center">
-					<div class="tabs flex items-center overflow-x-auto">
-						{#each analysisStore.tabs.filter((t) => t.type === 'datasource') as tab (tab.id)}
+				<div class={cx(row, css({ flex: '1', overflow: 'hidden' }))}>
+					<div class={cx(row, css({ overflowX: 'auto', gap: '0' }))}>
+						{#each analysisStore.tabs as tab (tab.id)}
 							<div
-								class="tab inline-flex items-center bg-transparent border-none text-xs font-medium uppercase text-fg-muted tracking-wide"
-								class:active={analysisStore.activeTab?.id === tab.id}
+								class={css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									backgroundColor: 'transparent',
+									border: 'none',
+									fontSize: 'xs',
+									fontWeight: 'medium',
+									textTransform: 'uppercase',
+									color: 'fg.muted',
+									letterSpacing: 'wide',
+									...(analysisStore.activeTab?.id === tab.id
+										? { color: 'fg.primary', backgroundColor: 'bg.secondary' }
+										: {})
+								})}
 							>
 								<button
-									class="tab-label inline-flex items-center min-w-0 bg-transparent border-none cursor-pointer"
+									class={css({
+										display: 'inline-flex',
+										alignItems: 'center',
+										minWidth: '0',
+										backgroundColor: 'transparent',
+										border: 'none',
+										cursor: 'pointer'
+									})}
 									onclick={() => handleSelectTab(tab.id)}
 									type="button"
+									data-testid={`tab-button-${tab.id}`}
+									data-tab-name={tab.name}
 								>
-									<span class="whitespace-nowrap overflow-hidden text-ellipsis max-w-37.5"
-										>{tab.name}</span
+									<span
+										class={css({
+											whiteSpace: 'nowrap',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											maxWidth: 'inputSm'
+										})}
 									>
+										{tab.name}
+									</span>
 								</button>
 								{#if analysisStore.tabs.length > 1}
 									<button
-										class="tab-remove text-base leading-none ml-1 opacity-40 hover:opacity-100 hover:text-error"
+										class={css({
+											fontSize: 'md',
+											lineHeight: '1',
+											marginLeft: '1',
+											backgroundColor: 'transparent',
+											opacity: '0.4',
+											_hover: { opacity: '1', color: 'fg.error' }
+										})}
 										onclick={() => handleRemoveTab(tab.id)}
 										type="button"
 										aria-label="Remove tab"
+										disabled={editorReadOnly}
 									>
 										<X size={10} />
 									</button>
 								{/if}
 							</div>
 						{/each}
-						<div class="flex items-center">
+						<div class={row}>
 							<button
-								class="tab add-tab inline-flex items-center bg-transparent border-none cursor-pointer text-xs uppercase text-fg-faint hover:text-fg-primary"
+								class={css({
+									display: 'inline-flex',
+									alignItems: 'center',
+									backgroundColor: 'transparent',
+									border: 'none',
+									cursor: 'pointer',
+									fontSize: 'xs',
+									textTransform: 'uppercase',
+									color: 'fg.faint',
+									_hover: { color: 'fg.primary' }
+								})}
 								onclick={() => openDatasourceModal('add')}
 								type="button"
 								title="Add datasource tab"
+								disabled={editorReadOnly}
 							>
 								<Plus size={12} />
 							</button>
@@ -954,7 +1228,19 @@
 				</div>
 			</div>
 			<button
-				class="config-position-toggle shrink-0 h-full flex items-center justify-center px-2 bg-panel border-none cursor-pointer text-fg-faint hover:text-fg-primary hover:bg-hover"
+				class={css({
+					flexShrink: '0',
+					height: '100%',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					paddingX: '2',
+					backgroundColor: 'bg.primary',
+					border: 'none',
+					cursor: 'pointer',
+					color: 'fg.faint',
+					_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
+				})}
 				onclick={toggleConfigPosition}
 				type="button"
 				title={configPosition === 'right' ? 'Move config to bottom' : 'Move config to side'}
@@ -966,120 +1252,202 @@
 				{/if}
 			</button>
 			<button
-				class="collapse-arrow collapse-arrow-right items-center px-2 bg-panel border-none text-fg-faint hover:text-fg-primary hover:bg-hover"
-				class:collapsed={rightPaneCollapsed}
-				onclick={() => (rightPaneCollapsed = !rightPaneCollapsed)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					paddingX: '2',
+					backgroundColor: 'bg.primary',
+					border: 'none',
+					color: 'fg.faint',
+					_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
+				})}
+				onclick={() => {
+					rightPaneCollapsed = !rightPaneCollapsed;
+					leftPaneCollapsed = !leftPaneCollapsed;
+				}}
 				type="button"
-				title={rightPaneCollapsed ? 'Expand configuration' : 'Collapse configuration'}
+				title={rightPaneCollapsed ? 'Expand panels' : 'Collapse panels'}
 			>
 				{#if configPosition === 'bottom'}
-					{#if rightPaneCollapsed}
+					{#if leftPaneCollapsed}
 						<ChevronUp size={12} />
 					{:else}
 						<ChevronDown size={12} />
 					{/if}
-				{:else if rightPaneCollapsed}
+				{:else if leftPaneCollapsed}
 					<ChevronLeft size={12} />
 				{:else}
 					<ChevronRight size={12} />
 				{/if}
 			</button>
 			<div
-				class="panel-width header-right flex items-center justify-end h-full box-border border-l border-tertiary"
+				class={cx(
+					row,
+					css({
+						justifyContent: 'flex-end',
+						height: '100%',
+						boxSizing: 'border-box',
+						borderLeftWidth: '1',
+						width: 'operationsPanel',
+						transitionProperty: 'width, visibility',
+						transitionDuration: 'normal'
+					})
+				)}
 			>
-				<div class="mode-toggle-container relative items-center px-2">
+				<div class={css({ display: 'flex', height: '100%', flex: '1', padding: '1', gap: '1' })}>
 					<button
-						class="mode-toggle flex items-center cursor-pointer text-xs py-1.5 px-3 bg-tertiary border border-tertiary text-fg-secondary gap-2 hover:bg-hover hover:border-tertiary"
-						onclick={() => (showModeDropdown = !showModeDropdown)}
-						type="button"
-					>
-						{isEditingMode ? 'Editing' : 'Viewing'}
-						<ChevronDown size={10} class="text-fg-faint" />
-					</button>
-
-					{#if showModeDropdown}
-						<div
-							class="mode-dropdown absolute left-0 min-w-35 bg-panel border border-tertiary p-1 z-100"
-						>
-							<button
-								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
-								onclick={() => setMode('viewing')}
-								type="button"
-							>
-								{#if isEditingMode}
-									<div class="w-3 h-3 border border-accent-primary"></div>
-								{:else}
-									<div class="w-3 h-3 bg-accent-primary"></div>
-								{/if}
-								<span>Viewing</span>
-							</button>
-							<button
-								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
-								onclick={() => setMode('editing')}
-								type="button"
-							>
-								{#if isEditingMode}
-									<div class="w-3 h-3 bg-accent-primary"></div>
-								{:else}
-									<div class="w-3 h-3 border border-accent-primary"></div>
-								{/if}
-								<span>Editing</span>
-							</button>
-							<button
-								class="mode-option flex items-center bg-transparent border-none cursor-pointer text-xs text-left text-fg-secondary hover:bg-hover"
-								onclick={openVersionModal}
-								type="button"
-							>
-								<div class="w-3 h-3 border border-accent-primary"></div>
-								<span>Rollback</span>
-							</button>
-						</div>
-					{/if}
-				</div>
-
-				<div class="flex h-full flex-1 p-1 gap-1">
-					<button
-						class="cancel-button flex-1 h-full bg-tertiary border-none text-xs font-medium cursor-pointer text-fg-muted hover:bg-hover hover:text-fg-primary"
+						class={css({
+							flex: '1',
+							height: '100%',
+							backgroundColor: 'bg.tertiary',
+							border: 'none',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							cursor: 'pointer',
+							color: 'fg.muted',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+						})}
 						onclick={discardChanges}
-						disabled={!isEditingMode || !isDirty || isSaving || analysisStore.loading}
+						disabled={!isDirty || isSaving || analysisStore.loading || editorReadOnly}
 						type="button"
 					>
-						Cancel
+						Discard
 					</button>
-					<button
-						class="save-button flex-1 h-full bg-transparent border-none text-xs font-medium cursor-pointer"
-						class:saved={!isDirty}
-						class:unsaved={isDirty}
-						onclick={handleSave}
-						disabled={!isEditingMode || isSaving || analysisStore.loading}
-						type="button"
+					<div
+						class={css({
+							display: 'flex',
+							flex: '1',
+							borderRadius: 'xs',
+							overflow: 'hidden',
+							...(isDirty ? { backgroundColor: 'bg.warning' } : { backgroundColor: 'bg.tertiary' })
+						})}
 					>
-						{isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
-					</button>
+						<button
+							class={css({
+								flex: '1',
+								height: '100%',
+								border: 'none',
+								backgroundColor: 'transparent',
+								fontSize: 'xs',
+								fontWeight: 'medium',
+								cursor: 'pointer',
+								_disabled: { opacity: '0.5', cursor: 'not-allowed' },
+								...(isDirty ? { color: 'fg.warning' } : { color: 'fg.success' })
+							})}
+							onclick={handleSave}
+							disabled={isSaving || analysisStore.loading || editorReadOnly}
+							type="button"
+							data-save-state={editorReadOnly
+								? 'locked'
+								: isSaving
+									? 'saving'
+									: isDirty
+										? 'dirty'
+										: 'clean'}
+						>
+							{editorReadOnly ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
+						</button>
+						<button
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								height: '100%',
+								backgroundColor: 'transparent',
+								border: 'none',
+								borderLeftWidth: '1',
+								borderLeftColor: isDirty ? 'border.warning' : 'border.primary',
+								cursor: 'pointer',
+								paddingX: '1.5',
+								color: isDirty ? 'fg.warning' : 'fg.faint',
+								opacity: '0.6',
+								_hover: { opacity: '1' }
+							})}
+							onclick={openVersionModal}
+							type="button"
+							title="Rollback to previous version"
+							data-testid="version-history-trigger"
+						>
+							<ChevronDown size={12} />
+						</button>
+					</div>
 				</div>
 			</div>
 		</header>
 
-		<div class="flex flex-1 overflow-hidden select-none bg-secondary" role="application">
-			{#if isEditingMode}
-				<div
-					class="left-pane shrink-0 overflow-hidden flex h-full box-border bg-panel border-r border-tertiary panel-width"
-					class:collapsed={leftPaneCollapsed}
-				>
-					<StepLibrary onAddStep={handleAddStep} onInsertStep={handleInsertStep} />
-				</div>
-			{/if}
+		{#if saveError}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
+				<Callout tone="error">{saveError}</Callout>
+			</div>
+		{/if}
 
-			<div class="flex flex-1 min-w-0 flex-col overflow-hidden">
+		{#if lockedByOther}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-banner">
+				<Callout tone="warn"
+					>This analysis is being edited by another user. Saving is disabled until the lock is
+					released.</Callout
+				>
+			</div>
+		{/if}
+
+		<div
+			class={css({
+				display: 'flex',
+				flex: '1',
+				overflow: 'hidden',
+				userSelect: 'none',
+				backgroundColor: 'bg.secondary'
+			})}
+			role="application"
+		>
+			<div
+				class={css({
+					flexShrink: '0',
+					overflow: 'hidden',
+					display: 'flex',
+					height: '100%',
+					boxSizing: 'border-box',
+					backgroundColor: 'bg.primary',
+					borderRightWidth: '1',
+					width: 'operationsPanel',
+					transitionProperty: 'width, visibility',
+					transitionDuration: 'normal',
+					'& > *': { width: '100%', visibility: 'visible' },
+					...(leftPaneCollapsed
+						? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
+						: {})
+				})}
+			>
+				<StepLibrary
+					onAddStep={handleAddStep}
+					onInsertStep={handleInsertStep}
+					readOnly={editorReadOnly}
+				/>
+			</div>
+
+			<div
+				class={css({
+					display: 'flex',
+					flex: '1',
+					minWidth: '0',
+					flexDirection: 'column',
+					overflow: 'hidden'
+				})}
+			>
 				<div
-					class="center-pane flex-1 min-w-50 min-h-0 flex bg-secondary"
-					class:readonly={!isEditingMode}
-					class:expanded={!isEditingMode}
+					class={css({
+						flex: '1',
+						minWidth: 'listSm',
+						minHeight: '0',
+						display: 'flex',
+						backgroundColor: 'bg.secondary',
+						'& > *': { width: '100%' }
+					})}
 				>
 					<PipelineCanvas
 						steps={analysisStore.pipeline}
-						analysisId={analysisId ?? undefined}
-						datasourceId={previewDatasourceId}
+						analysisId={analysisId || undefined}
+						datasourceId={previewDatasourceId || undefined}
 						datasource={currentDatasource}
 						{datasourceLabel}
 						tabName={analysisStore.activeTab?.name}
@@ -1088,21 +1456,45 @@
 						onStepDelete={handleDeleteStep}
 						onStepToggle={handleToggleStep}
 						onInsertStep={handleInsertStep}
+						onPasteStep={handlePasteStep}
 						onMoveStep={handleMoveStep}
 						onChangeDatasource={() => openDatasourceModal('change')}
 						onRenameTab={handleRenameSourceTab}
+						readOnly={editorReadOnly}
 					/>
 				</div>
 
-				{#if isEditingMode && configPosition === 'bottom'}
+				{#if configPosition === 'bottom'}
 					<div
-						class="bottom-pane shrink-0 overflow-hidden flex box-border bg-panel border-t border-tertiary"
-						class:collapsed={rightPaneCollapsed}
-						style="height: {rightPaneCollapsed ? 0 : bottomPaneHeight}px;"
+						class={css({
+							flexShrink: '0',
+							overflow: 'hidden',
+							display: 'flex',
+							boxSizing: 'border-box',
+							backgroundColor: 'bg.primary',
+							borderTopWidth: '1',
+							width: '100%',
+							position: 'relative',
+							transitionProperty: 'height, visibility',
+							transitionDuration: 'normal',
+							'& > .step-config': { width: '100%', flex: '1', minHeight: '0' },
+							...(rightPaneCollapsed ? { border: 'none' } : {})
+						})}
+						style:height="{rightPaneCollapsed ? 0 : bottomPaneHeight}px"
 					>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
-							class="bottom-pane-resize-handle"
+							class={css({
+								position: 'absolute',
+								top: '-3px',
+								left: '0',
+								right: '0',
+								height: 'barTall',
+								cursor: 'ns-resize',
+								zIndex: '5',
+								_hover: { background: 'accent.primary', opacity: '0.4' },
+								_active: { background: 'accent.primary', opacity: '0.4' }
+							})}
 							onpointerdown={handleBottomPaneResizeStart}
 						></div>
 						<StepConfig
@@ -1111,15 +1503,30 @@
 							{isLoadingSchema}
 							onClose={handleCloseConfig}
 							onConfigApply={markUnsaved}
+							readOnly={editorReadOnly}
 						/>
 					</div>
 				{/if}
 			</div>
 
-			{#if isEditingMode && configPosition === 'right'}
+			{#if configPosition === 'right'}
 				<div
-					class="right-pane shrink-0 overflow-hidden flex h-full box-border bg-panel border-l border-tertiary panel-width"
-					class:collapsed={rightPaneCollapsed}
+					class={css({
+						flexShrink: '0',
+						overflow: 'hidden',
+						display: 'flex',
+						height: '100%',
+						boxSizing: 'border-box',
+						backgroundColor: 'bg.primary',
+						borderLeftWidth: '1',
+						width: 'operationsPanel',
+						transitionProperty: 'width, visibility',
+						transitionDuration: 'normal',
+						'& > *': { width: '100%', visibility: 'visible' },
+						...(rightPaneCollapsed
+							? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
+							: {})
+					})}
 				>
 					<StepConfig
 						step={selectedStepState}
@@ -1127,6 +1534,7 @@
 						{isLoadingSchema}
 						onClose={handleCloseConfig}
 						onConfigApply={markUnsaved}
+						readOnly={editorReadOnly}
 					/>
 				</div>
 			{/if}
@@ -1134,7 +1542,28 @@
 	</div>
 {/if}
 
-<svelte:window onkeydown={handleVersionKeydown} />
+<svelte:window
+	onkeydown={handleVersionKeydown}
+	onbeforeunload={(e) => {
+		if (!isDirty) return;
+		e.preventDefault();
+	}}
+/>
+
+{#if tabError}
+	<div
+		class={css({
+			position: 'fixed',
+			bottom: '4',
+			left: '50%',
+			transform: 'translateX(-50%)',
+			zIndex: '1002',
+			width: 'min(480px, 90vw)'
+		})}
+	>
+		<Callout tone="error">{tabError}</Callout>
+	</div>
+{/if}
 
 <DatasourceSelectorModal
 	show={showDatasourceModal}
@@ -1150,84 +1579,259 @@
 />
 
 {#if showVersionModal}
-	<div class="modal-backdrop" aria-hidden="true"></div>
 	<div
-		class="modal max-h-[80vh]"
+		class={css({ position: 'fixed', inset: '0', background: 'bg.overlay', zIndex: 'modal' })}
+		aria-hidden="true"
+	></div>
+	<div
+		class={css({
+			position: 'fixed',
+			left: '50%',
+			top: '50%',
+			transform: 'translate(-50%, -50%)',
+			width: 'min(720px, 92vw)',
+			maxHeight: '80vh',
+			backgroundColor: 'bg.primary',
+			borderWidth: '1',
+			zIndex: '1001',
+			display: 'flex',
+			flexDirection: 'column',
+			_focus: { outline: 'none' }
+		})}
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="analysis-version-title"
 	>
-		<div class="modal-header">
+		<div
+			class={css({
+				display: 'flex',
+				justifyContent: 'space-between',
+				alignItems: 'center',
+				paddingX: '4',
+				paddingY: '3',
+				borderBottomWidth: '1',
+				'& h2': { margin: '0', fontSize: 'md', color: 'fg.primary' }
+			})}
+		>
 			<h2 id="analysis-version-title">Version history</h2>
-			<button class="modal-close" onclick={closeVersionModal} aria-label="Close">
+			<button
+				class={css({
+					background: 'transparent',
+					border: 'none',
+					color: 'fg.muted',
+					cursor: 'pointer',
+					fontSize: 'xl',
+					padding: '1',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					transitionProperty: 'color, background-color',
+					transitionDuration: 'normal',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
+				onclick={closeVersionModal}
+				aria-label="Close version history"
+			>
 				<X size={16} />
 			</button>
 		</div>
-		<div class="modal-body">
+		<div
+			class={css({
+				padding: '4',
+				overflowY: 'auto',
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3'
+			})}
+		>
 			{#if versionError}
-				<div class="error-box m-0">
+				<div
+					data-testid="version-error"
+					class={css({
+						paddingX: '2.5',
+						paddingY: '3',
+						border: 'none',
+						borderLeftWidth: '2',
+
+						marginTop: '3',
+						marginBottom: '0',
+						fontSize: 'xs',
+						lineHeight: '1.5',
+						backgroundColor: 'transparent',
+						borderLeftColor: 'border.error',
+						color: 'fg.error',
+						margin: '0'
+					})}
+				>
 					{versionError}
 				</div>
 			{/if}
 			{#if versionsQuery.isLoading}
-				<div class="flex items-center justify-center p-8 text-sm text-fg-muted">Loading...</div>
+				<div
+					class={cx(
+						row,
+						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
+					)}
+				>
+					Loading...
+				</div>
 			{:else if versionsQuery.isError}
-				<div class="error-box m-0">Failed to load version history.</div>
+				<div
+					data-testid="version-load-error"
+					class={css({
+						paddingX: '2.5',
+						paddingY: '3',
+						border: 'none',
+						borderLeftWidth: '2',
+
+						marginTop: '3',
+						marginBottom: '0',
+						fontSize: 'xs',
+						lineHeight: '1.5',
+						backgroundColor: 'transparent',
+						borderLeftColor: 'border.error',
+						color: 'fg.error',
+						margin: '0'
+					})}
+				>
+					Failed to load version history.
+				</div>
 			{:else if !versionsQuery.data?.length}
-				<p class="empty-message">No versions available.</p>
+				<p
+					class={css({
+						color: 'fg.muted',
+						fontStyle: 'italic',
+						textAlign: 'center',
+						padding: '4',
+						margin: '0'
+					})}
+				>
+					No versions available.
+				</p>
 			{:else}
-				<div class="flex flex-col gap-2">
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 					{#each versionsQuery.data as version (version.id)}
 						<div
-							class="flex items-start justify-between gap-4 border border-tertiary bg-tertiary p-3"
+							data-testid="version-row-{version.version}"
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								gap: '4',
+								borderWidth: '1',
+								backgroundColor: 'bg.tertiary',
+								padding: '3'
+							})}
 						>
-							<div class="flex min-w-0 flex-col">
-								<div class="text-[0.65rem] uppercase tracking-widest text-fg-muted">
+							<div class={css({ display: 'flex', minWidth: '0', flexDirection: 'column' })}>
+								<div
+									class={css({
+										fontSize: '2xs2',
+										textTransform: 'uppercase',
+										letterSpacing: 'widest',
+										color: 'fg.muted'
+									})}
+								>
 									Version {version.version} · {formatVersionDate(version.created_at)}
 								</div>
 								{#if editingVersionId === version.id}
 									<input
 										type="text"
-										class="text-sm font-semibold text-fg-primary bg-transparent border border-tertiary px-1 py-0.5"
+										class={cx(
+											input(),
+											css({
+												fontSize: 'sm',
+												fontWeight: 'semibold',
+												backgroundColor: 'transparent',
+												paddingX: '1',
+												paddingY: '0.5'
+											})
+										)}
+										id="version-name-{version.id}"
+										aria-label="Version name"
 										bind:value={editingVersionName}
+										disabled={editorReadOnly}
 										onblur={() => commitRenameVersion(version.version)}
 										onkeydown={(e) => {
 											if (e.key === 'Enter') commitRenameVersion(version.version);
-											if (e.key === 'Escape') editingVersionId = null;
+											else if (e.key === 'Escape') editingVersionId = null;
 										}}
 									/>
 								{:else}
-									<div class="flex items-center.5">
-										<span class="text-sm font-semibold text-fg-primary">
+									<div class={cx(row, css({ gap: '2' }))}>
+										<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
 											{version.name}
 										</span>
 										<button
-											class="p-0.5 bg-transparent border-transparent text-fg-muted hover:text-fg-primary"
+											class={css({
+												padding: '0.5',
+												backgroundColor: 'transparent',
+												borderColor: 'transparent',
+												color: 'fg.muted',
+												_hover: { color: 'fg.primary' }
+											})}
 											title="Rename version"
+											data-testid="version-rename-{version.version}"
 											onclick={() => startRenameVersion(version.id, version.name)}
+											disabled={editorReadOnly}
 										>
 											<Pencil size={12} />
 										</button>
 									</div>
 								{/if}
 								{#if version.description}
-									<div class="text-xs text-fg-muted">{version.description}</div>
+									<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+										{version.description}
+									</div>
 								{/if}
 							</div>
-							<button
-								class="btn-secondary btn-sm shrink-0"
-								onclick={() => handleRestoreVersion(version.version)}
-								type="button"
+							<div
+								class={css({ display: 'flex', gap: '1', flexShrink: '0', alignItems: 'center' })}
 							>
-								Restore
-							</button>
+								<button
+									class={css({
+										padding: '0.5',
+										backgroundColor: 'transparent',
+										border: 'none',
+										color: 'fg.muted',
+										cursor: 'pointer',
+										_hover: { color: 'fg.error' }
+									})}
+									title="Delete version"
+									data-testid="version-delete-{version.version}"
+									onclick={() => handleDeleteVersion(version.version)}
+									disabled={editorReadOnly}
+								>
+									<Trash2 size={14} />
+								</button>
+								<button
+									class={cx(button({ variant: 'secondary', size: 'sm' }))}
+									data-testid="version-restore-{version.version}"
+									onclick={() => handleRestoreVersion(version.version)}
+									type="button"
+									disabled={editorReadOnly}
+								>
+									Restore
+								</button>
+							</div>
 						</div>
 					{/each}
 				</div>
 			{/if}
 		</div>
-		<div class="modal-footer">
-			<button class="btn-secondary" onclick={closeVersionModal}>Close</button>
+		<div
+			class={css({
+				paddingX: '4',
+				paddingY: '3',
+				borderTopWidth: '1',
+				display: 'flex',
+				justifyContent: 'flex-end',
+				gap: '2'
+			})}
+		>
+			<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button"
+				>Close</button
+			>
 		</div>
 	</div>
 {/if}

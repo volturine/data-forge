@@ -1,6 +1,12 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
-import { ResultAsync } from 'neverthrow';
+import type { ResultAsync } from 'neverthrow';
+
+export const MASKED_PLACEHOLDER = '••••••••';
+
+export function isMasked(value: string): boolean {
+	return value === MASKED_PLACEHOLDER || /^\*+$/.test(value);
+}
 
 export interface AppSettings {
 	smtp_host: string;
@@ -9,6 +15,16 @@ export interface AppSettings {
 	smtp_password: string;
 	telegram_bot_token: string;
 	telegram_bot_enabled: boolean;
+	openrouter_api_key: string;
+	openrouter_default_model: string;
+	openai_api_key: string;
+	openai_endpoint_url: string;
+	openai_default_model: string;
+	openai_organization_id: string;
+	ollama_endpoint_url: string;
+	ollama_default_model: string;
+	huggingface_api_token: string;
+	huggingface_default_model: string;
 	public_idb_debug: boolean;
 }
 
@@ -21,7 +37,7 @@ export function getSettings(): ResultAsync<AppSettings, ApiError> {
 	return apiRequest<AppSettings>('/v1/settings');
 }
 
-export function updateSettings(data: AppSettings): ResultAsync<AppSettings, ApiError> {
+export function updateSettings(data: Partial<AppSettings>): ResultAsync<AppSettings, ApiError> {
 	return apiRequest<AppSettings>('/v1/settings', {
 		method: 'PUT',
 		body: JSON.stringify(data)

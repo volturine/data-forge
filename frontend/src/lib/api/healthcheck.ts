@@ -2,12 +2,53 @@ import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
+export type CheckType =
+	| 'row_count'
+	| 'column_null'
+	| 'column_unique'
+	| 'column_range'
+	| 'column_count'
+	| 'null_percentage'
+	| 'duplicate_percentage';
+
+export interface RowCountConfig {
+	min?: number | null;
+	max?: number | null;
+}
+
+export interface ColumnCheckConfig {
+	column: string;
+	threshold?: number | null;
+}
+
+export interface ColumnRangeConfig {
+	column: string;
+	min?: number | null;
+	max?: number | null;
+}
+
+export interface NullPercentageConfig {
+	threshold: number;
+}
+
+export interface DuplicatePercentageConfig {
+	columns?: string[];
+	threshold: number;
+}
+
+export type HealthCheckConfig =
+	| RowCountConfig
+	| ColumnCheckConfig
+	| ColumnRangeConfig
+	| NullPercentageConfig
+	| DuplicatePercentageConfig;
+
 export interface HealthCheck {
 	id: string;
 	datasource_id: string;
 	name: string;
-	check_type: string;
-	config: Record<string, unknown>;
+	check_type: CheckType;
+	config: HealthCheckConfig;
 	enabled: boolean;
 	critical: boolean;
 	created_at: string;
@@ -16,16 +57,16 @@ export interface HealthCheck {
 export interface HealthCheckCreate {
 	datasource_id: string;
 	name: string;
-	check_type: string;
-	config: Record<string, unknown>;
+	check_type: CheckType;
+	config: HealthCheckConfig;
 	enabled: boolean;
 	critical: boolean;
 }
 
 export interface HealthCheckUpdate {
 	name?: string;
-	check_type?: string;
-	config?: Record<string, unknown>;
+	check_type?: CheckType;
+	config?: HealthCheckConfig;
 	enabled?: boolean;
 	critical?: boolean;
 }

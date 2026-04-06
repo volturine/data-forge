@@ -1,15 +1,19 @@
 """Settings API routes — GET/PUT settings, test SMTP/Telegram."""
 
 import logging
-import smtplib
 from email.message import EmailMessage
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
+from core import http as http_client
 from core.database import get_settings_db
 from core.error_handlers import handle_errors
+from core.smtp import send_smtp_message
+from modules.auth.dependencies import get_current_user
+from modules.auth.models import User
+from modules.config.routes import invalidate_config_cache
+from modules.mcp.router import MCPRouter
 from modules.settings.schemas import (
     DetectCustomBotRequest,
     DetectTelegramResponse,
@@ -29,25 +33,37 @@ from modules.settings.service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix='/settings', tags=['settings'])
+router = MCPRouter(prefix='/settings', tags=['settings'])
 
 
-@router.get('', response_model=SettingsResponse)
+@router.get('', response_model=SettingsResponse, mcp=True)
 @handle_errors(operation='get settings')
-def read_settings(session: Session = Depends(get_settings_db)) -> SettingsResponse:
+def read_settings(
+    session: Session = Depends(get_settings_db),
+    user: User = Depends(get_current_user),
+) -> SettingsResponse:
+    """Get application settings including SMTP config, Telegram token, OpenRouter API key, and feature flags."""
     return get_settings(session)
 
 
-@router.put('', response_model=SettingsResponse)
+@router.put('', response_model=SettingsResponse, mcp=True)
 @handle_errors(operation='update settings')
-def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings_db)) -> SettingsResponse:
+def write_settings(
+    data: SettingsUpdate,
+    session: Session = Depends(get_settings_db),
+    user: User = Depends(get_current_user),
+) -> SettingsResponse:
+    """Update application settings. Only provided fields are changed; omitted fields keep current values."""
     from modules.telegram.bot import telegram_bot
 
     result = update_settings(session, data)
+    invalidate_config_cache()
+
+    token = get_resolved_telegram_settings().get('token', '')
 
     try:
-        if data.telegram_bot_enabled and data.telegram_bot_token:
-            telegram_bot.start(data.telegram_bot_token)
+        if result.telegram_bot_enabled and token:
+            telegram_bot.start(str(token))
         elif telegram_bot.running:
             telegram_bot.stop()
     except Exception:
@@ -56,45 +72,43 @@ def write_settings(data: SettingsUpdate, session: Session = Depends(get_settings
     return result
 
 
-@router.post('/test-smtp', response_model=TestResult)
+@router.post('/test-smtp', response_model=TestResult, mcp=True)
 @handle_errors(operation='test smtp')
-def test_smtp(body: TestSmtpRequest) -> TestResult:
+def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
+    """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
     smtp = get_resolved_smtp()
     host = str(smtp.get('host', ''))
     port = int(str(smtp.get('port', 587)))
-    user = str(smtp.get('user', ''))
+    smtp_user = str(smtp.get('user', ''))
     password = str(smtp.get('password', ''))
 
-    if not host or not user:
+    if not host or not smtp_user:
         return TestResult(success=False, message='SMTP not configured — set host and user first')
 
     msg = EmailMessage()
-    msg['From'] = user
+    msg['From'] = smtp_user
     msg['To'] = body.to
     msg['Subject'] = 'Test notification'
     msg.set_content('This is a test email from your application.')
 
     try:
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            server.starttls()
-            if password:
-                server.login(user, password)
-            server.send_message(msg)
+        send_smtp_message(host, port, smtp_user, password, msg)
         return TestResult(success=True, message=f'Test email sent to {body.to}')
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post('/test-telegram', response_model=TestResult)
+@router.post('/test-telegram', response_model=TestResult, mcp=True)
 @handle_errors(operation='test telegram')
-def test_telegram(body: TestTelegramRequest) -> TestResult:
+def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_user)) -> TestResult:
+    """Send a test message to a Telegram chat to verify bot settings. Requires chat_id in body."""
     resolved = get_resolved_telegram_settings()
     token = str(resolved.get('token', ''))
     if not resolved.get('enabled'):
         return TestResult(success=False, message='Telegram bot token not configured')
 
     try:
-        resp = httpx.post(
+        resp = http_client.post(
             f'https://api.telegram.org/bot{token}/sendMessage',
             json={
                 'chat_id': body.chat_id,
@@ -111,9 +125,14 @@ def test_telegram(body: TestTelegramRequest) -> TestResult:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post('/detect-telegram-chat', response_model=DetectTelegramResponse)
+@router.post('/detect-telegram-chat', response_model=DetectTelegramResponse, mcp=True)
 @handle_errors(operation='detect telegram chat')
-def detect_telegram_chat() -> DetectTelegramResponse:
+def detect_telegram_chat(user: User = Depends(get_current_user)) -> DetectTelegramResponse:
+    """Detect Telegram chats that have messaged the configured bot.
+
+    Send a message to your bot first, then call this to discover the chat_id.
+    Returns a list of detected chats with their IDs and titles.
+    """
     from modules.telegram.bot import telegram_bot
 
     resolved = get_resolved_telegram_settings()
@@ -160,9 +179,16 @@ def detect_telegram_chat() -> DetectTelegramResponse:
             telegram_bot.resume()
 
 
-@router.post('/detect-chat-custom', response_model=DetectTelegramResponse)
+@router.post('/detect-chat-custom', response_model=DetectTelegramResponse, mcp=True)
 @handle_errors(operation='detect custom telegram chat')
-def detect_custom_bot_chat(body: DetectCustomBotRequest) -> DetectTelegramResponse:
+def detect_custom_bot_chat(
+    body: DetectCustomBotRequest,
+    user: User = Depends(get_current_user),
+) -> DetectTelegramResponse:
+    """Detect chats for a custom Telegram bot token (not the one saved in settings).
+
+    Use this to test a new bot token before saving it. Requires bot_token in body.
+    """
     from modules.telegram.bot import telegram_bot
 
     if not body.bot_token:

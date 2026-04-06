@@ -63,7 +63,7 @@ class TestAIParams:
             {
                 'input_column': 'text',
                 'output_column': 'result',
-            }
+            },
         )
         assert params.provider == 'ollama'
         assert params.model == 'llama2'
@@ -78,7 +78,7 @@ class TestAIParams:
             {
                 'input_columns': ['title', 'body'],
                 'output_column': 'result',
-            }
+            },
         )
         assert params.input_columns == ['title', 'body']
 
@@ -87,7 +87,7 @@ class TestAIParams:
             {
                 'input_column': 'text',
                 'output_column': 'result',
-            }
+            },
         )
         assert params.input_columns == ['text']
         assert params.input_column is None
@@ -97,7 +97,7 @@ class TestAIParams:
             AIParams.model_validate(
                 {
                     'output_column': 'result',
-                }
+                },
             )
 
     def test_request_options_string_to_dict(self):
@@ -106,7 +106,7 @@ class TestAIParams:
                 'input_column': 'text',
                 'output_column': 'result',
                 'request_options': '{"temperature": 0.3}',
-            }
+            },
         )
         assert params.request_options == {'temperature': 0.3}
 
@@ -116,7 +116,7 @@ class TestAIParams:
                 'input_column': 'text',
                 'output_column': 'result',
                 'request_options': {'temperature': 0.3},
-            }
+            },
         )
         assert params.request_options == {'temperature': 0.3}
 
@@ -126,7 +126,7 @@ class TestAIParams:
                 'input_column': 'text',
                 'output_column': 'result',
                 'request_options': None,
-            }
+            },
         )
         assert params.request_options is None
 
@@ -136,7 +136,7 @@ class TestAIParams:
                 'input_column': 'text',
                 'output_column': 'result',
                 'request_options': '',
-            }
+            },
         )
         assert params.request_options is None
 
@@ -147,7 +147,7 @@ class TestAIParams:
                     'provider': 'invalid',
                     'input_column': 'text',
                     'output_column': 'result',
-                }
+                },
             )
 
     def test_extra_fields_forbidden(self):
@@ -157,7 +157,7 @@ class TestAIParams:
                     'input_column': 'text',
                     'output_column': 'result',
                     'unknown_field': 'value',
-                }
+                },
             )
 
 
@@ -246,7 +246,7 @@ class TestOllamaClient:
             'models': [
                 {'name': 'llama2', 'size': 3800000000},
                 {'name': 'mistral', 'size': 4100000000},
-            ]
+            ],
         }
         mock_response.raise_for_status = MagicMock()
 
@@ -268,14 +268,14 @@ class TestOllamaClient:
         mock_response.json.return_value = {'models': [{'name': 'llama2'}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch('modules.ai.service.httpx.get', return_value=mock_response):
+        with patch('modules.ai.service.http_client.get', return_value=mock_response):
             result = client.test_connection()
             assert result['ok'] is True
             assert '1 model(s)' in result['detail']
 
     def test_test_connection_failure(self):
         client = OllamaClient('http://localhost:11434')
-        with patch('modules.ai.service.httpx.get', side_effect=ConnectionError('refused')):
+        with patch('modules.ai.service.http_client.get', side_effect=ConnectionError('refused')):
             result = client.test_connection()
             assert result['ok'] is False
 
@@ -328,7 +328,7 @@ class TestOpenAIClient:
             'data': [
                 {'id': 'gpt-4o', 'owned_by': 'openai'},
                 {'id': 'gpt-3.5-turbo', 'owned_by': 'openai'},
-            ]
+            ],
         }
         mock_response.raise_for_status = MagicMock()
 
@@ -353,13 +353,13 @@ class TestOpenAIClient:
         mock_response.json.return_value = {'data': [{'id': 'gpt-4o'}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch('modules.ai.service.httpx.get', return_value=mock_response):
+        with patch('modules.ai.service.http_client.get', return_value=mock_response):
             result = client.test_connection()
             assert result['ok'] is True
 
     def test_test_connection_failure(self):
         client = OpenAIClient('sk-test')
-        with patch('modules.ai.service.httpx.get', side_effect=Exception('timeout')):
+        with patch('modules.ai.service.http_client.get', side_effect=Exception('timeout')):
             result = client.test_connection()
             assert result['ok'] is False
 
@@ -388,10 +388,6 @@ class TestAIClientBatch:
 
 
 class TestAIHandler:
-    def test_name(self):
-        handler = AIHandler()
-        assert handler.name == 'ai'
-
     def test_basic_execution(self):
         handler = AIHandler()
         df = pl.DataFrame({'text': ['Hello', 'World']})
@@ -495,7 +491,10 @@ class TestAIHandler:
             AIError('API timeout'),
         ]
 
-        with patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client):
+        with (
+            patch('modules.compute.operations.ai.get_ai_client', return_value=mock_client),
+            patch('modules.compute.operations.ai.time.sleep'),
+        ):
             result = handler(
                 df.lazy(),
                 {
@@ -717,7 +716,7 @@ class TestAIRoutes:
             mock_client = MagicMock()
             mock_client.list_models.return_value = mock_models
             mock_get.return_value = mock_client
-            response = client.get('/api/v1/ai/models?provider=ollama')
+            response = client.post('/api/v1/ai/models', json={'provider': 'ollama'})
             assert response.status_code == 200
             data = response.json()
             assert len(data) == 1
@@ -725,7 +724,7 @@ class TestAIRoutes:
 
     def test_list_models_invalid_provider(self, client):
         with patch('modules.ai.routes.get_ai_client', side_effect=ValueError('Unknown provider')):
-            response = client.get('/api/v1/ai/models?provider=bad')
+            response = client.post('/api/v1/ai/models', json={'provider': 'bad'})
             assert response.status_code == 400
             data = response.json()
             assert 'Unknown provider' in data['detail']
@@ -735,7 +734,7 @@ class TestAIRoutes:
             mock_client = MagicMock()
             mock_client.test_connection.return_value = {'ok': True, 'detail': '3 model(s) available'}
             mock_get.return_value = mock_client
-            response = client.get('/api/v1/ai/test?provider=ollama')
+            response = client.post('/api/v1/ai/test', json={'provider': 'ollama'})
             assert response.status_code == 200
             data = response.json()
             assert data['ok'] is True
@@ -745,7 +744,7 @@ class TestAIRoutes:
             mock_client = MagicMock()
             mock_client.test_connection.return_value = {'ok': False, 'detail': 'Connection refused'}
             mock_get.return_value = mock_client
-            response = client.get('/api/v1/ai/test?provider=ollama')
+            response = client.post('/api/v1/ai/test', json={'provider': 'ollama'})
             assert response.status_code == 200
             data = response.json()
             assert data['ok'] is False
@@ -753,7 +752,7 @@ class TestAIRoutes:
 
     def test_test_connection_no_key(self, client):
         with patch('modules.ai.routes.get_ai_client', side_effect=ValueError('OPENAI_API_KEY not configured')):
-            response = client.get('/api/v1/ai/test?provider=openai')
+            response = client.post('/api/v1/ai/test', json={'provider': 'openai'})
             assert response.status_code == 400
             data = response.json()
             assert 'OPENAI_API_KEY' in data['detail']

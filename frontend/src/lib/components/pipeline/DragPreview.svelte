@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
+	import { css } from '$lib/styles/panda';
 	import {
 		ArrowUpDown,
 		BarChart3,
@@ -8,8 +9,8 @@
 		Brush,
 		Calculator,
 		Calendar,
-		CircleHelp,
 		Dices,
+		Download,
 		Eye,
 		Filter,
 		Link,
@@ -47,12 +48,11 @@
 		sample: { label: 'Sample', icon: Dices },
 		limit: { label: 'Limit', icon: Scissors },
 		topk: { label: 'Top K', icon: Trophy },
-		null_count: { label: 'Null Count', icon: CircleHelp },
-		value_counts: { label: 'Value Counts', icon: BarChart3 },
 		chart: { label: 'Chart', icon: BarChart4 },
 		notification: { label: 'Notify', icon: Bell },
 		ai: { label: 'AI', icon: Sparkles },
-		view: { label: 'View', icon: Eye }
+		view: { label: 'View', icon: Eye },
+		download: { label: 'Download', icon: Download }
 	};
 
 	// Derive reactive values from drag store
@@ -81,16 +81,39 @@
 
 {#if active && info && position}
 	<div
-		class="drag-preview pointer-events-none fixed z-9999 flex items-center gap-2 whitespace-nowrap border-2 px-3 py-2 text-sm"
-		class:reorder={isReorder}
-		style="left: {position.x + 12}px; top: {position.y + 12}px;"
+		class={css({
+			pointerEvents: 'none',
+			position: 'fixed',
+			zIndex: '9999',
+			display: 'flex',
+			alignItems: 'center',
+			gap: '2',
+			whiteSpace: 'nowrap',
+			borderWidth: '2',
+			paddingX: '3',
+			paddingY: '2',
+			fontSize: 'sm',
+			backgroundColor: isReorder ? 'bg.warning' : 'bg.primary',
+			borderColor: isReorder ? 'border.warning' : 'border.primary',
+			boxShadow: 'drag'
+		})}
+		style:left="{position.x + 12}px"
+		style:top="{position.y + 12}px"
 	>
-		<Icon size={16} class="text-base" />
-		<span class="font-semibold text-fg-primary">{info.label}</span>
+		<Icon size={16} class={css({ fontSize: 'md' })} />
+		<span class={css({ fontWeight: 'semibold', color: 'fg.primary' })}>{info.label}</span>
 		{#if isReorder}
 			<span
-				class="px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide bg-warning-fg text-warning-contrast"
-				>Move</span
+				class={css({
+					paddingX: '1.5',
+					paddingY: '0.5',
+					fontSize: 'xs',
+					fontWeight: 'medium',
+					textTransform: 'uppercase',
+					letterSpacing: 'wide',
+					backgroundColor: 'fg.warning',
+					color: 'fg.inverse'
+				})}>Move</span
 			>
 		{/if}
 	</div>

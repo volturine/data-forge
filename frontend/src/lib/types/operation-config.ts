@@ -17,6 +17,7 @@ export interface FilterConfigData {
 
 export interface SelectConfigData {
 	columns: string[];
+	cast_map?: Record<string, string>;
 }
 
 export interface Aggregation {
@@ -26,13 +27,13 @@ export interface Aggregation {
 }
 
 export interface GroupByConfigData {
-	groupBy: string[];
+	group_by: string[];
 	aggregations: Aggregation[];
 }
 
 export interface SortConfigData {
 	columns: string[];
-	descending: boolean[];
+	descending: boolean[] | boolean;
 }
 
 export interface RenameConfigData {
@@ -95,7 +96,7 @@ export interface ExplodeConfigData {
 export interface PivotConfigData {
 	index: string[];
 	columns: string;
-	values?: string;
+	values?: string | null;
 	aggregate_function: string;
 }
 
@@ -128,7 +129,7 @@ export interface ViewConfigData {
 
 export interface SampleConfigData {
 	fraction?: number;
-	seed?: number;
+	seed?: number | null;
 }
 
 export interface LimitConfigData {
@@ -139,14 +140,6 @@ export interface TopKConfigData {
 	column: string;
 	k: number;
 	descending: boolean;
-}
-
-export type NullCountConfigData = Record<string, never>;
-
-export interface ValueCountsConfigData {
-	column: string;
-	normalize?: boolean;
-	sort?: boolean;
 }
 
 export interface UnpivotConfigData {
@@ -211,6 +204,7 @@ export interface PlotConfigData {
 	series_colors: string[];
 	overlays: OverlayConfig[];
 	reference_lines: ReferenceLineConfig[];
+	chart_height: 'small' | 'medium' | 'large' | 'xlarge';
 }
 
 export interface OverlayConfig {
@@ -252,14 +246,19 @@ export interface NotificationConfigData {
 }
 
 export interface AIConfigData {
-	provider: 'ollama' | 'openai';
+	provider: 'ollama' | 'openai' | 'openrouter' | 'huggingface';
 	model: string;
 	input_columns: string[];
 	output_column: string;
+	error_column: string;
 	prompt_template: string;
 	batch_size: number;
+	max_retries: number;
+	rate_limit_rpm?: number | null;
 	endpoint_url: string;
 	api_key: string;
+	temperature: number;
+	max_tokens?: number | null;
 	request_options?: Record<string, unknown> | null;
 }
 
@@ -284,8 +283,6 @@ export type OperationConfig =
 	| SampleConfigData
 	| LimitConfigData
 	| TopKConfigData
-	| NullCountConfigData
-	| ValueCountsConfigData
 	| UnpivotConfigData
 	| UnionByNameConfigData
 	| PlotConfigData

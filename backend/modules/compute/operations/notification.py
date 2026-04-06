@@ -1,11 +1,11 @@
 import logging
 import re
-from typing import Literal
+from enum import StrEnum
 
-import httpx
 import polars as pl
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
+from core import http as http_client
 from modules.compute.core.base import OperationHandler, OperationParams
 from modules.notification.service import notification_service
 from modules.settings.service import get_resolved_telegram_settings
@@ -15,15 +15,20 @@ logger = logging.getLogger(__name__)
 _PLACEHOLDER_RE = re.compile(r'\{\{(\w+)\}\}')
 
 
+class NotificationMethod(StrEnum):
+    EMAIL = 'email'
+    TELEGRAM = 'telegram'
+
+
 class NotificationParams(OperationParams):
     model_config = ConfigDict(extra='forbid')
 
-    method: Literal['email', 'telegram'] = 'email'
+    method: NotificationMethod = NotificationMethod.EMAIL
     recipient: str = ''
-    subscriber_ids: list[str] = []
+    subscriber_ids: list[str] = Field(default_factory=list)
     bot_token: str = ''
     recipient_column: str = ''
-    input_columns: list[str] = []
+    input_columns: list[str] = Field(default_factory=list)
     output_column: str = 'notification_status'
     message_template: str = '{{message}}'
     subject_template: str = 'Notification'
@@ -59,21 +64,15 @@ class NotificationHandler(OperationHandler):
     result of each send (``sent`` or ``[error: ...]``).
     """
 
-    @property
-    def name(self) -> str:
-        return 'notification'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = NotificationParams.model_validate(params)
         telegram_enabled = True
-        if validated.method == 'telegram':
+        if validated.method == NotificationMethod.TELEGRAM:
             resolved = get_resolved_telegram_settings()
             telegram_enabled = bool(resolved.get('enabled'))
         schema = lf.collect_schema()
@@ -101,7 +100,7 @@ class NotificationHandler(OperationHandler):
                 return df.with_columns(
                     pl.Series(name=validated.output_column, values=[], dtype=pl.Utf8),
                 )
-            if validated.method == 'telegram' and not telegram_enabled:
+            if validated.method == NotificationMethod.TELEGRAM and not telegram_enabled:
                 return df.with_columns(
                     pl.Series(
                         name=validated.output_column,
@@ -118,16 +117,14 @@ class NotificationHandler(OperationHandler):
                 batch = rows[offset : offset + validated.batch_size]
                 for row in batch:
                     message = _build_message(validated.message_template, row)
-                    recipient_value: object | None = None
-                    if validated.recipient_column:
-                        recipient_value = row.get(validated.recipient_column)
+                    recipient_value = row.get(validated.recipient_column) if validated.recipient_column else None
                     try:
                         recipients = parse_recipients(recipient_value)
                         if not recipients:
                             recipients = parse_recipients(validated.recipient)
                         if not recipients:
                             raise ValueError('recipient is required')
-                        if validated.method == 'email':
+                        if validated.method == NotificationMethod.EMAIL:
                             subject = _build_message(validated.subject_template, row)
                             notification_service.send_email(
                                 to=','.join(recipients),
@@ -136,7 +133,7 @@ class NotificationHandler(OperationHandler):
                             )
                         elif validated.bot_token:
                             for cid in recipients:
-                                httpx.post(
+                                http_client.post(
                                     f'https://api.telegram.org/bot{validated.bot_token}/sendMessage',
                                     json={'chat_id': cid, 'text': message, 'parse_mode': 'HTML'},
                                     timeout=validated.timeout_seconds,

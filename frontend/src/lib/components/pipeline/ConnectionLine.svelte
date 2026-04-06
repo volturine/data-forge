@@ -1,56 +1,67 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
+	import { css, cx } from '$lib/styles/panda';
 
 	interface Props {
 		fromStepIndex: number;
 		toStepIndex: number;
 		totalSteps: number;
 		highlighted?: boolean;
+		arrow?: boolean;
 	}
 
 	let {
 		fromStepIndex: _fromStepIndex,
 		toStepIndex: _toStepIndex,
 		totalSteps: _totalSteps,
-		highlighted = false
+		highlighted = false,
+		arrow = true
 	}: Props = $props();
 
-	const width = 24;
-	const height = 32;
-	const dotRadius = 2;
-	const dotSpacing = 8;
-	const arrowWidth = 8;
-	const arrowHeight = 8;
-
-	// Calculate dot positions
-	const dots = $derived(
-		Array.from(
-			{ length: Math.floor((height - arrowHeight - 6) / dotSpacing) },
-			(_, i) => i * dotSpacing + 6
-		)
-	);
+	const width = 12;
+	const height = 12;
+	const cx_ = width / 2;
 
 	const isDragActive = $derived(drag.active);
 	const lineClass = $derived(
-		`connection-line flex w-full shrink-0 items-center justify-center h-pipeline-connection${
-			isDragActive ? ' drag-active' : ''
-		}${highlighted ? ' highlighted' : ''}`
+		cx(
+			'connection-line',
+			css({
+				display: 'flex',
+				width: 'full',
+				flexShrink: '0',
+				alignItems: 'center',
+				justifyContent: 'center',
+				position: 'relative',
+				zIndex: '1',
+				height: 'pipelineConnection',
+				color: isDragActive ? (highlighted ? 'fg.primary' : 'fg.faint') : 'fg.faint',
+				_hover: { color: 'fg.primary' }
+			})
+		)
 	);
 </script>
 
 <div class={lineClass}>
-	<svg class="overflow-visible" {width} {height} xmlns="http://www.w3.org/2000/svg">
-		<!-- Dotted vertical line -->
-		{#each dots as y (y)}
-			<circle cx={width / 2} cy={y} r={dotRadius} fill="currentColor" class="opacity-80" />
-		{/each}
-
-		<!-- Arrow triangle pointing down -->
-		<polygon
-			points="{width / 2},{height - 2} {width / 2 - arrowWidth / 2},{height -
-				arrowHeight -
-				2} {width / 2 + arrowWidth / 2},{height - arrowHeight - 2}"
-			fill="currentColor"
+	<svg {width} {height} xmlns="http://www.w3.org/2000/svg">
+		<line
+			x1={cx_}
+			y1={0}
+			x2={cx_}
+			y2={arrow ? height - 6 : height}
+			stroke="currentColor"
+			stroke-width="1"
+			stroke-dasharray="2 2"
 		/>
+		{#if arrow}
+			<polyline
+				points="{cx_ - 3},{height - 5} {cx_},{height - 1} {cx_ + 3},{height - 5}"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			/>
+		{/if}
 	</svg>
 </div>

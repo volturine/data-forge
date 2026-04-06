@@ -22,8 +22,3 @@ SOURCE_TYPE_CATEGORY: dict[DataSourceType, DataSourceCategory] = {
 }
 
 FILE_BASED_CATEGORIES = {DataSourceCategory.FILE}
-
-FILE_BASED_SOURCE_TYPES = {
-    DataSourceType.FILE,
-    DataSourceType.ICEBERG,
-}

@@ -20,24 +20,19 @@
 		SampleConfigData,
 		LimitConfigData,
 		TopKConfigData,
-		ValueCountsConfigData,
 		UnpivotConfigData
 	} from '$lib/types/operation-config';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { getStepSchema, type StepSchemaRequest, type StepSchemaResponse } from '$lib/api/compute';
+	import { getStepSchema, type StepSchemaResponse } from '$lib/api/compute';
 	import { track } from '$lib/utils/audit-log';
-	import {
-		normalizeConfig,
-		type NotificationConfigData,
-		type AIConfigData
-	} from '$lib/utils/step-config-defaults';
-	import {
-		buildAnalysisPipelinePayload,
-		buildDatasourceConfig
-	} from '$lib/utils/analysis-pipeline';
+	import { normalizeConfig } from '$lib/utils/step-config-defaults';
+	import type { NotificationConfigData, AIConfigData } from '$lib/types/operation-config';
+	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
+	import { applySteps } from '$lib/utils/pipeline';
+	import { hashPipeline } from '$lib/utils/hash';
 	import FilterConfig from '$lib/components/operations/FilterConfig.svelte';
 	import SelectConfig from '$lib/components/operations/SelectConfig.svelte';
 	import GroupByConfig from '$lib/components/operations/GroupByConfig.svelte';
@@ -54,18 +49,22 @@
 	import TimeSeriesConfig from '$lib/components/operations/TimeSeriesConfig.svelte';
 	import StringMethodsConfig from '$lib/components/operations/StringMethodsConfig.svelte';
 	import ViewConfig from '$lib/components/operations/ViewConfig.svelte';
+	import DownloadConfig from '$lib/components/operations/DownloadConfig.svelte';
 	import SampleConfig from '$lib/components/operations/SampleConfig.svelte';
 	import LimitConfig from '$lib/components/operations/LimitConfig.svelte';
 	import TopKConfig from '$lib/components/operations/TopKConfig.svelte';
-	import NullCountConfig from '$lib/components/operations/NullCountConfig.svelte';
-	import ValueCountsConfig from '$lib/components/operations/ValueCountsConfig.svelte';
+
 	import UnpivotConfig from '$lib/components/operations/UnpivotConfig.svelte';
 	import PlotConfig from '$lib/components/operations/PlotConfig.svelte';
 	import NotificationConfig from '$lib/components/operations/NotificationConfig.svelte';
 	import AIConfig from '$lib/components/operations/AIConfig.svelte';
 	import UnionByNameConfig from '$lib/components/operations/UnionByNameConfig.svelte';
 	import { getStepTypeConfig } from '$lib/components/pipeline/utils';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
 	import { Settings2, X } from 'lucide-svelte';
+	import { css, cx, spinner, button } from '$lib/styles/panda';
 
 	type WithColumnsConfigShape = {
 		expressions: Array<{
@@ -84,6 +83,7 @@
 		isLoadingSchema?: boolean;
 		onClose?: () => void;
 		onConfigApply?: () => void;
+		readOnly?: boolean;
 	}
 
 	let {
@@ -91,7 +91,8 @@
 		schema,
 		isLoadingSchema = false,
 		onClose,
-		onConfigApply
+		onConfigApply,
+		readOnly = false
 	}: Props = $props();
 	const stepLabel = $derived(step ? getStepTypeConfig(step.type).label : '');
 	let fetchingPivotSchema = $state(false);
@@ -112,6 +113,7 @@
 		smtpEnabled: configStore.smtpEnabled,
 		telegramEnabled: configStore.telegramEnabled
 	});
+	const readOnlyConfigJson = $derived(JSON.stringify(draftConfig, null, 2));
 
 	function cloneConfig(
 		config: Record<string, unknown> | null | undefined
@@ -138,30 +140,23 @@
 
 	const hasChanges = $derived(
 		!!step &&
-			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) ||
-				(step as PipelineStep & { is_applied?: boolean }).is_applied === false)
+			(JSON.stringify(step.config) !== JSON.stringify(draftConfig) || step.is_applied === false)
 	);
 
 	function handleRefreshPivotSchema() {
 		if (!step || step.type !== 'pivot') return;
 		const config = draftConfig;
 		if (!config || typeof config !== 'object') return;
-		const columns = config.columns;
-		const index = config.index;
+		const columns = config['columns'];
+		const index = config['index'];
 		if (!(columns && Array.isArray(index) && index.length > 0)) return;
 
 		const analysis = analysisStore.current;
-		const datasourceId = analysisStore.activeTab?.datasource_id;
+		const datasourceId = analysisStore.activeTab?.datasource.id ?? null;
 		if (!analysis?.id || !datasourceId) return;
 
 		fetchingPivotSchema = true;
 
-		const datasourceConfig = buildDatasourceConfig({
-			analysisId: analysis.id,
-			tab: analysisStore.activeTab ?? null,
-			tabs: analysisStore.tabs,
-			datasources: datasourceStore.datasources
-		});
 		const analysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
 			analysisStore.tabs,
@@ -176,9 +171,8 @@
 			analysis_id: analysis.id,
 			analysis_pipeline: analysisPipeline,
 			tab_id: analysisStore.activeTab?.id ?? null,
-			target_step_id: step.id,
-			datasource_config: datasourceConfig
-		} as unknown as StepSchemaRequest)
+			target_step_id: step.id
+		})
 			.map((response: StepSchemaResponse) => {
 				schemaStore.setPreviewSchema(step.id, response.columns, response.column_types);
 				fetchingPivotSchema = false;
@@ -196,17 +190,50 @@
 	}
 
 	function handleApplyConfig() {
+		if (readOnly) return;
 		if (!step) return;
 		analysisStore.updateStepConfig(step.id, cloneConfig(draftConfig));
-		if ((step as PipelineStep & { is_applied?: boolean }).is_applied === false) {
-			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep> & {
-				is_applied: boolean;
-			});
+		if (step.is_applied === false) {
+			analysisStore.updateStep(step.id, { is_applied: true } as Partial<PipelineStep>);
 		}
 		onConfigApply?.();
+		if (step.type === 'expression' || step.type === 'with_columns') {
+			refreshStepSchema(step.id);
+		}
+	}
+
+	function refreshStepSchema(stepId: string) {
+		const analysis = analysisStore.current;
+		if (!analysis?.id) return;
+		const analysisPipeline = buildAnalysisPipelinePayload(
+			analysis.id,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+		if (!analysisPipeline) return;
+		const pipelineHash = hashPipeline(applySteps(analysisStore.pipeline));
+		getStepSchema({
+			analysis_id: analysis.id,
+			analysis_pipeline: analysisPipeline,
+			tab_id: analysisStore.activeTab?.id ?? null,
+			target_step_id: stepId
+		})
+			.map((response: StepSchemaResponse) => {
+				schemaStore.syncPreviewSchema(stepId, response, pipelineHash);
+			})
+			.mapErr((error: unknown) => {
+				const err = error instanceof Error ? error.message : String(error);
+				track({
+					event: 'schema_error',
+					action: 'apply_schema_refresh',
+					target: stepId,
+					meta: { message: err }
+				});
+			});
 	}
 
 	function handleCancelConfig() {
+		if (readOnly) return;
 		if (!step) return;
 		draftConfig = cloneConfig(step.config as Record<string, unknown>);
 	}
@@ -214,53 +241,153 @@
 
 {#if step === null}
 	<div
-		class="step-config box-border flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto bg-primary text-fg-primary"
+		class={cx(
+			'step-config',
+			css({
+				boxSizing: 'border-box',
+				display: 'flex',
+				height: '100%',
+				minHeight: '0',
+				width: 'full',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				overflowY: 'auto',
+				backgroundColor: 'bg.primary',
+				color: 'fg.primary'
+			})
+		)}
 	>
-		<div class="flex flex-col items-center justify-center p-10 text-center text-fg-muted">
-			<div class="mb-6 opacity-30"><Settings2 size={40} /></div>
-			<h3 class="m-0 mb-3 text-base text-fg-primary">No step selected</h3>
-			<p class="m-0 text-xs text-fg-muted">Click on a pipeline step to configure it</p>
+		<div
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				padding: '10',
+				textAlign: 'center',
+				color: 'fg.muted'
+			})}
+		>
+			<div class={css({ marginBottom: '6', opacity: '0.3' })}><Settings2 size={40} /></div>
+			<h3 class={css({ margin: '0', marginBottom: '3', fontSize: 'md', color: 'fg.primary' })}>
+				No step selected
+			</h3>
+			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
+				Click on a pipeline step to configure it
+			</p>
 		</div>
 	</div>
 {:else}
 	<div
-		class="step-config box-border flex h-full min-h-0 w-full flex-col overflow-y-auto bg-primary text-fg-primary"
+		class={cx(
+			'step-config',
+			css({
+				boxSizing: 'border-box',
+				display: 'flex',
+				height: '100%',
+				minHeight: '0',
+				width: 'full',
+				flexDirection: 'column',
+				overflowY: 'auto',
+				backgroundColor: 'bg.primary',
+				color: 'fg.primary'
+			})
+		)}
+		data-step-config={step.type}
 	>
-		<div
-			class="config-header relative flex items-center justify-between border-b border-tertiary bg-primary px-5 py-3"
-		>
-			<h3 class="m-0 text-xs font-semibold uppercase tracking-widest text-fg-muted">
-				{stepLabel}
-			</h3>
-			<button
-				class="close-button flex h-7 w-7 cursor-pointer items-center justify-center border-none bg-transparent p-0 leading-none text-fg-muted hover:bg-bg-hover hover:text-fg-primary"
-				onclick={() => onClose?.()}
-				type="button"
-				title="Close"
-			>
-				<X size={14} />
-			</button>
-		</div>
+		<PanelHeader>
+			{#snippet title()}{stepLabel}{/snippet}
+			{#snippet actions()}
+				<button
+					class={css({
+						display: 'flex',
+						height: 'row',
+						width: 'row',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'center',
+						borderWidth: '0',
+						backgroundColor: 'transparent',
+						padding: '0',
+						lineHeight: 'none',
+						color: 'fg.muted',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
+					onclick={() => onClose?.()}
+					type="button"
+					title="Close"
+				>
+					<X size={14} />
+				</button>
+			{/snippet}
+		</PanelHeader>
 
-		<div class="config-body flex-1 overflow-y-auto bg-primary p-5">
+		<div
+			class={css({
+				flex: '1',
+				overflowY: 'auto',
+				backgroundColor: 'bg.primary',
+				padding: '5'
+			})}
+		>
 			{#if !draftReady}
 				<div
-					class="flex flex-col items-center justify-center gap-4 bg-primary p-10 text-center text-fg-tertiary"
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						alignItems: 'center',
+						justifyContent: 'center',
+						gap: '4',
+						backgroundColor: 'bg.primary',
+						padding: '10',
+						textAlign: 'center',
+						color: 'fg.tertiary'
+					})}
 				>
-					<div class="spinner-md"></div>
-					<p class="m-0 text-xs">Initializing config...</p>
+					<div class={spinner({ size: 'md' })}></div>
+					<p class={css({ margin: '0', fontSize: 'xs' })}>Initializing config...</p>
 				</div>
 			{:else if !schema && !isLoadingSchema}
-				<div class="warning-message">
+				<Callout tone="warn">
 					<p>Schema not available. Please ensure the data source is loaded.</p>
-					<button onclick={() => onClose?.()} type="button">Close</button>
-				</div>
+					<button
+						class={button({ variant: 'ghost', size: 'sm' })}
+						onclick={() => onClose?.()}
+						type="button">Close</button
+					>
+				</Callout>
 			{:else if isLoadingSchema}
 				<div
-					class="flex flex-col items-center justify-center gap-4 bg-primary p-10 text-center text-fg-tertiary"
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						alignItems: 'center',
+						justifyContent: 'center',
+						gap: '4',
+						backgroundColor: 'bg.primary',
+						padding: '10',
+						textAlign: 'center',
+						color: 'fg.tertiary'
+					})}
 				>
-					<div class="spinner-md"></div>
-					<p class="m-0 text-xs">Loading schema...</p>
+					<div class={spinner({ size: 'md' })}></div>
+					<p class={css({ margin: '0', fontSize: 'xs' })}>Loading schema...</p>
+				</div>
+			{:else if readOnly}
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
+					<Callout tone="warn">This analysis is locked. Step configuration is read-only.</Callout>
+					<pre
+						class={css({
+							margin: '0',
+							overflowX: 'auto',
+							borderWidth: '1',
+							backgroundColor: 'bg.secondary',
+							padding: '3',
+							fontSize: 'xs',
+							color: 'fg.primary'
+						})}>
+{readOnlyConfigJson}</pre>
 				</div>
 			{:else if step.type === 'filter'}
 				<FilterConfig
@@ -332,9 +459,15 @@
 				/>
 			{:else if step.type === 'view'}
 				<ViewConfig schema={inputSchema} bind:config={draftConfig as unknown as ViewConfigData} />
+			{:else if step.type === 'download'}
+				<DownloadConfig
+					bind:config={draftConfig as unknown as { format: string; filename: string }}
+				/>
 			{:else if step.type === 'datasource'}
-				<div class="bg-primary p-10 text-center">
-					<p class="m-0 text-xs text-fg-muted">Datasource options are set during upload.</p>
+				<div class={css({ backgroundColor: 'bg.primary', padding: '10', textAlign: 'center' })}>
+					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
+						Datasource options are set during upload.
+					</p>
 				</div>
 			{:else if step.type === 'sample'}
 				<SampleConfig bind:config={draftConfig as unknown as SampleConfigData} />
@@ -342,13 +475,6 @@
 				<LimitConfig bind:config={draftConfig as unknown as LimitConfigData} />
 			{:else if step.type === 'topk'}
 				<TopKConfig schema={inputSchema} bind:config={draftConfig as unknown as TopKConfigData} />
-			{:else if step.type === 'null_count'}
-				<NullCountConfig bind:config={draftConfig as unknown as Record<string, never>} />
-			{:else if step.type === 'value_counts'}
-				<ValueCountsConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as ValueCountsConfigData}
-				/>
 			{:else if step.type === 'unpivot'}
 				<UnpivotConfig
 					schema={inputSchema}
@@ -370,35 +496,77 @@
 			{:else if step.type === 'ai'}
 				<AIConfig schema={inputSchema} bind:config={draftConfig as unknown as AIConfigData} />
 			{:else}
-				<div class="bg-primary p-10 text-center">
-					<p class="m-0 mb-4 text-xs text-fg-muted">
+				<div class={css({ backgroundColor: 'bg.primary', padding: '10', textAlign: 'center' })}>
+					<p class={css({ margin: '0', marginBottom: '4', fontSize: 'xs', color: 'fg.muted' })}>
 						Configuration for {step.type} is not yet implemented
 					</p>
 					<button
-						class="cursor-pointer border border-tertiary bg-transparent px-5 py-2 font-mono text-xs text-fg-secondary hover:bg-hover"
+						class={css({
+							cursor: 'pointer',
+							borderWidth: '1',
+							backgroundColor: 'transparent',
+							paddingX: '5',
+							paddingY: '2',
+							fontFamily: 'mono',
+							fontSize: 'xs',
+							color: 'fg.secondary',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
 						onclick={() => onClose?.()}
 						type="button">Close</button
 					>
 				</div>
 			{/if}
 		</div>
-		<div class="flex gap-3 border-t border-tertiary bg-primary px-5 py-4">
-			<button
-				class="action-button cancel flex-1 cursor-pointer border border-tertiary bg-transparent px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-fg-secondary hover:bg-hover hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-40"
-				onclick={handleCancelConfig}
-				disabled={!hasChanges}
-				type="button"
-			>
-				Cancel
-			</button>
-			<button
-				class="action-button apply flex-1 cursor-pointer border border-tertiary bg-accent-bg px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-wider text-accent-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-				onclick={handleApplyConfig}
-				disabled={!hasChanges}
-				type="button"
-			>
-				Apply
-			</button>
-		</div>
+		{#if !readOnly}
+			<PanelFooter>
+				<button
+					class={css({
+						flex: '1',
+						cursor: 'pointer',
+						borderWidth: '1',
+						backgroundColor: 'transparent',
+						paddingX: '4',
+						paddingY: '2.5',
+						fontFamily: 'mono',
+						fontSize: 'xs',
+						fontWeight: 'semibold',
+						textTransform: 'uppercase',
+						letterSpacing: 'wider',
+						color: 'fg.secondary',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+						_disabled: { cursor: 'not-allowed', opacity: '0.4' }
+					})}
+					onclick={handleCancelConfig}
+					disabled={!hasChanges}
+					type="button"
+				>
+					Cancel
+				</button>
+				<button
+					class={css({
+						flex: '1',
+						cursor: 'pointer',
+						borderWidth: '1',
+						backgroundColor: 'bg.accent',
+						paddingX: '4',
+						paddingY: '2.5',
+						fontFamily: 'mono',
+						fontSize: 'xs',
+						fontWeight: 'semibold',
+						textTransform: 'uppercase',
+						letterSpacing: 'wider',
+						color: 'accent.primary',
+						_hover: { opacity: '0.9' },
+						_disabled: { cursor: 'not-allowed', opacity: '0.4' }
+					})}
+					onclick={handleApplyConfig}
+					disabled={!hasChanges}
+					type="button"
+				>
+					Apply
+				</button>
+			</PanelFooter>
+		{/if}
 	</div>
 {/if}

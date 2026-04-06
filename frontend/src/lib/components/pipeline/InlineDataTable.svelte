@@ -1,19 +1,17 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import {
-		previewStepData,
-		type StepPreviewRequest,
-		type StepPreviewResponse
-	} from '$lib/api/compute';
+	import { previewStepData, type StepPreviewResponse } from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { schemaStore } from '$lib/stores/schema.svelte';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import DataTable from '$lib/components/common/DataTable.svelte';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		analysisId: string;
@@ -34,7 +32,7 @@
 
 	const activePipeline = $derived(applySteps(pipeline));
 	const isActiveStep = $derived(activePipeline.some((step) => step.id === stepId));
-	const pipelineKey = $derived.by(() => hashPipeline(activePipeline));
+	const pipelineKey = $derived(hashPipeline(activePipeline));
 	const datasourceConfig = $derived.by(() => {
 		const config = buildDatasourceConfig({
 			analysisId,
@@ -42,27 +40,31 @@
 			tabs: analysisStore.tabs,
 			datasources: datasourceStore.datasources
 		});
-		return config ?? analysisStore.activeTab?.datasource_config ?? {};
+		if (config) return config;
+		const active = analysisStore.activeTab;
+		if (!active) return {};
+		return active.datasource.config;
 	});
 	const datasourceKey = $derived.by(() => {
 		const config = datasourceConfig as Record<string, unknown>;
 		const {
 			time_travel_ui: _ui,
 			output: _output,
-			snapshot_id,
-			snapshot_timestamp_ms,
+			time_travel_snapshot_id,
+			time_travel_snapshot_timestamp_ms,
 			...rest
 		} = config;
 		return JSON.stringify({
 			...rest,
-			snapshot_id: snapshot_id ?? null,
-			snapshot_timestamp_ms: snapshot_timestamp_ms ?? null
+			snapshot_id: time_travel_snapshot_id ?? null,
+			snapshot_timestamp_ms: time_travel_snapshot_timestamp_ms ?? null
 		});
 	});
 	const snapshotKey = $derived.by(() => {
 		const config = datasourceConfig as Record<string, unknown>;
-		const snapshotId = (config.snapshot_id as string | null | undefined) ?? null;
-		const snapshotMs = (config.snapshot_timestamp_ms as number | null | undefined) ?? null;
+		const snapshotId = (config.time_travel_snapshot_id as string | null | undefined) ?? null;
+		const snapshotMs =
+			(config.time_travel_snapshot_timestamp_ms as number | null | undefined) ?? null;
 		return `${snapshotId ?? 'latest'}:${snapshotMs ?? 0}`;
 	});
 	const runKey = $derived(`${analysisId}:${datasourceId}:${snapshotKey}:${rowLimit}:${stepId}`);
@@ -89,19 +91,14 @@
 			datasourceKey
 		],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const resourceConfig = analysisStore.resourceConfig as unknown as Record<
-				string,
-				unknown
-			> | null;
 			const result = await previewStepData({
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: analysisPipeline!,
 				tab_id: analysisStore.activeTab?.id ?? null,
 				target_step_id: stepId,
 				row_limit: rowLimit,
 				page: currentPage,
-				resource_config: resourceConfig,
-				datasource_config: datasourceConfig
-			} as unknown as StepPreviewRequest);
+				resource_config: analysisStore.resourceConfig
+			});
 			if (result.isErr()) {
 				throw new Error(result.error.message);
 			}
@@ -110,6 +107,7 @@
 		staleTime: Infinity,
 		gcTime: Infinity,
 		refetchOnMount: false,
+		retry: false,
 		enabled: hasRun && isActiveStep && !!analysisPipeline
 	}));
 
@@ -131,8 +129,15 @@
 
 	// Network: $derived can't persist preview run state.
 	$effect(() => {
-		if (!isActiveStep || hasRun) return;
+		if (!isActiveStep || hasRun || !analysisPipeline) return;
 		analysisStore.setPreviewRun(runKey, true);
+	});
+
+	// Schema sync: $derived can't write to an external store reactively.
+	$effect(() => {
+		const response = query.data;
+		if (!response) return;
+		schemaStore.syncPreviewSchema(stepId, response, pipelineKey);
 	});
 
 	function runPreview() {
@@ -152,7 +157,10 @@
 	}
 </script>
 
-<div class="inline-preview-table w-full h-100 overflow-hidden">
+<div
+	class={css({ contain: 'content', width: 'full', height: 'panel', overflow: 'hidden' })}
+	data-testid="inline-data-table"
+>
 	<DataTable
 		columns={data?.columns ?? []}
 		data={data?.data ?? []}

@@ -1,8 +1,39 @@
 import type { Schema } from './schema';
+import type { PipelineStepType } from './pipeline-step';
+
+export interface AnalysisTabTimeTravelUIConfig {
+	open?: boolean;
+	month?: string;
+	day?: string;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabDatasourceConfig {
+	branch: string;
+	time_travel_snapshot_id?: string | null;
+	time_travel_snapshot_timestamp_ms?: number | null;
+	time_travel_ui?: AnalysisTabTimeTravelUIConfig;
+	snapshot_id?: string | null;
+	snapshot_timestamp_ms?: number | null;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabIcebergConfig {
+	namespace?: string;
+	table_name?: string;
+	branch?: string;
+	[key: string]: unknown;
+}
+
+export interface AnalysisTabNotificationConfig {
+	method?: string;
+	body_template?: string;
+	[key: string]: unknown;
+}
 
 export interface PipelineStep {
 	id: string;
-	type: string;
+	type: PipelineStepType;
 	config: Record<string, unknown>;
 	depends_on?: string[];
 	is_applied?: boolean;
@@ -10,37 +41,42 @@ export interface PipelineStep {
 	outputSchema?: Schema;
 }
 
-export type AnalysisTabType = 'datasource' | 'derived';
+export interface AnalysisTabDatasource {
+	id: string;
+	analysis_tab_id: string | null;
+	config: AnalysisTabDatasourceConfig;
+}
+
+export interface AnalysisTabOutput {
+	result_id: string;
+	format: string;
+	filename: string;
+	build_mode?: string;
+	iceberg?: AnalysisTabIcebergConfig;
+	notification?: AnalysisTabNotificationConfig | null;
+	[key: string]: unknown;
+}
 
 export interface AnalysisTab {
 	id: string;
 	name: string;
-	type: AnalysisTabType;
 	parent_id: string | null;
-	datasource_id: string | null;
-	output_datasource_id?: string | null;
-	datasource_config?: Record<string, unknown> | null;
+	datasource: AnalysisTabDatasource;
+	output: AnalysisTabOutput;
 	steps: PipelineStep[];
 }
 
 export interface AnalysisCreate {
 	name: string;
 	description?: string | null;
-	datasource_ids: string[];
-	pipeline_steps: PipelineStep[];
 	tabs: AnalysisTab[];
-	output_branch?: string | null;
 }
 
 export interface AnalysisUpdate {
 	name?: string | null;
 	description?: string | null;
-	pipeline_steps?: PipelineStep[] | null;
 	status?: string | null;
-	tabs?: AnalysisTab[] | null;
-	client_id?: string | null;
-	lock_token?: string | null;
-	output_branch?: string | null;
+	tabs: AnalysisTab[];
 }
 
 export interface Analysis {
@@ -53,9 +89,7 @@ export interface Analysis {
 	updated_at: string;
 	result_path: string | null;
 	thumbnail: string | null;
-	tabs: AnalysisTab[];
 	version?: string | null;
-	output_branch?: string | null;
 }
 
 export interface AnalysisGalleryItem {

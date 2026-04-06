@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import { css, label, stepConfig, cx, divider, input } from '$lib/styles/panda';
 
 	interface ExpressionConfigData {
 		expression: string;
@@ -21,74 +23,173 @@
 	}
 </script>
 
-<div class="config-panel" role="region" aria-label="Expression configuration">
-	<div class="form-section" role="group" aria-labelledby="expr-expression-heading">
-		<h4 id="expr-expression-heading">Expression</h4>
-		<label for="expr-textarea-expression" class="sr-only">Polars expression</label>
+<div class={stepConfig()} role="region" aria-label="Expression configuration">
+	<div
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
+
+			border: 'none'
+		})}
+		role="group"
+		aria-labelledby="expr-expression-heading"
+	>
+		<span id="expr-expression-heading"><SectionHeader>Expression</SectionHeader></span>
+		<label for="expr-textarea-expression" class={label({ variant: 'hidden' })}
+			>Polars expression</label
+		>
 		<textarea
 			id="expr-textarea-expression"
 			data-testid="expr-expression-textarea"
-			class="w-full resize-y mb-2"
+			class={cx(input(), css({ resize: 'vertical', marginBottom: '2' }))}
 			bind:value={config.expression}
 			placeholder="e.g., pl.col(&quot;price&quot;) * 1.2"
 			rows="4"
 			aria-describedby="expr-expression-help"
 		></textarea>
-		<span id="expr-expression-help" class="sr-only"
-			>Enter a Polars expression using pl.col() to reference columns</span
+		<span
+			id="expr-expression-help"
+			class={css({
+				position: 'absolute',
+				width: 'px',
+				height: 'px',
+				padding: '0',
+				margin: '-1px',
+				overflow: 'hidden',
+				clip: 'rect(0, 0, 0, 0)',
+				whiteSpace: 'nowrap',
+				border: '0'
+			})}>Enter a Polars expression using pl.col() to reference columns</span
 		>
 
-		<div id="expr-syntax-help" class="help-box leading-relaxed mt-3" aria-label="Syntax help">
+		<div
+			id="expr-syntax-help"
+			class={css({
+				color: 'fg.tertiary',
+				backgroundColor: 'transparent',
+				borderTopWidth: '0',
+				borderRightWidth: '0',
+				borderBottomWidth: '0',
+				borderLeftWidth: '2',
+				fontSize: 'xs',
+				paddingX: '3',
+				paddingY: '2',
+				lineHeight: 'relaxed',
+				marginTop: '3'
+			})}
+			aria-label="Syntax help"
+		>
 			<strong>Polars Expression Syntax:</strong><br />
 			Use
-			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
-				>pl.col("column")</code
+			<code
+				class={css({
+					backgroundColor: 'bg.tertiary',
+					paddingX: '2',
+					paddingY: '1',
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					color: 'accent.primary'
+				})}>pl.col("column")</code
 			>
 			to reference columns.<br />
 			Examples:<br />
 			-
-			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
-				>pl.col("price") * 1.2</code
+			<code
+				class={css({
+					backgroundColor: 'bg.tertiary',
+					paddingX: '2',
+					paddingY: '1',
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					color: 'accent.primary'
+				})}>pl.col("price") * 1.2</code
 			>
 			- Multiply<br />
 			-
-			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
-				>pl.col("value").cast(pl.Float64)</code
+			<code
+				class={css({
+					backgroundColor: 'bg.tertiary',
+					paddingX: '2',
+					paddingY: '1',
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					color: 'accent.primary'
+				})}>pl.col("value").cast(pl.Float64)</code
 			>
 			- Cast type<br />
 			-
-			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
-				>pl.col("name").str.to_uppercase()</code
+			<code
+				class={css({
+					backgroundColor: 'bg.tertiary',
+					paddingX: '2',
+					paddingY: '1',
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					color: 'accent.primary'
+				})}>pl.col("name").str.to_uppercase()</code
 			>
 			- String method<br />
 			-
-			<code class="rounded-[3px] bg-tertiary px-2 py-1 font-mono text-[0.85em] text-accent-primary"
-				>pl.col("date").dt.year()</code
+			<code
+				class={css({
+					backgroundColor: 'bg.tertiary',
+					paddingX: '2',
+					paddingY: '1',
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					color: 'accent.primary'
+				})}>pl.col("date").dt.year()</code
 			> - Date component
 		</div>
 	</div>
 
-	<div class="form-section" role="group" aria-labelledby="expr-new-column-heading">
-		<h4 id="expr-new-column-heading">New Column Name</h4>
-		<label for="expr-input-column" class="sr-only">New column name</label>
+	<div
+		class={cx(
+			divider,
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				paddingTop: '5',
+				backgroundColor: 'transparent'
+			})
+		)}
+		role="group"
+		aria-labelledby="expr-new-column-heading"
+	>
+		<span id="expr-new-column-heading"><SectionHeader>New Column Name</SectionHeader></span>
+		<label for="expr-input-column" class={label({ variant: 'hidden' })}>New column name</label>
 		<input
 			id="expr-input-column"
 			data-testid="expr-column-input"
 			type="text"
+			class={input()}
 			bind:value={config.column_name}
 			placeholder="e.g., price_with_tax, full_name"
 		/>
 	</div>
 
-	<div class="form-section" role="group" aria-labelledby="expr-columns-heading">
-		<h4 id="expr-columns-heading">Insert Column</h4>
+	<div
+		class={cx(
+			divider,
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				paddingTop: '5',
+				backgroundColor: 'transparent'
+			})
+		)}
+		role="group"
+		aria-labelledby="expr-columns-heading"
+	>
+		<span id="expr-columns-heading"><SectionHeader>Insert Column</SectionHeader></span>
 		<ColumnDropdown
 			{schema}
 			value=""
 			onChange={(val) => insertColumn(val)}
 			placeholder="Select column to insert..."
 		/>
-		<span class="mt-1 block text-xs text-fg-muted">
+		<span class={css({ marginTop: '1', display: 'block', fontSize: 'xs', color: 'fg.muted' })}>
 			Select a column to insert it into the expression above.
 		</span>
 	</div>

@@ -1,0 +1,2434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data-Forge Mobile — Design Concept</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ── Reset & base ── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        /* exact tokens from panda.config.ts dark theme */
+        --bg-primary: #0e0e0e;
+        --bg-secondary: #111111;
+        --bg-tertiary: #171717;
+        --bg-muted: #1f1f1f;
+        --bg-hover: #262626;
+        --border: rgba(43, 43, 43, 0.663);
+        --border-solid: #2b2b2b;
+        --fg-primary: #fafafa;
+        --fg-secondary: #d4d4d4;
+        --fg-tertiary: #a3a3a3;
+        --fg-muted: #737373;
+        --fg-faint: #525252;
+        --success-fg: #86efac;
+        --success-bg: #14532d;
+        --warning-fg: #fde047;
+        --warning-bg: #713f12;
+        --error-fg: #fca5a5;
+        --error-bg: #7f1d1d;
+        --font: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+        --radius: 0px;
+      }
+
+      body {
+        background: #080808;
+        font-family: var(--font);
+        font-size: 14px;
+        color: var(--fg-primary);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 48px 24px 96px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── Page header ── */
+      .page-header {
+        text-align: center;
+        margin-bottom: 56px;
+        max-width: 560px;
+      }
+      .page-header-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.15em;
+        color: var(--fg-faint);
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      .page-header h1 {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--fg-primary);
+        letter-spacing: -0.02em;
+        margin-bottom: 10px;
+      }
+      .page-header p {
+        font-size: 12px;
+        color: var(--fg-muted);
+        line-height: 1.7;
+      }
+
+      /* ── Screen grid ── */
+      .screens-grid {
+        display: flex;
+        gap: 40px;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: flex-start;
+        max-width: 1500px;
+      }
+      .screen-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+      .screen-meta {
+        text-align: center;
+      }
+      .screen-num {
+        font-size: 10px;
+        color: var(--fg-faint);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 3px;
+      }
+      .screen-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--fg-tertiary);
+      }
+      .screen-tag {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 2px 8px;
+        border: 1px solid var(--border-solid);
+        font-size: 10px;
+        color: var(--fg-muted);
+        font-weight: 500;
+      }
+      .screen-tag.primary {
+        border-color: var(--fg-faint);
+        color: var(--fg-tertiary);
+      }
+
+      /* ── Phone frame ── */
+      .phone {
+        width: 320px;
+        height: 660px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-solid);
+        border-radius: 0;
+        overflow: hidden;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+      }
+
+      /* Status bar */
+      .status-bar {
+        height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .status-time {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--fg-secondary);
+      }
+      .status-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+        color: var(--fg-muted);
+      }
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        background: var(--success-fg);
+      }
+
+      /* Screen body */
+      .screen-body {
+        flex: 1;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── Bottom nav ── */
+      .bottom-nav {
+        height: 52px;
+        background: var(--bg-primary);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: stretch;
+        flex-shrink: 0;
+      }
+      .nav-item {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        cursor: pointer;
+        border-right: 1px solid var(--border);
+      }
+      .nav-item:last-child {
+        border-right: 0;
+      }
+      .nav-item.active {
+        background: var(--bg-muted);
+      }
+      .nav-icon {
+        font-size: 13px;
+        line-height: 1;
+      }
+      .nav-label {
+        font-size: 8px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+      }
+      .nav-item.active .nav-label {
+        color: var(--fg-secondary);
+      }
+
+      /* ── Shared components ── */
+      .screen-header {
+        padding: 10px 14px;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .header-back {
+        font-size: 14px;
+        color: var(--fg-muted);
+        cursor: pointer;
+        padding: 2px 4px;
+      }
+      .header-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--fg-primary);
+      }
+      .header-sub {
+        font-size: 10px;
+        color: var(--fg-muted);
+        margin-top: 1px;
+      }
+      .header-spacer {
+        flex: 1;
+      }
+
+      .btn {
+        padding: 5px 10px;
+        font-family: var(--font);
+        font-size: 10px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid var(--border-solid);
+        background: var(--bg-muted);
+        color: var(--fg-secondary);
+        border-radius: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        letter-spacing: 0.04em;
+      }
+      .btn.primary {
+        background: var(--fg-primary);
+        color: var(--bg-primary);
+        border-color: var(--fg-primary);
+      }
+      .btn.ghost {
+        background: transparent;
+        border-color: var(--border-solid);
+        color: var(--fg-muted);
+      }
+      .btn.run {
+        background: var(--success-bg);
+        color: var(--success-fg);
+        border-color: #166534;
+      }
+
+      /* ══════════════════════════════════
+     SCREEN 1 — GALLERY
+  ══════════════════════════════════ */
+      .gallery-search {
+        padding: 8px 14px;
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .gallery-search span {
+        font-size: 11px;
+        color: var(--fg-faint);
+      }
+      .gallery-search input {
+        background: transparent;
+        border: 0;
+        color: var(--fg-muted);
+        font-family: var(--font);
+        font-size: 11px;
+        outline: none;
+        flex: 1;
+      }
+
+      .gallery-list {
+        flex: 1;
+        overflow-y: auto;
+      }
+      .gallery-list::-webkit-scrollbar {
+        display: none;
+      }
+
+      .section-label {
+        padding: 8px 14px 5px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .analysis-row {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        background: var(--bg-secondary);
+        transition: background 0.1s;
+      }
+      .analysis-row:hover {
+        background: var(--bg-tertiary);
+      }
+      .analysis-row.active {
+        background: var(--bg-muted);
+        border-left: 2px solid var(--fg-primary);
+      }
+      .row-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 5px;
+      }
+      .row-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--fg-primary);
+      }
+      .row-time {
+        font-size: 10px;
+        color: var(--fg-faint);
+      }
+      .row-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .meta-item {
+        font-size: 10px;
+        color: var(--fg-muted);
+      }
+      .status-pill {
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 1px 6px;
+        border: 1px solid;
+      }
+      .status-pill.live {
+        color: var(--success-fg);
+        border-color: #166534;
+        background: var(--success-bg);
+      }
+      .status-pill.paused {
+        color: var(--warning-fg);
+        border-color: #854d0e;
+        background: var(--warning-bg);
+      }
+      .progress-track {
+        height: 2px;
+        background: var(--bg-muted);
+        display: flex;
+        gap: 1px;
+      }
+      .progress-seg {
+        flex: 1;
+        height: 100%;
+        background: var(--bg-hover);
+      }
+      .progress-seg.done {
+        background: var(--fg-tertiary);
+      }
+      .progress-seg.active-seg {
+        background: var(--fg-primary);
+      }
+
+      .gallery-fab {
+        position: absolute;
+        bottom: 62px;
+        right: 14px;
+        width: 36px;
+        height: 36px;
+        background: var(--fg-primary);
+        color: var(--bg-primary);
+        border: 0;
+        font-family: var(--font);
+        font-size: 20px;
+        font-weight: 300;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* ══════════════════════════════════
+     SCREEN 2 — AI CHAT
+  ══════════════════════════════════ */
+      .pipeline-strip {
+        padding: 6px 12px;
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        overflow: hidden;
+      }
+      .strip-step {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 7px;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .strip-step.active {
+        color: var(--fg-primary);
+        background: var(--bg-muted);
+        border-color: var(--fg-faint);
+      }
+      .strip-arrow {
+        color: var(--fg-faint);
+        font-size: 10px;
+        flex-shrink: 0;
+      }
+      .strip-more {
+        font-size: 9px;
+        color: var(--fg-faint);
+        padding: 3px 7px;
+        border: 1px solid var(--border);
+        white-space: nowrap;
+      }
+
+      .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .chat-messages::-webkit-scrollbar {
+        display: none;
+      }
+
+      .msg {
+        display: flex;
+        flex-direction: column;
+      }
+      .msg.user {
+        align-items: flex-end;
+      }
+      .msg.ai {
+        align-items: flex-start;
+      }
+
+      .msg-sender {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        margin-bottom: 4px;
+        padding: 0 2px;
+      }
+      .msg.user .msg-sender {
+        color: var(--fg-faint);
+      }
+
+      .msg-bubble {
+        max-width: 84%;
+        padding: 9px 11px;
+        font-size: 11px;
+        line-height: 1.6;
+        border: 1px solid var(--border);
+      }
+      .msg.user .msg-bubble {
+        background: var(--bg-muted);
+        color: var(--fg-primary);
+        border-color: var(--fg-faint);
+      }
+      .msg.ai .msg-bubble {
+        background: var(--bg-tertiary);
+        color: var(--fg-secondary);
+        border-color: var(--border-solid);
+      }
+
+      .action-card {
+        margin-top: 6px;
+        border: 1px solid var(--border-solid);
+        background: var(--bg-secondary);
+        width: 210px;
+      }
+      .action-card-head {
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .action-op-tag {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 1px 6px;
+        background: var(--bg-muted);
+        color: var(--fg-secondary);
+        border: 1px solid var(--border-solid);
+      }
+      .action-card-body {
+        padding: 7px 10px;
+        font-size: 10px;
+        color: var(--fg-muted);
+        line-height: 1.6;
+        border-bottom: 1px solid var(--border);
+      }
+      .action-card-body code {
+        color: var(--fg-tertiary);
+        font-family: var(--font);
+      }
+      .action-card-foot {
+        padding: 6px 10px;
+        display: flex;
+        gap: 6px;
+      }
+      .action-card-btn {
+        flex: 1;
+        padding: 4px 6px;
+        font-family: var(--font);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-align: center;
+        cursor: pointer;
+        border: 1px solid var(--border-solid);
+        color: var(--fg-muted);
+        background: var(--bg-muted);
+      }
+      .action-card-btn.confirm {
+        background: var(--fg-primary);
+        color: var(--bg-primary);
+        border-color: var(--fg-primary);
+      }
+
+      .typing-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        width: fit-content;
+      }
+      .t-dot {
+        width: 4px;
+        height: 4px;
+        background: var(--fg-muted);
+        animation: tBounce 1s infinite ease-in-out;
+      }
+      .t-dot:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+      .t-dot:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+      @keyframes tBounce {
+        0%,
+        60%,
+        100% {
+          opacity: 0.3;
+          transform: translateY(0);
+        }
+        30% {
+          opacity: 1;
+          transform: translateY(-3px);
+        }
+      }
+
+      .quick-chips {
+        padding: 6px 12px;
+        display: flex;
+        gap: 5px;
+        border-top: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        flex-shrink: 0;
+      }
+      .q-chip {
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border: 1px solid var(--border-solid);
+        color: var(--fg-muted);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .chat-input-row {
+        padding: 8px 12px;
+        border-top: 1px solid var(--border);
+        background: var(--bg-primary);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .chat-input-box {
+        flex: 1;
+        background: var(--bg-muted);
+        border: 1px solid var(--border-solid);
+        padding: 7px 10px;
+        font-family: var(--font);
+        font-size: 10px;
+        color: var(--fg-faint);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .chat-input-box .placeholder {
+        flex: 1;
+      }
+      .mic-btn {
+        font-size: 11px;
+        opacity: 0.4;
+      }
+      .send-btn {
+        width: 30px;
+        height: 30px;
+        background: var(--fg-primary);
+        color: var(--bg-primary);
+        border: 0;
+        font-size: 13px;
+        font-family: var(--font);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+
+      /* ══════════════════════════════════
+     SCREEN 3 — PIPELINE
+  ══════════════════════════════════ */
+      .pipeline-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0;
+      }
+      .pipeline-list::-webkit-scrollbar {
+        display: none;
+      }
+
+      .source-block {
+        padding: 10px 14px;
+        background: var(--bg-tertiary);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .source-icon-box {
+        width: 28px;
+        height: 28px;
+        background: var(--bg-muted);
+        border: 1px solid var(--border-solid);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .source-name {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--fg-primary);
+      }
+      .source-meta {
+        font-size: 9px;
+        color: var(--fg-muted);
+        margin-top: 1px;
+      }
+      .source-badge {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 2px 6px;
+        border: 1px solid var(--border-solid);
+        color: var(--fg-muted);
+        margin-left: auto;
+      }
+
+      .step-connector-line {
+        width: 1px;
+        height: 10px;
+        background: var(--border-solid);
+        margin-left: 28px;
+      }
+
+      .step-row {
+        display: flex;
+        align-items: stretch;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        background: var(--bg-secondary);
+      }
+      .step-row:hover {
+        background: var(--bg-tertiary);
+      }
+
+      .step-origin-bar {
+        width: 3px;
+        flex-shrink: 0;
+      }
+      .step-origin-bar.ai {
+        background: var(--fg-tertiary);
+      }
+      .step-origin-bar.manual {
+        background: var(--warning-fg);
+      }
+      .step-origin-bar.chart {
+        background: var(--success-fg);
+      }
+      .step-origin-bar.none {
+        background: transparent;
+      }
+
+      .step-row-inner {
+        flex: 1;
+        padding: 9px 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .step-icon-box {
+        width: 26px;
+        height: 26px;
+        background: var(--bg-muted);
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        flex-shrink: 0;
+      }
+      .step-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .step-op {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--fg-primary);
+      }
+      .step-desc {
+        font-size: 9px;
+        color: var(--fg-muted);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .step-badge {
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 1px 5px;
+        border: 1px solid;
+        flex-shrink: 0;
+      }
+      .step-badge.ai-badge {
+        color: var(--fg-tertiary);
+        border-color: var(--border-solid);
+      }
+      .step-badge.manual-badge {
+        color: var(--warning-fg);
+        border-color: #854d0e;
+      }
+      .step-badge.chart-badge {
+        color: var(--success-fg);
+        border-color: #166534;
+      }
+      .step-chevron {
+        color: var(--fg-faint);
+        font-size: 11px;
+        flex-shrink: 0;
+      }
+
+      .add-row {
+        padding: 8px 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--border);
+      }
+      .add-row:hover {
+        background: var(--bg-tertiary);
+      }
+      .add-box {
+        width: 26px;
+        height: 26px;
+        border: 1px dashed var(--border-solid);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: var(--fg-faint);
+      }
+      .add-label {
+        font-size: 10px;
+        color: var(--fg-faint);
+      }
+      .add-label span {
+        color: var(--fg-tertiary);
+        text-decoration: underline;
+      }
+
+      /* ══════════════════════════════════
+     SCREEN 4 — DATA PREVIEW
+  ══════════════════════════════════ */
+      .step-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-tertiary);
+        overflow-x: auto;
+        flex-shrink: 0;
+      }
+      .step-tabs::-webkit-scrollbar {
+        display: none;
+      }
+      .step-tab {
+        padding: 7px 11px;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        border-right: 1px solid var(--border);
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .step-tab.active {
+        color: var(--fg-primary);
+        background: var(--bg-muted);
+        border-bottom: 2px solid var(--fg-primary);
+      }
+
+      .data-stats {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .data-stat {
+        flex: 1;
+        padding: 6px 10px;
+        border-right: 1px solid var(--border);
+        text-align: center;
+      }
+      .data-stat:last-child {
+        border-right: 0;
+      }
+      .stat-val {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--fg-primary);
+      }
+      .stat-key {
+        font-size: 8px;
+        color: var(--fg-faint);
+        margin-top: 1px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .table-wrap {
+        flex: 1;
+        overflow: auto;
+      }
+      .table-wrap::-webkit-scrollbar {
+        display: none;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10px;
+        min-width: 420px;
+      }
+      thead th {
+        padding: 6px 10px;
+        text-align: left;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+        position: sticky;
+        top: 0;
+      }
+      thead th .col-type {
+        color: var(--fg-faint);
+        font-weight: 400;
+        opacity: 0.6;
+      }
+      thead th.col-num {
+        color: var(--fg-tertiary);
+      }
+      tbody tr {
+        border-bottom: 1px solid var(--border);
+      }
+      tbody tr:hover {
+        background: var(--bg-tertiary);
+      }
+      tbody td {
+        padding: 6px 10px;
+        color: var(--fg-secondary);
+        white-space: nowrap;
+      }
+      tbody td.num {
+        color: var(--fg-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      tbody td.null {
+        color: var(--fg-faint);
+      }
+
+      /* ══════════════════════════════════
+     SCREEN 5 — STEP CONFIG PANEL
+  ══════════════════════════════════ */
+      .sheet-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 10;
+      }
+      .bg-pipeline-preview {
+        padding: 10px 14px;
+        opacity: 0.3;
+      }
+      .bg-step-row {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--fg-secondary);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .bg-step-row.selected-bg {
+        color: var(--fg-primary);
+      }
+
+      /* Panel replaces bottom sheet — no drag handle, no rounded top */
+      .bottom-sheet {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: var(--bg-primary);
+        border-top: 2px solid var(--fg-faint);
+        z-index: 20;
+        height: 78%;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── Panel titlebar ── */
+      .panel-titlebar {
+        display: flex;
+        align-items: stretch;
+        border-bottom: 1px solid var(--border-solid);
+        flex-shrink: 0;
+        height: 32px;
+      }
+      .panel-breadcrumb {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding: 0 12px;
+        overflow: hidden;
+      }
+      .panel-crumb {
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        white-space: nowrap;
+      }
+      .panel-crumb.active {
+        color: var(--fg-tertiary);
+      }
+      .panel-crumb-sep {
+        font-size: 10px;
+        color: var(--fg-faint);
+        padding: 0 5px;
+      }
+      .panel-close {
+        width: 32px;
+        border-left: 1px solid var(--border-solid);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: var(--fg-faint);
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .panel-close:hover {
+        background: var(--bg-muted);
+        color: var(--fg-secondary);
+      }
+
+      /* ── AI suggestion row ── */
+      .panel-ai-row {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        border-bottom: 1px solid var(--border-solid);
+        background: var(--bg-tertiary);
+        flex-shrink: 0;
+        min-height: 28px;
+      }
+      .panel-ai-tag {
+        padding: 0 8px;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        border-right: 1px solid var(--border-solid);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .panel-ai-msg {
+        flex: 1;
+        padding: 0 10px;
+        font-size: 9px;
+        color: var(--fg-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .panel-ai-msg strong {
+        color: var(--fg-tertiary);
+      }
+      .panel-ai-apply {
+        padding: 0 10px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        color: var(--fg-tertiary);
+        border-left: 1px solid var(--border-solid);
+        cursor: pointer;
+        white-space: nowrap;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .panel-ai-apply:hover {
+        background: var(--bg-muted);
+      }
+
+      /* ── Property grid ── */
+      .prop-grid {
+        flex: 1;
+        overflow-y: auto;
+        border-collapse: collapse;
+        width: 100%;
+        display: table;
+      }
+      .prop-grid::-webkit-scrollbar {
+        display: none;
+      }
+
+      .prop-row {
+        display: table-row;
+        border-bottom: 1px solid var(--border);
+      }
+      .prop-row:hover .prop-key {
+        color: var(--fg-tertiary);
+      }
+
+      .prop-key {
+        display: table-cell;
+        width: 88px;
+        padding: 0 10px 0 12px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        border-right: 1px solid var(--border-solid);
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+        white-space: nowrap;
+        background: var(--bg-tertiary);
+      }
+
+      .prop-val {
+        display: table-cell;
+        padding: 0;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+        background: var(--bg-secondary);
+      }
+      .prop-val.focused {
+        background: var(--bg-muted);
+      }
+
+      /* value types */
+      .pv-text {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 10px;
+        font-size: 11px;
+        color: var(--fg-primary);
+        height: 32px;
+      }
+      .pv-text .pv-chevron {
+        color: var(--fg-faint);
+        font-size: 10px;
+      }
+
+      .pv-segment {
+        display: flex;
+        height: 32px;
+      }
+      .pv-seg {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--fg-faint);
+        border-right: 1px solid var(--border-solid);
+        cursor: pointer;
+        letter-spacing: 0.02em;
+      }
+      .pv-seg:last-child {
+        border-right: 0;
+      }
+      .pv-seg.active {
+        background: var(--bg-hover);
+        color: var(--fg-primary);
+      }
+      /* active indicator dot */
+      .pv-seg.active::before {
+        content: "▪ ";
+        font-size: 8px;
+        color: var(--fg-tertiary);
+      }
+
+      .pv-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+        height: 32px;
+        cursor: pointer;
+      }
+      .pv-toggle-track {
+        width: 24px;
+        height: 12px;
+        border: 1px solid var(--border-solid);
+        background: var(--bg-muted);
+        position: relative;
+        flex-shrink: 0;
+      }
+      .pv-toggle-track.on {
+        background: var(--fg-secondary);
+        border-color: var(--fg-secondary);
+      }
+      .pv-toggle-track::after {
+        content: "";
+        position: absolute;
+        width: 7px;
+        height: 7px;
+        background: var(--bg-primary);
+        top: 2px;
+        right: 2px;
+      }
+      .pv-toggle-track.off::after {
+        right: 14px;
+      }
+      .pv-toggle-label {
+        font-size: 10px;
+        color: var(--fg-secondary);
+      }
+      .pv-toggle-label.off {
+        color: var(--fg-faint);
+      }
+
+      .pv-number {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        height: 32px;
+      }
+      .pv-num-val {
+        flex: 1;
+        padding: 0 10px;
+        font-size: 11px;
+        color: var(--fg-primary);
+      }
+      .pv-num-stepper {
+        display: flex;
+        flex-direction: column;
+        border-left: 1px solid var(--border-solid);
+      }
+      .pv-step-btn {
+        flex: 1;
+        width: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: var(--fg-faint);
+        cursor: pointer;
+        border-bottom: 1px solid var(--border);
+      }
+      .pv-step-btn:last-child {
+        border-bottom: 0;
+      }
+      .pv-step-btn:hover {
+        background: var(--bg-muted);
+        color: var(--fg-secondary);
+      }
+
+      /* ── Panel footer / action bar ── */
+      .panel-footer {
+        display: flex;
+        align-items: stretch;
+        border-top: 1px solid var(--border-solid);
+        flex-shrink: 0;
+        height: 38px;
+      }
+      .panel-action {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+        border-right: 1px solid var(--border-solid);
+        color: var(--fg-faint);
+      }
+      .panel-action:last-child {
+        border-right: 0;
+      }
+      .panel-action.primary {
+        background: var(--fg-primary);
+        color: var(--bg-primary);
+        flex: 2;
+      }
+
+      /* ── Annotations ── */
+      .annotation {
+        max-width: 320px;
+        width: 100%;
+      }
+      .ann-item {
+        display: flex;
+        gap: 7px;
+        margin-bottom: 7px;
+        align-items: flex-start;
+      }
+      .ann-mark {
+        width: 1px;
+        min-height: 14px;
+        background: var(--border-solid);
+        margin-top: 4px;
+        flex-shrink: 0;
+      }
+      .ann-text {
+        font-size: 10px;
+        color: var(--fg-faint);
+        line-height: 1.6;
+      }
+      .ann-text strong {
+        color: var(--fg-muted);
+      }
+
+      /* ── Flow section ── */
+      .bottom-section {
+        max-width: 1000px;
+        width: 100%;
+        margin-top: 64px;
+      }
+      .section-header-block {
+        margin-bottom: 24px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .section-header-block h2 {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--fg-primary);
+        margin-bottom: 4px;
+      }
+      .section-header-block p {
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      .flow-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0;
+      }
+      .flow-node {
+        border: 1px solid var(--border-solid);
+        background: var(--bg-secondary);
+        padding: 14px 16px;
+        min-width: 130px;
+        flex: 1;
+      }
+      .flow-node.primary-node {
+        background: var(--bg-muted);
+        border-color: var(--fg-faint);
+      }
+      .flow-node-label {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--fg-faint);
+        margin-bottom: 5px;
+      }
+      .flow-node-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--fg-primary);
+        margin-bottom: 4px;
+      }
+      .flow-node-desc {
+        font-size: 10px;
+        color: var(--fg-muted);
+        line-height: 1.5;
+      }
+      .flow-arrow {
+        font-size: 14px;
+        color: var(--fg-faint);
+        padding: 0 6px;
+        flex-shrink: 0;
+      }
+
+      /* ── Tokens section ── */
+      .tokens-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 1px;
+        background: var(--border-solid);
+        border: 1px solid var(--border-solid);
+        margin-top: 24px;
+      }
+      .token-cell {
+        background: var(--bg-secondary);
+        padding: 12px 14px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .token-swatch {
+        width: 20px;
+        height: 20px;
+        border: 1px solid var(--border-solid);
+        flex-shrink: 0;
+      }
+      .token-info {
+        min-width: 0;
+      }
+      .token-name {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--fg-tertiary);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .token-val {
+        font-size: 9px;
+        color: var(--fg-faint);
+        margin-top: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-header">
+      <div class="page-header-label">Design Concept</div>
+      <h1>Data-Forge / Mobile</h1>
+      <p>
+        AI-first interface. Natural language builds the pipeline. Manual config
+        is one tap away. Design follows the existing system: monospace,
+        monochrome, zero radius.
+      </p>
+    </div>
+
+    <div class="screens-grid">
+      <!-- ══════════════════════════════
+       1 — ANALYSES GALLERY
+  ══════════════════════════════ -->
+      <div class="screen-wrapper">
+        <div class="screen-meta">
+          <div class="screen-num">01</div>
+          <div class="screen-title">Analyses Gallery</div>
+          <div class="screen-tag">Entry point</div>
+        </div>
+        <div class="phone">
+          <div class="status-bar">
+            <span class="status-time">09:41</span>
+            <div class="status-right">
+              <div class="status-dot"></div>
+              <span>WiFi</span>
+              <span>100%</span>
+            </div>
+          </div>
+          <div class="screen-body">
+            <div class="screen-header">
+              <div>
+                <div class="header-title">Analyses</div>
+              </div>
+              <div class="header-spacer"></div>
+              <div class="btn ghost" style="font-size: 9px; padding: 4px 8px">
+                ⊕ New
+              </div>
+            </div>
+            <div class="gallery-search">
+              <span>⌕</span>
+              <input placeholder="search analyses..." readonly />
+            </div>
+            <div class="gallery-list">
+              <div class="section-label">Recent</div>
+
+              <div class="analysis-row active">
+                <div class="row-top">
+                  <div class="row-name">Customer Churn Analysis</div>
+                  <div class="row-time">2h ago</div>
+                </div>
+                <div class="row-meta">
+                  <span class="meta-item">6 steps</span>
+                  <span class="meta-item">·</span>
+                  <span class="meta-item">42K rows</span>
+                  <span class="status-pill live">live</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg active-seg"></div>
+                  <div class="progress-seg"></div>
+                </div>
+              </div>
+
+              <div class="analysis-row">
+                <div class="row-top">
+                  <div class="row-name">Sales by Region Q1</div>
+                  <div class="row-time">Yesterday</div>
+                </div>
+                <div class="row-meta">
+                  <span class="meta-item">4 steps</span>
+                  <span class="meta-item">·</span>
+                  <span class="meta-item">8.2K rows</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                </div>
+              </div>
+
+              <div class="analysis-row">
+                <div class="row-top">
+                  <div class="row-name">Inventory Forecast</div>
+                  <div class="row-time">3 days ago</div>
+                </div>
+                <div class="row-meta">
+                  <span class="meta-item">8 steps</span>
+                  <span class="meta-item">·</span>
+                  <span class="meta-item">120K rows</span>
+                  <span class="status-pill paused">paused</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg"></div>
+                  <div class="progress-seg"></div>
+                  <div class="progress-seg"></div>
+                </div>
+              </div>
+
+              <div class="section-label">All</div>
+
+              <div class="analysis-row">
+                <div class="row-top">
+                  <div class="row-name">Product Performance</div>
+                  <div class="row-time">1w ago</div>
+                </div>
+                <div class="row-meta">
+                  <span class="meta-item">3 steps</span>
+                  <span class="meta-item">·</span>
+                  <span class="meta-item">5K rows</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                  <div class="progress-seg done"></div>
+                </div>
+              </div>
+
+              <div class="analysis-row">
+                <div class="row-top">
+                  <div class="row-name">Support Ticket Trends</div>
+                  <div class="row-time">2w ago</div>
+                </div>
+                <div class="row-meta">
+                  <span class="meta-item">5 steps</span>
+                  <span class="meta-item">·</span>
+                  <span class="meta-item">18K rows</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button class="gallery-fab">+</button>
+          <div class="bottom-nav">
+            <div class="nav-item active">
+              <div class="nav-icon">⊞</div>
+              <div class="nav-label">Home</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">◇</div>
+              <div class="nav-label">Chat</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">⊸</div>
+              <div class="nav-label">Pipeline</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">⊟</div>
+              <div class="nav-label">Data</div>
+            </div>
+          </div>
+        </div>
+        <div class="annotation">
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Active row</strong> marked by a solid left border — no
+              colour fill needed
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Progress bar</strong> — 2px track, filled segments show
+              completed steps
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Status pills</strong> use semantic colours (green/yellow)
+              only for live/paused state
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════
+       2 — AI CHAT
+  ══════════════════════════════ -->
+      <div class="screen-wrapper">
+        <div class="screen-meta">
+          <div class="screen-num">02</div>
+          <div class="screen-title">AI Chat</div>
+          <div class="screen-tag primary">Primary interface</div>
+        </div>
+        <div class="phone">
+          <div class="status-bar">
+            <span class="status-time">09:41</span>
+            <div class="status-right"><span>WiFi</span><span>100%</span></div>
+          </div>
+          <div class="screen-body">
+            <div class="screen-header">
+              <span class="header-back">‹</span>
+              <div>
+                <div class="header-title">Customer Churn Analysis</div>
+                <div class="header-sub">customers.csv · 42,108 rows</div>
+              </div>
+              <div class="header-spacer"></div>
+              <div class="btn ghost" style="padding: 3px 7px; font-size: 9px">
+                ⚡
+              </div>
+            </div>
+
+            <div class="pipeline-strip">
+              <div class="strip-step">⊞ Source</div>
+              <div class="strip-arrow">›</div>
+              <div class="strip-step active">▽ Filter</div>
+              <div class="strip-arrow">›</div>
+              <div class="strip-step">↕ Sort</div>
+              <div class="strip-arrow">›</div>
+              <div class="strip-more">+3</div>
+            </div>
+
+            <div class="chat-messages">
+              <div class="msg ai">
+                <div class="msg-sender">system</div>
+                <div class="msg-bubble">
+                  Loaded <strong>customers.csv</strong>. 42,108 rows · 14 cols.
+                  What would you like to do?
+                </div>
+              </div>
+
+              <div class="msg user">
+                <div class="msg-sender">you</div>
+                <div class="msg-bubble">
+                  Filter to active customers from Europe, then sort by revenue
+                  top 20
+                </div>
+              </div>
+
+              <div class="msg ai">
+                <div class="msg-sender">assistant</div>
+                <div class="msg-bubble">Adding 2 steps:</div>
+                <div class="action-card">
+                  <div class="action-card-head">
+                    <div class="action-op-tag">Filter</div>
+                  </div>
+                  <div class="action-card-body">
+                    <code>status = "active"<br />AND region = "Europe"</code>
+                  </div>
+                  <div class="action-card-foot">
+                    <div class="action-card-btn confirm">Apply</div>
+                    <div class="action-card-btn">Edit</div>
+                  </div>
+                </div>
+                <div class="action-card" style="margin-top: 5px">
+                  <div class="action-card-head">
+                    <div class="action-op-tag">Sort + Limit</div>
+                  </div>
+                  <div class="action-card-body">
+                    <code>revenue DESC · limit 20</code>
+                  </div>
+                  <div class="action-card-foot">
+                    <div class="action-card-btn confirm">Apply</div>
+                    <div class="action-card-btn">Edit</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="msg user">
+                <div class="msg-sender">you</div>
+                <div class="msg-bubble">
+                  Now group by country, calc avg revenue
+                </div>
+              </div>
+
+              <div class="msg ai">
+                <div class="msg-sender">assistant</div>
+                <div class="typing-row">
+                  <div class="t-dot"></div>
+                  <div class="t-dot"></div>
+                  <div class="t-dot"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="quick-chips">
+              <div class="q-chip">+ Chart</div>
+              <div class="q-chip">Stats</div>
+              <div class="q-chip">Export</div>
+            </div>
+            <div class="chat-input-row">
+              <div class="chat-input-box">
+                <span class="placeholder">ask about your data...</span>
+                <span class="mic-btn">🎙</span>
+              </div>
+              <div class="send-btn">↑</div>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <div class="nav-item">
+              <div class="nav-icon">⊞</div>
+              <div class="nav-label">Home</div>
+            </div>
+            <div class="nav-item active">
+              <div class="nav-icon">◇</div>
+              <div class="nav-label">Chat</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">⊸</div>
+              <div class="nav-label">Pipeline</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">⊟</div>
+              <div class="nav-label">Data</div>
+            </div>
+          </div>
+        </div>
+        <div class="annotation">
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Pipeline strip</strong> always visible — context without
+              switching screens
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Action cards</strong> show exact step config before
+              committing — monospace code preview inline
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Message sender labels</strong> replace avatars —
+              consistent with terminal aesthetic
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════
+       3 — PIPELINE VIEW
+  ══════════════════════════════ -->
+      <div class="screen-wrapper">
+        <div class="screen-meta">
+          <div class="screen-num">03</div>
+          <div class="screen-title">Pipeline View</div>
+          <div class="screen-tag">Step inspection</div>
+        </div>
+        <div class="phone">
+          <div class="status-bar">
+            <span class="status-time">09:41</span>
+            <div class="status-right"><span>WiFi</span><span>100%</span></div>
+          </div>
+          <div class="screen-body">
+            <div class="screen-header">
+              <span class="header-back">‹</span>
+              <div>
+                <div class="header-title">Customer Churn Analysis</div>
+                <div class="header-sub">6 steps · ran 2m ago</div>
+              </div>
+              <div class="header-spacer"></div>
+              <div class="btn run">▶ Run</div>
+            </div>
+
+            <div class="pipeline-list">
+              <div class="source-block">
+                <div class="source-icon-box">📂</div>
+                <div>
+                  <div class="source-name">customers.csv</div>
+                  <div class="source-meta">42,108 rows · 14 columns</div>
+                </div>
+                <div class="source-badge">CSV</div>
+              </div>
+              <div class="step-connector-line"></div>
+
+              <div class="step-row">
+                <div class="step-origin-bar ai"></div>
+                <div class="step-row-inner">
+                  <div class="step-icon-box">▽</div>
+                  <div class="step-info">
+                    <div class="step-op">Filter</div>
+                    <div class="step-desc">
+                      status = active AND region = Europe
+                    </div>
+                  </div>
+                  <div class="step-badge ai-badge">AI</div>
+                  <div class="step-chevron">›</div>
+                </div>
+              </div>
+              <div class="step-connector-line"></div>
+
+              <div class="step-row">
+                <div class="step-origin-bar manual"></div>
+                <div class="step-row-inner">
+                  <div class="step-icon-box">↕</div>
+                  <div class="step-info">
+                    <div class="step-op">Sort</div>
+                    <div class="step-desc">revenue DESC · limit 20</div>
+                  </div>
+                  <div class="step-badge manual-badge">Edited</div>
+                  <div class="step-chevron">›</div>
+                </div>
+              </div>
+              <div class="step-connector-line"></div>
+
+              <div class="step-row">
+                <div class="step-origin-bar ai"></div>
+                <div class="step-row-inner">
+                  <div class="step-icon-box">▤</div>
+                  <div class="step-info">
+                    <div class="step-op">Group By</div>
+                    <div class="step-desc">country → avg(revenue), count</div>
+                  </div>
+                  <div class="step-badge ai-badge">AI</div>
+                  <div class="step-chevron">›</div>
+                </div>
+              </div>
+              <div class="step-connector-line"></div>
+
+              <div class="step-row">
+                <div class="step-origin-bar ai"></div>
+                <div class="step-row-inner">
+                  <div class="step-icon-box">✂</div>
+                  <div class="step-info">
+                    <div class="step-op">Select</div>
+                    <div class="step-desc">country, avg_revenue, count</div>
+                  </div>
+                  <div class="step-badge ai-badge">AI</div>
+                  <div class="step-chevron">›</div>
+                </div>
+              </div>
+              <div class="step-connector-line"></div>
+
+              <div class="step-row">
+                <div class="step-origin-bar chart"></div>
+                <div class="step-row-inner">
+                  <div class="step-icon-box">▨</div>
+                  <div class="step-info">
+                    <div class="step-op">Plot</div>
+                    <div class="step-desc">Bar · country vs avg_revenue</div>
+                  </div>
+                  <div class="step-badge chart-badge">Chart</div>
+                  <div class="step-chevron">›</div>
+                </div>
+              </div>
+              <div class="step-connector-line"></div>
+
+              <div class="add-row">
+                <div class="add-box">+</div>
+                <div class="add-label">
+                  Add step — or <span>ask the AI</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <div class="nav-item">
+              <div class="nav-icon">⊞</div>
+              <div class="nav-label">Home</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">◇</div>
+              <div class="nav-label">Chat</div>
+            </div>
+            <div class="nav-item active">
+              <div class="nav-icon">⊸</div>
+              <div class="nav-label">Pipeline</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">⊟</div>
+              <div class="nav-label">Data</div>
+            </div>
+          </div>
+        </div>
+        <div class="annotation">
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>3px left border</strong> encodes step origin — white=AI,
+              amber=user-edited, green=chart
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Connector lines</strong> replace canvas DAG — compact,
+              scannable on small screens
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              Tap any row → bottom sheet config. Long-press → drag to reorder.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════
+       4 — DATA PREVIEW
+  ══════════════════════════════ -->
+      <div class="screen-wrapper">
+        <div class="screen-meta">
+          <div class="screen-num">04</div>
+          <div class="screen-title">Data Preview</div>
+          <div class="screen-tag">Per-step output</div>
+        </div>
+        <div class="phone">
+          <div class="status-bar">
+            <span class="status-time">09:41</span>
+            <div class="status-right"><span>WiFi</span><span>100%</span></div>
+          </div>
+          <div class="screen-body">
+            <div class="screen-header">
+              <span class="header-back">‹</span>
+              <div>
+                <div class="header-title">Data Preview</div>
+                <div class="header-sub">output at Group By</div>
+              </div>
+              <div class="header-spacer"></div>
+              <div class="btn ghost" style="padding: 3px 7px; font-size: 9px">
+                ↓ CSV
+              </div>
+            </div>
+
+            <div class="step-tabs">
+              <div class="step-tab">Source</div>
+              <div class="step-tab">Filter</div>
+              <div class="step-tab">Sort</div>
+              <div class="step-tab active">Group By</div>
+              <div class="step-tab">Select</div>
+            </div>
+
+            <div class="data-stats">
+              <div class="data-stat">
+                <div class="stat-val">12</div>
+                <div class="stat-key">Rows</div>
+              </div>
+              <div class="data-stat">
+                <div class="stat-val">3</div>
+                <div class="stat-key">Cols</div>
+              </div>
+              <div class="data-stat">
+                <div class="stat-val">1</div>
+                <div class="stat-key">Nulls</div>
+              </div>
+              <div class="data-stat">
+                <div class="stat-val">4.8K</div>
+                <div class="stat-key">Size</div>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>country <span class="col-type">Utf8</span></th>
+                    <th class="col-num">
+                      avg_rev <span class="col-type">f64</span>
+                    </th>
+                    <th class="col-num">
+                      count <span class="col-type">u32</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Germany</td>
+                    <td class="num">4,821.33</td>
+                    <td class="num">1,204</td>
+                  </tr>
+                  <tr>
+                    <td>France</td>
+                    <td class="num">3,942.17</td>
+                    <td class="num">987</td>
+                  </tr>
+                  <tr>
+                    <td>UK</td>
+                    <td class="num">5,103.88</td>
+                    <td class="num">2,341</td>
+                  </tr>
+                  <tr>
+                    <td>Netherlands</td>
+                    <td class="num">3,291.50</td>
+                    <td class="num">412</td>
+                  </tr>
+                  <tr>
+                    <td>Spain</td>
+                    <td class="num">2,877.44</td>
+                    <td class="num">783</td>
+                  </tr>
+                  <tr>
+                    <td>Italy</td>
+                    <td class="num">2,654.90</td>
+                    <td class="num">659</td>
+                  </tr>
+                  <tr>
+                    <td>Sweden</td>
+                    <td class="num">4,122.11</td>
+                    <td class="num">228</td>
+                  </tr>
+                  <tr>
+                    <td>Poland</td>
+                    <td class="null">null</td>
+                    <td class="num">104</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="bottom-nav">
+            <div class="nav-item">
+              <div class="nav-icon">⊞</div>
+              <div class="nav-label">Home</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">◇</div>
+              <div class="nav-label">Chat</div>
+            </div>
+            <div class="nav-item">
+              <div class="nav-icon">⊸</div>
+              <div class="nav-label">Pipeline</div>
+            </div>
+            <div class="nav-item active">
+              <div class="nav-icon">⊟</div>
+              <div class="nav-label">Data</div>
+            </div>
+          </div>
+        </div>
+        <div class="annotation">
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Step tabs</strong> — inspect output at any pipeline stage
+              without running again
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Polars types</strong> shown in column headers — matches
+              desktop conventions
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>null values</strong> rendered in faint colour —
+              immediately distinguishable
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════
+       5 — STEP CONFIG PANEL
+  ══════════════════════════════ -->
+      <div class="screen-wrapper">
+        <div class="screen-meta">
+          <div class="screen-num">05</div>
+          <div class="screen-title">Manual Tuning</div>
+          <div class="screen-tag primary">Fine-tune controls</div>
+        </div>
+        <div class="phone" style="position: relative">
+          <div class="status-bar">
+            <span class="status-time">09:41</span>
+            <div class="status-right"><span>WiFi</span><span>100%</span></div>
+          </div>
+
+          <!-- Dimmed pipeline behind -->
+          <div class="bg-pipeline-preview">
+            <div
+              style="
+                font-size: 10px;
+                font-weight: 700;
+                color: #333;
+                margin-bottom: 8px;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+              "
+            >
+              Customer Churn Analysis
+            </div>
+            <div class="bg-step-row">
+              <span style="color: #333">▽</span> Filter
+            </div>
+            <div class="bg-step-row selected-bg">
+              <span style="color: #888">↕</span> Sort
+            </div>
+            <div class="bg-step-row">
+              <span style="color: #333">▤</span> Group By
+            </div>
+            <div class="bg-step-row">
+              <span style="color: #333">✂</span> Select
+            </div>
+          </div>
+          <div class="sheet-overlay"></div>
+
+          <!-- Config panel — anchored to bottom, no drag handle -->
+          <div class="bottom-sheet">
+            <!-- Titlebar: breadcrumb + close -->
+            <div class="panel-titlebar">
+              <div class="panel-breadcrumb">
+                <span class="panel-crumb">pipeline</span>
+                <span class="panel-crumb-sep">/</span>
+                <span class="panel-crumb">step 2</span>
+                <span class="panel-crumb-sep">/</span>
+                <span class="panel-crumb active">sort · config</span>
+              </div>
+              <div class="panel-close">✕</div>
+            </div>
+
+            <!-- AI suggestion — single dense row -->
+            <div class="panel-ai-row">
+              <div class="panel-ai-tag">AI →</div>
+              <div class="panel-ai-msg">
+                add <strong>customer_since</strong> as secondary key to break
+                ties
+              </div>
+              <div class="panel-ai-apply">apply</div>
+            </div>
+
+            <!-- Property grid — label | control, no separate label blocks -->
+            <div class="prop-grid">
+              <div class="prop-row">
+                <div class="prop-key">column</div>
+                <div class="prop-val focused">
+                  <div class="pv-text">
+                    <span>revenue</span>
+                    <span class="pv-chevron">⌄</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <div class="prop-key">direction</div>
+                <div class="prop-val">
+                  <div class="pv-segment">
+                    <div class="pv-seg active">↓ desc</div>
+                    <div class="pv-seg">↑ asc</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <div class="prop-key">limit</div>
+                <div class="prop-val">
+                  <div class="pv-toggle">
+                    <div class="pv-toggle-track on"></div>
+                    <span class="pv-toggle-label">enabled</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <div class="prop-key">max rows</div>
+                <div class="prop-val focused">
+                  <div class="pv-number">
+                    <div class="pv-num-val">20</div>
+                    <div class="pv-num-stepper">
+                      <div class="pv-step-btn">▲</div>
+                      <div class="pv-step-btn">▼</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <div class="prop-key">nulls</div>
+                <div class="prop-val">
+                  <div class="pv-segment">
+                    <div class="pv-seg">first</div>
+                    <div class="pv-seg active">last</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <div class="prop-key">stable</div>
+                <div class="prop-val">
+                  <div class="pv-toggle">
+                    <div class="pv-toggle-track off"></div>
+                    <span class="pv-toggle-label off">disabled</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="prop-row">
+                <div class="prop-key">secondary</div>
+                <div class="prop-val">
+                  <div class="pv-text">
+                    <span style="color: var(--fg-faint)">— none —</span>
+                    <span class="pv-chevron">⌄</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- /prop-grid -->
+
+            <!-- Action bar — full-width, divided by borders -->
+            <div class="panel-footer">
+              <div class="panel-action">discard</div>
+              <div class="panel-action primary">apply</div>
+            </div>
+          </div>
+          <!-- /bottom-sheet -->
+        </div>
+        <div class="annotation">
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>2px top border</strong> anchors the panel — no drag
+              handle, no rounded cap, just a hard edge
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Breadcrumb titlebar</strong> shows context without needing
+              a title. Matches desktop panel header pattern.
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>Property grid</strong> — fixed key column, value fills
+              right. Inline controls: stepper, segment, toggle. No stacked
+              label/field pairs.
+            </div>
+          </div>
+          <div class="ann-item">
+            <div class="ann-mark"></div>
+            <div class="ann-text">
+              <strong>AI suggestion</strong> compressed to a single row — prefix
+              tag | message | apply link. Always visible, never intrusive.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+     UX FLOW
+══════════════════════════════════════ -->
+    <div class="bottom-section">
+      <div class="section-header-block">
+        <h2>Interaction Flow</h2>
+        <p>
+          AI-first with manual escape hatches. Users never leave the chat unless
+          they choose to.
+        </p>
+      </div>
+      <div class="flow-row">
+        <div class="flow-node">
+          <div class="flow-node-label">01</div>
+          <div class="flow-node-name">Open</div>
+          <div class="flow-node-desc">
+            Pick or create an analysis from the gallery
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node primary-node">
+          <div class="flow-node-label">02 · primary</div>
+          <div class="flow-node-name">Chat</div>
+          <div class="flow-node-desc">Describe intent in plain language</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node">
+          <div class="flow-node-label">03</div>
+          <div class="flow-node-name">Confirm</div>
+          <div class="flow-node-desc">
+            Review AI action cards, apply or edit
+          </div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node">
+          <div class="flow-node-label">04 · optional</div>
+          <div class="flow-node-name">Tune</div>
+          <div class="flow-node-desc">Tap any step to open manual config</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node">
+          <div class="flow-node-label">05</div>
+          <div class="flow-node-name">Inspect</div>
+          <div class="flow-node-desc">Preview data output at any step</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+     DESIGN TOKENS
+══════════════════════════════════════ -->
+    <div class="bottom-section" style="margin-top: 32px">
+      <div class="section-header-block">
+        <h2>Tokens — dark theme (existing panda.config.ts)</h2>
+        <p>
+          No new colours introduced. All values lifted directly from the
+          existing semantic token set.
+        </p>
+      </div>
+      <div class="tokens-grid">
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #0e0e0e"></div>
+          <div class="token-info">
+            <div class="token-name">bg.primary</div>
+            <div class="token-val">#0e0e0e</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #111111"></div>
+          <div class="token-info">
+            <div class="token-name">bg.secondary</div>
+            <div class="token-val">#111111</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #171717"></div>
+          <div class="token-info">
+            <div class="token-name">bg.tertiary</div>
+            <div class="token-val">#171717</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #1f1f1f"></div>
+          <div class="token-info">
+            <div class="token-name">bg.muted</div>
+            <div class="token-val">#1f1f1f</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #262626"></div>
+          <div class="token-info">
+            <div class="token-name">bg.hover</div>
+            <div class="token-val">#262626</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div
+            class="token-swatch"
+            style="background: #fafafa; border-color: #444"
+          ></div>
+          <div class="token-info">
+            <div class="token-name">fg.primary</div>
+            <div class="token-val">#fafafa</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #d4d4d4"></div>
+          <div class="token-info">
+            <div class="token-name">fg.secondary</div>
+            <div class="token-val">#d4d4d4</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #a3a3a3"></div>
+          <div class="token-info">
+            <div class="token-name">fg.tertiary</div>
+            <div class="token-val">#a3a3a3</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #737373"></div>
+          <div class="token-info">
+            <div class="token-name">fg.muted</div>
+            <div class="token-val">#737373</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #525252"></div>
+          <div class="token-info">
+            <div class="token-name">fg.faint</div>
+            <div class="token-val">#525252</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #86efac"></div>
+          <div class="token-info">
+            <div class="token-name">fg.success</div>
+            <div class="token-val">#86efac</div>
+          </div>
+        </div>
+        <div class="token-cell">
+          <div class="token-swatch" style="background: #fde047"></div>
+          <div class="token-info">
+            <div class="token-name">fg.warning</div>
+            <div class="token-val">#fde047</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

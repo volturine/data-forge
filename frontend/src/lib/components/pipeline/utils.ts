@@ -6,8 +6,8 @@ import {
 	Brush,
 	Calculator,
 	Calendar,
-	CircleHelp,
 	Dices,
+	Download,
 	Eye,
 	Filter,
 	LayoutGrid,
@@ -26,6 +26,11 @@ import {
 	Trash2,
 	Bell
 } from 'lucide-svelte';
+import {
+	isChartStepType,
+	normalizePipelineStepType,
+	type CanonicalStepType
+} from '$lib/types/pipeline-step';
 
 function truncate(items: string[], max = 3, len = 20): string {
 	if (!items?.length) return '';
@@ -42,7 +47,7 @@ type StepTypeConfig = {
 	summary: (c: Record<string, unknown>) => string;
 };
 
-const stepTypes: Record<string, StepTypeConfig> = {
+const stepTypes = {
 	filter: {
 		label: 'Filter',
 		icon: Filter,
@@ -71,7 +76,7 @@ const stepTypes: Record<string, StepTypeConfig> = {
 		icon: BarChart3,
 		typeLabel: 'group_by',
 		summary: (c) => {
-			const keys = c.groupBy as string[];
+			const keys = c.group_by as string[];
 			const aggs = c.aggregations as Array<{ column: string; function: string }>;
 			if (!keys?.length) return 'not configured';
 			const aggStr =
@@ -225,7 +230,13 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			const value = c.value as number;
 			const unit = c.unit as string;
 			if (!col || !op) return 'not configured';
-			const detail = component ? `.${component}` : value && unit ? `(${value} ${unit})` : '';
+			const detail = component
+				? `.${component}`
+				: value && unit
+					? `(${value} ${unit})`
+					: unit
+						? `(${unit})`
+						: '';
 			return `${col}.${op}${detail} → ${newCol}`;
 		}
 	},
@@ -282,27 +293,7 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			return `top ${k} by ${col} ${desc ? '▼' : '▲'}`;
 		}
 	},
-	null_count: {
-		label: 'Null Count',
-		icon: CircleHelp,
-		typeLabel: 'null_count',
-		summary: () => 'count nulls per column'
-	},
-	value_counts: {
-		label: 'Value Counts',
-		icon: BarChart3,
-		typeLabel: 'value_counts',
-		summary: (c) => {
-			const col = c.column as string;
-			const norm = c.normalize as boolean;
-			const sort = c.sort as boolean;
-			if (!col) return 'not configured';
-			const extras = [];
-			if (norm) extras.push('%');
-			if (sort) extras.push('sorted');
-			return extras.length ? `${col} (${extras.join(', ')})` : col;
-		}
-	},
+
 	chart: {
 		label: 'Chart',
 		icon: BarChart4,
@@ -365,13 +356,26 @@ const stepTypes: Record<string, StepTypeConfig> = {
 			const format = (c.format as string) || 'csv';
 			const dest = (c.destination as string) || 'download';
 			if (dest === 'datasource') {
-				const dsType = (c.datasource_type as string) || 'iceberg';
-				return `datasource (${dsType})`;
+				return 'datasource (iceberg)';
 			}
 			return `${filename}.${format}`;
 		}
+	},
+	download: {
+		label: 'Download',
+		icon: Download,
+		typeLabel: 'download',
+		summary: (c) => {
+			const filename = (c.filename as string) || 'download';
+			const format = (c.format as string) || 'csv';
+			return `${filename}.${format}`;
+		}
 	}
-};
+} satisfies Partial<Record<CanonicalStepType, StepTypeConfig>>;
+
+function hasStepTypeConfig(type: string): type is keyof typeof stepTypes {
+	return type in stepTypes;
+}
 
 const defaultStepType: StepTypeConfig = {
 	label: 'Unknown',
@@ -381,10 +385,26 @@ const defaultStepType: StepTypeConfig = {
 };
 
 function getStepTypeConfig(type: string): StepTypeConfig {
-	if (type.startsWith('plot_')) {
-		return stepTypes.chart ?? defaultStepType;
+	if (isChartStepType(type)) return stepTypes.chart;
+	if (hasStepTypeConfig(type)) {
+		return stepTypes[type];
 	}
-	return stepTypes[type] ?? defaultStepType;
+	return defaultStepType;
 }
 
-export { type StepTypeConfig, defaultStepType, stepTypes, getStepTypeConfig };
+function isChartStep(type: string): boolean {
+	return isChartStepType(type);
+}
+
+function normalizeStepType(type: string): string {
+	return normalizePipelineStepType(type);
+}
+
+export {
+	type StepTypeConfig,
+	defaultStepType,
+	stepTypes,
+	getStepTypeConfig,
+	isChartStep,
+	normalizeStepType
+};

@@ -4,22 +4,22 @@
 # ============================================
 # Stage 1: Build Frontend
 # ============================================
-FROM node:20-slim AS frontend-builder
+FROM oven/bun:1 AS frontend-builder
 
 WORKDIR /app/frontend
 
 # Copy package files
-COPY frontend/package*.json ./
+COPY frontend/package.json frontend/bun.lock* ./
 
 # Install dependencies
-RUN npm ci --omit=dev
+RUN bun install --frozen-lockfile
 
 # Copy frontend source
 COPY frontend/ .
 
 # Build static site
 # The build will be output to /app/frontend/build
-RUN npm run build
+RUN bun run build
 
 # ============================================
 # Stage 2: Backend Runtime (Build + Run)

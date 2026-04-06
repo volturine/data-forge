@@ -1,14 +1,19 @@
+import asyncio
+import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import polars as pl
 import pytest
 from openpyxl import Workbook
+from sqlmodel import select
 
 from modules.analysis.models import Analysis
 from modules.datasource.models import DataSource
 from modules.datasource.service import _compute_histogram, create_analysis_datasource
+from modules.engine_runs.models import EngineRun
 
 
 class TestDataSourceValidation:
@@ -132,10 +137,7 @@ class TestDataSourceValidation:
         excel_path = temp_upload_dir / 'test.xlsx'
         df = pl.DataFrame({'id': [1, 2, 3], 'name': ['A', 'B', 'C']})
 
-        try:
-            df.write_excel(excel_path)
-        except (ImportError, ValueError, OSError):
-            pytest.skip('Excel support not available')
+        df.write_excel(excel_path)
 
         with open(excel_path, 'rb') as f:
             files = {'file': ('test.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
@@ -246,6 +248,109 @@ class TestDataSourceValidation:
         assert body['preflight_id']
         assert len(body['preview']) == 3
 
+    @pytest.mark.asyncio
+    async def test_preflight_cleanup_removes_expired_without_clear_preflight(self, tmp_path: Path, monkeypatch) -> None:
+        from modules.datasource import preflight
+
+        keep_path = tmp_path / 'keep.xlsx'
+        keep_path.write_bytes(b'keep')
+        drop_path = tmp_path / 'drop.xlsx'
+        drop_path.write_bytes(b'drop')
+        stay_path = tmp_path / 'stay.xlsx'
+        stay_path.write_bytes(b'stay')
+        now = datetime.now(UTC).replace(tzinfo=None)
+
+        async def fail(*args, **kwargs) -> None:
+            raise AssertionError('_cleanup_expired() should not call clear_preflight()')
+
+        monkeypatch.setattr(preflight, 'clear_preflight', fail)
+        preflight._PREFLIGHTS.clear()
+        preflight._PREFLIGHTS['keep'] = preflight.ExcelPreflight(
+            temp_path=keep_path,
+            sheets=[],
+            tables={},
+            named_ranges=[],
+            created_at=now - preflight._PREFLIGHT_TTL - timedelta(seconds=1),
+            delete_file=False,
+        )
+        preflight._PREFLIGHTS['drop'] = preflight.ExcelPreflight(
+            temp_path=drop_path,
+            sheets=[],
+            tables={},
+            named_ranges=[],
+            created_at=now - preflight._PREFLIGHT_TTL - timedelta(seconds=1),
+            delete_file=True,
+        )
+        preflight._PREFLIGHTS['stay'] = preflight.ExcelPreflight(
+            temp_path=stay_path,
+            sheets=[],
+            tables={},
+            named_ranges=[],
+            created_at=now,
+            delete_file=True,
+        )
+
+        try:
+            await preflight._cleanup_expired()
+
+            assert 'keep' not in preflight._PREFLIGHTS
+            assert 'drop' not in preflight._PREFLIGHTS
+            assert 'stay' in preflight._PREFLIGHTS
+            assert keep_path.exists()
+            assert not drop_path.exists()
+            assert stay_path.exists()
+        finally:
+            preflight._PREFLIGHTS.clear()
+
+    @pytest.mark.asyncio
+    async def test_create_preflight_allows_concurrent_workbook_parsing(self, tmp_path: Path, monkeypatch) -> None:
+        from modules.datasource import preflight
+
+        class Sheet:
+            def __init__(self, title: str) -> None:
+                self.title = title
+                self.tables = {f'{title}_table': object()}
+
+        class Book:
+            def __init__(self, title: str) -> None:
+                self.sheetnames = [title]
+                self.worksheets = [Sheet(title)]
+                self.defined_names = [f'{title}_range']
+
+        barrier = threading.Barrier(2, timeout=1)
+
+        def fake_load_workbook(path: Path, read_only: bool = False, data_only: bool = True) -> Book:
+            assert read_only is False
+            assert data_only is True
+            barrier.wait()
+            return Book(path.stem)
+
+        one = tmp_path / 'one.xlsx'
+        two = tmp_path / 'two.xlsx'
+        one.write_bytes(b'one')
+        two.write_bytes(b'two')
+        monkeypatch.setattr(preflight, 'load_workbook', fake_load_workbook)
+        preflight._PREFLIGHTS.clear()
+
+        try:
+            first, second = await asyncio.wait_for(
+                asyncio.gather(
+                    preflight.create_preflight(one),
+                    preflight.create_preflight(two),
+                ),
+                timeout=2,
+            )
+            first_id, first_preflight = first
+            second_id, second_preflight = second
+
+            assert first_id != second_id
+            assert first_preflight.sheets == ['one']
+            assert second_preflight.sheets == ['two']
+            assert preflight._PREFLIGHTS[first_id] is first_preflight
+            assert preflight._PREFLIGHTS[second_id] is second_preflight
+        finally:
+            preflight._PREFLIGHTS.clear()
+
     def test_confirm_excel_end_row(self, client, temp_upload_dir: Path):
         """Test Excel confirm stores manual end row selection."""
         excel_path = temp_upload_dir / 'bounds.xlsx'
@@ -286,7 +391,7 @@ class TestDataSourceValidation:
 
         assert confirm.status_code == 200
         config = confirm.json()['config']
-        assert config['end_row'] == 1
+        assert config['source']['end_row'] == 1
 
     def test_confirm_excel_cell_range_stores_bounds(self, client, temp_upload_dir: Path):
         """Test Excel confirm stores manual cell range selection."""
@@ -318,12 +423,12 @@ class TestDataSourceValidation:
 
         assert confirm.status_code == 200
         config = confirm.json()['config']
-        assert config['cell_range'] == 'Sheet1!A1:B3'
-        assert config['sheet_name'] == 'Sheet1'
-        assert config['start_row'] == 0
-        assert config['start_col'] == 0
-        assert config['end_col'] == 1
-        assert config['end_row'] == 2
+        assert config['source']['cell_range'] == 'Sheet1!A1:B3'
+        assert config['source']['sheet_name'] == 'Sheet1'
+        assert config['source']['start_row'] == 0
+        assert config['source']['start_col'] == 0
+        assert config['source']['end_col'] == 1
+        assert config['source']['end_row'] == 2
 
 
 class TestDataSourceSchema:
@@ -403,6 +508,23 @@ class TestDataSourceListing:
         # Should return at most 1 item if pagination is supported
         if isinstance(data, list):
             assert len(data) <= 1 or len(data) == len(sample_datasources)
+
+    def test_list_does_not_extract_or_write_schema_cache(self, client, test_db_session, sample_datasource: DataSource, monkeypatch):
+        """Listing datasources stays read-only for schema cache."""
+        calls = {'count': 0}
+
+        def fail_extract(*args, **kwargs):
+            calls['count'] += 1
+            raise AssertionError('list_datasources must not call _extract_schema')
+
+        monkeypatch.setattr('modules.datasource.service._extract_schema', fail_extract)
+
+        response = client.get('/api/v1/datasource')
+        assert response.status_code == 200
+        assert calls['count'] == 0
+
+        test_db_session.refresh(sample_datasource)
+        assert sample_datasource.schema_cache is None
 
 
 class TestComputeHistogram:
@@ -506,7 +628,7 @@ class TestDataSourceDeletion:
 
     def test_delete_datasource_cascades(self, client, test_db_session, sample_analysis):
         """Test that deleting a datasource handles linked analyses."""
-        datasource_id = sample_analysis.pipeline_definition['datasource_ids'][0]
+        datasource_id = sample_analysis.pipeline_definition['tabs'][0]['datasource']['id']
 
         # Delete the datasource
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
@@ -514,25 +636,32 @@ class TestDataSourceDeletion:
         # Should succeed or return appropriate error
         assert response.status_code in [204, 400, 409]
 
-    def test_delete_datasource_removes_file(self, client, temp_upload_dir: Path):
-        """Test that deleting a datasource removes the file."""
-        # Create and upload a file
-        csv_path = temp_upload_dir / 'to_delete.csv'
-        df = pl.DataFrame({'id': [1], 'value': [10]})
-        df.write_csv(csv_path)
+    def test_delete_uploaded_datasource_removes_iceberg_and_upload(self, client):
+        payload = b'id,value\n1,10\n2,20\n'
+        files = {'file': ('to_delete.csv', payload, 'text/csv')}
+        data = {'name': 'Delete Test'}
 
-        with open(csv_path, 'rb') as f:
-            files = {'file': ('to_delete.csv', f.read(), 'text/csv')}
-            data = {'name': 'Delete Test'}
-            response = client.post('/api/v1/datasource/upload', files=files, data=data)
+        create = client.post('/api/v1/datasource/upload', files=files, data=data)
 
-        datasource_id = response.json()['id']
+        assert create.status_code == 200
+        body = create.json()
+        datasource_id = body['id']
+        metadata_path = Path(body['config']['metadata_path'])
+        source = body['config']['source']
+        upload_path = Path(source['file_path'])
 
-        # Delete the datasource
+        assert metadata_path.exists()
+        assert upload_path.exists()
+        assert source['source_type'] == 'file'
+
         response = client.delete(f'/api/v1/datasource/{datasource_id}')
 
-        # File should be removed (implementation dependent)
         assert response.status_code == 204
+        assert not metadata_path.exists()
+        assert not upload_path.exists()
+
+        get_response = client.get(f'/api/v1/datasource/{datasource_id}')
+        assert get_response.status_code == 404
 
 
 class TestIsHidden:
@@ -608,25 +737,146 @@ class TestIsHidden:
         assert response.json()['is_hidden'] is True
 
     def test_auto_creation_on_analysis_update(self, client, test_db_session, sample_analysis: Analysis):
-        """Updating an analysis with a tab lacking datasource_id auto-creates a hidden datasource."""
-        from tests.conftest import acquire_lock
-
-        client_id, lock_token = acquire_lock(client, sample_analysis.id)
-
+        """Updating an analysis keeps explicit datasource ids."""
         new_tab_id = str(uuid.uuid4())
-        update_payload = {
-            'client_id': client_id,
-            'lock_token': lock_token,
+        update_payload: dict[str, object] = {
             'tabs': [
                 {
                     'id': new_tab_id,
                     'name': 'Auto Tab',
-                    'type': 'datasource',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_analysis.pipeline_definition['tabs'][0]['datasource']['id'],
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': str(uuid.uuid4()),
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_datasource',
+                    },
                     'steps': [],
                 },
             ],
-            'pipeline_steps': [],
         }
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=update_payload)
-        assert response.status_code == 409
+        assert response.status_code == 200
+
+
+class TestDatasourceRefresh:
+    @patch('modules.datasource.service.load_datasource')
+    @patch('modules.datasource.service._write_iceberg_table')
+    def test_refresh_external_datasource_updates_snapshot_fields(
+        self,
+        mock_write,
+        mock_load,
+        test_db_session,
+        sample_csv_file: Path,
+    ):
+        from modules.datasource.service import refresh_external_datasource
+
+        class _Snap:
+            snapshot_id = 222
+            timestamp_ms = 654321
+
+        class _Table:
+            def current_snapshot(self):
+                return _Snap()
+
+        mock_load.return_value = pl.DataFrame({'x': [1]}).lazy()
+        mock_write.return_value = _Table()
+
+        ds = DataSource(
+            id=str(uuid.uuid4()),
+            name='Refreshable Raw',
+            source_type='iceberg',
+            config={
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds)
+        test_db_session.commit()
+
+        out = refresh_external_datasource(test_db_session, ds.id)
+        assert out.config['snapshot_id'] == '222'
+        assert out.config['snapshot_timestamp_ms'] == 654321
+        assert out.config['current_snapshot_id'] == '222'
+        assert out.config['current_snapshot_timestamp_ms'] == 654321
+        assert out.config['refresh'] is not None
+        mock_write.assert_called_once_with(mock_load.return_value, Path(out.config['metadata_path']), build_mode='full')
+
+        runs = (
+            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
+            .scalars()
+            .all()
+        )
+        latest = sorted(runs, key=lambda row: row.created_at)[-1]
+        assert latest.kind == 'datasource_update'
+        assert latest.result_json is not None
+        assert latest.result_json['snapshot_id'] == '222'
+
+
+class TestDatasourceUpdateRunLogging:
+    def test_update_raw_iceberg_logs_snapshot_id(self, client, test_db_session, sample_csv_file: Path):
+        ds = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'snapshot_id': '500',
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds)
+        test_db_session.commit()
+
+        response = client.put(f'/api/v1/datasource/{ds.id}', json={'name': 'Renamed Raw'})
+        assert response.status_code == 200
+
+        runs = (
+            test_db_session.execute(select(EngineRun).where(EngineRun.datasource_id == ds.id))  # type: ignore[arg-type]
+            .scalars()
+            .all()
+        )
+        latest = sorted(runs, key=lambda row: row.created_at)[-1]
+        assert latest.kind == 'datasource_update'
+        assert latest.result_json is not None
+        assert latest.result_json['snapshot_id'] == '500'
+
+    def test_update_rejects_system_snapshot_fields(self, client, test_db_session, sample_csv_file: Path):
+        ds = DataSource(
+            id=str(uuid.uuid4()),
+            name='Snapshot Locked',
+            source_type='iceberg',
+            config={
+                'metadata_path': str(Path('data') / 'clean' / str(uuid.uuid4()) / 'master'),
+                'branch': 'master',
+                'snapshot_id': '111',
+                'snapshot_timestamp_ms': 1000,
+                'current_snapshot_id': '111',
+                'current_snapshot_timestamp_ms': 1000,
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds)
+        test_db_session.commit()
+
+        response = client.put(
+            f'/api/v1/datasource/{ds.id}',
+            json={'config': {'current_snapshot_id': '999'}},
+        )
+
+        assert response.status_code == 400
+        assert 'system-managed' in response.json()['detail']

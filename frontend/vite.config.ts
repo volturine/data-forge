@@ -1,6 +1,10 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
+const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
+const apiPort = parseInt(process.env.PORT || '8000', 10);
+const apiHost = process.env.VITE_BACKEND_HOST || '127.0.0.1';
+
 export default defineConfig({
 	resolve: {
 		dedupe: [
@@ -12,12 +16,19 @@ export default defineConfig({
 		]
 	},
 	plugins: [sveltekit()],
+
 	server: {
 		host: '0.0.0.0',
-		port: 3000,
+		port,
 		allowedHosts: true,
+		fs: {
+			allow: ['styled-system']
+		},
 		proxy: {
-			'/api': 'http://localhost:8000'
+			'/api': {
+				target: `http://${apiHost}:${apiPort}`,
+				ws: true
+			}
 		},
 		hmr: {
 			host: '0.0.0.0'

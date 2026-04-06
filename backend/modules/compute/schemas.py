@@ -1,6 +1,7 @@
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class EngineStatus(StrEnum):
@@ -57,15 +58,44 @@ class EngineDefaults(BaseModel):
     streaming_chunk_size: int  # 0 = auto
 
 
+class AnalysisPipelineDatasourceConfig(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra='allow')
+
+    branch: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+
+
+class AnalysisPipelineDatasource(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    analysis_tab_id: str | None
+    config: AnalysisPipelineDatasourceConfig
+
+
 class AnalysisPipelineTab(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     name: str | None = None
-    datasource_id: str | None = None
-    output_datasource_id: str | None = None
-    datasource_config: dict | None = None
+    datasource: AnalysisPipelineDatasource
+    output: dict
     steps: list[dict]
+
+    @field_validator('output')
+    @classmethod
+    def validate_output(cls, value: dict) -> dict:
+        if not isinstance(value, dict):
+            raise ValueError('Analysis pipeline tab output must be a dict')
+        output_id = value.get('result_id')
+        if not isinstance(output_id, str) or not output_id.strip():
+            raise ValueError('Analysis pipeline tab output.result_id is required')
+        filename = value.get('filename')
+        if not isinstance(filename, str) or not filename.strip():
+            raise ValueError('Analysis pipeline tab output.filename is required')
+        export_format = value.get('format')
+        if not isinstance(export_format, str) or not export_format.strip():
+            raise ValueError('Analysis pipeline tab output.format is required')
+        return value
 
 
 class AnalysisPipelinePayload(BaseModel):
@@ -74,6 +104,13 @@ class AnalysisPipelinePayload(BaseModel):
     analysis_id: str
     tabs: list[AnalysisPipelineTab]
     sources: dict[str, dict]
+
+    @field_validator('tabs')
+    @classmethod
+    def validate_tabs(cls, value: list[AnalysisPipelineTab]) -> list[AnalysisPipelineTab]:
+        if not isinstance(value, list) or not value:
+            raise ValueError('analysis_pipeline.tabs must include at least one tab')
+        return value
 
 
 class EngineStatusSchema(BaseModel):
@@ -104,9 +141,6 @@ class SpawnEngineRequest(BaseModel):
     resource_config: EngineResourceConfig | None = None
 
 
-EngineDefaultsResponse = EngineDefaults  # Alias for backwards compatibility
-
-
 class StepPreviewRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -117,7 +151,6 @@ class StepPreviewRequest(BaseModel):
     row_limit: int = 1000
     page: int = 1
     resource_config: EngineResourceConfig | None = None
-    datasource_config: dict | None = None
 
 
 class StepPreviewResponse(BaseModel):
@@ -142,18 +175,12 @@ class ExportFormat(StrEnum):
     JSON = 'json'
     NDJSON = 'ndjson'
     DUCKDB = 'duckdb'
+    EXCEL = 'excel'
 
 
 class ExportDestination(StrEnum):
     DOWNLOAD = 'download'
-    FILESYSTEM = 'filesystem'
     DATASOURCE = 'datasource'
-
-
-class ExportDatasourceType(StrEnum):
-    ICEBERG = 'iceberg'
-    DUCKDB = 'duckdb'
-    FILE = 'file'
 
 
 class IcebergExportOptions(BaseModel):
@@ -162,14 +189,6 @@ class IcebergExportOptions(BaseModel):
     table_name: str = 'exported_data'
     namespace: str = 'outputs'
     branch: str = 'master'
-
-
-class DuckDBExportOptions(BaseModel):
-    """Options for DuckDB export when destination is 'datasource'."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    table_name: str = 'data'
 
 
 class ExportRequest(BaseModel):
@@ -182,18 +201,17 @@ class ExportRequest(BaseModel):
     format: ExportFormat = ExportFormat.CSV
     filename: str = 'export'
     destination: ExportDestination = ExportDestination.DOWNLOAD
-    datasource_type: ExportDatasourceType = ExportDatasourceType.ICEBERG
     iceberg_options: IcebergExportOptions | None = None
-    duckdb_options: DuckDBExportOptions | None = None
-    datasource_config: dict | None = None
-    output_datasource_id: str | None = None
+    result_id: str | None = None
 
-    @field_validator('datasource_type')
+    @field_validator('result_id')
     @classmethod
-    def validate_datasource_type_for_output(cls, value: ExportDatasourceType, info):
-        destination = info.data.get('destination') if info.data else None
-        if destination == ExportDestination.DATASOURCE and value != ExportDatasourceType.ICEBERG:
-            raise ValueError('Output exports must use Iceberg datasources')
+    def validate_result_id(cls, value: str | None, info):
+        if not info.data:
+            return value
+        destination = info.data.get('destination')
+        if destination == ExportDestination.DATASOURCE and (not isinstance(value, str) or not value.strip()):
+            raise ValueError('Output exports require result_id')
         return value
 
 
@@ -204,10 +222,22 @@ class ExportResponse(BaseModel):
     filename: str
     format: str
     destination: str
-    file_path: str | None = None
     message: str | None = None
     datasource_id: str | None = None
     datasource_name: str | None = None
+
+
+class DownloadRequest(BaseModel):
+    """Request to download the result of a pipeline step in a specific format."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    analysis_id: str | None = None
+    target_step_id: str
+    analysis_pipeline: AnalysisPipelinePayload
+    tab_id: str | None = None
+    format: ExportFormat = ExportFormat.CSV
+    filename: str = 'download'
 
 
 class StepSchemaRequest(BaseModel):
@@ -217,7 +247,6 @@ class StepSchemaRequest(BaseModel):
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
-    datasource_config: dict | None = None
 
 
 class StepRowCountRequest(BaseModel):
@@ -227,7 +256,6 @@ class StepRowCountRequest(BaseModel):
     target_step_id: str
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
-    datasource_config: dict | None = None
 
 
 class IcebergSnapshotInfo(BaseModel):
@@ -270,12 +298,27 @@ class StepRowCountResponse(BaseModel):
     row_count: int
 
 
+class BuildStatus(StrEnum):
+    SUCCESS = 'success'
+    WARNING = 'warning'
+
+
+class BuildTabStatus(StrEnum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
+
+
+class ComputeRunStatus(StrEnum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
+
+
 class BuildTabResult(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     tab_id: str
     tab_name: str
-    status: str
+    status: BuildTabStatus
     error: str | None = None
 
 
@@ -292,3 +335,47 @@ class BuildRequest(BaseModel):
 
     analysis_pipeline: AnalysisPipelinePayload
     tab_id: str | None = None
+
+
+class ComputeWebsocketAction(StrEnum):
+    PREVIEW = 'preview'
+    SCHEMA = 'schema'
+    ROW_COUNT = 'row_count'
+    BUILD = 'build'
+
+
+class ComputeWebsocketRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    action: ComputeWebsocketAction
+    payload: dict = Field(default_factory=dict)
+
+
+class ComputeWebsocketMessageType(StrEnum):
+    STARTED = 'started'
+    RESULT = 'result'
+    ERROR = 'error'
+
+
+class ComputeWebsocketStartedMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.STARTED
+    action: ComputeWebsocketAction
+
+
+class ComputeWebsocketResultMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.RESULT
+    action: ComputeWebsocketAction
+    data: dict
+
+
+class ComputeWebsocketErrorMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.ERROR
+    action: ComputeWebsocketAction | None = None
+    error: str
+    status_code: int = 500

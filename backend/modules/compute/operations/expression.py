@@ -3,6 +3,7 @@
 import polars as pl
 
 from modules.compute.core.base import OperationHandler, OperationParams
+from modules.compute.operations._validation import validate_no_reflection_escape
 
 
 class ExpressionParams(OperationParams):
@@ -21,7 +22,9 @@ def parse_expression(expr_str: str) -> pl.Expr:
     if not expr_str or not expr_str.strip():
         raise ValueError('Expression cannot be empty')
 
-    # Basic security: block dangerous patterns
+    validate_no_reflection_escape(expr_str, label='Expression')
+
+    # Block dangerous patterns — defense in depth alongside __builtins__: {}
     dangerous = [
         'import ',
         '__import__',
@@ -32,13 +35,20 @@ def parse_expression(expr_str: str) -> pl.Expr:
         '__builtins__',
         '__class__',
         '__subclasses__',
+        '__mro__',
+        '__init__',
+        '__new__',
         'subprocess',
         'os.system',
         'os.popen',
+        'getattr(',
+        'setattr(',
+        'delattr(',
+        'vars(',
+        'dir(',
     ]
-    for pattern in dangerous:
-        if pattern in expr_str:
-            raise ValueError(f'Expression contains forbidden pattern: {pattern}')
+    if found := next((p for p in dangerous if p in expr_str), None):
+        raise ValueError(f'Expression contains forbidden pattern: {found}')
 
     try:
         result = eval(expr_str, {'__builtins__': {}, 'pl': pl})  # noqa: S307
@@ -56,21 +66,12 @@ def parse_expression(expr_str: str) -> pl.Expr:
 class ExpressionHandler(OperationHandler):
     """Create a new column using a Polars expression string."""
 
-    @property
-    def name(self) -> str:
-        return 'expression'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = ExpressionParams.model_validate(params)
 
-        expr = parse_expression(validated.expression)
-        aliased = expr.alias(validated.column_name)
-
-        return lf.with_columns(aliased)
+        return lf.with_columns(parse_expression(validated.expression).alias(validated.column_name))

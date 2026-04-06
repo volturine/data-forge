@@ -20,6 +20,7 @@ export interface CSVOptions {
 }
 
 export interface FileDataSourceConfig {
+	[key: string]: unknown;
 	file_path: string;
 	file_type: string;
 	options?: Record<string, unknown>;
@@ -36,12 +37,14 @@ export interface FileDataSourceConfig {
 }
 
 export interface DatabaseDataSourceConfig {
+	[key: string]: unknown;
 	connection_string: string;
 	query: string;
 	branch?: string | null;
 }
 
 export interface IcebergDataSourceConfig {
+	[key: string]: unknown;
 	metadata_path: string;
 	branch?: string | null;
 	branches?: string[] | null;
@@ -59,27 +62,58 @@ export interface IcebergDataSourceConfig {
 }
 
 export interface AnalysisDataSourceConfig {
+	[key: string]: unknown;
 	analysis_id: string;
 	analysis_tab_id?: string | null;
 }
 
 export type SourceType = 'file' | 'database' | 'iceberg' | 'analysis';
 
-export interface DataSourceCreate {
-	name: string;
-	source_type: SourceType;
-	config: Record<string, unknown>;
-}
+export type DataSourceConfig =
+	| FileDataSourceConfig
+	| DatabaseDataSourceConfig
+	| IcebergDataSourceConfig
+	| AnalysisDataSourceConfig;
 
-export interface DataSource {
+interface DataSourceBase {
 	id: string;
 	name: string;
-	source_type: SourceType;
-	config: Record<string, unknown>;
-	schema_cache: Record<string, unknown> | null;
+	schema_cache?: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;
 	created_by: string;
 	is_hidden: boolean;
 	created_at: string;
 	output_of_tab_id?: string | null;
+}
+
+export interface FileDataSource extends DataSourceBase {
+	source_type: 'file';
+	config: FileDataSourceConfig;
+}
+
+export interface DatabaseDataSource extends DataSourceBase {
+	source_type: 'database';
+	config: DatabaseDataSourceConfig;
+}
+
+export interface IcebergDataSource extends DataSourceBase {
+	source_type: 'iceberg';
+	config: IcebergDataSourceConfig;
+}
+
+export interface AnalysisDataSource extends DataSourceBase {
+	source_type: 'analysis';
+	config: AnalysisDataSourceConfig;
+}
+
+export type DataSource =
+	| FileDataSource
+	| DatabaseDataSource
+	| IcebergDataSource
+	| AnalysisDataSource;
+
+export interface DataSourceCreate {
+	name: string;
+	source_type: SourceType;
+	config: DataSourceConfig;
 }

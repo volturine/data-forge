@@ -4,6 +4,7 @@
 	import type { FileListItem, FileListResponse } from '$lib/api/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import { ArrowUp } from 'lucide-svelte';
+	import { css, emptyText, cx, row, divider } from '$lib/styles/panda';
 
 	let {
 		initialPath = '',
@@ -98,51 +99,93 @@
 </script>
 
 <div
-	class="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-overlay-soft"
-	role="button"
-	tabindex="0"
-	aria-label="Close file picker"
+	class={cx(
+		row,
+		css({
+			position: 'fixed',
+			inset: '0',
+			zIndex: 'modal',
+			justifyContent: 'center',
+			padding: '4',
+			backgroundColor: 'bg.overlaySoft'
+		})
+	)}
+	role="presentation"
 	onclick={oncancel}
 	onkeydown={handleBackdropKeydown}
 >
 	<div
-		class="flex w-full max-w-180 max-h-[70vh] flex-col border bg-panel border-tertiary"
+		class={css({
+			display: 'flex',
+			width: '100%',
+			maxWidth: 'modal',
+			maxHeight: '70vh',
+			flexDirection: 'column',
+			borderWidth: '1',
+			backgroundColor: 'bg.primary'
+		})}
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"
 		onclick={stopPickerEvent}
 		onkeydown={stopPickerEvent}
 	>
-		<div class="grid grid-cols-[1fr_auto] gap-2 border-b p-4 border-tertiary">
-			<div class="flex flex-col gap-1">
-				<h4 class="m-0 text-sm font-semibold text-fg-primary">Data directory</h4>
+		<div
+			class={css({
+				display: 'grid',
+				gridTemplateColumns: '1fr auto',
+				gap: '2',
+				borderBottomWidth: '1',
+				padding: '4'
+			})}
+		>
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+				<h4 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>Data directory</h4>
 				<div
-					class="flex flex-wrap items-center gap-1"
+					class={cx(row, css({ flexWrap: 'wrap', gap: '1' }))}
 					role="navigation"
 					aria-label="Path breadcrumb"
 				>
 					{#each crumbs as crumb, index (crumb.path)}
 						<button
 							type="button"
-							class="cursor-pointer border-none bg-transparent p-0 text-xs text-fg-secondary hover:text-fg-primary hover:underline disabled:text-fg-muted disabled:cursor-default disabled:no-underline"
+							class={css({
+								cursor: 'pointer',
+								border: 'none',
+								backgroundColor: 'transparent',
+								padding: '0',
+								fontSize: 'xs',
+								color: 'fg.secondary',
+								_hover: { color: 'fg.primary', textDecoration: 'underline' },
+								_disabled: { color: 'fg.muted', cursor: 'default', textDecoration: 'none' }
+							})}
 							onclick={() => load(crumb.path)}
 							disabled={loading}
 						>
 							{crumb.label}
 						</button>
 						{#if index < crumbs.length - 1}
-							<span class="text-xs text-fg-muted">/</span>
+							<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>/</span>
 						{/if}
 					{/each}
 				</div>
-				<span class="break-all text-xs text-fg-muted">{path}</span>
-				<span class="text-xs text-fg-muted"
-					>Select files or choose a folder for parquet datasets.</span
+				<span class={css({ wordBreak: 'break-all', fontSize: 'xs', color: 'fg.muted' })}
+					>{path}</span
 				>
+				<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+					Select files or choose a folder for parquet datasets.
+				</span>
 			</div>
-			<div class="flex items-center justify-end gap-2">
+			<div class={cx(row, css({ justifyContent: 'flex-end', gap: '2' }))}>
 				<button
-					class="cursor-pointer border-none bg-transparent p-0 text-xs text-accent"
+					class={css({
+						cursor: 'pointer',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '0',
+						fontSize: 'xs',
+						color: 'accent.primary'
+					})}
 					onclick={oncancel}
 				>
 					Close
@@ -150,25 +193,40 @@
 			</div>
 		</div>
 
-		<div class="flex-1 overflow-auto p-3">
+		<div class={css({ flex: '1', overflow: 'auto', padding: '3' })}>
 			{#if loading}
-				<div class="p-6 text-center text-sm text-fg-muted">Loading...</div>
+				<div class={emptyText({ size: 'panel' })}>Loading...</div>
 			{:else if error}
-				<div class="p-6 text-center text-sm text-fg-muted">{error}</div>
+				<div class={emptyText({ size: 'panel' })}>
+					{error}
+				</div>
 			{:else if entries.length === 0}
-				<div class="p-6 text-center text-sm text-fg-muted">No files found</div>
+				<div class={emptyText({ size: 'panel' })}>No files found</div>
 			{:else}
-				<div class="flex flex-col gap-2">
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 					{#each entries as entry (entry.path)}
 						<button
 							type="button"
-							class="flex w-full cursor-pointer items-center justify-between gap-2 border p-2 px-3 text-left bg-primary border-tertiary hover:bg-hover"
+							class={css({
+								display: 'flex',
+								width: '100%',
+								cursor: 'pointer',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								gap: '2',
+								borderWidth: '1',
+								padding: '2',
+								paddingX: '3',
+								textAlign: 'left',
+								backgroundColor: 'bg.primary',
+								_hover: { backgroundColor: 'bg.hover' }
+							})}
 							onclick={() => (entry.is_dir ? load(entry.path) : onselect(entry.path, false))}
 							disabled={loading}
 						>
-							<div class="flex flex-col gap-0.5">
-								<span class="text-sm text-fg-primary">{entry.name}</span>
-								<span class="text-xs text-fg-muted">{entryType(entry)}</span>
+							<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
+								<span class={css({ fontSize: 'sm' })}>{entry.name}</span>
+								<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>{entryType(entry)}</span>
 							</div>
 							<FileTypeBadge path={entry.name} isFolder={entry.is_dir} size="sm" />
 						</button>
@@ -177,10 +235,32 @@
 			{/if}
 		</div>
 
-		<div class="flex justify-between gap-2 border-t p-3 border-tertiary">
-			<div class="flex items-center gap-2">
+		<div
+			class={cx(
+				divider,
+				css({
+					display: 'flex',
+					justifyContent: 'space-between',
+					gap: '2',
+					padding: '3'
+				})
+			)}
+		>
+			<div class={cx(row, css({ gap: '2' }))}>
 				<button
-					class="inline-flex h-8 w-8 cursor-pointer items-center justify-center border disabled:cursor-not-allowed disabled:opacity-50 bg-primary border-tertiary text-fg-secondary hover:bg-hover hover:text-fg-primary"
+					class={css({
+						display: 'inline-flex',
+						height: 'rowLg',
+						width: 'rowLg',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'center',
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						color: 'fg.secondary',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+						_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+					})}
 					onclick={up}
 					disabled={!canUp}
 					aria-label="Go up"
@@ -188,7 +268,17 @@
 					<ArrowUp size={14} />
 				</button>
 				<button
-					class="cursor-pointer border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-tertiary hover:bg-hover hover:border-tertiary"
+					class={css({
+						cursor: 'pointer',
+						borderWidth: '1',
+						paddingX: '4',
+						paddingY: '2',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						backgroundColor: 'bg.secondary',
+						_hover: { backgroundColor: 'bg.hover' },
+						_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+					})}
 					onclick={() => onselect(path, true)}
 					disabled={loading || !path}
 				>
@@ -196,7 +286,17 @@
 				</button>
 			</div>
 			<button
-				class="cursor-pointer border px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-secondary text-fg-primary border-tertiary hover:bg-hover hover:border-tertiary"
+				class={css({
+					cursor: 'pointer',
+					borderWidth: '1',
+					paddingX: '4',
+					paddingY: '2',
+					fontSize: 'sm',
+					fontWeight: 'medium',
+					backgroundColor: 'bg.secondary',
+					_hover: { backgroundColor: 'bg.hover' },
+					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+				})}
 				onclick={() => load(path)}
 				disabled={loading}
 			>

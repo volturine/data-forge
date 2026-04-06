@@ -5,13 +5,18 @@ from unittest.mock import MagicMock, patch
 from sqlmodel import Session
 
 from core.namespace import namespace_paths
-from modules.analysis.models import Analysis
-from modules.analysis.schemas import AnalysisUpdateSchema, TabSchema
+from modules.analysis.models import Analysis, AnalysisStatus
+from modules.analysis.schemas import AnalysisUpdateSchema, TabDatasourceConfig, TabDatasourceSchema, TabOutputSchema, TabSchema
 from modules.analysis.service import update_analysis
 from modules.compute.service import _upsert_output_datasource, export_data
 from modules.datasource.models import DataSource
 from modules.datasource.service import create_analysis_datasource
 from modules.datasource.source_types import DataSourceType
+
+_OUT_A = str(uuid.uuid4())
+_OUT_B = str(uuid.uuid4())
+_OUT_1 = str(uuid.uuid4())
+_OUT_XYZ = str(uuid.uuid4())
 
 # ---------------------------------------------------------------------------
 # TabSchema
@@ -19,26 +24,63 @@ from modules.datasource.source_types import DataSourceType
 
 
 class TestTabSchemaOutputDatasourceId:
-    """TabSchema must declare output_datasource_id as an optional field."""
+    """TabSchema requires result_id for pipeline output routing."""
 
-    def test_default_is_none(self):
-        tab = TabSchema(id='t1', name='Tab 1')
-        assert tab.output_datasource_id is None
+    def test_accepts_uuid(self):
+        rid = str(uuid.uuid4())
+        tab = TabSchema(
+            id='t1',
+            name='Tab 1',
+            datasource=TabDatasourceSchema(
+                id='ds-1',
+                analysis_tab_id=None,
+                config=TabDatasourceConfig(branch='master'),
+            ),
+            output=TabOutputSchema(
+                result_id=rid,
+                format='parquet',
+                filename='tab_output',
+            ),
+            steps=[],
+        )
+        assert tab.output.result_id == rid
 
-    def test_accepts_string(self):
-        tab = TabSchema(id='t1', name='Tab 1', output_datasource_id='ds-abc')
-        assert tab.output_datasource_id == 'ds-abc'
+    def test_rejects_non_uuid(self):
+        import pytest
+        from pydantic import ValidationError
 
-    def test_accepts_none_explicitly(self):
-        tab = TabSchema(id='t1', name='Tab 1', output_datasource_id=None)
-        assert tab.output_datasource_id is None
+        with pytest.raises(ValidationError):
+            TabOutputSchema(result_id='not-a-uuid', format='parquet', filename='tab_output')
+
+    def test_rejects_non_v4_uuid(self):
+        """Only v4 UUIDs are accepted — AI agents should use the generate_uuid tool."""
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            TabOutputSchema(result_id='f9a8b2c4-e5d6-7f8a-9b0c-1d2e3f4a5b6c', format='parquet', filename='tab_output')
 
     def test_round_trips_through_model_dump(self):
-        tab = TabSchema(id='t1', name='Tab 1', output_datasource_id='ds-xyz')
+        rid = str(uuid.uuid4())
+        tab = TabSchema(
+            id='t1',
+            name='Tab 1',
+            datasource=TabDatasourceSchema(
+                id='ds-1',
+                analysis_tab_id=None,
+                config=TabDatasourceConfig(branch='master'),
+            ),
+            output=TabOutputSchema(
+                result_id=rid,
+                format='parquet',
+                filename='tab_output',
+            ),
+            steps=[],
+        )
         dumped = tab.model_dump()
-        assert dumped['output_datasource_id'] == 'ds-xyz'
+        assert dumped['output']['result_id'] == rid
         restored = TabSchema.model_validate(dumped)
-        assert restored.output_datasource_id == 'ds-xyz'
+        assert restored.output.result_id == rid
 
 
 # ---------------------------------------------------------------------------
@@ -83,36 +125,37 @@ class TestCreateAnalysisDatasourceHidden:
 class TestUpsertOutputDatasource:
     """_upsert_output_datasource creates or updates a DataSource."""
 
-    def test_creates_new_when_no_id(self, test_db_session: Session):
+    def test_creates_new_with_uuid(self, test_db_session: Session):
+        rid = str(uuid.uuid4())
         ds = _upsert_output_datasource(
             session=test_db_session,
-            output_datasource_id=None,
+            result_id=rid,
             name='brand-new',
             source_type='file',
             config={'file_path': '/tmp/test.csv', 'file_type': 'csv'},
             schema_cache={'col': 'Utf8'},
             analysis_id='a1',
         )
-        assert ds.id is not None
+        assert ds.id == rid
         assert ds.name == 'brand-new'
         assert ds.source_type == 'file'
         assert ds.created_by_analysis_id == 'a1'
         assert ds.created_by == 'analysis'
         assert ds.is_hidden is True
 
-    def test_creates_new_when_id_not_found(self, test_db_session: Session):
-        ds = _upsert_output_datasource(
-            session=test_db_session,
-            output_datasource_id='nonexistent-id',
-            name='fallback',
-            source_type='file',
-            config={'file_path': '/tmp/x.csv', 'file_type': 'csv'},
-            schema_cache={},
-            analysis_id=None,
-        )
-        assert ds.id == 'nonexistent-id'
-        assert ds.name == 'fallback'
-        assert ds.is_hidden is True
+    def test_rejects_non_uuid(self, test_db_session: Session):
+        import pytest
+
+        with pytest.raises(ValueError, match='result_id must be a valid UUID'):
+            _upsert_output_datasource(
+                session=test_db_session,
+                result_id='nonexistent-id',  # type: ignore[arg-type]
+                name='fallback',
+                source_type='file',
+                config={'file_path': '/tmp/x.csv', 'file_type': 'csv'},
+                schema_cache={},
+                analysis_id=None,
+            )
 
     def test_updates_existing(self, test_db_session: Session):
         existing_id = str(uuid.uuid4())
@@ -129,7 +172,7 @@ class TestUpsertOutputDatasource:
 
         ds = _upsert_output_datasource(
             session=test_db_session,
-            output_datasource_id=existing_id,
+            result_id=existing_id,
             name='new-name',
             source_type='iceberg',
             config={'table': 't1'},
@@ -147,34 +190,42 @@ class TestUpsertOutputDatasource:
 
 
 # ---------------------------------------------------------------------------
-# update_analysis — output_datasource_id auto-creation
+# update_analysis — result_id required
 # ---------------------------------------------------------------------------
 
 
 class TestUpdateAnalysisOutputDatasource:
-    """update_analysis only allocates output_datasource_id values, no datasource rows."""
+    """update_analysis requires result_id and does not create datasources."""
 
-    def test_allocates_output_id_without_creating_datasource(
-        self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
+    def test_keeps_output_id_without_creating_datasource(
+        self,
+        test_db_session: Session,
+        sample_analysis: Analysis,
+        sample_datasource: DataSource,
     ):
         tabs = [
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    result_id=_OUT_1,
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(
-            tabs=tabs,
-            pipeline_steps=[],
-        )
+        update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
-        assert len(result.tabs) == 1
-        tab = result.tabs[0]
-        assert tab.output_datasource_id is not None
-        output_ds = test_db_session.get(DataSource, tab.output_datasource_id)
+        assert len(result.pipeline_definition['tabs']) == 1
+        tab = result.pipeline_definition['tabs'][0]
+        assert tab['output']['result_id'] == _OUT_1
+        output_ds = test_db_session.get(DataSource, tab['output']['result_id'])
         assert output_ds is None
 
     def test_reuses_existing_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
@@ -182,68 +233,116 @@ class TestUpdateAnalysisOutputDatasource:
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    result_id=_OUT_1,
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        update = AnalysisUpdateSchema(tabs=tabs)
 
         result1 = update_analysis(test_db_session, sample_analysis.id, update)
-        output_id_1 = result1.tabs[0].output_datasource_id
-        assert output_id_1 is not None
+        output_id_1 = result1.pipeline_definition['tabs'][0]['output']['result_id']
 
         tabs2 = [
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
-                output_datasource_id=output_id_1,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    result_id=output_id_1,
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
-        update2 = AnalysisUpdateSchema(tabs=tabs2, pipeline_steps=[])
+        update2 = AnalysisUpdateSchema(tabs=tabs2)
         result2 = update_analysis(test_db_session, sample_analysis.id, update2)
-        output_id_2 = result2.tabs[0].output_datasource_id
+        output_id_2 = result2.pipeline_definition['tabs'][0]['output']['result_id']
 
         assert output_id_2 == output_id_1
 
     def test_multiple_tabs_each_get_output_id(self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource):
+        from datetime import UTC, datetime
+
+        other_analysis_id = str(uuid.uuid4())
+        placeholder = DataSource(
+            id=_OUT_A,
+            name=_OUT_A,
+            source_type='analysis',
+            config={'analysis_tab_id': 'tab-a'},
+            created_by_analysis_id=other_analysis_id,
+            created_by='analysis',
+            is_hidden=False,
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+        )
+        test_db_session.add(placeholder)
+        test_db_session.flush()
         tabs = [
-            TabSchema(id='tab-a', name='Tab A', type='datasource', datasource_id=sample_datasource.id, steps=[]),
+            TabSchema(
+                id='tab-a',
+                name='Tab A',
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    result_id=_OUT_A,
+                    format='parquet',
+                    filename='tab_output',
+                ),
+                steps=[],
+            ),
             TabSchema(
                 id='tab-b',
                 name='Tab B',
-                type='derived',
                 parent_id='tab-a',
-                datasource_config={
-                    'analysis_id': sample_analysis.id,
-                    'analysis_tab_id': 'tab-a',
-                },
+                datasource=TabDatasourceSchema(
+                    id=_OUT_A,
+                    analysis_tab_id='tab-a',
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    result_id=_OUT_B,
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
 
-        assert len(result.tabs) == 2
-        ids = [t.output_datasource_id for t in result.tabs]
+        assert len(result.pipeline_definition['tabs']) == 2
+        ids = [t['output']['result_id'] for t in result.pipeline_definition['tabs']]
         assert all(i is not None for i in ids)
         assert ids[0] != ids[1]
-        assert result.tabs[1].datasource_id == ids[0]
+        assert result.pipeline_definition['tabs'][1]['datasource']['id'] == _OUT_A
 
 
 # ---------------------------------------------------------------------------
-# run_analysis_build passes output_datasource_id
+# run_analysis_build passes result_id
 # ---------------------------------------------------------------------------
 
 
 class TestRunAnalysisBuildOutputDatasource:
-    """Scheduler's run_analysis_build passes output_datasource_id to export_data."""
+    """Scheduler's run_analysis_build passes result_id to export_data."""
 
-    def test_passes_output_datasource_id(self, test_db_session: Session, sample_datasource: DataSource):
-        """run_analysis_build should forward output_datasource_id from the tab."""
+    def test_passes_result_id(self, test_db_session: Session, sample_datasource: DataSource):
+        """run_analysis_build should forward result_id from the tab."""
         output_ds_id = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -254,29 +353,28 @@ class TestRunAnalysisBuildOutputDatasource:
             description='',
             pipeline_definition={
                 'steps': [],
-                'datasource_ids': [sample_datasource.id],
                 'tabs': [
                     {
                         'id': 'tab1',
                         'name': 'Main',
-                        'type': 'datasource',
-                        'datasource_id': sample_datasource.id,
-                        'output_datasource_id': output_ds_id,
-                        'steps': [
-                            {'id': 's1', 'type': 'filter', 'config': {'column': 'age', 'operator': '>', 'value': 30}, 'depends_on': []}
-                        ],
-                        'datasource_config': {
-                            'output': {
-                                'datasource_type': 'iceberg',
-                                'format': 'parquet',
-                                'filename': 'test_out',
-                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                            }
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
                         },
-                    }
+                        'steps': [
+                            {'id': 's1', 'type': 'filter', 'config': {'column': 'age', 'operator': '>', 'value': 30}, 'depends_on': []},
+                        ],
+                        'output': {
+                            'result_id': output_ds_id,
+                            'format': 'parquet',
+                            'filename': 'test_out',
+                            'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                        },
+                    },
                 ],
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -297,11 +395,11 @@ class TestRunAnalysisBuildOutputDatasource:
 
             mock_export.assert_called_once()
             call_kwargs = mock_export.call_args
-            assert call_kwargs.kwargs.get('output_datasource_id') == output_ds_id
+            assert call_kwargs.kwargs.get('result_id') == output_ds_id
             assert call_kwargs.kwargs.get('triggered_by') == 'schedule'
             mock_preview.assert_not_called()
 
-    def test_export_uses_output_datasource_id_for_table_name(self, test_db_session: Session, sample_datasource: DataSource):
+    def test_export_uses_result_id_for_table_name(self, test_db_session: Session, sample_datasource: DataSource):
         output_ds_id = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -312,27 +410,26 @@ class TestRunAnalysisBuildOutputDatasource:
             description='',
             pipeline_definition={
                 'steps': [],
-                'datasource_ids': [sample_datasource.id],
                 'tabs': [
                     {
                         'id': 'tab1',
                         'name': 'Main',
-                        'type': 'datasource',
-                        'datasource_id': sample_datasource.id,
-                        'output_datasource_id': output_ds_id,
-                        'steps': [],
-                        'datasource_config': {
-                            'output': {
-                                'datasource_type': 'iceberg',
-                                'format': 'parquet',
-                                'filename': 'test_out',
-                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                            }
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
                         },
-                    }
+                        'steps': [],
+                        'output': {
+                            'result_id': output_ds_id,
+                            'format': 'parquet',
+                            'filename': 'test_out',
+                            'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                        },
+                    },
                 ],
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -343,102 +440,114 @@ class TestRunAnalysisBuildOutputDatasource:
         mock_table = MagicMock()
         mock_catalog.table_exists.return_value = False
         mock_catalog.create_table.return_value = mock_table
+        mock_table.current_snapshot.return_value = MagicMock(snapshot_id=123, timestamp_ms=1000)
+
+        engine_mock = MagicMock()
+        engine_mock.is_process_alive.return_value = True
+        engine_mock.export.return_value = 'job-1'
+        engine_mock.get_result.return_value = {
+            'data': {'row_count': 1},
+            'error': None,
+            'step_timings': {},
+        }
+        manager_mock = MagicMock()
+        manager_mock.get_engine.return_value = engine_mock
+        manager_mock.get_or_create_engine.return_value = engine_mock
 
         with (
             patch('modules.compute.service.load_catalog', return_value=mock_catalog),
             patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
         ):
             mock_read.return_value.to_arrow.return_value = MagicMock(schema=MagicMock())
-            _, _, _, _, created_ds_id, _ = export_data(
+            export_result = export_data(
                 session=test_db_session,
+                manager=manager_mock,
                 target_step_id='source',
                 analysis_pipeline={
                     'analysis_id': analysis_id,
                     'tabs': [
                         {
                             'id': 'tab1',
-                            'datasource_id': sample_datasource.id,
-                            'output_datasource_id': output_ds_id,
-                            'datasource_config': {
-                                'output': {
-                                    'datasource_type': 'iceberg',
-                                    'format': 'parquet',
-                                    'filename': 'test_out',
-                                    'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
-                                }
+                            'datasource': {
+                                'id': sample_datasource.id,
+                                'analysis_tab_id': None,
+                                'config': {'branch': 'master'},
+                            },
+                            'output': {
+                                'result_id': output_ds_id,
+                                'format': 'parquet',
+                                'filename': 'test_out',
+                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
                             },
                             'steps': [],
-                        }
+                        },
                     ],
                     'sources': {
                         sample_datasource.id: {
                             'source_type': sample_datasource.source_type,
                             **sample_datasource.config,
-                        }
+                        },
                     },
                 },
-                export_format='parquet',
                 filename='test_out',
-                destination='datasource',
-                datasource_type='iceberg',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
-                output_datasource_id=output_ds_id,
+                result_id=output_ds_id,
             )
 
         identifier = mock_catalog.create_table.call_args.args[0]
         assert identifier == f'ns.{output_ds_id}_master'
 
-        output_ds = test_db_session.get(DataSource, created_ds_id)
+        output_ds = test_db_session.get(DataSource, export_result.datasource_id)
         assert output_ds is not None
         expected_path = str(namespace_paths().exports_dir / output_ds_id)
         assert output_ds.config['metadata_path'] == expected_path
         assert output_ds.config['table'] == f'{output_ds_id}_master'
+        assert output_ds.config['current_snapshot_id'] == '123'
+        assert output_ds.config['current_snapshot_timestamp_ms'] == 1000
+        assert output_ds.config['snapshot_id'] == '123'
+        assert output_ds.config['snapshot_timestamp_ms'] == 1000
 
-    def test_tab_without_output_config_fails(self, test_db_session: Session, sample_datasource: DataSource):
-        """Tabs without output config should fail."""
+    def test_tab_missing_output_filename_fails(self, test_db_session: Session, sample_datasource: DataSource):
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
 
         analysis = Analysis(
             id=analysis_id,
-            name='Preview Test',
+            name='Missing Output Fields',
             description='',
             pipeline_definition={
                 'steps': [],
-                'datasource_ids': [sample_datasource.id],
                 'tabs': [
                     {
                         'id': 'tab1',
-                        'name': 'No Output',
-                        'type': 'datasource',
-                        'datasource_id': sample_datasource.id,
-                        'output_datasource_id': 'some-output-id',
-                        'datasource_config': {},
+                        'name': 'No Filename',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': str(uuid.uuid4()),
+                            'format': 'parquet',
+                        },
                         'steps': [],
-                    }
+                    },
                 ],
             },
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
         test_db_session.add(analysis)
         test_db_session.commit()
 
-        mock_export = MagicMock()
-        mock_preview = MagicMock()
-        mock_notify = MagicMock()
-        with (
-            patch('modules.compute.service.export_data', mock_export),
-            patch('modules.compute.service.preview_step', mock_preview),
-            patch('modules.compute.service._send_pipeline_notifications', mock_notify),
-        ):
+        with patch('modules.compute.service.export_data') as mock_export:
             from modules.scheduler.service import run_analysis_build
 
             result = run_analysis_build(test_db_session, analysis_id)
 
             mock_export.assert_not_called()
-            mock_preview.assert_not_called()
             assert result['tabs_built'] == 0
             assert result['results'][0]['status'] == 'failed'
 
@@ -522,28 +631,40 @@ class TestSourceTypeCreatedBy:
         assert ds.created_by == 'import'
 
     def test_update_analysis_does_not_create_output_datasource(
-        self, test_db_session: Session, sample_analysis: Analysis, sample_datasource: DataSource
+        self,
+        test_db_session: Session,
+        sample_analysis: Analysis,
+        sample_datasource: DataSource,
     ):
         """update_analysis does not create output datasources."""
         tabs = [
             TabSchema(
                 id='tab1',
                 name='Source',
-                type='datasource',
-                datasource_id=sample_datasource.id,
+                datasource=TabDatasourceSchema(
+                    id=sample_datasource.id,
+                    analysis_tab_id=None,
+                    config=TabDatasourceConfig(branch='master'),
+                ),
+                output=TabOutputSchema(
+                    result_id=_OUT_1,
+                    format='parquet',
+                    filename='tab_output',
+                ),
                 steps=[],
             ),
         ]
-        update = AnalysisUpdateSchema(tabs=tabs, pipeline_steps=[])
+        update = AnalysisUpdateSchema(tabs=tabs)
         result = update_analysis(test_db_session, sample_analysis.id, update)
-        output_ds = test_db_session.get(DataSource, result.tabs[0].output_datasource_id)
+        output_ds = test_db_session.get(DataSource, result.pipeline_definition['tabs'][0]['output']['result_id'])
         assert output_ds is None
 
     def test_upsert_output_sets_created_by_analysis(self, test_db_session: Session):
         """_upsert_output_datasource sets created_by='analysis'."""
+        rid = str(uuid.uuid4())
         ds = _upsert_output_datasource(
             session=test_db_session,
-            output_datasource_id=None,
+            result_id=rid,
             name='upserted',
             source_type='iceberg',
             config={'metadata_path': '/tmp/iceberg'},

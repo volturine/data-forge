@@ -3,14 +3,8 @@ import { configStore } from '$lib/stores/config.svelte';
 type DateInput = string | number | Date;
 
 function toDate(value: DateInput): Date | null {
-	if (value instanceof Date) {
-		const time = value.getTime();
-		if (Number.isNaN(time)) return null;
-		return value;
-	}
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return null;
-	return date;
+	const date = value instanceof Date ? value : new Date(value);
+	return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function hasTimezone(value: string): boolean {
@@ -134,6 +128,13 @@ function parseDateTimeInput(value: string): {
 	return { year, month, day, hour, minute };
 }
 
+function partsMap(format: Intl.DateTimeFormat, date: Date): Record<string, string> {
+	const parts = Object.fromEntries(format.formatToParts(date).map((p) => [p.type, p.value]));
+	// Some CI/runtime combinations emit midnight as "24" instead of "00" for 24-hour clocks.
+	if (parts.hour === '24') parts.hour = '00';
+	return parts;
+}
+
 function getTimeZoneOffsetMinutes(date: Date, timezone: string): number {
 	const format = new Intl.DateTimeFormat('en-CA', {
 		timeZone: timezone,
@@ -145,8 +146,7 @@ function getTimeZoneOffsetMinutes(date: Date, timezone: string): number {
 		second: '2-digit',
 		hour12: false
 	});
-	const parts = format.formatToParts(date);
-	const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+	const map = partsMap(format, date);
 	const asUtc = Date.UTC(
 		Number(map.year),
 		Number(map.month) - 1,
@@ -191,8 +191,7 @@ export function formatDateForInput(value: DateInput, timezone: string, normalize
 		month: '2-digit',
 		day: '2-digit'
 	});
-	const parts = format.formatToParts(date);
-	const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+	const map = partsMap(format, date);
 	return `${map.year}-${map.month}-${map.day}`;
 }
 
@@ -213,8 +212,7 @@ export function formatDateTimeForInput(
 		minute: '2-digit',
 		hour12: false
 	});
-	const parts = format.formatToParts(date);
-	const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+	const map = partsMap(format, date);
 	return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}`;
 }
 

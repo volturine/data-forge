@@ -2,6 +2,7 @@ from modules.compute.core.base import OperationHandler, OperationParams
 from modules.compute.operations.ai import AIHandler
 from modules.compute.operations.datasource import DatasourceHandler
 from modules.compute.operations.deduplicate import DeduplicateHandler
+from modules.compute.operations.download import DownloadHandler
 from modules.compute.operations.drop import DropHandler
 from modules.compute.operations.explode import ExplodeHandler
 from modules.compute.operations.export import ExportHandler
@@ -12,7 +13,6 @@ from modules.compute.operations.groupby import GroupByHandler
 from modules.compute.operations.join import JoinHandler
 from modules.compute.operations.limit import LimitHandler
 from modules.compute.operations.notification import NotificationHandler
-from modules.compute.operations.null_count import NullCountHandler
 from modules.compute.operations.pivot import PivotHandler
 from modules.compute.operations.plot import ChartHandler
 from modules.compute.operations.rename import RenameHandler
@@ -24,89 +24,41 @@ from modules.compute.operations.timeseries import TimeseriesHandler
 from modules.compute.operations.topk import TopKHandler
 from modules.compute.operations.union import UnionByNameHandler
 from modules.compute.operations.unpivot import UnpivotHandler
-from modules.compute.operations.value_counts import ValueCountsHandler
 from modules.compute.operations.view import ViewHandler
 from modules.compute.operations.with_columns import WithColumnsHandler
 
 __all__ = [
-    # Base
+    'HANDLERS',
     'OperationHandler',
     'OperationParams',
-    # Handlers
-    'DatasourceHandler',
-    'AIHandler',
-    'DeduplicateHandler',
-    'DropHandler',
-    'ExplodeHandler',
-    'ExportHandler',
-    'FillNullHandler',
-    'FilterHandler',
-    'GroupByHandler',
-    'JoinHandler',
-    'LimitHandler',
-    'NullCountHandler',
-    'NotificationHandler',
-    'PivotHandler',
-    'RenameHandler',
-    'SampleHandler',
-    'SelectHandler',
-    'SortHandler',
-    'StringTransformHandler',
-    'TimeseriesHandler',
-    'TopKHandler',
-    'UnionByNameHandler',
-    'UnpivotHandler',
-    'ValueCountsHandler',
-    'ViewHandler',
-    'WithColumnsHandler',
-    'ExpressionHandler',
-    'ChartHandler',
-    # Registry
-    'register_operation',
-    'get_operation_handlers',
 ]
 
-_OPERATION_REGISTRY: dict[str, OperationHandler] = {}
-
-
-def register_operation(name: str, handler: OperationHandler) -> None:
-    if name in _OPERATION_REGISTRY:
-        raise ValueError(f'Operation already registered: {name}')
-    _OPERATION_REGISTRY[name] = handler
-
-
-def get_operation_handlers() -> dict[str, OperationHandler]:
-    if not _OPERATION_REGISTRY:
-        _register_defaults()
-    return dict(_OPERATION_REGISTRY)
-
-
-def _register_defaults() -> None:
-    register_operation('datasource', DatasourceHandler())
-    register_operation('ai', AIHandler())
-    register_operation('deduplicate', DeduplicateHandler())
-    register_operation('drop', DropHandler())
-    register_operation('explode', ExplodeHandler())
-    register_operation('export', ExportHandler())
-    register_operation('fill_null', FillNullHandler())
-    register_operation('filter', FilterHandler())
-    register_operation('groupby', GroupByHandler())
-    register_operation('join', JoinHandler())
-    register_operation('limit', LimitHandler())
-    register_operation('null_count', NullCountHandler())
-    register_operation('notification', NotificationHandler())
-    register_operation('pivot', PivotHandler())
-    register_operation('rename', RenameHandler())
-    register_operation('sample', SampleHandler())
-    register_operation('select', SelectHandler())
-    register_operation('sort', SortHandler())
-    register_operation('string_transform', StringTransformHandler())
-    register_operation('timeseries', TimeseriesHandler())
-    register_operation('topk', TopKHandler())
-    register_operation('union_by_name', UnionByNameHandler())
-    register_operation('unpivot', UnpivotHandler())
-    register_operation('value_counts', ValueCountsHandler())
-    register_operation('view', ViewHandler())
-    register_operation('with_columns', WithColumnsHandler())
-    register_operation('expression', ExpressionHandler())
-    register_operation('chart', ChartHandler())
+HANDLERS: dict[str, OperationHandler] = {
+    'datasource': DatasourceHandler(),
+    'ai': AIHandler(),
+    'deduplicate': DeduplicateHandler(),
+    'download': DownloadHandler(),
+    'drop': DropHandler(),
+    'explode': ExplodeHandler(),
+    'export': ExportHandler(),
+    'fill_null': FillNullHandler(),
+    'filter': FilterHandler(),
+    'groupby': GroupByHandler(),
+    'join': JoinHandler(),
+    'limit': LimitHandler(),
+    'notification': NotificationHandler(),
+    'pivot': PivotHandler(),
+    'rename': RenameHandler(),
+    'sample': SampleHandler(),
+    'select': SelectHandler(),
+    'sort': SortHandler(),
+    'string_transform': StringTransformHandler(),
+    'timeseries': TimeseriesHandler(),
+    'topk': TopKHandler(),
+    'union_by_name': UnionByNameHandler(),
+    'unpivot': UnpivotHandler(),
+    'view': ViewHandler(),
+    'with_columns': WithColumnsHandler(),
+    'expression': ExpressionHandler(),
+    'chart': ChartHandler(),
+}

@@ -1,15 +1,89 @@
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import polars as pl
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.config import settings
 from modules.compute.core.base import OperationHandler, OperationParams
+from modules.compute.operations._validation import validate_regex_pattern
 
-ValueType = Literal['string', 'number', 'date', 'datetime', 'column', 'boolean']
+
+def _parse_datetime_string(s: str) -> datetime:
+    """Parse a datetime string, supporting ISO 8601 and common fallback formats."""
+    if s.endswith('Z'):
+        s = s[:-1] + '+00:00'
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Cannot parse datetime string '{s}'. Accepted formats: ISO 8601 (YYYY-MM-DDTHH:MM:SS), YYYY-MM-DD HH:MM:SS, MM/DD/YYYY",
+    )
+
+
+class FilterValueType(StrEnum):
+    STRING = 'string'
+    NUMBER = 'number'
+    DATE = 'date'
+    DATETIME = 'datetime'
+    COLUMN = 'column'
+    BOOLEAN = 'boolean'
+
+
+NULL_CHECK_OPERATORS = frozenset({'is_null', 'is_not_null'})
+
+
+def _normalize_text_field(value: Any) -> str:
+    if not isinstance(value, str):
+        return ''
+    return value.strip()
+
+
+def normalize_filter_conditions(conditions: list[Any] | None) -> list[Any]:
+    if not conditions:
+        return []
+
+    normalized: list[Any] = []
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            normalized.append(condition)
+            continue
+
+        column = _normalize_text_field(condition.get('column'))
+        if not column:
+            continue
+
+        operator = condition.get('operator') or '='
+        value_type = condition.get('value_type', FilterValueType.STRING.value)
+        item: dict[str, Any] = {
+            'column': column,
+            'operator': operator,
+            'value': condition.get('value'),
+            'value_type': value_type,
+        }
+
+        if operator in NULL_CHECK_OPERATORS:
+            normalized.append(item)
+            continue
+
+        compare_column = _normalize_text_field(condition.get('compare_column'))
+        if value_type == FilterValueType.COLUMN and not compare_column:
+            continue
+        if compare_column:
+            item['compare_column'] = compare_column
+
+        normalized.append(item)
+
+    return normalized
 
 
 class FilterCondition(BaseModel):
@@ -18,26 +92,33 @@ class FilterCondition(BaseModel):
     column: str
     operator: str = '=='
     value: Any | list[Any] | None = None
-    value_type: ValueType = 'string'
+    value_type: FilterValueType = FilterValueType.STRING
     compare_column: str | None = None
 
     @model_validator(mode='after')
     def validate_condition(self) -> 'FilterCondition':
-        if self.operator in ('is_null', 'is_not_null'):
+        if self.operator in NULL_CHECK_OPERATORS:
             return self
-        if self.value_type == 'column' and not self.compare_column:
+        if self.value_type == FilterValueType.COLUMN and not self.compare_column:
             raise ValueError('compare_column required when value_type is column')
-        if self.value_type != 'column' and self.value is None:
+        if self.value_type != FilterValueType.COLUMN and self.value is None:
             raise ValueError('value required for non-column comparisons')
         return self
 
 
 class FilterParams(OperationParams):
-    conditions: list[FilterCondition]
+    conditions: list[FilterCondition] = Field(default_factory=list)
     logic: str = 'AND'
 
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_conditions(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        return {**data, 'conditions': normalize_filter_conditions(data.get('conditions'))}
 
-def coerce_value(value: Any, value_type: ValueType) -> Any:
+
+def coerce_value(value: Any, value_type: FilterValueType) -> Any:
     """Coerce value to the appropriate Python/Polars type."""
     if value is None:
         return None
@@ -45,39 +126,37 @@ def coerce_value(value: Any, value_type: ValueType) -> Any:
     if isinstance(value, list):
         return [coerce_value(item, value_type) for item in value]
 
-    if value_type == 'number':
+    if value_type == FilterValueType.NUMBER:
         if isinstance(value, (int, float)):
             return value
         s = str(value)
-        return float(s) if '.' in s else int(s)
+        parsed = float(s)
+        if parsed.is_integer() and '.' not in s and 'e' not in s.lower():
+            return int(parsed)
+        return parsed
 
-    if value_type == 'boolean':
+    if value_type == FilterValueType.BOOLEAN:
         if isinstance(value, bool):
             return value
         return str(value).lower() in ('true', '1', 'yes')
 
-    if value_type == 'date':
+    if value_type == FilterValueType.DATE:
         if isinstance(value, datetime):
             return value.date()
-        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).date()
+        return _parse_datetime_string(str(value)).date()
 
-    if value_type == 'datetime':
-        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-        if not dt.tzinfo:
-            if settings.normalize_tz:
-                return dt.replace(tzinfo=ZoneInfo(settings.timezone))
+    if value_type == FilterValueType.DATETIME:
+        dt = value if isinstance(value, datetime) else _parse_datetime_string(str(value))
+        if not dt.tzinfo and not settings.normalize_tz:
             return dt
-        if settings.normalize_tz:
-            return dt.astimezone(ZoneInfo(settings.timezone))
-        return dt.astimezone(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+        tz = ZoneInfo(settings.timezone)
+        dt = dt.replace(tzinfo=tz) if not dt.tzinfo else dt.astimezone(tz)
+        return dt if settings.normalize_tz else dt.replace(tzinfo=None)
 
     return str(value)
 
 
 class FilterHandler(OperationHandler):
-    def __init__(self) -> None:
-        self._last_schema: dict[str, pl.DataType] | None = None
-
     OPERATORS: dict[str, Callable[[pl.Expr, Any], pl.Expr]] = {
         '=': lambda col, val: col == val,
         '==': lambda col, val: col == val,
@@ -107,85 +186,58 @@ class FilterHandler(OperationHandler):
         '<=': lambda left, right: left <= right,
     }
 
-    @property
-    def name(self) -> str:
-        return 'filter'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = FilterParams.model_validate(params)
-        self._last_schema = lf.collect_schema()
+        if not validated.conditions:
+            return lf
 
-        exprs: list[pl.Expr] = []
-        for cond in validated.conditions:
-            exprs.append(self._build_expr(cond))
+        schema = lf.collect_schema()
 
-        if len(exprs) == 1:
-            return lf.filter(exprs[0])
+        exprs = [self._build_expr(cond, schema) for cond in validated.conditions]
 
-        combined = exprs[0]
         if validated.logic == 'AND':
-            for expr in exprs[1:]:
-                combined = combined & expr
-            return lf.filter(combined)
-
+            return lf.filter(pl.all_horizontal(exprs))
         if validated.logic == 'OR':
-            for expr in exprs[1:]:
-                combined = combined | expr
-            return lf.filter(combined)
-
+            return lf.filter(pl.any_horizontal(exprs))
         raise ValueError(f'Unsupported logic operator: {validated.logic}')
 
-    def _build_expr(self, cond: FilterCondition) -> pl.Expr:
-        """Build a filter expression from a condition."""
+    def _build_expr(self, cond: FilterCondition, schema: pl.Schema) -> pl.Expr:
         left = pl.col(cond.column)
-        schema = self._schema
-        col_dtype = schema.get(cond.column) if schema else None
+        col_dtype = schema.get(cond.column)
         if col_dtype:
-            left = self._normalize_datetime_col(left, col_dtype)
+            left = _normalize_datetime_col(left, col_dtype)
 
         if cond.operator in ('is_null', 'is_not_null'):
-            op = self.OPERATORS.get(cond.operator)
-            if not op:
-                raise ValueError(f'Unsupported filter operator: {cond.operator}')
-            return op(left, None)
+            return get_operator(cond.operator)(left, None)
 
-        if cond.value_type == 'column':
+        if cond.value_type == FilterValueType.COLUMN:
             op = self.COLUMN_OPERATORS.get(cond.operator)
             if not op:
                 raise ValueError(f'Operator {cond.operator} not supported for column comparison')
             if not cond.compare_column:
                 raise ValueError('compare_column required when value_type is column')
             right = pl.col(cond.compare_column)
-            if schema and cond.compare_column in schema:
-                right = self._normalize_datetime_col(right, schema[cond.compare_column])
+            if cond.compare_column in schema:
+                right = _normalize_datetime_col(right, schema[cond.compare_column])
             return op(left, right)
 
-        # Check if this is a date-only value against a datetime column
-        is_date_only = self._is_date_only_value(cond.value)
+        is_date_only = _is_date_only_value(cond.value)
         is_datetime_col = isinstance(col_dtype, pl.Datetime)
 
-        # For date-only comparisons against datetime columns, compare by date
         if is_date_only and is_datetime_col and cond.value_type == 'datetime':
-            date_val = coerce_value(cond.value, 'date')
-            left_date = pl.col(cond.column).dt.date()
-            op = self.OPERATORS.get(cond.operator)
-            if not op:
-                raise ValueError(f'Unsupported filter operator: {cond.operator}')
-            return op(left_date, date_val)
+            return get_operator(cond.operator)(pl.col(cond.column).dt.date(), coerce_value(cond.value, FilterValueType.DATE))
 
         coerced = coerce_value(cond.value, cond.value_type)
-        op = self.OPERATORS.get(cond.operator)
-        if not op:
-            raise ValueError(f'Unsupported filter operator: {cond.operator}')
+        op = get_operator(cond.operator)
         if cond.operator == 'regex' and coerced == '':
             return pl.lit(False)
+        if cond.operator == 'regex' and isinstance(coerced, str):
+            validate_regex_pattern(coerced)
         if isinstance(coerced, list):
             if not coerced:
                 if cond.operator in ('not_contains', 'not_in'):
@@ -204,34 +256,28 @@ class FilterHandler(OperationHandler):
             return combined
         return op(left, coerced)
 
-    def _is_date_only_value(self, value: Any) -> bool:
-        """Check if value is a date-only string (YYYY-MM-DD without time)."""
-        if not isinstance(value, str):
-            return False
-        return len(value) == 10 and '-' in value and 'T' not in value
 
-    def _get_operator(self, name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
-        op = self.OPERATORS.get(name)
-        if not op:
-            raise ValueError(f'Unsupported filter operator: {name}')
-        return op
+def _is_date_only_value(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return len(value) == 10 and '-' in value and 'T' not in value
 
-    @property
-    def _schema(self) -> dict[str, pl.DataType] | None:
-        return getattr(self, '_last_schema', None)
 
-    def _normalize_datetime_col(self, expr: pl.Expr, dtype: pl.DataType) -> pl.Expr:
-        if not isinstance(dtype, pl.Datetime):
-            return expr
-        tz = dtype.time_zone
-        if settings.normalize_tz:
-            if tz is None:
-                return expr.dt.replace_time_zone(settings.timezone)
-            return expr.dt.convert_time_zone(settings.timezone)
+def _normalize_datetime_col(expr: pl.Expr, dtype: pl.DataType) -> pl.Expr:
+    if not isinstance(dtype, pl.Datetime):
+        return expr
+    tz = dtype.time_zone
+    if settings.normalize_tz:
         if tz is None:
-            return expr
-        return expr.dt.replace_time_zone(None)
+            return expr.dt.replace_time_zone(settings.timezone)
+        return expr.dt.convert_time_zone(settings.timezone)
+    if tz is None:
+        return expr
+    return expr.dt.replace_time_zone(None)
 
 
 def get_operator(name: str) -> Callable[[pl.Expr, Any], pl.Expr]:
-    return FilterHandler()._get_operator(name)
+    op = FilterHandler.OPERATORS.get(name)
+    if not op:
+        raise ValueError(f'Unsupported filter operator: {name}')
+    return op

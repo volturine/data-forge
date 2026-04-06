@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, Plus } from 'lucide-svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
+	import { css, cx, menuItem, muted } from '$lib/styles/panda';
 
 	interface BranchOption {
 		id: string;
@@ -28,27 +29,36 @@
 	let menuOpen = $state(false);
 	let popoverRect = $state({ left: 0, top: 0, width: 240 });
 
-	const normalizedBranches = $derived(branches.length ? branches : ['master']);
+	const normalizedBranches = $derived(branches);
 	const trimmedSearch = $derived(searchValue.trim());
 	const canCreate = $derived(
 		allowCreate &&
 			trimmedSearch.length > 0 &&
 			!normalizedBranches.some((branch) => branch === trimmedSearch)
 	);
-	const currentValue = $derived(value || 'master');
+	const currentValue = $derived(value ?? 'master');
 	const options = $derived.by(() => {
-		const base = normalizedBranches.map((branch) => ({
-			id: branch,
-			label: branch,
-			kind: 'branch'
-		}) satisfies BranchOption);
-		if (!canCreate) return base;
+		const base = normalizedBranches.map(
+			(branch) =>
+				({
+					id: branch,
+					label: branch,
+					kind: 'branch'
+				}) satisfies BranchOption
+		);
+		const current = value?.trim?.() ?? '';
+		const hasCurrent = current && !base.some((option) => option.id === current);
+		const extras = hasCurrent
+			? ([{ id: current, label: current, kind: 'branch' }] satisfies BranchOption[])
+			: [];
+		if (!canCreate) return [...extras, ...base];
 		return [
 			{
 				id: `__create__${trimmedSearch}`,
 				label: `Create "${trimmedSearch}"`,
 				kind: 'create'
 			} satisfies BranchOption,
+			...extras,
 			...base
 		];
 	});
@@ -75,9 +85,11 @@
 		rect: { left: number; top: number; width: number }
 	) {
 		if (!node) return;
-		node.style.setProperty('--popover-left', `${rect.left}px`);
-		node.style.setProperty('--popover-top', `${rect.top}px`);
-		node.style.setProperty('--popover-width', `${rect.width}px`);
+		node.style.left = `${rect.left}px`;
+		node.style.top = `${rect.top}px`;
+		node.style.width = `${rect.width}px`;
+		node.style.minWidth = `${rect.width}px`;
+		node.style.maxWidth = `${rect.width}px`;
 	}
 
 	function portal(node: HTMLElement, rect: { left: number; top: number; width: number }) {
@@ -131,44 +143,89 @@
 </script>
 
 <SearchableDropdown
-	options={options}
+	{options}
 	value={currentValue}
 	onChange={handleChange}
-	placeholder={placeholder}
+	{placeholder}
 	searchPlaceholder="Search branches..."
-	menuClass="branch-picker__menu fixed z-popover"
+	menuClass={css({ position: 'fixed', zIndex: 'popover' })}
 	menuAction={portal}
 	menuActionValue={popoverRect}
-	searchValue={searchValue}
+	bind:searchValue
 	onOpen={handleOpen}
 	onClose={handleClose}
-	renderTrigger={renderTrigger}
-	renderOption={renderOption}
+	{renderTrigger}
+	{renderOption}
 />
 
-{#snippet renderTrigger(payload: { open: boolean; selectedCount: number; selectedOption: unknown; displayLabel: string; disabled: boolean; onOpen: () => void; triggerAction: (node: HTMLElement, value: unknown) => { update?: (value: unknown) => void; destroy?: () => void } })}
+{#snippet renderTrigger(payload: {
+	open: boolean;
+	selectedCount: number;
+	selectedOption: unknown;
+	displayLabel: string;
+	disabled: boolean;
+	onOpen: () => void;
+	triggerAction: (
+		node: HTMLElement,
+		value: unknown
+	) => { update?: (value: unknown) => void; destroy?: () => void };
+})}
 	<button
 		type="button"
-		class="column-trigger"
+		class={css({
+			display: 'inline-flex',
+			alignItems: 'center',
+			justifyContent: 'space-between',
+			gap: '2',
+			width: '100%',
+			padding: '2',
+			paddingX: '3',
+			borderWidth: '1',
+			background: 'bg.secondary',
+			fontSize: 'sm',
+			textTransform: 'none'
+		})}
 		onclick={payload.onOpen}
 		aria-expanded={payload.open}
 		use:payload.triggerAction={undefined}
 	>
 		{#if currentValue}
-			<span class="column-label">{currentValue}</span>
+			<span
+				class={css({
+					flex: '1',
+					textAlign: 'left',
+					minWidth: '0',
+					overflow: 'hidden',
+					textOverflow: 'ellipsis',
+					whiteSpace: 'nowrap'
+				})}>{currentValue}</span
+			>
 		{:else}
-			<span class="column-placeholder">{placeholder}</span>
+			<span class={muted}>{placeholder}</span>
 		{/if}
-		<ChevronDown size={14} class="chevron" />
+		<ChevronDown size={14} class={cx(muted, css({ opacity: '0.7' }))} />
 	</button>
 {/snippet}
 
-{#snippet renderOption(payload: { option: { id: string; label: string }; selected: boolean; onSelect: () => void })}
+{#snippet renderOption(payload: {
+	option: { id: string; label: string };
+	selected: boolean;
+	onSelect: () => void;
+})}
 	{@const option = payload.option as BranchOption}
 	<button
 		type="button"
-		class="column-option"
-		class:selected={payload.selected}
+		class={cx(
+			menuItem(),
+			css({
+				display: 'flex',
+				alignItems: 'center',
+				gap: '2',
+				fontSize: 'sm',
+				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
+				...(payload.selected ? { backgroundColor: 'bg.hover' } : {})
+			})
+		)}
 		onclick={payload.onSelect}
 		role="option"
 		aria-selected={payload.selected}

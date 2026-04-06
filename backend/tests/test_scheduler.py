@@ -2,21 +2,26 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlmodel import Session
 
-from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError, ScheduleValidationError
-from modules.analysis.models import Analysis, AnalysisDataSource
+from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError, ScheduleNotFoundError
+from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
 from modules.datasource.models import DataSource
+from modules.engine_runs.models import EngineRun
 from modules.scheduler.models import Schedule
 from modules.scheduler.schemas import ScheduleCreate, ScheduleUpdate
 from modules.scheduler.service import (
     create_schedule,
     delete_schedule,
+    execute_schedule,
     get_build_order,
     get_due_schedules,
+    is_schedule_target_eligible,
     list_schedules,
     mark_schedule_run,
     run_analysis_build,
@@ -41,7 +46,7 @@ def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> Da
         id=str(uuid.uuid4()),
         name='Output DataSource',
         source_type='iceberg',
-        config={'analysis_id': sample_analysis.id, 'analysis_tab_id': 'tab1'},
+        config={'analysis_tab_id': 'tab1'},
         created_by='analysis',
         created_by_analysis_id=sample_analysis.id,
         is_hidden=True,
@@ -57,37 +62,41 @@ def output_datasource(test_db_session: Session, sample_analysis: Analysis) -> Da
 def analysis_with_output(test_db_session: Session, sample_datasource: DataSource) -> Analysis:
     """Analysis with a tab that has output configuration (for build testing)."""
     analysis_id = str(uuid.uuid4())
-    pipeline_definition: dict[str, object] = {
+    pipeline_definition: dict[str, Any] = {
         'tabs': [
             {
                 'id': 'tab-1',
                 'name': 'Export Tab',
-                'type': 'datasource',
                 'parent_id': None,
-                'datasource_id': sample_datasource.id,
-                'datasource_config': {
-                    'output': {
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'test_output',
-                        'iceberg': {'namespace': 'outputs', 'table_name': 'test_output'},
-                    }
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'result_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'test_output',
+                    'iceberg': {'namespace': 'outputs', 'table_name': 'test_output'},
                 },
                 'steps': [],
             },
             {
                 'id': 'tab-2',
                 'name': 'No Output Tab',
-                'type': 'datasource',
                 'parent_id': None,
-                'datasource_id': sample_datasource.id,
-                'datasource_config': {
-                    'output': {
-                        'datasource_type': 'iceberg',
-                        'format': 'parquet',
-                        'filename': 'test_output_two',
-                        'iceberg': {'namespace': 'outputs', 'table_name': 'test_output_two'},
-                    }
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {'branch': 'master'},
+                },
+                'output': {
+                    'result_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'test_output_two',
+                    'iceberg': {'namespace': 'outputs', 'table_name': 'test_output_two'},
                 },
                 'steps': [],
             },
@@ -99,7 +108,7 @@ def analysis_with_output(test_db_session: Session, sample_datasource: DataSource
         name='Build Test Analysis',
         description='Has output config',
         pipeline_definition=pipeline_definition,
-        status='draft',
+        status=AnalysisStatus.DRAFT,
         created_at=now,
         updated_at=now,
     )
@@ -181,15 +190,54 @@ class TestScheduleCrud:
         result = list_schedules(test_db_session)
         assert len(result) == 2
 
+    def test_list_schedules_batch_enrichment(
+        self,
+        test_db_session: Session,
+        sample_analysis: Analysis,
+        sample_analyses: list[Analysis],
+        output_datasource: DataSource,
+    ):
+        """Batch enrichment resolves analysis_name and analysis_id for multiple schedules."""
+        ds2 = DataSource(
+            id=str(uuid.uuid4()),
+            name='Output DS 2',
+            source_type='iceberg',
+            config={'analysis_tab_id': 'tab1'},
+            created_by='analysis',
+            created_by_analysis_id=sample_analyses[1].id,
+            is_hidden=True,
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(ds2)
+        test_db_session.commit()
+
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        create_schedule(test_db_session, ScheduleCreate(datasource_id=ds2.id, cron_expression='0 0 * * *'))
+
+        result = list_schedules(test_db_session)
+        assert len(result) == 2
+
+        by_ds = {r.datasource_id: r for r in result}
+        r1 = by_ds[output_datasource.id]
+        r2 = by_ds[ds2.id]
+
+        assert r1.analysis_id == sample_analysis.id
+        assert r1.analysis_name == sample_analysis.name
+        assert r2.analysis_id == sample_analyses[1].id
+        assert r2.analysis_name == sample_analyses[1].name
+
     def test_list_schedules_filter_by_datasource(
-        self, test_db_session: Session, sample_analyses: list[Analysis], output_datasource: DataSource
+        self,
+        test_db_session: Session,
+        sample_analyses: list[Analysis],
+        output_datasource: DataSource,
     ):
         # Create second output datasource for filtering test
         ds2 = DataSource(
             id=str(uuid.uuid4()),
             name='Output DataSource 2',
             source_type='iceberg',
-            config={'analysis_id': sample_analyses[1].id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=sample_analyses[1].id,
             is_hidden=True,
@@ -244,14 +292,61 @@ class TestScheduleCrud:
         with pytest.raises(ValidationError):
             ScheduleCreate(cron_expression='0 * * * *')  # type: ignore[call-arg]
 
-    def test_create_schedule_rejected_for_non_analysis_datasource(self, test_db_session: Session, sample_datasource: DataSource):
-        """Schedules must be rejected for datasources not created by an analysis."""
+    def test_create_schedule_allows_non_analysis_datasource(self, test_db_session: Session, sample_datasource: DataSource):
+        """Schedules can target non-analysis datasources."""
         payload = ScheduleCreate(
             datasource_id=sample_datasource.id,
             cron_expression='0 * * * *',
         )
-        with pytest.raises(ScheduleValidationError, match='analysis-output'):
-            create_schedule(test_db_session, payload)
+        created = create_schedule(test_db_session, payload)
+        assert created.datasource_id == sample_datasource.id
+
+    def test_create_schedule_allows_reingestable_raw_iceberg(self, test_db_session: Session, sample_csv_file):
+        source = {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}}
+        raw = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={'metadata_path': '/tmp/path', 'branch': 'master', 'source': source},
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(raw)
+        test_db_session.commit()
+
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=raw.id, cron_expression='0 * * * *'))
+        assert created.datasource_id == raw.id
+
+
+class TestScheduleEligibility:
+    def test_eligible_for_analysis_output(self, output_datasource: DataSource):
+        assert is_schedule_target_eligible(output_datasource) is True
+
+    def test_eligible_for_reingestable_raw_iceberg(self, sample_csv_file):
+        raw = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={
+                'metadata_path': '/tmp/path',
+                'branch': 'master',
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        assert is_schedule_target_eligible(raw) is True
+
+    def test_eligible_for_non_reingestable_raw(self):
+        datasource = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={'metadata_path': '/tmp/path', 'branch': 'master', 'source': {'source_type': 's3'}},
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        assert is_schedule_target_eligible(datasource) is True
 
     def test_create_schedule_rejected_for_nonexistent_datasource(self, test_db_session: Session):
         """Schedules must be rejected when datasource does not exist."""
@@ -402,8 +497,28 @@ class TestGetBuildOrder:
             id=upstream_id,
             name='Upstream',
             description='',
-            pipeline_definition={'tabs': []},
-            status='draft',
+            pipeline_definition={
+                'tabs': [
+                    {
+                        'id': 'tab-upstream',
+                        'name': 'Upstream',
+                        'parent_id': None,
+                        'datasource': {
+                            'id': ds_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': str(uuid.uuid4()),
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'scheduled_source',
+                        },
+                        'steps': [],
+                    },
+                ],
+            },
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -415,8 +530,28 @@ class TestGetBuildOrder:
             id=downstream_id,
             name='Downstream',
             description='',
-            pipeline_definition={'tabs': []},
-            status='draft',
+            pipeline_definition={
+                'tabs': [
+                    {
+                        'id': 'tab-downstream',
+                        'name': 'Downstream',
+                        'parent_id': None,
+                        'datasource': {
+                            'id': ds_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': str(uuid.uuid4()),
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'scheduled_source',
+                        },
+                        'steps': [],
+                    },
+                ],
+            },
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -452,7 +587,7 @@ class TestRunAnalysisBuild:
             name='Empty',
             description='',
             pipeline_definition={},
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -474,12 +609,12 @@ class TestRunAnalysisBuild:
     @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
     def test_builds_all_tabs(self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis):
-        """All tabs with datasource_id should be built — export for output tabs."""
+        """All tabs with output config should be built — export for output tabs."""
         mock_export.return_value = None
         mock_preview.return_value = None
 
         result = run_analysis_build(test_db_session, analysis_with_output.id)
-        # Both tabs have datasource_id and output config
+        # Both tabs have output config
         assert result['tabs_built'] == 2
         assert len(result['results']) == 2
         assert result['results'][0]['status'] == 'success'
@@ -493,7 +628,12 @@ class TestRunAnalysisBuild:
     @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
     def test_export_failure_captured(
-        self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis
+        self,
+        mock_export,
+        mock_preview,
+        mock_notify,
+        test_db_session: Session,
+        analysis_with_output: Analysis,
     ):
         """Failed export should be recorded but not crash the build; other tabs still run."""
         call_count = {'i': 0}
@@ -502,7 +642,6 @@ class TestRunAnalysisBuild:
             call_count['i'] += 1
             if call_count['i'] == 1:
                 raise RuntimeError('Export failed')
-            return None
 
         mock_export.side_effect = _side_effect
         mock_preview.return_value = None
@@ -519,7 +658,12 @@ class TestRunAnalysisBuild:
     @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
     def test_export_called_only_for_output_tabs(
-        self, mock_export, mock_preview, mock_notify, test_db_session: Session, analysis_with_output: Analysis
+        self,
+        mock_export,
+        mock_preview,
+        mock_notify,
+        test_db_session: Session,
+        analysis_with_output: Analysis,
     ):
         """export_data is called for tabs with output config."""
         mock_export.return_value = None
@@ -534,45 +678,54 @@ class TestRunAnalysisBuild:
     @patch('modules.compute.service.preview_step')
     @patch('modules.compute.service.export_data')
     def test_build_only_matching_datasource_tab(
-        self, mock_export, mock_preview, mock_notify, test_db_session: Session, sample_datasource: DataSource
+        self,
+        mock_export,
+        mock_preview,
+        mock_notify,
+        test_db_session: Session,
+        sample_datasource: DataSource,
     ):
-        """When datasource_id is provided, only the tab with that datasource runs."""
+        """When datasource_id is provided, only the tab with that output runs."""
         other_ds_id = str(uuid.uuid4())
         output_a = str(uuid.uuid4())
         output_b = str(uuid.uuid4())
         analysis_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        pipeline = {
+        pipeline: dict[str, Any] = {
             'tabs': [
                 {
                     'id': 'tab-a',
                     'name': 'Tab A',
-                    'type': 'datasource',
-                    'datasource_id': sample_datasource.id,
-                    'output_datasource_id': output_a,
-                    'datasource_config': {
-                        'output': {
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'tab_a',
-                            'iceberg': {'namespace': 'outputs', 'table_name': 'tab_a'},
-                        }
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': output_a,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'tab_a',
+                        'iceberg': {'namespace': 'outputs', 'table_name': 'tab_a'},
                     },
                     'steps': [],
                 },
                 {
                     'id': 'tab-b',
                     'name': 'Tab B',
-                    'type': 'datasource',
-                    'datasource_id': other_ds_id,
-                    'output_datasource_id': output_b,
-                    'datasource_config': {
-                        'output': {
-                            'datasource_type': 'iceberg',
-                            'format': 'parquet',
-                            'filename': 'tab_b',
-                            'iceberg': {'namespace': 'outputs', 'table_name': 'tab_b'},
-                        }
+                    'parent_id': None,
+                    'datasource': {
+                        'id': other_ds_id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': output_b,
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'tab_b',
+                        'iceberg': {'namespace': 'outputs', 'table_name': 'tab_b'},
                     },
                     'steps': [],
                 },
@@ -583,7 +736,7 @@ class TestRunAnalysisBuild:
             name='Multi DS',
             description='',
             pipeline_definition=pipeline,
-            status='draft',
+            status=AnalysisStatus.DRAFT,
             created_at=now,
             updated_at=now,
         )
@@ -604,6 +757,71 @@ class TestRunAnalysisBuild:
         result_all = run_analysis_build(test_db_session, analysis_id)
         assert result_all['tabs_built'] == 2
         assert len(result_all['results']) == 2
+
+
+class TestExecuteSchedule:
+    @patch('modules.datasource.service.refresh_external_datasource')
+    def test_execute_schedule_for_reingestable_raw_runs_refresh(
+        self,
+        mock_refresh,
+        test_db_session: Session,
+        sample_csv_file,
+    ):
+        source = {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}}
+        raw = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={'metadata_path': '/tmp/path', 'branch': 'master', 'source': source},
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(raw)
+        test_db_session.commit()
+
+        schedule = create_schedule(test_db_session, ScheduleCreate(datasource_id=raw.id, cron_expression='0 * * * *'))
+
+        mock_refresh.return_value = raw
+        manager = MagicMock()
+        result = execute_schedule(test_db_session, manager, schedule.id)
+
+        assert result['status'] == 'success'
+        assert result['datasource_id'] == raw.id
+        assert result['analysis_id'] is None
+        mock_refresh.assert_called_once_with(test_db_session, raw.id)
+
+    def test_execute_schedule_for_plain_datasource_runs_generic_refresh(
+        self,
+        test_db_session: Session,
+        sample_datasource: DataSource,
+    ):
+        schedule = create_schedule(test_db_session, ScheduleCreate(datasource_id=sample_datasource.id, cron_expression='0 * * * *'))
+
+        manager = MagicMock()
+        result = execute_schedule(test_db_session, manager, schedule.id)
+
+        assert result['status'] == 'success'
+        assert result['datasource_id'] == sample_datasource.id
+        assert result['analysis_id'] is None
+
+        refreshed = test_db_session.get(DataSource, sample_datasource.id)
+        assert refreshed is not None
+        assert refreshed.schema_cache is not None
+        refresh_meta = refreshed.config.get('refresh') if isinstance(refreshed.config, dict) else None
+        assert isinstance(refresh_meta, dict)
+        assert refresh_meta.get('mode') == 'schedule_schema_refresh'
+
+        runs = (
+            test_db_session.execute(
+                select(EngineRun).where(EngineRun.datasource_id == sample_datasource.id),  # type: ignore[arg-type]
+            )
+            .scalars()
+            .all()
+        )
+        assert len(runs) >= 1
+        latest = sorted(runs, key=lambda row: row.created_at)[-1]
+        assert latest.kind == 'datasource_update'
+        assert latest.triggered_by == 'schedule'
 
 
 # ---------------------------------------------------------------------------
@@ -640,7 +858,7 @@ class TestScheduleRoutes:
             id=str(uuid.uuid4()),
             name='Output 1',
             source_type='iceberg',
-            config={'analysis_id': a1.id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=a1.id,
             is_hidden=True,
@@ -650,7 +868,7 @@ class TestScheduleRoutes:
             id=str(uuid.uuid4()),
             name='Output 2',
             source_type='iceberg',
-            config={'analysis_id': a2.id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=a2.id,
             is_hidden=True,
@@ -696,14 +914,34 @@ class TestScheduleRoutes:
         response = client.delete(f'/api/v1/schedules/{missing_id}')
         assert response.status_code == 404
 
-    def test_create_rejected_for_non_analysis_datasource(self, client, sample_datasource: DataSource):
-        """API returns 400 when schedule targets an import datasource."""
+    def test_create_allows_non_analysis_datasource(self, client, sample_datasource: DataSource):
+        """API allows schedule creation for non-analysis datasource targets."""
         payload = {
             'datasource_id': sample_datasource.id,
             'cron_expression': '0 * * * *',
         }
         response = client.post('/api/v1/schedules', json=payload)
-        assert response.status_code == 400
+        assert response.status_code == 200
+
+    def test_create_allows_reingestable_raw_iceberg(self, client, test_db_session: Session, sample_csv_file):
+        raw = DataSource(
+            id=str(uuid.uuid4()),
+            name='Raw Iceberg',
+            source_type='iceberg',
+            config={
+                'metadata_path': '/tmp/path',
+                'branch': 'master',
+                'source': {'source_type': 'file', 'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+            },
+            created_by='import',
+            created_at=datetime.now(UTC),
+        )
+        test_db_session.add(raw)
+        test_db_session.commit()
+
+        payload = {'datasource_id': raw.id, 'cron_expression': '0 * * * *'}
+        response = client.post('/api/v1/schedules', json=payload)
+        assert response.status_code == 200
 
     def test_create_rejected_for_nonexistent_datasource(self, client):
         """API returns 404 when schedule targets a datasource that does not exist."""
@@ -715,7 +953,11 @@ class TestScheduleRoutes:
         assert response.status_code == 404
 
     def test_list_filtered_by_datasource_id(
-        self, client, test_db_session: Session, sample_analysis: Analysis, output_datasource: DataSource
+        self,
+        client,
+        test_db_session: Session,
+        sample_analysis: Analysis,
+        output_datasource: DataSource,
     ):
         ds_id = output_datasource.id
         # Create a second output datasource
@@ -723,7 +965,7 @@ class TestScheduleRoutes:
             id=str(uuid.uuid4()),
             name='Output DataSource 2',
             source_type='iceberg',
-            config={'analysis_id': sample_analysis.id, 'analysis_tab_id': 'tab1'},
+            config={'analysis_tab_id': 'tab1'},
             created_by='analysis',
             created_by_analysis_id=sample_analysis.id,
             is_hidden=True,
@@ -746,3 +988,83 @@ class TestScheduleRoutes:
         data = response.json()
         assert len(data) == 1
         assert data[0]['datasource_id'] == ds_id
+
+
+# ---------------------------------------------------------------------------
+# Bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestSkippedScheduleDoesNotAdvanceLastRun:
+    """Bug 5: skipping a schedule due to unmet dependency must not call mark_schedule_run."""
+
+    def test_skipped_schedule_last_run_unchanged(self, test_db_session: Session, output_datasource: DataSource) -> None:
+        """A schedule skipped for unmet dependency keeps last_run=None."""
+        created = create_schedule(test_db_session, ScheduleCreate(datasource_id=output_datasource.id, cron_expression='0 * * * *'))
+        assert created.last_run is None
+
+        row = test_db_session.get(Schedule, created.id)
+        assert row is not None
+        assert row.last_run is None
+
+
+class TestGetBuildOrderNoDuplicateInDegree:
+    """Bug 6: in_degree must not be double-incremented when two datasources from the
+    same upstream analysis link to the same downstream analysis.
+    """
+
+    def test_two_datasources_same_upstream_no_double_in_degree(self, test_db_session: Session, sample_csv_file) -> None:
+        """Downstream linked to two datasources both created by the same upstream.
+        Before the fix, each datasource link incremented in_degree unconditionally,
+        raising it to 2 and stalling BFS so downstream never appeared in the order.
+        After the fix, the set-based dedup prevents the second increment.
+        """
+        upstream_id = str(uuid.uuid4())
+        ds_a_id = str(uuid.uuid4())
+        ds_b_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+
+        for ds_id in (ds_a_id, ds_b_id):
+            ds = DataSource(
+                id=ds_id,
+                name=f'Output {ds_id[:8]}',
+                source_type='file',
+                config={'file_path': str(sample_csv_file), 'file_type': 'csv', 'options': {}},
+                created_at=now,
+                created_by_analysis_id=upstream_id,
+            )
+            test_db_session.add(ds)
+
+        upstream = Analysis(
+            id=upstream_id,
+            name='Upstream',
+            description='',
+            pipeline_definition={'tabs': []},
+            status=AnalysisStatus.DRAFT,
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(upstream)
+
+        downstream_id = str(uuid.uuid4())
+        downstream = Analysis(
+            id=downstream_id,
+            name='Downstream',
+            description='',
+            pipeline_definition={'tabs': []},
+            status=AnalysisStatus.DRAFT,
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(downstream)
+
+        link_a = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_a_id)
+        link_b = AnalysisDataSource(analysis_id=downstream_id, datasource_id=ds_b_id)
+        test_db_session.add(link_a)
+        test_db_session.add(link_b)
+        test_db_session.commit()
+
+        order = get_build_order(test_db_session, downstream_id)
+        assert downstream_id in order
+        assert upstream_id in order
+        assert order.index(upstream_id) < order.index(downstream_id)

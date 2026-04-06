@@ -1,6 +1,6 @@
 ---
 description: Ask clarifying questions before starting work
-agent: planner
+agent: orchestrator
 ---
 
 Analyze this request and surface any ambiguities before implementation begins.

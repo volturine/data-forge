@@ -18,27 +18,73 @@ Backend format:
 """
 
 import logging
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+
+from modules.analysis.step_types import ChartType, chart_type_for_step, normalize_step_type
+from modules.compute.operations.filter import normalize_filter_conditions
 
 logger = logging.getLogger(__name__)
 
 
-def convert_step_format(frontend_step: dict) -> dict:
+@dataclass(frozen=True, slots=True)
+class FrontendStep:
+    id: str
+    type: str
+    config: dict[str, object] = field(default_factory=dict)
+    depends_on: tuple[str, ...] = ()
+    is_applied: bool | None = None
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, object]) -> 'FrontendStep':
+        step_type = payload.get('type')
+        if not isinstance(step_type, str) or not step_type:
+            raise ValueError('Step must have a type field')
+
+        step_id = payload.get('id')
+        raw_config = payload.get('config')
+        raw_deps = payload.get('depends_on')
+        raw_applied = payload.get('is_applied')
+
+        config = raw_config if isinstance(raw_config, dict) else {}
+        depends_on = tuple(dep for dep in raw_deps if isinstance(dep, str)) if isinstance(raw_deps, list) else ()
+        is_applied = raw_applied if isinstance(raw_applied, bool) else None
+
+        return cls(
+            id=str(step_id) if step_id is not None else 'Unknown Step',
+            type=step_type,
+            config=config,
+            depends_on=depends_on,
+            is_applied=is_applied,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BackendStep:
+    name: str
+    operation: str
+    params: dict[str, object]
+
+
+def get_chart_type_for_step(step_type: str) -> ChartType | None:
+    return chart_type_for_step(step_type)
+
+
+def convert_step_format(frontend_step: Mapping[str, object] | FrontendStep) -> BackendStep:
     """Convert frontend step format to backend engine format."""
-    step_type = frontend_step.get('type')
-    if not step_type:
-        raise ValueError('Step must have a type field')
+    parsed = frontend_step if isinstance(frontend_step, FrontendStep) else FrontendStep.from_mapping(frontend_step)
+    step_type = parsed.type
+    config = parsed.config
+    chart_type = get_chart_type_for_step(step_type)
+    if chart_type:
+        config = {**config, 'chart_type': chart_type}
+    normalized_type = normalize_step_type(step_type)
 
-    config = frontend_step.get('config', {})
-    config = _normalize_chart_config(step_type, config)
-    normalized_type = _normalize_chart_type(step_type)
-
-    step_id = frontend_step.get('id', 'Unknown Step')
-
-    return {
-        'name': step_id,
-        'operation': normalized_type,
-        'params': convert_config_to_params(normalized_type, config),
-    }
+    return BackendStep(
+        name=parsed.id or 'Unknown Step',
+        operation=normalized_type,
+        params=convert_config_to_params(normalized_type, config),
+    )
 
 
 def convert_filter_config(config: dict) -> dict:
@@ -50,33 +96,21 @@ def convert_filter_config(config: dict) -> dict:
     Supports multiple conditions with AND/OR logic.
     Supports typed values (string, number, date, datetime, column) and NULL checks.
     """
-    conditions = config.get('conditions', [])
-    if not conditions:
-        raise ValueError('Filter requires at least one condition')
-
-    converted = []
-    for cond in conditions:
-        item = {
-            'column': cond.get('column', ''),
-            'operator': cond.get('operator', '='),
-            'value': cond.get('value'),
-            'value_type': cond.get('value_type', 'string'),
-        }
-        if cond.get('compare_column'):
-            item['compare_column'] = cond['compare_column']
-        converted.append(item)
-
-    return {'conditions': converted, 'logic': config.get('logic', 'AND')}
+    return {
+        'conditions': normalize_filter_conditions(config.get('conditions')),
+        'logic': config.get('logic', 'AND'),
+    }
 
 
 def convert_groupby_config(config: dict) -> dict:
     """Convert groupby config from frontend to backend format.
 
-    Frontend: {groupBy: [...], aggregations: [{column, function, alias}]}
-    Backend: {group_by: [...], aggregations: [{column, function}]}
+    Canonical: {group_by: [...], aggregations: [{column, function, alias}]}
+    Legacy fallback: {groupBy: [...], aggregations: [{column, function, alias}]}
+    Backend: {group_by: [...], aggregations: [{column, function, alias}]}
     """
     return {
-        'group_by': config.get('groupBy', []),
+        'group_by': config.get('group_by') or config.get('groupBy', []),
         'aggregations': [
             {
                 'column': agg.get('column'),
@@ -112,8 +146,10 @@ def convert_join_config(config: dict) -> dict:
 def convert_fillnull_config(config: dict) -> dict:
     """Convert fill_null config from frontend to backend format.
 
-    Frontend: {strategy, value, columns}
-    Backend: {strategy, value, columns}
+    Frontend: {strategy, value, value_type, columns}
+    Backend: {strategy, value, value_type, columns}
+
+    Normalizes frontend strategy "value" to backend strategy "literal".
     """
     strategy = config.get('strategy', 'literal')
     if strategy == 'value':
@@ -147,12 +183,10 @@ def convert_rename_config(config: dict) -> dict:
     Frontend: {column_mapping: {oldName: newName}}
     Backend: {mapping: {oldName: newName}}
     """
-    # Support both column_mapping (frontend) and mapping (backend format)
     mapping = config.get('column_mapping') or config.get('mapping', {})
-    normalized = mapping
     if isinstance(mapping, list):
-        normalized = {item.get('from'): item.get('to') for item in mapping if item.get('from') and item.get('to')}
-    return {'mapping': normalized}
+        mapping = {item.get('from'): item.get('to') for item in mapping if item.get('from') and item.get('to')}
+    return {'mapping': mapping}
 
 
 def convert_sort_config(config: dict) -> dict:
@@ -161,17 +195,14 @@ def convert_sort_config(config: dict) -> dict:
     Frontend: [{column: 'col1', descending: false}, {column: 'col2', descending: true}]
     Backend: {columns: ['col1', 'col2'], descending: [false, true]}
     """
-    # If config is already a list (frontend format)
     if isinstance(config, list):
         columns = [rule.get('column') for rule in config if rule.get('column')]
         descending = [rule.get('descending', False) for rule in config if rule.get('column')]
         return {'columns': columns, 'descending': descending}
 
-    # If config is a dict, check if it has the 'columns' key (already backend format)
     if 'columns' in config:
         return config
 
-    # Empty or invalid config
     return {'columns': [], 'descending': []}
 
 
@@ -224,68 +255,17 @@ def convert_string_transform_config(config: dict) -> dict:
     }
 
 
-def convert_sample_config(config: dict) -> dict:
-    """Convert sample config from frontend to backend format.
-
-    Frontend: {fraction, seed}
-    Backend: {fraction, seed}
-    """
-    return {
-        'fraction': config.get('fraction'),
-        'seed': config.get('seed'),
-    }
-
-
-def convert_limit_config(config: dict) -> dict:
-    """Convert limit config from frontend to backend format.
-
-    Frontend: {n}
-    Backend: {n}
-    """
-    return {
-        'n': config.get('n', 10),
-    }
-
-
-def convert_topk_config(config: dict) -> dict:
-    """Convert topk config from frontend to backend format.
-
-    Frontend: {column, k, descending}
-    Backend: {column, k, descending}
-    """
-    return {
-        'column': config.get('column'),
-        'k': config.get('k', 10),
-        'descending': config.get('descending', False),
-    }
-
-
-def convert_value_counts_config(config: dict) -> dict:
-    """Convert value_counts config from frontend to backend format.
-
-    Frontend: {column, normalize, sort}
-    Backend: {column, normalize, sort}
-    """
-    return {
-        'column': config.get('column'),
-        'normalize': config.get('normalize', False),
-        'sort': config.get('sort', True),
-    }
-
-
 def convert_export_config(config: dict) -> dict:
     """Convert export config from frontend to backend format.
 
-    Frontend: {format, filename, destination, datasource_type, iceberg_options, duckdb_options}
-    Backend: {format, filename, destination, datasource_type, iceberg_options, duckdb_options}
+    Frontend: {format, filename, destination, iceberg_options}
+    Backend: {format, filename, destination, iceberg_options}
     """
     return {
         'format': config.get('format', 'csv'),
         'filename': config.get('filename', 'export'),
         'destination': config.get('destination', 'download'),
-        'datasource_type': config.get('datasource_type', 'iceberg'),
         'iceberg_options': config.get('iceberg_options'),
-        'duckdb_options': config.get('duckdb_options'),
     }
 
 
@@ -298,18 +278,6 @@ def convert_union_by_name_config(config: dict) -> dict:
     return {
         'sources': config.get('sources', []),
         'allow_missing': config.get('allow_missing', config.get('allowMissing', True)),
-    }
-
-
-def convert_expression_config(config: dict) -> dict:
-    """Convert expression config from frontend to backend format.
-
-    Frontend: {expression: str, column_name: str}
-    Backend: {expression: str, column_name: str}
-    """
-    return {
-        'expression': config.get('expression', ''),
-        'column_name': config.get('column_name', 'new_column'),
     }
 
 
@@ -349,45 +317,6 @@ def convert_plot_config(config: dict) -> dict:
     }
 
 
-def _normalize_chart_type(step_type: str) -> str:
-    if step_type == 'plot_bar':
-        return 'chart'
-    if step_type == 'plot_horizontal_bar':
-        return 'chart'
-    if step_type == 'plot_area':
-        return 'chart'
-    if step_type == 'plot_heatgrid':
-        return 'chart'
-    if step_type == 'plot_histogram':
-        return 'chart'
-    if step_type == 'plot_scatter':
-        return 'chart'
-    if step_type == 'plot_line':
-        return 'chart'
-    if step_type == 'plot_pie':
-        return 'chart'
-    if step_type == 'plot_boxplot':
-        return 'chart'
-    return step_type
-
-
-def _normalize_chart_config(step_type: str, config: dict) -> dict:
-    chart_map = {
-        'plot_bar': 'bar',
-        'plot_horizontal_bar': 'horizontal_bar',
-        'plot_area': 'area',
-        'plot_heatgrid': 'heatgrid',
-        'plot_histogram': 'histogram',
-        'plot_scatter': 'scatter',
-        'plot_line': 'line',
-        'plot_pie': 'pie',
-        'plot_boxplot': 'boxplot',
-    }
-    if step_type not in chart_map:
-        return config
-    return {**config, 'chart_type': chart_map[step_type]}
-
-
 def convert_ai_config(config: dict) -> dict:
     raw_options = config.get('request_options') or config.get('requestOptions')
     # Parse string JSON to dict if needed (frontend sends textarea value as string)
@@ -396,8 +325,7 @@ def convert_ai_config(config: dict) -> dict:
 
     # Support both legacy input_column (singular) and input_columns (plural)
     input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
-    legacy_col = config.get('input_column') or config.get('inputColumn')
-    if legacy_col and legacy_col not in input_columns:
+    if (legacy_col := config.get('input_column') or config.get('inputColumn')) and legacy_col not in input_columns:
         input_columns = [legacy_col, *input_columns]
 
     result: dict[str, object] = {
@@ -405,10 +333,15 @@ def convert_ai_config(config: dict) -> dict:
         'model': config.get('model', 'llama2'),
         'input_columns': input_columns,
         'output_column': config.get('output_column') or config.get('outputColumn') or 'ai_result',
+        'error_column': config.get('error_column') or config.get('errorColumn') or 'ai_error',
         'prompt_template': config.get('prompt_template') or config.get('promptTemplate') or 'Classify this text: {{text}}',
         'batch_size': config.get('batch_size', 10),
+        'max_retries': config.get('max_retries', config.get('maxRetries', 3)),
+        'rate_limit_rpm': config.get('rate_limit_rpm', config.get('rateLimitRpm')),
         'endpoint_url': config.get('endpoint_url') or config.get('endpointUrl'),
         'api_key': config.get('api_key') or config.get('apiKey'),
+        'temperature': config.get('temperature', 0.7),
+        'max_tokens': config.get('max_tokens', config.get('maxTokens')),
         'request_options': raw_options,
     }
     return result
@@ -418,11 +351,8 @@ def convert_notification_config(config: dict) -> dict:
     """Convert notification config — per-row UDF with column inputs."""
     input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
 
-    recipients = config.get('recipient', '')
-    if not recipients:
-        selected = config.get('subscriber_ids')
-        if isinstance(selected, list):
-            recipients = ','.join(str(cid) for cid in selected)
+    selected = config.get('subscriber_ids')
+    recipients = config.get('recipient', '') or (','.join(str(cid) for cid in selected) if isinstance(selected, list) else '')
 
     return {
         'method': config.get('method', 'email'),
@@ -439,43 +369,28 @@ def convert_notification_config(config: dict) -> dict:
     }
 
 
-def get_converters() -> dict:
-    """Return all converters dictionary."""
-    return {
-        'filter': convert_filter_config,
-        'select': lambda c: c,
-        'groupby': convert_groupby_config,
-        'sort': convert_sort_config,
-        'rename': convert_rename_config,
-        'drop': lambda c: c,
-        'join': convert_join_config,
-        'with_columns': lambda c: c,
-        'deduplicate': convert_deduplicate_config,
-        'fill_null': convert_fillnull_config,
-        'explode': lambda c: c,
-        'pivot': convert_pivot_config,
-        'unpivot': lambda c: c,
-        'view': lambda c: c,
-        'timeseries': convert_timeseries_config,
-        'string_transform': convert_string_transform_config,
-        'sample': convert_sample_config,
-        'limit': convert_limit_config,
-        'topk': convert_topk_config,
-        'null_count': lambda c: c,
-        'value_counts': convert_value_counts_config,
-        'export': convert_export_config,
-        'union_by_name': convert_union_by_name_config,
-        'expression': convert_expression_config,
-        'chart': convert_plot_config,
-        'ai': convert_ai_config,
-        'notification': convert_notification_config,
-    }
+_CONVERTERS: dict[str, Callable[[dict], dict]] = {
+    'filter': convert_filter_config,
+    'groupby': convert_groupby_config,
+    'sort': convert_sort_config,
+    'rename': convert_rename_config,
+    'join': convert_join_config,
+    'deduplicate': convert_deduplicate_config,
+    'fill_null': convert_fillnull_config,
+    'pivot': convert_pivot_config,
+    'timeseries': convert_timeseries_config,
+    'string_transform': convert_string_transform_config,
+    'export': convert_export_config,
+    'union_by_name': convert_union_by_name_config,
+    'chart': convert_plot_config,
+    'ai': convert_ai_config,
+    'notification': convert_notification_config,
+}
 
 
 def convert_config_to_params(operation: str, config: dict) -> dict:
     """Convert operation-specific config to params."""
-    converters = get_converters()
-    converter = converters.get(operation, lambda c: c)
+    converter = _CONVERTERS.get(operation, lambda c: c)
     try:
         return converter(config)
     except Exception as e:

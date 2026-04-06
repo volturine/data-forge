@@ -5,16 +5,15 @@ import type {
 	SchemaInfo
 } from '$lib/types/datasource';
 import { apiRequest } from './client';
-import { ResultAsync } from 'neverthrow';
+import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
-function createApiError(
-	type: 'network' | 'http' | 'parse',
-	message: string,
-	status?: number,
-	statusText?: string
-): ApiError {
-	return { type, message, status, statusText };
+function appendCsvOptions(formData: FormData, csvOptions: CSVOptions): void {
+	formData.append('delimiter', csvOptions.delimiter);
+	formData.append('quote_char', csvOptions.quote_char);
+	formData.append('has_header', String(csvOptions.has_header));
+	formData.append('skip_rows', String(csvOptions.skip_rows));
+	formData.append('encoding', csvOptions.encoding);
 }
 
 export function uploadFile(
@@ -26,20 +25,14 @@ export function uploadFile(
 	formData.append('file', file);
 	formData.append('name', name);
 
-	if (csvOptions) {
-		formData.append('delimiter', csvOptions.delimiter);
-		formData.append('quote_char', csvOptions.quote_char);
-		formData.append('has_header', String(csvOptions.has_header));
-		formData.append('skip_rows', String(csvOptions.skip_rows));
-		formData.append('encoding', csvOptions.encoding);
-	}
+	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
 	return apiRequest<DataSource>('/v1/datasource/upload', {
 		method: 'POST',
 		body: formData
 	}).mapErr((error) => {
 		if (error.type === 'network') {
-			return createApiError('network', error.message || 'Upload failed');
+			return { type: 'network' as const, message: error.message || 'Upload failed' };
 		}
 		return error;
 	});
@@ -66,38 +59,16 @@ export function uploadBulkFiles(
 	const formData = new FormData();
 	files.forEach((file) => formData.append('files', file));
 
-	if (csvOptions) {
-		formData.append('delimiter', csvOptions.delimiter);
-		formData.append('quote_char', csvOptions.quote_char);
-		formData.append('has_header', String(csvOptions.has_header));
-		formData.append('skip_rows', String(csvOptions.skip_rows));
-		formData.append('encoding', csvOptions.encoding);
-	}
+	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
 	return apiRequest<BulkUploadResponse>('/v1/datasource/upload/bulk', {
 		method: 'POST',
 		body: formData
 	}).mapErr((error) => {
 		if (error.type === 'network') {
-			return createApiError('network', error.message || 'Bulk upload failed');
+			return { type: 'network' as const, message: error.message || 'Bulk upload failed' };
 		}
 		return error;
-	});
-}
-
-export function connectIcebergPath(
-	name: string,
-	metadataPath: string
-): ResultAsync<DataSource, ApiError> {
-	return apiRequest<DataSource>('/v1/datasource/connect', {
-		method: 'POST',
-		body: JSON.stringify({
-			name,
-			source_type: 'iceberg',
-			config: {
-				metadata_path: metadataPath
-			}
-		})
 	});
 }
 
@@ -164,18 +135,6 @@ export function connectAnalysisDatasource(
 			config: { analysis_id: analysisId }
 		})
 	});
-}
-
-export function resolveIcebergMetadata(
-	metadataPath: string
-): ResultAsync<{ metadata_path: string }, ApiError> {
-	const params = new URLSearchParams({ metadata_path: metadataPath });
-	return apiRequest<{ metadata_path: string }>(
-		`/v1/datasource/iceberg/resolve?${params.toString()}`,
-		{
-			method: 'GET'
-		}
-	);
 }
 
 export function refreshDatasource(datasourceId: string): ResultAsync<DataSource, ApiError> {
@@ -321,13 +280,13 @@ export interface ColumnStatsResponse {
 export function getColumnStats(
 	datasourceId: string,
 	columnName: string,
-	options?: { sample?: boolean; datasource_config?: Record<string, unknown> }
+	options?: { sample?: boolean; datasource?: { config: Record<string, unknown> } }
 ): ResultAsync<ColumnStatsResponse, ApiError> {
 	const params = new URLSearchParams();
 	if (options?.sample === false) {
 		params.set('sample', 'false');
 	}
-	const payload = options?.datasource_config ?? null;
+	const payload = options?.datasource?.config ?? null;
 	const suffix = params.toString() ? `?${params.toString()}` : '';
 	if (!payload) {
 		return apiRequest<ColumnStatsResponse>(
@@ -338,7 +297,7 @@ export function getColumnStats(
 		`/v1/datasource/${datasourceId}/column/${encodeURIComponent(columnName)}/stats${suffix}`,
 		{
 			method: 'POST',
-			body: JSON.stringify({ datasource_config: payload })
+			body: JSON.stringify({ datasource: payload ? { config: payload } : null })
 		}
 	);
 }

@@ -1,53 +1,65 @@
 import datetime as dt
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class EngineRunCreateSchema(BaseModel):
+class EngineRunKind(StrEnum):
+    PREVIEW = 'preview'
+    ROW_COUNT = 'row_count'
+    DOWNLOAD = 'download'
+    DATASOURCE_CREATE = 'datasource_create'
+    DATASOURCE_UPDATE = 'datasource_update'
+
+
+class EngineRunStatus(StrEnum):
+    SUCCESS = 'success'
+    FAILED = 'failed'
+
+
+class SchemaDiffStatus(StrEnum):
+    ADDED = 'added'
+    REMOVED = 'removed'
+    TYPE_CHANGED = 'type_changed'
+
+
+class EngineRunResultSummary(BaseModel):
+    model_config = ConfigDict(extra='allow')
+
+    row_count: int | str | None = None
+    schema_: dict[str, str] | None = Field(default_factory=dict, alias='schema')
+    data: list[dict[str, Any]] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class EngineRunBaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
     analysis_id: str | None = None
     datasource_id: str
-    kind: str
-    status: str
-    request_json: dict
-    result_json: dict | None = None
+    kind: EngineRunKind
+    status: EngineRunStatus
+    request_json: dict[str, Any]
+    result_json: dict[str, Any] | None = None
     error_message: str | None = None
     created_at: dt.datetime
     completed_at: dt.datetime | None = None
     duration_ms: int | None = None
-    step_timings: dict = Field(default_factory=dict)
+    step_timings: dict[str, float] = Field(default_factory=dict)
     query_plan: str | None = None
     progress: float = 0.0
     current_step: str | None = None
     triggered_by: str | None = None
 
 
-class EngineRunResponseSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class EngineRunResponseSchema(EngineRunBaseSchema):
     id: str
-    analysis_id: str | None
-    datasource_id: str
-    kind: str
-    status: str
-    request_json: dict
-    result_json: dict | None
-    error_message: str | None
-    created_at: dt.datetime
-    completed_at: dt.datetime | None
-    duration_ms: int | None
-    step_timings: dict
-    query_plan: str | None
-    progress: float = 0.0
-    current_step: str | None
-    triggered_by: str | None = None
 
 
 class ColumnDiff(BaseModel):
     column: str
-    status: str  # 'added', 'removed', 'type_changed'
+    status: SchemaDiffStatus
     type_a: str | None = None
     type_b: str | None = None
 
@@ -64,8 +76,8 @@ class RunSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    kind: str
-    status: str
+    kind: EngineRunKind
+    status: EngineRunStatus
     created_at: dt.datetime
     duration_ms: int | None
     row_count: int | None = None

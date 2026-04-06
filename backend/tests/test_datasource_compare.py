@@ -28,7 +28,7 @@ def test_compare_iceberg_snapshots(test_db_session, monkeypatch):
                     'id': [1, 2, 3],
                     'name': ['a', 'b', None],
                     'value': [10, 20, 30],
-                }
+                },
             ).lazy()
         if snapshot_id == '2':
             return pl.DataFrame(
@@ -37,7 +37,7 @@ def test_compare_iceberg_snapshots(test_db_session, monkeypatch):
                     'name': ['a', 'b', 'c', 'd'],
                     'value': [10, 20, 30, 40],
                     'extra': ['x', 'y', 'z', 'w'],
-                }
+                },
             ).lazy()
         return pl.DataFrame({'id': []}).lazy()
 

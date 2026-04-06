@@ -24,8 +24,9 @@
 	import { onClickOutside } from 'runed';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
+	import { css, cx, menuItem, divider, muted, input } from '$lib/styles/panda';
 	import type { TableCellValue } from '$lib/types/api-responses';
-	import { resolveColumnType } from '$lib/utils/columnTypes';
+	import { resolveColumnType } from '$lib/utils/column-types';
 	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
 
 	interface Props {
@@ -93,7 +94,7 @@
 	});
 
 	// Non-reactive resize tracking to avoid table re-renders during resize
-	let resizeOffset = { delta: 0, start: 0 };
+	const resizeOffset = { delta: 0, start: 0 };
 	let columnVisibility = $state<Record<string, boolean>>({});
 	let columnOrder = $state<string[]>([]);
 	let columnPinning = $state<ColumnPinningState>({ left: [], right: [] });
@@ -108,11 +109,11 @@
 	let scrollRef = $state<HTMLDivElement>();
 
 	// Non-reactive copy state to avoid table re-renders
-	let copiedCells = new SvelteSet<string>();
-	let copyTimers = new SvelteMap<string, number>();
+	const copiedCells = new SvelteSet<string>();
+	const copyTimers = new SvelteMap<string, number>();
 
 	// Non-reactive tooltip state to avoid table re-renders
-	let tipState = {
+	const tipState = {
 		text: '',
 		x: 0,
 		y: 0,
@@ -140,15 +141,15 @@
 			y: tipState.y,
 			visible: tipState.visible
 		};
-		if (tipState.visible) {
-			tipRef.style.setProperty('--tip-left', `${tipState.x}px`);
-			tipRef.style.setProperty('--tip-top', `${tipState.y}px`);
-			tipRef.style.opacity = '1';
-			tipRef.style.visibility = 'visible';
-		} else {
+		if (!tipState.visible) {
 			tipRef.style.opacity = '0';
 			tipRef.style.visibility = 'hidden';
+			return;
 		}
+		tipRef.style.setProperty('--tip-left', `${tipState.x}px`);
+		tipRef.style.setProperty('--tip-top', `${tipState.y}px`);
+		tipRef.style.opacity = '1';
+		tipRef.style.visibility = 'visible';
 	});
 
 	function setWidth(node: HTMLElement, size: number) {
@@ -203,8 +204,9 @@
 				columnPinning = typeof updater === 'function' ? updater(columnPinning) : updater;
 			},
 			onColumnSizingChange: (updater) => {
-				const next = typeof updater === 'function' ? updater(columnSizing) : updater;
-				columnSizing = normalizeSizing(next);
+				columnSizing = normalizeSizing(
+					typeof updater === 'function' ? updater(columnSizing) : updater
+				);
 			},
 			onColumnSizingInfoChange: (updater) => {
 				const next = typeof updater === 'function' ? updater(columnSizingInfo) : updater;
@@ -217,14 +219,14 @@
 					resizeOffset.delta = next.deltaOffset ?? 0;
 					resizeOffset.start = next.startOffset ?? 0;
 					document.documentElement.style.setProperty('--resize-delta', `${resizeOffset.delta}px`);
-				} else {
-					// Resize start/end - update reactive state
-					columnSizingInfo = next;
-					resizeOffset.delta = next.deltaOffset ?? 0;
-					resizeOffset.start = next.startOffset ?? 0;
-					if (!isResizing) {
-						document.documentElement.style.removeProperty('--resize-delta');
-					}
+					return;
+				}
+				// Resize start/end - update reactive state
+				columnSizingInfo = next;
+				resizeOffset.delta = next.deltaOffset ?? 0;
+				resizeOffset.start = next.startOffset ?? 0;
+				if (!isResizing) {
+					document.documentElement.style.removeProperty('--resize-delta');
 				}
 			},
 			getCoreRowModel: getCoreRowModel(),
@@ -239,7 +241,6 @@
 	const headerGroups = $derived<HeaderGroup<RowData>[]>(table ? table.getHeaderGroups() : []);
 	const rows = $derived<Row<RowData>[]>(table ? table.getRowModel().rows : []);
 	const compact = $derived(density === 'compact');
-	const resizing = $derived(columnSizingInfo.isResizingColumn !== false);
 	const effectiveVisibility = $derived(
 		columns.reduce(
 			(acc, col) => {
@@ -278,15 +279,10 @@
 	function pinColumn(columnId: string, side: 'left' | 'right' | 'none') {
 		const left = (columnPinning.left ?? []).filter((id) => id !== columnId);
 		const right = (columnPinning.right ?? []).filter((id) => id !== columnId);
-		if (side === 'left') {
-			columnPinning = { left: [...left, columnId], right };
-			return;
-		}
-		if (side === 'right') {
-			columnPinning = { left, right: [...right, columnId] };
-			return;
-		}
-		columnPinning = { left, right };
+		columnPinning = {
+			left: side === 'left' ? [...left, columnId] : left,
+			right: side === 'right' ? [...right, columnId] : right
+		};
 	}
 
 	function toggleColumnMenu(columnId: string) {
@@ -313,14 +309,14 @@
 
 		// Hit-test which <th> the pointer is over
 		const els = document.elementsFromPoint(event.clientX, event.clientY);
-		const th = els.find((el) => el.closest('.dataset-table__th')) as HTMLElement | undefined;
-		const header = th?.closest('.dataset-table__th') as HTMLElement | null;
-		if (header) {
-			const id = header.dataset.columnId ?? null;
-			dragOver = id && id !== dragColumn ? id : null;
-		} else {
+		const th = els.find((el) => el.closest('[data-column-header]')) as HTMLElement | undefined;
+		const header = th?.closest('[data-column-header]') as HTMLElement | null;
+		if (!header) {
 			dragOver = null;
+			return;
 		}
+		const id = header.dataset.columnId ?? null;
+		dragOver = id && id !== dragColumn ? id : null;
 	}
 
 	function handleColumnPointerUp() {
@@ -420,28 +416,20 @@
 		event.preventDefault();
 		event.stopPropagation();
 
-		// Direct DOM manipulation - show visual feedback immediately
-		const button = event.currentTarget as HTMLButtonElement;
-		if (!button) return;
-
-		// Clear existing timer if any
 		const existingTimer = copyTimers.get(id);
 		if (existingTimer) {
 			window.clearTimeout(existingTimer);
 		}
 
 		copiedCells.add(id);
-		button.classList.add('dataset-table__copy--copied');
 
 		const timer = window.setTimeout(() => {
 			copiedCells.delete(id);
 			copyTimers.delete(id);
-			button.classList.remove('dataset-table__copy--copied');
 		}, 1400);
 
 		copyTimers.set(id, timer);
 
-		// Try to copy to clipboard
 		if (!navigator?.clipboard) return;
 		const textToCopy = String(value);
 		await navigator.clipboard.writeText(textToCopy).catch(() => {
@@ -488,35 +476,66 @@
 </script>
 
 <div
-	class="dataset-table relative overflow-hidden bg-panel"
-	class:h-full={fillContainer}
-	class:flex={fillContainer}
-	class:flex-col={fillContainer}
-	class:dataset-table--compact={compact}
-	class:dataset-table--resizing={resizing}
+	class={cx(
+		css({ position: 'relative', overflow: 'hidden', backgroundColor: 'bg.primary' }),
+		fillContainer && css({ height: '100%', display: 'flex', flexDirection: 'column' })
+	)}
 >
 	{#if showHeader}
-		<div class="flex items-center gap-3 px-4 py-2 border-b border-tertiary bg-tertiary">
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				gap: '3',
+				paddingX: '4',
+				paddingY: '2',
+				borderBottomWidth: '1',
+				backgroundColor: 'bg.tertiary'
+			})}
+		>
 			{#if showPagination && pagination}
 				<button
-					class="py-1 px-2.5 border border-tertiary bg-primary text-fg-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+					class={css({
+						paddingY: '1',
+						paddingX: '2.5',
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						fontSize: 'xs',
+						_disabled: { opacity: 0.5, cursor: 'not-allowed' }
+					})}
 					onclick={pagination.onPrev}
 					disabled={!pagination.canPrev || !!pagination.loading}
+					data-testid="pagination-prev"
 				>
 					Prev
 				</button>
-				<span class="text-xs text-fg-muted">Page {pagination.page}</span>
+				<span class={css({ fontSize: 'xs', color: 'fg.muted' })} data-testid="pagination-page"
+					>Page {pagination.page}</span
+				>
 				<button
-					class="py-1 px-2.5 border border-tertiary bg-primary text-fg-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+					class={css({
+						paddingY: '1',
+						paddingX: '2.5',
+						borderWidth: '1',
+						backgroundColor: 'bg.primary',
+						fontSize: 'xs',
+						_disabled: { opacity: 0.5, cursor: 'not-allowed' }
+					})}
 					onclick={pagination.onNext}
 					disabled={!pagination.canNext || !!pagination.loading}
+					data-testid="pagination-next"
 				>
 					Next
 				</button>
 			{/if}
 			<input
 				type="text"
-				class="input-base border px-2 py-1 text-xs ml-auto w-60"
+				class={cx(
+					input(),
+					css({ paddingX: '2', paddingY: '1', fontSize: 'xs', marginLeft: 'auto', width: 'list' })
+				)}
+				id="dt-col-search"
+				aria-label="Filter columns"
 				placeholder="Filter columns"
 				bind:value={columnSearch}
 			/>
@@ -524,49 +543,103 @@
 	{/if}
 
 	{#if loading}
-		<div class="flex h-full flex-col items-center justify-center gap-3 text-fg-tertiary">
-			<LoaderCircle size={18} class="animate-spin" />
-			<p class="m-0 text-fg-tertiary">Loading</p>
+		<div
+			class={css({
+				display: 'flex',
+				height: '100%',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				gap: '3',
+				color: 'fg.tertiary'
+			})}
+		>
+			<LoaderCircle size={18} class={css({ animation: 'spin 1s linear infinite' })} />
+			<p class={css({ margin: '0', color: 'fg.tertiary' })}>Loading</p>
 		</div>
 	{/if}
 
 	{#if error}
-		<div class="flex h-full flex-col items-center justify-center gap-3 text-fg-tertiary">
+		<div
+			class={css({
+				display: 'flex',
+				height: '100%',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				gap: '3',
+				color: 'fg.tertiary'
+			})}
+			data-testid="preview-error"
+		>
 			<Bug size={18} />
-			<p class="m-0 text-fg-tertiary">Failed</p>
-			<p class="m-0 text-fg-tertiary">{error.message}</p>
+			<p class={css({ margin: '0', color: 'fg.tertiary' })}>Failed</p>
+			<p class={css({ margin: '0', color: 'fg.tertiary', maxWidth: 'sm', textAlign: 'center' })}>
+				{error.message.startsWith('{') ||
+				error.message.startsWith('[') ||
+				error.message.includes('/')
+					? 'An error occurred while loading the data.'
+					: error.message}
+			</p>
 		</div>
 	{/if}
 
 	{#if !loading && data.length === 0}
 		{#if analysis}
-			<div
-				class="flex h-full flex-col items-center justify-center gap-3 text-fg-tertiary"
-				role="button"
+			<button
+				type="button"
+				class={css({
+					display: 'flex',
+					height: '100%',
+					width: '100%',
+					flexDirection: 'column',
+					alignItems: 'center',
+					justifyContent: 'center',
+					gap: '3',
+					color: 'fg.tertiary',
+					border: 'none',
+					backgroundColor: 'transparent',
+					cursor: onPreview ? 'pointer' : 'default'
+				})}
 				tabindex={onPreview ? 0 : -1}
-				aria-disabled={!onPreview}
+				disabled={!onPreview}
 				onclick={handlePreview}
 				onkeydown={handlePreviewKey}
 			>
 				<Play size={18} />
-				<p class="m-0 text-fg-tertiary">Preview</p>
-			</div>
+				<p class={css({ margin: '0', color: 'fg.tertiary' })}>Preview</p>
+			</button>
 		{:else}
-			<div class="p-12 text-center m-0 text-fg-muted">
-				<p class="m-0">No data available</p>
+			<div class={css({ padding: '12', textAlign: 'center', margin: '0', color: 'fg.muted' })}>
+				<p class={css({ margin: '0' })}>No data available</p>
 			</div>
 		{/if}
 	{:else if headerGroups.length > 0}
 		<div
-			class="dataset-table__scroll overflow-x-auto overflow-y-auto bg-panel"
-			class:flex-1={fillContainer}
+			class={cx(
+				css({ overflowX: 'auto', overflowY: 'auto', backgroundColor: 'bg.primary' }),
+				fillContainer && css({ flex: '1' })
+			)}
 			bind:this={scrollRef}
 		>
 			<table
-				class="dataset-table__table w-full border-collapse text-sm"
+				class={css({
+					tableLayout: 'fixed',
+					minWidth: '100%',
+					width: '100%',
+					borderCollapse: 'collapse',
+					fontSize: 'sm'
+				})}
 				use:setWidth={table?.getTotalSize() ?? 0}
 			>
-				<thead class="dataset-table__thead sticky top-0 z-20 bg-tertiary">
+				<thead
+					class={css({
+						position: 'sticky',
+						top: '0',
+						zIndex: '20',
+						backgroundColor: 'bg.tertiary'
+					})}
+				>
 					{#each headerGroups as headerGroup (headerGroup.id)}
 						<tr>
 							{#each headerGroup.headers as header (header.id)}
@@ -575,23 +648,84 @@
 										? header.column.columnDef.header
 										: header.id}
 								<th
-									class="dataset-table__th p-0 text-left font-semibold border-b border-tertiary"
-									class:dataset-table__th--drag={dragOver === header.id}
-									class:dataset-table__th--dragging={dragColumn === header.id}
+									class={cx(
+										css({
+											position: 'relative',
+											borderRightWidth: '1',
+											_last: { borderRight: 'none' },
+											padding: '0',
+											textAlign: 'left',
+											fontWeight: 'semibold',
+											borderBottomWidth: '1'
+										}),
+										dragOver === header.id &&
+											css({
+												outlineWidth: '2',
+												outlineStyle: 'dashed',
+												outlineColor: 'border.primary'
+											}),
+										dragColumn === header.id && css({ opacity: '0.6' })
+									)}
+									data-column-header
 									data-column-id={header.id}
 									use:setWidth={header.getSize()}
 								>
 									<div
-										class="dataset-table__header flex items-start justify-between w-full px-4 py-2"
+										class={css({
+											minHeight: 'rowLg',
+											gap: '2',
+											display: 'flex',
+											alignItems: 'flex-start',
+											justifyContent: 'space-between',
+											width: '100%',
+											paddingX: '4',
+											paddingY: '2'
+										})}
 									>
-										<div class="dataset-table__header-left">
-											<div class="dataset-table__header-actions">
-												<div class="dataset-table__drag-slot">
+										<div
+											class={css({
+												display: 'flex',
+												gap: '2',
+												alignItems: 'center',
+												flex: '1',
+												minWidth: '0'
+											})}
+										>
+											<div
+												class={css({
+													display: 'inline-flex',
+													gap: '1'
+												})}
+											>
+												<div
+													class={css({
+														width: 'iconSm',
+														height: 'iconSm',
+														display: 'inline-flex',
+														alignItems: 'center',
+														justifyContent: 'center'
+													})}
+												>
 													{#if (columnPinning.left ?? []).includes(header.id) || (columnPinning.right ?? []).includes(header.id)}
-														<Pin class="dataset-table__pin-icon" size={12} />
+														<Pin
+															class={css({ alignSelf: 'center', color: 'fg.muted' })}
+															size={12}
+														/>
 													{:else}
 														<button
-															class="dataset-table__drag"
+															class={css({
+																border: 'none',
+																background: 'transparent',
+																color: 'fg.muted',
+																display: 'inline-flex',
+																alignItems: 'center',
+																justifyContent: 'center',
+																cursor: 'grab',
+																alignSelf: 'center',
+																_icon: { stroke: 'currentColor', fill: 'none' },
+																_hover: { color: 'fg.primary' },
+																_active: { cursor: 'grabbing' }
+															})}
 															onpointerdown={(event) =>
 																handleColumnPointerDown(event, header.id, headerLabel)}
 															onpointermove={handleColumnPointerMove}
@@ -604,9 +738,27 @@
 													{/if}
 												</div>
 											</div>
-											<div class="dataset-table__sort-label" role="presentation">
+											<div
+												class={css({
+													display: 'flex',
+													flexDirection: 'column',
+													gap: 'tight',
+													alignItems: 'flex-start',
+													alignSelf: 'flex-start',
+													minWidth: '0'
+												})}
+												role="presentation"
+											>
 												<span
-													class="dataset-table__label-text font-mono text-sm font-semibold text-fg-primary"
+													class={css({
+														maxWidth: '100%',
+														overflow: 'hidden',
+														textOverflow: 'ellipsis',
+														whiteSpace: 'nowrap',
+														fontFamily: 'mono',
+														fontSize: 'sm',
+														fontWeight: 'semibold'
+													})}
 												>
 													{typeof header.column.columnDef.header === 'string'
 														? header.column.columnDef.header
@@ -616,14 +768,30 @@
 													{#if getColumnType(header.id)}
 														<ColumnTypeBadge columnType={getColumnType(header.id)} size="xs" />
 													{:else}
-														<span class="dataset-table__type-text">-</span>
+														<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>-</span>
 													{/if}
 												{/if}
 											</div>
 										</div>
-										<div class="dataset-table__header-actions dataset-table__header-actions--right">
+										<div
+											class={css({
+												display: 'inline-flex',
+												gap: '1',
+												alignSelf: 'center',
+												flexShrink: '0'
+											})}
+										>
 											<button
-												class="dataset-table__header-btn"
+												class={css({
+													border: 'none',
+													background: 'transparent',
+													color: 'fg.muted',
+													padding: '0',
+													display: 'inline-flex',
+													alignItems: 'center',
+													justifyContent: 'center',
+													_hover: { color: 'fg.primary' }
+												})}
 												onclick={() => toggleColumnMenu(header.id)}
 												aria-label="Column options"
 											>
@@ -633,48 +801,76 @@
 									</div>
 									{#if enableResize}
 										<button
-											class="dataset-table__resizer"
+											class={cx(
+												css({
+													position: 'absolute',
+													top: '0',
+													right: '-3px',
+													width: 'bar',
+													height: '100%',
+													cursor: 'col-resize',
+													background: 'transparent',
+													padding: '0',
+													smDown: { width: 'dot' },
+													_after: {
+														content: "''",
+														position: 'absolute',
+														opacity: '0',
+														width: 'px',
+														height: '100%',
+														background: 'accent.primary'
+													},
+													_hover: { _after: { opacity: '1' } }
+												}),
+												header.column.getIsResizing() && css({ _after: { opacity: '1' } })
+											)}
 											onmousedown={header.getResizeHandler()}
 											ontouchstart={header.getResizeHandler()}
 											aria-label="Resize column"
-											class:dataset-table__resizer--active={header.column.getIsResizing()}
 										></button>
 									{/if}
 									{#if activeColumn === header.id}
-										<div class="dataset-table__column-menu" bind:this={columnMenuRef}>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => setSort(header.id, 'asc')}>Sort A-Z</button
+										<div
+											class={css({
+												position: 'absolute',
+												right: '1',
+												top: '10',
+												background: 'bg.primary',
+												borderWidth: '1',
+												zIndex: 'tooltip',
+												padding: '2',
+												minWidth: 'inputSm',
+												boxShadow: 'menu',
+												display: 'flex',
+												flexDirection: 'column',
+												gap: '1'
+											})}
+											bind:this={columnMenuRef}
+										>
+											<button class={menuItem()} onclick={() => setSort(header.id, 'asc')}
+												>Sort A-Z</button
 											>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => setSort(header.id, 'desc')}>Sort Z-A</button
+											<button class={menuItem()} onclick={() => setSort(header.id, 'desc')}
+												>Sort Z-A</button
 											>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => setSort(header.id, 'none')}>Clear sort</button
+											<button class={menuItem()} onclick={() => setSort(header.id, 'none')}
+												>Clear sort</button
 											>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => pinColumn(header.id, 'left')}>Pin left</button
+											<button class={menuItem()} onclick={() => pinColumn(header.id, 'left')}
+												>Pin left</button
 											>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => pinColumn(header.id, 'right')}>Pin right</button
+											<button class={menuItem()} onclick={() => pinColumn(header.id, 'right')}
+												>Pin right</button
 											>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => pinColumn(header.id, 'none')}>Unpin</button
+											<button class={menuItem()} onclick={() => pinColumn(header.id, 'none')}
+												>Unpin</button
 											>
-											<button
-												class="dataset-table__menu-btn"
-												onclick={() => toggleColumnVisibility(header.id)}
-											>
+											<button class={menuItem()} onclick={() => toggleColumnVisibility(header.id)}>
 												{(columnVisibility[header.id] ?? true) ? 'Hide column' : 'Show column'}
 											</button>
 											{#if onColumnStats}
 												<button
-													class="dataset-table__menu-btn"
+													class={menuItem()}
 													onclick={() => {
 														onColumnStats(header.id);
 														activeColumn = null;
@@ -692,29 +888,90 @@
 				</thead>
 				<tbody>
 					{#each rows as row (row.id)}
-						<tr class="dataset-table__row">
+						<tr
+							class={css({
+								_hover: { backgroundColor: 'bg.hover' }
+							})}
+						>
 							{#each row.getVisibleCells() as cell (cell.id)}
 								{@const display = formatValue(cell.getValue() as TableCellValue, cell.column.id)}
-								<td class="dataset-table__td">
+								<td
+									class={css({
+										padding: '0',
+										borderRightWidth: '1',
+										borderBottomWidth: '1',
+										_last: { borderRight: 'none' }
+									})}
+								>
 									<div
-										class="dataset-table__cell px-4 text-sm text-fg-secondary"
-										class:text-xs={isListType(getColumnType(cell.column.id))}
+										class={cx(
+											'group',
+											css({
+												position: 'relative',
+												paddingRight: '9',
+												whiteSpace: 'nowrap',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												minHeight: 'row',
+												display: 'flex',
+												alignItems: 'center',
+												minWidth: '0',
+												paddingX: '4',
+												fontSize: 'sm',
+												color: 'fg.secondary'
+											}),
+											compact &&
+												css({
+													paddingTop: '2',
+													paddingBottom: '2'
+												}),
+											isListType(getColumnType(cell.column.id)) && css({ fontSize: 'xs' })
+										)}
 										role="presentation"
 										onmouseenter={(event) => tipShow(event, cell.id, display)}
 										onmouseleave={() => tipHide(cell.id)}
 									>
-										<span class="dataset-table__value" data-cell-value="true">{display}</span>
+										<span
+											class={css({
+												flex: '1',
+												minWidth: '0',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												display: 'block'
+											})}
+											data-cell-value="true">{display}</span
+										>
 										{#if enableCopy}
 											<button
-												class="dataset-table__copy"
+												class={css({
+													position: 'absolute',
+													top: '50%',
+													right: '2',
+													transform: 'translateY(-50%)',
+													opacity: '0',
+													color: 'fg.muted',
+													display: 'inline-flex',
+													alignItems: 'center',
+													justifyContent: 'center',
+													backgroundColor: 'transparent',
+													padding: '0',
+													transition: 'none',
+													_icon: { stroke: 'currentColor', fill: 'none' },
+													_groupHover: { opacity: '1' },
+													smDown: { opacity: '1', width: 'row', height: 'row' }
+												})}
 												aria-label="Copy cell value"
 												onclick={(event) => copyValue(event, cell.id, display)}
 											>
-												<span class="dataset-table__copy-icon dataset-table__copy-icon--copy"
-													><Copy size={14} /></span
+												<span
+													class={css({
+														display: copiedCells.has(cell.id) ? 'none' : 'block'
+													})}><Copy size={14} /></span
 												>
-												<span class="dataset-table__copy-icon dataset-table__copy-icon--check"
-													><Check size={14} /></span
+												<span
+													class={css({
+														display: copiedCells.has(cell.id) ? 'block' : 'none'
+													})}><Check size={14} /></span
 												>
 											</button>
 										{/if}
@@ -729,22 +986,65 @@
 	{/if}
 
 	{#if showFooter && !loading && data.length > 0}
-		<div class="px-4 py-3 border-t border-tertiary bg-tertiary">
-			<span class="text-xs text-fg-tertiary">
+		<div
+			class={cx(
+				divider,
+				css({
+					paddingX: '4',
+					paddingY: '3',
+					backgroundColor: 'bg.tertiary'
+				})
+			)}
+		>
+			<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 				Showing {data.length.toLocaleString()} row{data.length !== 1 ? 's' : ''}
 			</span>
 		</div>
 	{/if}
 
-	<div class="dataset-table__tooltip" bind:this={tipRef}></div>
+	<div
+		class={css({
+			position: 'fixed',
+			maxWidth: 'min(420px, 80vw)',
+			paddingX: '3',
+			paddingY: '2',
+			borderWidth: '1',
+			background: 'bg.primary',
+			fontSize: 'sm',
+			boxShadow: 'menu',
+			zIndex: 'tooltip',
+			whiteSpace: 'normal',
+			wordBreak: 'break-word',
+			opacity: '0',
+			visibility: 'hidden',
+			pointerEvents: 'none'
+		})}
+		bind:this={tipRef}
+	></div>
 </div>
 
 {#if dragColumn && dragPointerX !== null && dragPointerY !== null}
 	<div
-		class="dataset-table__drag-preview pointer-events-none fixed z-9999 flex items-center gap-2 whitespace-nowrap border px-3 py-1.5 text-sm font-semibold border-tertiary bg-panel text-fg-primary"
-		style="left: {dragPointerX + 12}px; top: {dragPointerY + 12}px;"
+		class={css({
+			pointerEvents: 'none',
+			position: 'fixed',
+			zIndex: '9999',
+			display: 'flex',
+			alignItems: 'center',
+			gap: '2',
+			whiteSpace: 'nowrap',
+			borderWidth: '1',
+			paddingX: '3',
+			paddingY: '1.5',
+			fontSize: 'sm',
+			fontWeight: 'semibold',
+			backgroundColor: 'bg.primary',
+			boxShadow: 'popup'
+		})}
+		style:left="{dragPointerX + 12}px"
+		style:top="{dragPointerY + 12}px"
 	>
-		<GripVertical size={12} class="text-fg-muted" />
-		<span class="font-mono">{dragLabel}</span>
+		<GripVertical size={12} class={muted} />
+		<span class={css({ fontFamily: 'mono' })}>{dragLabel}</span>
 	</div>
 {/if}

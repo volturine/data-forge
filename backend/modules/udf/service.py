@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import or_, select
 from sqlmodel import Session
 
+from core.exceptions import UdfNotFoundError, UdfValidationError
 from modules.udf.models import Udf
 from modules.udf.schemas import (
     UdfCloneSchema,
@@ -19,11 +20,11 @@ from modules.udf.schemas import (
 
 def _validate_code(code: str) -> None:
     if not code.strip():
-        raise ValueError('UDF code cannot be empty')
+        raise UdfValidationError('UDF code cannot be empty')
     try:
         ast.parse(code)
     except SyntaxError as e:
-        raise ValueError(f'Invalid Python syntax: {e.msg}')
+        raise UdfValidationError(f'Invalid Python syntax: {e.msg}', details={'error': e.msg})
 
 
 def _signature_key(signature: dict) -> str:
@@ -34,7 +35,7 @@ def _signature_key(signature: dict) -> str:
     return ','.join(dtypes)
 
 
-def create_udf(session: Session, data: UdfCreateSchema) -> UdfResponseSchema:
+def create_udf(session: Session, data: UdfCreateSchema, owner_id: str | None = None) -> UdfResponseSchema:
     _validate_code(data.code)
     now = datetime.now(UTC)
     udf = Udf(
@@ -45,6 +46,7 @@ def create_udf(session: Session, data: UdfCreateSchema) -> UdfResponseSchema:
         code=data.code,
         tags=data.tags,
         source=data.source or 'user',
+        owner_id=owner_id,
         created_at=now,
         updated_at=now,
     )
@@ -58,7 +60,7 @@ def get_udf(session: Session, udf_id: str) -> UdfResponseSchema:
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
     return UdfResponseSchema.model_validate(udf)
 
 
@@ -70,7 +72,6 @@ def list_udfs(
 ) -> list[UdfResponseSchema]:
     stmt = select(Udf)
 
-    # Apply SQL-level text search filtering
     if query:
         q = f'%{query.lower()}%'
         stmt = stmt.where(or_(Udf.name.ilike(q), Udf.description.ilike(q)))  # type: ignore[arg-type, attr-defined, union-attr]
@@ -78,21 +79,7 @@ def list_udfs(
     result = session.execute(stmt)
     udfs = result.scalars().all()
 
-    # Apply Python-side filters for complex JSON fields
-    filtered_udfs = []
-    for u in udfs:
-        # Signature dtype key filter (requires parsing JSON signature)
-        if dtype_key and _signature_key(u.signature) != dtype_key:
-            continue
-
-        # Tag filter (requires parsing JSON tags array)
-        if tag:
-            tags = u.tags or []
-            if tag not in tags:
-                continue
-
-        filtered_udfs.append(u)
-
+    filtered_udfs = [u for u in udfs if (not dtype_key or _signature_key(u.signature) == dtype_key) and (not tag or tag in (u.tags or []))]
     return [UdfResponseSchema.model_validate(u) for u in filtered_udfs]
 
 
@@ -100,7 +87,7 @@ def update_udf(session: Session, udf_id: str, data: UdfUpdateSchema) -> UdfRespo
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
 
     if data.name is not None:
         udf.name = data.name
@@ -126,7 +113,7 @@ def delete_udf(session: Session, udf_id: str) -> None:
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
     session.delete(udf)
     session.commit()
 
@@ -135,7 +122,7 @@ def clone_udf(session: Session, udf_id: str, data: UdfCloneSchema) -> UdfRespons
     result = session.execute(select(Udf).where(Udf.id == udf_id))  # type: ignore[arg-type, attr-defined]
     udf = result.scalar_one_or_none()
     if not udf:
-        raise ValueError(f'UDF {udf_id} not found')
+        raise UdfNotFoundError(udf_id)
 
     now = datetime.now(UTC)
     cloned = Udf(
@@ -167,51 +154,46 @@ def export_udfs(session: Session) -> list[UdfResponseSchema]:
 
 
 def import_udfs(session: Session, payload: UdfImportSchema) -> list[UdfResponseSchema]:
-    """Import UDFs with atomic transaction - either all succeed or all fail."""
-    created: list[UdfResponseSchema] = []
-    udfs_to_refresh: list[Udf] = []
+    """Import UDFs - validate all first, then persist."""
+    for item in payload.udfs:
+        _validate_code(item.code)
 
-    # Use a single transaction to guarantee atomicity
-    transaction = session.begin_nested() if session.in_transaction() else session.begin()
-    with transaction:
-        for item in payload.udfs:
-            _validate_code(item.code)
+    imported: list[Udf] = []
+    for item in payload.udfs:
+        existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
+        udf = existing_result.scalar_one_or_none()
 
-            existing_result = session.execute(select(Udf).where(Udf.name == item.name))  # type: ignore[arg-type, attr-defined]
-            udf = existing_result.scalar_one_or_none()
+        if udf and not payload.overwrite:
+            continue
 
-            if udf and not payload.overwrite:
-                continue
+        if udf:
+            udf.description = item.description
+            udf.signature = item.signature.model_dump()
+            udf.code = item.code
+            udf.tags = item.tags
+            udf.source = item.source or 'user'
+            udf.updated_at = datetime.now(UTC)
+            imported.append(udf)
+        else:
+            now = datetime.now(UTC)
+            new_udf = Udf(
+                id=str(uuid.uuid4()),
+                name=item.name,
+                description=item.description,
+                signature=item.signature.model_dump(),
+                code=item.code,
+                tags=item.tags,
+                source=item.source or 'user',
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(new_udf)
+            imported.append(new_udf)
 
-            if udf and payload.overwrite:
-                udf.description = item.description
-                udf.signature = item.signature.model_dump()
-                udf.code = item.code
-                udf.tags = item.tags
-                udf.source = item.source or 'user'
-                udf.updated_at = datetime.now(UTC)
-                udfs_to_refresh.append(udf)
-            else:
-                now = datetime.now(UTC)
-                new_udf = Udf(
-                    id=str(uuid.uuid4()),
-                    name=item.name,
-                    description=item.description,
-                    signature=item.signature.model_dump(),
-                    code=item.code,
-                    tags=item.tags,
-                    source=item.source or 'user',
-                    created_at=now,
-                    updated_at=now,
-                )
-                session.add(new_udf)
-                udfs_to_refresh.append(new_udf)
-
-    for udf in udfs_to_refresh:
+    session.commit()
+    for udf in imported:
         session.refresh(udf)
-        created.append(UdfResponseSchema.model_validate(udf))
-
-    return created
+    return [UdfResponseSchema.model_validate(udf) for udf in imported]
 
 
 def seed_defaults(session: Session) -> list[UdfResponseSchema]:
@@ -276,7 +258,4 @@ def seed_defaults(session: Session) -> list[UdfResponseSchema]:
         ),
     ]
 
-    created: list[UdfResponseSchema] = []
-    for item in defaults:
-        created.append(create_udf(session, item))
-    return created
+    return [create_udf(session, item) for item in defaults]

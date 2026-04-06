@@ -15,17 +15,11 @@ class UnpivotParams(OperationParams):
 
 
 class UnpivotHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'unpivot'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = UnpivotParams.model_validate(params)
         index = validated.index or validated.id_vars or []

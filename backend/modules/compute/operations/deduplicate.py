@@ -1,29 +1,36 @@
 """Deduplicate rows operation."""
 
-from typing import Literal
+from enum import StrEnum
 
 import polars as pl
 
 from modules.compute.core.base import OperationHandler, OperationParams
 
 
+class DeduplicateKeep(StrEnum):
+    FIRST = 'first'
+    LAST = 'last'
+    ANY = 'any'
+    NONE = 'none'
+
+
 class DeduplicateParams(OperationParams):
     subset: list[str] | None = None
-    keep: Literal['first', 'last', 'any', 'none'] = 'first'
+    keep: DeduplicateKeep = DeduplicateKeep.FIRST
 
 
 class DeduplicateHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'deduplicate'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = DeduplicateParams.model_validate(params)
-        return lf.unique(subset=validated.subset, keep=validated.keep, maintain_order=True)
+        if validated.keep == DeduplicateKeep.FIRST:
+            return lf.unique(subset=validated.subset, keep='first', maintain_order=True)
+        if validated.keep == DeduplicateKeep.LAST:
+            return lf.unique(subset=validated.subset, keep='last', maintain_order=True)
+        if validated.keep == DeduplicateKeep.ANY:
+            return lf.unique(subset=validated.subset, keep='any', maintain_order=True)
+        return lf.unique(subset=validated.subset, keep='none', maintain_order=True)

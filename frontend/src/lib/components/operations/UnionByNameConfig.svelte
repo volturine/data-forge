@@ -4,6 +4,9 @@
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import { css, cx, stepConfig, label, divider, muted } from '$lib/styles/panda';
 
 	interface UnionByNameConfigData {
 		sources: string[];
@@ -22,100 +25,172 @@
 
 	let { schema, config = $bindable(defaultConfig) }: Props = $props();
 
-	let selectedSources = $state<string[]>(config.sources ?? []);
-	let loadedSources = $state<string[]>([]);
-
-	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource_id ?? null);
+	const currentTabDatasource = $derived(analysisStore.activeTab?.datasource.id ?? null);
 	const currentDatasource = $derived(
 		datasourceStore.datasources.find((ds) => ds.id === currentTabDatasource)
 	);
-	const datasourceOptions = $derived.by(() => datasourceStore.datasources);
+	const datasourceOptions = $derived(datasourceStore.datasources);
+	const ready = $derived(datasourceStore.loaded);
 
-	// Sync selectedSources with config.sources
-	// Subscription: $derived can't sync selected sources to config.
-	$effect(() => {
-		config.sources = selectedSources;
-	});
-
-	// Load schemas for selected sources
-	// Network: $derived can't fetch source schemas.
-	$effect(() => {
-		const selected = new Set(selectedSources);
-		for (const sourceId of selectedSources) {
-			if (!loadedSources.includes(sourceId)) {
-				loadSourceSchema(sourceId);
-			}
-		}
-		const removed = loadedSources.filter((id) => !selected.has(id));
-		if (removed.length === 0) return;
-		for (const sourceId of removed) {
-			schemaStore.removeJoinDatasource(sourceId);
-		}
-		loadedSources = loadedSources.filter((id) => selected.has(id));
-	});
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- bookkeeping only, never read by template
+	const loaded = new Set<string>();
+	let pending = $state(0);
+	const loading = $derived(pending > 0);
 
 	async function loadSourceSchema(datasourceId: string) {
-		const schemaInfo = await datasourceStore.getSchema(datasourceId);
-		const unionSchema: Schema = {
-			columns: schemaInfo.columns.map((c) => ({
-				name: c.name,
-				dtype: c.dtype,
-				nullable: c.nullable
-			})),
-			row_count: schemaInfo.row_count
-		};
-		schemaStore.setJoinDatasource(datasourceId, unionSchema);
-		if (!loadedSources.includes(datasourceId)) {
-			loadedSources = [...loadedSources, datasourceId];
+		loaded.add(datasourceId);
+		pending += 1;
+		try {
+			const schemaInfo = await datasourceStore.getSchema(datasourceId);
+			const unionSchema: Schema = {
+				columns: schemaInfo.columns.map((c) => ({
+					name: c.name,
+					dtype: c.dtype,
+					nullable: c.nullable
+				})),
+				row_count: schemaInfo.row_count
+			};
+			schemaStore.setJoinDatasource(datasourceId, unionSchema);
+		} catch {
+			loaded.delete(datasourceId);
+		} finally {
+			pending -= 1;
 		}
 	}
+
+	function removeSourceSchema(datasourceId: string) {
+		loaded.delete(datasourceId);
+		schemaStore.removeJoinDatasource(datasourceId);
+	}
+
+	// Network: $derived can't trigger async schema loads for pre-populated or externally-changed sources.
+	$effect(() => {
+		const current = new Set(config.sources);
+		for (const id of current) {
+			if (!loaded.has(id)) void loadSourceSchema(id);
+		}
+		const stale = [...loaded].filter((id) => !current.has(id));
+		for (const id of stale) {
+			removeSourceSchema(id);
+		}
+	});
 </script>
 
-<div class="config-panel">
-	<p class="description">Combine rows from multiple datasources using matching column names.</p>
+<div class={stepConfig()} data-ready={ready || undefined} data-loading={loading || undefined}>
+	<p
+		class={css({
+			marginTop: '0',
+			marginBottom: '3',
+			color: 'fg.tertiary',
+			fontSize: 'xs',
+			lineHeight: 'base'
+		})}
+	>
+		Combine rows from multiple datasources using matching column names.
+	</p>
 
-	<div class="form-section">
-		<h4>Base Datasource</h4>
-		<div class="flex flex-col gap-1">
+	<div
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
+
+			border: 'none'
+		})}
+	>
+		<SectionHeader>Base Datasource</SectionHeader>
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 			{#if currentDatasource}
 				<strong>{currentDatasource.name}</strong>
-				<span class="text-xs text-fg-tertiary">{schema.columns.length} columns</span>
+				<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}
+					>{schema.columns.length} columns</span
+				>
 			{:else}
-				<span class="text-fg-muted">No active datasource selected</span>
+				<span class={muted}>No active datasource selected</span>
 			{/if}
 		</div>
 	</div>
 
-	<div class="form-section">
-		<div class="flex justify-between items-center mb-5">
-			<h4 class="mb-0">Union Sources</h4>
+	<div
+		class={cx(
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				backgroundColor: 'transparent',
+
+				border: 'none'
+			}),
+			cx(
+				divider,
+				css({
+					paddingTop: '5'
+				})
+			)
+		)}
+	>
+		<div
+			class={css({
+				display: 'flex',
+				justifyContent: 'space-between',
+				alignItems: 'center',
+				marginBottom: '5'
+			})}
+		>
+			<SectionHeader>Union Sources</SectionHeader>
 		</div>
 
 		{#if datasourceOptions.length === 0}
-			<p class="my-2 italic text-fg-muted">Add another datasource to enable unions.</p>
+			<p class={css({ marginY: '2', fontStyle: 'italic', color: 'fg.muted' })}>
+				Add another datasource to enable unions.
+			</p>
 		{:else}
 			<DatasourcePicker
 				datasources={datasourceOptions}
-				bind:selected={selectedSources}
+				bind:selected={config.sources}
 				mode="multi"
 				showChips={true}
 				showBulkActions={true}
-				onSelect={(id) => loadSourceSchema(id)}
+				onSelect={(id) => void loadSourceSchema(id)}
+				onDeselect={(id) => removeSourceSchema(id)}
 			/>
 		{/if}
 
-		{#if selectedSources.length === 0}
-			<div class="warning-box">Select at least one datasource to union.</div>
+		{#if config.sources.length === 0}
+			<Callout tone="warn">Select at least one datasource to union.</Callout>
 		{/if}
 	</div>
 
-	<div class="form-section">
-		<h4>Column Matching</h4>
-		<label class="flex items-center gap-3">
+	<div
+		class={cx(
+			css({
+				marginBottom: '0',
+				paddingBottom: '5',
+				backgroundColor: 'transparent',
+
+				border: 'none'
+			}),
+			cx(
+				divider,
+				css({
+					paddingTop: '5'
+				})
+			)
+		)}
+	>
+		<SectionHeader>Column Matching</SectionHeader>
+		<label class={label({ variant: 'checkbox' })}>
 			<input id="allow-missing" type="checkbox" bind:checked={config.allow_missing} />
 			<span>Allow missing columns (fill with nulls)</span>
 		</label>
-		<span class="mt-2 block text-xs text-fg-muted leading-relaxed">
+		<span
+			class={css({
+				marginTop: '2',
+				display: 'block',
+				fontSize: 'xs',
+				color: 'fg.muted',
+				lineHeight: 'relaxed'
+			})}
+		>
 			When enabled, missing columns are created with null values to keep all rows.
 		</span>
 	</div>

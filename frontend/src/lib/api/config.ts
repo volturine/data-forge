@@ -1,6 +1,6 @@
 import { apiRequest } from './client';
 import type { ApiError } from './client';
-import { ResultAsync } from 'neverthrow';
+import type { ResultAsync } from 'neverthrow';
 
 export interface FrontendConfig {
 	engine_pooling_interval: number; // milliseconds
@@ -17,6 +17,7 @@ export interface FrontendConfig {
 	smtp_enabled: boolean;
 	telegram_enabled: boolean;
 	default_namespace: string;
+	auth_required: boolean;
 }
 
 export function getConfig(): ResultAsync<FrontendConfig, ApiError> {

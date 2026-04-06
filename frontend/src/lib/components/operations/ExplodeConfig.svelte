@@ -1,6 +1,9 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import { css, stepConfig } from '$lib/styles/panda';
 
 	interface ExplodeConfigData {
 		columns: string[];
@@ -28,18 +31,26 @@
 	}
 </script>
 
-<div class="config-panel">
-	<p class="description">
+<div class={stepConfig()}>
+	<p
+		class={css({
+			marginTop: '0',
+			marginBottom: '3',
+			color: 'fg.tertiary',
+			fontSize: 'xs',
+			lineHeight: '1.6'
+		})}
+	>
 		Transform list/array columns into multiple rows. Each list element becomes a separate row.
 	</p>
 
-	<div class="mb-5">
-		<h4>Columns to Explode</h4>
+	<div class={css({ marginBottom: '5' })}>
+		<SectionHeader>Columns to Explode</SectionHeader>
 
 		{#if !hasListColumns}
-			<div class="warning-box">
+			<Callout tone="warn">
 				No list/array columns detected. This operation requires columns with list or array types.
-			</div>
+			</Callout>
 		{:else}
 			<MultiSelectColumnDropdown
 				{schema}
@@ -51,7 +62,7 @@
 			/>
 
 			{#if (config.columns ?? []).length > 0}
-				<span class="mt-2 block text-xs text-fg-muted">
+				<span class={css({ marginTop: '2', display: 'block', fontSize: 'xs', color: 'fg.muted' })}>
 					{(config.columns ?? []).length} column{(config.columns ?? []).length !== 1 ? 's' : ''} selected:
 					{(config.columns ?? []).join(', ')}
 				</span>
@@ -59,7 +70,7 @@
 		{/if}
 	</div>
 
-	<div class="text-xs text-fg-muted leading-relaxed">
+	<div class={css({ fontSize: 'xs', color: 'fg.muted', lineHeight: 'relaxed' })}>
 		Each list element becomes a new row. Other column values are duplicated. Null values are
 		preserved; empty lists create no rows.
 	</div>

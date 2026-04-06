@@ -29,24 +29,12 @@ export default defineConfig(
 				'error',
 				{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
 			],
-			// Allow any type in API and utility code where needed for flexibility
-			'@typescript-eslint/no-explicit-any': 'warn',
-			// Allow lexical declarations in case blocks (common pattern)
-			'no-case-declarations': 'off',
-			// Allow useless catch when logging/cleanup is needed
-			'no-useless-catch': 'warn',
-			// Svelte-specific: allow navigation without resolve in this project
-			'svelte/no-navigation-without-resolve': 'warn',
-			// Svelte-specific: allow each blocks without keys (performance tradeoff)
-			'svelte/require-each-key': 'warn',
-			// Svelte-specific: allow built-in reactive types where SvelteSet/Map not needed
-			'svelte/prefer-svelte-reactivity': 'warn',
-			// Allow unnecessary state wrap in some edge cases
-			'svelte/no-unnecessary-state-wrap': 'warn',
-			// Allow mustache with string literals for clarity
-			'svelte/no-useless-mustaches': 'warn',
-			// Allow $state + $effect pattern instead of writable $derived
-			'svelte/prefer-writable-derived': 'warn'
+			// No any — use proper types or infer from function signatures
+			'@typescript-eslint/no-explicit-any': 'error',
+			// Svelte: each blocks should have keys for correct reconciliation
+			'svelte/require-each-key': 'error',
+			// Svelte: prefer reactive primitives over plain JS Map/Set/Date in state
+			'svelte/prefer-svelte-reactivity': 'error'
 		}
 	},
 	{

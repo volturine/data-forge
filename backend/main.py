@@ -1,22 +1,26 @@
 import asyncio
 import contextlib
 import logging
-import os
+from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import Session, text
 
 from api import router
 from core.config import settings
-from core.database import get_db, get_settings_db, init_db
+from core.database import get_settings_db, init_db, run_db
+from core.error_handlers import app_error_handler, generic_error_handler, validation_error_handler
+from core.exceptions import AppError
+from core.http import close_clients
 from core.logging import RequestLoggingMiddleware, configure_logging
 from core.namespace import list_namespaces, namespace_paths, reset_namespace, set_namespace_context
-from modules.compute.manager import get_manager
+from modules.compute.manager import ProcessManager
 from modules.scheduler import service as scheduler_service
 from modules.udf.seed import ensure_udf_seeds
 
@@ -25,7 +29,22 @@ logger = logging.getLogger(__name__)
 frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 
-async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
+async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
+    """Periodically sweep expired chat sessions."""
+    from modules.chat.sessions import session_store
+
+    while not stop_event.is_set():
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=300)
+        if stop_event.is_set():
+            break
+        try:
+            session_store.sweep()
+        except Exception as e:
+            logger.error('Chat sweep error: %s', e, exc_info=True)
+
+
+async def engine_cleanup_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     """Periodically check and clean up idle engines."""
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
@@ -33,7 +52,6 @@ async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
         if stop_event.is_set():
             break
         try:
-            manager = get_manager()
             cleaned = manager.cleanup_idle_engines()
             if cleaned:
                 for analysis_id in cleaned:
@@ -44,7 +62,7 @@ async def engine_cleanup_loop(stop_event: asyncio.Event) -> None:
             logger.error(f'Error in engine cleanup: {e}', exc_info=True)
 
 
-async def scheduler_loop(stop_event: asyncio.Event) -> None:
+async def scheduler_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     while not stop_event.is_set():
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=settings.scheduler_check_interval)
@@ -57,69 +75,44 @@ async def scheduler_loop(stop_event: asyncio.Event) -> None:
             for name in namespaces:
                 token = set_namespace_context(name)
                 try:
-                    for session in get_db():
-                        due = scheduler_service.get_due_schedules(session)
-                        if not due:
-                            logger.debug('No schedules due')
-                            break
-
-                        # Build a topological order to respect analysis dependencies
-                        all_analysis_ids = {str(s.analysis_id) for s in due if s.analysis_id}
-                        ordered_ids: list[str] = []
-                        for aid in all_analysis_ids:
-                            build_order = scheduler_service.get_build_order(session, aid)
-                            for oid in build_order:
-                                if oid in all_analysis_ids and oid not in ordered_ids:
-                                    ordered_ids.append(oid)
-
-                        # Add any remaining IDs not in the build order
-                        for aid in all_analysis_ids:
-                            if aid not in ordered_ids:
-                                ordered_ids.append(aid)
-
-                        # Map schedule by analysis_id for marking
-                        schedule_map: dict[str, list] = {}
-                        for s in due:
-                            if not s.analysis_id:
-                                continue
-                            schedule_map.setdefault(str(s.analysis_id), []).append(s)
-
-                        # Build schedule-level dependency order within each analysis group.
-                        # If schedule B depends_on schedule A, run A before B.
-                        due_by_id = {s.id: s for s in due}
-                        completed_schedule_ids: set[str] = set()
-
-                        for aid in ordered_ids:
-                            logger.info(f'Scheduler: running build for analysis {aid}')
-                            schedules_for_aid = schedule_map.get(aid, [])
-
-                            # Topological sort within this analysis's schedules
-                            sorted_schedules = _topo_sort_schedules(schedules_for_aid, due_by_id)
-
-                            for sched in sorted_schedules:
-                                # If this schedule depends on another schedule that was
-                                # due in this batch but has not completed, skip it.
-                                if sched.depends_on and sched.depends_on not in completed_schedule_ids and sched.depends_on in due_by_id:
-                                    logger.warning(
-                                        f'Scheduler: skipping schedule {sched.id} — dependency {sched.depends_on} did not complete'
-                                    )
-                                    scheduler_service.mark_schedule_run(session, sched.id)
-                                    continue
-
-                                try:
-                                    result = scheduler_service.run_analysis_build(session, aid, datasource_id=sched.datasource_id)
-                                    scheduler_service.mark_schedule_run(session, sched.id)
-                                    completed_schedule_ids.add(sched.id)
-                                    logger.info(
-                                        f'Scheduler: build complete for analysis {aid} '
-                                        f'(datasource={sched.datasource_id}) — '
-                                        f'{result["tabs_built"]} tab(s) built'
-                                    )
-                                except Exception as e:
-                                    logger.error(f'Scheduler: build failed for analysis {aid}: {e}', exc_info=True)
-                                    # Still mark the schedule as run to prevent retry storms
-                                    scheduler_service.mark_schedule_run(session, sched.id)
+                    due = await asyncio.to_thread(run_db, scheduler_service.get_due_schedules)
+                    if not due:
+                        logger.debug('No schedules due')
                         break
+
+                    due_by_id = {s.id: s for s in due}
+                    completed_schedule_ids: set[str] = set()
+
+                    sorted_schedules = _topo_sort_schedules(due, due_by_id)
+                    for sched in sorted_schedules:
+                        sched_id = sched.id
+                        if sched.depends_on and sched.depends_on not in completed_schedule_ids and sched.depends_on in due_by_id:
+                            logger.warning(f'Scheduler: skipping schedule {sched_id} — dependency {sched.depends_on} did not complete')
+                            continue
+
+                        try:
+
+                            def _execute_and_mark(session: Session, target_id: str = sched_id) -> dict:
+                                result = scheduler_service.execute_schedule(session, manager, target_id)
+                                scheduler_service.mark_schedule_run(session, target_id)
+                                return result
+
+                            result = await asyncio.to_thread(run_db, _execute_and_mark)
+                            completed_schedule_ids.add(sched.id)
+                            logger.info(
+                                'Scheduler: execution complete for schedule %s (datasource=%s status=%s)',
+                                sched_id,
+                                sched.datasource_id,
+                                result.get('status', 'unknown'),
+                            )
+                        except Exception as e:
+                            logger.error(f'Scheduler: execution failed for schedule {sched_id}: {e}', exc_info=True)
+
+                            def _mark(session: Session, target_id: str = sched_id) -> None:
+                                scheduler_service.mark_schedule_run(session, target_id)
+
+                            await asyncio.to_thread(run_db, _mark)
+                    break
                 finally:
                     reset_namespace(token)
         except Exception as e:
@@ -140,10 +133,10 @@ def _topo_sort_schedules(
             graph[s.depends_on].append(s.id)
             in_degree[s.id] += 1
 
-    queue = [sid for sid, deg in in_degree.items() if deg == 0]
+    queue = deque(sid for sid, deg in in_degree.items() if deg == 0)
     ordered: list[str] = []
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         ordered.append(node)
         for neighbor in graph.get(node, []):
             in_degree[neighbor] -= 1
@@ -163,32 +156,37 @@ def _topo_sort_schedules(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info('Starting application...')
-    init_db()
-    for session in get_db():
-        ensure_udf_seeds(session)
-        break
+    app.state.manager = ProcessManager()
+    await init_db()
+    await asyncio.to_thread(run_db, ensure_udf_seeds)
 
     # Start background cleanup task
     stop_event = asyncio.Event()
-    cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event))
-    scheduler_task = asyncio.create_task(scheduler_loop(stop_event))
+    cleanup_task = asyncio.create_task(engine_cleanup_loop(stop_event, app.state.manager))
+    scheduler_task = asyncio.create_task(scheduler_loop(stop_event, app.state.manager))
+    chat_sweep_task = asyncio.create_task(chat_sweep_loop(stop_event))
 
     # Start Telegram bot only if explicitly enabled in settings
     from modules.telegram.bot import telegram_bot
 
     def _check_bot_enabled(session: Session) -> tuple[bool, str]:
-        from modules.settings.models import AppSettings
+        from modules.settings.service import get_resolved_telegram_settings
 
-        row = session.get(AppSettings, 1)
-        if row and row.telegram_bot_enabled and row.telegram_bot_token:
-            return True, row.telegram_bot_token
-        return False, ''
+        del session
+        resolved = get_resolved_telegram_settings()
+        enabled = bool(resolved.get('enabled'))
+        token = str(resolved.get('token', ''))
+        return enabled, token
 
-    from core.database import run_db as _run_db
+    from core.database import run_settings_db
 
-    enabled, token = _run_db(_check_bot_enabled)
+    enabled, token = run_settings_db(_check_bot_enabled)
     if enabled:
         telegram_bot.start(token)
+
+    from modules.mcp.routes import get_registry
+
+    get_registry(app)
 
     yield
 
@@ -200,19 +198,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await asyncio.wait_for(cleanup_task, timeout=5)
     with contextlib.suppress(asyncio.TimeoutError):
         await asyncio.wait_for(scheduler_task, timeout=5)
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(chat_sweep_task, timeout=5)
+    await close_clients()
 
     # Cleanup compute processes on shutdown
     logger.info('Shutting down compute processes...')
-    manager = get_manager()
-    manager.shutdown_all()
+    app.state.manager.shutdown_all()
     logger.info('Application shutdown complete')
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
+# Global exception handlers for consistent structured error responses
+app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(Exception, generic_error_handler)  # type: ignore[arg-type]
+
 
 @app.middleware('http')
-async def namespace_middleware(request: Request, call_next):
+async def namespace_middleware(request: Request, call_next) -> Response:
     token = set_namespace_context(request.headers.get('X-Namespace'))
     try:
         return await call_next(request)
@@ -225,21 +230,34 @@ app.add_middleware(
     allow_credentials=True,
     allow_origins=settings.cors_origins_list,
     allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allow_headers=['Content-Type', 'Authorization', 'X-Namespace'],
+    allow_headers=['Content-Type', 'Authorization', 'If-Match', 'X-Client-Id', 'X-Namespace', 'X-Session-Token'],
 )
+
+
+@app.middleware('http')
+async def security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '0'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    if not settings.debug:
+        response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains'
+    return response
+
 
 app.add_middleware(RequestLoggingMiddleware)
 
 # Include API Routers (prefix already defined in api/router.py)
-app.include_router(router, tags=['api'])
+app.include_router(router)
 
 
-@app.get('/')
-async def root():
-    prod_mode_enabled = os.getenv('PROD_MODE_ENABLED', 'false').lower() in ['true', '1', 'yes']
+@app.get('/', response_model=None)
+async def root() -> FileResponse | dict[str, str]:
     index_path = frontend_build_dir / 'index.html'
 
-    if prod_mode_enabled and index_path.exists():
+    if settings.prod_mode_enabled and index_path.exists():
         return FileResponse(str(index_path))
 
     return {'message': 'Welcome to Svelte-FastAPI Template'}
@@ -247,19 +265,16 @@ async def root():
 
 # Health Check Endpoints
 @app.get('/health')
-async def health():
+async def health() -> dict[str, str]:
     """Basic liveness check - returns 200 if app is running."""
     return {'status': 'healthy', 'service': settings.app_name, 'version': settings.app_version}
 
 
 @app.get('/health/ready')
-def readiness(session: Session = Depends(get_settings_db)):
-    """
-    Readiness check - verifies app can handle requests.
+async def readiness(request: Request, session: Session = Depends(get_settings_db)) -> JSONResponse:
+    """Readiness check - verifies app can handle requests.
     Checks database connectivity, engine manager, and filesystem.
     """
-    from fastapi.responses import JSONResponse
-
     checks = {}
     is_ready = True
 
@@ -268,17 +283,17 @@ def readiness(session: Session = Depends(get_settings_db)):
         session.execute(text('SELECT 1'))
         checks['database'] = 'ok'
     except Exception as e:
-        checks['database'] = f'error: {str(e)}'
+        checks['database'] = f'error: {e!s}'
         is_ready = False
 
     # Check engine manager
     try:
-        manager = get_manager()
+        manager = request.app.state.manager
         engine_count = len(manager.list_engines())
         checks['engine_manager'] = 'ok'
         checks['active_engines'] = str(engine_count)
     except Exception as e:
-        checks['engine_manager'] = f'error: {str(e)}'
+        checks['engine_manager'] = f'error: {e!s}'
         is_ready = False
 
     # Check filesystem (data directories)
@@ -291,7 +306,7 @@ def readiness(session: Session = Depends(get_settings_db)):
         if not all(d.exists() for d in [paths.upload_dir, paths.clean_dir, paths.exports_dir]):
             is_ready = False
     except Exception as e:
-        checks['filesystem'] = f'error: {str(e)}'
+        checks['filesystem'] = f'error: {e!s}'
         is_ready = False
 
     status_code = 200 if is_ready else 503
@@ -299,9 +314,8 @@ def readiness(session: Session = Depends(get_settings_db)):
 
 
 @app.get('/health/startup')
-async def startup():
-    """
-    Startup probe - quick check for container startup.
+async def startup() -> dict[str, str]:
+    """Startup probe - quick check for container startup.
     Returns 200 when app is initialized and ready to accept traffic.
     """
     try:
@@ -311,12 +325,9 @@ async def startup():
         return {'status': 'error', 'message': str(e)}
 
 
-@app.get('/{full_path:path}', include_in_schema=False)
-async def serve_static_or_index(full_path: str):
-    prod_mode_enabled = os.getenv('PROD_MODE_ENABLED', 'false').lower() in ['true', '1', 'yes']
-    frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
-
-    if not prod_mode_enabled:
+@app.get('/{full_path:path}', include_in_schema=False, response_model=None)
+async def serve_static_or_index(full_path: str) -> FileResponse:
+    if not settings.prod_mode_enabled:
         logger.info('Frontend build not served (development mode or build missing)')
         raise HTTPException(status_code=404, detail='Frontend build not found')
 
@@ -341,4 +352,11 @@ async def serve_static_or_index(full_path: str):
 if __name__ == '__main__':
     import uvicorn
 
-    uvicorn.run('main:app', host='0.0.0.0', port=8000, reload=True)
+    uvicorn.run(
+        'main:app',
+        host='0.0.0.0',
+        port=settings.port,
+        reload=settings.debug,
+        log_level=settings.log_level,
+        access_log=settings.uvicorn_access_log,
+    )

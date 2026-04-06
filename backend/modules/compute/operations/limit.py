@@ -10,17 +10,11 @@ class LimitParams(OperationParams):
 
 
 class LimitHandler(OperationHandler):
-    @property
-    def name(self) -> str:
-        return 'limit'
-
     def __call__(
         self,
         lf: pl.LazyFrame,
         params: dict,
-        *,
-        right_lf: pl.LazyFrame | None = None,
-        right_sources: dict[str, pl.LazyFrame] | None = None,
+        **_,
     ) -> pl.LazyFrame:
         validated = LimitParams.model_validate(params)
         return lf.head(validated.n)

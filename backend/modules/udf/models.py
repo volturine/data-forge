@@ -14,5 +14,6 @@ class Udf(SQLModel, table=True):  # type: ignore[call-arg]
     code: str = Field(sa_column=Column(String, nullable=False))
     tags: list[str] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     source: str = Field(default='user', sa_column=Column(String, nullable=False))
+    owner_id: str | None = Field(default=None, sa_column=Column(String, nullable=True))
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     updated_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

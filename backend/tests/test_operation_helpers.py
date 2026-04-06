@@ -1,7 +1,9 @@
 import polars as pl
 import pytest
 
+from core.config import settings
 from modules.compute.core.exports import get_export_format
+from modules.compute.operations.datasource import resolve_iceberg_metadata_path
 from modules.compute.operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from modules.compute.operations.filter import get_operator
 from modules.compute.operations.groupby import get_aggregation
@@ -65,3 +67,17 @@ def test_export_format_invalid():
 def test_type_casting():
     assert cast_value('1', 'Int64') == 1
     assert get_polars_type('Float64') == pl.Float64()
+
+
+def test_resolve_iceberg_metadata_path_allows_symlinked_data_root(tmp_path, monkeypatch):
+    real_dir = tmp_path / 'real'
+    real_dir.mkdir()
+    link_dir = tmp_path / 'link'
+    link_dir.symlink_to(real_dir, target_is_directory=True)
+    monkeypatch.setattr(settings, 'data_dir', link_dir, raising=False)
+
+    metadata_file = link_dir / 'namespaces' / settings.default_namespace / 'exports' / 'table' / 'metadata' / 'v1.metadata.json'
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
+    metadata_file.write_text('{}', encoding='utf-8')
+
+    assert resolve_iceberg_metadata_path(str(metadata_file)) == str(metadata_file)

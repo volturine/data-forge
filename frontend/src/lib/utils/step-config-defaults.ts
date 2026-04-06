@@ -3,157 +3,73 @@
  * Centralizes config shape definitions to eliminate defensive $effect blocks in components.
  */
 
-import type { FilterCondition, JoinColumn, PlotConfigData } from '$lib/types/operation-config';
+import type {
+	PlotConfigData,
+	TopKConfigData,
+	SampleConfigData,
+	PivotConfigData
+} from '$lib/types/operation-config';
+import type {
+	SelectConfig,
+	DropConfig,
+	FilterConfig,
+	GroupByConfig,
+	JoinConfig,
+	UnionByNameConfig,
+	UnpivotConfig,
+	ExplodeConfig,
+	LimitConfig,
+	ViewConfig,
+	ExportConfig,
+	DownloadConfig,
+	NotificationConfig,
+	AIConfig
+} from '$lib/types/step-schemas.generated';
+import {
+	chartTypeForStep,
+	isChartStepType,
+	normalizePipelineStepType
+} from '$lib/types/pipeline-step';
+import { cloneJson } from '$lib/utils/json';
 
-export interface SelectConfigData {
-	columns: string[];
-}
-
-export interface DropConfigData {
-	columns: string[];
-}
-
-export interface FilterConfigData {
-	conditions: FilterCondition[];
-	logic: 'AND' | 'OR';
-}
-
-export interface GroupByConfigData {
-	groupBy: string[];
-	aggregations: Array<{
-		column: string;
-		function: string;
-		alias: string;
-	}>;
-}
-
-export interface JoinConfigData {
-	how: 'inner' | 'left' | 'right' | 'outer' | 'cross';
-	right_source: string;
-	join_columns: JoinColumn[];
-	right_columns: string[];
-	suffix: string;
-}
-
-export interface UnionByNameConfigData {
-	sources: string[];
-	allow_missing: boolean;
-}
-
-export interface ValueCountsConfigData {
-	column: string;
-	sort: boolean;
-}
-
-export interface UnpivotConfigData {
-	id_vars: string[];
-	value_vars: string[];
-	variable_name: string;
-	value_name: string;
-}
-
-export interface ExplodeConfigData {
-	columns: string[];
-}
-
-export interface PivotConfigData {
-	index: string[];
-	columns: string[];
-	values: string[];
-	aggregate_function: string;
-}
-
-export interface SampleConfigData {
-	n: number;
-	with_replacement: boolean;
-	shuffle: boolean;
-	seed: number | null;
-}
-
-export interface LimitConfigData {
-	n: number;
-}
-
-export interface TopKConfigData {
-	by: string;
-	k: number;
-	reverse: boolean;
-}
-
-export interface ViewConfigData {
-	rowLimit: number | null;
-}
-
-export interface ExportConfigData {
-	format: string;
-	filename: string;
-	destination: string;
-}
-
+// ChartConfigData re-uses the richer PlotConfigData type from operation-config.
 export type ChartConfigData = PlotConfigData;
 
-export interface NotificationConfigData {
-	method: 'email' | 'telegram';
-	recipient: string;
-	subscriber_ids: string[];
-	bot_token: string;
-	recipient_source: 'manual' | 'column';
-	recipient_column: string;
-	input_columns: string[];
-	output_column: string;
-	message_template: string;
-	subject_template: string;
-	batch_size: number;
-	timeout_seconds: number;
-}
-
-export interface AIConfigData {
-	provider: 'ollama' | 'openai';
-	model: string;
-	input_columns: string[];
-	output_column: string;
-	prompt_template: string;
-	batch_size: number;
-	endpoint_url: string;
-	api_key: string;
-	request_options?: Record<string, unknown> | null;
-}
-
 export type StepConfig =
-	| SelectConfigData
-	| DropConfigData
-	| FilterConfigData
-	| GroupByConfigData
-	| JoinConfigData
-	| UnionByNameConfigData
-	| ValueCountsConfigData
-	| UnpivotConfigData
-	| ExplodeConfigData
+	| SelectConfig
+	| DropConfig
+	| FilterConfig
+	| GroupByConfig
+	| JoinConfig
+	| UnionByNameConfig
+	| UnpivotConfig
+	| ExplodeConfig
 	| PivotConfigData
 	| SampleConfigData
-	| LimitConfigData
+	| LimitConfig
 	| TopKConfigData
-	| ViewConfigData
-	| ExportConfigData
+	| ViewConfig
+	| ExportConfig
+	| DownloadConfig
 	| PlotConfigData
-	| NotificationConfigData
-	| AIConfigData
+	| NotificationConfig
+	| AIConfig
 	| Record<string, unknown>;
 
 const defaultConfigs: Record<string, StepConfig> = {
-	select: { columns: [] } satisfies SelectConfigData,
+	select: { columns: [], cast_map: {} } satisfies SelectConfig,
 
-	drop: { columns: [] } satisfies DropConfigData,
+	drop: { columns: [] } satisfies DropConfig,
 
 	filter: {
 		conditions: [{ column: '', operator: '=', value: '', value_type: 'string' }],
 		logic: 'AND'
-	} satisfies FilterConfigData,
+	} satisfies FilterConfig,
 
 	groupby: {
-		groupBy: [],
+		group_by: [],
 		aggregations: []
-	} satisfies GroupByConfigData,
+	} satisfies GroupByConfig,
 
 	join: {
 		how: 'inner',
@@ -161,62 +77,60 @@ const defaultConfigs: Record<string, StepConfig> = {
 		join_columns: [],
 		right_columns: [],
 		suffix: '_right'
-	} satisfies JoinConfigData,
+	} satisfies JoinConfig,
 
 	union_by_name: {
 		sources: [],
 		allow_missing: true
-	} satisfies UnionByNameConfigData,
-
-	value_counts: {
-		column: '',
-		sort: true
-	} satisfies ValueCountsConfigData,
+	} satisfies UnionByNameConfig,
 
 	unpivot: {
 		id_vars: [],
 		value_vars: [],
 		variable_name: 'variable',
 		value_name: 'value'
-	} satisfies UnpivotConfigData,
+	} satisfies UnpivotConfig,
 
 	explode: {
 		columns: []
-	} satisfies ExplodeConfigData,
+	} satisfies ExplodeConfig,
 
 	pivot: {
 		index: [],
-		columns: [],
-		values: [],
+		columns: '',
+		values: null,
 		aggregate_function: 'first'
 	} satisfies PivotConfigData,
 
 	sample: {
-		n: 1000,
-		with_replacement: false,
-		shuffle: true,
+		fraction: 0.5,
 		seed: null
 	} satisfies SampleConfigData,
 
 	limit: {
 		n: 100
-	} satisfies LimitConfigData,
+	} satisfies LimitConfig,
 
 	topk: {
-		by: '',
+		column: '',
 		k: 10,
-		reverse: false
+		descending: false
 	} satisfies TopKConfigData,
 
 	view: {
 		rowLimit: 100
-	} satisfies ViewConfigData,
+	} satisfies ViewConfig,
 
 	export: {
 		format: 'csv',
 		filename: 'export',
 		destination: 'download'
-	} satisfies ExportConfigData,
+	} satisfies ExportConfig,
+
+	download: {
+		format: 'csv',
+		filename: 'download'
+	} satisfies DownloadConfig,
 
 	chart: {
 		chart_type: 'bar',
@@ -249,7 +163,8 @@ const defaultConfigs: Record<string, StepConfig> = {
 		title: '',
 		series_colors: [],
 		overlays: [],
-		reference_lines: []
+		reference_lines: [],
+		chart_height: 'medium'
 	} satisfies PlotConfigData,
 
 	notification: {
@@ -265,19 +180,24 @@ const defaultConfigs: Record<string, StepConfig> = {
 		subject_template: 'Notification',
 		batch_size: 10,
 		timeout_seconds: 20
-	} satisfies NotificationConfigData,
+	} satisfies NotificationConfig,
 
 	ai: {
 		provider: 'ollama',
-		model: 'llama2',
+		model: 'llama3.2',
 		input_columns: [],
 		output_column: 'ai_result',
+		error_column: 'ai_error',
 		prompt_template: 'Classify this text: {{text}}',
 		batch_size: 10,
+		max_retries: 3,
+		rate_limit_rpm: null,
 		endpoint_url: '',
 		api_key: '',
+		temperature: 0.7,
+		max_tokens: null,
 		request_options: null
-	} satisfies AIConfigData,
+	} satisfies AIConfig,
 
 	// Operations that don't need config
 	datasource: {},
@@ -286,10 +206,9 @@ const defaultConfigs: Record<string, StepConfig> = {
 	expression: { expression: '', column_name: '' },
 	with_columns: { expressions: [] },
 	fill_null: {},
-	deduplicate: {},
+	deduplicate: { subset: null, keep: 'first' },
 	string_transform: {},
-	timeseries: {},
-	null_count: {}
+	timeseries: {}
 };
 
 /**
@@ -297,13 +216,9 @@ const defaultConfigs: Record<string, StepConfig> = {
  * Returns a fresh copy to avoid reference sharing between steps.
  */
 export function getDefaultConfig(stepType: string): StepConfig {
-	const normalizedType = stepType.startsWith('plot_') ? 'chart' : stepType;
+	const normalizedType = normalizePipelineStepType(stepType);
 	const defaults = defaultConfigs[normalizedType];
-	if (!defaults) {
-		return {};
-	}
-	// Deep clone to prevent shared references
-	return JSON.parse(JSON.stringify(defaults));
+	return defaults ? cloneJson(defaults) : {};
 }
 
 /**
@@ -312,21 +227,36 @@ export function getDefaultConfig(stepType: string): StepConfig {
  * Preserves all existing config fields while adding any missing defaults.
  */
 export function normalizeConfig(stepType: string, config: Record<string, unknown>): StepConfig {
-	const normalizedType = stepType.startsWith('plot_') ? 'chart' : stepType;
+	const normalizedType = normalizePipelineStepType(stepType);
 	const defaults = getDefaultConfig(normalizedType);
 
-	if (stepType.startsWith('plot_')) {
-		const chartType = stepType.replace('plot_', '');
-		const chartConfig = { ...config, chart_type: chartType };
-		return { ...defaults, ...chartConfig };
+	if (isChartStepType(stepType)) {
+		const chartAliasType = chartTypeForStep(stepType);
+		config = chartAliasType ? { ...config, chart_type: chartAliasType } : config;
 	}
 	if (stepType === 'export') {
 		const cleaned = { ...config } as Record<string, unknown>;
-		delete cleaned.datasource_type;
 		delete cleaned.iceberg_options;
-		delete cleaned.duckdb_options;
 		cleaned.destination = 'download';
 		return { ...defaults, ...cleaned };
+	}
+
+	// Migrate legacy groupBy → group_by (camelCase → snake_case)
+	if (stepType === 'groupby' && 'groupBy' in config && !('group_by' in config)) {
+		config = { ...config, group_by: config.groupBy };
+		delete config.groupBy;
+	}
+
+	// Migrate legacy topk keys: by → column, reverse → descending
+	if (stepType === 'topk') {
+		if ('by' in config && !('column' in config)) {
+			config = { ...config, column: config.by };
+			delete config.by;
+		}
+		if ('reverse' in config && !('descending' in config)) {
+			config = { ...config, descending: config.reverse };
+			delete config.reverse;
+		}
 	}
 
 	// Handle filter-specific normalization for backward compatibility

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 
+from core.error_handlers import handle_errors
 from modules.logs.schemas import ClientLogBatch
 from modules.logs.service import save_client_logs
 
@@ -7,6 +8,7 @@ router = APIRouter(prefix='/logs', tags=['logs'])
 
 
 @router.post('/client')
+@handle_errors(operation='ingest client logs')
 async def ingest_client_logs(batch: ClientLogBatch, request: Request):
     client_id = request.headers.get('x-client-id')
     session_id = request.headers.get('x-client-session')

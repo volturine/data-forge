@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,9 +45,15 @@ class ColumnStats(BaseModel):
     max: object | None = None
 
 
+class SchemaDiffStatus(StrEnum):
+    ADDED = 'added'
+    REMOVED = 'removed'
+    TYPE_CHANGED = 'type_changed'
+
+
 class SchemaDiff(BaseModel):
     column: str
-    status: Literal['added', 'removed', 'type_changed']
+    status: SchemaDiffStatus
     type_a: str | None = None
     type_b: str | None = None
 
@@ -100,7 +106,7 @@ class ColumnStatsResponse(BaseModel):
 
 
 class ColumnStatsRequest(BaseModel):
-    datasource_config: dict | None = None
+    datasource: dict | None = None
 
 
 class ExcelPreflightPathRequest(BaseModel):
@@ -175,18 +181,8 @@ class DatabaseDataSourceConfig(BaseModel):
 
 
 class IcebergDataSourceConfig(BaseModel):
-    metadata_path: str
     branch: str = 'master'
-    snapshot_id: str | None = None
-    snapshot_timestamp_ms: int | None = None
-    storage_options: dict | None = None
-    reader: str | None = None
-    catalog_type: str | None = None
-    catalog_uri: str | None = None
-    warehouse: str | None = None
-    namespace: str | None = None
-    table: str | None = None
-    source: dict | None = None
+    source: dict
     refresh: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -206,6 +202,22 @@ class DataSourceResponse(BaseModel):
     source_type: DataSourceType
     config: dict
     schema_cache: dict | None
+    created_by_analysis_id: str | None = None
+    created_by: str = 'import'
+    is_hidden: bool = False
+    created_at: datetime
+    output_of_tab_id: str | None = None
+
+
+class DataSourceListItem(BaseModel):
+    """Lightweight schema for list endpoints — excludes heavy schema_cache."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    source_type: DataSourceType
+    config: dict
     created_by_analysis_id: str | None = None
     created_by: str = 'import'
     is_hidden: bool = False

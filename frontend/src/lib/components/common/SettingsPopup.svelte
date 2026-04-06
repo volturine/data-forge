@@ -5,6 +5,7 @@
 		Mail,
 		MessageCircle,
 		Database,
+		ChevronDown,
 		CheckCircle,
 		XCircle,
 		Send,
@@ -18,10 +19,17 @@
 		testSmtp,
 		getBotStatus,
 		getSubscribers,
-		deleteSubscriber
+		deleteSubscriber,
+		isMasked,
+		MASKED_PLACEHOLDER
 	} from '$lib/api/settings';
+	import type { AppSettings } from '$lib/api/settings';
+	import { listAIModels, testAIConnection } from '$lib/api/ai';
 	import { configStore } from '$lib/stores/config.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
+	import { css, input, cx, label, row, rowBetween, divider } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -38,20 +46,67 @@
 	let smtp_password = $state('');
 	let telegram_bot_token = $state('');
 	let telegram_bot_enabled = $state(false);
+	let openrouter_api_key = $state('');
+	let openrouter_default_model = $state('');
+	let openai_api_key = $state('');
+	let openai_endpoint_url = $state('https://api.openai.com');
+	let openai_default_model = $state('gpt-4o-mini');
+	let openai_organization_id = $state('');
+	let ollama_endpoint_url = $state('http://localhost:11434');
+	let ollama_default_model = $state('llama3.2');
+	let huggingface_api_token = $state('');
+	let huggingface_default_model = $state('google/flan-t5-base');
 	let idb = $state(false);
+
+	// Track whether user explicitly changed secret fields
+	let smtp_password_dirty = $state(false);
+	let telegram_bot_token_dirty = $state(false);
+	let openrouter_api_key_dirty = $state(false);
+	let openai_api_key_dirty = $state(false);
+	let huggingface_api_token_dirty = $state(false);
 
 	// UI state
 	let loading = $state(false);
 	let saving = $state(false);
 	let testingSmtp = $state(false);
+	let testingProvider = $state<string | null>(null);
 	let smtpTestTo = $state('');
 	let feedback = $state<{ type: 'success' | 'error'; message: string } | null>(null);
+	let aiProvidersCollapsed = $state(true);
+	let smtpCollapsed = $state(true);
+	let telegramCollapsed = $state(true);
+	let debugCollapsed = $state(true);
+
+	const sectionToggle = css({
+		display: 'flex',
+		width: '100%',
+		cursor: 'pointer',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+		border: 'none',
+		backgroundColor: 'transparent',
+		padding: '0',
+		textAlign: 'left',
+		transition: 'color 150ms',
+		_hover: { color: 'fg.primary' }
+	});
+	const sectionToggleLabel = css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' });
+	const sectionChevron = css({ transition: 'transform 150ms' });
 
 	// Network: $derived can't fetch settings on open.
 	$effect(() => {
 		if (!open) return;
 		loading = true;
 		feedback = null;
+		aiProvidersCollapsed = true;
+		smtpCollapsed = true;
+		telegramCollapsed = true;
+		debugCollapsed = true;
+		smtp_password_dirty = false;
+		telegram_bot_token_dirty = false;
+		openrouter_api_key_dirty = false;
+		openai_api_key_dirty = false;
+		huggingface_api_token_dirty = false;
 		let aborted = false;
 		getSettings().match(
 			(s) => {
@@ -59,9 +114,19 @@
 				smtp_host = s.smtp_host;
 				smtp_port = s.smtp_port;
 				smtp_user = s.smtp_user;
-				smtp_password = s.smtp_password;
-				telegram_bot_token = s.telegram_bot_token;
+				smtp_password = isMasked(s.smtp_password) ? '' : s.smtp_password;
+				telegram_bot_token = isMasked(s.telegram_bot_token) ? '' : s.telegram_bot_token;
 				telegram_bot_enabled = s.telegram_bot_enabled;
+				openrouter_api_key = isMasked(s.openrouter_api_key) ? '' : s.openrouter_api_key;
+				openrouter_default_model = s.openrouter_default_model;
+				openai_api_key = isMasked(s.openai_api_key) ? '' : s.openai_api_key;
+				openai_endpoint_url = s.openai_endpoint_url;
+				openai_default_model = s.openai_default_model;
+				openai_organization_id = s.openai_organization_id;
+				ollama_endpoint_url = s.ollama_endpoint_url;
+				ollama_default_model = s.ollama_default_model;
+				huggingface_api_token = isMasked(s.huggingface_api_token) ? '' : s.huggingface_api_token;
+				huggingface_default_model = s.huggingface_default_model;
 				idb = s.public_idb_debug;
 				loading = false;
 			},
@@ -126,15 +191,26 @@
 	async function save() {
 		saving = true;
 		feedback = null;
-		const result = await updateSettings({
+		const payload: Partial<AppSettings> = {
 			smtp_host,
 			smtp_port,
 			smtp_user,
-			smtp_password,
-			telegram_bot_token,
 			telegram_bot_enabled,
+			openrouter_default_model,
+			openai_endpoint_url,
+			openai_default_model,
+			openai_organization_id,
+			ollama_endpoint_url,
+			ollama_default_model,
+			huggingface_default_model,
 			public_idb_debug: idb
-		});
+		};
+		if (smtp_password_dirty) payload.smtp_password = smtp_password;
+		if (telegram_bot_token_dirty) payload.telegram_bot_token = telegram_bot_token;
+		if (openrouter_api_key_dirty) payload.openrouter_api_key = openrouter_api_key;
+		if (openai_api_key_dirty) payload.openai_api_key = openai_api_key;
+		if (huggingface_api_token_dirty) payload.huggingface_api_token = huggingface_api_token;
+		const result = await updateSettings(payload);
 		result.match(
 			() => {
 				feedback = { type: 'success', message: 'Settings saved' };
@@ -168,49 +244,131 @@
 		testingSmtp = false;
 	}
 
+	async function handleTestAIProvider(
+		provider: 'openrouter' | 'openai' | 'ollama' | 'huggingface'
+	) {
+		testingProvider = provider;
+		feedback = null;
+		const endpoint =
+			provider === 'openai'
+				? openai_endpoint_url
+				: provider === 'ollama'
+					? ollama_endpoint_url
+					: provider === 'huggingface'
+						? 'https://api-inference.huggingface.co'
+						: null;
+		const apiKey =
+			provider === 'openrouter'
+				? openrouter_api_key || null
+				: provider === 'openai'
+					? openai_api_key || null
+					: provider === 'huggingface'
+						? huggingface_api_token || null
+						: null;
+		const organizationId = provider === 'openai' ? openai_organization_id || null : null;
+
+		const testResult = await testAIConnection(provider, endpoint, apiKey, organizationId);
+		const modelsResult = await listAIModels(provider, endpoint, apiKey, organizationId);
+		testResult.match(
+			(result) => {
+				const modelsCount = modelsResult.isOk() ? modelsResult.value.length : 0;
+				const modelsText = modelsCount > 0 ? ` (${modelsCount} model(s) listed)` : '';
+				feedback = {
+					type: result.ok ? 'success' : 'error',
+					message: `${provider}: ${result.detail}${modelsText}`
+				};
+			},
+			(err) => {
+				feedback = { type: 'error', message: err.message };
+			}
+		);
+		testingProvider = null;
+	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <BaseModal
-	open={open}
+	{open}
 	onClose={() => (open = false)}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
-	panelClass="w-full max-w-120 max-h-[90vh] overflow-y-auto border animate-slide-up bg-dialog border-tertiary focus:outline-none"
+	panelClass={css({
+		width: '100%',
+		maxWidth: 'modalSm',
+		maxHeight: '90vh',
+		overflowY: 'auto',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary',
+		outline: 'none'
+	})}
 	ariaLabelledby="settings-title"
-	content={content}
+	{content}
 />
 
 {#snippet content()}
-	<div class="flex items-center justify-between border-b p-4 border-tertiary">
-		<h2 id="settings-title" class="m-0 text-sm font-semibold text-fg-primary">Settings</h2>
-		<button
-			class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
-			onclick={() => (open = false)}
-			aria-label="Close settings"
-			type="button"
-		>
-			<X size={16} />
-		</button>
-	</div>
+	<PanelHeader>
+		{#snippet title()}
+			<h2 id="settings-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
+				Settings
+			</h2>
+		{/snippet}
+		{#snippet actions()}
+			<button
+				class={css({
+					display: 'flex',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'center',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '1',
+					color: 'fg.muted',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
+				onclick={() => (open = false)}
+				aria-label="Close settings"
+				type="button"
+			>
+				<X size={16} />
+			</button>
+		{/snippet}
+	</PanelHeader>
 
 	{#if loading}
-		<div class="flex items-center justify-center gap-2 p-8 text-xs text-fg-muted">
-			<Loader2 size={14} class="animate-spin" />
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				gap: '2',
+				padding: '8',
+				fontSize: 'xs',
+				color: 'fg.muted'
+			})}
+		>
+			<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 			Loading settings...
 		</div>
 	{:else}
-		<div class="flex flex-col gap-4 p-4">
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '4', padding: '4' })}>
 			{#if feedback}
 				<div
-					class="flex items-center gap-2 border p-2 text-xs"
-					class:border-success={feedback.type === 'success'}
-					class:bg-success={feedback.type === 'success'}
-					class:text-success={feedback.type === 'success'}
-					class:border-error={feedback.type === 'error'}
-					class:bg-error={feedback.type === 'error'}
-					class:text-error={feedback.type === 'error'}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						borderWidth: '1',
+						padding: '2',
+						fontSize: 'xs',
+						...(feedback.type === 'success'
+							? {
+									borderColor: 'border.success',
+									backgroundColor: 'bg.success',
+									color: 'fg.success'
+								}
+							: { borderColor: 'border.error', backgroundColor: 'bg.error', color: 'fg.error' })
+					})}
 				>
 					{#if feedback.type === 'success'}
 						<CheckCircle size={12} />
@@ -221,219 +379,664 @@
 				</div>
 			{/if}
 
-			<span class="text-xs font-semibold uppercase tracking-wider text-fg-tertiary">
-				<Mail size={12} class="mr-1 inline" />
-				SMTP
-			</span>
+			<button
+				class={sectionToggle}
+				type="button"
+				aria-expanded={!aiProvidersCollapsed}
+				aria-controls="settings-ai-providers"
+				onclick={() => (aiProvidersCollapsed = !aiProvidersCollapsed)}
+			>
+				<span class={sectionToggleLabel}>
+					<SectionHeader>AI Providers</SectionHeader>
+				</span>
+				<ChevronDown
+					size={14}
+					class={cx(
+						sectionChevron,
+						aiProvidersCollapsed ? css({ transform: 'rotate(-90deg)' }) : ''
+					)}
+				/>
+			</button>
 
-			<div class="grid grid-cols-2 gap-2">
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Host</span>
-					<input
-						type="text"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-						bind:value={smtp_host}
-						placeholder="smtp.example.com"
-					/>
-				</label>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Port</span>
-					<input
-						type="number"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-						bind:value={smtp_port}
-					/>
-				</label>
+			<div
+				id="settings-ai-providers"
+				hidden={aiProvidersCollapsed}
+				aria-hidden={aiProvidersCollapsed}
+				class={cx(
+					css({ display: 'flex', flexDirection: 'column', gap: '4' }),
+					aiProvidersCollapsed ? css({ display: 'none' }) : ''
+				)}
+			>
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2',
+						borderWidth: '1',
+						padding: '3'
+					})}
+				>
+					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenRouter</span>
+						<button
+							class={css({
+								borderWidth: '1',
+								paddingX: '2',
+								paddingY: '1',
+								fontSize: 'xs',
+								_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+							})}
+							onclick={() => void handleTestAIProvider('openrouter')}
+							disabled={testingProvider === 'openrouter'}
+							aria-label="Test OpenRouter"
+							type="button"
+						>
+							{testingProvider === 'openrouter' ? 'Testing…' : 'Test'}
+						</button>
+					</div>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API key</span>
+						<input
+							type="password"
+							class={input()}
+							bind:value={openrouter_api_key}
+							oninput={() => (openrouter_api_key_dirty = true)}
+							placeholder={MASKED_PLACEHOLDER}
+						/>
+					</label>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>
+						<input
+							type="text"
+							class={input()}
+							bind:value={openrouter_default_model}
+							placeholder="openai/gpt-4o-mini"
+						/>
+					</label>
+				</div>
+
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2',
+						borderWidth: '1',
+						padding: '3'
+					})}
+				>
+					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenAI</span>
+						<button
+							class={css({
+								borderWidth: '1',
+								paddingX: '2',
+								paddingY: '1',
+								fontSize: 'xs',
+								_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+							})}
+							onclick={() => void handleTestAIProvider('openai')}
+							disabled={testingProvider === 'openai'}
+							aria-label="Test OpenAI"
+							type="button"
+						>
+							{testingProvider === 'openai' ? 'Testing…' : 'Test'}
+						</button>
+					</div>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API key</span>
+						<input
+							type="password"
+							class={input()}
+							bind:value={openai_api_key}
+							oninput={() => (openai_api_key_dirty = true)}
+							placeholder={MASKED_PLACEHOLDER}
+						/>
+					</label>
+					<div
+						class={css({
+							display: 'grid',
+							gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+							gap: '2'
+						})}
+					>
+						<label class={label({ variant: 'wrapper' })}>
+							<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Endpoint URL</span>
+							<input type="text" class={input()} bind:value={openai_endpoint_url} />
+						</label>
+						<label class={label({ variant: 'wrapper' })}>
+							<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>
+							<input type="text" class={input()} bind:value={openai_default_model} />
+						</label>
+					</div>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}
+							>Organization ID (optional)</span
+						>
+						<input type="text" class={input()} bind:value={openai_organization_id} />
+					</label>
+				</div>
+
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2',
+						borderWidth: '1',
+						padding: '3'
+					})}
+				>
+					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Ollama</span>
+						<button
+							class={css({
+								borderWidth: '1',
+								paddingX: '2',
+								paddingY: '1',
+								fontSize: 'xs',
+								_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+							})}
+							onclick={() => void handleTestAIProvider('ollama')}
+							disabled={testingProvider === 'ollama'}
+							aria-label="Test Ollama"
+							type="button"
+						>
+							{testingProvider === 'ollama' ? 'Testing…' : 'Test'}
+						</button>
+					</div>
+					<div
+						class={css({
+							display: 'grid',
+							gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+							gap: '2'
+						})}
+					>
+						<label class={label({ variant: 'wrapper' })}>
+							<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Endpoint URL</span>
+							<input type="text" class={input()} bind:value={ollama_endpoint_url} />
+						</label>
+						<label class={label({ variant: 'wrapper' })}>
+							<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>
+							<input type="text" class={input()} bind:value={ollama_default_model} />
+						</label>
+					</div>
+				</div>
+
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2',
+						borderWidth: '1',
+						padding: '3'
+					})}
+				>
+					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Hugging Face</span>
+						<button
+							class={css({
+								borderWidth: '1',
+								paddingX: '2',
+								paddingY: '1',
+								fontSize: 'xs',
+								_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+							})}
+							onclick={() => void handleTestAIProvider('huggingface')}
+							disabled={testingProvider === 'huggingface'}
+							aria-label="Test Hugging Face"
+							type="button"
+						>
+							{testingProvider === 'huggingface' ? 'Testing…' : 'Test'}
+						</button>
+					</div>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>API token</span>
+						<input
+							type="password"
+							class={input()}
+							bind:value={huggingface_api_token}
+							oninput={() => (huggingface_api_token_dirty = true)}
+							placeholder={MASKED_PLACEHOLDER}
+						/>
+					</label>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Default model</span>
+						<input type="text" class={input()} bind:value={huggingface_default_model} />
+					</label>
+				</div>
 			</div>
 
-			<div class="grid grid-cols-2 gap-2">
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">User</span>
-					<input
-						type="text"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-						bind:value={smtp_user}
-						placeholder="user@example.com"
+			<div
+				class={css({
+					borderBottomWidth: '1'
+				})}
+			></div>
+
+			<button
+				class={sectionToggle}
+				type="button"
+				aria-expanded={!smtpCollapsed}
+				aria-controls="settings-smtp"
+				onclick={() => (smtpCollapsed = !smtpCollapsed)}
+			>
+				<span class={sectionToggleLabel}>
+					<Mail size={12} />
+					<SectionHeader>SMTP</SectionHeader>
+				</span>
+				<ChevronDown
+					size={14}
+					class={cx(sectionChevron, smtpCollapsed ? css({ transform: 'rotate(-90deg)' }) : '')}
+				/>
+			</button>
+
+			<div
+				id="settings-smtp"
+				hidden={smtpCollapsed}
+				aria-hidden={smtpCollapsed}
+				class={cx(
+					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
+					smtpCollapsed ? css({ display: 'none' }) : ''
+				)}
+			>
+				<div
+					class={css({
+						display: 'grid',
+						gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+						gap: '2'
+					})}
+				>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Host</span>
+						<input
+							type="text"
+							class={input()}
+							id="smtp-host"
+							bind:value={smtp_host}
+							placeholder="smtp.example.com"
+						/>
+					</label>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Port</span>
+						<input type="number" class={input()} id="smtp-port" bind:value={smtp_port} />
+					</label>
+				</div>
+
+				<div
+					class={css({
+						display: 'grid',
+						gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+						gap: '2'
+					})}
+				>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>User</span>
+						<input
+							type="text"
+							class={input()}
+							id="smtp-user"
+							bind:value={smtp_user}
+							placeholder="user@example.com"
+						/>
+					</label>
+					<label class={label({ variant: 'wrapper' })}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Password</span>
+						<input
+							type="password"
+							class={input()}
+							id="smtp-password"
+							bind:value={smtp_password}
+							oninput={() => (smtp_password_dirty = true)}
+							placeholder={MASKED_PLACEHOLDER}
+						/>
+					</label>
+				</div>
+
+				<div class={css({ display: 'flex', alignItems: 'flex-end', gap: '2' })}>
+					<label class={cx(label({ variant: 'wrapper' }), css({ flex: '1' }))}>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Test recipient</span>
+						<input
+							type="email"
+							class={input()}
+							id="smtp-test-to"
+							data-testid="settings-smtp-test-recipient"
+							bind:value={smtpTestTo}
+							placeholder="test@example.com"
+						/>
+					</label>
+					<button
+						class={css({
+							display: 'flex',
+							flexShrink: '0',
+							cursor: 'pointer',
+							alignItems: 'center',
+							gap: '1',
+							borderWidth: '1',
+							paddingX: '3',
+							paddingY: '1.5',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							backgroundColor: 'bg.tertiary',
+							color: 'fg.secondary',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+							_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+						})}
+						onclick={handleTestSmtp}
+						disabled={testingSmtp || !smtpTestTo}
+						aria-label="Test SMTP"
+						data-testid="settings-smtp-test-button"
+						type="button"
+					>
+						{#if testingSmtp}
+							<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
+						{:else}
+							<Send size={12} />
+						{/if}
+						Test
+					</button>
+				</div>
+			</div>
+
+			<div
+				class={css({
+					borderBottomWidth: '1'
+				})}
+			></div>
+
+			<button
+				class={sectionToggle}
+				type="button"
+				aria-expanded={!telegramCollapsed}
+				aria-controls="settings-telegram"
+				onclick={() => (telegramCollapsed = !telegramCollapsed)}
+			>
+				<span class={sectionToggleLabel}>
+					<MessageCircle size={12} />
+					<SectionHeader>Telegram</SectionHeader>
+				</span>
+				<span class={cx(row, css({ gap: '2', alignItems: 'center' }))}>
+					{#if statusQuery.data}
+						<span
+							class={css({
+								display: 'inline-block',
+								height: 'dot',
+								width: 'dot',
+								flexShrink: '0',
+								backgroundColor: botRunning ? 'fg.success' : 'fg.error'
+							})}
+							title={botRunning ? 'Bot running' : 'Bot stopped'}
+						></span>
+					{/if}
+					<ChevronDown
+						size={14}
+						class={cx(
+							sectionChevron,
+							telegramCollapsed ? css({ transform: 'rotate(-90deg)' }) : ''
+						)}
 					/>
-				</label>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Password</span>
+				</span>
+			</button>
+
+			<div
+				id="settings-telegram"
+				hidden={telegramCollapsed}
+				aria-hidden={telegramCollapsed}
+				class={cx(
+					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
+					telegramCollapsed ? css({ display: 'none' }) : ''
+				)}
+			>
+				<label class={label({ variant: 'wrapper' })}>
+					<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Bot token</span>
 					<input
 						type="password"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-						bind:value={smtp_password}
-						placeholder="••••••••"
+						class={input()}
+						id="telegram-bot-token"
+						bind:value={telegram_bot_token}
+						oninput={() => (telegram_bot_token_dirty = true)}
+						placeholder={MASKED_PLACEHOLDER}
 					/>
 				</label>
-			</div>
 
-			<div class="flex items-end gap-2">
-				<label class="flex flex-1 flex-col gap-1">
-					<span class="text-xs text-fg-tertiary">Test recipient</span>
-					<input
-						type="email"
-						class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-						bind:value={smtpTestTo}
-						placeholder="test@example.com"
-					/>
-				</label>
-				<button
-					class="flex shrink-0 cursor-pointer items-center gap-1 border px-3 py-1.5 text-xs font-medium border-tertiary bg-tertiary text-fg-secondary hover:bg-hover hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-50"
-					onclick={handleTestSmtp}
-					disabled={testingSmtp || !smtpTestTo}
-					type="button"
-				>
-					{#if testingSmtp}
-						<Loader2 size={12} class="animate-spin" />
-					{:else}
-						<Send size={12} />
-					{/if}
-					Test
-				</button>
-			</div>
+				<div class={rowBetween}>
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Enable Bot</span>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+							Start the Telegram bot listener on save
+						</span>
+					</div>
+					<button
+						class={css({
+							position: 'relative',
+							height: 'iconMd',
+							width: 'rowXl',
+							cursor: 'pointer',
+							border: 'none',
+							transition: 'background-color 150ms',
+							backgroundColor: telegram_bot_enabled ? 'accent.primary' : 'bg.tertiary'
+						})}
+						onclick={() => (telegram_bot_enabled = !telegram_bot_enabled)}
+						type="button"
+						role="switch"
+						aria-checked={telegram_bot_enabled}
+						aria-label="Toggle Telegram bot"
+					>
+						<span
+							class={css({
+								position: 'absolute',
+								top: '0.5',
+								left: '0.5',
+								height: 'iconSm',
+								width: 'iconSm',
+								backgroundColor: 'accent.primary',
+								transition: 'transform 150ms',
+								...(telegram_bot_enabled ? { transform: 'translateX(1rem)' } : {})
+							})}
+						></span>
+					</button>
+				</div>
 
-			<div class="border-b border-tertiary"></div>
-
-			<div class="flex items-center gap-2">
-				<span class="text-xs font-semibold uppercase tracking-wider text-fg-tertiary">
-					<MessageCircle size={12} class="mr-1 inline" />
-					Telegram
-				</span>
 				{#if statusQuery.data}
-					<span
-						class="inline-block h-2 w-2 shrink-0"
-						class:bg-success={botRunning}
-						class:bg-error={!botRunning}
-						title={botRunning ? 'Bot running' : 'Bot stopped'}
-					></span>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							borderWidth: '1',
+							paddingX: '3',
+							paddingY: '2',
+							fontSize: 'xs',
+							backgroundColor: 'bg.tertiary'
+						})}
+					>
+						<span class={cx(row, css({ gap: '1.5' }))}>
+							<span
+								class={css({
+									display: 'inline-block',
+									height: 'barTall',
+									width: 'barTall',
+									flexShrink: '0',
+									backgroundColor: botRunning ? 'fg.success' : 'fg.error'
+								})}
+							></span>
+							<span class={css({ color: 'fg.secondary' })}>
+								{botRunning ? 'Bot running' : 'Bot stopped'}
+							</span>
+						</span>
+						<span class={css({ color: 'fg.tertiary' })}>
+							{statusQuery.data.subscriber_count}
+							{statusQuery.data.subscriber_count === 1 ? 'subscriber' : 'subscribers'}
+						</span>
+					</div>
+				{/if}
+
+				{#if subscribers.length > 0}
+					<div
+						class={css({
+							display: 'flex',
+							flexDirection: 'column',
+							borderWidth: '1'
+						})}
+					>
+						{#each subscribers as sub (sub.id)}
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									borderBottomWidth: '1',
+									paddingX: '3',
+									paddingY: '2',
+									fontSize: 'xs'
+								})}
+							>
+								<div class={cx(row, css({ gap: '2' }))}>
+									<span
+										class={css({
+											display: 'inline-block',
+											height: 'barTall',
+											width: 'barTall',
+											flexShrink: '0',
+											backgroundColor: sub.is_active ? 'fg.success' : 'bg.tertiary'
+										})}
+										title={sub.is_active ? 'Active' : 'Inactive'}
+									></span>
+									<span class={css({ fontWeight: 'medium' })}>{sub.title}</span>
+									<span class={css({ color: 'fg.tertiary' })}>{sub.chat_id}</span>
+								</div>
+								<button
+									class={css({
+										display: 'flex',
+										cursor: 'pointer',
+										alignItems: 'center',
+										justifyContent: 'center',
+										border: 'none',
+										backgroundColor: 'transparent',
+										padding: '1',
+										color: 'fg.tertiary',
+										transition: 'color 150ms',
+										_hover: { color: 'error' }
+									})}
+									onclick={() => deleteMut.mutate(sub.id)}
+									disabled={deleteMut.isPending}
+									type="button"
+									title="Remove subscriber"
+								>
+									<Trash2 size={12} />
+								</button>
+							</div>
+						{/each}
+					</div>
+				{:else if statusQuery.data && !subscribersQuery.isFetching}
+					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
+						Subscribers appear here after users send /subscribe to your bot.
+					</p>
 				{/if}
 			</div>
 
-			<label class="flex flex-col gap-1">
-				<span class="text-xs text-fg-tertiary">Bot token</span>
-				<input
-					type="password"
-					class="w-full border bg-transparent px-2 py-1.5 text-xs text-fg-primary border-tertiary focus:border-accent-primary focus:outline-none"
-					bind:value={telegram_bot_token}
-					placeholder="123456:ABC-DEF..."
+			<div
+				class={css({
+					borderBottomWidth: '1'
+				})}
+			></div>
+
+			<button
+				class={sectionToggle}
+				type="button"
+				aria-expanded={!debugCollapsed}
+				aria-controls="settings-debug"
+				onclick={() => (debugCollapsed = !debugCollapsed)}
+			>
+				<span class={sectionToggleLabel}>
+					<Database size={12} />
+					<SectionHeader>Debug</SectionHeader>
+				</span>
+				<ChevronDown
+					size={14}
+					class={cx(sectionChevron, debugCollapsed ? css({ transform: 'rotate(-90deg)' }) : '')}
 				/>
-			</label>
+			</button>
 
-			<div class="flex items-center justify-between">
-				<div class="flex flex-col gap-0.5">
-					<span class="text-sm font-medium text-fg-primary">Enable Bot</span>
-					<span class="text-xs text-fg-tertiary">Start the Telegram bot listener on save</span>
-				</div>
-				<button
-					class="relative h-5 w-9 cursor-pointer border-none transition-colors"
-					class:bg-accent-primary={telegram_bot_enabled}
-					class:bg-tertiary={!telegram_bot_enabled}
-					onclick={() => (telegram_bot_enabled = !telegram_bot_enabled)}
-					type="button"
-					role="switch"
-					aria-checked={telegram_bot_enabled}
-					aria-label="Toggle Telegram bot"
-				>
-					<span
-						class="absolute top-0.5 left-0.5 h-4 w-4 bg-fg-primary transition-transform"
-						class:translate-x-4={telegram_bot_enabled}
-					></span>
-				</button>
-			</div>
-
-			{#if statusQuery.data}
-				<div class="flex items-center justify-between border px-3 py-2 text-xs border-tertiary bg-tertiary">
-					<span class="flex items-center gap-1.5">
-						<span
-							class="inline-block h-1.5 w-1.5 shrink-0"
-							class:bg-success={botRunning}
-							class:bg-error={!botRunning}
-						></span>
-						<span class="text-fg-secondary">
-							{botRunning ? 'Bot running' : 'Bot stopped'}
+			<div
+				id="settings-debug"
+				hidden={debugCollapsed}
+				aria-hidden={debugCollapsed}
+				class={debugCollapsed ? css({ display: 'none' }) : ''}
+			>
+				<div class={rowBetween}>
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
+						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}> IndexedDB Inspector </span>
+						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
+							Show cache debug button in header
 						</span>
-					</span>
-					<span class="text-fg-tertiary">
-						{statusQuery.data.subscriber_count}
-						{statusQuery.data.subscriber_count === 1 ? 'subscriber' : 'subscribers'}
-					</span>
+					</div>
+					<button
+						class={css({
+							position: 'relative',
+							height: 'iconMd',
+							width: 'rowXl',
+							cursor: 'pointer',
+							border: 'none',
+							transition: 'background-color 150ms',
+							backgroundColor: idb ? 'accent.primary' : 'bg.tertiary'
+						})}
+						onclick={() => (idb = !idb)}
+						type="button"
+						role="switch"
+						aria-checked={idb}
+						aria-label="Toggle IndexedDB inspector"
+					>
+						<span
+							class={css({
+								position: 'absolute',
+								top: '0.5',
+								left: '0.5',
+								height: 'iconSm',
+								width: 'iconSm',
+								backgroundColor: 'accent.primary',
+								transition: 'transform 150ms',
+								...(idb ? { transform: 'translateX(1rem)' } : {})
+							})}
+						></span>
+					</button>
 				</div>
-			{/if}
-
-			{#if subscribers.length > 0}
-				<div class="flex flex-col border border-tertiary">
-					{#each subscribers as sub (sub.id)}
-						<div
-							class="flex items-center justify-between border-b px-3 py-2 text-xs last:border-b-0 border-tertiary"
-						>
-							<div class="flex items-center gap-2">
-								<span
-									class="inline-block h-1.5 w-1.5 shrink-0"
-									class:bg-success={sub.is_active}
-									class:bg-tertiary={!sub.is_active}
-									title={sub.is_active ? 'Active' : 'Inactive'}
-								></span>
-								<span class="font-medium text-fg-primary">{sub.title}</span>
-								<span class="text-fg-tertiary">{sub.chat_id}</span>
-							</div>
-							<button
-								class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-tertiary transition-colors hover:text-error"
-								onclick={() => deleteMut.mutate(sub.id)}
-								disabled={deleteMut.isPending}
-								type="button"
-								title="Remove subscriber"
-							>
-								<Trash2 size={12} />
-							</button>
-						</div>
-					{/each}
-				</div>
-			{:else if statusQuery.data && !subscribersQuery.isFetching}
-				<p class="m-0 text-xs text-fg-tertiary">
-					Subscribers appear here after users send /subscribe to your bot.
-				</p>
-			{/if}
-
-			<div class="border-b border-tertiary"></div>
-
-			<span class="text-xs font-semibold uppercase tracking-wider text-fg-tertiary">
-				<Database size={12} class="mr-1 inline" />
-				Debug
-			</span>
-
-			<div class="flex items-center justify-between">
-				<div class="flex flex-col gap-0.5">
-					<span class="text-sm font-medium text-fg-primary">IndexedDB Inspector</span>
-					<span class="text-xs text-fg-tertiary">Show cache debug button in header</span>
-				</div>
-				<button
-					class="relative h-5 w-9 cursor-pointer border-none transition-colors"
-					class:bg-accent-primary={idb}
-					class:bg-tertiary={!idb}
-					onclick={() => (idb = !idb)}
-					type="button"
-					role="switch"
-					aria-checked={idb}
-					aria-label="Toggle IndexedDB inspector"
-				>
-					<span
-						class="absolute top-0.5 left-0.5 h-4 w-4 bg-fg-primary transition-transform"
-						class:translate-x-4={idb}
-					></span>
-				</button>
 			</div>
 		</div>
 
-		<div class="flex items-center justify-between border-t p-4 border-tertiary">
-			<p class="m-0 text-xs text-fg-tertiary">Settings are stored in the database.</p>
+		<div
+			class={cx(
+				divider,
+				css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					padding: '4'
+				})
+			)}
+		>
+			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
+				Settings are stored in the database.
+			</p>
 			<button
-				class="flex cursor-pointer items-center gap-1.5 border-none px-4 py-2 text-xs font-medium bg-accent text-bg-primary hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+				class={css({
+					display: 'flex',
+					cursor: 'pointer',
+					alignItems: 'center',
+					gap: '1.5',
+					border: 'none',
+					paddingX: '4',
+					paddingY: '2',
+					fontSize: 'xs',
+					fontWeight: 'medium',
+					backgroundColor: 'accent.primary',
+					color: 'fg.inverse',
+					_hover: { opacity: 0.9 },
+					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+				})}
 				onclick={save}
 				disabled={saving}
 				type="button"
 			>
 				{#if saving}
-					<Loader2 size={12} class="animate-spin" />
+					<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 				{:else}
 					<Save size={12} />
 				{/if}

@@ -157,6 +157,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
 - [PRD](docs/PRD.md) — Feature specs and architecture
 - [AGENTS.md](AGENTS.md) — Developer guidelines
 - [STYLE_GUIDE.md](STYLE_GUIDE.md) — Code style
+- [MCP Tool Contract](docs/mcp-tool-contract.md) — How API routes are exposed as MCP tools
 
 ## License
 

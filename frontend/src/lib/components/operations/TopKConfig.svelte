@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
+	import { css, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface Props {
 		schema: Schema;
@@ -19,9 +20,21 @@
 	}
 </script>
 
-<div class="config-panel" role="region" aria-label="Top K configuration">
-	<div class="form-group mb-5">
-		<div class="form-label">Column to sort by</div>
+<div class={stepConfig()} role="region" aria-label="Top K configuration">
+	<div class={css({ marginBottom: '5' })}>
+		<div
+			class={css({
+				display: 'block',
+				fontSize: 'xs',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider'
+			})}
+		>
+			Column to sort by
+		</div>
 		<ColumnDropdown
 			{schema}
 			value={config.column ?? ''}
@@ -30,12 +43,13 @@
 		/>
 	</div>
 
-	<div class="form-group mb-5">
-		<label for="topk-input-k">Number of rows (k)</label>
+	<div class={css({ marginBottom: '5' })}>
+		<label class={label()} for="topk-input-k">Number of rows (k)</label>
 		<input
 			id="topk-input-k"
 			data-testid="topk-k-input"
 			type="number"
+			class={input()}
 			value={config.k}
 			oninput={(e) => setK(e.currentTarget.value)}
 			min="1"
@@ -43,8 +57,8 @@
 		/>
 	</div>
 
-	<div class="form-group mb-0">
-		<label class="flex cursor-pointer items-center gap-3">
+	<div class={css({ marginBottom: '0' })}>
+		<label class={label({ variant: 'checkbox' })}>
 			<input
 				id="topk-checkbox-descending"
 				data-testid="topk-descending-checkbox"
@@ -55,8 +69,19 @@
 			/>
 			<span>Descending (largest first)</span>
 		</label>
-		<span id="topk-descending-help" class="sr-only"
-			>Sort in descending order (largest values first)</span
+		<span
+			id="topk-descending-help"
+			class={css({
+				position: 'absolute',
+				width: 'px',
+				height: 'px',
+				padding: '0',
+				margin: '-1px',
+				overflow: 'hidden',
+				clip: 'rect(0, 0, 0, 0)',
+				whiteSpace: 'nowrap',
+				border: '0'
+			})}>Sort in descending order (largest values first)</span
 		>
 	</div>
 </div>

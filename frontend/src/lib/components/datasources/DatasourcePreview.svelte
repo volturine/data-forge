@@ -9,10 +9,12 @@
 	import ColumnStatsPanel from '$lib/components/datasources/ColumnStatsPanel.svelte';
 	import type { DataSource } from '$lib/types/datasource';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
+	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import {
 		buildAnalysisPipelinePayload,
 		buildDatasourcePipelinePayload
 	} from '$lib/utils/analysis-pipeline';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -37,22 +39,7 @@
 		statsOpen = false;
 	}
 
-	// Subscription: $derived can't reset pagination/state.
-	$effect(() => {
-		if (!datasourceId) return;
-		void datasourceConfig;
-		page = 1;
-		statsOpen = false;
-		statsColumn = null;
-	});
-
-	// Subscription: $derived can't reset pagination on pipeline changes.
-	$effect(() => {
-		if (!analysisPipeline) return;
-		page = 1;
-	});
-
-	const resolvedDatasource = $derived.by(() => datasource ?? null);
+	const resolvedDatasource = $derived(datasource ?? null);
 	const analysisSourceId = $derived.by(() => {
 		return (
 			(datasourceConfig?.analysis_id as string | null | undefined) ??
@@ -69,39 +56,44 @@
 			return buildAnalysisPipelinePayload(
 				activeId,
 				analysisStore.tabs,
-				resolvedDatasource ? [resolvedDatasource] : []
+				datasourceStore.datasources
 			);
 		}
 		if (!resolvedDatasource) return null;
 		return buildDatasourcePipelinePayload({
 			datasource: resolvedDatasource,
-			datasourceConfig: datasourceConfig ?? null
+			datasourceConfig: datasourceConfig ?? { branch: 'master' }
 		});
 	});
 
+	const configKey = $derived(JSON.stringify(datasourceConfig));
+	const pipelineKey = $derived(JSON.stringify(analysisPipeline));
+
+	// Subscription: $derived can't reset pagination/state.
+	$effect(() => {
+		if (!datasourceId) return;
+		void configKey;
+		page = 1;
+		statsOpen = false;
+		statsColumn = null;
+	});
+
+	// Subscription: $derived can't reset pagination on pipeline changes.
+	$effect(() => {
+		if (!pipelineKey) return;
+		page = 1;
+	});
+
 	const query = createQuery(() => ({
-		queryKey: [
-			'datasource-preview',
-			datasourceId,
-			page,
-			rowLimit,
-			datasourceConfig,
-			analysisPipeline
-		],
+		queryKey: ['datasource-preview', datasourceId, page, rowLimit, configKey, pipelineKey],
 		queryFn: async (): Promise<StepPreviewResponse> => {
-			const combinedConfig = analysisPipeline
-				? { ...(datasourceConfig ?? {}), analysis_pipeline: analysisPipeline }
-				: datasourceConfig;
-			if (!analysisPipeline) {
-				throw new Error('Analysis pipeline payload required for preview');
-			}
+			const pipeline = analysisPipeline!;
 			const request = {
 				analysis_id: '',
 				target_step_id: 'source',
-				analysis_pipeline: analysisPipeline,
+				analysis_pipeline: pipeline,
 				row_limit: rowLimit,
-				page,
-				datasource_config: combinedConfig
+				page
 			} satisfies StepPreviewRequest;
 			const result = await previewStepData(request);
 			if (result.isErr()) {
@@ -110,7 +102,7 @@
 			return result.value;
 		},
 		staleTime: 30000,
-		enabled: !!datasourceId
+		enabled: !!datasourceId && !!analysisPipeline
 	}));
 
 	const data = $derived(query.data);
@@ -132,8 +124,16 @@
 	}
 </script>
 
-<div class="relative h-full flex flex-col">
-	<div class="overflow-hidden h-full">
+<div
+	class={css({
+		position: 'relative',
+		height: 'full',
+		display: 'flex',
+		flexDirection: 'column'
+	})}
+	data-preview-ready={data && !isLoading ? 'true' : undefined}
+>
+	<div class={css({ overflow: 'hidden', height: 'full' })}>
 		<DataTable
 			columns={data?.columns ?? []}
 			data={data?.data ?? []}

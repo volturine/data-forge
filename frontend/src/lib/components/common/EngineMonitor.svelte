@@ -4,6 +4,7 @@
 	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
+	import { css, emptyText, cx, row } from '$lib/styles/panda';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
@@ -49,94 +50,205 @@
 		},
 		{ immediate: true }
 	);
+
+	let trigger = $state<HTMLButtonElement>();
+	let pos = $state({ top: 0, right: 0 });
+
+	// DOM measurement for fixed-position popup — $derived cannot access DOM
+	$effect(() => {
+		if (expanded && trigger) {
+			const rect = trigger.getBoundingClientRect();
+			pos = { top: rect.bottom, right: window.innerWidth - rect.right };
+		}
+	});
 </script>
 
-<div class="relative" bind:this={dropdownRef}>
+<div bind:this={dropdownRef}>
 	<button
-		class="flex cursor-pointer items-center gap-2 border border-transparent px-3 py-2 text-xs text-fg-tertiary hover:text-fg-primary"
-		class:!bg-bg-hover={expanded}
-		class:!text-fg-primary={expanded}
-		class:text-fg-secondary={enginesStore.count > 0}
+		class={css({
+			display: 'flex',
+			cursor: 'pointer',
+			alignItems: 'center',
+			gap: '2',
+			borderWidth: '1',
+			borderColor: 'transparent',
+			paddingX: '3',
+			paddingY: '2',
+			fontSize: 'xs',
+			backgroundColor: expanded ? 'bg.hover' : 'bg.primary',
+			color: expanded ? 'fg.primary' : enginesStore.count > 0 ? 'fg.secondary' : 'fg.tertiary',
+			_hover: { color: 'fg.primary' }
+		})}
 		onclick={toggleExpanded}
 		title="Engine Monitor"
+		bind:this={trigger}
 	>
 		<Cpu size={16} />
 		{#if enginesStore.count > 0}
-			<span class="min-w-4.5 px-2 text-center text-xs font-semibold bg-accent text-bg-primary">
+			<span
+				class={css({
+					minWidth: 'icon',
+					paddingX: '2',
+					textAlign: 'center',
+					fontSize: 'xs',
+					fontWeight: 'semibold',
+					backgroundColor: 'accent.primary',
+					color: 'fg.inverse'
+				})}
+			>
 				{enginesStore.count}
 			</span>
 		{/if}
-		<span class="rotate-180" class:rotate-180={expanded}>
+		<span class={expanded ? css({ transform: 'rotate(180deg)' }) : ''}>
 			<ChevronDown size={12} />
 		</span>
 	</button>
 
 	{#if expanded}
 		<div
-			class="absolute right-0 top-full z-engine w-70 overflow-hidden border bg-primary border-tertiary"
+			class={css({
+				position: 'fixed',
+				right: `${pos.right}px`,
+				top: `${pos.top}px`,
+				zIndex: 'engine',
+				width: 'listLg',
+				overflow: 'hidden',
+				borderWidth: '1',
+				backgroundColor: 'bg.primary'
+			})}
 		>
-			<div class="flex items-center justify-between border-b p-3 bg-secondary border-tertiary">
-				<span class="text-sm font-semibold text-fg-primary">Active Engines</span>
+			<div
+				class={cx(
+					row,
+					css({
+						justifyContent: 'space-between',
+						borderBottomWidth: '1',
+						padding: '3',
+						backgroundColor: 'bg.secondary'
+					})
+				)}
+			>
+				<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> Active Engines </span>
 				<button
-					class="flex cursor-pointer items-center justify-center border-none bg-transparent p-1 text-fg-muted hover:bg-hover hover:text-fg-primary"
+					class={css({
+						display: 'flex',
+						cursor: 'pointer',
+						alignItems: 'center',
+						justifyContent: 'center',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '1',
+						color: 'fg.muted',
+						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
 					onclick={() => (expanded = false)}
 				>
 					<X size={14} />
 				</button>
 			</div>
 
-			<div class="max-h-75 overflow-y-auto">
+			<div class={css({ maxHeight: 'dropdownTall', overflowY: 'auto' })}>
 				{#if enginesStore.count === 0}
 					{#if enginesStore.loading}
 						<div
-							class="flex items-center justify-center gap-2 p-6 text-center text-sm text-fg-muted"
+							class={cx(
+								row,
+								css({
+									justifyContent: 'center',
+									gap: '2',
+									padding: '6',
+									textAlign: 'center',
+									fontSize: 'sm',
+									color: 'fg.muted'
+								})
+							)}
 						>
-							<LoaderCircle size={16} class="animate-spin" />
+							<LoaderCircle size={16} class={css({ animation: 'spin 1s linear infinite' })} />
 							<span>Loading...</span>
 						</div>
 					{:else}
-						<div class="p-6 text-center text-sm text-fg-muted">
+						<div class={emptyText({ size: 'panel' })}>
 							<span>No active engines</span>
 						</div>
 					{/if}
 				{:else}
-					<ul class="m-0 list-none p-0">
+					<ul class={css({ margin: '0', listStyle: 'none', padding: '0' })}>
 						{#each enginesStore.engines as engine (engine.analysis_id)}
-							<li class="flex items-center gap-3 border-b p-3 last:border-b-0 border-tertiary">
-								<div class="min-w-0 flex-1">
-									<div class="flex items-center gap-2">
-										<span class="font-mono text-xs text-fg-primary" title={engine.analysis_id}>
+							<li
+								class={cx(
+									row,
+									css({
+										gap: '3',
+										borderBottomWidth: '1',
+										padding: '3'
+									})
+								)}
+							>
+								<div class={css({ minWidth: '0', flex: '1' })}>
+									<div class={cx(row, css({ gap: '2' }))}>
+										<span
+											class={css({
+												fontFamily: 'mono',
+												fontSize: 'xs'
+											})}
+											title={engine.analysis_id}
+										>
 											{engine.analysis_id.slice(0, 8)}...
 										</span>
 										<span
-											class="px-2 py-px text-xs font-medium uppercase"
-											class:bg-accent-bg={engine.status === 'healthy'}
-											class:text-accent-primary={engine.status === 'healthy'}
-											class:bg-tertiary={engine.status !== 'healthy'}
-											class:text-fg-muted={engine.status !== 'healthy'}
+											class={css({
+												paddingX: '2',
+												paddingY: 'px',
+												fontSize: 'xs',
+												fontWeight: 'medium',
+												textTransform: 'uppercase',
+												backgroundColor: engine.status === 'healthy' ? 'bg.accent' : 'bg.tertiary',
+												color: engine.status === 'healthy' ? 'accent.primary' : 'fg.muted'
+											})}
 										>
 											{engine.status}
 										</span>
 									</div>
-									<div class="mt-1 flex items-center gap-2">
+									<div class={cx(row, css({ marginTop: '1', gap: '2' }))}>
 										{#if engine.current_job_id}
-											<span class="font-mono text-xs text-accent">
+											<span
+												class={css({
+													fontFamily: 'mono',
+													fontSize: 'xs',
+													color: 'accent.primary'
+												})}
+											>
 												Job: {engine.current_job_id.slice(0, 6)}
 											</span>
 										{/if}
-										<span class="text-xs text-fg-muted">
+										<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 											{formatTime(engine.last_activity)}
 										</span>
 									</div>
 								</div>
 								<button
-									class="flex cursor-pointer items-center justify-center border p-1 disabled:cursor-not-allowed disabled:opacity-50 bg-transparent border-tertiary text-fg-muted hover:bg-error hover:border-error hover:text-error-fg"
+									class={css({
+										display: 'flex',
+										cursor: 'pointer',
+										alignItems: 'center',
+										justifyContent: 'center',
+										borderWidth: '1',
+										padding: '1',
+										backgroundColor: 'transparent',
+										color: 'fg.muted',
+										_hover: {
+											backgroundColor: 'bg.error',
+											borderColor: 'border.error',
+											color: 'fg.error'
+										},
+										_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+									})}
 									onclick={() => handleKill(engine.analysis_id)}
 									disabled={killing === engine.analysis_id}
 									title="Shutdown engine"
 								>
 									{#if killing === engine.analysis_id}
-										<LoaderCircle size={12} class="animate-spin" />
+										<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 									{:else}
 										<X size={12} />
 									{/if}
@@ -148,7 +260,16 @@
 			</div>
 
 			{#if enginesStore.error}
-				<div class="border-t p-2 text-xs bg-error text-error-fg border-error">
+				<div
+					class={css({
+						borderTopWidth: '1',
+						borderTopColor: 'border.error',
+						padding: '2',
+						fontSize: 'xs',
+						backgroundColor: 'bg.error',
+						color: 'fg.error'
+					})}
+				>
 					{enginesStore.error}
 				</div>
 			{/if}
