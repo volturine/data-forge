@@ -8,7 +8,7 @@
 	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
-	import { css, cx, button, input, row, muted } from '$lib/styles/panda';
+	import { css, cx, button, input } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource;
@@ -127,17 +127,17 @@
 	}
 
 	function rowDeltaClass(val: number): string {
-		if (val === 0) return muted;
+		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
 
 	function nullDeltaClass(val: number): string {
-		if (val === 0) return muted;
+		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.error' }) : css({ color: 'fg.success' });
 	}
 
 	function uniqueDeltaClass(val: number): string {
-		if (val === 0) return muted;
+		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
 
@@ -354,7 +354,7 @@
 											onclick={() => toggleSelect(run.id)}
 										>
 											<div class={css({ minWidth: '0' })}>
-												<div class={cx(row, css({ gap: '2' }))}>
+												<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 													<span class={css({ fontFamily: 'mono', fontSize: 'xs' })}
 														>{run.id.slice(0, 8)}...</span
 													>
@@ -400,8 +400,8 @@
 							fontSize: 'sm'
 						})}
 					>
-						<div class={cx(row, css({ gap: '2' }))}>
-							<GitCompareArrows size={14} class={muted} />
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+							<GitCompareArrows size={14} class={css({ color: 'fg.muted' })} />
 							<span>{selected.size}/2 builds selected</span>
 						</div>
 						{#if selectedRuns.length === 0}
@@ -423,7 +423,7 @@
 											fontSize: 'xs'
 										})}
 									>
-										<div class={cx(row, css({ gap: '2' }))}>
+										<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 											<span class={css({ fontFamily: 'mono' })}>{run.id.slice(0, 8)}...</span>
 											<span class={css({ color: 'fg.tertiary' })}>{run.kind}</span>
 										</div>
@@ -808,7 +808,7 @@
 													})}
 												>
 													<div class={css({ display: 'flex', alignItems: 'baseline', gap: '2' })}>
-														<span class={muted}>{stat.null_a}</span>
+														<span class={css({ color: 'fg.muted' })}>{stat.null_a}</span>
 														<span class={css({ color: 'fg.tertiary' })}>→</span>
 														<span>{stat.null_b}</span>
 														{#if stat.null_delta !== null}
@@ -833,7 +833,7 @@
 													})}
 												>
 													<div class={css({ display: 'flex', alignItems: 'baseline', gap: '2' })}>
-														<span class={muted}>{stat.unique_a}</span>
+														<span class={css({ color: 'fg.muted' })}>{stat.unique_a}</span>
 														<span class={css({ color: 'fg.tertiary' })}>→</span>
 														<span>{stat.unique_b}</span>
 														{#if stat.unique_delta !== null}

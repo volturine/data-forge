@@ -21,7 +21,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, spinner, button, chip, input, row, rowBetween } from '$lib/styles/panda';
+	import { css, cx, spinner, button, chip, input } from '$lib/styles/panda';
 
 	const queryClient = useQueryClient();
 
@@ -190,9 +190,9 @@
 				boxSizing: 'border-box'
 			})}
 		>
-			<div class={rowBetween}>
+			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<h1 class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>Data Sources</h1>
-				<div class={cx(row, css({ gap: '1' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<button
 						class={css({
 							display: 'inline-flex',
@@ -265,7 +265,14 @@
 		<!-- Datasource List -->
 		<div class={css({ flex: '1', overflowY: 'auto' })}>
 			{#if query.isLoading}
-				<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						height: '100%',
+						justifyContent: 'center'
+					})}
+				>
 					<div class={spinner()}></div>
 				</div>
 			{:else if query.isError}
@@ -317,24 +324,26 @@
 					>
 						<!-- Row -->
 						<div
-							class={cx(
-								row,
-								css({ justifyContent: 'space-between', paddingX: '3', paddingY: '2.5' })
-							)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								paddingX: '3',
+								paddingY: '2.5'
+							})}
 						>
 							<button
-								class={cx(
-									row,
-									css({
-										gap: '2',
-										minWidth: '0',
-										flex: '1',
-										textAlign: 'left',
-										backgroundColor: 'transparent',
-										padding: '0',
-										borderColor: 'transparent'
-									})
-								)}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '2',
+									minWidth: '0',
+									flex: '1',
+									textAlign: 'left',
+									backgroundColor: 'transparent',
+									padding: '0',
+									borderColor: 'transparent'
+								})}
 								onclick={() => selectDatasource(datasource.id)}
 							>
 								<span
@@ -367,7 +376,7 @@
 									</span>
 								{/if}
 							</button>
-							<div class={cx(row, css({ flexShrink: '0' }))}>
+							<div class={css({ display: 'flex', alignItems: 'center', flexShrink: '0' })}>
 								<button
 									class={css({
 										padding: '1.5',
@@ -407,20 +416,19 @@
 		{#if selectedDatasource}
 			<div class={css({ height: '100%', display: 'flex', flexDirection: 'column' })}>
 				<div
-					class={cx(
-						row,
-						css({
-							borderBottomWidth: '1',
-							backgroundColor: 'bg.secondary',
-							padding: '3',
-							justifyContent: 'space-between',
-							gap: '3'
-						})
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						borderBottomWidth: '1',
+						backgroundColor: 'bg.secondary',
+						padding: '3',
+						justifyContent: 'space-between',
+						gap: '3'
+					})}
 				>
 					<div class={css({ flex: '1', minWidth: '0' })}>
 						{#if selectedDatasource.source_type === 'iceberg'}
-							<div class={cx(row, css({ gap: '2' }))}>
+							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 								<div class={css({ flex: '1', minWidth: '0' })}>
 									<SnapshotPicker
 										datasourceId={selectedDatasource.id}
@@ -432,7 +440,7 @@
 										onConfigChange={handleSnapshotConfigChange}
 									/>
 								</div>
-								<div class={cx(row, css({ gap: '2' }))}>
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 									<GitBranch size={14} class={css({ color: 'fg.tertiary' })} />
 									<BranchPicker
 										branches={branchOptions}
@@ -486,15 +494,14 @@
 			</div>
 		{:else}
 			<div
-				class={cx(
-					row,
-					css({
-						height: '100%',
-						justifyContent: 'center',
-						color: 'fg.muted',
-						backgroundColor: 'bg.secondary'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					height: '100%',
+					justifyContent: 'center',
+					color: 'fg.muted',
+					backgroundColor: 'bg.secondary'
+				})}
 			>
 				<div class={css({ textAlign: 'center' })}>
 					<p class={css({ fontSize: 'lg', fontWeight: 'medium', marginBottom: '2' })}>

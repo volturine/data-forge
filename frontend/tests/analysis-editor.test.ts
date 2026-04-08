@@ -987,7 +987,7 @@ test.describe('Analyses – insert view via insert zone', () => {
 			// Insert zone between filter (index 0) and limit (index 1) has data-index="2"
 			// (index 0 = above first step, 1 = after view, 2 = after filter, 3 = after limit)
 			// The insert zone after filter is at data-index matching after the filter step
-			const insertZone = page.locator('.insert-zone').nth(2);
+			const insertZone = page.locator('[data-hook="insert-zone"]').nth(2);
 			await insertZone.hover();
 
 			// Click the "Insert view" button
@@ -1066,7 +1066,7 @@ test.describe('Analyses – pointer drag reorder', () => {
 			});
 
 			// Capture target insert-zone bounding box after drag has started
-			const targetZone = page.locator('.insert-zone').nth(filterIdx);
+			const targetZone = page.locator('[data-hook="insert-zone"]').nth(filterIdx);
 			const targetBox = await targetZone.boundingBox();
 			expect(targetBox).not.toBeNull();
 

@@ -4,7 +4,7 @@
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, stepConfig, divider, label, input } from '$lib/styles/panda';
+	import { css, cx, stepConfig, label, input } from '$lib/styles/panda';
 
 	interface FillNullConfigData {
 		strategy: string;
@@ -73,12 +73,7 @@
 
 					border: 'none'
 				}),
-				cx(
-					divider,
-					css({
-						paddingTop: '5'
-					})
-				)
+				css({ borderTopWidth: '1', paddingTop: '5' })
 			)}
 			role="group"
 			aria-labelledby="fill-value-heading"
@@ -109,12 +104,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 		role="group"
 		aria-labelledby="target-columns-heading"

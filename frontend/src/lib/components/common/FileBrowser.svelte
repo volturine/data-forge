@@ -4,7 +4,7 @@
 	import type { FileListItem, FileListResponse } from '$lib/api/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import { ArrowUp } from 'lucide-svelte';
-	import { css, emptyText, cx, row, divider } from '$lib/styles/panda';
+	import { css, emptyText } from '$lib/styles/panda';
 
 	let {
 		initialPath = '',
@@ -99,17 +99,16 @@
 </script>
 
 <div
-	class={cx(
-		row,
-		css({
-			position: 'fixed',
-			inset: '0',
-			zIndex: 'modal',
-			justifyContent: 'center',
-			padding: '4',
-			backgroundColor: 'bg.overlaySoft'
-		})
-	)}
+	class={css({
+		display: 'flex',
+		alignItems: 'center',
+		position: 'fixed',
+		inset: '0',
+		zIndex: 'modal',
+		justifyContent: 'center',
+		padding: '4',
+		backgroundColor: 'bg.overlaySoft'
+	})}
 	role="presentation"
 	onclick={oncancel}
 	onkeydown={handleBackdropKeydown}
@@ -142,7 +141,7 @@
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 				<h4 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>Data directory</h4>
 				<div
-					class={cx(row, css({ flexWrap: 'wrap', gap: '1' }))}
+					class={css({ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '1' })}
 					role="navigation"
 					aria-label="Path breadcrumb"
 				>
@@ -176,7 +175,9 @@
 					Select files or choose a folder for parquet datasets.
 				</span>
 			</div>
-			<div class={cx(row, css({ justifyContent: 'flex-end', gap: '2' }))}>
+			<div
+				class={css({ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '2' })}
+			>
 				<button
 					class={css({
 						cursor: 'pointer',
@@ -236,17 +237,15 @@
 		</div>
 
 		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					justifyContent: 'space-between',
-					gap: '2',
-					padding: '3'
-				})
-			)}
+			class={css({
+				borderTopWidth: '1',
+				display: 'flex',
+				justifyContent: 'space-between',
+				gap: '2',
+				padding: '3'
+			})}
 		>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<button
 					class={css({
 						display: 'inline-flex',

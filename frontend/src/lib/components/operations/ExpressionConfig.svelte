@@ -2,7 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, label, stepConfig, cx, divider, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, cx, input } from '$lib/styles/panda';
 
 	interface ExpressionConfigData {
 		expression: string;
@@ -145,15 +145,13 @@
 	</div>
 
 	<div
-		class={cx(
-			divider,
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				paddingTop: '5',
-				backgroundColor: 'transparent'
-			})
-		)}
+		class={css({
+			borderTopWidth: '1',
+			marginBottom: '0',
+			paddingBottom: '5',
+			paddingTop: '5',
+			backgroundColor: 'transparent'
+		})}
 		role="group"
 		aria-labelledby="expr-new-column-heading"
 	>
@@ -170,15 +168,13 @@
 	</div>
 
 	<div
-		class={cx(
-			divider,
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				paddingTop: '5',
-				backgroundColor: 'transparent'
-			})
-		)}
+		class={css({
+			borderTopWidth: '1',
+			marginBottom: '0',
+			paddingBottom: '5',
+			paddingTop: '5',
+			backgroundColor: 'transparent'
+		})}
 		role="group"
 		aria-labelledby="expr-columns-heading"
 	>

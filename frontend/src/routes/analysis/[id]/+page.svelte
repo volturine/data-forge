@@ -44,7 +44,7 @@
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { css, cx, spinner, button, input, row } from '$lib/styles/panda';
+	import { css, cx, spinner, button, input } from '$lib/styles/panda';
 	import {
 		ChevronDown,
 		ChevronLeft,
@@ -976,45 +976,45 @@
 </script>
 
 {#if analysisQuery.isLoading}
-	<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+	<div
+		class={css({ display: 'flex', alignItems: 'center', height: '100%', justifyContent: 'center' })}
+	>
 		<div class={spinner()}></div>
 	</div>
 {:else if analysisQuery.isError}
 	<div
 		data-testid="analysis-load-error"
-		class={cx(
-			row,
-			css({
-				paddingX: '2.5',
-				paddingY: '3',
-				border: 'none',
-				borderLeftWidth: '2',
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			paddingX: '2.5',
+			paddingY: '3',
+			border: 'none',
+			borderLeftWidth: '2',
 
-				fontSize: 'xs',
-				lineHeight: '1.5',
-				backgroundColor: 'transparent',
-				borderLeftColor: 'border.error',
-				color: 'fg.error',
-				height: '100%',
-				flexDirection: 'column',
-				justifyContent: 'center',
-				textAlign: 'center',
-				gap: '4'
-			})
-		)}
+			fontSize: 'xs',
+			lineHeight: '1.5',
+			backgroundColor: 'transparent',
+			borderLeftColor: 'border.error',
+			color: 'fg.error',
+			height: '100%',
+			flexDirection: 'column',
+			justifyContent: 'center',
+			textAlign: 'center',
+			gap: '4'
+		})}
 	>
 		<div
-			class={cx(
-				row,
-				css({
-					justifyContent: 'center',
-					fontSize: 'xl',
-					fontWeight: 'bold',
-					width: 'logoLg',
-					height: 'logoLg',
-					borderWidth: '1'
-				})
-			)}
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				fontSize: 'xl',
+				fontWeight: 'bold',
+				width: 'logoLg',
+				height: 'logoLg',
+				borderWidth: '1'
+			})}
 		>
 			!
 		</div>
@@ -1052,17 +1052,16 @@
 			})}
 		>
 			<div
-				class={cx(
-					row,
-					css({
-						height: '100%',
-						boxSizing: 'border-box',
-						borderRightWidth: '1',
-						width: 'operationsPanel',
-						transitionProperty: 'width, visibility',
-						transitionDuration: 'normal'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					height: '100%',
+					boxSizing: 'border-box',
+					borderRightWidth: '1',
+					width: 'operationsPanel',
+					transitionProperty: 'width, visibility',
+					transitionDuration: 'normal'
+				})}
 			>
 				<div
 					class={css({
@@ -1125,10 +1124,15 @@
 				</div>
 			</div>
 			<div
-				class={cx(
-					row,
-					css({ flex: '1', minWidth: '0', overflow: 'hidden', justifyContent: 'center', gap: '0' })
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					flex: '1',
+					minWidth: '0',
+					overflow: 'hidden',
+					justifyContent: 'center',
+					gap: '0'
+				})}
 			>
 				<button
 					class={css({
@@ -1157,8 +1161,8 @@
 						<ChevronLeft size={12} />
 					{/if}
 				</button>
-				<div class={cx(row, css({ flex: '1', overflow: 'hidden' }))}>
-					<div class={cx(row, css({ overflowX: 'auto', gap: '0' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', flex: '1', overflow: 'hidden' })}>
+					<div class={css({ display: 'flex', alignItems: 'center', overflowX: 'auto', gap: '0' })}>
 						{#each analysisStore.tabs as tab (tab.id)}
 							<div
 								class={css({
@@ -1221,7 +1225,7 @@
 								{/if}
 							</div>
 						{/each}
-						<div class={row}>
+						<div class={css({ display: 'flex', alignItems: 'center' })}>
 							<button
 								class={css({
 									display: 'inline-flex',
@@ -1299,18 +1303,17 @@
 				{/if}
 			</button>
 			<div
-				class={cx(
-					row,
-					css({
-						justifyContent: 'flex-end',
-						height: '100%',
-						boxSizing: 'border-box',
-						borderLeftWidth: '1',
-						width: 'operationsPanel',
-						transitionProperty: 'width, visibility',
-						transitionDuration: 'normal'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'flex-end',
+					height: '100%',
+					boxSizing: 'border-box',
+					borderLeftWidth: '1',
+					width: 'operationsPanel',
+					transitionProperty: 'width, visibility',
+					transitionDuration: 'normal'
+				})}
 			>
 				<div class={css({ display: 'flex', height: '100%', flex: '1', padding: '1', gap: '1' })}>
 					<button
@@ -1687,10 +1690,14 @@
 			{/if}
 			{#if versionsQuery.isLoading}
 				<div
-					class={cx(
-						row,
-						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						padding: '8',
+						fontSize: 'sm',
+						color: 'fg.muted'
+					})}
 				>
 					Loading...
 				</div>
@@ -1777,7 +1784,7 @@
 										}}
 									/>
 								{:else}
-									<div class={cx(row, css({ gap: '2' }))}>
+									<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 										<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
 											{version.name}
 										</span>

@@ -10,7 +10,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { X } from 'lucide-svelte';
-	import { css, stepConfig, cx, divider, label, input } from '$lib/styles/panda';
+	import { css, stepConfig, cx, label, input } from '$lib/styles/panda';
 
 	const _uid = $props.id();
 
@@ -139,15 +139,13 @@
 	</div>
 
 	<div
-		class={cx(
-			divider,
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				paddingTop: '5',
-				backgroundColor: 'transparent'
-			})
-		)}
+		class={css({
+			borderTopWidth: '1',
+			marginBottom: '0',
+			paddingBottom: '5',
+			paddingTop: '5',
+			backgroundColor: 'transparent'
+		})}
 		role="group"
 		aria-labelledby="join-type-heading"
 	>
@@ -188,15 +186,13 @@
 
 	{#if !isCrossJoin}
 		<div
-			class={cx(
-				divider,
-				css({
-					marginBottom: '0',
-					paddingBottom: '5',
-					paddingTop: '5',
-					backgroundColor: 'transparent'
-				})
-			)}
+			class={css({
+				borderTopWidth: '1',
+				marginBottom: '0',
+				paddingBottom: '5',
+				paddingTop: '5',
+				backgroundColor: 'transparent'
+			})}
 			role="group"
 			aria-labelledby="join-columns-heading"
 		>
@@ -311,15 +307,13 @@
 	{/if}
 
 	<div
-		class={cx(
-			divider,
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				paddingTop: '5',
-				backgroundColor: 'transparent'
-			})
-		)}
+		class={css({
+			borderTopWidth: '1',
+			marginBottom: '0',
+			paddingBottom: '5',
+			paddingTop: '5',
+			backgroundColor: 'transparent'
+		})}
 		role="group"
 		aria-labelledby="right-columns-heading"
 	>
@@ -353,15 +347,13 @@
 		{/if}
 	</div>
 	<div
-		class={cx(
-			divider,
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				paddingTop: '5',
-				backgroundColor: 'transparent'
-			})
-		)}
+		class={css({
+			borderTopWidth: '1',
+			marginBottom: '0',
+			paddingBottom: '5',
+			paddingTop: '5',
+			backgroundColor: 'transparent'
+		})}
 		role="group"
 		aria-labelledby="suffix-heading"
 	>

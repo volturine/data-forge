@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { css, cx, button, input, label, spinner, row } from '$lib/styles/panda';
+	import { css, cx, button, input, label, spinner } from '$lib/styles/panda';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { updateProfile, changePassword, unlinkProvider, getMe } from '$lib/api/auth';
@@ -267,8 +267,15 @@
 			{/if}
 
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-				<div class={cx(row, css({ justifyContent: 'space-between', paddingY: '2' }))}>
-					<div class={cx(row, css({ gap: '3' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						paddingY: '2'
+					})}
+				>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 						<span class={css({ color: 'fg.primary', fontSize: 'sm' })}>Google</span>
 						{#if connected('google')}
 							<span
@@ -306,8 +313,15 @@
 
 				<div class={css({ borderTopWidth: '1', borderColor: 'border.primary' })}></div>
 
-				<div class={cx(row, css({ justifyContent: 'space-between', paddingY: '2' }))}>
-					<div class={cx(row, css({ gap: '3' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						paddingY: '2'
+					})}
+				>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 						<GitBranch size={16} />
 						<span class={css({ color: 'fg.primary', fontSize: 'sm' })}>GitHub</span>
 						{#if connected('github')}
@@ -352,7 +366,7 @@
 				Danger zone
 			</h2>
 
-			<div class={cx(row, css({ justifyContent: 'space-between' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<div>
 					<p class={css({ fontSize: 'sm', color: 'fg.primary' })}>Delete account</p>
 					<p class={css({ fontSize: 'xs', color: 'fg.muted' })}>

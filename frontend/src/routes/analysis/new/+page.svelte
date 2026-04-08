@@ -11,7 +11,7 @@
 	import type { AnalysisCreate, PipelineStep } from '$lib/types/analysis';
 	import { buildOutputConfig, generateOutputName } from '$lib/utils/analysis-tab';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
-	import { css, cx, spinner, button, label, input, row, divider } from '$lib/styles/panda';
+	import { css, cx, spinner, button, label, input } from '$lib/styles/panda';
 
 	let step = $state(1);
 	let name = $state('');
@@ -109,7 +109,7 @@
 		<h1 class={css({ margin: '0', marginBottom: '6', fontSize: '2xl', fontWeight: 'semibold' })}>
 			New Analysis
 		</h1>
-		<div class={cx(row, css({ gap: '2' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 			<div
 				class={css({
 					display: 'flex',
@@ -456,16 +456,7 @@
 		{/if}
 	</div>
 
-	<div
-		class={cx(
-			divider,
-			css({
-				display: 'flex',
-				gap: '3',
-				paddingTop: '6'
-			})
-		)}
-	>
+	<div class={css({ borderTopWidth: '1', display: 'flex', gap: '3', paddingTop: '6' })}>
 		{#if step > 1}
 			<button
 				class={button({ variant: 'secondary' })}

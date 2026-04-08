@@ -9,7 +9,7 @@
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
 	import type { Udf, UdfInput, UdfSignature } from '$lib/types/udf';
 	import { ArrowLeft, Save } from 'lucide-svelte';
-	import { css, button, cx, input, label, row, rowBetween } from '$lib/styles/panda';
+	import { css, button, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		mode: 'create' | 'edit';
@@ -163,7 +163,7 @@
 			sm: { flexDirection: 'row', alignItems: 'center' }
 		})}
 	>
-		<div class={cx(row, css({ gap: '3' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 			<button
 				class={css({
 					width: 'rowXl',
@@ -308,7 +308,9 @@
 					backgroundColor: 'bg.primary'
 				})}
 			>
-				<div class={rowBetween}>
+				<div
+					class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+				>
 					<h4 class={css({ margin: '0', fontSize: 'sm', color: 'fg.secondary' })}>Code</h4>
 					<span class={css({ fontSize: 'xs', color: 'fg.muted' })}
 						>Define a function named <code>udf</code></span

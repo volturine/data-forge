@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { css, cx, button, input, label, spinner, row } from '$lib/styles/panda';
+	import { css, cx, button, input, label, spinner } from '$lib/styles/panda';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { GitBranch } from 'lucide-svelte';
 
@@ -160,7 +160,7 @@
 			</button>
 		</form>
 
-		<div class={cx(row, css({ gap: '3' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 			<div class={css({ flex: '1', height: '1px', backgroundColor: 'border.primary' })}></div>
 			<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>or continue with</span>
 			<div class={css({ flex: '1', height: '1px', backgroundColor: 'border.primary' })}></div>

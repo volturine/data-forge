@@ -19,7 +19,7 @@
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
-	import { css, cx, chip, input, label, row, rowBetween, muted } from '$lib/styles/panda';
+	import { css, cx, chip, input, label } from '$lib/styles/panda';
 	import {
 		Bell,
 		CalendarClock,
@@ -449,7 +449,7 @@
 				borderBottomWidth: '1'
 			})}
 		>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<div
 					class={css({
 						display: 'flex',
@@ -515,9 +515,9 @@
 				<Pencil size={11} class={css({ opacity: '0.5' })} />
 				<span>Table name</span>
 			</div>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				{#if editingName}
-					<div class={cx(row, css({ gap: '1' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 						<input
 							class={cx(
 								input(),
@@ -645,7 +645,9 @@
 					padding: '3'
 				})}
 			>
-				<div class={rowBetween}>
+				<div
+					class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+				>
 					<span
 						class={css({ fontSize: 'sm', fontWeight: 'semibold' })}
 						data-testid="output-table-name-card"
@@ -772,7 +774,7 @@
 										whiteSpace: 'nowrap'
 									})}>{outputConfig.build_mode}</span
 								>
-								<ChevronDown size={14} class={muted} />
+								<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
 							</button>
 							{#if modeMenuOpen}
 								<div
@@ -930,7 +932,7 @@
 					onclick={() => (notifyOpen = !notifyOpen)}
 					data-testid="output-notify-toggle"
 				>
-					<span class={cx(row, css({ gap: '2' }))}>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						{#if notifyOpen}
 							<ChevronDown size={12} />
 						{:else}
@@ -1136,7 +1138,7 @@
 					onclick={() => (healthOpen = !healthOpen)}
 					data-testid="output-health-toggle"
 				>
-					<span class={cx(row, css({ gap: '2' }))}>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						{#if healthOpen}
 							<ChevronDown size={12} />
 						{:else}
@@ -1231,7 +1233,7 @@
 					onclick={() => (scheduleOpen = !scheduleOpen)}
 					data-testid="output-schedule-toggle"
 				>
-					<span class={cx(row, css({ gap: '2' }))}>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						{#if scheduleOpen}
 							<ChevronDown size={12} />
 						{:else}

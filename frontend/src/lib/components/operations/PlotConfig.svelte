@@ -19,7 +19,7 @@
 	} from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, label, stepConfig, cx, divider, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, cx, input } from '$lib/styles/panda';
 
 	type PlotConfigData = Omit<PlotConfigBase, 'aggregation' | 'chart_type' | 'stack_mode'> & {
 		chart_type:
@@ -925,17 +925,15 @@
 			{/if}
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginBottom: '0',
-						paddingBottom: '5',
-						paddingTop: '5',
-						backgroundColor: 'transparent',
+				class={css({
+					borderTopWidth: '1',
+					marginBottom: '0',
+					paddingBottom: '5',
+					paddingTop: '5',
+					backgroundColor: 'transparent',
 
-						border: 'none'
-					})
-				)}
+					border: 'none'
+				})}
 				role="group"
 				aria-labelledby={`${uid}-plot-overlays`}
 			>
@@ -1122,17 +1120,15 @@
 			</div>
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginBottom: '0',
-						paddingBottom: '5',
-						paddingTop: '5',
-						backgroundColor: 'transparent',
+				class={css({
+					borderTopWidth: '1',
+					marginBottom: '0',
+					paddingBottom: '5',
+					paddingTop: '5',
+					backgroundColor: 'transparent',
 
-						border: 'none'
-					})
-				)}
+					border: 'none'
+				})}
 				role="group"
 				aria-labelledby={`${uid}-plot-reference-lines`}
 			>
@@ -1547,17 +1543,15 @@
 			{/if}
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginBottom: '0',
-						paddingBottom: '5',
-						paddingTop: '5',
-						backgroundColor: 'transparent',
+				class={css({
+					borderTopWidth: '1',
+					marginBottom: '0',
+					paddingBottom: '5',
+					paddingTop: '5',
+					backgroundColor: 'transparent',
 
-						border: 'none'
-					})
-				)}
+					border: 'none'
+				})}
 				role="group"
 				aria-labelledby={`${uid}-plot-height`}
 			>

@@ -2,7 +2,7 @@
 	import { Debounced } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { ChevronDown } from 'lucide-svelte';
-	import { css, cx, emptyText, input, muted } from '$lib/styles/panda';
+	import { css, cx, emptyText, input } from '$lib/styles/panda';
 
 	import type { Snippet } from 'svelte';
 
@@ -299,7 +299,7 @@
 							textOverflow: 'ellipsis',
 							whiteSpace: 'nowrap'
 						})
-					: muted}>{displayLabel}</span
+					: css({ color: 'fg.muted' })}>{displayLabel}</span
 			>
 			{#if clearable && selectedCount > 0}
 				<span
@@ -333,7 +333,7 @@
 					aria-label="Clear selection">✕</span
 				>
 			{:else}
-				<ChevronDown size={14} class={muted} />
+				<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
 			{/if}
 		</button>
 	{/if}

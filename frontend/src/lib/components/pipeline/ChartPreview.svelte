@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as d3 from 'd3';
 	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
-	import { css, cx, button, divider } from '$lib/styles/panda';
+	import { css, cx, button } from '$lib/styles/panda';
 	import { downloadBlob } from '$lib/api/compute';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
@@ -3912,12 +3912,7 @@
 		justifyContent: 'flex-end'
 	});
 
-	const legendBottomCss = cx(
-		divider,
-		css({
-			borderBottom: 'none'
-		})
-	);
+	const legendBottomCss = css({ borderTopWidth: '1', borderBottom: 'none' });
 
 	const legendBottomCollapsedCss = css({ justifyContent: 'flex-start' });
 

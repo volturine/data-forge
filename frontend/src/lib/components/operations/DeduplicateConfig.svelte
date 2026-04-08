@@ -3,7 +3,7 @@
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, label, stepConfig, divider } from '$lib/styles/panda';
+	import { css, cx, label, stepConfig } from '$lib/styles/panda';
 
 	interface DeduplicateConfigData {
 		subset: string[] | null;
@@ -67,12 +67,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 		role="group"
 		aria-labelledby="column-subset-heading"

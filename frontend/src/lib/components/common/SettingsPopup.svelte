@@ -29,7 +29,7 @@
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, input, cx, label, row, rowBetween, divider } from '$lib/styles/panda';
+	import { css, input, cx, label } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -416,7 +416,13 @@
 						padding: '3'
 					})}
 				>
-					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between'
+						})}
+					>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenRouter</span>
 						<button
 							class={css({
@@ -464,7 +470,13 @@
 						padding: '3'
 					})}
 				>
-					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between'
+						})}
+					>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>OpenAI</span>
 						<button
 							class={css({
@@ -525,7 +537,13 @@
 						padding: '3'
 					})}
 				>
-					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between'
+						})}
+					>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Ollama</span>
 						<button
 							class={css({
@@ -570,7 +588,13 @@
 						padding: '3'
 					})}
 				>
-					<div class={cx(rowBetween, css({ alignItems: 'center' }))}>
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between'
+						})}
+					>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Hugging Face</span>
 						<button
 							class={css({
@@ -752,7 +776,7 @@
 					<MessageCircle size={12} />
 					<SectionHeader>Telegram</SectionHeader>
 				</span>
-				<span class={cx(row, css({ gap: '2', alignItems: 'center' }))}>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 					{#if statusQuery.data}
 						<span
 							class={css({
@@ -796,7 +820,9 @@
 					/>
 				</label>
 
-				<div class={rowBetween}>
+				<div
+					class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Enable Bot</span>
 						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
@@ -847,7 +873,7 @@
 							backgroundColor: 'bg.tertiary'
 						})}
 					>
-						<span class={cx(row, css({ gap: '1.5' }))}>
+						<span class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
 							<span
 								class={css({
 									display: 'inline-block',
@@ -888,7 +914,7 @@
 									fontSize: 'xs'
 								})}
 							>
-								<div class={cx(row, css({ gap: '2' }))}>
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 									<span
 										class={css({
 											display: 'inline-block',
@@ -961,7 +987,9 @@
 				aria-hidden={debugCollapsed}
 				class={debugCollapsed ? css({ display: 'none' }) : ''}
 			>
-				<div class={rowBetween}>
+				<div
+					class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}> IndexedDB Inspector </span>
 						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
@@ -1002,15 +1030,13 @@
 		</div>
 
 		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'space-between',
-					padding: '4'
-				})
-			)}
+			class={css({
+				borderTopWidth: '1',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				padding: '4'
+			})}
 		>
 			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
 				Settings are stored in the database.

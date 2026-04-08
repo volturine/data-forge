@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { UdfInput } from '$lib/types/udf';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
-	import { css, cx, button, emptyText, input, label, rowBetween } from '$lib/styles/panda';
+	import { css, cx, button, emptyText, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		inputs: UdfInput[];
@@ -32,7 +32,7 @@
 </script>
 
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-	<div class={rowBetween}>
+	<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 		<h4 class={css({ margin: '0', fontSize: 'sm', color: 'fg.secondary' })}>Inputs</h4>
 		<button type="button" class={button({ variant: 'secondary', size: 'sm' })} onclick={addInput}
 			>Add input</button

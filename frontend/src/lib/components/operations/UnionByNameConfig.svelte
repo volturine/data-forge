@@ -6,7 +6,7 @@
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, stepConfig, label, divider, muted } from '$lib/styles/panda';
+	import { css, cx, stepConfig, label } from '$lib/styles/panda';
 
 	interface UnionByNameConfigData {
 		sources: string[];
@@ -106,7 +106,7 @@
 					>{schema.columns.length} columns</span
 				>
 			{:else}
-				<span class={muted}>No active datasource selected</span>
+				<span class={css({ color: 'fg.muted' })}>No active datasource selected</span>
 			{/if}
 		</div>
 	</div>
@@ -120,12 +120,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 	>
 		<div
@@ -169,12 +164,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 	>
 		<SectionHeader>Column Matching</SectionHeader>

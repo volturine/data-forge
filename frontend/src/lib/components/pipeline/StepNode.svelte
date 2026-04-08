@@ -21,7 +21,7 @@
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner, button, divider } from '$lib/styles/panda';
+	import { css, cx, spinner, button } from '$lib/styles/panda';
 
 	interface Props {
 		step: PipelineStep;
@@ -456,15 +456,7 @@
 			</div>
 		</div>
 
-		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					gap: '0'
-				})
-			)}
-		>
+		<div class={css({ borderTopWidth: '1', display: 'flex', gap: '0' })}>
 			<button
 				class={cx(
 					'action-btn',
@@ -553,7 +545,7 @@
 		</div>
 
 		{#if step.type === 'view' && datasourceId && analysisId}
-			<div class={divider}>
+			<div class={css({ borderTopWidth: '1' })}>
 				<InlineDataTable
 					{analysisId}
 					{datasourceId}
@@ -565,14 +557,7 @@
 		{/if}
 
 		{#if step.type === 'download' && datasourceId && analysisId}
-			<div
-				class={cx(
-					divider,
-					css({
-						padding: '3'
-					})
-				)}
-			>
+			<div class={css({ borderTopWidth: '1', padding: '3' })}>
 				<button
 					class={cx(button({ variant: 'primary' }), css({ width: '100%' }))}
 					onclick={() => handleDownload()}
@@ -584,7 +569,7 @@
 		{/if}
 
 		{#if isChart && datasourceId && analysisId}
-			<div class={divider}>
+			<div class={css({ borderTopWidth: '1' })}>
 				{#if !isApplied}
 					<div
 						class={css({
@@ -655,15 +640,13 @@
 		{/if}
 
 		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					alignItems: 'center',
-					paddingX: '4',
-					paddingY: '2.5'
-				})
-			)}
+			class={css({
+				borderTopWidth: '1',
+				display: 'flex',
+				alignItems: 'center',
+				paddingX: '4',
+				paddingY: '2.5'
+			})}
 		>
 			{#if rowCount !== null}
 				{#key `${rowCountKey}:${rowCount}`}

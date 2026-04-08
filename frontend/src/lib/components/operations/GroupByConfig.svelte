@@ -3,7 +3,7 @@
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, stepConfig, cx, divider, label, input } from '$lib/styles/panda';
+	import { css, stepConfig, cx, label, input } from '$lib/styles/panda';
 
 	const uid = $props.id();
 
@@ -96,17 +96,15 @@
 	</div>
 
 	<div
-		class={cx(
-			divider,
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				backgroundColor: 'transparent',
+		class={css({
+			borderTopWidth: '1',
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
 
-				border: 'none',
-				paddingTop: '5'
-			})
-		)}
+			border: 'none',
+			paddingTop: '5'
+		})}
 		role="group"
 		aria-labelledby="{uid}-agg-heading"
 	>

@@ -26,7 +26,7 @@
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
-	import { css, cx, input, label, row, rowBetween, divider, muted } from '$lib/styles/panda';
+	import { css, cx, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource | null;
@@ -291,7 +291,7 @@
 				borderBottomWidth: '1'
 			})}
 		>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<div
 					class={css({
 						display: 'flex',
@@ -398,9 +398,9 @@
 				<PanelLeft size={11} class={css({ opacity: '0.5' })} />
 				<span>Tab name</span>
 			</div>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				{#if isEditing}
-					<div class={cx(row, css({ gap: '1' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 						<input
 							class={cx(
 								input(),
@@ -528,11 +528,13 @@
 						padding: '3'
 					})}
 				>
-					<div class={rowBetween}>
+					<div
+						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+					>
 						<div class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
 							{datasourceLabel ?? datasource?.name}
 						</div>
-						<div class={cx(row, css({ gap: '2' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							{#if datasource}
 								{#if isDerived}
 									<FileTypeBadge sourceType="derived" size="sm" showIcon={true} />
@@ -560,15 +562,13 @@
 					</div>
 					{#if isIceberg && datasource}
 						<div
-							class={cx(
-								divider,
-								css({
-									display: 'flex',
-									alignItems: 'flex-start',
-									gap: '2',
-									paddingTop: '2'
-								})
-							)}
+							class={css({
+								borderTopWidth: '1',
+								display: 'flex',
+								alignItems: 'flex-start',
+								gap: '2',
+								paddingTop: '2'
+							})}
 						>
 							<div class={css({ minWidth: '0', flex: '1' })}>
 								{#if readOnly}
@@ -695,7 +695,7 @@
 						<Cpu size={12} />
 						<span>Engine</span>
 					</div>
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<span
 							class={css({
 								fontSize: '2xs',
@@ -704,7 +704,13 @@
 						>
 							{effectiveThreads} threads, {effectiveMemoryGb}GB
 						</span>
-						<span class={cx(muted, row, engineExpanded && css({ transform: 'rotate(180deg)' }))}>
+						<span
+							class={cx(
+								css({ color: 'fg.muted' }),
+								css({ display: 'flex', alignItems: 'center' }),
+								engineExpanded && css({ transform: 'rotate(180deg)' })
+							)}
+						>
 							<ChevronDown size={12} />
 						</span>
 					</div>
@@ -712,18 +718,16 @@
 
 				{#if engineExpanded}
 					<div
-						class={cx(
-							divider,
-							css({
-								display: 'flex',
-								flexDirection: 'column',
-								gap: '2',
-								backgroundColor: 'bg.primary',
-								padding: '3'
-							})
-						)}
+						class={css({
+							borderTopWidth: '1',
+							display: 'flex',
+							flexDirection: 'column',
+							gap: '2',
+							backgroundColor: 'bg.primary',
+							padding: '3'
+						})}
 					>
-						<div class={cx(row, css({ gap: '3' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 							<label
 								for="threads-input"
 								class={cx(
@@ -765,7 +769,7 @@
 								</span>
 							{/if}
 						</div>
-						<div class={cx(row, css({ gap: '3' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 							<label
 								for="memory-select"
 								class={cx(

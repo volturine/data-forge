@@ -3,7 +3,7 @@
 	import { onClickOutside } from 'runed';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
-	import { css, emptyText, cx, row } from '$lib/styles/panda';
+	import { css, emptyText } from '$lib/styles/panda';
 
 	let open = $state(false);
 	let entries = $state<Array<{ key: string; value: unknown }>>([]);
@@ -135,7 +135,7 @@
 					})}
 				>
 					<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> IndexedDB </span>
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<button
 							class={css({
 								display: 'flex',

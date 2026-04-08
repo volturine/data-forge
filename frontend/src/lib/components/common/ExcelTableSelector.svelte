@@ -3,7 +3,7 @@
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
 	import type { ExcelParams } from '$lib/api/excel';
 	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { css, cx, button, input, label, row, rowBetween } from '$lib/styles/panda';
+	import { css, cx, button, input, label } from '$lib/styles/panda';
 
 	interface ExcelConfig {
 		sheet_name: string;
@@ -418,7 +418,7 @@
 		padding: '4'
 	})}
 >
-	<div class={rowBetween}>
+	<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 		<h3 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold', color: 'fg.secondary' })}>
 			Excel Table Selection
 		</h3>
@@ -536,7 +536,7 @@
 		</div>
 	</div>
 
-	<div class={cx(row, css({ gap: '2' }))}>
+	<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 		<input
 			id="excel-header"
 			type="checkbox"
@@ -573,26 +573,26 @@
 					color: 'fg.muted'
 				})}
 			>
-				<span class={cx(row, css({ gap: '1' }))}
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
 					><span class={css({ color: 'fg.tertiary' })}>Start row:</span>
 					<span class={css({ fontWeight: 'semibold' })}>{startRow + 1}</span></span
 				>
-				<span class={cx(row, css({ gap: '1' }))}
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
 					><span class={css({ color: 'fg.tertiary' })}>Start col:</span>
 					<span class={css({ fontWeight: 'semibold' })}>{cellLabel(startCol)}</span></span
 				>
-				<span class={cx(row, css({ gap: '1' }))}
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
 					><span class={css({ color: 'fg.tertiary' })}>End col:</span>
 					<span class={css({ fontWeight: 'semibold' })}>{cellLabel(endCol)}</span></span
 				>
 				{#if endRow !== null}
-					<span class={cx(row, css({ gap: '1' }))}
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
 						><span class={css({ color: 'fg.tertiary' })}>End row:</span>
 						<span class={css({ fontWeight: 'semibold' })}>{endRow + 1}</span></span
 					>
 				{/if}
 				{#if detectedEndRow !== null}
-					<span class={cx(row, css({ gap: '1' }))}
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
 						><span class={css({ color: 'fg.tertiary' })}>Detected end:</span>
 						<span class={css({ fontWeight: 'semibold' })}>{detectedEndRow + 1}</span></span
 					>

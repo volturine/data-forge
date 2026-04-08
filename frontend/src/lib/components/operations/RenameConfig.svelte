@@ -3,7 +3,7 @@
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import { ArrowRight, X } from 'lucide-svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, cx, emptyText, input, label, stepConfig, muted } from '$lib/styles/panda';
+	import { css, cx, emptyText, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface RenameConfigData {
 		column_mapping: { [oldName: string]: string };
@@ -180,7 +180,7 @@
 							})}
 							title={mapping.oldName}>{mapping.oldName}</span
 						>
-						<ArrowRight size={12} class={muted} aria-hidden="true" />
+						<ArrowRight size={12} class={css({ color: 'fg.muted' })} aria-hidden="true" />
 						<span
 							class={css({
 								fontWeight: 'semibold',

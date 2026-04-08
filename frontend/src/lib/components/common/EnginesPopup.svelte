@@ -3,7 +3,7 @@
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import type { EngineStatus } from '$lib/types/compute';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { css, cx, row } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -215,7 +215,7 @@
 							fontSize: 'xs'
 						})}
 					>
-						<div class={cx(row, css({ gap: '2', minWidth: '0' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2', minWidth: '0' })}>
 							<span
 								class={css({
 									display: 'inline-block',

@@ -4,7 +4,7 @@
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner, row, muted } from '$lib/styles/panda';
+	import { css, cx, spinner } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -480,7 +480,7 @@
 			<Clock size={12} />
 			<span>{label}</span>
 		</div>
-		<div class={cx(row, css({ gap: '2' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 			{#if isLatest}
 				<span
 					class={css({
@@ -516,7 +516,13 @@
 					{timeTravelId}
 				</span>
 			{/if}
-			<span class={cx(muted, row, snapshotsOpen && css({ transform: 'rotate(180deg)' }))}>
+			<span
+				class={cx(
+					css({ color: 'fg.muted' }),
+					css({ display: 'flex', alignItems: 'center' }),
+					snapshotsOpen && css({ transform: 'rotate(180deg)' })
+				)}
+			>
 				<ChevronDown size={12} />
 			</span>
 		</div>
@@ -635,7 +641,7 @@
 			{:else}
 				<div class={css({ display: 'flex', gap: '2' })}>
 					<div class={css({ display: 'flex', flex: '1', flexDirection: 'column', gap: '2' })}>
-						<div class={cx(row, css({ gap: '2' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<button
 								class={css({
 									borderWidth: '1',

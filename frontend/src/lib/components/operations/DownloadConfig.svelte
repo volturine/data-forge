@@ -8,7 +8,7 @@
 		config?: DownloadConfigData;
 	}
 
-	import { css, cx, label, stepConfig, divider, input } from '$lib/styles/panda';
+	import { css, cx, label, stepConfig, input } from '$lib/styles/panda';
 
 	let { config = $bindable({ format: 'csv', filename: 'download' }) }: Props = $props();
 
@@ -63,12 +63,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 	>
 		<label for="download-format" class={cx(label({ variant: 'wrapper' }), css({ gap: '3' }))}>

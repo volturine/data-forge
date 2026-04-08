@@ -24,18 +24,7 @@
 	} from 'lucide-svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import {
-		css,
-		cx,
-		spinner,
-		button,
-		tabButton,
-		emptyText,
-		input,
-		row,
-		divider,
-		muted
-	} from '$lib/styles/panda';
+	import { css, cx, spinner, button, tabButton, emptyText, input } from '$lib/styles/panda';
 
 	interface Props {
 		compact?: boolean;
@@ -348,7 +337,7 @@
 
 	{#if compact}
 		{#if searchQuery === undefined}
-			<div class={cx(row, css({ marginBottom: '3', gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', marginBottom: '3', gap: '2' })}>
 				<div class={css({ position: 'relative', minWidth: 'list', flex: '1' })}>
 					<Search
 						size={14}
@@ -392,7 +381,15 @@
 			</button>
 		{/if}
 	{:else}
-		<div class={cx(row, css({ marginBottom: '4', flexWrap: 'wrap', gap: '3' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginBottom: '4',
+				flexWrap: 'wrap',
+				gap: '3'
+			})}
+		>
 			{#if searchQuery === undefined}
 				<div class={css({ position: 'relative', minWidth: 'list', maxWidth: 'panel', flex: '1' })}>
 					<Search
@@ -450,8 +447,8 @@
 				placeholder="Branch"
 				onChange={(value: string) => (branchFilter = value)}
 			/>
-			<div class={cx(row, css({ gap: '1.5', fontSize: 'sm' }))}>
-				<span class={muted}>From</span>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5', fontSize: 'sm' })}>
+				<span class={css({ color: 'fg.muted' })}>From</span>
 				<input
 					type="date"
 					class={cx(input(), css({ paddingY: '1', fontSize: 'sm', cursor: 'pointer' }))}
@@ -459,7 +456,7 @@
 					aria-label="From date"
 					bind:value={dateFrom}
 				/>
-				<span class={muted}>To</span>
+				<span class={css({ color: 'fg.muted' })}>To</span>
 				<input
 					type="date"
 					class={cx(input(), css({ paddingY: '1', fontSize: 'sm', cursor: 'pointer' }))}
@@ -472,7 +469,14 @@
 	{/if}
 
 	{#if query.isLoading}
-		<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				height: '100%',
+				justifyContent: 'center'
+			})}
+		>
 			<div class={spinner()}></div>
 		</div>
 	{:else if query.isError}
@@ -607,10 +611,10 @@
 										<Download size={14} class={css({ color: 'fg.success' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'row_count'}
-										<Hash size={14} class={muted} />
+										<Hash size={14} class={css({ color: 'fg.muted' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else}
-										<Database size={14} class={muted} />
+										<Database size={14} class={css({ color: 'fg.muted' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{/if}
 									{#if run.triggered_by === 'schedule'}
@@ -679,7 +683,7 @@
 										{resolveName(run.analysis_id, analysisNames)}
 									</span>
 								{:else}
-									<span class={muted}>-</span>
+									<span class={css({ color: 'fg.muted' })}>-</span>
 								{/if}
 							</td>
 							<td
@@ -697,7 +701,7 @@
 										{getOutputName(run)}
 									</span>
 								{:else}
-									<span class={muted}>-</span>
+									<span class={css({ color: 'fg.muted' })}>-</span>
 								{/if}
 							</td>
 							<td
@@ -800,7 +804,7 @@
 													})}
 												>
 													<div>
-														<span class={muted}>Run ID:</span>
+														<span class={css({ color: 'fg.muted' })}>Run ID:</span>
 														<span
 															class={css({
 																marginLeft: '2',
@@ -812,14 +816,14 @@
 														</span>
 													</div>
 													<div>
-														<span class={muted}>Datasource:</span>
+														<span class={css({ color: 'fg.muted' })}>Datasource:</span>
 														<span class={css({ marginLeft: '2', fontSize: 'xs' })}>
 															{resolveName(run.datasource_id, dsNames)}
 														</span>
 													</div>
 													{#if run.analysis_id}
 														<div>
-															<span class={muted}>Analysis:</span>
+															<span class={css({ color: 'fg.muted' })}>Analysis:</span>
 															<span class={css({ marginLeft: '2', fontSize: 'xs' })}>
 																{resolveName(run.analysis_id, analysisNames)}
 															</span>
@@ -827,7 +831,7 @@
 													{/if}
 													{#if run.triggered_by}
 														<div>
-															<span class={muted}>Triggered by:</span>
+															<span class={css({ color: 'fg.muted' })}>Triggered by:</span>
 															<span
 																class={css({
 																	marginLeft: '2',
@@ -922,7 +926,7 @@
 														>
 															{#if 'row_count' in result}
 																<div>
-																	<span class={muted}>Rows:</span>
+																	<span class={css({ color: 'fg.muted' })}>Rows:</span>
 																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
 																		{result.row_count}
 																	</span>
@@ -930,7 +934,7 @@
 															{/if}
 															{#if 'page' in result}
 																<div>
-																	<span class={muted}>Page:</span>
+																	<span class={css({ color: 'fg.muted' })}>Page:</span>
 																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
 																		{result.page}
 																	</span>
@@ -938,7 +942,7 @@
 															{/if}
 															{#if 'page_size' in result}
 																<div>
-																	<span class={muted}>Page Size:</span>
+																	<span class={css({ color: 'fg.muted' })}>Page Size:</span>
 																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
 																		{result.page_size}
 																	</span>
@@ -946,7 +950,7 @@
 															{/if}
 															{#if 'export_format' in result}
 																<div>
-																	<span class={muted}>Format:</span>
+																	<span class={css({ color: 'fg.muted' })}>Format:</span>
 																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
 																		{result.export_format}
 																	</span>
@@ -954,7 +958,7 @@
 															{/if}
 															{#if 'file_size_bytes' in result}
 																<div>
-																	<span class={muted}>File Size:</span>
+																	<span class={css({ color: 'fg.muted' })}>File Size:</span>
 																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
 																		{(Number(result.file_size_bytes) / 1024).toFixed(1)} KB
 																	</span>
@@ -987,7 +991,7 @@
 																	{#each Object.entries(result.schema as Record<string, string>) as [col, dtype] (col)}
 																		<div>
 																			<span class={css({ color: 'accent.primary' })}>{col}</span>:
-																			<span class={muted}>{dtype}</span>
+																			<span class={css({ color: 'fg.muted' })}>{dtype}</span>
 																		</div>
 																	{/each}
 																</div>
@@ -1014,7 +1018,14 @@
 													Step Execution Timeline
 												</h4>
 												{#each entries as entry (entry.name)}
-													<div class={cx(row, css({ gap: '3', fontSize: 'xs' }))}>
+													<div
+														class={css({
+															display: 'flex',
+															alignItems: 'center',
+															gap: '3',
+															fontSize: 'xs'
+														})}
+													>
 														<span
 															class={css({
 																width: 'colWide',
@@ -1063,17 +1074,15 @@
 												{/each}
 												{#if entries.length > 0}
 													<div
-														class={cx(
-															divider,
-															css({
-																marginTop: '3',
-																paddingTop: '2',
-																textAlign: 'right',
-																fontFamily: 'mono',
-																fontSize: 'xs',
-																color: 'fg.muted'
-															})
-														)}
+														class={css({
+															borderTopWidth: '1',
+															marginTop: '3',
+															paddingTop: '2',
+															textAlign: 'right',
+															fontFamily: 'mono',
+															fontSize: 'xs',
+															color: 'fg.muted'
+														})}
 													>
 														Total: {formatDuration(run.duration_ms)}
 													</div>
@@ -1145,14 +1154,21 @@
 			</table>
 		</div>
 
-		<div class={cx(row, css({ marginTop: '4', justifyContent: 'space-between' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginTop: '4',
+				justifyContent: 'space-between'
+			})}
+		>
 			<span class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
 				Page {page}
 				{#if filteredRuns.length < runs.length}
 					({filteredRuns.length} of {runs.length} shown)
 				{/if}
 			</span>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<button
 					class={button({ variant: 'ghost', size: 'sm' })}
 					onclick={prevPage}

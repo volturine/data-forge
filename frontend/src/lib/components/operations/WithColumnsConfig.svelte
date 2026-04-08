@@ -13,18 +13,7 @@
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import { Pencil, X } from 'lucide-svelte';
-	import {
-		css,
-		button,
-		emptyText,
-		input,
-		label,
-		stepConfig,
-		cx,
-		row,
-		rowBetween,
-		divider
-	} from '$lib/styles/panda';
+	import { css, button, emptyText, input, label, stepConfig, cx } from '$lib/styles/panda';
 
 	interface WithColumnsExpr {
 		name: string;
@@ -282,7 +271,7 @@
 			/>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-				<div class={cx(row, css({ gap: '3' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 					<label class={label({ variant: 'inline' })}>
 						<input id="wc-use-lib-no" type="radio" bind:group={useLibrary} value={false} />
 						Inline UDF
@@ -294,7 +283,7 @@
 				</div>
 
 				{#if useLibrary}
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<button
 							type="button"
 							class={button({ variant: 'secondary', size: 'sm' })}
@@ -325,7 +314,9 @@
 						placeholder="Select input columns..."
 					/>
 
-					<div class={rowBetween}>
+					<div
+						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+					>
 						<label for="wc-expr-code" class={label()}>Function</label>
 						<button
 							type="button"
@@ -354,16 +345,14 @@
 					</label>
 					{#if saveToLibrary}
 						<div
-							class={cx(
-								divider,
-								css({
-									display: 'flex',
-									flexDirection: 'column',
-									gap: '3',
-									marginTop: '3',
-									paddingTop: '3'
-								})
-							)}
+							class={css({
+								borderTopWidth: '1',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '3',
+								marginTop: '3',
+								paddingTop: '3'
+							})}
 						>
 							<label class={label()} for="wc-save-name">Name</label>
 							<input
@@ -453,7 +442,7 @@
 							})}
 					role="listitem"
 				>
-					<div class={cx(row, css({ gap: '3', minWidth: '0' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '3', minWidth: '0' })}>
 						<span
 							class={css({
 								fontWeight: 'semibold',

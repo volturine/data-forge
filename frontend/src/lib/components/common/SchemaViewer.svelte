@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import { css, cx, row, muted } from '$lib/styles/panda';
+	import { css, cx } from '$lib/styles/panda';
 
 	interface Props {
 		schema: Schema;
@@ -21,16 +21,15 @@
 	)}
 >
 	<div
-		class={cx(
-			row,
-			css({
-				justifyContent: 'space-between',
-				paddingX: '5',
-				paddingY: '4',
-				borderBottomWidth: '1',
-				backgroundColor: 'bg.tertiary'
-			})
-		)}
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: 'space-between',
+			paddingX: '5',
+			paddingY: '4',
+			borderBottomWidth: '1',
+			backgroundColor: 'bg.tertiary'
+		})}
 	>
 		<h3 class={css({ margin: '0', fontSize: 'lg', fontWeight: 'semibold' })}>Schema</h3>
 		{#if schema.row_count !== null}
@@ -74,15 +73,15 @@
 					_hover: { backgroundColor: 'bg.hover' }
 				})}
 			>
-				<div class={cx(row, css({ gap: '2', fontWeight: 'medium' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2', fontWeight: 'medium' })}>
 					<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}>{column.name}</span>
 				</div>
-				<div class={row}>
+				<div class={css({ display: 'flex', alignItems: 'center' })}>
 					<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
 				</div>
-				<div class={cx(row, css({ fontSize: 'sm' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', fontSize: 'sm' })}>
 					{#if column.nullable}
-						<span class={muted}>Yes</span>
+						<span class={css({ color: 'fg.muted' })}>Yes</span>
 					{:else}
 						<span class={css({ fontWeight: 'medium', color: 'fg.secondary' })}>No</span>
 					{/if}

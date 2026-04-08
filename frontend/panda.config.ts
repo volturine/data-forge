@@ -100,7 +100,7 @@ export default defineConfig({
 			WebkitUserSelect: 'none',
 			WebkitTouchCallout: 'none'
 		},
-		'body.touch-dragging .pipeline-canvas': {
+		'body.touch-dragging [data-hook="pipeline-canvas"]': {
 			overflow: 'hidden',
 			touchAction: 'none'
 		}
@@ -108,16 +108,56 @@ export default defineConfig({
 	staticCss: {
 		recipes: {
 			callout: [{ tone: ['info', 'warn', 'error'] }],
-			chip: [{ tone: ['accent', 'neutral', 'warning', 'success', 'error'] }],
-			button: [{ variant: ['primary', 'secondary', 'ghost', 'danger'], size: ['default', 'sm'] }],
+			chip: [
+				{ tone: ['accent', 'neutral', 'warning', 'success', 'error'], size: ['default', 'compact'] }
+			],
+			button: [
+				{
+					variant: ['primary', 'secondary', 'ghost', 'ghostOutline', 'danger'],
+					size: ['default', 'sm']
+				}
+			],
 			spinner: [{ size: ['default', 'sm', 'md'] }],
 			badge: [{ tone: ['type', 'file'], size: ['sm', 'md', 'lg'] }],
 			tabButton: [{ active: ['true', 'false'], size: ['default', 'lg'] }],
 			emptyText: [{ size: ['compact', 'panel', 'inline'] }],
 			toggleButton: [{ active: ['true', 'false'], radius: ['left', 'right'] }],
-			input: [{ variant: ['default', 'compact', 'search', 'searchCompact', 'menu', 'searchWide'] }],
+			input: [
+				{
+					variant: [
+						'default',
+						'compact',
+						'compactForm',
+						'plotSelect',
+						'panelForm',
+						'timeField',
+						'dateSelect',
+						'search',
+						'searchTight',
+						'searchCompact',
+						'searchSmall',
+						'menu',
+						'searchWide'
+					]
+				}
+			],
 			label: [
-				{ variant: ['default', 'field', 'compact', 'checkbox', 'inline', 'wrapper', 'hidden'] }
+				{
+					variant: [
+						'default',
+						'field',
+						'fieldSmall',
+						'fieldTight',
+						'fieldFlush',
+						'compact',
+						'checkbox',
+						'checkboxCompact',
+						'inline',
+						'wrapper',
+						'wrapperWide',
+						'hidden'
+					]
+				}
 			]
 		}
 	},

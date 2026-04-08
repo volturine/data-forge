@@ -24,7 +24,7 @@
 	import { onClickOutside } from 'runed';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import { css, cx, menuItem, divider, muted, input } from '$lib/styles/panda';
+	import { css, cx, menuItem, input } from '$lib/styles/panda';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
@@ -987,14 +987,12 @@
 
 	{#if showFooter && !loading && data.length > 0}
 		<div
-			class={cx(
-				divider,
-				css({
-					paddingX: '4',
-					paddingY: '3',
-					backgroundColor: 'bg.tertiary'
-				})
-			)}
+			class={css({
+				borderTopWidth: '1',
+				paddingX: '4',
+				paddingY: '3',
+				backgroundColor: 'bg.tertiary'
+			})}
 		>
 			<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>
 				Showing {data.length.toLocaleString()} row{data.length !== 1 ? 's' : ''}
@@ -1044,7 +1042,7 @@
 		style:left="{dragPointerX + 12}px"
 		style:top="{dragPointerY + 12}px"
 	>
-		<GripVertical size={12} class={muted} />
+		<GripVertical size={12} class={css({ color: 'fg.muted' })} />
 		<span class={css({ fontFamily: 'mono' })}>{dragLabel}</span>
 	</div>
 {/if}

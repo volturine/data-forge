@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, Plus } from 'lucide-svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, cx, menuItem, muted } from '$lib/styles/panda';
+	import { css, cx, menuItem } from '$lib/styles/panda';
 
 	interface BranchOption {
 		id: string;
@@ -201,9 +201,9 @@
 				})}>{currentValue}</span
 			>
 		{:else}
-			<span class={muted}>{placeholder}</span>
+			<span class={css({ color: 'fg.muted' })}>{placeholder}</span>
 		{/if}
-		<ChevronDown size={14} class={cx(muted, css({ opacity: '0.7' }))} />
+		<ChevronDown size={14} class={css({ color: 'fg.muted', opacity: '0.7' })} />
 	</button>
 {/snippet}
 

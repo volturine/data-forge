@@ -5,7 +5,7 @@
 	import type { HistogramBin } from '$lib/api/datasource';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, row, muted } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -72,7 +72,7 @@
 		>
 			<PanelHeader>
 				{#snippet title()}
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<BarChart3 size={16} />
 						<h3 class={css({ margin: '0', fontSize: 'xs', fontWeight: 'semibold' })}>
 							Column Stats
@@ -457,7 +457,9 @@
 										<span class={css({ color: 'accent.primary' })}
 											>True: {stats.true_count.toLocaleString()}</span
 										>
-										<span class={muted}>False: {(stats.false_count ?? 0).toLocaleString()}</span>
+										<span class={css({ color: 'fg.muted' })}
+											>False: {(stats.false_count ?? 0).toLocaleString()}</span
+										>
 									</div>
 								</div>
 							{/if}

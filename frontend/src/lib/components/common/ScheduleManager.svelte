@@ -24,18 +24,7 @@
 	} from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import {
-		css,
-		cx,
-		spinner,
-		emptyText,
-		label,
-		row,
-		rowBetween,
-		divider,
-		muted,
-		input
-	} from '$lib/styles/panda';
+	import { css, cx, spinner, emptyText, label, input } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -409,7 +398,7 @@
 				paddingBottom: '5'
 			})}
 		>
-			<div class={rowBetween}>
+			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<div>
 					<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>Schedules</h1>
 					<p class={css({ margin: '0', color: 'fg.tertiary' })}>
@@ -437,7 +426,15 @@
 				</button>
 			</div>
 			{#if externalSearch === undefined}
-				<div class={cx(row, css({ marginTop: '4', flexWrap: 'wrap', gap: '3' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						marginTop: '4',
+						flexWrap: 'wrap',
+						gap: '3'
+					})}
+				>
 					<div
 						class={css({
 							position: 'relative',
@@ -478,7 +475,14 @@
 			{/if}
 		</header>
 	{:else}
-		<div class={cx(row, css({ marginBottom: '3', justifyContent: 'space-between' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				marginBottom: '3',
+				justifyContent: 'space-between'
+			})}
+		>
 			<span
 				class={css({
 					fontSize: 'xs',
@@ -493,7 +497,7 @@
 					<span class={css({ color: 'fg.tertiary' })}>({schedules.length})</span>
 				{/if}
 			</span>
-			<div class={cx(row, css({ gap: '1' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 				<button
 					class={css({
 						display: 'inline-flex',
@@ -554,15 +558,16 @@
 						gap: '1'
 					})}
 				>
-					<li class={cx(row, css({ gap: '1' }))}>
-						<Clock size={10} class={muted} /> <strong>On a Schedule</strong> — runs on a cron interval
+					<li class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+						<Clock size={10} class={css({ color: 'fg.muted' })} /> <strong>On a Schedule</strong> — runs
+						on a cron interval
 					</li>
-					<li class={cx(row, css({ gap: '1' }))}>
-						<Link size={10} class={muted} />
+					<li class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+						<Link size={10} class={css({ color: 'fg.muted' })} />
 						<strong>After Another Schedule</strong> — runs when a dependency completes
 					</li>
-					<li class={cx(row, css({ gap: '1' }))}>
-						<Database size={10} class={muted} />
+					<li class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+						<Database size={10} class={css({ color: 'fg.muted' })} />
 						<strong>When Dataset Updates</strong> — runs on datasource change
 					</li>
 				</ul>
@@ -589,15 +594,14 @@
 			<!-- Target Section -->
 			<div class={css({ marginBottom: '5' })}>
 				<div
-					class={cx(
-						row,
-						css({
-							marginBottom: '3',
-							gap: '2',
-							borderBottomWidth: '1',
-							paddingBottom: '2'
-						})
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						marginBottom: '3',
+						gap: '2',
+						borderBottomWidth: '1',
+						paddingBottom: '2'
+					})}
 				>
 					<Database size={14} class={css({ color: 'accent.primary' })} />
 					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>
@@ -607,14 +611,21 @@
 
 				{#if currentTarget}
 					<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
-						<div class={cx(row, css({ gap: '2' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
 							<span class={css({ fontWeight: 'medium' })}>
 								{currentTarget.datasourceName}
 							</span>
 						</div>
 						<div
-							class={cx(row, css({ marginTop: '1', gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								marginTop: '1',
+								gap: '1',
+								fontSize: 'xs',
+								color: 'fg.muted'
+							})}
 						>
 							<span>└─ Produced by:</span>
 							<span class={css({ color: 'fg.secondary' })}>
@@ -662,15 +673,19 @@
 
 						{#if selectedDatasource}
 							<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
-								<div class={cx(row, css({ gap: '2' }))}>
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 									<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
 									<span class={css({ fontWeight: 'medium' })}>{selectedDatasource.name}</span>
 								</div>
 								<div
-									class={cx(
-										row,
-										css({ marginTop: '1', gap: '1', fontSize: 'xs', color: 'fg.muted' })
-									)}
+									class={css({
+										display: 'flex',
+										alignItems: 'center',
+										marginTop: '1',
+										gap: '1',
+										fontSize: 'xs',
+										color: 'fg.muted'
+									})}
 								>
 									<span>└─ Produced by:</span>
 									{#if selectedDatasource.created_by_analysis_id}
@@ -692,15 +707,14 @@
 			<!-- Trigger Section -->
 			<div>
 				<div
-					class={cx(
-						row,
-						css({
-							marginBottom: '3',
-							gap: '2',
-							borderBottomWidth: '1',
-							paddingBottom: '2'
-						})
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						marginBottom: '3',
+						gap: '2',
+						borderBottomWidth: '1',
+						paddingBottom: '2'
+					})}
 				>
 					<Clock size={14} class={css({ color: 'accent.primary' })} />
 					<span class={css({ fontSize: 'xs', fontWeight: 'medium' })}>
@@ -737,7 +751,9 @@
 								Run on a recurring cron interval
 							</p>
 							{#if triggerType === 'cron'}
-								<div class={cx(row, css({ marginTop: '2', gap: '2' }))}>
+								<div
+									class={css({ display: 'flex', alignItems: 'center', marginTop: '2', gap: '2' })}
+								>
 									<input
 										type="text"
 										class={cx(
@@ -784,12 +800,16 @@
 						/>
 						<div class={css({ flex: '1' })}>
 							<div
-								class={cx(
-									row,
-									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: 'medium' })
-								)}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									marginBottom: '1',
+									gap: '1',
+									fontSize: 'xs',
+									fontWeight: 'medium'
+								})}
 							>
-								<Link size={12} class={muted} />
+								<Link size={12} class={css({ color: 'fg.muted' })} />
 								After Another Schedule
 							</div>
 							<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
@@ -842,12 +862,16 @@
 						/>
 						<div class={css({ flex: '1' })}>
 							<div
-								class={cx(
-									row,
-									css({ marginBottom: '1', gap: '1', fontSize: 'xs', fontWeight: 'medium' })
-								)}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									marginBottom: '1',
+									gap: '1',
+									fontSize: 'xs',
+									fontWeight: 'medium'
+								})}
 							>
-								<Database size={12} class={muted} />
+								<Database size={12} class={css({ color: 'fg.muted' })} />
 								When Dataset Updates
 							</div>
 							<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.tertiary' })}>
@@ -881,15 +905,13 @@
 			</div>
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginTop: '4',
-						display: 'flex',
-						gap: '2',
-						paddingTop: '4'
-					})
-				)}
+				class={css({
+					borderTopWidth: '1',
+					marginTop: '4',
+					display: 'flex',
+					gap: '2',
+					paddingTop: '4'
+				})}
 			>
 				<button
 					class={css({
@@ -935,7 +957,14 @@
 	{/if}
 
 	{#if schedulesQuery.isLoading}
-		<div class={cx(row, css({ justifyContent: 'center', paddingY: '6' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				paddingY: '6'
+			})}
+		>
 			<div class={spinner()}></div>
 		</div>
 	{:else if schedulesQuery.isError}
@@ -1078,7 +1107,7 @@
 								{#if schedule.enabled}
 									<Power size={10} class={css({ color: 'fg.success' })} />
 								{:else}
-									<PowerOff size={10} class={muted} />
+									<PowerOff size={10} class={css({ color: 'fg.muted' })} />
 								{/if}
 							</button>
 							<button
@@ -1107,15 +1136,7 @@
 							</button>
 						</div>
 						{#if expandedId === schedule.id}
-							<div
-								class={cx(
-									divider,
-									css({
-										paddingX: '3',
-										paddingY: '2'
-									})
-								)}
-							>
+							<div class={css({ borderTopWidth: '1', paddingX: '3', paddingY: '2' })}>
 								<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 									{#if triggerTypeValue === 'cron'}
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
@@ -1123,7 +1144,7 @@
 												Cron Expression
 											</span>
 											{#if editingCron === schedule.id}
-												<div class={cx(row, css({ gap: '1' }))}>
+												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 													<input
 														type="text"
 														class={cx(
@@ -1173,7 +1194,7 @@
 													</button>
 												</div>
 											{:else}
-												<div class={cx(row, css({ gap: '1' }))}>
+												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 													<code
 														class={css({
 															backgroundColor: 'bg.tertiary',
@@ -1458,7 +1479,7 @@
 										paddingY: '1.5'
 									})}
 								>
-									<div class={cx(row, css({ gap: '1.5' }))}>
+									<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
 										{#if triggerTypeValue === 'cron'}
 											<Clock size={12} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 										{:else if triggerTypeValue === 'depends'}
@@ -1506,8 +1527,8 @@
 											<Power size={12} class={css({ color: 'fg.success' })} />
 											<span class={css({ color: 'fg.success' })}>On</span>
 										{:else}
-											<PowerOff size={12} class={muted} />
-											<span class={muted}>Off</span>
+											<PowerOff size={12} class={css({ color: 'fg.muted' })} />
+											<span class={css({ color: 'fg.muted' })}>Off</span>
 										{/if}
 									</button>
 								</td>
@@ -1580,8 +1601,8 @@
 												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
 													>Target Datasource</span
 												>
-												<div class={cx(row, css({ gap: '1' }))}>
-													<BarChart3 size={10} class={muted} />
+												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+													<BarChart3 size={10} class={css({ color: 'fg.muted' })} />
 													<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 														{resolveDatasource(schedule.datasource_id)}
 													</span>
@@ -1599,7 +1620,7 @@
 														>Cron Expression</span
 													>
 													{#if editingCron === schedule.id}
-														<div class={cx(row, css({ gap: '1' }))}>
+														<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 															<input
 																type="text"
 																class={cx(
@@ -1655,7 +1676,7 @@
 															</button>
 														</div>
 													{:else}
-														<div class={cx(row, css({ gap: '1' }))}>
+														<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 															<code
 																class={css({
 																	backgroundColor: 'bg.tertiary',
@@ -1689,7 +1710,7 @@
 												<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Depends On</span
 													>
-													<div class={cx(row, css({ gap: '1' }))}>
+													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
 															class={cx(
 																input(),
@@ -1712,7 +1733,7 @@
 															{/each}
 														</select>
 														{#if schedule.depends_on}
-															<Link size={10} class={muted} />
+															<Link size={10} class={css({ color: 'fg.muted' })} />
 														{/if}
 													</div>
 												</div>
@@ -1721,7 +1742,7 @@
 													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
 														>On Datasource Update</span
 													>
-													<div class={cx(row, css({ gap: '1' }))}>
+													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
 															class={cx(
 																input(),
@@ -1745,7 +1766,7 @@
 															{/each}
 														</select>
 														{#if schedule.trigger_on_datasource_id}
-															<Database size={10} class={muted} />
+															<Database size={10} class={css({ color: 'fg.muted' })} />
 														{/if}
 													</div>
 												</div>

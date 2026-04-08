@@ -10,7 +10,7 @@
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner, button, chip, cx, input, label, row } from '$lib/styles/panda';
+	import { css, spinner, button, chip, cx, input, label } from '$lib/styles/panda';
 
 	const queryClient = useQueryClient();
 
@@ -179,7 +179,7 @@
 		</div>
 	</header>
 
-	<div class={cx(row, css({ marginBottom: '4', gap: '3' }))}>
+	<div class={css({ display: 'flex', alignItems: 'center', marginBottom: '4', gap: '3' })}>
 		<input
 			id="udf-search"
 			aria-label="Search UDFs"
@@ -191,7 +191,14 @@
 	</div>
 
 	{#if query.isLoading}
-		<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				height: '100%',
+				justifyContent: 'center'
+			})}
+		>
 			<div class={spinner()}></div>
 		</div>
 	{:else if query.isError}
@@ -230,9 +237,11 @@
 						})}
 					>
 						<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-							<div class={cx(row, css({ gap: '3' }))}>
+							<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 								<h3 class={css({ margin: '0', fontSize: 'md' })}>{udf.name}</h3>
-								<div class={cx(row, css({ flexWrap: 'wrap', gap: '1' }))}>
+								<div
+									class={css({ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '1' })}
+								>
 									{#if udf.signature?.inputs?.length}
 										{#each udf.signature.inputs as input, i (i)}
 											<ColumnTypeBadge columnType={input.dtype} size="xs" showIcon={false} />
@@ -269,7 +278,7 @@
 								</div>
 							{/if}
 						</div>
-						<div class={cx(row, css({ gap: '2' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<button
 								class={button({ variant: 'ghost', size: 'sm' })}
 								onclick={() => editUdf(udf.id)}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { FileType } from '$lib/utils/file-types';
-	import { css, label, stepConfig, cx, row, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, input } from '$lib/styles/panda';
 
 	interface Props {
 		config?: {
@@ -45,7 +45,7 @@
 
 <div class={stepConfig()} role="region" aria-label="Export configuration">
 	<div class={css({ marginBottom: '5' })}>
-		<div class={cx(row, css({ gap: '2' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 			Destination
 			<span
 				class={css({

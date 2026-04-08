@@ -10,7 +10,7 @@
 
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Check, X } from 'lucide-svelte';
-	import { css, cx, button, input, tabButton, label, row } from '$lib/styles/panda';
+	import { css, cx, button, input, tabButton, label } from '$lib/styles/panda';
 
 	type Tab = 'file' | 'database';
 
@@ -557,7 +557,7 @@
 								/>
 							</div>
 						</div>
-						<div class={cx(row, css({ gap: '2' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<input
 								id="csv-header"
 								type="checkbox"

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { css, cx, label, stepConfig, divider, input } from '$lib/styles/panda';
+	import { css, cx, label, stepConfig, input } from '$lib/styles/panda';
 
 	interface StringMethodsConfigData {
 		column: string;
@@ -137,12 +137,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 		role="group"
 		aria-labelledby="str-method-heading"
@@ -592,12 +587,7 @@
 
 				border: 'none'
 			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			css({ borderTopWidth: '1', paddingTop: '5' })
 		)}
 		role="group"
 		aria-labelledby="new-column-heading"
