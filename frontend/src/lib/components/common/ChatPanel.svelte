@@ -33,6 +33,8 @@
 	import { css, cx, iconButton, button, input, label } from '$lib/styles/panda';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { chatStore } from '$lib/stores/chat.svelte';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import type { MCPTool } from '$lib/api/mcp';
 	import type { ChatUiPatchEvent } from '$lib/api/chat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -229,23 +231,17 @@
 		return () => window.removeEventListener('chat:ui_patch', onPatch);
 	});
 
-	// keyboard event listener — imperative DOM subscription
-	$effect(() => {
-		if (!chatStore.open) return;
-		if (typeof window === 'undefined') return;
-		function onKey(e: KeyboardEvent) {
-			if (e.key === 'Escape') {
-				if (configOpen || toolsOpen || sessionsOpen) {
-					configOpen = false;
-					toolsOpen = false;
-					sessionsOpen = false;
-					return;
-				}
-				chatStore.close();
+	// Overlay config for the panel — two-level escape: close sub-panels first, then close panel.
+	const chatOverlayConfig = $derived<OverlayConfig>({
+		onEscape: () => {
+			if (configOpen || toolsOpen || sessionsOpen) {
+				configOpen = false;
+				toolsOpen = false;
+				sessionsOpen = false;
+				return;
 			}
+			chatStore.close();
 		}
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
 	});
 
 	// DOM focus after state change — $derived cannot call focus()
@@ -555,9 +551,6 @@
 			e.preventDefault();
 			void handleSend();
 		}
-		if (e.key === 'Escape') {
-			chatStore.close();
-		}
 	}
 
 	function handlePaste() {
@@ -660,6 +653,7 @@
 		})}
 		style:width="{panelWidth}px"
 		style:height="{activeHeight}px"
+		use:overlayStack.action={chatOverlayConfig}
 	>
 		<!-- Corner resize handle (top-left) -->
 		<div

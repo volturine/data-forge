@@ -13,6 +13,7 @@
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import { chatStore } from '$lib/stores/chat.svelte';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import { initNamespace, setNamespace, useNamespace } from '$lib/stores/namespace.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
@@ -106,6 +107,29 @@
 	// Cleanup: $derived can't teardown singleton resources.
 	$effect(() => {
 		return () => chatStore.destroy();
+	});
+
+	// DOM: global capture-phase arbiter for overlay Escape / outside-click.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		function onKeydown(event: KeyboardEvent) {
+			if (event.key !== 'Escape') return;
+			if (overlayStack.handleEscape()) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+			}
+		}
+		function onMousedown(event: MouseEvent) {
+			const target = event.target as Node | null;
+			if (!target) return;
+			overlayStack.handleOutsideClick(target);
+		}
+		window.addEventListener('keydown', onKeydown, true);
+		window.addEventListener('mousedown', onMousedown, true);
+		return () => {
+			window.removeEventListener('keydown', onKeydown, true);
+			window.removeEventListener('mousedown', onMousedown, true);
+		};
 	});
 
 	// Subscription: $derived can't update audit page.
@@ -230,7 +254,7 @@
 					{theme}
 					onToggleTheme={toggleTheme}
 					onOpenSettings={() => (settingsOpen = true)}
-					onOpenEngines={() => (enginesOpen = true)}
+					onOpenEngines={() => (enginesOpen = !enginesOpen)}
 					onOpenChat={handleOpenChat}
 					onOpenNamespace={openNamespace}
 					onSignOut={handleSignOut}

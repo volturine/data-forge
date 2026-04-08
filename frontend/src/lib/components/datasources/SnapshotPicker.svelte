@@ -5,6 +5,8 @@
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { css, cx, spinner } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		datasourceId: string;
@@ -78,6 +80,15 @@
 		if (snapshotList.length === 0) return true;
 		if (currentSnapshot && timeTravelId === currentSnapshot.id) return true;
 		return false;
+	});
+
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: closeSnapshots,
+		onOutsideClick: (target: Node) => {
+			if (popoverRef?.contains(target)) return;
+			if (triggerRef?.contains(target)) return;
+			closeSnapshots();
+		}
 	});
 
 	// Subscription: $derived can't sync state from config — config is external and may change at any time.
@@ -394,20 +405,6 @@
 		};
 	}
 
-	// DOM: $derived can't handle outside click listener lifecycle.
-	$effect(() => {
-		if (!snapshotsOpen) return;
-		const handleOutside = (event: MouseEvent) => {
-			const target = event.target as Node | null;
-			if (!target) return;
-			if (popoverRef?.contains(target)) return;
-			if (triggerRef?.contains(target)) return;
-			closeSnapshots();
-		};
-		window.addEventListener('mousedown', handleOutside, true);
-		return () => window.removeEventListener('mousedown', handleOutside, true);
-	});
-
 	function shiftMonth(delta: number) {
 		const [yearStr, monthStr] = snapshotMonth.split('-');
 		const year = Number(yearStr);
@@ -546,6 +543,7 @@
 			})}
 			bind:this={popoverRef}
 			use:portal={popoverRect}
+			use:overlayStack.action={overlayConfig}
 		>
 			<div
 				class={css({

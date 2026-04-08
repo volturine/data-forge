@@ -180,14 +180,6 @@
 	const botRunning = $derived(statusQuery.data?.running ?? false);
 	const subscribers = $derived(subscribersQuery.data ?? []);
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (!open) return;
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			open = false;
-		}
-	}
-
 	async function save() {
 		saving = true;
 		feedback = null;
@@ -285,8 +277,6 @@
 		testingProvider = null;
 	}
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 <BaseModal
 	{open}

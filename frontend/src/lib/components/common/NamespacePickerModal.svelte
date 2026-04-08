@@ -4,6 +4,8 @@
 	import { listNamespaces } from '$lib/api/namespaces';
 	import { normalizeNamespace } from '$lib/utils/namespace';
 	import { css, cx, input } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		open: boolean;
@@ -46,6 +48,8 @@
 		!!normalizedCandidate && !rawNamespaces.some((name) => name === normalizedCandidate)
 	);
 
+	let popupRef = $state<HTMLElement | null>(null);
+
 	function handleClose() {
 		onClose();
 		searchQuery = '';
@@ -61,18 +65,14 @@
 		handleSelect(normalizedCandidate);
 	}
 
-	function handleKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: handleClose,
+		onOutsideClick: (target: Node) => {
+			if (popupRef?.contains(target)) return;
+			if (lastAnchor?.contains(target)) return;
 			handleClose();
 		}
-	}
-
-	function handleBackdropKeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			handleClose();
-		}
-	}
+	});
 
 	function updatePopoverPosition() {
 		const node = lastAnchor;
@@ -144,8 +144,6 @@
 	});
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
 {#if open}
 	<div
 		class={css({
@@ -155,12 +153,18 @@
 			backgroundColor: 'transparent'
 		})}
 		onclick={handleClose}
-		onkeydown={handleBackdropKeydown}
+		onkeydown={(event) => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				handleClose();
+			}
+		}}
 		role="button"
 		tabindex="0"
 		aria-label="Close namespace menu"
 	></div>
 	<div
+		bind:this={popupRef}
 		class={css({
 			position: 'fixed',
 			zIndex: 'overlay',
@@ -177,6 +181,7 @@
 		aria-labelledby="namespace-picker-search"
 		tabindex="-1"
 		use:portal={popoverRect}
+		use:overlayStack.action={overlayConfig}
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => e.stopPropagation()}
 	>

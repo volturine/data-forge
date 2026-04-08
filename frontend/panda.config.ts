@@ -322,6 +322,8 @@ export default defineConfig({
 					primary: { value: { base: '#ffffff', _dark: '#0e0e0e' } },
 					secondary: { value: { base: '#fafafa', _dark: '#111111' } },
 					tertiary: { value: { base: '#f5f5f5', _dark: '#171717' } },
+					subtle: { value: { base: '#f5f5f5', _dark: '#171717' } },
+					canvas: { value: { base: '#fafafa', _dark: '#111111' } },
 					muted: { value: { base: '#e5e5e5', _dark: '#1f1f1f' } },
 					hover: { value: { base: '#e5e5e5', _dark: '#262626' } },
 					panel: { value: { base: '#ffffff', _dark: '#0e0e0e' } },
@@ -330,16 +332,20 @@ export default defineConfig({
 					indicator: { value: { base: '#71717a', _dark: '#737373' } },
 					warning: { value: { base: '#fef3c7', _dark: '#713f12' } },
 					error: { value: { base: '#fee2e2', _dark: '#7f1d1d' } },
+					errorSubtle: { value: { base: '#fef2f2', _dark: '#450a0a' } },
 					success: { value: { base: '#dcfce7', _dark: '#14532d' } },
 					accent: { value: { base: '#f4f4f5', _dark: '#1f1f1f' } }
 				},
 				fg: {
 					primary: { value: { base: '#09090b', _dark: '#fafafa' } },
+					default: { value: { base: '#09090b', _dark: '#fafafa' } },
 					secondary: { value: { base: '#27272a', _dark: '#d4d4d4' } },
 					tertiary: { value: { base: '#52525b', _dark: '#a3a3a3' } },
 					muted: { value: { base: '#71717a', _dark: '#737373' } },
 					faint: { value: { base: '#a1a1aa', _dark: '#525252' } },
 					inverse: { value: { base: '#ffffff', _dark: '#0e0e0e' } },
+					onAccent: { value: { base: '#09090b', _dark: '#fafafa' } },
+					accent: { value: { base: '#09090b', _dark: '#fafafa' } },
 					error: { value: { base: '#991b1b', _dark: '#fca5a5' } },
 					warning: { value: { base: '#92400e', _dark: '#fde047' } },
 					success: { value: { base: '#166534', _dark: '#86efac' } }
@@ -350,6 +356,8 @@ export default defineConfig({
 				},
 				border: {
 					primary: { value: { base: '#e0e0e0', _dark: '#2b2b2b' } },
+					default: { value: { base: '#e0e0e0', _dark: '#2b2b2b' } },
+					subtle: { value: { base: '#ebebeb', _dark: '#222222' } },
 					error: { value: { base: '#dc2626', _dark: '#991b1b' } },
 					accent: { value: { base: '#09090b', _dark: '#fafafa' } },
 					success: { value: { base: '#16a34a', _dark: '#86efac' } },

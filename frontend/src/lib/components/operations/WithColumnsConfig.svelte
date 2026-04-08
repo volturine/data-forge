@@ -2,13 +2,13 @@
 	import type { Schema } from '$lib/types/schema';
 	import type { Udf } from '$lib/types/udf';
 
-	import { onClickOutside } from 'runed';
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { listUdfs, createUdf } from '$lib/api/udf';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import UdfPickerModal from '$lib/components/common/UdfPickerModal.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
@@ -46,7 +46,6 @@
 	let useLibrary = $state(false);
 	let showEditor = $state(false);
 	let codeEdited = $state(false);
-	let modalRef = $state<HTMLElement>();
 	let editIndex = $state<number | null>(null);
 	const isEditing = $derived(editIndex !== null);
 	let pickerOpen = $state(false);
@@ -213,13 +212,6 @@
 		config.expressions = expressions.filter((_: WithColumnsExpr, idx: number) => idx !== index);
 		if (editIndex === index) resetForm();
 	}
-
-	onClickOutside(
-		() => modalRef,
-		() => {
-			if (showEditor) showEditor = false;
-		}
-	);
 </script>
 
 <div class={stepConfig()} role="region" aria-label="With columns configuration">
@@ -520,76 +512,73 @@
 	{/if}
 </div>
 
-{#if showEditor}
-	<div
-		class={css({ position: 'fixed', inset: '0', background: 'bg.overlay', zIndex: 'modal' })}
-		aria-hidden="true"
-	></div>
+<BaseModal
+	open={showEditor}
+	onClose={() => (showEditor = false)}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	panelClass={css({
+		width: 'min(720px, 92vw)',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		display: 'flex',
+		flexDirection: 'column',
+		_focus: { outline: 'none' }
+	})}
+	ariaLabelledby="wc-editor-title"
+	{content}
+/>
+
+{#snippet content()}
+	<PanelHeader>
+		{#snippet title()}
+			<span id="wc-editor-title">UDF Editor</span>
+		{/snippet}
+		{#snippet actions()}
+			<button
+				class={css({
+					background: 'transparent',
+					border: 'none',
+					color: 'fg.muted',
+					cursor: 'pointer',
+					fontSize: 'xl',
+					padding: '1',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					transition: 'color 160ms ease, background-color 160ms ease',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
+				onclick={() => (showEditor = false)}
+				aria-label="Close"
+				type="button"
+			>
+				<X size={16} />
+			</button>
+		{/snippet}
+	</PanelHeader>
 	<div
 		class={css({
-			position: 'fixed',
-			left: '50%',
-			top: '50%',
-			transform: 'translate(-50%, -50%)',
-			width: 'min(720px, 92vw)',
-			backgroundColor: 'bg.primary',
-			borderWidth: '1',
-			zIndex: '1001',
+			padding: '4',
+			overflowY: 'auto',
 			display: 'flex',
 			flexDirection: 'column',
-			_focus: { outline: 'none' }
+			gap: '3'
 		})}
-		role="dialog"
-		aria-modal="true"
-		bind:this={modalRef}
 	>
-		<PanelHeader>
-			{#snippet title()}UDF Editor{/snippet}
-			{#snippet actions()}
-				<button
-					class={css({
-						background: 'transparent',
-						border: 'none',
-						color: 'fg.muted',
-						cursor: 'pointer',
-						fontSize: 'xl',
-						padding: '1',
-						display: 'flex',
-						alignItems: 'center',
-						justifyContent: 'center',
-						transition: 'color 160ms ease, background-color 160ms ease',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
-					onclick={() => (showEditor = false)}
-					aria-label="Close"
-				>
-					<X size={16} />
-				</button>
-			{/snippet}
-		</PanelHeader>
-		<div
-			class={css({
-				padding: '4',
-				overflowY: 'auto',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '3'
-			})}
-		>
-			<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
-			<p class={css({ fontSize: 'sm', margin: '0', color: 'fg.muted' })}>
-				Define a function named <code>udf</code> that returns a value per row.
-			</p>
-		</div>
-		<PanelFooter>
-			<button
-				class={button({ variant: 'secondary' })}
-				onclick={() => (showEditor = false)}
-				type="button">Done</button
-			>
-		</PanelFooter>
+		<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
+		<p class={css({ fontSize: 'sm', margin: '0', color: 'fg.muted' })}>
+			Define a function named <code>udf</code> that returns a value per row.
+		</p>
 	</div>
-{/if}
+	<PanelFooter>
+		<button
+			class={button({ variant: 'secondary' })}
+			onclick={() => (showEditor = false)}
+			type="button">Done</button
+		>
+	</PanelFooter>
+{/snippet}
 
 <UdfPickerModal
 	show={pickerOpen}
