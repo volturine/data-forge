@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
-	import { onClickOutside } from 'runed';
 	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
 	import { css, emptyText } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
@@ -43,13 +44,18 @@
 	}
 
 	let dropdownRef = $state<HTMLElement>();
-	onClickOutside(
-		() => dropdownRef,
-		() => {
+	let popupRef = $state<HTMLElement>();
+
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: () => {
 			expanded = false;
 		},
-		{ immediate: true }
-	);
+		onOutsideClick: (target: Node) => {
+			if (popupRef?.contains(target)) return;
+			if (dropdownRef?.contains(target)) return;
+			expanded = false;
+		}
+	});
 
 	let trigger = $state<HTMLButtonElement>();
 	let pos = $state({ top: 0, right: 0 });
@@ -106,6 +112,7 @@
 
 	{#if expanded}
 		<div
+			bind:this={popupRef}
 			class={css({
 				position: 'fixed',
 				right: `${pos.right}px`,
@@ -116,6 +123,7 @@
 				borderWidth: '1',
 				backgroundColor: 'bg.primary'
 			})}
+			use:overlayStack.action={overlayConfig}
 		>
 			<div
 				class={css({

@@ -17,7 +17,6 @@
 		placeholder?: string;
 		filter?: (column: { name: string; dtype: string }) => boolean;
 		clearable?: boolean;
-		containerClass?: string;
 		triggerClass?: string;
 		menuClass?: string;
 	}
@@ -29,7 +28,6 @@
 		placeholder = 'Select column...',
 		filter,
 		clearable = false,
-		containerClass = '',
 		triggerClass = '',
 		menuClass = ''
 	}: Props = $props();
@@ -51,7 +49,6 @@
 	{placeholder}
 	{clearable}
 	searchPlaceholder="Search columns..."
-	{containerClass}
 	{triggerClass}
 	{menuClass}
 	{renderOption}

@@ -21,13 +21,14 @@
 		Bug,
 		Play
 	} from 'lucide-svelte';
-	import { onClickOutside } from 'runed';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import { css, cx, menuItem, input } from '$lib/styles/panda';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		columns: string[];
@@ -363,14 +364,15 @@
 		onPreview();
 	}
 
-	onClickOutside(
-		() => columnMenuRef,
-		() => {
-			if (activeColumn) {
-				activeColumn = null;
-			}
+	const columnMenuOverlayConfig = $derived<OverlayConfig>({
+		onEscape: () => {
+			activeColumn = null;
+		},
+		onOutsideClick: (target: Node) => {
+			if (columnMenuRef?.contains(target)) return;
+			activeColumn = null;
 		}
-	);
+	});
 
 	function getTemporalType(dtype: string | undefined): 'date' | 'datetime' | null {
 		if (!dtype) return null;
@@ -846,6 +848,7 @@
 												gap: '1'
 											})}
 											bind:this={columnMenuRef}
+											use:overlayStack.action={columnMenuOverlayConfig}
 										>
 											<button class={menuItem()} onclick={() => setSort(header.id, 'asc')}
 												>Sort A-Z</button

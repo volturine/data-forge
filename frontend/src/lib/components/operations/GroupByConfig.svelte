@@ -115,12 +115,14 @@
 			role="group"
 			aria-label="Add aggregation form"
 		>
-			<div class={css({ flex: '2', minWidth: 'inputSm' })}>
+			<div class={css({ flex: '2', minWidth: 'dropdown' })}>
 				<ColumnDropdown
 					{schema}
 					value={newAggregation.column}
 					onChange={(val) => (newAggregation.column = val)}
 					placeholder="Select column..."
+					triggerClass={css({ width: '100%' })}
+					menuClass={css({ top: '100%' })}
 				/>
 			</div>
 

@@ -127,15 +127,6 @@
 		};
 	});
 
-	// DOM: $derived can't lock scroll.
-	$effect(() => {
-		if (!open) return;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = '';
-		};
-	});
-
 	// DOM: $derived can't focus the search input.
 	$effect(() => {
 		if (open && searchInput) {
@@ -145,24 +136,6 @@
 </script>
 
 {#if open}
-	<div
-		class={css({
-			position: 'fixed',
-			inset: '0',
-			zIndex: 'popover',
-			backgroundColor: 'transparent'
-		})}
-		onclick={handleClose}
-		onkeydown={(event) => {
-			if (event.key === 'Enter' || event.key === ' ') {
-				event.preventDefault();
-				handleClose();
-			}
-		}}
-		role="button"
-		tabindex="0"
-		aria-label="Close namespace menu"
-	></div>
 	<div
 		bind:this={popupRef}
 		class={css({
@@ -182,8 +155,6 @@
 		tabindex="-1"
 		use:portal={popoverRect}
 		use:overlayStack.action={overlayConfig}
-		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
 	>
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '2', padding: '2' })}>
 			<input

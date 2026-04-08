@@ -19,6 +19,8 @@
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
 	import HealthChecksManager from '$lib/components/common/HealthChecksManager.svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import { css, cx, chip, input, label } from '$lib/styles/panda';
 	import {
 		Bell,
@@ -399,20 +401,13 @@
 		);
 	}
 
-	// DOM: $derived can't close menu on outside click.
-	$effect(() => {
-		if (!modeMenuOpen) return;
-		const handleOutside = (event: MouseEvent) => {
-			const target = event.target as Node | null;
-			if (!target) return;
+	const modeMenuOverlayConfig = $derived<OverlayConfig>({
+		onEscape: () => (modeMenuOpen = false),
+		onOutsideClick: (target: Node) => {
 			if (modeMenuRef?.contains(target)) return;
 			if (modeTriggerRef?.contains(target)) return;
 			modeMenuOpen = false;
-		};
-		window.addEventListener('mousedown', handleOutside, true);
-		return () => {
-			window.removeEventListener('mousedown', handleOutside, true);
-		};
+		}
 	});
 
 	// Reset datasource probing when tab/output target changes.
@@ -795,6 +790,7 @@
 									})}
 									role="listbox"
 									data-testid="output-mode-listbox"
+									use:overlayStack.action={modeMenuOverlayConfig}
 								>
 									<div
 										class={css({

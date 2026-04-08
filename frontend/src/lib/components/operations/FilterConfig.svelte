@@ -371,9 +371,8 @@
 									value={cond.column}
 									onChange={(val) => handleColumnChange(i, val)}
 									placeholder="Select..."
-									containerClass={css({ position: 'static' })}
 									triggerClass={css({ width: '100%' })}
-									menuClass={css({ top: 'inherit', marginTop: '12' })}
+									menuClass={css({ top: '100%' })}
 								/>
 							</div>
 
@@ -449,9 +448,8 @@
 											value={cond.compare_column ?? ''}
 											onChange={(val) => updateCondition(i, { compare_column: val })}
 											placeholder="Select..."
-											containerClass={css({ position: 'static' })}
 											triggerClass={css({ width: '100%' })}
-											menuClass={css({ top: 'inherit', marginTop: '12' })}
+											menuClass={css({ top: '100%' })}
 										/>
 									{:else if colType === 'number'}
 										<input

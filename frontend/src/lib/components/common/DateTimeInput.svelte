@@ -9,6 +9,8 @@
 		Clock
 	} from 'lucide-svelte';
 	import { css, cx, input } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		value: string;
@@ -136,8 +138,7 @@
 
 	function toggle() {
 		if (open) {
-			open = false;
-			mode = 'date';
+			closePopover();
 			return;
 		}
 		const today = new Date();
@@ -190,7 +191,7 @@
 	function pick(key: string) {
 		if (!withTime) {
 			onChange(key);
-			open = false;
+			closePopover();
 			return;
 		}
 		if (hour && minute) {
@@ -205,7 +206,7 @@
 		const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 		if (!withTime) {
 			onChange(key);
-			open = false;
+			closePopover();
 			return;
 		}
 		const h = String(d.getHours()).padStart(2, '0');
@@ -218,7 +219,7 @@
 
 	function clear() {
 		onChange('');
-		open = false;
+		closePopover();
 	}
 
 	function handleHour(e: Event) {
@@ -243,14 +244,17 @@
 		onChange(`${date}T${hour}:${minute}`);
 	}
 
-	// $derived can't register DOM event listeners
-	$effect(() => {
-		if (!open) return;
-		function handler(e: MouseEvent) {
-			if (containerRef && !containerRef.contains(e.target as Node)) open = false;
+	function closePopover() {
+		open = false;
+		mode = 'date';
+	}
+
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: closePopover,
+		onOutsideClick: (target: Node) => {
+			if (containerRef?.contains(target)) return;
+			closePopover();
 		}
-		window.addEventListener('mousedown', handler, true);
-		return () => window.removeEventListener('mousedown', handler, true);
 	});
 
 	// $derived can't handle conditional write-back to mutable state
@@ -335,6 +339,7 @@
 				gap: '2',
 				width: 'popover'
 			})}
+			use:overlayStack.action={overlayConfig}
 		>
 			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<div class={css({ display: 'flex', alignItems: 'center' })}>
