@@ -12,7 +12,7 @@
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import { GripVertical, Hash, RefreshCw, Copy } from 'lucide-svelte';
+	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
@@ -429,6 +429,27 @@
 			>
 				<Copy size={11} />
 			</button>
+			<button
+				class={css({
+					flexShrink: '0',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					cursor: 'pointer',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0.5',
+					color: 'fg.faint',
+					_hover: { color: 'fg.error', backgroundColor: 'bg.hover' },
+					_disabled: { opacity: '0.4', cursor: 'not-allowed' }
+				})}
+				onclick={() => onDelete(step.id)}
+				type="button"
+				title="Delete step"
+				disabled={readOnly}
+			>
+				<Trash2 size={11} />
+			</button>
 		</div>
 
 		<div class={css({ paddingX: '4', paddingY: '3' })}>
@@ -516,31 +537,6 @@
 				disabled={readOnly}
 			>
 				edit
-			</button>
-			<div class={css({ width: 'px', backgroundColor: 'bg.muted', flexShrink: '0' })}></div>
-			<button
-				class={cx(
-					'action-btn',
-					css({
-						flex: '1',
-						cursor: 'pointer',
-						border: 'none',
-						backgroundColor: 'transparent',
-						paddingY: '2.5',
-						fontSize: '3xs',
-						fontWeight: 'medium',
-						textTransform: 'uppercase',
-						letterSpacing: 'widest',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.error', color: 'fg.error' }
-					})
-				)}
-				onclick={() => onDelete(step.id)}
-				type="button"
-				data-action="delete"
-				disabled={readOnly}
-			>
-				delete
 			</button>
 		</div>
 
