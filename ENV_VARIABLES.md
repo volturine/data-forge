@@ -1,10 +1,12 @@
 # Environment Variables
 
-This project uses environment variables for three different layers:
+This project uses environment variables for two layers:
 
-1. **Backend runtime** — loaded by `backend/core/config.py`
-2. **Frontend dev server** — loaded by Vite from `frontend/.env*`
-3. **Local e2e tooling** — optional overrides for Playwright
+1. **Backend runtime** — loaded by `backend/core/config.py` from `backend/.env`
+2. **Frontend dev server (Vite)** — read from the process environment; `just dev` sources `backend/.env` so all variables come from the same file
+
+There is no separate `frontend/.env` file. All configuration — including Vite
+dev-server settings (`FRONTEND_PORT`, `BACKEND_HOST`) — lives in `backend/.env`.
 
 ## Deployment topologies
 
@@ -55,8 +57,7 @@ Browser  ──►  Vite dev server (FRONTEND_PORT 3000)
 
 **Templates for this topology:**
 
-- Backend: copy `backend/.env.example` → `backend/.env`
-- Frontend Vite: copy `frontend/.env.example` → `frontend/.env`
+- Copy `backend/.env.example` → `backend/.env` (covers both backend and Vite dev-server settings)
 
 ---
 
@@ -82,12 +83,11 @@ If you only want the high-value knobs, start with these:
 - `DATABASE_URL` currently exists as a setting, but the backend recomputes the SQLite URL from `DATA_DIR` on startup.
 - Some values such as SMTP and provider defaults are **seeded into the database once**. After the UI saves a value, the database value wins until it is cleared.
 
-### Frontend
+### Frontend dev server
 
-- Vite reads `frontend/.env`, `frontend/.env.local`, and shell env vars.
-- Only variables prefixed with `VITE_` are exposed to browser code.
-- `FRONTEND_PORT` is used by Vite/Playwright tooling and does not go into browser code.
-- **These variables are only needed during development.** In production the Vite dev server is not running, so none of these vars have any effect.
+- `just dev` sources `backend/.env` into the shell before starting Vite, so `FRONTEND_PORT` and `BACKEND_HOST` are inherited from the same file as the backend.
+- No `frontend/.env` file is needed or used.
+- No variables are exposed to browser code — the `VITE_` prefix convention is not used.
 
 ## Setup examples
 
@@ -114,11 +114,8 @@ just prod
 ### Local development
 
 ```bash
-# Backend
-cd backend && cp .env.example .env && cd ..
-# Frontend Vite dev server
-cd frontend && cp .env.example .env && cd ..
-# Start both
+cp backend/.env.example backend/.env
+# Edit backend/.env with your settings — covers both backend and Vite dev-server
 just dev
 ```
 
@@ -228,18 +225,19 @@ just dev
 | `GITHUB_CLIENT_SECRET`  | empty                                               | GitHub OAuth client secret.                                                                                                                                                                                               |
 | `GITHUB_REDIRECT_URI`   | `http://localhost:8000/api/v1/auth/github/callback` | GitHub OAuth callback.                                                                                                                                                                                                    |
 
-## Frontend variables
+## Frontend dev-server variables
 
-> **Development only.** These variables configure the Vite dev server and its
-> proxy to the backend. They are read from `frontend/.env` at dev-server startup.
+> **Development only.** These configure the Vite dev server and its proxy.
+> They live in `backend/.env` alongside the backend variables. `just dev`
+> sources that file so both processes share the same configuration.
 > In production the Vite dev server is not running, so none of these have any
 > effect on the deployed application.
 
 | Variable        | Default     | Notes                                                   |
 | --------------- | ----------- | ------------------------------------------------------- |
-| `FRONTEND_PORT` | `3000`      | Local Vite dev-server port.                             |
+| `FRONTEND_PORT` | `3000`      | Local Vite dev-server port.  Must match `AUTH_FRONTEND_URL`. |
 | `BACKEND_HOST`  | `127.0.0.1` | Backend hostname used by the Vite proxy (Node.js only, not exposed to browser code). |
-| `BACKEND_PORT`  | `8000`      | Backend port used by the Vite proxy (Node.js only, not exposed to browser code). Falls back to the backend `PORT` env var. |
+| `BACKEND_PORT`  | `PORT`      | Backend port used by the Vite proxy. Defaults to `PORT` when unset. |
 
 ## Test and tooling variables
 

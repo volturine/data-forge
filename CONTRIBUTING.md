@@ -46,9 +46,8 @@ cd polars-fastapi-svelte
 # Install dependencies
 just install
 
-# Copy environment files
+# Copy environment file
 cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
 
 # Start development servers
 just dev

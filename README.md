@@ -87,9 +87,8 @@ open http://localhost:8000
 # Install all dependencies
 just install
 
-# Copy environment files
+# Copy environment file
 cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
 
 # Start both servers with hot-reload
 just dev
