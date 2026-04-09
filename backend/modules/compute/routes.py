@@ -20,6 +20,7 @@ from modules.auth.models import User
 from modules.compute import schemas, service
 from modules.compute.live import registry as build_registry
 from modules.compute.manager import ProcessManager
+from modules.engine_runs import service as engine_run_service
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,15 @@ async def _emit_active_build_event(build_id: str, analysis_id: str, payload: dic
     if not isinstance(emitted_at, str):
         emitted_at = service._utcnow().isoformat()
     normalized = {'build_id': build_id, 'analysis_id': analysis_id, 'emitted_at': emitted_at, **payload}
+    engine_run_id = normalized.get('engine_run_id')
+    if isinstance(engine_run_id, str) and engine_run_id:
+        session_gen = get_db()
+        session = next(session_gen)
+        try:
+            engine_run_service.apply_live_event(session, engine_run_id, normalized)
+        finally:
+            session.close()
+            session_gen.close()
     build = await build_registry.apply_event(build_id, normalized)
     if build is None:
         return
@@ -302,7 +312,7 @@ async def list_active_builds(
     _user: User = Depends(get_current_user),
 ):
     del request
-    builds = await build_registry.list_builds(status=status)
+    builds = await build_registry.list_builds(status=status or schemas.ActiveBuildStatus.RUNNING)
     namespace = get_namespace()
     visible = [build for build in builds if build.namespace == namespace]
     return schemas.ActiveBuildListResponse(builds=visible, total=len(visible))
@@ -513,7 +523,7 @@ async def build_list_stream(websocket: WebSocket) -> None:
     try:
         await _require_websocket_user(websocket)
         await build_registry.add_list_watcher(namespace, websocket)
-        builds = await build_registry.list_builds()
+        builds = await build_registry.list_builds(status=schemas.ActiveBuildStatus.RUNNING)
         visible = [build for build in builds if build.namespace == namespace]
         await websocket.send_json(schemas.BuildListSnapshotMessage(builds=visible).model_dump(mode='json'))
         while True:

@@ -608,6 +608,7 @@ describe('SnapshotPicker', () => {
 				progress: 100,
 				current_step: null,
 				triggered_by: null,
+				execution_entries: [],
 				...overrides
 			};
 		}

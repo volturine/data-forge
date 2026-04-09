@@ -89,6 +89,8 @@ class EngineResult:
     error_details: dict[str, Any] | None = None
     step_timings: dict[str, float] = field(default_factory=dict)
     query_plan: str | None = None
+    read_duration_ms: float | None = None
+    write_duration_ms: float | None = None
 
 
 @dataclass(slots=True)

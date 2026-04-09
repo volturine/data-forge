@@ -320,6 +320,8 @@ class BuildTabResult(BaseModel):
     tab_id: str
     tab_name: str
     status: BuildTabStatus
+    output_id: str | None = None
+    output_name: str | None = None
     error: str | None = None
 
 
@@ -440,8 +442,12 @@ class ActiveBuildSummary(BaseModel):
     current_step: str | None = None
     current_step_index: int | None = None
     total_steps: int = 0
+    current_kind: str | None = None
+    current_datasource_id: str | None = None
     current_tab_id: str | None = None
     current_tab_name: str | None = None
+    current_output_id: str | None = None
+    current_output_name: str | None = None
     total_tabs: int = 0
 
 
@@ -482,8 +488,12 @@ class BuildStreamEvent(BaseModel):
     build_id: str
     analysis_id: str
     emitted_at: datetime
+    current_kind: str | None = None
+    current_datasource_id: str | None = None
     tab_id: str | None = None
     tab_name: str | None = None
+    current_output_id: str | None = None
+    current_output_name: str | None = None
 
 
 class BuildPlanEvent(BuildStreamEvent):

@@ -14,6 +14,7 @@ import { connectBuildStream } from '$lib/api/build-stream';
 
 const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
+const INITIAL_UPDATE_TIMEOUT_MS = 10_000;
 
 function wireStepState(raw: string): BuildStepState {
 	if (
@@ -28,7 +29,7 @@ function wireStepState(raw: string): BuildStepState {
 }
 
 export class BuildStreamStore {
-	status = $state<BuildStatus>('connecting');
+	status = $state<BuildStatus>('disconnected');
 	buildId = $state<string | null>(null);
 	analysisId = $state<string | null>(null);
 	progress = $state(0);
@@ -49,6 +50,7 @@ export class BuildStreamStore {
 	duration = $state<number | null>(null);
 
 	private connection: { close: () => void } | null = null;
+	private initialUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	done = $derived(this.status === 'completed' || this.status === 'failed');
 	succeeded = $derived(this.status === 'completed');
@@ -64,27 +66,37 @@ export class BuildStreamStore {
 	start(request: Record<string, unknown>): void {
 		this.reset();
 		this.status = 'connecting';
+		this.armInitialUpdateTimeout();
 		this.connection = connectBuildStream(request, {
-			onSnapshot: (build: ActiveBuildDetail) => this.applySnapshot(build),
-			onEvent: (event: BuildEvent) => this.applyEvent(event),
+			onSnapshot: (build: ActiveBuildDetail) => {
+				this.clearInitialUpdateTimeout();
+				this.applySnapshot(build);
+			},
+			onEvent: (event: BuildEvent) => {
+				this.clearInitialUpdateTimeout();
+				this.applyEvent(event);
+			},
 			onError: (msg: string) => {
+				this.clearInitialUpdateTimeout();
 				this.error = msg;
 				if (!this.done) this.status = 'disconnected';
 			},
 			onClose: () => {
+				this.clearInitialUpdateTimeout();
 				if (!this.done) this.status = 'disconnected';
 			}
 		});
 	}
 
 	close(): void {
+		this.clearInitialUpdateTimeout();
 		this.connection?.close();
 		this.connection = null;
 	}
 
 	reset(): void {
 		this.close();
-		this.status = 'connecting';
+		this.status = 'disconnected';
 		this.buildId = null;
 		this.analysisId = null;
 		this.progress = 0;
@@ -103,6 +115,22 @@ export class BuildStreamStore {
 		this.results = [];
 		this.error = null;
 		this.duration = null;
+	}
+
+	private armInitialUpdateTimeout(): void {
+		this.clearInitialUpdateTimeout();
+		this.initialUpdateTimeout = setTimeout(() => {
+			if (this.status !== 'connecting' || this.buildId !== null) return;
+			this.error = 'Timed out waiting for build updates';
+			this.status = 'disconnected';
+			this.close();
+		}, INITIAL_UPDATE_TIMEOUT_MS);
+	}
+
+	private clearInitialUpdateTimeout(): void {
+		if (this.initialUpdateTimeout === null) return;
+		clearTimeout(this.initialUpdateTimeout);
+		this.initialUpdateTimeout = null;
 	}
 
 	applySnapshot(build: ActiveBuildDetail): void {

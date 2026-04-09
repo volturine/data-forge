@@ -2,12 +2,24 @@ import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
 
+export interface EngineRunExecutionEntry {
+	key: string;
+	label: string;
+	category: 'read' | 'step' | 'plan' | 'write';
+	order: number;
+	duration_ms: number | null;
+	share_pct: number | null;
+	optimized_plan: string | null;
+	unoptimized_plan: string | null;
+	metadata: Record<string, unknown> | null;
+}
+
 export interface EngineRun {
 	id: string;
 	analysis_id: string | null;
 	datasource_id: string;
 	kind: string;
-	status: 'success' | 'failed';
+	status: 'running' | 'success' | 'failed';
 	request_json: Record<string, unknown>;
 	result_json: Record<string, unknown> | null;
 	error_message: string | null;
@@ -19,6 +31,7 @@ export interface EngineRun {
 	progress: number;
 	current_step: string | null;
 	triggered_by: string | null;
+	execution_entries: EngineRunExecutionEntry[];
 }
 
 export interface ColumnDiff {
@@ -62,7 +75,7 @@ export interface ListEngineRunsParams {
 	analysis_id?: string;
 	datasource_id?: string;
 	kind?: string;
-	status?: 'success' | 'failed';
+	status?: 'running' | 'success' | 'failed';
 	limit?: number;
 	offset?: number;
 }

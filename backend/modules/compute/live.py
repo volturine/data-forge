@@ -150,6 +150,8 @@ class ActiveBuild:
     current_step_index: int | None = None
     current_tab_id: str | None = None
     current_tab_name: str | None = None
+    current_output_id: str | None = None
+    current_output_name: str | None = None
     duration_ms: int | None = None
     error: str | None = None
     updated_at: datetime = field(default_factory=_utcnow)
@@ -234,6 +236,8 @@ class ActiveBuild:
             total_steps=self.total_steps,
             current_tab_id=self.current_tab_id,
             current_tab_name=self.current_tab_name,
+            current_output_id=self.current_output_id,
+            current_output_name=self.current_output_name,
             total_tabs=self.total_tabs,
         )
 
@@ -375,6 +379,8 @@ class ActiveBuildRegistry:
             event_type = _safe_str(normalized.get('type'))
             build.current_tab_id = _safe_str(normalized.get('tab_id')) or build.current_tab_id
             build.current_tab_name = _safe_str(normalized.get('tab_name')) or build.current_tab_name
+            build.current_output_id = _safe_str(normalized.get('current_output_id')) or build.current_output_id
+            build.current_output_name = _safe_str(normalized.get('current_output_name')) or build.current_output_name
             if event_type == schemas.BuildEventType.PLAN.value:
                 optimized = _safe_str(normalized.get('optimized_plan')) or ''
                 unoptimized = _safe_str(normalized.get('unoptimized_plan')) or ''

@@ -24,11 +24,12 @@
 
 	interface Props {
 		store: BuildStreamStore;
+		title?: string;
 	}
 
-	const { store }: Props = $props();
+	const { store, title = 'Build' }: Props = $props();
 
-	type PreviewTab = 'steps' | 'plan' | 'resources' | 'logs';
+	type PreviewTab = 'steps' | 'plan' | 'config' | 'resources' | 'logs' | 'results';
 	let activeTab = $state<PreviewTab>('steps');
 	let logsRef = $state<HTMLElement>();
 	let planView = $state<'optimized' | 'unoptimized'>('optimized');
@@ -44,9 +45,11 @@
 		store.remaining !== null && store.remaining > 0 ? (store.remaining / 1000).toFixed(0) : null
 	);
 	const durationSec = $derived(store.duration !== null ? (store.duration / 1000).toFixed(2) : null);
-	const hasResources = $derived(store.latestResources !== null || store.resourceConfig !== null);
+	const hasConfig = $derived(store.resourceConfig !== null);
+	const hasResources = $derived(store.latestResources !== null || store.resourceHistory.length > 0);
 	const hasPlans = $derived(store.queryPlans.length > 0);
-	const hasLogs = $derived(store.logs.length > 0);
+	const hasLogs = $derived(store.status !== 'connecting');
+	const hasResults = $derived(store.results.length > 0);
 
 	const filteredLogs = $derived.by((): BuildLogEntry[] => {
 		if (logLevel === 'all') return store.logs;
@@ -131,6 +134,13 @@
 			logsRef.scrollTop = logsRef.scrollHeight;
 		}
 	});
+
+	$effect(() => {
+		if (activeTab === 'plan' && !hasPlans) activeTab = 'steps';
+		if (activeTab === 'config' && !hasConfig) activeTab = 'steps';
+		if (activeTab === 'resources' && !hasResources) activeTab = 'steps';
+		if (activeTab === 'results' && !hasResults) activeTab = 'steps';
+	});
 </script>
 
 {#snippet sparkline(data: number[], max: number, warn: number)}
@@ -199,7 +209,7 @@
 				<AlertTriangle size={14} class={css({ color: 'fg.warning' })} />
 			{/if}
 			<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
-				Build
+				{title}
 				{#if store.buildId}
 					<span
 						class={css({ fontFamily: 'mono', fontSize: 'xs', color: 'fg.muted', marginLeft: '2' })}
@@ -314,6 +324,20 @@
 				</span>
 			</button>
 		{/if}
+		{#if hasConfig}
+			<button
+				role="tab"
+				aria-selected={activeTab === 'config'}
+				aria-controls="build-panel-config"
+				class={tabButton({ active: activeTab === 'config' })}
+				onclick={() => (activeTab = 'config')}
+			>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
+					<Settings size={12} />
+					Config
+				</span>
+			</button>
+		{/if}
 		{#if hasResources}
 			<button
 				role="tab"
@@ -343,6 +367,21 @@
 					<Terminal size={12} />
 					Logs
 					<span class={chip({ tone: 'neutral' })}>{store.logs.length}</span>
+				</span>
+			</button>
+		{/if}
+		{#if hasResults}
+			<button
+				role="tab"
+				aria-selected={activeTab === 'results'}
+				aria-controls="build-panel-results"
+				class={tabButton({ active: activeTab === 'results' })}
+				onclick={() => (activeTab = 'results')}
+			>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
+					<FileText size={12} />
+					Results
+					<span class={chip({ tone: 'neutral' })}>{store.results.length}</span>
 				</span>
 			</button>
 		{/if}
@@ -547,6 +586,76 @@
 						})}>{planText(plan)}</pre>
 				{/each}
 			</div>
+		{:else if activeTab === 'config' && hasConfig}
+			<div
+				id="build-panel-config"
+				role="tabpanel"
+				aria-labelledby="tab-config"
+				class={css({ padding: '4' })}
+				data-testid="build-config-panel"
+			>
+				{#if store.resourceConfig}
+					<div
+						class={css({
+							display: 'grid',
+							gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+							gap: '3'
+						})}
+					>
+						<div
+							class={css({
+								borderWidth: '1',
+								backgroundColor: 'bg.tertiary',
+								padding: '3',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '1'
+							})}
+						>
+							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}
+								>Max Threads</span
+							>
+							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}
+								>{store.resourceConfig.max_threads ?? 'auto'}</span
+							>
+						</div>
+						<div
+							class={css({
+								borderWidth: '1',
+								backgroundColor: 'bg.tertiary',
+								padding: '3',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '1'
+							})}
+						>
+							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}
+								>Max Memory</span
+							>
+							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}
+								>{store.resourceConfig.max_memory_mb ?? 'auto'} MB</span
+							>
+						</div>
+						<div
+							class={css({
+								borderWidth: '1',
+								backgroundColor: 'bg.tertiary',
+								padding: '3',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '1'
+							})}
+						>
+							<span class={css({ fontSize: '2xs', color: 'fg.muted', textTransform: 'uppercase' })}
+								>Chunk Size</span
+							>
+							<span class={css({ fontFamily: 'mono', fontSize: 'sm' })}
+								>{store.resourceConfig.streaming_chunk_size ?? 'auto'}</span
+							>
+						</div>
+					</div>
+				{/if}
+			</div>
 		{:else if activeTab === 'resources' && hasResources}
 			<div
 				id="build-panel-resources"
@@ -555,45 +664,6 @@
 				class={css({ padding: '4' })}
 				data-testid="build-resources-panel"
 			>
-				{#if store.resourceConfig}
-					<div
-						class={cx(
-							rowClass,
-							css({
-								gap: '3',
-								paddingX: '3',
-								paddingY: '2',
-								marginBottom: '3',
-								borderWidth: '1',
-								backgroundColor: 'bg.tertiary',
-								fontSize: 'xs',
-								color: 'fg.muted'
-							})
-						)}
-						data-testid="resource-config-summary"
-					>
-						<Settings size={12} />
-						{#if store.resourceConfig.max_threads !== null}
-							<span>
-								<span class={css({ fontWeight: 'semibold', color: 'fg.secondary' })}>Threads:</span>
-								{store.resourceConfig.max_threads}
-							</span>
-						{/if}
-						{#if store.resourceConfig.max_memory_mb !== null}
-							<span>
-								<span class={css({ fontWeight: 'semibold', color: 'fg.secondary' })}>Memory:</span>
-								{store.resourceConfig.max_memory_mb} MB
-							</span>
-						{/if}
-						{#if store.resourceConfig.streaming_chunk_size !== null}
-							<span>
-								<span class={css({ fontWeight: 'semibold', color: 'fg.secondary' })}>Chunk:</span>
-								{store.resourceConfig.streaming_chunk_size.toLocaleString()}
-							</span>
-						{/if}
-					</div>
-				{/if}
-
 				{#if memoryWarning}
 					<div
 						class={cx(callout({ tone: 'warn' }), css({ marginBottom: '3' }))}
@@ -688,6 +758,12 @@
 								{@render sparkline(sparklineMem, 100, MEMORY_WARN_THRESHOLD)}
 							{/if}
 						</div>
+					</div>
+				{:else}
+					<div
+						class={css({ padding: '4', textAlign: 'center', fontSize: 'sm', color: 'fg.muted' })}
+					>
+						No resource samples captured
 					</div>
 				{/if}
 			</div>
@@ -804,13 +880,57 @@
 						scrollbarColor: '{colors.border.primary} transparent'
 					})}
 				>
-					{#each filteredLogs as entry, i (i)}
-						<div class={css({ paddingY: '0.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' })}>
-							<span class={css({ color: levelColor(entry.level) })}>[{entry.level}]</span>
-							{#if entry.step_name}
-								<span class={css({ color: 'fg.faint' })}>[{entry.step_name}]</span>
+					{#if filteredLogs.length === 0}
+						<div class={css({ color: 'fg.muted' })}>No logs captured</div>
+					{:else}
+						{#each filteredLogs as entry, i (i)}
+							<div class={css({ paddingY: '0.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' })}>
+								<span class={css({ color: levelColor(entry.level) })}>[{entry.level}]</span>
+								{#if entry.step_name}
+									<span class={css({ color: 'fg.faint' })}>[{entry.step_name}]</span>
+								{/if}
+								&nbsp;{entry.message}
+							</div>
+						{/each}
+					{/if}
+				</div>
+			</div>
+		{:else if activeTab === 'results' && hasResults}
+			<div
+				id="build-panel-results"
+				role="tabpanel"
+				aria-labelledby="tab-results"
+				class={css({ padding: '4' })}
+				data-testid="build-results-panel"
+			>
+				<div
+					class={css({
+						display: 'flex',
+						flexDirection: 'column',
+						gap: '2'
+					})}
+				>
+					{#each store.results as result (result.tab_id)}
+						<div class={cx(rowClass, css({ gap: '2', fontSize: 'sm' }))}>
+							{#if result.status === 'success'}
+								<CheckCircle size={12} class={css({ color: 'fg.success' })} />
+							{:else}
+								<XCircle size={12} class={css({ color: 'fg.error' })} />
 							{/if}
-							&nbsp;{entry.message}
+							<span>{result.tab_name}</span>
+							<span
+								class={chip({
+									tone: result.status === 'success' ? 'success' : 'error'
+								})}
+							>
+								{result.status}
+							</span>
+							{#if result.output_name}
+								<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>{result.output_name}</span>
+							{/if}
+							{#if result.error}
+								<span class={css({ fontSize: 'xs', color: 'fg.error' })}>{result.error}</span>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -824,52 +944,6 @@
 			data-testid="build-error"
 		>
 			{store.error}
-		</div>
-	{/if}
-
-	{#if store.results.length > 0}
-		<div
-			class={css({
-				borderTopWidth: '1',
-				paddingX: '4',
-				paddingY: '3',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '2'
-			})}
-			data-testid="build-results"
-		>
-			<span
-				class={css({
-					fontSize: 'xs',
-					fontWeight: 'semibold',
-					textTransform: 'uppercase',
-					letterSpacing: 'wide',
-					color: 'fg.muted'
-				})}
-			>
-				Results
-			</span>
-			{#each store.results as result (result.tab_id)}
-				<div class={cx(rowClass, css({ gap: '2', fontSize: 'sm' }))}>
-					{#if result.status === 'success'}
-						<CheckCircle size={12} class={css({ color: 'fg.success' })} />
-					{:else}
-						<XCircle size={12} class={css({ color: 'fg.error' })} />
-					{/if}
-					<span>{result.tab_name}</span>
-					<span
-						class={chip({
-							tone: result.status === 'success' ? 'success' : 'error'
-						})}
-					>
-						{result.status}
-					</span>
-					{#if result.error}
-						<span class={css({ fontSize: 'xs', color: 'fg.error' })}>{result.error}</span>
-					{/if}
-				</div>
-			{/each}
 		</div>
 	{/if}
 </div>

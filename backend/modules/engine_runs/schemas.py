@@ -14,8 +14,16 @@ class EngineRunKind(StrEnum):
 
 
 class EngineRunStatus(StrEnum):
+    RUNNING = 'running'
     SUCCESS = 'success'
     FAILED = 'failed'
+
+
+class EngineRunExecutionCategory(StrEnum):
+    READ = 'read'
+    STEP = 'step'
+    PLAN = 'plan'
+    WRITE = 'write'
 
 
 class SchemaDiffStatus(StrEnum):
@@ -30,6 +38,18 @@ class EngineRunResultSummary(BaseModel):
     row_count: int | str | None = None
     schema_: dict[str, str] | None = Field(default_factory=dict, alias='schema')
     data: list[dict[str, Any]] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class EngineRunExecutionEntry(BaseModel):
+    key: str
+    label: str
+    category: EngineRunExecutionCategory
+    order: int
+    duration_ms: float | None = None
+    share_pct: float | None = None
+    optimized_plan: str | None = None
+    unoptimized_plan: str | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -51,6 +71,7 @@ class EngineRunBaseSchema(BaseModel):
     progress: float = 0.0
     current_step: str | None = None
     triggered_by: str | None = None
+    execution_entries: list[EngineRunExecutionEntry] = Field(default_factory=list)
 
 
 class EngineRunResponseSchema(EngineRunBaseSchema):

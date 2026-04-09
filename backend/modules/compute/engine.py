@@ -492,7 +492,7 @@ class PolarsComputeEngine:
         additional_datasources: dict[str, dict] | None = None,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> pl.LazyFrame:
-        lf, _step_timings, _plan_frames = PolarsComputeEngine._build_pipeline(
+        lf, _step_timings, _plan_frames, _read_duration_ms = PolarsComputeEngine._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -508,8 +508,10 @@ class PolarsComputeEngine:
         job_id: str,
         additional_datasources: dict[str, dict] | None = None,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
-    ) -> tuple[pl.LazyFrame, dict[str, float], list[pl.LazyFrame]]:
+    ) -> tuple[pl.LazyFrame, dict[str, float], list[pl.LazyFrame], float]:
+        read_started = time.perf_counter()
         lf = load_datasource(datasource_config)
+        read_duration_ms = (time.perf_counter() - read_started) * 1000
 
         right_sources: dict[str, pl.LazyFrame] = {}
         for ds_id, ds_config in (additional_datasources or {}).items():
@@ -525,7 +527,7 @@ class PolarsComputeEngine:
         steps = apply_steps(steps)
 
         if not steps:
-            return lf, {}, [lf]
+            return lf, {}, [lf], read_duration_ms
 
         step_map: dict[str, dict] = {}
         for step in steps:
@@ -678,7 +680,7 @@ class PolarsComputeEngine:
 
         plan_frames.append(last_frame)
 
-        return last_frame, step_timings, plan_frames
+        return last_frame, step_timings, plan_frames, read_duration_ms
 
     @staticmethod
     def _merge_query_plans(plans: list[dict | None]) -> dict | None:
@@ -778,7 +780,7 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and return limited rows for preview."""
-        lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -812,6 +814,7 @@ class PolarsComputeEngine:
             'query_plan': query_plan,
             'query_plans': query_plans,
             'step_timings': step_timings,
+            'read_duration_ms': read_duration_ms,
         }
 
         if metadata:
@@ -830,7 +833,7 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and write full results to file."""
-        lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -850,12 +853,14 @@ class PolarsComputeEngine:
         logger.debug(f'Job {job_id}: Writing export file')
 
         # Collect full dataset and write to file
+        write_started = time.perf_counter()
         df = lf.collect()
         row_count = len(df)
         schema = {col: str(dtype) for col, dtype in df.schema.items()}
 
         fmt = get_export_format(export_format)
         fmt.writer(df, output_path)
+        write_duration_ms = (time.perf_counter() - write_started) * 1000
 
         return {
             'output_path': output_path,
@@ -865,6 +870,8 @@ class PolarsComputeEngine:
             'query_plan': query_plan,
             'query_plans': query_plans,
             'step_timings': step_timings,
+            'read_duration_ms': read_duration_ms,
+            'write_duration_ms': write_duration_ms,
         }
 
     @staticmethod
@@ -876,7 +883,7 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and return schema without collecting full data."""
-        lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -904,6 +911,7 @@ class PolarsComputeEngine:
             'step_timings': step_timings,
             'query_plan': query_plan,
             'query_plans': query_plans,
+            'read_duration_ms': read_duration_ms,
         }
 
     @staticmethod
@@ -915,7 +923,7 @@ class PolarsComputeEngine:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> dict:
         """Execute pipeline and return row count without collecting full data."""
-        lf, step_timings, plan_frames = PolarsComputeEngine._build_pipeline(
+        lf, step_timings, plan_frames, read_duration_ms = PolarsComputeEngine._build_pipeline(
             datasource_config,
             steps,
             job_id,
@@ -940,6 +948,7 @@ class PolarsComputeEngine:
             'step_timings': step_timings,
             'query_plan': query_plan,
             'query_plans': query_plans,
+            'read_duration_ms': read_duration_ms,
         }
 
     @staticmethod

@@ -62,12 +62,13 @@ describe('BuildStreamStore', () => {
 	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.unstubAllGlobals();
 	});
 
 	test('initial state', () => {
 		const store = new BuildStreamStore();
-		expect(store.status).toBe('connecting');
+		expect(store.status).toBe('disconnected');
 		expect(store.buildId).toBeNull();
 		expect(store.progress).toBe(0);
 		expect(store.progressPct).toBe(0);
@@ -120,6 +121,8 @@ describe('BuildStreamStore', () => {
 				total_steps: 3,
 				current_tab_id: 'tab-1',
 				current_tab_name: 'Sheet 1',
+				current_output_id: 'output-1',
+				current_output_name: 'output_sheet_1',
 				total_tabs: 2,
 				steps: [
 					{
@@ -521,7 +524,7 @@ describe('BuildStreamStore', () => {
 		expect(store.done).toBe(true);
 
 		store.reset();
-		expect(store.status).toBe('connecting');
+		expect(store.status).toBe('disconnected');
 		expect(store.buildId).toBeNull();
 		expect(store.progress).toBe(0);
 		expect(store.progressPct).toBe(0);
@@ -614,6 +617,19 @@ describe('BuildStreamStore', () => {
 		expect(store.status).toBe('disconnected');
 	});
 
+	test('times out if no snapshot or event arrives after start', () => {
+		vi.useFakeTimers();
+		const store = new BuildStreamStore();
+		store.start({});
+
+		expect(store.status).toBe('connecting');
+
+		vi.advanceTimersByTime(10_000);
+
+		expect(store.status).toBe('disconnected');
+		expect(store.error).toBe('Timed out waiting for build updates');
+	});
+
 	test('does not change status on close after completed', () => {
 		const store = new BuildStreamStore();
 		store.start({});
@@ -660,6 +676,8 @@ describe('BuildStreamStore', () => {
 			total_steps: 2,
 			current_tab_id: null,
 			current_tab_name: null,
+			current_output_id: null,
+			current_output_name: null,
 			total_tabs: 1,
 			steps: [],
 			query_plans: [],
@@ -741,6 +759,8 @@ describe('BuildStreamStore', () => {
 			total_steps: 2,
 			current_tab_id: null,
 			current_tab_name: null,
+			current_output_id: null,
+			current_output_name: null,
 			total_tabs: 1,
 			steps: [],
 			query_plans: [],

@@ -16,6 +16,8 @@ export interface BuildEventBase {
 	emitted_at: string;
 	tab_id?: string | null;
 	tab_name?: string | null;
+	current_output_id?: string | null;
+	current_output_name?: string | null;
 }
 
 export interface PlanEvent extends BuildEventBase {
@@ -120,6 +122,8 @@ export interface BuildTabResult {
 	tab_id: string;
 	tab_name: string;
 	status: 'success' | 'failed';
+	output_id?: string | null;
+	output_name?: string | null;
 	error?: string | null;
 }
 
@@ -197,6 +201,8 @@ export interface ActiveBuildSummary {
 	total_steps: number;
 	current_tab_id: string | null;
 	current_tab_name: string | null;
+	current_output_id: string | null;
+	current_output_name: string | null;
 	total_tabs: number;
 }
 

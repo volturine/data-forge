@@ -8,7 +8,7 @@ import psutil  # type: ignore[import-untyped]  # psutil does not ship type hints
 from modules.compute.core.base import ComputeEngine
 
 
-async def monitor_engine_resources(engine: ComputeEngine, interval: float = 5.0) -> AsyncIterator[dict[str, float | int | None]]:
+async def monitor_engine_resources(engine: ComputeEngine, interval: float = 1.0) -> AsyncIterator[dict[str, float | int | None]]:
     pid = engine.process_id
     if pid is None:
         return

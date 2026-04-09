@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from datetime import UTC, datetime
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -188,6 +189,156 @@ def test_engine_progress_queue_returns_matching_event() -> None:
     assert event.event['type'] == 'progress'
 
 
+def test_build_canonical_engine_run_result_persists_unified_detail_shape() -> None:
+    result = compute_service._build_canonical_engine_run_result(
+        existing_result={
+            'resources': [
+                {
+                    'sampled_at': '2026-04-08T12:00:00Z',
+                    'cpu_percent': 25.0,
+                    'memory_mb': 128.0,
+                    'memory_limit_mb': 512.0,
+                    'active_threads': 4,
+                    'max_threads': 8,
+                }
+            ],
+            'logs': [
+                {
+                    'timestamp': '2026-04-08T12:00:01Z',
+                    'level': 'info',
+                    'message': 'Running build',
+                }
+            ],
+        },
+        summary_meta={
+            'row_count': 3,
+            'query_plans': {'optimized': 'optimized plan', 'unoptimized': 'raw plan'},
+            'source_datasource_id': 'input-ds-1',
+            'source_datasource_name': 'Source 1',
+        },
+        execution_entries=[
+            {
+                'key': 'initial_read',
+                'label': 'Initial Read',
+                'category': 'read',
+                'order': 0,
+                'duration_ms': 12.0,
+                'metadata': None,
+            },
+            {
+                'key': 'filter_1',
+                'label': 'Filter',
+                'category': 'step',
+                'order': 1,
+                'duration_ms': 25.0,
+                'metadata': {'step_type': 'filter'},
+            },
+            {
+                'key': 'write_output',
+                'label': 'Write Output',
+                'category': 'write',
+                'order': 2,
+                'duration_ms': 18.0,
+                'metadata': None,
+            },
+        ],
+        current_output_id='output-ds-1',
+        current_output_name='output_salary_predictions',
+        current_tab_id='tab-1',
+        current_tab_name='View',
+        total_steps=3,
+        total_tabs=1,
+        resource_config={'max_threads': 8, 'max_memory_mb': 512, 'streaming_chunk_size': 1000},
+        results=[
+            {
+                'tab_id': 'tab-1',
+                'tab_name': 'View',
+                'status': 'success',
+                'output_id': 'output-ds-1',
+                'output_name': 'output_salary_predictions',
+            }
+        ],
+        append_logs=[
+            {
+                'timestamp': '2026-04-08T12:00:02Z',
+                'level': 'info',
+                'message': 'Built output output_salary_predictions',
+                'tab_id': 'tab-1',
+                'tab_name': 'View',
+                'step_id': None,
+                'step_name': None,
+            }
+        ],
+    )
+
+    assert result['current_output_name'] == 'output_salary_predictions'
+    assert result['source_datasource_id'] == 'input-ds-1'
+    assert result['source_datasource_name'] == 'Source 1'
+    assert result['row_count'] == 3
+    assert result['query_plans'] == [
+        {
+            'tab_id': 'tab-1',
+            'tab_name': 'View',
+            'optimized_plan': 'optimized plan',
+            'unoptimized_plan': 'raw plan',
+        }
+    ]
+    assert result['steps'] == [
+        {
+            'build_step_index': 0,
+            'step_index': 0,
+            'step_id': 'initial_read',
+            'step_name': 'Initial Read',
+            'step_type': 'read',
+            'tab_id': 'tab-1',
+            'tab_name': 'View',
+            'state': 'completed',
+            'duration_ms': 12.0,
+            'row_count': None,
+            'error': None,
+        },
+        {
+            'build_step_index': 1,
+            'step_index': 1,
+            'step_id': 'filter_1',
+            'step_name': 'Filter',
+            'step_type': 'filter',
+            'tab_id': 'tab-1',
+            'tab_name': 'View',
+            'state': 'completed',
+            'duration_ms': 25.0,
+            'row_count': None,
+            'error': None,
+        },
+        {
+            'build_step_index': 2,
+            'step_index': 2,
+            'step_id': 'write_output',
+            'step_name': 'Write Output',
+            'step_type': 'write',
+            'tab_id': 'tab-1',
+            'tab_name': 'View',
+            'state': 'completed',
+            'duration_ms': 18.0,
+            'row_count': None,
+            'error': None,
+        },
+    ]
+    resources = result['resources']
+    assert isinstance(resources, list)
+    assert resources[0]['cpu_percent'] == 25.0
+    latest_resources = result['latest_resources']
+    assert isinstance(latest_resources, dict)
+    assert latest_resources['cpu_percent'] == 25.0
+    logs = result['logs']
+    assert isinstance(logs, list)
+    assert logs[0]['message'] == 'Running build'
+    assert logs[1]['message'] == 'Built output output_salary_predictions'
+    results = result['results']
+    assert isinstance(results, list)
+    assert results[0]['output_name'] == 'output_salary_predictions'
+
+
 def test_schedule_stream_tasks_runs_on_main_loop() -> None:
     loop = asyncio.new_event_loop()
     progress_task = None
@@ -214,11 +365,16 @@ def test_schedule_stream_tasks_runs_on_main_loop() -> None:
                     engine=FakeEngine(),
                     job_id='job-1',
                     build_step_base=0,
+                    engine_step_offset=0,
                     total_steps=1,
                     started_perf=time.perf_counter(),
                     tab_id='tab1',
                     tab_name='Tab 1',
+                    current_output_id=None,
+                    current_output_name=None,
+                    engine_run_id=None,
                     emitter=emitter,
+                    read_stage=None,
                 )
             )
 
@@ -266,12 +422,17 @@ def test_start_stream_tasks_skips_when_loop_unavailable() -> None:
         engine=FakeEngine(),
         job_id='job-1',
         build_step_base=0,
+        engine_step_offset=0,
         total_steps=1,
         started_perf=time.perf_counter(),
         tab_id='tab1',
         tab_name='Tab 1',
+        current_output_id=None,
+        current_output_name=None,
+        engine_run_id=None,
         emitter=None,
         build=build,
+        read_stage=None,
     )
 
     assert tasks == (None, None)
@@ -329,11 +490,16 @@ def test_stream_engine_events_drains_final_events_after_job_finish() -> None:
             engine=FakeEngine(),
             job_id='job-1',
             build_step_base=0,
+            engine_step_offset=0,
             total_steps=1,
             started_perf=time.perf_counter(),
             tab_id='tab1',
             tab_name='Tab 1',
+            current_output_id=None,
+            current_output_name=None,
+            engine_run_id=None,
             emitter=emitter,
+            read_stage=None,
         )
 
     asyncio.run(run())
@@ -870,6 +1036,7 @@ class TestComputePreview:
         assert run.request_json['iceberg_options']['branch'] == 'master'
         assert 'data' not in run.result_json
         assert run.result_json['query_plans']['optimized'] == 'opt'
+        assert run.result_json['execution_entries'][0]['key'] == 'query_plan'
 
 
 def test_list_active_builds_returns_running_build(client, test_user) -> None:
@@ -1284,6 +1451,148 @@ def test_active_build_list_websocket_sends_snapshot_and_updates(client, test_use
     assert snapshot['builds'][0]['build_id'] == build.build_id
     assert update['type'] == 'log'
     assert update['build_id'] == build.build_id
+
+
+def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(test_user) -> None:
+    class FakeProgressEvent:
+        def __init__(self, event: dict[str, object]) -> None:
+            self.event = event
+
+    class FakeEngine:
+        def __init__(self) -> None:
+            self.analysis_id = 'analysis-live'
+            self.resource_config: dict[str, int] = {}
+            self.effective_resources: dict[str, int] = {}
+            self.current_job_id: str | None = 'job-1'
+            self._events = [
+                FakeProgressEvent(
+                    {
+                        'type': 'step_start',
+                        'step_index': 0,
+                        'step_id': 'step-1',
+                        'step_name': 'Filter rows',
+                        'step_type': 'filter',
+                        'total_steps': 3,
+                    }
+                ),
+                FakeProgressEvent(
+                    {
+                        'type': 'step_complete',
+                        'step_index': 0,
+                        'step_id': 'step-1',
+                        'step_name': 'Filter rows',
+                        'step_type': 'filter',
+                        'duration_ms': 25,
+                        'row_count': None,
+                        'total_steps': 3,
+                    }
+                ),
+            ]
+
+        def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None):
+            del timeout, job_id
+            if self._events:
+                event = self._events.pop(0)
+                if not self._events:
+                    self.current_job_id = None
+                return event
+            self.current_job_id = None
+            return None
+
+    async def fake_monitor_engine_resources(engine):
+        del engine
+        if False:
+            yield None
+
+    def fake_export_data(*args, **kwargs):
+        del args
+        job_started = kwargs['job_started']
+        build_stage_event = kwargs['build_stage_event']
+        job_started({'job_id': 'job-1', 'engine': FakeEngine()})
+        time.sleep(0.05)
+        build_stage_event({'stage': 'write_start', 'read_duration_ms': 12.0})
+        time.sleep(0.01)
+        build_stage_event({'stage': 'write_complete', 'write_duration_ms': 7.0})
+        return compute_service.ExportDatasourceResult(
+            datasource_id='output-ds-1',
+            datasource_name='output_salary_predictions',
+            result_meta={'datasource_id': 'output-ds-1', 'datasource_name': 'output_salary_predictions'},
+            read_duration_ms=12.0,
+            write_duration_ms=7.0,
+        )
+
+    async def run() -> tuple[list[dict[str, object]], ActiveBuild]:
+        await active_build_registry.clear()
+        build = await active_build_registry.create_build(
+            analysis_id='analysis-live',
+            analysis_name='Live Analysis',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+        emitted: list[dict[str, object]] = []
+
+        async def emitter(payload: dict[str, object]) -> None:
+            normalized = {
+                'build_id': build.build_id,
+                'analysis_id': build.analysis_id,
+                'emitted_at': datetime.now(UTC).isoformat(),
+                **payload,
+            }
+            emitted.append(normalized)
+            await active_build_registry.apply_event(build.build_id, normalized)
+
+        pipeline = {
+            'analysis_id': 'analysis-live',
+            'tab_id': 'tab-1',
+            'tabs': [
+                {
+                    'id': 'tab-1',
+                    'name': 'View',
+                    'datasource': {'id': 'source-ds-1', 'analysis_tab_id': None, 'config': {'branch': 'master'}},
+                    'output': {
+                        'result_id': 'output-ds-1',
+                        'filename': 'view',
+                        'iceberg': {'table_name': 'output_salary_predictions', 'namespace': 'outputs', 'branch': 'master'},
+                        'build_mode': 'full',
+                    },
+                    'steps': [{'id': 'step-1', 'type': 'filter', 'config': {'column': 'age', 'operator': '>', 'value': 25}}],
+                }
+            ],
+            'sources': {},
+        }
+
+        with (
+            patch('modules.compute.service.export_data', side_effect=fake_export_data),
+            patch('modules.compute.service.monitor_engine_resources', side_effect=fake_monitor_engine_resources),
+        ):
+            await compute_service.run_analysis_build_stream(
+                session=MagicMock(),
+                manager=MagicMock(),
+                pipeline=pipeline,
+                build=build,
+                emitter=emitter,
+                triggered_by=str(test_user.id),
+            )
+
+        stored = await active_build_registry.get_build(build.build_id)
+        assert stored is not None
+        return emitted, stored
+
+    emitted, stored = asyncio.run(run())
+
+    assert stored.current_output_id == 'output-ds-1'
+    assert stored.current_output_name == 'output_salary_predictions'
+    assert [step.step_name for step in stored.detail().steps] == ['Initial Read', 'Filter rows', 'Write Output']
+    assert [step.step_type for step in stored.detail().steps] == ['read', 'filter', 'write']
+    assert stored.detail().steps[0].duration_ms is not None
+    assert stored.detail().steps[2].duration_ms == 7
+    assert stored.detail().results[0].output_name == 'output_salary_predictions'
+    complete = next(event for event in emitted if event['type'] == 'complete')
+    complete_results = complete.get('results')
+    assert isinstance(complete_results, list)
+    typed_complete_results = cast(list[dict[str, object]], complete_results)
+    assert typed_complete_results[0]['output_name'] == 'output_salary_predictions'
 
 
 def test_active_build_registry_prunes_old_finished_builds(test_user) -> None:

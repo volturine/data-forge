@@ -36,6 +36,8 @@ function makeDetail(overrides: Partial<ActiveBuildDetail> = {}): ActiveBuildDeta
 		total_steps: 4,
 		current_tab_id: null,
 		current_tab_name: null,
+		current_output_id: null,
+		current_output_name: null,
 		total_tabs: 1,
 		steps: [],
 		query_plans: [],
@@ -156,6 +158,19 @@ describe('BuildPreview', () => {
 			expect(screen.getByRole('tab', { name: /Resources/i })).toBeInTheDocument();
 		});
 
+		test('shows Config tab when resource config exists', () => {
+			renderPreview(
+				makeDetail({
+					resource_config: {
+						max_threads: 0,
+						max_memory_mb: 0,
+						streaming_chunk_size: 0
+					}
+				})
+			);
+			expect(screen.getByRole('tab', { name: /Config/i })).toBeInTheDocument();
+		});
+
 		test('shows Logs tab when logs exist', () => {
 			renderPreview(
 				makeDetail({
@@ -174,11 +189,34 @@ describe('BuildPreview', () => {
 			);
 			expect(screen.getByRole('tab', { name: /Logs/i })).toBeInTheDocument();
 		});
+
+		test('shows Logs tab for completed builds even when no logs were captured', () => {
+			renderPreview(makeDetail({ status: 'completed', progress: 1, duration_ms: 500, logs: [] }));
+			expect(screen.getByRole('tab', { name: /Logs/i })).toBeInTheDocument();
+		});
+
+		test('shows Results tab when results exist', () => {
+			renderPreview(
+				makeDetail({
+					results: [
+						{
+							tab_id: 't1',
+							tab_name: 'Source 1',
+							status: 'success',
+							output_id: 'out-1',
+							output_name: 'output_salary_predictions'
+						}
+					]
+				})
+			);
+			expect(screen.getByRole('tab', { name: /Results/i })).toBeInTheDocument();
+		});
 	});
 
 	describe('steps panel', () => {
 		test('shows connecting state when no steps and connecting', () => {
 			const store = new BuildStreamStore();
+			store.status = 'connecting';
 			render(BuildPreview, { props: { store } });
 			expect(screen.getByText('Waiting for build to start...')).toBeInTheDocument();
 		});

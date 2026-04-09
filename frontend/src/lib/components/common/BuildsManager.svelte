@@ -8,6 +8,7 @@
 		Search,
 		CircleCheck,
 		CircleX,
+		Loader,
 		Eye,
 		EyeOff,
 		Download,
@@ -16,15 +17,24 @@
 		ChevronDown,
 		ArrowUp,
 		ArrowDown,
-		Timer,
 		CalendarClock,
 		Database,
 		RefreshCw,
 		Hash
 	} from 'lucide-svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
+	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
+	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import { css, cx, spinner, button, tabButton, emptyText, input } from '$lib/styles/panda';
+	import { css, cx, spinner, button, emptyText, input } from '$lib/styles/panda';
+	import {
+		engineRunBuildDetail,
+		engineRunCurrentTabName,
+		engineRunDatasourceId,
+		engineRunDatasourceName,
+		engineRunOutputName,
+		engineRunStatus
+	} from '$lib/utils/engine-run-build-detail';
 
 	interface Props {
 		compact?: boolean;
@@ -38,15 +48,16 @@
 	let search = $state('');
 	const effectiveSearch = $derived(searchQuery ?? search);
 	let kindFilter = $state<string>('');
-	let statusFilter = $state<'success' | 'failed' | ''>('');
+	let statusFilter = $state<'all' | 'running' | 'completed' | 'failed'>('all');
 	let dateFrom = $state('');
 	let dateTo = $state('');
 	let page = $state(1);
 	let branchFilter = $state('');
 	let expandedId = $state<string | null>(null);
-	let activeTab = $state<'request' | 'result' | 'plans' | 'timings'>('request');
+	let expandedStore = $state<BuildStreamStore | null>(null);
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
+	const runDetailStores = new SvelteMap<string, BuildStreamStore>();
 	const limit = 50;
 	const previewsVisible = $derived(!compact || showPreviews);
 
@@ -54,7 +65,14 @@
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
 		datasource_id: (pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined,
 		kind: kindFilter || undefined,
-		status: statusFilter || undefined,
+		status:
+			statusFilter === 'running'
+				? 'running'
+				: statusFilter === 'completed'
+					? 'success'
+					: statusFilter === 'failed'
+						? 'failed'
+						: undefined,
 		limit,
 		offset: (page - 1) * limit
 	});
@@ -65,7 +83,8 @@
 			const result = await listEngineRuns(params as ListEngineRunsParams);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		}
+		},
+		refetchInterval: 1000
 	}));
 
 	const datasourcesQuery = createQuery(() => ({
@@ -106,46 +125,6 @@
 
 	const runs = $derived(query.data ?? []);
 
-	const filteredRuns = $derived.by(() => {
-		let result = runs;
-
-		if (!previewsVisible && kindFilter !== 'preview') {
-			result = result.filter((run) => run.kind !== 'preview');
-		}
-
-		if (effectiveSearch) {
-			const q = effectiveSearch.toLowerCase();
-			result = result.filter(
-				(r) =>
-					r.id.toLowerCase().includes(q) ||
-					r.datasource_id.toLowerCase().includes(q) ||
-					(r.analysis_id && r.analysis_id.toLowerCase().includes(q)) ||
-					(dsNames.get(r.datasource_id) ?? '').toLowerCase().includes(q) ||
-					(r.analysis_id && (analysisNames.get(r.analysis_id) ?? '').toLowerCase().includes(q))
-			);
-		}
-
-		if (dateFrom) {
-			const from = new Date(dateFrom);
-			result = result.filter((r) => new Date(r.created_at) >= from);
-		}
-		if (dateTo) {
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Date for comparison, not reactive state
-			const to = new Date(dateTo);
-			to.setHours(23, 59, 59, 999);
-			result = result.filter((r) => new Date(r.created_at) <= to);
-		}
-
-		if (branchFilter) {
-			result = result.filter((run) => {
-				const runBranch = getRunBranch(run);
-				return runBranch === branchFilter;
-			});
-		}
-
-		return sortRuns(result);
-	});
-
 	const datasourceId = $derived(
 		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
 	);
@@ -169,6 +148,55 @@
 		return Array.from(set).sort((a, b) => a.localeCompare(b));
 	});
 
+	const filteredRuns = $derived.by(() => {
+		let result = runs;
+
+		if (!previewsVisible && kindFilter !== 'preview') {
+			result = result.filter((run) => run.kind !== 'preview');
+		}
+
+		if (effectiveSearch) {
+			const q = effectiveSearch.toLowerCase();
+			result = result.filter((run) => {
+				const outputName = engineRunOutputName(run) ?? '';
+				const currentTabName = engineRunCurrentTabName(run) ?? '';
+				return (
+					run.id.toLowerCase().includes(q) ||
+					engineRunDatasourceId(run).toLowerCase().includes(q) ||
+					(run.analysis_id?.toLowerCase().includes(q) ?? false) ||
+					(engineRunDatasourceName(run) ?? dsNames.get(engineRunDatasourceId(run)) ?? '')
+						.toLowerCase()
+						.includes(q) ||
+					(run.analysis_id
+						? (analysisNames.get(run.analysis_id) ?? '').toLowerCase().includes(q)
+						: false) ||
+					outputName.toLowerCase().includes(q) ||
+					currentTabName.toLowerCase().includes(q) ||
+					(run.current_step ?? '').toLowerCase().includes(q)
+				);
+			});
+		}
+
+		if (dateFrom) {
+			const from = new Date(dateFrom);
+			result = result.filter((run) => new Date(run.created_at) >= from);
+		}
+		if (dateTo) {
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- local Date for comparison, not reactive state
+			const to = new Date(dateTo);
+			to.setHours(23, 59, 59, 999);
+			result = result.filter((run) => new Date(run.created_at) <= to);
+		}
+
+		if (branchFilter) {
+			result = result.filter((run) => getRunBranch(run) === branchFilter);
+		}
+
+		return sortRuns(result);
+	});
+
+	const hasAnyBuildRows = $derived(runs.length > 0);
+
 	function sortRuns(list: EngineRun[]): EngineRun[] {
 		const dir = sortDir === 'asc' ? 1 : -1;
 		return [...list].sort((a, b) => {
@@ -182,22 +210,28 @@
 				return dir * a.kind.localeCompare(b.kind);
 			}
 			if (sortColumn === 'status') {
-				return dir * a.status.localeCompare(b.status);
+				return dir * engineRunStatus(a).localeCompare(engineRunStatus(b));
 			}
 			if (sortColumn === 'datasource') {
-				const an = dsNames.get(a.datasource_id) ?? a.datasource_id;
-				const bn = dsNames.get(b.datasource_id) ?? b.datasource_id;
-				return dir * an.localeCompare(bn);
+				const left =
+					engineRunDatasourceName(a) ??
+					dsNames.get(engineRunDatasourceId(a)) ??
+					engineRunDatasourceId(a);
+				const right =
+					engineRunDatasourceName(b) ??
+					dsNames.get(engineRunDatasourceId(b)) ??
+					engineRunDatasourceId(b);
+				return dir * left.localeCompare(right);
 			}
 			if (sortColumn === 'analysis') {
-				const an = a.analysis_id ? (analysisNames.get(a.analysis_id) ?? a.analysis_id) : '';
-				const bn = b.analysis_id ? (analysisNames.get(b.analysis_id) ?? b.analysis_id) : '';
-				return dir * an.localeCompare(bn);
+				const left = a.analysis_id ? (analysisNames.get(a.analysis_id) ?? a.analysis_id) : '';
+				const right = b.analysis_id ? (analysisNames.get(b.analysis_id) ?? b.analysis_id) : '';
+				return dir * left.localeCompare(right);
 			}
 			if (sortColumn === 'output') {
-				const an = getOutputName(a) ?? '';
-				const bn = getOutputName(b) ?? '';
-				return dir * an.localeCompare(bn);
+				const left = engineRunOutputName(a) ?? '';
+				const right = engineRunOutputName(b) ?? '';
+				return dir * left.localeCompare(right);
 			}
 			return 0;
 		});
@@ -219,8 +253,7 @@
 	}
 
 	function formatDate(isoDate: string): string {
-		const date = new Date(isoDate);
-		return date.toLocaleString();
+		return new Date(isoDate).toLocaleString();
 	}
 
 	function prevPage() {
@@ -232,66 +265,16 @@
 	}
 
 	function toggleExpand(id: string) {
-		if (expandedId === id) {
-			expandedId = null;
-			return;
-		}
-		expandedId = id;
-		activeTab = 'request';
-	}
-
-	function getQueryPlans(run: EngineRun): { optimized: string; unoptimized: string } | null {
-		const result = run.result_json;
-		if (result && typeof result === 'object') {
-			const plans = result.query_plans as { optimized?: string; unoptimized?: string } | undefined;
-			if (plans) {
-				return {
-					optimized: plans.optimized ?? '',
-					unoptimized: plans.unoptimized ?? ''
-				};
-			}
-		}
-		if (!run.query_plan) return null;
-		return {
-			optimized: run.query_plan,
-			unoptimized: run.query_plan
-		};
-	}
-
-	function hasPlans(run: EngineRun): boolean {
-		return getQueryPlans(run) !== null;
-	}
-
-	function hasTimings(run: EngineRun): boolean {
-		return Object.keys(run.step_timings ?? {}).length > 0;
-	}
-
-	function getTimingEntries(run: EngineRun): { name: string; ms: number; pct: number }[] {
-		const timings = run.step_timings ?? {};
-		const entries = Object.entries(timings).map(([name, ms]) => ({
-			name,
-			ms: ms as number
-		}));
-		const total = entries.reduce((sum, e) => sum + e.ms, 0);
-		if (total === 0) return entries.map((e) => ({ ...e, pct: 0 }));
-		return entries.map((e) => ({ ...e, pct: (e.ms / total) * 100 }));
+		expandedId = expandedId === id ? null : id;
 	}
 
 	function resolveName(id: string, map: Map<string, string>): string {
-		return map.get(id) ?? id.slice(0, 8) + '...';
-	}
-
-	function getOutputName(run: EngineRun): string | null {
-		if (!run.result_json) return null;
-		const name = run.result_json.datasource_name;
-		if (typeof name === 'string') return name;
-		return null;
+		return map.get(id) ?? `${id.slice(0, 8)}...`;
 	}
 
 	function getKindLabel(kind: string): string {
 		if (kind === 'preview') return 'Preview';
-		if (kind === 'download') return 'Download';
-		if (kind === 'export') return 'Download';
+		if (kind === 'download' || kind === 'export') return 'Download';
 		if (kind === 'datasource_create') return 'Output Create';
 		if (kind === 'datasource_update') return 'Output Update';
 		if (kind === 'row_count') return 'Row Count';
@@ -313,6 +296,44 @@
 
 		return null;
 	}
+
+	function runStatusLabel(run: EngineRun): string {
+		const status = engineRunStatus(run);
+		if (status === 'running') return 'Running';
+		if (status === 'completed') return 'Completed';
+		return 'Failed';
+	}
+
+	function runDetailStore(run: EngineRun): BuildStreamStore {
+		let store = runDetailStores.get(run.id);
+		if (!store) {
+			store = new BuildStreamStore();
+			runDetailStores.set(run.id, store);
+		}
+		store.applySnapshot(engineRunBuildDetail(run));
+		return store;
+	}
+
+	$effect(() => {
+		const expandedRun = runs.find((run) => run.id === expandedId) ?? null;
+		expandedStore = expandedRun ? runDetailStore(expandedRun) : null;
+	});
+
+	$effect(() => {
+		return () => {
+			for (const store of runDetailStores.values()) {
+				store.close();
+			}
+			runDetailStores.clear();
+		};
+	});
+
+	const summaryCellClass = css({
+		display: 'block',
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap'
+	});
 </script>
 
 <div
@@ -416,7 +437,20 @@
 			<select
 				class={cx(
 					input(),
-					css({ backgroundColor: 'transparent', paddingX: '3', paddingY: '1.5', fontSize: 'sm' })
+					css({
+						backgroundColor: 'bg.primary',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'sm',
+						'& option': {
+							backgroundColor: 'bg.secondary',
+							color: 'fg.primary'
+						},
+						'& option:checked': {
+							backgroundColor: 'bg.accent',
+							color: 'accent.primary'
+						}
+					})
 				)}
 				id="builds-kind-filter"
 				aria-label="Filter by type"
@@ -432,14 +466,28 @@
 			<select
 				class={cx(
 					input(),
-					css({ backgroundColor: 'transparent', paddingX: '3', paddingY: '1.5', fontSize: 'sm' })
+					css({
+						backgroundColor: 'bg.primary',
+						paddingX: '3',
+						paddingY: '1.5',
+						fontSize: 'sm',
+						'& option': {
+							backgroundColor: 'bg.secondary',
+							color: 'fg.primary'
+						},
+						'& option:checked': {
+							backgroundColor: 'bg.accent',
+							color: 'accent.primary'
+						}
+					})
 				)}
 				id="builds-status-filter"
 				aria-label="Filter by status"
 				bind:value={statusFilter}
 			>
-				<option value="">All statuses</option>
-				<option value="success">Success</option>
+				<option value="all">All statuses</option>
+				<option value="running">Running</option>
+				<option value="completed">Completed</option>
 				<option value="failed">Failed</option>
 			</select>
 			<BranchPicker
@@ -499,7 +547,7 @@
 		>
 			{query.error instanceof Error ? query.error.message : 'Error loading runs.'}
 		</div>
-	{:else if runs.length === 0}
+	{:else if !hasAnyBuildRows}
 		<div
 			class={css({
 				borderWidth: '1',
@@ -508,7 +556,7 @@
 				textAlign: 'center'
 			})}
 		>
-			<p class={emptyText({ size: 'panel' })}>No engine runs yet.</p>
+			<p class={emptyText({ size: 'panel' })}>No builds yet.</p>
 			<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
 				Runs will appear here when you preview or export data in analyses. Compare builds from the
 				Datasources tab.
@@ -521,7 +569,24 @@
 				borderWidth: '1'
 			})}
 		>
-			<table class={css({ width: '100%', borderCollapse: 'collapse', fontSize: 'sm' })}>
+			<table
+				class={css({
+					width: '100%',
+					borderCollapse: 'collapse',
+					tableLayout: 'fixed',
+					fontSize: 'sm'
+				})}
+			>
+				<colgroup>
+					<col style="width: 40px;" />
+					<col style="width: 180px;" />
+					<col style="width: 130px;" />
+					<col style="width: 240px;" />
+					<col style="width: 120px;" />
+					<col style="width: 220px;" />
+					<col style="width: 110px;" />
+					<col style="width: 190px;" />
+				</colgroup>
 				<thead>
 					<tr class={css({ backgroundColor: 'bg.tertiary' })}>
 						<th
@@ -568,7 +633,7 @@
 					{#each filteredRuns as run (run.id)}
 						<tr
 							data-build-row={run.id}
-							data-build-status={run.status}
+							data-build-status={engineRunStatus(run)}
 							data-build-kind={run.kind}
 							class={cx(
 								css({
@@ -598,7 +663,12 @@
 									paddingY: '2'
 								})}
 							>
-								<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
+								<span
+									class={cx(
+										summaryCellClass,
+										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
+									)}
+								>
 									{#if run.kind === 'preview'}
 										<Eye size={14} class={css({ color: 'accent.primary' })} />
 										<span>{getKindLabel(run.kind)}</span>
@@ -645,13 +715,24 @@
 									paddingY: '2'
 								})}
 							>
-								<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
-									{#if run.status === 'success'}
+								<span
+									class={cx(
+										summaryCellClass,
+										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
+									)}
+								>
+									{#if engineRunStatus(run) === 'running'}
+										<Loader
+											size={14}
+											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
+										/>
+										<span class={css({ color: 'accent.primary' })}>{runStatusLabel(run)}</span>
+									{:else if engineRunStatus(run) === 'completed'}
 										<CircleCheck size={14} class={css({ color: 'fg.success' })} />
-										<span class={css({ color: 'fg.success' })}>Success</span>
+										<span class={css({ color: 'fg.success' })}>{runStatusLabel(run)}</span>
 									{:else}
 										<CircleX size={14} class={css({ color: 'fg.error' })} />
-										<span class={css({ color: 'fg.error' })}>Failed</span>
+										<span class={css({ color: 'fg.error' })}>{runStatusLabel(run)}</span>
 									{/if}
 								</span>
 							</td>
@@ -663,10 +744,10 @@
 								})}
 							>
 								<span
-									class={css({ fontSize: 'xs', color: 'fg.secondary' })}
-									title={run.datasource_id}
+									class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
+									title={engineRunDatasourceId(run)}
 								>
-									{resolveName(run.datasource_id, dsNames)}
+									{engineRunDatasourceName(run) ?? resolveName(engineRunDatasourceId(run), dsNames)}
 								</span>
 							</td>
 							<td
@@ -678,7 +759,7 @@
 							>
 								{#if run.analysis_id}
 									<span
-										class={css({ fontSize: 'xs', color: 'fg.secondary' })}
+										class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
 										title={run.analysis_id}
 									>
 										{resolveName(run.analysis_id, analysisNames)}
@@ -694,12 +775,12 @@
 									paddingY: '2'
 								})}
 							>
-								{#if getOutputName(run)}
+								{#if engineRunOutputName(run)}
 									<span
-										class={css({ fontSize: 'xs', color: 'fg.secondary' })}
-										title={getOutputName(run) ?? ''}
+										class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
+										title={engineRunOutputName(run) ?? ''}
 									>
-										{getOutputName(run)}
+										{engineRunOutputName(run)}
 									</span>
 								{:else}
 									<span class={css({ color: 'fg.muted' })}>-</span>
@@ -711,7 +792,8 @@
 									paddingX: '3',
 									paddingY: '2',
 									fontFamily: 'mono',
-									fontSize: 'xs'
+									fontSize: 'xs',
+									whiteSpace: 'nowrap'
 								})}
 							>
 								{formatDuration(run.duration_ms)}
@@ -721,7 +803,8 @@
 									borderBottomWidth: '1',
 									paddingX: '3',
 									paddingY: '2',
-									color: 'fg.secondary'
+									color: 'fg.secondary',
+									whiteSpace: 'nowrap'
 								})}
 							>
 								{formatDate(run.created_at)}
@@ -734,419 +817,15 @@
 									class={css({
 										borderBottomWidth: '1',
 										backgroundColor: 'bg.primary',
-										padding: '0'
+										padding: '0',
+										overflow: 'hidden'
 									})}
 								>
-									<div class={css({ padding: '4' })}>
-										<div
-											class={css({
-												marginBottom: '4',
-												display: 'flex',
-												gap: '1',
-												borderBottomWidth: '1'
-											})}
-										>
-											<button
-												class={tabButton({ active: activeTab === 'request' })}
-												onclick={(e) => {
-													e.stopPropagation();
-													activeTab = 'request';
-												}}
-											>
-												Request Config
-											</button>
-											<button
-												class={tabButton({ active: activeTab === 'result' })}
-												onclick={(e) => {
-													e.stopPropagation();
-													activeTab = 'result';
-												}}
-											>
-												Result
-											</button>
-											{#if hasTimings(run)}
-												<button
-													class={tabButton({ active: activeTab === 'timings' })}
-													onclick={(e) => {
-														e.stopPropagation();
-														activeTab = 'timings';
-													}}
-												>
-													<span
-														class={css({ display: 'inline-flex', alignItems: 'center', gap: '1' })}
-													>
-														<Timer size={13} />
-														Step Timings
-													</span>
-												</button>
-											{/if}
-											{#if hasPlans(run)}
-												<button
-													class={tabButton({ active: activeTab === 'plans' })}
-													onclick={(e) => {
-														e.stopPropagation();
-														activeTab = 'plans';
-													}}
-												>
-													Query Plans
-												</button>
-											{/if}
+									{#if expandedStore}
+										<div class={css({ width: '100%', overflowX: 'hidden' })}>
+											<BuildPreview store={expandedStore} title={getKindLabel(run.kind)} />
 										</div>
-
-										<!-- Tab content -->
-										{#if activeTab === 'request'}
-											<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-												<div
-													class={css({
-														display: 'grid',
-														gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-														gap: '4',
-														fontSize: 'sm'
-													})}
-												>
-													<div>
-														<span class={css({ color: 'fg.muted' })}>Run ID:</span>
-														<span
-															class={css({
-																marginLeft: '2',
-																fontFamily: 'mono',
-																fontSize: 'xs'
-															})}
-														>
-															{run.id}
-														</span>
-													</div>
-													<div>
-														<span class={css({ color: 'fg.muted' })}>Datasource:</span>
-														<span class={css({ marginLeft: '2', fontSize: 'xs' })}>
-															{resolveName(run.datasource_id, dsNames)}
-														</span>
-													</div>
-													{#if run.analysis_id}
-														<div>
-															<span class={css({ color: 'fg.muted' })}>Analysis:</span>
-															<span class={css({ marginLeft: '2', fontSize: 'xs' })}>
-																{resolveName(run.analysis_id, analysisNames)}
-															</span>
-														</div>
-													{/if}
-													{#if run.triggered_by}
-														<div>
-															<span class={css({ color: 'fg.muted' })}>Triggered by:</span>
-															<span
-																class={css({
-																	marginLeft: '2',
-																	display: 'inline-flex',
-																	alignItems: 'center',
-																	gap: '1',
-																	fontSize: 'xs',
-																	color: 'accent.primary'
-																})}
-															>
-																<CalendarClock size={12} />
-																{run.triggered_by}
-															</span>
-														</div>
-													{/if}
-												</div>
-												<div>
-													<h4
-														class={css({
-															marginBottom: '2',
-															fontSize: 'sm',
-															fontWeight: 'medium',
-															color: 'fg.secondary'
-														})}
-													>
-														Request Payload
-													</h4>
-													<pre
-														class={css({
-															maxHeight: 'listLg',
-															overflowX: 'auto',
-															borderWidth: '1',
-															backgroundColor: 'bg.tertiary',
-															padding: '3',
-															fontFamily: 'mono',
-															fontSize: 'xs'
-														})}>{JSON.stringify(run.request_json, null, 2)}</pre>
-												</div>
-											</div>
-										{:else if activeTab === 'result'}
-											<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-												{#if run.status === 'failed' && run.error_message}
-													<div
-														class={css({
-															paddingX: '3',
-															paddingY: '2.5',
-															border: 'none',
-															borderLeftWidth: '2',
-
-															marginTop: '3',
-															marginBottom: '0',
-															fontSize: 'xs',
-															lineHeight: '1.5',
-															backgroundColor: 'transparent',
-															borderLeftColor: 'border.error',
-															color: 'fg.error'
-														})}
-													>
-														<h4
-															class={css({
-																marginBottom: '1',
-																fontSize: 'sm',
-																fontWeight: 'medium'
-															})}
-														>
-															Error
-														</h4>
-														<p class={css({ fontSize: 'sm' })}>{run.error_message}</p>
-													</div>
-												{/if}
-												{#if run.result_json}
-													{@const result = run.result_json}
-													<div>
-														<h4
-															class={css({
-																marginBottom: '2',
-																fontSize: 'sm',
-																fontWeight: 'medium',
-																color: 'fg.secondary'
-															})}
-														>
-															Result Metadata
-														</h4>
-														<div
-															class={css({
-																marginBottom: '3',
-																display: 'grid',
-																gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-																gap: '4',
-																fontSize: 'sm'
-															})}
-														>
-															{#if 'row_count' in result}
-																<div>
-																	<span class={css({ color: 'fg.muted' })}>Rows:</span>
-																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
-																		{result.row_count}
-																	</span>
-																</div>
-															{/if}
-															{#if 'page' in result}
-																<div>
-																	<span class={css({ color: 'fg.muted' })}>Page:</span>
-																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
-																		{result.page}
-																	</span>
-																</div>
-															{/if}
-															{#if 'page_size' in result}
-																<div>
-																	<span class={css({ color: 'fg.muted' })}>Page Size:</span>
-																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
-																		{result.page_size}
-																	</span>
-																</div>
-															{/if}
-															{#if 'export_format' in result}
-																<div>
-																	<span class={css({ color: 'fg.muted' })}>Format:</span>
-																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
-																		{result.export_format}
-																	</span>
-																</div>
-															{/if}
-															{#if 'file_size_bytes' in result}
-																<div>
-																	<span class={css({ color: 'fg.muted' })}>File Size:</span>
-																	<span class={css({ marginLeft: '2', fontFamily: 'mono' })}>
-																		{(Number(result.file_size_bytes) / 1024).toFixed(1)} KB
-																	</span>
-																</div>
-															{/if}
-														</div>
-														{#if 'schema' in result && result.schema}
-															<div>
-																<h4
-																	class={css({
-																		marginBottom: '2',
-																		fontSize: 'sm',
-																		fontWeight: 'medium',
-																		color: 'fg.secondary'
-																	})}
-																>
-																	Schema
-																</h4>
-																<div
-																	class={css({
-																		maxHeight: 'inputSm',
-																		overflowX: 'auto',
-																		borderWidth: '1',
-																		backgroundColor: 'bg.tertiary',
-																		padding: '3',
-																		fontFamily: 'mono',
-																		fontSize: 'xs'
-																	})}
-																>
-																	{#each Object.entries(result.schema as Record<string, string>) as [col, dtype] (col)}
-																		<div>
-																			<span class={css({ color: 'accent.primary' })}>{col}</span>:
-																			<span class={css({ color: 'fg.muted' })}>{dtype}</span>
-																		</div>
-																	{/each}
-																</div>
-															</div>
-														{/if}
-													</div>
-												{:else}
-													<p class={css({ fontSize: 'sm', color: 'fg.muted' })}>
-														No result data available.
-													</p>
-												{/if}
-											</div>
-										{:else if activeTab === 'timings'}
-											{@const entries = getTimingEntries(run)}
-											<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-												<h4
-													class={css({
-														marginBottom: '3',
-														fontSize: 'sm',
-														fontWeight: 'medium',
-														color: 'fg.secondary'
-													})}
-												>
-													Step Execution Timeline
-												</h4>
-												{#each entries as entry (entry.name)}
-													<div
-														class={css({
-															display: 'flex',
-															alignItems: 'center',
-															gap: '3',
-															fontSize: 'xs'
-														})}
-													>
-														<span
-															class={css({
-																width: 'colWide',
-																flexShrink: '0',
-																overflow: 'hidden',
-																textOverflow: 'ellipsis',
-																whiteSpace: 'nowrap',
-																fontFamily: 'mono',
-																color: 'fg.secondary'
-															})}
-															title={entry.name}
-														>
-															{entry.name}
-														</span>
-														<div
-															class={css({
-																position: 'relative',
-																height: 'iconMd',
-																flex: '1',
-																backgroundColor: 'bg.tertiary'
-															})}
-														>
-															<div
-																class={css({
-																	position: 'absolute',
-																	top: '0',
-																	bottom: '0',
-																	left: '0',
-																	backgroundColor: 'bg.accent'
-																})}
-																style={`width: ${Math.max(entry.pct, 1)}%`}
-															></div>
-														</div>
-														<span
-															class={css({
-																width: 'logoXl',
-																flexShrink: '0',
-																textAlign: 'right',
-																fontFamily: 'mono',
-																color: 'fg.muted'
-															})}
-														>
-															{formatDuration(entry.ms)}
-														</span>
-													</div>
-												{/each}
-												{#if entries.length > 0}
-													<div
-														class={css({
-															borderTopWidth: '1',
-															marginTop: '3',
-															paddingTop: '2',
-															textAlign: 'right',
-															fontFamily: 'mono',
-															fontSize: 'xs',
-															color: 'fg.muted'
-														})}
-													>
-														Total: {formatDuration(run.duration_ms)}
-													</div>
-												{/if}
-											</div>
-										{:else if activeTab === 'plans'}
-											{@const plans = getQueryPlans(run)}
-											{#if plans}
-												<div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
-													<div>
-														<h4
-															class={css({
-																marginBottom: '2',
-																fontSize: 'sm',
-																fontWeight: 'medium',
-																color: 'fg.secondary'
-															})}
-														>
-															Optimized Plan
-														</h4>
-														<pre
-															class={css({
-																maxHeight: 'list',
-																overflowX: 'auto',
-																whiteSpace: 'pre-wrap',
-																borderWidth: '1',
-																backgroundColor: 'bg.tertiary',
-																padding: '3',
-																fontFamily: 'mono',
-																fontSize: 'xs'
-															})}>{plans.optimized || 'N/A'}</pre>
-													</div>
-													<div>
-														<h4
-															class={css({
-																marginBottom: '2',
-																fontSize: 'sm',
-																fontWeight: 'medium',
-																color: 'fg.secondary'
-															})}
-														>
-															Unoptimized Plan
-														</h4>
-														<pre
-															class={css({
-																maxHeight: 'list',
-																overflowX: 'auto',
-																whiteSpace: 'pre-wrap',
-																borderWidth: '1',
-																backgroundColor: 'bg.tertiary',
-																padding: '3',
-																fontFamily: 'mono',
-																fontSize: 'xs'
-															})}>{plans.unoptimized || 'N/A'}</pre>
-													</div>
-												</div>
-											{:else}
-												<p class={css({ fontSize: 'sm', color: 'fg.muted' })}>
-													No query plans available for this run.
-												</p>
-											{/if}
-										{/if}
-									</div>
+									{/if}
 								</td>
 							</tr>
 						{/if}

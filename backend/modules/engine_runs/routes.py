@@ -69,4 +69,4 @@ def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail='Engine run not found')
-    return schemas.EngineRunResponseSchema.model_validate(run)
+    return service._serialize_run(run)

@@ -82,6 +82,7 @@ function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
 		progress: 100,
 		current_step: null,
 		triggered_by: null,
+		execution_entries: [],
 		...overrides
 	};
 }
