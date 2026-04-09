@@ -16,10 +16,10 @@ from core.dependencies import get_manager
 from core.exceptions import PipelineValidationError
 from core.namespace import namespace_paths
 from main import app
-from modules.compute import service as compute_service
+from modules.compute import schemas as compute_schemas, service as compute_service
 from modules.compute.core.base import EngineResult
 from modules.compute.engine import PolarsComputeEngine
-from modules.compute.live import registry as active_build_registry
+from modules.compute.live import ActiveBuild, registry as active_build_registry
 from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import _analysis_stack_var
 from modules.compute.routes import _safe_close_websocket, _safe_send_json
@@ -243,6 +243,105 @@ def test_schedule_stream_tasks_runs_on_main_loop() -> None:
         loop.call_soon_threadsafe(loop.stop)
         thread.join()
         loop.close()
+
+
+def test_start_stream_tasks_skips_when_loop_unavailable() -> None:
+    loop = asyncio.new_event_loop()
+    loop.close()
+
+    class FakeEngine:
+        effective_resources = {'max_threads': 8, 'max_memory_mb': 512, 'streaming_chunk_size': 1000}
+
+    build = ActiveBuild(
+        build_id='build-1',
+        analysis_id='analysis-1',
+        analysis_name='Analysis 1',
+        namespace='default',
+        starter=compute_service._build_starter(None),
+        started_at=datetime.now(UTC),
+    )
+
+    tasks = compute_service._start_stream_tasks(
+        loop,
+        engine=FakeEngine(),
+        job_id='job-1',
+        build_step_base=0,
+        total_steps=1,
+        started_perf=time.perf_counter(),
+        tab_id='tab1',
+        tab_name='Tab 1',
+        emitter=None,
+        build=build,
+    )
+
+    assert tasks == (None, None)
+    assert build.resource_config is not None
+    assert build.resource_config.max_threads == 8
+    assert build.resource_config.max_memory_mb == 512
+    assert build.resource_config.streaming_chunk_size == 1000
+
+
+def test_stream_engine_events_drains_final_events_after_job_finish() -> None:
+    emitted: list[dict[str, object]] = []
+
+    async def emitter(payload: dict[str, object]) -> None:
+        emitted.append(payload)
+
+    class FakeEngine:
+        def __init__(self) -> None:
+            self.current_job_id: str | None = 'job-1'
+            self.calls = 0
+
+        def get_progress_event(self, _timeout: float = 1.0, _job_id: str | None = None):
+            from modules.compute.core.base import EngineProgressEvent
+
+            self.calls += 1
+            if self.calls == 1:
+                self.current_job_id = None
+                return None
+            if self.calls == 2:
+                return EngineProgressEvent(
+                    job_id='job-1',
+                    event={
+                        'type': 'plan',
+                        'optimized_plan': 'OPT',
+                        'unoptimized_plan': 'RAW',
+                    },
+                )
+            if self.calls == 3:
+                return EngineProgressEvent(
+                    job_id='job-1',
+                    event={
+                        'type': 'step_complete',
+                        'step_index': 0,
+                        'step_id': 'step1',
+                        'step_name': 'Step 1',
+                        'step_type': 'filter',
+                        'duration_ms': 10,
+                        'row_count': 3,
+                        'total_steps': 1,
+                    },
+                )
+            return None
+
+    async def run() -> None:
+        await compute_service._stream_engine_events(
+            engine=FakeEngine(),
+            job_id='job-1',
+            build_step_base=0,
+            total_steps=1,
+            started_perf=time.perf_counter(),
+            tab_id='tab1',
+            tab_name='Tab 1',
+            emitter=emitter,
+        )
+
+    asyncio.run(run())
+
+    assert [payload['type'] for payload in emitted] == ['plan', 'step_complete', 'progress']
+    assert emitted[0]['optimized_plan'] == 'OPT'
+    assert emitted[1]['build_step_index'] == 0
+    assert emitted[2]['progress'] == 1.0
 
 
 class TestComputePreview:
@@ -863,6 +962,35 @@ def test_get_active_build_returns_detail(client, test_user) -> None:
     assert payload['logs'][0]['message'] == 'Started build'
 
 
+def test_get_active_build_returns_resource_config_summary(client, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-config',
+            analysis_name='Analysis Config',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    registry_build = asyncio.run(active_build_registry.get_build(build.build_id))
+    assert registry_build is not None
+    registry_build.resource_config = compute_schemas.BuildResourceConfigSummary(
+        max_threads=6,
+        max_memory_mb=1024,
+        streaming_chunk_size=2000,
+    )
+
+    response = client.get(f'/api/v1/compute/builds/active/{build.build_id}')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['resource_config'] == {
+        'max_threads': 6,
+        'max_memory_mb': 1024,
+        'streaming_chunk_size': 2000,
+    }
+
+
 def test_build_stream_websocket_emits_snapshot_and_terminal_event(client, sample_datasource: DataSource, test_user) -> None:
     payload = {
         'analysis_pipeline': {
@@ -1019,6 +1147,72 @@ def test_build_stream_websocket_emits_snapshot_and_terminal_event(client, sample
     assert progress['type'] == 'progress'
     assert complete['type'] == 'complete'
     assert complete['results'][0]['status'] == 'success'
+
+
+def test_active_build_registry_sanitizes_logs_and_flushes_throttled_events(test_user) -> None:
+    async def run() -> tuple[list[dict[str, object]], ActiveBuild | None]:
+        build = await active_build_registry.create_build(
+            analysis_id='analysis-log',
+            analysis_name='Analysis Log',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+        websocket = MagicMock()
+        sent: list[dict[str, object]] = []
+
+        async def send_json(payload: dict[str, object]) -> None:
+            sent.append(payload)
+
+        websocket.send_json = AsyncMock(side_effect=send_json)
+        await active_build_registry.add_watcher(build.build_id, websocket)
+
+        first = {
+            'type': 'log',
+            'build_id': build.build_id,
+            'analysis_id': build.analysis_id,
+            'emitted_at': datetime.now(UTC).isoformat(),
+            'level': 'info',
+            'message': '\x1b[31mhello\x00 world\r\n',
+        }
+        second = {
+            'type': 'log',
+            'build_id': build.build_id,
+            'analysis_id': build.analysis_id,
+            'emitted_at': datetime.now(UTC).isoformat(),
+            'level': 'info',
+            'message': 'second message',
+        }
+        terminal = {
+            'type': 'complete',
+            'build_id': build.build_id,
+            'analysis_id': build.analysis_id,
+            'emitted_at': datetime.now(UTC).isoformat(),
+            'elapsed_ms': 12,
+            'total_steps': 1,
+            'tabs_built': 1,
+            'duration_ms': 12,
+            'results': [{'tab_id': 'tab1', 'tab_name': 'Tab 1', 'status': 'success'}],
+        }
+
+        await active_build_registry.apply_event(build.build_id, first)
+        await active_build_registry.publish(build.build_id, first)
+        await active_build_registry.apply_event(build.build_id, second)
+        await active_build_registry.publish(build.build_id, second)
+        await active_build_registry.apply_event(build.build_id, terminal)
+        await active_build_registry.publish(build.build_id, terminal)
+
+        stored = await active_build_registry.get_build(build.build_id)
+        await active_build_registry.remove_watcher(build.build_id, websocket)
+        return sent, stored
+
+    sent, stored = asyncio.run(run())
+
+    assert [payload['type'] for payload in sent] == ['log', 'log', 'complete']
+    assert sent[0]['message'] == 'hello world'
+    assert sent[1]['message'] == 'second message'
+    assert stored is not None
+    assert [item.message for item in stored.logs] == ['hello world', 'second message']
 
 
 def test_active_build_monitor_websocket_sends_snapshot_and_updates(client, test_user) -> None:

@@ -3,8 +3,16 @@
 	import { connectBuildsListStream, connectBuildDetailStream } from '$lib/api/build-stream';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import BuildPreview from './BuildPreview.svelte';
-	import { Loader, CheckCircle, XCircle, ChevronDown, ChevronRight, Radio } from 'lucide-svelte';
-	import { css, cx, chip, row, spinner } from '$lib/styles/panda';
+	import {
+		Loader,
+		CheckCircle,
+		XCircle,
+		ChevronDown,
+		ChevronRight,
+		Radio,
+		User
+	} from 'lucide-svelte';
+	import { css, cx, chip, row, spinner, tabButton } from '$lib/styles/panda';
 	import { untrack } from 'svelte';
 
 	interface Props {
@@ -18,11 +26,20 @@
 	let error = $state<string | null>(null);
 	let expandedId = $state<string | null>(null);
 	let detailStores = $state(new Map<string, BuildStreamStore>());
+	let statusFilter = $state<'all' | 'running' | 'completed' | 'failed'>('all');
 
 	let connection: { close: () => void } | null = null;
 
 	function progressToPercent(p: number): number {
 		return Math.min(Math.max(Math.round(p * 100), 0), 100);
+	}
+
+	function starterLabel(build: ActiveBuildSummary): string | null {
+		if (build.starter.display_name) return build.starter.display_name;
+		if (build.starter.email) return build.starter.email;
+		if (build.starter.user_id) return build.starter.user_id;
+		if (build.starter.triggered_by) return build.starter.triggered_by;
+		return null;
 	}
 
 	function applyProgressToSummary(buildId: string, event: BuildEvent): void {
@@ -98,14 +115,20 @@
 	}
 
 	const filtered = $derived.by(() => {
-		if (!searchQuery) return builds;
+		let result = builds;
+		if (statusFilter !== 'all') {
+			result = result.filter((b) => b.status === statusFilter);
+		}
+		if (!searchQuery) return result;
 		const q = searchQuery.toLowerCase();
-		return builds.filter(
+		return result.filter(
 			(b) =>
 				b.build_id.toLowerCase().includes(q) ||
 				b.analysis_id.toLowerCase().includes(q) ||
 				b.analysis_name.toLowerCase().includes(q) ||
-				(b.current_step ?? '').toLowerCase().includes(q)
+				(b.current_step ?? '').toLowerCase().includes(q) ||
+				(b.starter.display_name ?? '').toLowerCase().includes(q) ||
+				(b.starter.email ?? '').toLowerCase().includes(q)
 		);
 	});
 
@@ -136,6 +159,37 @@
 				Connecting...
 			</div>
 		{/if}
+	</div>
+
+	<div class={cx(row, css({ gap: '1' }))} data-testid="active-builds-status-filter">
+		<button
+			type="button"
+			class={tabButton({ active: statusFilter === 'all' })}
+			onclick={() => (statusFilter = 'all')}
+		>
+			All
+		</button>
+		<button
+			type="button"
+			class={tabButton({ active: statusFilter === 'running' })}
+			onclick={() => (statusFilter = 'running')}
+		>
+			Running
+		</button>
+		<button
+			type="button"
+			class={tabButton({ active: statusFilter === 'completed' })}
+			onclick={() => (statusFilter = 'completed')}
+		>
+			Completed
+		</button>
+		<button
+			type="button"
+			class={tabButton({ active: statusFilter === 'failed' })}
+			onclick={() => (statusFilter = 'failed')}
+		>
+			Failed
+		</button>
 	</div>
 
 	{#if error}
@@ -172,6 +226,7 @@
 			{#each filtered as build (build.build_id)}
 				{@const isExpanded = expandedId === build.build_id}
 				{@const pct = progressToPercent(build.progress)}
+				{@const starter = starterLabel(build)}
 				<div
 					class={css({
 						borderWidth: '1',
@@ -222,6 +277,19 @@
 							{build.analysis_name}
 						</span>
 
+						{#if starter}
+							<span
+								class={cx(
+									row,
+									css({ gap: '1', fontSize: 'xs', color: 'fg.muted', flexShrink: '0' })
+								)}
+								data-testid="build-starter"
+							>
+								<User size={10} />
+								{starter}
+							</span>
+						{/if}
+
 						<div class={css({ flex: '1', minWidth: '0' })}>
 							{#if build.current_step}
 								<span
@@ -238,7 +306,6 @@
 							{/if}
 						</div>
 
-						<!-- Inline progress bar -->
 						<div
 							class={css({
 								width: 'colNarrow',

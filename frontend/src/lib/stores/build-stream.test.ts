@@ -112,6 +112,7 @@ describe('BuildStreamStore', () => {
 				progress: 0.42,
 				started_at: '2025-01-01T00:00:00Z',
 				starter: STARTER,
+				resource_config: null,
 				elapsed_ms: 1200,
 				estimated_remaining_ms: 800,
 				current_step: 'Loading data',
@@ -650,6 +651,7 @@ describe('BuildStreamStore', () => {
 			status: 'running',
 			started_at: '2025-01-01T00:00:00Z',
 			starter: STARTER,
+			resource_config: null,
 			progress: 0.1,
 			elapsed_ms: 100,
 			estimated_remaining_ms: 900,
@@ -687,5 +689,113 @@ describe('BuildStreamStore', () => {
 		});
 		expect(store.progress).toBe(0.5);
 		expect(store.progressPct).toBe(50);
+	});
+
+	test('resourceHistory accumulates from resource events', () => {
+		const store = new BuildStreamStore();
+		store.start({});
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+
+		msg(socket, {
+			type: 'resources',
+			cpu_percent: 50,
+			memory_mb: 256,
+			memory_limit_mb: 1024,
+			active_threads: 2,
+			max_threads: 8
+		});
+		msg(socket, {
+			type: 'resources',
+			cpu_percent: 75,
+			memory_mb: 512,
+			memory_limit_mb: 1024,
+			active_threads: 4,
+			max_threads: 8
+		});
+
+		expect(store.resourceHistory).toHaveLength(2);
+		expect(store.resourceHistory[0].cpu_percent).toBe(50);
+		expect(store.resourceHistory[1].cpu_percent).toBe(75);
+		expect(store.latestResources!.cpu_percent).toBe(75);
+	});
+
+	test('applySnapshot populates resourceHistory and resourceConfig', () => {
+		const store = new BuildStreamStore();
+
+		const detail: ActiveBuildDetail = {
+			build_id: 'b-2',
+			analysis_id: 'a-2',
+			analysis_name: 'Snapshot Test',
+			namespace: 'default',
+			status: 'running',
+			started_at: '2025-01-01T00:00:00Z',
+			starter: STARTER,
+			resource_config: { max_threads: 4, max_memory_mb: 2048, streaming_chunk_size: 10000 },
+			progress: 0.3,
+			elapsed_ms: 300,
+			estimated_remaining_ms: 700,
+			current_step: 'Loading',
+			current_step_index: 0,
+			total_steps: 2,
+			current_tab_id: null,
+			current_tab_name: null,
+			total_tabs: 1,
+			steps: [],
+			query_plans: [],
+			latest_resources: {
+				sampled_at: '2025-01-01T00:00:01Z',
+				cpu_percent: 60,
+				memory_mb: 512,
+				memory_limit_mb: 2048,
+				active_threads: 3,
+				max_threads: 4
+			},
+			resources: [
+				{
+					sampled_at: '2025-01-01T00:00:01Z',
+					cpu_percent: 60,
+					memory_mb: 512,
+					memory_limit_mb: 2048,
+					active_threads: 3,
+					max_threads: 4
+				}
+			],
+			logs: [],
+			results: [],
+			duration_ms: null,
+			error: null
+		};
+
+		store.applySnapshot(detail);
+		expect(store.resourceConfig).not.toBeNull();
+		expect(store.resourceConfig!.max_threads).toBe(4);
+		expect(store.resourceConfig!.max_memory_mb).toBe(2048);
+		expect(store.resourceConfig!.streaming_chunk_size).toBe(10000);
+		expect(store.resourceHistory).toHaveLength(1);
+		expect(store.resourceHistory[0].cpu_percent).toBe(60);
+	});
+
+	test('reset clears resourceHistory and resourceConfig', () => {
+		const store = new BuildStreamStore();
+		store.start({});
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+
+		msg(socket, {
+			type: 'resources',
+			cpu_percent: 50,
+			memory_mb: 256,
+			memory_limit_mb: 1024,
+			active_threads: 2,
+			max_threads: 8
+		});
+
+		expect(store.resourceHistory).toHaveLength(1);
+		store.reset();
+		expect(store.resourceHistory).toEqual([]);
+		expect(store.resourceConfig).toBeNull();
 	});
 });

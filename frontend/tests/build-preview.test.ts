@@ -68,10 +68,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });
 
-			const terminal = preview
-				.getByText('Complete', { exact: true })
-				.or(preview.getByText('Failed', { exact: true }));
-			await expect(terminal).toBeVisible({ timeout: 60_000 });
+			await expect(preview.getByText('Complete', { exact: true })).toBeVisible({ timeout: 60_000 });
 
 			await screenshot(page, 'build-preview', 'real-build-complete-with-steps');
 
@@ -84,7 +81,6 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const results = page.locator('[data-testid="build-results"]');
 			await expect(results).toBeVisible({ timeout: 5_000 });
 			await expect(results.getByText('Source 1')).toBeVisible();
-
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);
@@ -113,7 +109,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 			await expect(closeBtn).toBeVisible();
 			await closeBtn.click();
 
-			await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5_000 });
+			await expect(preview).not.toBeVisible({ timeout: 5_000 });
 
 			await screenshot(page, 'build-preview', 'real-build-modal-closed');
 		} finally {

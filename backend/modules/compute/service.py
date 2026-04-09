@@ -55,9 +55,11 @@ def _resource_summary(engine) -> dict[str, int | None]:
     effective = engine.effective_resources if getattr(engine, 'effective_resources', None) else {}
     max_threads = effective.get('max_threads')
     max_memory_mb = effective.get('max_memory_mb')
+    streaming_chunk_size = effective.get('streaming_chunk_size')
     return {
         'max_threads': int(max_threads) if isinstance(max_threads, int) else None,
         'max_memory_mb': int(max_memory_mb) if isinstance(max_memory_mb, int) else None,
+        'streaming_chunk_size': int(streaming_chunk_size) if isinstance(streaming_chunk_size, int) else None,
     }
 
 
@@ -1683,11 +1685,22 @@ async def _stream_engine_events(
     emitter: BuildEmitter | None,
 ) -> None:
     completed_steps = build_step_base
+    draining = False
+    drain_deadline: float | None = None
     while True:
-        event = await asyncio.to_thread(engine.get_progress_event, 0.2, job_id)
+        poll_timeout = 0.2 if not draining else 0.05
+        event = await asyncio.to_thread(engine.get_progress_event, poll_timeout, job_id)
         if event is None:
+            if draining:
+                if drain_deadline is None:
+                    drain_deadline = time.monotonic() + 0.5
+                if time.monotonic() >= drain_deadline:
+                    return
+                continue
             if engine.current_job_id != job_id:
-                return
+                draining = True
+                drain_deadline = time.monotonic() + 0.5
+                continue
             continue
 
         payload = dict(event.event)
@@ -1787,7 +1800,58 @@ def _schedule_stream_tasks(
     return progress_task, resource_task
 
 
-async def _stop_resource_task(task: asyncio.Task | None) -> None:
+def _start_stream_tasks(
+    loop: asyncio.AbstractEventLoop,
+    *,
+    engine,
+    job_id: str,
+    build_step_base: int,
+    total_steps: int,
+    started_perf: float,
+    tab_id: str | None,
+    tab_name: str | None,
+    emitter: BuildEmitter | None,
+    build: ActiveBuild,
+) -> tuple[asyncio.Task | None, asyncio.Task | None]:
+    build.resource_config = compute_schemas.BuildResourceConfigSummary.model_validate(_resource_summary(engine))
+    if loop.is_closed() or not loop.is_running():
+        logger.warning('Skipping build stream tasks for job %s because the event loop is unavailable', job_id)
+        return None, None
+
+    future: concurrent.futures.Future[tuple[asyncio.Task, asyncio.Task]] = concurrent.futures.Future()
+
+    def assign() -> None:
+        try:
+            future.set_result(
+                _schedule_stream_tasks(
+                    loop,
+                    engine=engine,
+                    job_id=job_id,
+                    build_step_base=build_step_base,
+                    total_steps=total_steps,
+                    started_perf=started_perf,
+                    tab_id=tab_id,
+                    tab_name=tab_name,
+                    emitter=emitter,
+                )
+            )
+        except Exception as exc:
+            future.set_exception(exc)
+
+    try:
+        loop.call_soon_threadsafe(assign)
+    except RuntimeError as exc:
+        logger.warning('Skipping build stream tasks for job %s because the event loop rejected scheduling: %s', job_id, exc)
+        return None, None
+
+    try:
+        return future.result(timeout=5)
+    except (concurrent.futures.TimeoutError, RuntimeError) as exc:
+        logger.warning('Skipping build stream tasks for job %s because scheduling did not complete: %s', job_id, exc)
+        return None, None
+
+
+async def _stop_stream_task(task: asyncio.Task | None) -> None:
     if task is None:
         return
     task.cancel()
@@ -2020,28 +2084,18 @@ async def run_analysis_build_stream(
                 engine = info.get('engine')
                 if not isinstance(job_id, str) or engine is None:
                     return
-                future = concurrent.futures.Future[tuple[asyncio.Task, asyncio.Task]]()
-
-                def assign() -> None:
-                    try:
-                        future.set_result(
-                            _schedule_stream_tasks(
-                                loop,
-                                engine=engine,
-                                job_id=job_id,
-                                build_step_base=current_build_step_base,
-                                total_steps=total_steps,
-                                started_perf=started_perf,
-                                tab_id=current_tab_id,
-                                tab_name=current_tab_name,
-                                emitter=emitter,
-                            )
-                        )
-                    except Exception as exc:
-                        future.set_exception(exc)
-
-                loop.call_soon_threadsafe(assign)
-                next_progress_task, next_resource_task = future.result(timeout=5)
+                next_progress_task, next_resource_task = _start_stream_tasks(
+                    loop,
+                    engine=engine,
+                    job_id=job_id,
+                    build_step_base=current_build_step_base,
+                    total_steps=total_steps,
+                    started_perf=started_perf,
+                    tab_id=current_tab_id,
+                    tab_name=current_tab_name,
+                    emitter=emitter,
+                    build=build,
+                )
                 progress_task = next_progress_task
                 resource_task = next_resource_task
 
@@ -2079,7 +2133,7 @@ async def run_analysis_build_stream(
 
             if progress_task is not None:
                 await progress_task
-            await _stop_resource_task(resource_task)
+            await _stop_stream_task(resource_task)
             if not steps:
                 duration_ms = int((time.perf_counter() - (source_step_started_at or started_perf)) * 1000)
                 await _emit_build_event(
@@ -2119,7 +2173,7 @@ async def run_analysis_build_stream(
             if progress_task is not None:
                 with contextlib.suppress(Exception):
                     await progress_task
-            await _stop_resource_task(resource_task)
+            await _stop_stream_task(resource_task)
             results.append({'tab_id': tab_id, 'tab_name': tab_name, 'status': BuildTabStatus.FAILED, 'error': str(exc)})
             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
             if not steps:

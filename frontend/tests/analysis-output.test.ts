@@ -25,7 +25,7 @@ test.describe('Analyses – output visibility toggle', () => {
 
 			// Without a saved/built output datasource, toggle shows "hidden" (default)
 			// The toggle button is present but not functional until the output datasource exists
-			await expect(toggleBtn).toContainText(/hidden|visible/, { timeout: 5_000 });
+			await expect(toggleBtn).toContainText('hidden', { timeout: 5_000 });
 
 			await screenshot(page, 'analysis/output', 'output-visibility-toggle');
 		} finally {
@@ -339,93 +339,70 @@ test.describe('Analyses – output node persistence', () => {
 	});
 });
 
-// ── Output build flow ───────────────────────────────────────────────────────
+// ── Output build flow (real websocket) ──────────────────────────────────────
 
 test.describe('Analyses – output build flow', () => {
-	test('build button triggers build API and completes', async ({ page, request }) => {
-		test.setTimeout(90_000);
+	test('build button opens BuildPreview and reaches terminal state', async ({ page, request }) => {
+		test.setTimeout(120_000);
 		const dsName = `e2e-build-flow-ds-${uid()}`;
 		const aName = `E2E Build Flow ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
+
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 15_000 });
-
-			// Force HTTP transport so page.route() can intercept compute requests
-			await page.evaluate(() => localStorage.setItem('debug:prefer-http', 'true'));
-
-			// Mock a successful build response so the test is deterministic
-			const mockBody = { analysis_id: aId, results: [{ tab: 'Source 1', status: 'ok' }] };
-			await page.route('**/api/v1/compute/build', (route) => {
-				if (route.request().method() === 'POST') {
-					return route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify(mockBody)
-					});
-				}
-				return route.continue();
-			});
-
+			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
 
-			// Building state should appear
-			await expect(page.locator('[data-testid="output-building"]')).toBeVisible({
-				timeout: 5_000
-			});
+			const preview = page.locator('[data-testid="build-preview"]');
+			await expect(preview).toBeVisible({ timeout: 10_000 });
 
-			// Building state should disappear after mock response resolves
-			await expect(page.locator('[data-testid="output-building"]')).not.toBeVisible({
-				timeout: 15_000
-			});
+			const progressBar = page.locator('[data-testid="build-progress-bar"]');
+			await expect(progressBar).toBeVisible();
 
-			// No error should be visible
-			await expect(page.locator('[data-testid="output-build-error"]')).not.toBeVisible();
+			const terminal = preview
+				.getByText('Complete', { exact: true })
+				.or(preview.getByText('Failed', { exact: true }));
+			await expect(terminal).toBeVisible({ timeout: 60_000 });
 
 			await screenshot(page, 'analysis/output', 'output-build-success');
 		} finally {
-			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
 
-	test('build API failure shows error on output node', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const dsName = `e2e-build-err-ds-${uid()}`;
-		const aName = `E2E Build Error ${uid()}`;
+	test('BuildPreview shows steps panel after completion', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const dsName = `e2e-build-steps-ds-${uid()}`;
+		const aName = `E2E Build Steps ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
 		const aId = await createAnalysis(request, aName, dsId);
 		try {
 			await page.goto(`/analysis/${aId}`);
+			await waitForLayoutReady(page);
+			await expect(page.locator('[role="application"]')).toBeVisible({ timeout: 15_000 });
+
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
-			await expect(buildBtn).toBeVisible({ timeout: 15_000 });
-
-			// Force HTTP transport so page.route() can intercept compute requests
-			await page.evaluate(() => localStorage.setItem('debug:prefer-http', 'true'));
-
-			// Intercept build API to return 500
-			await page.route('**/api/v1/compute/build', (route) => {
-				if (route.request().method() === 'POST') {
-					return route.fulfill({
-						status: 500,
-						contentType: 'application/json',
-						body: JSON.stringify({ detail: 'Simulated build failure' })
-					});
-				}
-				return route.continue();
-			});
-
+			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
 
-			// Error should appear on output node
-			await expect(page.locator('[data-testid="output-build-error"]')).toBeVisible({
-				timeout: 15_000
-			});
+			const preview = page.locator('[data-testid="build-preview"]');
+			await expect(preview).toBeVisible({ timeout: 10_000 });
 
-			await screenshot(page, 'analysis/output', 'output-build-error');
+			await expect(preview.getByText('Complete', { exact: true })).toBeVisible({ timeout: 60_000 });
+
+			const stepsPanel = page.locator('[data-testid="build-steps-panel"]');
+			await expect(stepsPanel).toBeVisible({ timeout: 5_000 });
+
+			const results = page.locator('[data-testid="build-results"]');
+			await expect(results).toBeVisible({ timeout: 5_000 });
+			await expect(results.getByText('Source 1')).toBeVisible();
+
+			await screenshot(page, 'analysis/output', 'output-build-steps');
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);

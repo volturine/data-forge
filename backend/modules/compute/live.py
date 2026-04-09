@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from collections import deque
@@ -19,6 +20,14 @@ _MAX_RESOURCES = 60
 _MAX_EVENTS = 500
 _MAX_FINISHED_BUILDS = 100
 _FINISHED_BUILD_TTL_SECONDS = 900
+_LOG_MESSAGE_MAX = 4000
+_EVENT_INTERVAL_SECONDS = {
+    schemas.BuildEventType.PROGRESS.value: 0.1,
+    schemas.BuildEventType.RESOURCES.value: 0.5,
+    schemas.BuildEventType.LOG.value: 0.05,
+}
+_ANSI_RE = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+_CONTROL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 
 def _utcnow() -> datetime:
@@ -47,6 +56,58 @@ def _safe_str(value: object) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _sanitize_log_message(value: object) -> str:
+    if not isinstance(value, str):
+        return ''
+    text = _ANSI_RE.sub('', value)
+    text = _CONTROL_RE.sub('', text)
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = '\n'.join(line.rstrip() for line in text.split('\n'))
+    text = text.strip()
+    if len(text) <= _LOG_MESSAGE_MAX:
+        return text
+    return text[: _LOG_MESSAGE_MAX - 1] + '…'
+
+
+def _normalize_payload(payload: dict) -> dict:
+    normalized = dict(payload)
+    event_type = _safe_str(normalized.get('type'))
+    if event_type == schemas.BuildEventType.LOG.value:
+        normalized['message'] = _sanitize_log_message(normalized.get('message'))
+    return normalized
+
+
+def _should_throttle(build: ActiveBuild, payload: dict) -> bool:
+    event_type = _safe_str(payload.get('type'))
+    if event_type is None:
+        return False
+    min_interval = _EVENT_INTERVAL_SECONDS.get(event_type)
+    if min_interval is None:
+        return False
+    now = time.monotonic()
+    last = build.last_event_sent_at.get(event_type)
+    if last is None or now - last >= min_interval:
+        build.last_event_sent_at[event_type] = now
+        return False
+    build.last_throttled_event[event_type] = payload
+    return True
+
+
+def _consume_throttled(build: ActiveBuild, payload: dict) -> list[dict]:
+    event_type = _safe_str(payload.get('type'))
+    if event_type is None:
+        return []
+    if event_type in {schemas.BuildEventType.COMPLETE.value, schemas.BuildEventType.FAILED.value}:
+        queued = list(build.last_throttled_event.values())
+        build.last_throttled_event.clear()
+        return queued
+    delayed = build.last_throttled_event.pop(event_type, None)
+    if delayed is None:
+        return []
+    build.last_event_sent_at[event_type] = time.monotonic()
+    return [delayed]
 
 
 def _coerce_level(value: object) -> schemas.BuildLogLevel:
@@ -101,6 +162,9 @@ class ActiveBuild:
     events: deque[dict] = field(default_factory=lambda: deque(maxlen=_MAX_EVENTS))
     perf_started_at: float = field(default_factory=time.perf_counter)
     last_emitted_at: float = field(default_factory=time.monotonic)
+    resource_config: schemas.BuildResourceConfigSummary | None = None
+    last_event_sent_at: dict[str, float] = field(default_factory=dict)
+    last_throttled_event: dict[str, dict] = field(default_factory=dict)
 
     def add_event(self, payload: dict) -> None:
         self.updated_at = _utcnow()
@@ -161,6 +225,7 @@ class ActiveBuild:
             status=self.status,
             started_at=self.started_at,
             starter=self.starter,
+            resource_config=self.resource_config,
             progress=self.progress,
             elapsed_ms=self.elapsed_ms,
             estimated_remaining_ms=self.estimated_remaining_ms,
@@ -253,21 +318,28 @@ class ActiveBuildRegistry:
             build = self._builds.get(build_id)
             if build is None:
                 return
-            build.add_event(payload)
+            normalized = _normalize_payload(payload)
+            build.add_event(normalized)
+            if _should_throttle(build, normalized):
+                return
+            queued = _consume_throttled(build, normalized)
+            outbound = [*queued, normalized]
             sockets = list(self._watchers.get(build_id, set()))
             list_sockets = list(self._list_watchers.get(build.namespace, set()))
         stale: list[WebSocket] = []
-        for websocket in sockets:
-            try:
-                await websocket.send_json(payload)
-            except Exception:
-                stale.append(websocket)
+        for message in outbound:
+            for websocket in sockets:
+                try:
+                    await websocket.send_json(message)
+                except Exception:
+                    stale.append(websocket)
         stale_lists: list[WebSocket] = []
-        for websocket in list_sockets:
-            try:
-                await websocket.send_json(payload)
-            except Exception:
-                stale_lists.append(websocket)
+        for message in outbound:
+            for websocket in list_sockets:
+                try:
+                    await websocket.send_json(message)
+                except Exception:
+                    stale_lists.append(websocket)
         if not stale and not stale_lists:
             return
         async with self._lock:
@@ -279,7 +351,7 @@ class ActiveBuildRegistry:
             if list_watchers:
                 for websocket in stale_lists:
                     list_watchers.discard(websocket)
-            event_type = _safe_str(payload.get('type'))
+            event_type = _safe_str(normalized.get('type'))
             if event_type in {schemas.BuildEventType.COMPLETE.value, schemas.BuildEventType.FAILED.value}:
                 self._prune_finished_locked()
 
@@ -299,123 +371,126 @@ class ActiveBuildRegistry:
             build = self._builds.get(build_id)
             if build is None:
                 return None
-            event_type = _safe_str(payload.get('type'))
-            build.current_tab_id = _safe_str(payload.get('tab_id')) or build.current_tab_id
-            build.current_tab_name = _safe_str(payload.get('tab_name')) or build.current_tab_name
+            normalized = _normalize_payload(payload)
+            event_type = _safe_str(normalized.get('type'))
+            build.current_tab_id = _safe_str(normalized.get('tab_id')) or build.current_tab_id
+            build.current_tab_name = _safe_str(normalized.get('tab_name')) or build.current_tab_name
             if event_type == schemas.BuildEventType.PLAN.value:
-                optimized = _safe_str(payload.get('optimized_plan')) or ''
-                unoptimized = _safe_str(payload.get('unoptimized_plan')) or ''
+                optimized = _safe_str(normalized.get('optimized_plan')) or ''
+                unoptimized = _safe_str(normalized.get('unoptimized_plan')) or ''
                 build.add_query_plan(
                     schemas.BuildQueryPlanSnapshot(
-                        tab_id=_safe_str(payload.get('tab_id')),
-                        tab_name=_safe_str(payload.get('tab_name')),
+                        tab_id=_safe_str(normalized.get('tab_id')),
+                        tab_name=_safe_str(normalized.get('tab_name')),
                         optimized_plan=optimized,
                         unoptimized_plan=unoptimized,
                     )
                 )
             if event_type == schemas.BuildEventType.STEP_START.value:
                 snapshot = schemas.BuildStepSnapshot(
-                    build_step_index=_safe_int(payload.get('build_step_index')) or 0,
-                    step_index=_safe_int(payload.get('step_index')) or 0,
-                    step_id=_safe_str(payload.get('step_id')) or 'unknown',
-                    step_name=_safe_str(payload.get('step_name')) or 'Unnamed step',
-                    step_type=_safe_str(payload.get('step_type')) or 'unknown',
-                    tab_id=_safe_str(payload.get('tab_id')),
-                    tab_name=_safe_str(payload.get('tab_name')),
+                    build_step_index=_safe_int(normalized.get('build_step_index')) or 0,
+                    step_index=_safe_int(normalized.get('step_index')) or 0,
+                    step_id=_safe_str(normalized.get('step_id')) or 'unknown',
+                    step_name=_safe_str(normalized.get('step_name')) or 'Unnamed step',
+                    step_type=_safe_str(normalized.get('step_type')) or 'unknown',
+                    tab_id=_safe_str(normalized.get('tab_id')),
+                    tab_name=_safe_str(normalized.get('tab_name')),
                     state=schemas.BuildStepState.RUNNING,
                 )
                 build.upsert_step(snapshot)
             if event_type == schemas.BuildEventType.STEP_COMPLETE.value:
                 snapshot = schemas.BuildStepSnapshot(
-                    build_step_index=_safe_int(payload.get('build_step_index')) or 0,
-                    step_index=_safe_int(payload.get('step_index')) or 0,
-                    step_id=_safe_str(payload.get('step_id')) or 'unknown',
-                    step_name=_safe_str(payload.get('step_name')) or 'Unnamed step',
-                    step_type=_safe_str(payload.get('step_type')) or 'unknown',
-                    tab_id=_safe_str(payload.get('tab_id')),
-                    tab_name=_safe_str(payload.get('tab_name')),
+                    build_step_index=_safe_int(normalized.get('build_step_index')) or 0,
+                    step_index=_safe_int(normalized.get('step_index')) or 0,
+                    step_id=_safe_str(normalized.get('step_id')) or 'unknown',
+                    step_name=_safe_str(normalized.get('step_name')) or 'Unnamed step',
+                    step_type=_safe_str(normalized.get('step_type')) or 'unknown',
+                    tab_id=_safe_str(normalized.get('tab_id')),
+                    tab_name=_safe_str(normalized.get('tab_name')),
                     state=schemas.BuildStepState.COMPLETED,
-                    duration_ms=_safe_int(payload.get('duration_ms')),
-                    row_count=_safe_int(payload.get('row_count')),
+                    duration_ms=_safe_int(normalized.get('duration_ms')),
+                    row_count=_safe_int(normalized.get('row_count')),
                 )
                 build.upsert_step(snapshot)
             if event_type == schemas.BuildEventType.STEP_FAILED.value:
                 snapshot = schemas.BuildStepSnapshot(
-                    build_step_index=_safe_int(payload.get('build_step_index')) or 0,
-                    step_index=_safe_int(payload.get('step_index')) or 0,
-                    step_id=_safe_str(payload.get('step_id')) or 'unknown',
-                    step_name=_safe_str(payload.get('step_name')) or 'Unnamed step',
-                    step_type=_safe_str(payload.get('step_type')) or 'unknown',
-                    tab_id=_safe_str(payload.get('tab_id')),
-                    tab_name=_safe_str(payload.get('tab_name')),
+                    build_step_index=_safe_int(normalized.get('build_step_index')) or 0,
+                    step_index=_safe_int(normalized.get('step_index')) or 0,
+                    step_id=_safe_str(normalized.get('step_id')) or 'unknown',
+                    step_name=_safe_str(normalized.get('step_name')) or 'Unnamed step',
+                    step_type=_safe_str(normalized.get('step_type')) or 'unknown',
+                    tab_id=_safe_str(normalized.get('tab_id')),
+                    tab_name=_safe_str(normalized.get('tab_name')),
                     state=schemas.BuildStepState.FAILED,
-                    error=_safe_str(payload.get('error')),
+                    error=_safe_str(normalized.get('error')),
                 )
                 build.upsert_step(snapshot)
             if event_type == schemas.BuildEventType.PROGRESS.value:
                 build.update_progress(
-                    progress=_safe_float(payload.get('progress')),
-                    elapsed_ms=_safe_int(payload.get('elapsed_ms')) or build.elapsed_ms,
-                    estimated_remaining_ms=_safe_int(payload.get('estimated_remaining_ms')),
-                    current_step=_safe_str(payload.get('current_step')),
-                    current_step_index=_safe_int(payload.get('current_step_index')),
-                    total_steps=_safe_int(payload.get('total_steps')) or build.total_steps,
+                    progress=_safe_float(normalized.get('progress')),
+                    elapsed_ms=_safe_int(normalized.get('elapsed_ms')) or build.elapsed_ms,
+                    estimated_remaining_ms=_safe_int(normalized.get('estimated_remaining_ms')),
+                    current_step=_safe_str(normalized.get('current_step')),
+                    current_step_index=_safe_int(normalized.get('current_step_index')),
+                    total_steps=_safe_int(normalized.get('total_steps')) or build.total_steps,
                 )
             if event_type == schemas.BuildEventType.RESOURCES.value:
                 build.add_resource(
                     schemas.BuildResourceSnapshot(
                         sampled_at=_utcnow(),
-                        cpu_percent=_safe_float(payload.get('cpu_percent')),
-                        memory_mb=_safe_float(payload.get('memory_mb')),
-                        memory_limit_mb=_safe_float(payload.get('memory_limit_mb')) if payload.get('memory_limit_mb') is not None else None,
-                        active_threads=_safe_int(payload.get('active_threads')) or 0,
-                        max_threads=_safe_int(payload.get('max_threads')),
+                        cpu_percent=_safe_float(normalized.get('cpu_percent')),
+                        memory_mb=_safe_float(normalized.get('memory_mb')),
+                        memory_limit_mb=_safe_float(normalized.get('memory_limit_mb'))
+                        if normalized.get('memory_limit_mb') is not None
+                        else None,
+                        active_threads=_safe_int(normalized.get('active_threads')) or 0,
+                        max_threads=_safe_int(normalized.get('max_threads')),
                     )
                 )
             if event_type == schemas.BuildEventType.LOG.value:
                 build.add_log(
                     schemas.BuildLogEntry(
                         timestamp=_utcnow(),
-                        level=_coerce_level(payload.get('level')),
-                        message=_safe_str(payload.get('message')) or '',
-                        step_name=_safe_str(payload.get('step_name')),
-                        step_id=_safe_str(payload.get('step_id')),
-                        tab_id=_safe_str(payload.get('tab_id')),
-                        tab_name=_safe_str(payload.get('tab_name')),
+                        level=_coerce_level(normalized.get('level')),
+                        message=_safe_str(normalized.get('message')) or '',
+                        step_name=_safe_str(normalized.get('step_name')),
+                        step_id=_safe_str(normalized.get('step_id')),
+                        tab_id=_safe_str(normalized.get('tab_id')),
+                        tab_name=_safe_str(normalized.get('tab_name')),
                     )
                 )
             if event_type == schemas.BuildEventType.COMPLETE.value:
                 build.results = [
-                    schemas.BuildTabResult.model_validate(item) for item in payload.get('results', []) if isinstance(item, dict)
+                    schemas.BuildTabResult.model_validate(item) for item in normalized.get('results', []) if isinstance(item, dict)
                 ]
                 build.update_progress(
                     progress=1.0,
-                    elapsed_ms=_safe_int(payload.get('elapsed_ms')) or build.elapsed_ms,
+                    elapsed_ms=_safe_int(normalized.get('elapsed_ms')) or build.elapsed_ms,
                     estimated_remaining_ms=0,
                     current_step=build.current_step,
                     current_step_index=build.current_step_index,
-                    total_steps=_safe_int(payload.get('total_steps')) or build.total_steps,
+                    total_steps=_safe_int(normalized.get('total_steps')) or build.total_steps,
                 )
                 build.update_status(
                     schemas.ActiveBuildStatus.COMPLETED,
-                    duration_ms=_safe_int(payload.get('duration_ms')) or build.elapsed_ms,
+                    duration_ms=_safe_int(normalized.get('duration_ms')) or build.elapsed_ms,
                 )
             if event_type == schemas.BuildEventType.FAILED.value:
                 build.results = [
-                    schemas.BuildTabResult.model_validate(item) for item in payload.get('results', []) if isinstance(item, dict)
+                    schemas.BuildTabResult.model_validate(item) for item in normalized.get('results', []) if isinstance(item, dict)
                 ]
                 build.update_progress(
-                    progress=_safe_float(payload.get('progress'), build.progress),
-                    elapsed_ms=_safe_int(payload.get('elapsed_ms')) or build.elapsed_ms,
+                    progress=_safe_float(normalized.get('progress'), build.progress),
+                    elapsed_ms=_safe_int(normalized.get('elapsed_ms')) or build.elapsed_ms,
                     estimated_remaining_ms=None,
                     current_step=build.current_step,
                     current_step_index=build.current_step_index,
-                    total_steps=_safe_int(payload.get('total_steps')) or build.total_steps,
+                    total_steps=_safe_int(normalized.get('total_steps')) or build.total_steps,
                 )
                 build.update_status(
                     schemas.ActiveBuildStatus.FAILED,
-                    duration_ms=_safe_int(payload.get('duration_ms')) or build.elapsed_ms,
-                    error=_safe_str(payload.get('error')),
+                    duration_ms=_safe_int(normalized.get('duration_ms')) or build.elapsed_ms,
+                    error=_safe_str(normalized.get('error')),
                 )
             return build
 

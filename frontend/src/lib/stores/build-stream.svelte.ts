@@ -4,6 +4,7 @@ import type {
 	StepInfo,
 	BuildTabResult,
 	BuildResourceSnapshot,
+	BuildResourceConfigSummary,
 	BuildLogEntry,
 	ActiveBuildDetail,
 	QueryPlan,
@@ -12,6 +13,7 @@ import type {
 import { connectBuildStream } from '$lib/api/build-stream';
 
 const MAX_LOGS = 500;
+const MAX_RESOURCE_HISTORY = 120;
 
 function wireStepState(raw: string): BuildStepState {
 	if (
@@ -40,6 +42,8 @@ export class BuildStreamStore {
 	logs = $state<BuildLogEntry[]>([]);
 	queryPlans = $state<QueryPlan[]>([]);
 	latestResources = $state<BuildResourceSnapshot | null>(null);
+	resourceHistory = $state<BuildResourceSnapshot[]>([]);
+	resourceConfig = $state<BuildResourceConfigSummary | null>(null);
 	results = $state<BuildTabResult[]>([]);
 	error = $state<string | null>(null);
 	duration = $state<number | null>(null);
@@ -94,6 +98,8 @@ export class BuildStreamStore {
 		this.logs = [];
 		this.queryPlans = [];
 		this.latestResources = null;
+		this.resourceHistory = [];
+		this.resourceConfig = null;
 		this.results = [];
 		this.error = null;
 		this.duration = null;
@@ -129,6 +135,8 @@ export class BuildStreamStore {
 			unoptimized: p.unoptimized_plan
 		}));
 		this.latestResources = build.latest_resources ?? null;
+		this.resourceHistory = build.resources ?? [];
+		this.resourceConfig = build.resource_config ?? null;
 		this.logs = build.logs ?? [];
 		this.results = build.results ?? [];
 		this.duration = build.duration_ms ?? null;
@@ -212,8 +220,8 @@ export class BuildStreamStore {
 				this.totalSteps = event.total_steps;
 				break;
 
-			case 'resources':
-				this.latestResources = {
+			case 'resources': {
+				const snapshot: BuildResourceSnapshot = {
 					sampled_at: event.emitted_at,
 					cpu_percent: event.cpu_percent,
 					memory_mb: event.memory_mb,
@@ -221,7 +229,10 @@ export class BuildStreamStore {
 					active_threads: event.active_threads,
 					max_threads: event.max_threads
 				};
+				this.latestResources = snapshot;
+				this.pushResourceHistory(snapshot);
 				break;
+			}
 
 			case 'log':
 				this.addLog({
@@ -282,5 +293,14 @@ export class BuildStreamStore {
 			return;
 		}
 		this.logs = next;
+	}
+
+	private pushResourceHistory(snapshot: BuildResourceSnapshot): void {
+		const next = [...this.resourceHistory, snapshot];
+		if (next.length > MAX_RESOURCE_HISTORY) {
+			this.resourceHistory = next.slice(next.length - MAX_RESOURCE_HISTORY);
+			return;
+		}
+		this.resourceHistory = next;
 	}
 }

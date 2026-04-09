@@ -367,6 +367,14 @@ class BuildStarter(BaseModel):
     triggered_by: str | None = None
 
 
+class BuildResourceConfigSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    max_threads: int | None = None
+    max_memory_mb: int | None = None
+    streaming_chunk_size: int | None = None
+
+
 class BuildStepSnapshot(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -425,6 +433,7 @@ class ActiveBuildSummary(BaseModel):
     status: ActiveBuildStatus
     started_at: datetime
     starter: BuildStarter
+    resource_config: BuildResourceConfigSummary | None = None
     progress: float = 0.0
     elapsed_ms: int = 0
     estimated_remaining_ms: int | None = None

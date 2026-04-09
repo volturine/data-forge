@@ -155,6 +155,12 @@ export interface BuildStarter {
 	triggered_by: string | null;
 }
 
+export interface BuildResourceConfigSummary {
+	max_threads: number | null;
+	max_memory_mb: number | null;
+	streaming_chunk_size: number | null;
+}
+
 export interface BuildResourceSnapshot {
 	sampled_at: string;
 	cpu_percent: number;
@@ -182,6 +188,7 @@ export interface ActiveBuildSummary {
 	status: string;
 	started_at: string;
 	starter: BuildStarter;
+	resource_config: BuildResourceConfigSummary | null;
 	progress: number;
 	elapsed_ms: number;
 	estimated_remaining_ms: number | null;

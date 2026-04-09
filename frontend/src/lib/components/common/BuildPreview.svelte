@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import type { QueryPlan } from '$lib/types/build-stream';
+	import type { QueryPlan, BuildLogEntry } from '$lib/types/build-stream';
 	import {
 		CheckCircle,
 		XCircle,
@@ -13,7 +13,11 @@
 		Activity,
 		ScrollText,
 		Terminal,
-		AlertTriangle
+		AlertTriangle,
+		Copy,
+		Settings,
+		PauseCircle,
+		PlayCircle
 	} from 'lucide-svelte';
 	import { css, cx, tabButton, chip, row, callout, spinner } from '$lib/styles/panda';
 
@@ -27,15 +31,31 @@
 	let activeTab = $state<PreviewTab>('steps');
 	let logsRef = $state<HTMLElement>();
 	let planView = $state<'optimized' | 'unoptimized'>('optimized');
+	let logLevel = $state<'all' | 'warning' | 'error'>('all');
+	let scrollPaused = $state(false);
+	let copied = $state(false);
+
+	const MEMORY_WARN_THRESHOLD = 80;
 
 	const elapsedSec = $derived(store.elapsed > 0 ? (store.elapsed / 1000).toFixed(1) : '0.0');
 	const remainingSec = $derived(
 		store.remaining !== null && store.remaining > 0 ? (store.remaining / 1000).toFixed(0) : null
 	);
 	const durationSec = $derived(store.duration !== null ? (store.duration / 1000).toFixed(2) : null);
-	const hasResources = $derived(store.latestResources !== null);
+	const hasResources = $derived(store.latestResources !== null || store.resourceConfig !== null);
 	const hasPlans = $derived(store.queryPlans.length > 0);
 	const hasLogs = $derived(store.logs.length > 0);
+
+	const filteredLogs = $derived.by((): BuildLogEntry[] => {
+		if (logLevel === 'all') return store.logs;
+		if (logLevel === 'error') return store.logs.filter((e) => e.level === 'error');
+		return store.logs.filter((e) => e.level === 'warning' || e.level === 'error');
+	});
+
+	const errorLogCount = $derived(store.logs.filter((e) => e.level === 'error').length);
+	const warnLogCount = $derived(
+		store.logs.filter((e) => e.level === 'warning' || e.level === 'error').length
+	);
 
 	const statusLabel = $derived.by(() => {
 		if (store.status === 'connecting') return 'Connecting';
@@ -51,6 +71,8 @@
 		return 'accent' as const;
 	});
 
+	const memoryWarning = $derived(store.memoryPercent > MEMORY_WARN_THRESHOLD);
+
 	const tabSteps = $derived.by(() => {
 		let lastTab: string | null = null;
 		return store.steps.map((step) => {
@@ -60,18 +82,84 @@
 		});
 	});
 
+	const sparklineCpu = $derived(store.resourceHistory.map((r) => r.cpu_percent));
+	const sparklineMem = $derived(
+		store.resourceHistory.map((r) => {
+			if (!r.memory_limit_mb || r.memory_limit_mb <= 0) return 0;
+			return (r.memory_mb / r.memory_limit_mb) * 100;
+		})
+	);
+
 	function planText(plan: QueryPlan): string {
 		if (planView === 'optimized') return plan.optimized;
 		return plan.unoptimized;
 	}
 
-	// DOM: scroll logs to bottom when new entries arrive
+	function handleLogScroll(): void {
+		if (!logsRef) return;
+		const threshold = 30;
+		const atBottom = logsRef.scrollHeight - logsRef.scrollTop - logsRef.clientHeight < threshold;
+		scrollPaused = !atBottom;
+	}
+
+	async function copyLogs(): Promise<void> {
+		const text = filteredLogs
+			.map((e) => `[${e.level}]${e.step_name ? `[${e.step_name}]` : ''} ${e.message}`)
+			.join('\n');
+		await navigator.clipboard.writeText(text);
+		copied = true;
+		setTimeout(() => (copied = false), 2000);
+	}
+
+	function scrollToBottom(): void {
+		if (!logsRef) return;
+		logsRef.scrollTop = logsRef.scrollHeight;
+		scrollPaused = false;
+	}
+
+	function levelColor(level: string): string {
+		if (level === 'error') return 'fg.error';
+		if (level === 'warning') return 'fg.warning';
+		return 'fg.muted';
+	}
+
+	// DOM: scroll logs to bottom when new entries arrive, unless user paused
 	$effect(() => {
-		if (store.logs.length > 0 && logsRef && activeTab === 'logs') {
+		if (store.logs.length > 0 && logsRef && activeTab === 'logs' && !scrollPaused) {
 			logsRef.scrollTop = logsRef.scrollHeight;
 		}
 	});
 </script>
+
+{#snippet sparkline(data: number[], max: number, warn: number)}
+	{@const width = 120}
+	{@const height = 24}
+	{@const count = data.length}
+	{#if count >= 2}
+		{@const step = width / (count - 1)}
+		{@const points = data
+			.map((v, i) => `${i * step},${height - (Math.min(v, max) / max) * height}`)
+			.join(' ')}
+		{@const warnY = height - (warn / max) * height}
+		<svg
+			viewBox={`0 0 ${width} ${height}`}
+			class={css({ width: 'full', height: '6' })}
+			preserveAspectRatio="none"
+			data-testid="sparkline"
+		>
+			<line
+				x1="0"
+				y1={warnY}
+				x2={width}
+				y2={warnY}
+				stroke="var(--colors-fg-warning)"
+				stroke-width="0.5"
+				stroke-dasharray="2 2"
+			/>
+			<polyline fill="none" stroke="var(--colors-accent-primary)" stroke-width="1.5" {points} />
+		</svg>
+	{/if}
+{/snippet}
 
 <div
 	class={css({
@@ -84,7 +172,6 @@
 	})}
 	data-testid="build-preview"
 >
-	<!-- Header -->
 	<div
 		class={css({
 			display: 'flex',
@@ -123,7 +210,6 @@
 		<span class={chip({ tone: statusTone })}>{statusLabel}</span>
 	</div>
 
-	<!-- Progress bar -->
 	<div
 		class={css({
 			paddingX: '4',
@@ -190,7 +276,6 @@
 		</div>
 	</div>
 
-	<!-- Tab bar -->
 	<div
 		role="tablist"
 		aria-label="Build details"
@@ -238,6 +323,9 @@
 				<span class={cx(row, css({ gap: '1' }))}>
 					<Activity size={12} />
 					Resources
+					{#if memoryWarning}
+						<AlertTriangle size={10} class={css({ color: 'fg.warning' })} />
+					{/if}
 				</span>
 			</button>
 		{/if}
@@ -258,7 +346,6 @@
 		{/if}
 	</div>
 
-	<!-- Tab panels -->
 	<div class={css({ maxHeight: 'listLg', overflowY: 'auto' })}>
 		{#if activeTab === 'steps'}
 			<div
@@ -466,6 +553,56 @@
 				class={css({ padding: '4' })}
 				data-testid="build-resources-panel"
 			>
+				{#if store.resourceConfig}
+					<div
+						class={cx(
+							row,
+							css({
+								gap: '3',
+								paddingX: '3',
+								paddingY: '2',
+								marginBottom: '3',
+								borderWidth: '1',
+								backgroundColor: 'bg.tertiary',
+								fontSize: 'xs',
+								color: 'fg.muted'
+							})
+						)}
+						data-testid="resource-config-summary"
+					>
+						<Settings size={12} />
+						{#if store.resourceConfig.max_threads !== null}
+							<span>
+								<span class={css({ fontWeight: 'semibold', color: 'fg.secondary' })}>Threads:</span>
+								{store.resourceConfig.max_threads}
+							</span>
+						{/if}
+						{#if store.resourceConfig.max_memory_mb !== null}
+							<span>
+								<span class={css({ fontWeight: 'semibold', color: 'fg.secondary' })}>Memory:</span>
+								{store.resourceConfig.max_memory_mb} MB
+							</span>
+						{/if}
+						{#if store.resourceConfig.streaming_chunk_size !== null}
+							<span>
+								<span class={css({ fontWeight: 'semibold', color: 'fg.secondary' })}>Chunk:</span>
+								{store.resourceConfig.streaming_chunk_size.toLocaleString()}
+							</span>
+						{/if}
+					</div>
+				{/if}
+
+				{#if memoryWarning}
+					<div
+						class={cx(callout({ tone: 'warn' }), css({ marginBottom: '3' }))}
+						data-testid="memory-warning"
+					>
+						<AlertTriangle size={12} />
+						Memory usage at {store.memoryPercent}% of allocated — exceeds {MEMORY_WARN_THRESHOLD}%
+						threshold
+					</div>
+				{/if}
+
 				{#if store.latestResources}
 					<div
 						class={css({
@@ -494,6 +631,9 @@
 							<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 								{store.latestResources.active_threads}/{store.latestResources.max_threads ?? '?'} threads
 							</span>
+							{#if sparklineCpu.length >= 2}
+								{@render sparkline(sparklineCpu, 100, MEMORY_WARN_THRESHOLD)}
+							{/if}
 						</div>
 						<div
 							class={css({
@@ -528,7 +668,7 @@
 												top: '0',
 												left: '0',
 												bottom: '0',
-												backgroundColor: store.memoryPercent > 85 ? 'fg.error' : 'accent.primary'
+												backgroundColor: memoryWarning ? 'fg.error' : 'accent.primary'
 											})}
 											style={`width: ${store.memoryPercent}%`}
 										></div>
@@ -537,6 +677,9 @@
 										{store.memoryPercent}% of {store.latestResources.memory_limit_mb} MB
 									</span>
 								</div>
+							{/if}
+							{#if sparklineMem.length >= 2}
+								{@render sparkline(sparklineMem, 100, MEMORY_WARN_THRESHOLD)}
 							{/if}
 						</div>
 					</div>
@@ -551,7 +694,98 @@
 				data-testid="build-logs-panel"
 			>
 				<div
+					class={cx(
+						row,
+						css({
+							justifyContent: 'space-between',
+							paddingX: '3',
+							paddingY: '2',
+							borderBottomWidth: '1',
+							backgroundColor: 'bg.secondary'
+						})
+					)}
+				>
+					<div class={cx(row, css({ gap: '1' }))} data-testid="log-level-filter">
+						<button
+							type="button"
+							class={tabButton({ active: logLevel === 'all' })}
+							onclick={() => (logLevel = 'all')}
+						>
+							All ({store.logs.length})
+						</button>
+						<button
+							type="button"
+							class={tabButton({ active: logLevel === 'warning' })}
+							onclick={() => (logLevel = 'warning')}
+						>
+							Warn+ ({warnLogCount})
+						</button>
+						<button
+							type="button"
+							class={tabButton({ active: logLevel === 'error' })}
+							onclick={() => (logLevel = 'error')}
+						>
+							Errors ({errorLogCount})
+						</button>
+					</div>
+					<div class={cx(row, css({ gap: '2' }))}>
+						{#if scrollPaused}
+							<button
+								type="button"
+								class={cx(
+									row,
+									css({
+										gap: '1',
+										fontSize: 'xs',
+										color: 'fg.muted',
+										cursor: 'pointer',
+										border: 'none',
+										backgroundColor: 'transparent',
+										_hover: { color: 'fg.secondary' }
+									})
+								)}
+								onclick={scrollToBottom}
+								title="Resume auto-scroll"
+								data-testid="log-resume-scroll"
+							>
+								<PlayCircle size={12} />
+								Resume
+							</button>
+						{:else if store.status === 'running'}
+							<span
+								class={cx(row, css({ gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
+								data-testid="log-auto-scroll"
+							>
+								<PauseCircle size={12} />
+								Auto-scroll
+							</span>
+						{/if}
+						<button
+							type="button"
+							class={cx(
+								row,
+								css({
+									gap: '1',
+									fontSize: 'xs',
+									color: 'fg.muted',
+									cursor: 'pointer',
+									border: 'none',
+									backgroundColor: 'transparent',
+									_hover: { color: 'fg.secondary' }
+								})
+							)}
+							onclick={copyLogs}
+							title="Copy logs to clipboard"
+							data-testid="log-copy"
+						>
+							<Copy size={12} />
+							{copied ? 'Copied' : 'Copy'}
+						</button>
+					</div>
+				</div>
+				<div
 					bind:this={logsRef}
+					onscroll={handleLogScroll}
 					class={css({
 						maxHeight: 'listLg',
 						overflowY: 'auto',
@@ -564,9 +798,9 @@
 						scrollbarColor: '{colors.border.primary} transparent'
 					})}
 				>
-					{#each store.logs as entry, i (i)}
+					{#each filteredLogs as entry, i (i)}
 						<div class={css({ paddingY: '0.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' })}>
-							<span class={css({ color: 'fg.muted' })}>[{entry.level}]</span>
+							<span class={css({ color: levelColor(entry.level) })}>[{entry.level}]</span>
 							{#if entry.step_name}
 								<span class={css({ color: 'fg.faint' })}>[{entry.step_name}]</span>
 							{/if}
@@ -578,7 +812,6 @@
 		{/if}
 	</div>
 
-	<!-- Error callout -->
 	{#if store.error}
 		<div
 			class={cx(callout({ tone: 'error' }), css({ borderTopWidth: '1', margin: '0' }))}
@@ -588,7 +821,6 @@
 		</div>
 	{/if}
 
-	<!-- Results summary -->
 	{#if store.results.length > 0}
 		<div
 			class={css({

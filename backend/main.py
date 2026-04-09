@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -42,6 +43,21 @@ else:
     # In a regular source checkout, the frontend build lives two levels up
     # from backend/main.py at <repo_root>/frontend/build.
     frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
+
+
+def _resolve_uvicorn_workers() -> int:
+    if settings.debug:
+        return 1
+    if settings.workers > 0:
+        return settings.workers
+    cores = os.cpu_count() or 1
+    return max(1, (2 * cores) + 1)
+
+
+def _resolve_uvicorn_limit_concurrency() -> int | None:
+    if settings.worker_connections > 0:
+        return settings.worker_connections
+    return None
 
 
 async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
@@ -380,6 +396,8 @@ if __name__ == '__main__':
         host='0.0.0.0',
         port=settings.port,
         reload=False if _NUITKA_COMPILED else settings.debug,
+        workers=_resolve_uvicorn_workers(),
+        limit_concurrency=_resolve_uvicorn_limit_concurrency(),
         log_level=settings.log_level,
         access_log=settings.uvicorn_access_log,
     )
