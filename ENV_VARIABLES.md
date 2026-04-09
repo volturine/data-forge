@@ -2,8 +2,8 @@
 
 This project uses environment variables for three different layers:
 
-1. **Backend runtime** — loaded by `/home/runner/work/polars-fastapi-svelte/polars-fastapi-svelte/backend/core/config.py`
-2. **Frontend dev server** — loaded by Vite from `/home/runner/work/polars-fastapi-svelte/polars-fastapi-svelte/frontend/.env*`
+1. **Backend runtime** — loaded by `backend/core/config.py`
+2. **Frontend dev server** — loaded by Vite from `frontend/.env*`
 3. **Local e2e tooling** — optional overrides for Playwright
 
 ## What to configure first
