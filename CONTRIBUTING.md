@@ -4,7 +4,6 @@ First off, thank you for considering contributing to Data-Forge! It's people lik
 
 ## Table of Contents
 
-- [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
 - [Development Environment](#development-environment)
 - [How to Contribute](#how-to-contribute)
@@ -13,10 +12,6 @@ First off, thank you for considering contributing to Data-Forge! It's people lik
 - [Testing](#testing)
 - [Documentation](#documentation)
 - [Community](#community)
-
-## Code of Conduct
-
-This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the project maintainers.
 
 ## Getting Started
 
