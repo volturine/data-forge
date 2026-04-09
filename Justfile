@@ -19,7 +19,8 @@ update-deps:
 
 # Run development servers concurrently
 dev:
-    @echo "Starting servers..."
+    #!/usr/bin/env bash
+    set -a; source backend/.env; set +a
     (cd backend && uv run --env-file .env ./main.py) & (cd frontend && bun run dev) & wait
 
 # Format code
@@ -47,7 +48,6 @@ test-e2e:
     trap cleanup EXIT INT TERM
 
     set -a; source backend/e2e.env; set +a
-    export FRONTEND_PORT=3001
     (cd backend && uv run --no-env-file ./main.py) &
     (cd frontend && bun run dev) &
     FRONTEND_PID=$!
@@ -75,7 +75,8 @@ generate-step-types:
 # Full verification gate -- must pass before any task is declared done
 verify: format check
 
-# Build for production
+# Build for production (single-port: FastAPI serves the built frontend)
+# Setup: cp backend/.prod.env.example backend/.prod.env  then edit it.
 prod:
     @echo "Building frontend..."
     cd frontend && bun run build
