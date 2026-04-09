@@ -1,7 +1,7 @@
 import contextlib
 
 from fastapi import Depends, Header, HTTPException, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session
 
 from core.database import get_db
@@ -9,7 +9,8 @@ from core.dependencies import get_manager, get_optional_lock_owner_id
 from core.error_handlers import handle_errors
 from core.validation import AnalysisId, parse_analysis_id
 from modules.analysis import schemas, service
-from modules.analysis.step_schemas import StepType, get_config_model, get_step_catalog
+from modules.analysis.step_schemas import get_config_model, get_step_catalog
+from modules.analysis.step_types import is_step_type
 from modules.auth.dependencies import get_optional_user
 from modules.auth.models import User
 from modules.compute import service as compute_service
@@ -230,15 +231,29 @@ async def preview_analysis(
 
 
 class AddStepBody(BaseModel):
-    type: StepType = Field(description='The step type. Use GET /step-types to see valid types.')
+    type: str = Field(description='The step type. Use GET /step-types to see valid types.')
     config: dict = Field(default_factory=dict, description='Step configuration. Schema depends on step type.')
     position: int | None = Field(None, description='Insert position (0-based index). Omit to append at end.')
     depends_on: list[str] = Field(default_factory=list, description='List of step IDs this step depends on.')
 
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        if not is_step_type(value):
+            raise ValueError(f"Unknown step type '{value}'")
+        return value
+
 
 class UpdateStepBody(BaseModel):
-    type: StepType | None = Field(None, description='New step type. Omit to keep current type.')
+    type: str | None = Field(None, description='New step type. Omit to keep current type.')
     config: dict | None = Field(None, description='New config. Omit to keep current config.')
+
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, value: str | None) -> str | None:
+        if value is not None and not is_step_type(value):
+            raise ValueError(f"Unknown step type '{value}'")
+        return value
 
 
 @router.post('/{analysis_id}/tabs/{tab_id}/steps', mcp=True)

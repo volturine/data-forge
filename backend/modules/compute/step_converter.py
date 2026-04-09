@@ -21,7 +21,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
-from modules.analysis.step_types import ChartType, chart_type_for_step, normalize_step_type
+from modules.analysis.step_types import ChartType, chart_type_for_step, get_step_type_label, normalize_step_type
 from modules.compute.operations.filter import normalize_filter_conditions
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,14 @@ class BackendStep:
     params: dict[str, object]
 
 
+def step_display_name(step_type: str, config: Mapping[str, object]) -> str:
+    if step_type == 'chart':
+        chart_type = config.get('chart_type')
+        if isinstance(chart_type, str) and chart_type:
+            return get_step_type_label(f'plot_{chart_type}')
+    return get_step_type_label(step_type)
+
+
 def get_chart_type_for_step(step_type: str) -> ChartType | None:
     return chart_type_for_step(step_type)
 
@@ -81,7 +89,7 @@ def convert_step_format(frontend_step: Mapping[str, object] | FrontendStep) -> B
     normalized_type = normalize_step_type(step_type)
 
     return BackendStep(
-        name=parsed.id or 'Unknown Step',
+        name=step_display_name(step_type, config),
         operation=normalized_type,
         params=convert_config_to_params(normalized_type, config),
     )

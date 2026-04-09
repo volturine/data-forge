@@ -342,7 +342,10 @@ test.describe('Analyses – output node persistence', () => {
 // ── Output build flow (real websocket) ──────────────────────────────────────
 
 test.describe('Analyses – output build flow', () => {
-	test('build button opens BuildPreview and reaches terminal state', async ({ page, request }) => {
+	test('build button starts the run and BuildPreview opens from the engine status control', async ({
+		page,
+		request
+	}) => {
 		test.setTimeout(120_000);
 		const dsName = `e2e-build-flow-ds-${uid()}`;
 		const aName = `E2E Build Flow ${uid()}`;
@@ -358,6 +361,12 @@ test.describe('Analyses – output build flow', () => {
 			await buildBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
+			await expect(preview).not.toBeVisible();
+
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
+
 			await expect(preview).toBeVisible({ timeout: 10_000 });
 
 			const progressBar = page.locator('[data-testid="build-progress-bar"]');
@@ -389,6 +398,10 @@ test.describe('Analyses – output build flow', () => {
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
+
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });

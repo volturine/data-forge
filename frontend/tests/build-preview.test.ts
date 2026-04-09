@@ -13,7 +13,10 @@ import { screenshot } from './utils/visual.js';
 // ── Real e2e build preview tests (no WS mocking) ───────────────────────────
 
 test.describe('Build Preview – real build lifecycle', () => {
-	test('clicking Build opens the modal and reaches a terminal state', async ({ page, request }) => {
+	test('clicking Build queues the run and the preview opens only from the engine status control', async ({
+		page,
+		request
+	}) => {
 		test.setTimeout(120_000);
 		const dsName = `e2e-bprev-real-ds-${uid()}`;
 		const aName = `E2E BPrev Real ${uid()}`;
@@ -28,8 +31,14 @@ test.describe('Build Preview – real build lifecycle', () => {
 			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
 
-			await expect(page.getByText('Build Preview')).toBeVisible({ timeout: 10_000 });
 			const preview = page.locator('[data-testid="build-preview"]');
+			await expect(preview).not.toBeVisible();
+
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
+
+			await expect(page.getByText('Build Preview')).toBeVisible({ timeout: 10_000 });
 			await expect(preview).toBeVisible({ timeout: 5_000 });
 
 			const closeBtn = page.locator('[aria-label="Close build preview"]');
@@ -64,6 +73,10 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
+
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });
@@ -101,6 +114,10 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
+
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });

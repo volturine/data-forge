@@ -2,7 +2,7 @@ import re
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import defer
@@ -19,7 +19,6 @@ from modules.analysis.schemas import (
     AnalysisUpdateSchema,
 )
 from modules.analysis.step_schemas import validate_step
-from modules.analysis.step_types import StepType
 from modules.analysis_versions import service as version_service
 from modules.datasource.models import DataSource
 
@@ -346,7 +345,7 @@ def add_step(
 
     step = PipelineStep(
         id=str(uuid.uuid4()),
-        type=cast(StepType, step_type),
+        type=step_type,
         config=config,
         depends_on=depends_on or [],
         is_applied=True,
@@ -406,7 +405,7 @@ def update_step(
         raise ValueError(f'Step {step_id} not found')
 
     if step_type is not None:
-        step.type = cast(StepType, step_type)
+        step.type = step_type
     if config is not None:
         step.config = config
 
@@ -471,7 +470,7 @@ def derive_tab(
 
     derived_step = PipelineStep(
         id=str(uuid.uuid4()),
-        type=cast(StepType, 'view'),
+        type='view',
         config={'rowLimit': 100},
         depends_on=[],
         is_applied=True,

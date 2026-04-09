@@ -5,17 +5,24 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from modules.analysis.models import AnalysisStatus
-from modules.analysis.step_schemas import StepType
+from modules.analysis.step_types import is_step_type
 
 
 class PipelineStepSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    type: StepType
+    type: str
     config: dict[str, object]
     depends_on: list[str] = Field(default_factory=list)
     is_applied: bool | None = None
+
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        if not is_step_type(value):
+            raise ValueError(f"Unknown step type '{value}'")
+        return value
 
 
 class TabDatasourceConfig(BaseModel):

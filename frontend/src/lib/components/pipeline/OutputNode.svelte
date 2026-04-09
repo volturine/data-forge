@@ -53,7 +53,7 @@
 	const queryClient = useQueryClient();
 	const buildStore = new BuildStreamStore();
 	let toggling = $state(false);
-	let building = $state(false);
+	let buildStarting = $state(false);
 	let previewOpen = $state(false);
 	let error = $state<string | null>(null);
 	let notifyOpen = $state(false);
@@ -239,6 +239,39 @@
 	);
 
 	const selectedCount = $derived(activeSubscribers.length);
+	const buildBusy = $derived(
+		buildStarting || buildStore.status === 'connecting' || buildStore.status === 'running'
+	);
+	const hasBuildSession = $derived(
+		buildBusy ||
+			buildStore.buildId !== null ||
+			buildStore.status === 'completed' ||
+			buildStore.status === 'failed'
+	);
+	const buildSessionLabel = $derived.by(() => {
+		if (buildBusy) return 'Engine Run';
+		if (buildStore.status === 'completed') return 'Last Build';
+		if (buildStore.status === 'failed') return 'Last Build';
+		return 'Build';
+	});
+	const buildSessionSummary = $derived.by(() => {
+		if (buildBusy) return buildStore.currentStep ?? 'Preparing build';
+		if (buildStore.status === 'completed') {
+			if (buildStore.duration !== null) {
+				return `Completed in ${(buildStore.duration / 1000).toFixed(2)}s`;
+			}
+			return 'Completed';
+		}
+		if (buildStore.status === 'failed') {
+			return buildStore.error ?? 'Build failed';
+		}
+		return 'No build data';
+	});
+
+	function openBuildPreview(): void {
+		if (!hasBuildSession) return;
+		previewOpen = true;
+	}
 
 	function updateOutputConfig(patch: Partial<AnalysisTabOutput>) {
 		if (readOnly) return;
@@ -353,15 +386,15 @@
 	}
 
 	async function handleManualBuild() {
-		if (!analysisId || building || readOnly) return;
-		building = true;
+		if (!analysisId || buildBusy || readOnly) return;
+		buildStarting = true;
 		error = null;
 		ensureOutputConfig();
 
 		const saveResult = await analysisStore.save();
 		if (saveResult.isErr()) {
 			error = saveResult.error.message;
-			building = false;
+			buildStarting = false;
 			return;
 		}
 
@@ -374,20 +407,18 @@
 			error = datasourceStore.loaded
 				? 'Unable to build analysis payload.'
 				: 'Datasources are still loading. Please try again.';
-			building = false;
+			buildStarting = false;
 			return;
 		}
-		previewOpen = true;
 		buildStore.start({
 			analysis_pipeline: pipeline,
 			tab_id: activeTab?.id ?? null
 		});
+		buildStarting = false;
 	}
 
 	function closeBuildPreview() {
 		previewOpen = false;
-		buildStore.close();
-		building = false;
 	}
 
 	const modeMenuOverlayConfig = $derived<OverlayConfig>({
@@ -397,6 +428,13 @@
 			if (modeTriggerRef?.contains(target)) return;
 			modeMenuOpen = false;
 		}
+	});
+
+	// Lifecycle: keep the build stream alive across modal toggles and close it when the node unmounts.
+	$effect(() => {
+		return () => {
+			buildStore.close();
+		};
 	});
 </script>
 
@@ -861,12 +899,12 @@
 					_disabled: { cursor: 'not-allowed', opacity: '0.5' }
 				})}
 				onclick={handleManualBuild}
-				disabled={!analysisId || building || readOnly}
+				disabled={!analysisId || buildBusy || readOnly}
 				title="Run analysis build"
 				type="button"
 				data-testid="output-build-button"
 			>
-				{#if building}
+				{#if buildBusy}
 					<Loader size={14} class={css({ opacity: '0.7' })} />
 					<span data-testid="output-building">building...</span>
 				{:else}
@@ -875,6 +913,86 @@
 				{/if}
 			</button>
 		</div>
+
+		{#if hasBuildSession}
+			<div class={css({ marginX: '4', marginBottom: '3' })}>
+				<button
+					type="button"
+					class={css({
+						display: 'flex',
+						width: '100%',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						gap: '3',
+						cursor: 'pointer',
+						borderWidth: '1',
+						backgroundColor: buildBusy ? 'bg.accent' : 'bg.secondary',
+						paddingX: '3',
+						paddingY: '2.5',
+						textAlign: 'left',
+						_hover: { backgroundColor: 'bg.hover' }
+					})}
+					onclick={openBuildPreview}
+					data-testid="output-build-preview-trigger"
+					aria-label="Open build preview"
+				>
+					<div class={css({ display: 'flex', minWidth: '0', alignItems: 'center', gap: '2.5' })}>
+						{#if buildBusy}
+							<Loader
+								size={14}
+								class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
+							/>
+						{:else if buildStore.status === 'completed'}
+							<Check size={14} class={css({ color: 'fg.success' })} />
+						{:else}
+							<X size={14} class={css({ color: 'fg.error' })} />
+						{/if}
+						<div
+							class={css({ display: 'flex', minWidth: '0', flexDirection: 'column', gap: '0.5' })}
+						>
+							<span
+								class={css({
+									fontSize: '2xs',
+									textTransform: 'uppercase',
+									letterSpacing: 'wide',
+									color: 'fg.muted'
+								})}
+							>
+								{buildSessionLabel}
+							</span>
+							<span
+								class={css({
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+									fontSize: 'sm',
+									fontWeight: 'medium'
+								})}
+								title={buildSessionSummary}
+							>
+								{buildSessionSummary}
+							</span>
+						</div>
+					</div>
+					<div
+						class={css({
+							display: 'flex',
+							flexShrink: '0',
+							alignItems: 'center',
+							gap: '2',
+							fontSize: 'xs',
+							color: 'fg.muted'
+						})}
+					>
+						{#if buildStore.buildId}
+							<span class={css({ fontFamily: 'mono' })}>{buildStore.buildId.slice(0, 8)}</span>
+						{/if}
+						<span>{buildBusy ? 'Open live view' : 'Open details'}</span>
+						<ChevronRight size={12} />
+					</div>
+				</button>
+			</div>
+		{/if}
 
 		<!-- Collapsible Sections -->
 		<div

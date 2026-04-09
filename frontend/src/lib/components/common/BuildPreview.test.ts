@@ -222,6 +222,29 @@ describe('BuildPreview', () => {
 			expect(screen.getByText('100ms')).toBeInTheDocument();
 		});
 
+		test('falls back to a human label when the backend only sends a step id', () => {
+			renderPreview(
+				makeDetail({
+					steps: [
+						{
+							build_step_index: 0,
+							step_index: 0,
+							step_id: 's1',
+							step_name: 'b4637b15-879b-4688-bc62-914303e091dc',
+							step_type: 'filter',
+							tab_id: null,
+							tab_name: null,
+							state: 'completed',
+							duration_ms: 100,
+							row_count: null,
+							error: null
+						}
+					]
+				})
+			);
+			expect(screen.getByText('Filter')).toBeInTheDocument();
+		});
+
 		test('shows step error text', () => {
 			renderPreview(
 				makeDetail({
@@ -288,7 +311,8 @@ describe('BuildPreview', () => {
 			const panel = screen.getByTestId('build-resources-panel');
 			expect(within(panel).getByText('78.5%')).toBeInTheDocument();
 			expect(within(panel).getByText('512 MB')).toBeInTheDocument();
-			expect(within(panel).getByText('4/8 threads')).toBeInTheDocument();
+			expect(within(panel).getByText('4/8 threads in use')).toBeInTheDocument();
+			expect(within(panel).getByText('Share of allocated CPU capacity')).toBeInTheDocument();
 		});
 
 		test('shows memory warning when above 80%', async () => {

@@ -619,9 +619,10 @@ test.describe('Monitoring – Active Builds section', () => {
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
-			await expect(page.locator('[data-testid="build-preview"]')).toBeVisible({
-				timeout: 10_000
-			});
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
+			await expect(page.locator('[data-testid="build-preview"]')).toBeVisible({ timeout: 10_000 });
 
 			const activeBuild = monitorPage.locator('[data-testid^="active-build-"]').first();
 			const buildAppeared = await activeBuild
@@ -667,6 +668,10 @@ test.describe('Monitoring – Active Builds section', () => {
 			const buildBtn = page.locator('[data-testid="output-build-button"]');
 			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
 			await buildBtn.click();
+
+			const openPreviewBtn = page.locator('[data-testid="output-build-preview-trigger"]');
+			await expect(openPreviewBtn).toBeVisible({ timeout: 10_000 });
+			await openPreviewBtn.click();
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });

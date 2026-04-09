@@ -108,7 +108,7 @@ def test_convert_step_format_returns_frozen_backend_step_dataclass() -> None:
 
     assert isinstance(step, BackendStep)
     assert dataclasses.is_dataclass(step)
-    assert step.name == 'step-1'
+    assert step.name == 'Scatter Plot'
     assert step.operation == 'chart'
     assert step.params['chart_type'] == 'scatter'
 

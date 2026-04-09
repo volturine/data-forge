@@ -20,6 +20,7 @@
 		PlayCircle
 	} from 'lucide-svelte';
 	import { css, cx, tabButton, chip, callout, spinner } from '$lib/styles/panda';
+	import { buildStepLabel } from '$lib/utils/build-step-label';
 
 	interface Props {
 		store: BuildStreamStore;
@@ -447,12 +448,12 @@
 										overflow: 'hidden',
 										textOverflow: 'ellipsis',
 										whiteSpace: 'nowrap',
-										fontFamily: 'mono',
-										fontSize: 'xs'
+										fontSize: 'sm',
+										fontWeight: 'medium'
 									})}
-									title={step.name}
+									title={buildStepLabel(step.name, step.stepType)}
 								>
-									{step.name}
+									{buildStepLabel(step.name, step.stepType)}
 								</span>
 								{#if step.rowCount !== null}
 									<span
@@ -631,6 +632,10 @@
 							</span>
 							<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
 								{store.latestResources.active_threads}/{store.latestResources.max_threads ?? '?'} threads
+								in use
+							</span>
+							<span class={css({ fontSize: '2xs', color: 'fg.faint' })}>
+								Share of allocated CPU capacity
 							</span>
 							{#if sparklineCpu.length >= 2}
 								{@render sparkline(sparklineCpu, 100, MEMORY_WARN_THRESHOLD)}

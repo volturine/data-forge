@@ -30,9 +30,10 @@
 		compact?: boolean;
 		searchQuery?: string;
 		showPreviews?: boolean;
+		embedded?: boolean;
 	}
 
-	let { compact = false, searchQuery, showPreviews = false }: Props = $props();
+	let { compact = false, searchQuery, showPreviews = false, embedded = false }: Props = $props();
 
 	let search = $state('');
 	const effectiveSearch = $derived(searchQuery ?? search);
@@ -320,7 +321,7 @@
 		css({ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' })
 	)}
 >
-	{#if !compact}
+	{#if !compact && !embedded}
 		<header
 			class={css({
 				marginBottom: '6',

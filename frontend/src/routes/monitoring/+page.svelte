@@ -125,10 +125,10 @@
 			id="panel-builds"
 			role="tabpanel"
 			aria-labelledby="tab-builds"
-			class={css({ marginTop: '4', display: 'flex', flexDirection: 'column', gap: '6' })}
+			class={css({ marginTop: '4', display: 'flex', flexDirection: 'column', gap: '4' })}
 		>
 			<ActiveBuilds searchQuery={search} />
-			<BuildsManager searchQuery={search} {showPreviews} />
+			<BuildsManager searchQuery={search} {showPreviews} embedded />
 		</div>
 	{:else if activeTab === 'schedules'}
 		<div
