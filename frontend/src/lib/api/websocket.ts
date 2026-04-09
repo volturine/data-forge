@@ -17,10 +17,22 @@ type WebsocketMessage<T> =
 			status_code?: number;
 	  };
 
+const DEV_BACKEND_PORT = '8000';
+const DEV_FRONTEND_PORT = '3000';
 const DEV_CONNECT_TIMEOUT_MS = 500;
 
+function resolveDevBackendHost(): string {
+	const explicitHost = import.meta.env.VITE_BACKEND_HOST;
+	if (typeof explicitHost === 'string' && explicitHost.trim().length > 0) {
+		return explicitHost.trim();
+	}
+	return window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+}
+
 function resolveWebsocketOrigin(): string {
-	return window.location.origin;
+	if (!import.meta.env.DEV) return window.location.origin;
+	if (window.location.port !== DEV_FRONTEND_PORT) return window.location.origin;
+	return `${window.location.protocol}//${resolveDevBackendHost()}:${DEV_BACKEND_PORT}`;
 }
 
 export function buildWebsocketUrl(endpoint: string): string {
