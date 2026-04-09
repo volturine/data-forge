@@ -366,7 +366,8 @@
 		const pipeline = buildAnalysisPipelinePayload(
 			analysisId,
 			analysisStore.tabs,
-			datasourceStore.datasources
+			datasourceStore.datasources,
+			analysisStore.variables
 		);
 		if (!pipeline) {
 			error = datasourceStore.loaded

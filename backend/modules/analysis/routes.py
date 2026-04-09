@@ -8,7 +8,7 @@ from core.database import get_db
 from core.dependencies import get_manager, get_optional_lock_owner_id
 from core.error_handlers import handle_errors
 from core.validation import AnalysisId, parse_analysis_id
-from modules.analysis import schemas, service
+from modules.analysis import dashboard_service, schemas, service
 from modules.analysis.step_schemas import StepType, get_config_model, get_step_catalog
 from modules.auth.dependencies import get_optional_user
 from modules.auth.models import User
@@ -60,6 +60,17 @@ async def validate_analysis(
 ):
     """Validate analysis payload without persisting."""
     return service.validate_analysis(session, data)
+
+
+@router.post('/{analysis_id}/dashboards/validate', mcp=True)
+@handle_errors(operation='validate dashboards', value_error_status=400)
+async def validate_dashboards(
+    analysis_id: AnalysisId,
+    data: schemas.DashboardValidateRequestSchema,
+    session: Session = Depends(get_db),
+):
+    del analysis_id
+    return dashboard_service.validate_dashboard_payload(session, data)
 
 
 @router.post('', response_model=schemas.AnalysisResponseSchema, mcp=True)
@@ -116,6 +127,37 @@ async def get_analysis(
     response.headers['ETag'] = _analysis_etag(analysis)
     response.headers['X-Analysis-Version'] = _analysis_version(analysis)
     return analysis
+
+
+@router.get(
+    '/{analysis_id}/dashboards/{dashboard_id}',
+    response_model=schemas.DashboardDetailResponseSchema,
+    mcp=True,
+)
+@handle_errors(operation='get dashboard', value_error_status=404)
+async def get_dashboard(
+    analysis_id: AnalysisId,
+    dashboard_id: str,
+    session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
+):
+    return dashboard_service.get_dashboard_detail(session, manager, parse_analysis_id(analysis_id), dashboard_id)
+
+
+@router.post(
+    '/{analysis_id}/dashboards/{dashboard_id}/run',
+    response_model=schemas.DashboardRunResponseSchema,
+    mcp=True,
+)
+@handle_errors(operation='run dashboard', value_error_status=400)
+async def run_dashboard(
+    analysis_id: AnalysisId,
+    dashboard_id: str,
+    data: schemas.DashboardRunRequestSchema,
+    session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
+):
+    return dashboard_service.run_dashboard(session, manager, parse_analysis_id(analysis_id), dashboard_id, data)
 
 
 @router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)

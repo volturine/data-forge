@@ -150,7 +150,7 @@ class FilterConditionSchema(BaseModel):
 
     column: str = Field(description='Column to filter on')
     operator: str = Field(description='Comparison operator')
-    value: str | int | float | bool | list[str] | None = ''
+    value: str | int | float | bool | list[str | int | float | bool] | dict[str, object] | None = ''
     value_type: FilterValueType = FilterValueType.STRING
     compare_column: str | None = None
 
@@ -236,7 +236,7 @@ class WithColumnsConfig(BaseModel):
 class LimitConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
-    n: int = Field(100, description='Maximum number of rows')
+    n: int | dict[str, object] = Field(100, description='Maximum number of rows')
 
 
 class SampleConfig(BaseModel):
@@ -250,7 +250,7 @@ class TopKConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     column: str = Field('', description='Column to rank by')
-    k: int = Field(10, description='Number of top rows')
+    k: int | dict[str, object] = Field(10, description='Number of top rows')
     descending: bool = False
 
 

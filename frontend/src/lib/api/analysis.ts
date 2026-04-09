@@ -1,6 +1,10 @@
 import type {
 	Analysis,
 	AnalysisCreate,
+	DashboardDetailResponse,
+	DashboardRunResponse,
+	DashboardSelectionFilter,
+	DashboardWidgetPage,
 	AnalysisGalleryItem,
 	AnalysisUpdate
 } from '$lib/types/analysis';
@@ -100,3 +104,39 @@ export const previewAnalysis = (
 		method: 'POST',
 		body: JSON.stringify({ pipeline })
 	});
+
+export const getDashboard = (
+	analysisId: string,
+	dashboardId: string
+): ResultAsync<DashboardDetailResponse, ApiError> =>
+	apiRequest<DashboardDetailResponse>(`/v1/analysis/${analysisId}/dashboards/${dashboardId}`);
+
+export const runDashboard = (
+	analysisId: string,
+	dashboardId: string,
+	args: {
+		variable_values?: Record<string, unknown>;
+		widget_ids?: string[];
+		widget_page?: Record<string, DashboardWidgetPage>;
+		selection_filters?: Record<string, DashboardSelectionFilter>;
+	}
+): ResultAsync<DashboardRunResponse, ApiError> =>
+	apiRequest<DashboardRunResponse>(`/v1/analysis/${analysisId}/dashboards/${dashboardId}/run`, {
+		method: 'POST',
+		body: JSON.stringify(args)
+	});
+
+export const validateDashboards = (
+	analysisId: string,
+	data: AnalysisUpdate
+): ResultAsync<
+	{ valid: boolean; widget_dependencies: Record<string, Record<string, string[]>> },
+	ApiError
+> =>
+	apiRequest<{ valid: boolean; widget_dependencies: Record<string, Record<string, string[]>> }>(
+		`/v1/analysis/${analysisId}/dashboards/validate`,
+		{
+			method: 'POST',
+			body: JSON.stringify(data)
+		}
+	);

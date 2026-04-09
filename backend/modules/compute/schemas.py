@@ -104,6 +104,8 @@ class AnalysisPipelinePayload(BaseModel):
     analysis_id: str
     tabs: list[AnalysisPipelineTab]
     sources: dict[str, dict]
+    variables: list[dict] = Field(default_factory=list)
+    variable_values: dict[str, object] = Field(default_factory=dict)
 
     @field_validator('tabs')
     @classmethod

@@ -160,7 +160,8 @@
 		const analysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
 			analysisStore.tabs,
-			datasourceStore.datasources
+			datasourceStore.datasources,
+			analysisStore.variables
 		);
 		if (!analysisPipeline) {
 			fetchingPivotSchema = false;
@@ -208,7 +209,8 @@
 		const analysisPipeline = buildAnalysisPipelinePayload(
 			analysis.id,
 			analysisStore.tabs,
-			datasourceStore.datasources
+			datasourceStore.datasources,
+			analysisStore.variables
 		);
 		if (!analysisPipeline) return;
 		const pipelineHash = hashPipeline(applySteps(analysisStore.pipeline));
@@ -392,6 +394,7 @@
 			{:else if step.type === 'filter'}
 				<FilterConfig
 					schema={inputSchema}
+					variables={analysisStore.variables}
 					bind:config={draftConfig as unknown as FilterConfigData}
 				/>
 			{:else if step.type === 'select'}

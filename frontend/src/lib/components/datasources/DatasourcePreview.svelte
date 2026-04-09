@@ -56,7 +56,8 @@
 			return buildAnalysisPipelinePayload(
 				activeId,
 				analysisStore.tabs,
-				datasourceStore.datasources
+				datasourceStore.datasources,
+				analysisStore.variables
 			);
 		}
 		if (!resolvedDatasource) return null;

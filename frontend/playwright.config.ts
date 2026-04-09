@@ -7,6 +7,7 @@ const parallelism =
 	typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
 const defaultWorkers = Math.min(6, Math.max(2, Math.floor(parallelism / 2)));
 const workers = parseInt(process.env.PW_E2E_WORKERS || `${defaultWorkers}`, 10);
+const serversManaged = process.env.PW_SERVERS_MANAGED === '1';
 
 export default defineConfig({
 	testDir: './tests',
@@ -34,10 +35,12 @@ export default defineConfig({
 			}
 		}
 	],
-	webServer: {
-		command: 'bun run dev',
-		url: baseURL,
-		reuseExistingServer: true,
-		timeout: 60_000
-	}
+	...(!serversManaged && {
+		webServer: {
+			command: 'bun run dev',
+			url: baseURL,
+			reuseExistingServer: true,
+			timeout: 60_000
+		}
+	})
 });

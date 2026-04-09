@@ -41,6 +41,7 @@
 	} from '$lib/components/pipeline/PipelineCanvas.svelte';
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
+	import DashboardBuilder from '$lib/components/analysis/DashboardBuilder.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
@@ -202,6 +203,8 @@
 				analysisId: string;
 				version?: string | null;
 				tabs: AnalysisTab[];
+				variables?: typeof analysisStore.variables;
+				dashboards?: typeof analysisStore.dashboards;
 				activeTabId: string | null;
 				resourceConfig: EngineResourceConfig | null;
 				engineDefaults: EngineDefaults | null;
@@ -222,6 +225,8 @@
 			}
 			const sanitized = parsed.tabs.map((tab, index) => ensureTabDefaults(tab, index));
 			analysisStore.setTabs(sanitized);
+			analysisStore.setVariables(parsed.variables ?? []);
+			analysisStore.setDashboards(parsed.dashboards ?? []);
 			analysisStore.activeTabId = parsed.activeTabId;
 			analysisStore.setResourceConfig(parsed.resourceConfig);
 			analysisStore.setEngineDefaults(parsed.engineDefaults);
@@ -243,6 +248,8 @@
 			analysisId,
 			version: analysisStore.current?.version ?? null,
 			tabs: analysisStore.tabs,
+			variables: analysisStore.variables,
+			dashboards: analysisStore.dashboards,
 			activeTabId: analysisStore.activeTabId,
 			resourceConfig: analysisStore.resourceConfig,
 			engineDefaults: analysisStore.engineDefaults,
@@ -270,6 +277,7 @@
 	let showDatasourceModal = $state(false);
 	let modalMode = $state<'add' | 'change'>('add');
 	let modalSource = $state<'datasource' | 'analysis'>('datasource');
+	let editorMode = $state<'pipeline' | 'dashboards'>('pipeline');
 	let leftPaneCollapsed = $state(false);
 	let rightPaneCollapsed = $state(false);
 	let configPosition = $state<'right' | 'bottom'>('right');
@@ -418,7 +426,8 @@
 		const analysisPayload = buildAnalysisPipelinePayload(
 			validAnalysisId,
 			analysisStore.tabs,
-			datasourceStore.datasources
+			datasourceStore.datasources,
+			analysisStore.variables
 		);
 		if (!analysisPayload) return;
 		const pipelineHash = hashPipeline(applySteps(pipeline));
@@ -484,7 +493,8 @@
 			? buildAnalysisPipelinePayload(
 					validAnalysisId,
 					analysisStore.tabs,
-					datasourceStore.datasources
+					datasourceStore.datasources,
+					analysisStore.variables
 				)
 			: null;
 
@@ -1406,114 +1416,177 @@
 			</div>
 		{/if}
 
-		<div
-			class={css({
-				display: 'flex',
-				flex: '1',
-				overflow: 'hidden',
-				userSelect: 'none',
-				backgroundColor: 'bg.secondary'
-			})}
-			role="application"
-		>
-			<div
+		<div class={css({ display: 'flex', gap: '2', paddingX: '4', paddingBottom: '2' })}>
+			<button
+				type="button"
+				data-testid="editor-mode-pipeline"
 				class={css({
-					flexShrink: '0',
-					overflow: 'hidden',
-					display: 'flex',
-					height: '100%',
-					boxSizing: 'border-box',
-					backgroundColor: 'bg.primary',
-					borderRightWidth: '1',
-					width: 'operationsPanel',
-					transitionProperty: 'width, visibility',
-					transitionDuration: 'normal',
-					'& > *': { width: '100%', visibility: 'visible' },
-					...(leftPaneCollapsed
-						? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
-						: {})
+					borderWidth: '1',
+					backgroundColor: editorMode === 'pipeline' ? 'bg.tertiary' : 'bg.primary',
+					paddingX: '3',
+					paddingY: '2',
+					fontSize: 'sm'
 				})}
+				onclick={() => (editorMode = 'pipeline')}
 			>
-				<StepLibrary
-					onAddStep={handleAddStep}
-					onInsertStep={handleInsertStep}
-					readOnly={editorReadOnly}
-				/>
-			</div>
+				Pipeline
+			</button>
+			<button
+				type="button"
+				data-testid="editor-mode-dashboards"
+				class={css({
+					borderWidth: '1',
+					backgroundColor: editorMode === 'dashboards' ? 'bg.tertiary' : 'bg.primary',
+					paddingX: '3',
+					paddingY: '2',
+					fontSize: 'sm'
+				})}
+				onclick={() => (editorMode = 'dashboards')}
+			>
+				Dashboards
+			</button>
+		</div>
 
+		{#if editorMode === 'pipeline'}
 			<div
 				class={css({
 					display: 'flex',
 					flex: '1',
-					minWidth: '0',
-					flexDirection: 'column',
-					overflow: 'hidden'
+					overflow: 'hidden',
+					userSelect: 'none',
+					backgroundColor: 'bg.secondary'
 				})}
+				role="application"
 			>
 				<div
 					class={css({
-						flex: '1',
-						minWidth: 'listSm',
-						minHeight: '0',
+						flexShrink: '0',
+						overflow: 'hidden',
 						display: 'flex',
-						backgroundColor: 'bg.secondary',
-						'& > *': { width: '100%' }
+						height: '100%',
+						boxSizing: 'border-box',
+						backgroundColor: 'bg.primary',
+						borderRightWidth: '1',
+						width: 'operationsPanel',
+						transitionProperty: 'width, visibility',
+						transitionDuration: 'normal',
+						'& > *': { width: '100%', visibility: 'visible' },
+						...(leftPaneCollapsed
+							? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
+							: {})
 					})}
 				>
-					<PipelineCanvas
-						steps={analysisStore.pipeline}
-						analysisId={analysisId || undefined}
-						datasourceId={previewDatasourceId || undefined}
-						datasource={currentDatasource}
-						{datasourceLabel}
-						tabName={analysisStore.activeTab?.name}
-						activeTab={analysisStore.activeTab}
-						onStepClick={handleSelectStep}
-						onStepDelete={handleDeleteStep}
-						onStepToggle={handleToggleStep}
+					<StepLibrary
+						onAddStep={handleAddStep}
 						onInsertStep={handleInsertStep}
-						onPasteStep={handlePasteStep}
-						onMoveStep={handleMoveStep}
-						onChangeDatasource={() => openDatasourceModal('change')}
-						onRenameTab={handleRenameSourceTab}
-						onDuplicateTab={handleDuplicateActiveTab}
 						readOnly={editorReadOnly}
 					/>
 				</div>
 
-				{#if configPosition === 'bottom'}
+				<div
+					class={css({
+						display: 'flex',
+						flex: '1',
+						minWidth: '0',
+						flexDirection: 'column',
+						overflow: 'hidden'
+					})}
+				>
+					<div
+						class={css({
+							flex: '1',
+							minWidth: 'listSm',
+							minHeight: '0',
+							display: 'flex',
+							backgroundColor: 'bg.secondary',
+							'& > *': { width: '100%' }
+						})}
+					>
+						<PipelineCanvas
+							steps={analysisStore.pipeline}
+							analysisId={analysisId || undefined}
+							datasourceId={previewDatasourceId || undefined}
+							datasource={currentDatasource}
+							{datasourceLabel}
+							tabName={analysisStore.activeTab?.name}
+							activeTab={analysisStore.activeTab}
+							onStepClick={handleSelectStep}
+							onStepDelete={handleDeleteStep}
+							onStepToggle={handleToggleStep}
+							onInsertStep={handleInsertStep}
+							onPasteStep={handlePasteStep}
+							onMoveStep={handleMoveStep}
+							onChangeDatasource={() => openDatasourceModal('change')}
+							onRenameTab={handleRenameSourceTab}
+							onDuplicateTab={handleDuplicateActiveTab}
+							readOnly={editorReadOnly}
+						/>
+					</div>
+
+					{#if configPosition === 'bottom'}
+						<div
+							class={css({
+								flexShrink: '0',
+								overflow: 'hidden',
+								display: 'flex',
+								boxSizing: 'border-box',
+								backgroundColor: 'bg.primary',
+								borderTopWidth: '1',
+								width: '100%',
+								position: 'relative',
+								transitionProperty: 'height, visibility',
+								transitionDuration: 'normal',
+								'& > .step-config': { width: '100%', flex: '1', minHeight: '0' },
+								...(rightPaneCollapsed ? { border: 'none' } : {})
+							})}
+							style:height="{rightPaneCollapsed ? 0 : bottomPaneHeight}px"
+						>
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								class={css({
+									position: 'absolute',
+									top: '-3px',
+									left: '0',
+									right: '0',
+									height: 'barTall',
+									cursor: 'ns-resize',
+									zIndex: '5',
+									_hover: { background: 'accent.primary', opacity: '0.4' },
+									_active: { background: 'accent.primary', opacity: '0.4' }
+								})}
+								onpointerdown={handleBottomPaneResizeStart}
+							></div>
+							<StepConfig
+								step={selectedStepState}
+								schema={analysisStore.calculatedSchema}
+								{isLoadingSchema}
+								onClose={handleCloseConfig}
+								onConfigApply={markUnsaved}
+								readOnly={editorReadOnly}
+							/>
+						</div>
+					{/if}
+				</div>
+
+				{#if configPosition === 'right'}
 					<div
 						class={css({
 							flexShrink: '0',
 							overflow: 'hidden',
 							display: 'flex',
+							height: '100%',
 							boxSizing: 'border-box',
 							backgroundColor: 'bg.primary',
-							borderTopWidth: '1',
-							width: '100%',
-							position: 'relative',
-							transitionProperty: 'height, visibility',
+							borderLeftWidth: '1',
+							width: 'operationsPanel',
+							transitionProperty: 'width, visibility',
 							transitionDuration: 'normal',
-							'& > .step-config': { width: '100%', flex: '1', minHeight: '0' },
-							...(rightPaneCollapsed ? { border: 'none' } : {})
+							'& > *': { width: '100%', visibility: 'visible' },
+							...(rightPaneCollapsed
+								? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
+								: {})
 						})}
-						style:height="{rightPaneCollapsed ? 0 : bottomPaneHeight}px"
 					>
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							class={css({
-								position: 'absolute',
-								top: '-3px',
-								left: '0',
-								right: '0',
-								height: 'barTall',
-								cursor: 'ns-resize',
-								zIndex: '5',
-								_hover: { background: 'accent.primary', opacity: '0.4' },
-								_active: { background: 'accent.primary', opacity: '0.4' }
-							})}
-							onpointerdown={handleBottomPaneResizeStart}
-						></div>
 						<StepConfig
 							step={selectedStepState}
 							schema={analysisStore.calculatedSchema}
@@ -1525,37 +1598,17 @@
 					</div>
 				{/if}
 			</div>
-
-			{#if configPosition === 'right'}
-				<div
-					class={css({
-						flexShrink: '0',
-						overflow: 'hidden',
-						display: 'flex',
-						height: '100%',
-						boxSizing: 'border-box',
-						backgroundColor: 'bg.primary',
-						borderLeftWidth: '1',
-						width: 'operationsPanel',
-						transitionProperty: 'width, visibility',
-						transitionDuration: 'normal',
-						'& > *': { width: '100%', visibility: 'visible' },
-						...(rightPaneCollapsed
-							? { width: '0', border: 'none', '& > *': { width: '100%', visibility: 'hidden' } }
-							: {})
-					})}
-				>
-					<StepConfig
-						step={selectedStepState}
-						schema={analysisStore.calculatedSchema}
-						{isLoadingSchema}
-						onClose={handleCloseConfig}
-						onConfigApply={markUnsaved}
-						readOnly={editorReadOnly}
-					/>
-				</div>
-			{/if}
-		</div>
+		{:else}
+			<div class={css({ flex: '1', overflow: 'auto', backgroundColor: 'bg.secondary' })}>
+				<DashboardBuilder
+					analysisId={analysisId || ''}
+					tabs={analysisStore.tabs}
+					bind:variables={analysisStore.variables}
+					bind:dashboards={analysisStore.dashboards}
+					readOnly={editorReadOnly}
+				/>
+			</div>
+		{/if}
 	</div>
 {/if}
 

@@ -1,11 +1,12 @@
 // Type definitions for operation configuration objects
+import type { AnalysisVariableRef } from './analysis';
 
 export type FilterValueType = 'string' | 'number' | 'date' | 'datetime' | 'column' | 'boolean';
 
 export interface FilterCondition {
 	column: string;
 	operator: string;
-	value: string | number | boolean | string[] | null;
+	value: string | number | boolean | Array<string | number | boolean> | AnalysisVariableRef | null;
 	value_type: FilterValueType;
 	compare_column?: string;
 }

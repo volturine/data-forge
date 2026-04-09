@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { AnalysisVariableDefinition, AnalysisVariableRef } from '$lib/types/analysis';
 	import type { Schema } from '$lib/types/schema';
 	import { X, Plus } from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
@@ -14,7 +15,13 @@
 	interface Condition {
 		column: string;
 		operator: string;
-		value: string | number | boolean | string[] | null;
+		value:
+			| string
+			| number
+			| boolean
+			| Array<string | number | boolean>
+			| AnalysisVariableRef
+			| null;
 		value_type: ValueType;
 		compare_column?: string;
 	}
@@ -27,6 +34,7 @@
 	interface Props {
 		schema: Schema;
 		config?: FilterConfigData;
+		variables?: AnalysisVariableDefinition[];
 	}
 
 	const defaultCondition: Condition = {
@@ -36,8 +44,11 @@
 		value_type: 'string'
 	};
 
-	let { schema, config = $bindable({ conditions: [defaultCondition], logic: 'AND' }) }: Props =
-		$props();
+	let {
+		schema,
+		config = $bindable({ conditions: [defaultCondition], logic: 'AND' }),
+		variables = []
+	}: Props = $props();
 
 	const conditions = $derived(config.conditions ?? [defaultCondition]);
 
@@ -86,6 +97,15 @@
 		return NULL_OPS.includes(op);
 	}
 
+	function isVariableValue(value: Condition['value']): value is AnalysisVariableRef {
+		return (
+			typeof value === 'object' &&
+			value !== null &&
+			'kind' in value &&
+			value.kind === 'variable_ref'
+		);
+	}
+
 	function addCondition() {
 		config.conditions = [
 			...conditions,
@@ -106,8 +126,11 @@
 		return op !== 'regex' && op !== 'is_null' && op !== 'is_not_null';
 	}
 
-	function getLiteralList(value: string | number | boolean | string[] | null): string[] {
-		if (Array.isArray(value)) return value;
+	function getLiteralList(
+		value: string | number | boolean | Array<string | number | boolean> | AnalysisVariableRef | null
+	): string[] {
+		if (Array.isArray(value)) return value.map(String);
+		if (isVariableValue(value)) return [];
 		if (value === null || value === undefined) return [];
 		if (value === '') return [];
 		return [String(value)];
@@ -148,7 +171,7 @@
 		});
 	}
 
-	function handleModeChange(idx: number, mode: 'value' | 'column') {
+	function handleModeChange(idx: number, mode: 'value' | 'column' | 'variable') {
 		const cond = conditions[idx];
 		const colType = getColumnType(cond.column);
 		const isColumn = mode === 'column';
@@ -159,12 +182,41 @@
 			updateCondition(idx, { value_type: 'column', compare_column: '', operator: op, value: '' });
 			return;
 		}
+		if (mode === 'variable') {
+			const variable = variables[0];
+			updateCondition(idx, {
+				value_type: colType,
+				compare_column: undefined,
+				operator: op,
+				value: variable ? { kind: 'variable_ref', variable_id: variable.id } : null
+			});
+			return;
+		}
 		updateCondition(idx, {
 			value_type: colType,
 			compare_column: undefined,
 			operator: op,
 			value: ''
 		});
+	}
+
+	function setVariableRef(idx: number, variableId: string) {
+		const existing = conditions[idx].value;
+		const value_key = isVariableValue(existing) ? existing.value_key : undefined;
+		updateCondition(idx, {
+			value: variableId ? { kind: 'variable_ref', variable_id: variableId, value_key } : null
+		});
+	}
+
+	function setVariableRefKey(idx: number, valueKey: 'start' | 'end') {
+		const existing = conditions[idx].value;
+		if (!isVariableValue(existing)) return;
+		updateCondition(idx, { value: { ...existing, value_key: valueKey } });
+	}
+
+	function getVariableChoice(value: Condition['value']): AnalysisVariableDefinition | null {
+		if (!isVariableValue(value)) return null;
+		return variables.find((variable) => variable.id === value.variable_id) ?? null;
 	}
 
 	function handleOperatorChange(idx: number, op: string) {
@@ -179,9 +231,12 @@
 		updateCondition(idx, updates);
 	}
 
-	function formatDatetimeForInput(val: string | number | boolean | string[] | null): string {
+	function formatDatetimeForInput(
+		val: string | number | boolean | Array<string | number | boolean> | AnalysisVariableRef | null
+	): string {
 		if (!val) return '';
 		if (Array.isArray(val)) return '';
+		if (isVariableValue(val)) return '';
 		const str = String(val);
 		// If already in datetime-local format (YYYY-MM-DDTHH:MM), return as-is
 		if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return str.slice(0, 16);
@@ -193,9 +248,12 @@
 		return '';
 	}
 
-	function formatDateForInput(val: string | number | boolean | string[] | null): string {
+	function formatDateForInput(
+		val: string | number | boolean | Array<string | number | boolean> | AnalysisVariableRef | null
+	): string {
 		if (!val) return '';
 		if (Array.isArray(val)) return '';
+		if (isVariableValue(val)) return '';
 		const str = String(val);
 		// If already in date format (YYYY-MM-DD), return as-is
 		if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
@@ -284,9 +342,15 @@
 				{#each conditions as cond, i (i)}
 					{@const colType = getColumnType(cond.column)}
 					{@const isColumn = cond.value_type === 'column'}
+					{@const isVariable = isVariableValue(cond.value)}
+					{@const variableChoice = getVariableChoice(cond.value)}
 					{@const isNull = isNullOperator(cond.operator)}
 					{@const multiLiteral =
-						!isColumn && !isNull && colType === 'string' && isMultiLiteralOperator(cond.operator)}
+						!isColumn &&
+						!isVariable &&
+						!isNull &&
+						colType === 'string' &&
+						isMultiLiteralOperator(cond.operator)}
 					{@const ops = getOperatorsForType(colType, isColumn)}
 
 					<div
@@ -428,10 +492,15 @@
 										<span class={cx(label(), css({ fontWeight: 'normal' }))}>Compare to</span>
 										<div class={css({ display: 'flex' })} role="radiogroup" aria-label="Value mode">
 											<ToggleButton
-												active={!isColumn}
+												active={!isColumn && !isVariable}
 												radius="left"
 												onclick={() => handleModeChange(i, 'value')}
-												ariaPressed={!isColumn}>Value</ToggleButton
+												ariaPressed={!isColumn && !isVariable}>Value</ToggleButton
+											>
+											<ToggleButton
+												active={isVariable}
+												onclick={() => handleModeChange(i, 'variable')}
+												ariaPressed={isVariable}>Variable</ToggleButton
 											>
 											<ToggleButton
 												active={isColumn}
@@ -451,6 +520,33 @@
 											triggerClass={css({ width: '100%' })}
 											menuClass={css({ top: '100%' })}
 										/>
+									{:else if isVariable}
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+											<select
+												id="{uid}-value-{i}"
+												class={input()}
+												value={isVariableValue(cond.value) ? cond.value.variable_id : ''}
+												onchange={(e) => setVariableRef(i, e.currentTarget.value)}
+											>
+												<option value="">Select variable...</option>
+												{#each variables as variable (variable.id)}
+													<option value={variable.id}>{variable.label}</option>
+												{/each}
+											</select>
+											{#if variableChoice?.type === 'date_range'}
+												<select
+													class={input()}
+													value={isVariableValue(cond.value)
+														? (cond.value.value_key ?? 'start')
+														: 'start'}
+													onchange={(e) =>
+														setVariableRefKey(i, e.currentTarget.value === 'end' ? 'end' : 'start')}
+												>
+													<option value="start">Start date</option>
+													<option value="end">End date</option>
+												</select>
+											{/if}
+										</div>
 									{:else if colType === 'number'}
 										<input
 											id="{uid}-value-{i}"

@@ -16,6 +16,7 @@
 		| 'scatter'
 		| 'boxplot';
 	type Row = Record<string, unknown>;
+	type SelectionValue = string | number | boolean;
 
 	interface Props {
 		data: Row[];
@@ -23,9 +24,21 @@
 		config: Record<string, unknown>;
 		metadata?: Record<string, unknown> | null;
 		height?: number;
+		selectedValues?: SelectionValue[];
+		selectionResetToken?: number;
+		onSelectionChange?: ((values: SelectionValue[]) => void) | undefined;
 	}
 
-	const { data, chartType, config, metadata, height = 300 }: Props = $props();
+	let {
+		data,
+		chartType,
+		config,
+		metadata,
+		height = 300,
+		selectedValues = $bindable([]),
+		selectionResetToken = 0,
+		onSelectionChange
+	}: Props = $props();
 
 	/* ── Enterprise color palette (Contour-inspired) ── */
 	const PALETTE = [
@@ -52,6 +65,7 @@
 	let _tipY = $state(0);
 	let tipVisible = $state(false);
 	const selectedKeys = new SvelteSet<string>();
+	const selectedValueByKey = new SvelteMap<string, SelectionValue>();
 	const hiddenSeries = new SvelteSet<string>();
 	type HtmlLegend = {
 		labels: string[];
@@ -69,6 +83,7 @@
 	const selectEnabled = $derived(Boolean(config.selection_enabled));
 	const areaSelectEnabled = $derived(Boolean(config.area_selection_enabled));
 	const zoomActive = $derived(Boolean(zoomTransform));
+	let lastSelectionResetToken = $state<number | null>(null);
 
 	// Subscription: $derived can't reset zoom state.
 	$effect(() => {
@@ -82,6 +97,44 @@
 	$effect(() => {
 		if (selectEnabled) return;
 		selectedKeys.clear();
+		selectedValueByKey.clear();
+		selectedValues = [];
+	});
+
+	// Side-effect: clears mutable selection sets when the external reset token changes.
+	$effect(() => {
+		if (lastSelectionResetToken === null) {
+			lastSelectionResetToken = selectionResetToken;
+			return;
+		}
+		if (selectionResetToken === lastSelectionResetToken) return;
+		lastSelectionResetToken = selectionResetToken;
+		selectedKeys.clear();
+		selectedValueByKey.clear();
+		selectedValues = [];
+	});
+
+	const derivedSelected = $derived(
+		Array.from(
+			new Set(
+				Array.from(selectedKeys)
+					.map((key) => selectedValueByKey.get(key))
+					.filter((value): value is SelectionValue => value !== undefined)
+			)
+		)
+	);
+
+	// Callback: $derived can't invoke onSelectionChange or assign $bindable.
+	$effect(() => {
+		const next = derivedSelected;
+		if (
+			selectedValues.length === next.length &&
+			selectedValues.every((value, index) => Object.is(value, next[index]))
+		) {
+			return;
+		}
+		selectedValues = next;
+		onSelectionChange?.(next);
 	});
 
 	function resetZoom() {
@@ -101,6 +154,12 @@
 	function str(v: unknown): string {
 		if (v == null) return '';
 		return String(v);
+	}
+
+	function normalizeSelectionValue(value: unknown): SelectionValue {
+		if (typeof value === 'boolean') return value;
+		if (typeof value === 'number') return value;
+		return str(value);
 	}
 
 	const CHAR_WIDTH = 6;
@@ -459,6 +518,13 @@
 		});
 	}
 
+	function barAriaLabel(group: string, label: string): string {
+		const prefix = group ? `${group} – ` : '';
+		const text = `${prefix}${label}`;
+		if (text) return text;
+		return 'Data point';
+	}
+
 	function updateSelection(svg: Svg) {
 		svg.selectAll<SVGElement, unknown>('[data-key]').each(function () {
 			const item = d3.select(this);
@@ -472,10 +538,16 @@
 		});
 	}
 
-	function toggleSelection(key: string, multi: boolean) {
-		if (!multi) selectedKeys.clear();
+	function toggleSelection(key: string, filterValue: unknown, multi: boolean) {
+		selectedValueByKey.set(key, normalizeSelectionValue(filterValue));
+		if (!multi) {
+			selectedKeys.clear();
+			selectedValueByKey.clear();
+			selectedValueByKey.set(key, normalizeSelectionValue(filterValue));
+		}
 		if (selectedKeys.has(key)) {
 			selectedKeys.delete(key);
+			selectedValueByKey.delete(key);
 			return;
 		}
 		selectedKeys.add(key);
@@ -1319,6 +1391,8 @@
 					.attr('class', 'chart-bar')
 					.attr('data-series', group)
 					.attr('data-key', (d) => makeKey(group, str(d.x)))
+					.attr('role', selectEnabled ? 'button' : null)
+					.attr('aria-label', (d) => barAriaLabel(group, str(d.x)))
 					.attr('x', (d) => x(d.x) ?? 0)
 					.attr('y', (d) => y(d[1] as number))
 					.attr('width', x.bandwidth())
@@ -1335,7 +1409,7 @@
 					})
 					.on('click', function (event: MouseEvent, d) {
 						if (!selectEnabled) return;
-						toggleSelection(makeKey(group, str(d.x)), event.metaKey || event.ctrlKey);
+						toggleSelection(makeKey(group, str(d.x)), d.x, event.metaKey || event.ctrlKey);
 						updateSelection(svg);
 					})
 					.on('mouseout', function () {
@@ -1464,6 +1538,8 @@
 					.attr('class', 'chart-bar')
 					.attr('data-series', group)
 					.attr('data-key', (r) => makeKey(group, str(r.x)))
+					.attr('role', selectEnabled ? 'button' : null)
+					.attr('aria-label', (r) => barAriaLabel(group, str(r.x)))
 					.attr('x', (r) => (x0(str(r.x)) ?? 0) + (x1(group) ?? 0))
 					.attr('y', (r) => y(num(r.y)))
 					.attr('width', x1.bandwidth())
@@ -1479,7 +1555,7 @@
 					.on('click', function (event: MouseEvent, r: Row) {
 						if (!selectEnabled) return;
 						const key = makeKey(group, str(r.x));
-						toggleSelection(key, event.metaKey || event.ctrlKey);
+						toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 						updateSelection(svg);
 					})
 					.on('mouseout', function () {
@@ -1606,6 +1682,8 @@
 				.attr('class', 'chart-bar')
 				.attr('data-series', '')
 				.attr('data-key', (r) => makeKey('', str(r.x)))
+				.attr('role', selectEnabled ? 'button' : null)
+				.attr('aria-label', (r) => barAriaLabel('', str(r.x)))
 				.attr('x', (r) => x(str(r.x)) ?? 0)
 				.attr('y', (r) => y(num(r.y)))
 				.attr('width', x.bandwidth())
@@ -1621,7 +1699,7 @@
 				.on('click', function (event: MouseEvent, r: Row) {
 					if (!selectEnabled) return;
 					const key = makeKey('', str(r.x));
-					toggleSelection(key, event.metaKey || event.ctrlKey);
+					toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 					updateSelection(svg);
 				})
 				.on('mouseout', function () {
@@ -1851,6 +1929,8 @@
 					.attr('class', 'chart-bar')
 					.attr('data-series', group)
 					.attr('data-key', (d) => makeKey(group, str(stackData.rows[d.index]?.x ?? '')))
+					.attr('role', selectEnabled ? 'button' : null)
+					.attr('aria-label', (d) => barAriaLabel(group, str(stackData.rows[d.index]?.x ?? '')))
 					.attr('y', (d) => yBand(stackData.rows[d.index]?.x ?? '') ?? 0)
 					.attr('x', (d) => {
 						const segment = d.segment;
@@ -1882,7 +1962,7 @@
 					.on('click', function (event: MouseEvent, d) {
 						if (!selectEnabled) return;
 						const key = makeKey(group, str(stackData.rows[d.index]?.x ?? ''));
-						toggleSelection(key, event.metaKey || event.ctrlKey);
+						toggleSelection(key, stackData.rows[d.index]?.x ?? '', event.metaKey || event.ctrlKey);
 						updateSelection(svg);
 					})
 					.on('mouseout', function () {
@@ -2016,6 +2096,8 @@
 					.attr('class', 'chart-bar')
 					.attr('data-series', group)
 					.attr('data-key', (r) => makeKey(group, str(r.x)))
+					.attr('role', selectEnabled ? 'button' : null)
+					.attr('aria-label', (r) => barAriaLabel(group, str(r.x)))
 					.attr('y', (r) => (yBand(str(r.x)) ?? 0) + (sub(group) ?? 0))
 					.attr('x', 0)
 					.attr('height', sub.bandwidth())
@@ -2031,7 +2113,7 @@
 					.on('click', function (event: MouseEvent, r: Row) {
 						if (!selectEnabled) return;
 						const key = makeKey(group, str(r.x));
-						toggleSelection(key, event.metaKey || event.ctrlKey);
+						toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 						updateSelection(svg);
 					})
 					.on('mouseout', function () {
@@ -2047,6 +2129,8 @@
 				.attr('class', 'chart-bar')
 				.attr('data-series', '')
 				.attr('data-key', (r) => makeKey('', str(r.x)))
+				.attr('role', selectEnabled ? 'button' : null)
+				.attr('aria-label', (r) => barAriaLabel('', str(r.x)))
 				.attr('y', (r) => yBand(str(r.x)) ?? 0)
 				.attr('x', 0)
 				.attr('height', yBand.bandwidth())
@@ -2062,7 +2146,7 @@
 				.on('click', function (event: MouseEvent, r: Row) {
 					if (!selectEnabled) return;
 					const key = makeKey('', str(r.x));
-					toggleSelection(key, event.metaKey || event.ctrlKey);
+					toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 					updateSelection(svg);
 				})
 				.on('mouseout', function () {
@@ -2809,7 +2893,7 @@
 					.on('click', function (event: MouseEvent, r: Row) {
 						if (!selectEnabled) return;
 						const key = makeKey(group, str(r.x));
-						toggleSelection(key, event.metaKey || event.ctrlKey);
+						toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 						updateSelection(svg);
 					})
 					.on('mouseout', function () {
@@ -2873,7 +2957,7 @@
 				.on('click', function (event: MouseEvent, r: Row) {
 					if (!selectEnabled) return;
 					const key = makeKey('', str(r.x));
-					toggleSelection(key, event.metaKey || event.ctrlKey);
+					toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 					updateSelection(svg);
 				})
 				.on('mouseout', function () {
@@ -3433,7 +3517,7 @@
 				.on('click', function (event: MouseEvent, r: Row) {
 					if (!selectEnabled) return;
 					const key = makePointKey(str(r.group), str(r.x), num(r.y));
-					toggleSelection(key, event.metaKey || event.ctrlKey);
+					toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 					updateSelection(svg);
 				})
 				.on('mouseout', function () {
@@ -3469,7 +3553,7 @@
 				.on('click', function (event: MouseEvent, r: Row) {
 					if (!selectEnabled) return;
 					const key = makePointKey('', str(r.x), num(r.y));
-					toggleSelection(key, event.metaKey || event.ctrlKey);
+					toggleSelection(key, r.x, event.metaKey || event.ctrlKey);
 					updateSelection(svg);
 				})
 				.on('mouseout', function () {
@@ -3666,6 +3750,7 @@
 					if (!selectEnabled) return;
 					const selection = event.selection as [[number, number], [number, number]] | null;
 					selectedKeys.clear();
+					selectedValueByKey.clear();
 					if (!selection) {
 						updateSelection(svg);
 						return;
@@ -3677,6 +3762,7 @@
 						if (cx < x0 || cx > x1 || cy < y0 || cy > y1) return;
 						const key = makePointKey(str(r.group ?? ''), str(r.x), num(r.y));
 						selectedKeys.add(key);
+						selectedValueByKey.set(key, normalizeSelectionValue(r.x));
 					});
 					updateSelection(svg);
 				});

@@ -1,6 +1,7 @@
 import type {
 	AnalysisTab,
 	AnalysisTabDatasourceConfig,
+	AnalysisVariableDefinition,
 	AnalysisTabOutput,
 	PipelineStep
 } from '$lib/types/analysis';
@@ -26,6 +27,8 @@ export type AnalysisPipelinePayload = {
 	analysis_id: string;
 	tabs: PipelineTab[];
 	sources: Record<string, PipelineSourceConfig>;
+	variables: AnalysisVariableDefinition[];
+	variable_values?: Record<string, unknown>;
 };
 
 function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
@@ -86,7 +89,8 @@ function collectSourceIds(tabs: AnalysisTab[]): Set<string> {
 export function buildAnalysisPipelinePayload(
 	analysisId: string,
 	tabs: AnalysisTab[],
-	datasources: DataSource[]
+	datasources: DataSource[],
+	variables: AnalysisVariableDefinition[] = []
 ): AnalysisPipelinePayload | null {
 	if (!analysisId) return null;
 	if (!tabs.length) return null;
@@ -144,7 +148,7 @@ export function buildAnalysisPipelinePayload(
 
 	const tabsPayload = pipelineTabs.filter((tab): tab is PipelineTab => tab !== null);
 	if (tabsPayload.length !== pipelineTabs.length) return null;
-	return { analysis_id: analysisId, tabs: tabsPayload, sources };
+	return { analysis_id: analysisId, tabs: tabsPayload, sources, variables };
 }
 
 export function buildDatasourceConfig(args: {
@@ -161,7 +165,7 @@ export function buildDatasourceConfig(args: {
 	const analysisSourceId = datasource?.created_by_analysis_id ?? null;
 	if (!analysisSourceId || !args.analysisId) return base;
 	if (analysisSourceId !== args.analysisId) return base;
-	const payload = buildAnalysisPipelinePayload(args.analysisId, args.tabs, args.datasources);
+	const payload = buildAnalysisPipelinePayload(args.analysisId, args.tabs, args.datasources, []);
 	if (!payload) return base;
 	return { ...base, analysis_pipeline: payload };
 }
@@ -199,6 +203,7 @@ export function buildDatasourcePipelinePayload(args: {
 		tabs,
 		sources: {
 			[datasource.id]: { source_type: datasource.source_type, ...datasource.config }
-		}
+		},
+		variables: []
 	};
 }

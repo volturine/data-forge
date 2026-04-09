@@ -40,22 +40,35 @@ test-e2e:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    BACKEND_PID=
+    FRONTEND_PID=
+
     cleanup() {
-        lsof -ti tcp:8001,3001 | xargs kill 2>/dev/null || true
+        for pid in $BACKEND_PID $FRONTEND_PID; do
+            [ -n "$pid" ] && kill -INT "$pid" 2>/dev/null || true
+        done
+        for pid in $BACKEND_PID $FRONTEND_PID; do
+            [ -n "$pid" ] && wait "$pid" 2>/dev/null || true
+        done
     }
 
     trap cleanup EXIT INT TERM
 
     set -a; source backend/e2e.env; set +a
     export FRONTEND_PORT=3001
-    (cd backend && uv run --no-env-file ./main.py) &
-    (cd frontend && bun run dev) &
+    (cd backend && exec uv run --no-env-file ./main.py) &
+    BACKEND_PID=$!
+    (cd frontend && exec bun run dev) &
     FRONTEND_PID=$!
 
     for _ in {1..90}; do
-        if nc -z localhost 8001 && nc -z localhost 3001; then
-            cd frontend && bun run test:e2e
-            exit 0
+        if curl -sf http://localhost:8001/health/ready >/dev/null 2>&1 \
+            && curl -sf http://localhost:3001/ >/dev/null 2>&1; then
+            cd frontend && PW_SERVERS_MANAGED=1 bun run test:e2e
+            TEST_EXIT=$?
+            cleanup
+            trap - EXIT INT TERM
+            exit $TEST_EXIT
         fi
         sleep 1
     done

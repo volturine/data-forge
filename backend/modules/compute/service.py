@@ -6,6 +6,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from sqlmodel import Session, col
 from core.config import settings
 from core.exceptions import DataSourceNotFoundError, DataSourceSnapshotError, PipelineExecutionError, PipelineValidationError
 from core.namespace import get_namespace, namespace_paths
+from modules.analysis.dashboard_utils import resolve_pipeline_variables
 from modules.analysis.models import Analysis
 from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path
@@ -603,11 +605,23 @@ def _resolve_pipeline_request(
     }
 
 
+def _resolve_analysis_variables(pipeline: dict) -> tuple[dict, dict[str, object]]:
+    variables = pipeline.get('variables')
+    if not isinstance(variables, list) or not variables:
+        return deepcopy(pipeline), {}
+    variable_values = pipeline.get('variable_values')
+    resolved, state = resolve_pipeline_variables(
+        pipeline,
+        variable_values if isinstance(variable_values, dict) else None,
+    )
+    return resolved, state
+
+
 def build_analysis_pipeline_payload(session: Session, analysis: Analysis, datasource_id: str | None = None) -> dict:
     pipeline = analysis.pipeline_definition
     tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
     if not isinstance(tabs, list) or not tabs:
-        return {'analysis_id': str(analysis.id), 'tabs': [], 'sources': {}}
+        return {'analysis_id': str(analysis.id), 'tabs': [], 'sources': {}, 'variables': [], 'variable_values': {}}
 
     sources: dict[str, dict] = {}
     output_map: dict[str, str] = {}
@@ -665,6 +679,8 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
         'analysis_id': str(analysis.id),
         'tabs': next_tabs,
         'sources': sources,
+        'variables': pipeline.get('variables', []) if isinstance(pipeline.get('variables', []), list) else [],
+        'variable_values': {},
     }
 
 
@@ -688,9 +704,10 @@ def preview_step(
     if timeout is None:
         timeout = settings.job_timeout
 
+    resolved_pipeline, variable_state = _resolve_analysis_variables(analysis_pipeline)
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(resolved_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -723,7 +740,8 @@ def preview_step(
             'row_limit': row_limit,
             'page': page,
             'resource_config': resource_config,
-            'analysis_pipeline': analysis_pipeline,
+            'analysis_pipeline': resolved_pipeline,
+            'variable_state': variable_state,
             'tab_id': tab_id,
             'iceberg_options': {'branch': branch},
         },
@@ -741,7 +759,7 @@ def preview_step(
 
     engine = manager.get_or_create_engine(analysis_id_value, resource_config=resource_config)
 
-    additional_datasources = _get_additional_datasources(session, preview_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(session, preview_steps, resolved_pipeline)
 
     # Calculate offset for pagination
     offset = (page - 1) * row_limit
@@ -844,7 +862,8 @@ def get_step_schema(
     if timeout is None:
         timeout = settings.job_timeout
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved_pipeline, _ = _resolve_analysis_variables(analysis_pipeline)
+    resolved = _resolve_pipeline_request(resolved_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -874,7 +893,7 @@ def get_step_schema(
 
     engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
 
-    additional_datasources = _get_additional_datasources(session, schema_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(session, schema_steps, resolved_pipeline)
 
     # Use the new schema command that doesn't collect full data
     job_id = engine.get_schema(
@@ -917,10 +936,11 @@ def get_step_row_count(
     if timeout is None:
         timeout = settings.job_timeout
 
+    resolved_pipeline, variable_state = _resolve_analysis_variables(analysis_pipeline)
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(resolved_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -947,7 +967,8 @@ def get_step_row_count(
             'datasource_id': datasource_id,
             'steps': steps,
             'target_step_id': target_step_id,
-            'analysis_pipeline': analysis_pipeline,
+            'analysis_pipeline': resolved_pipeline,
+            'variable_state': variable_state,
             'tab_id': tab_id,
         },
         branch,
@@ -964,7 +985,7 @@ def get_step_row_count(
 
     engine = manager.get_engine(analysis_id_value) or manager.get_or_create_engine(analysis_id_value)
 
-    additional_datasources = _get_additional_datasources(session, count_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(session, count_steps, resolved_pipeline)
 
     job_id = engine.get_row_count(
         datasource_config=config,
@@ -1057,7 +1078,8 @@ def export_data(
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved_pipeline, variable_state = _resolve_analysis_variables(analysis_pipeline)
+    resolved = _resolve_pipeline_request(resolved_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -1087,7 +1109,8 @@ def export_data(
             'filename': filename,
             'destination': 'datasource',
             'iceberg_options': iceberg_options,
-            'analysis_pipeline': analysis_pipeline,
+            'analysis_pipeline': resolved_pipeline,
+            'variable_state': variable_state,
             'tab_id': tab_id,
             'build_mode': build_mode,
         },
@@ -1111,7 +1134,7 @@ def export_data(
         engine = manager.get_or_create_engine(temp_engine_id)
         temp_engine = True
 
-    additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(session, export_steps, resolved_pipeline)
 
     tmp_output = tempfile.mktemp(suffix='.parquet')
     step_timings: dict = {}
@@ -1362,7 +1385,8 @@ def download_step(
     if timeout is None:
         timeout = settings.job_timeout
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved_pipeline, variable_state = _resolve_analysis_variables(analysis_pipeline)
+    resolved = _resolve_pipeline_request(resolved_pipeline, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -1412,12 +1436,13 @@ def download_step(
             'format': export_format,
             'filename': filename,
             'tab_id': tab_id,
-            'analysis_pipeline': analysis_pipeline,
+            'analysis_pipeline': resolved_pipeline,
+            'variable_state': variable_state,
         },
         branch,
     )
 
-    additional_datasources = _get_additional_datasources(session, download_steps, analysis_pipeline)
+    additional_datasources = _get_additional_datasources(session, download_steps, resolved_pipeline)
 
     export_fmt = get_export_format(export_format)
     ext = export_fmt.extension
@@ -1541,6 +1566,7 @@ def run_analysis_build_from_payload(session: Session, manager: ProcessManager, p
     if not isinstance(pipeline, dict):
         raise ValueError('analysis_pipeline is required')
 
+    pipeline, _ = _resolve_analysis_variables(pipeline)
     tabs = pipeline.get('tabs', [])
     if not isinstance(tabs, list) or not tabs:
         raise ValueError('analysis_pipeline missing tabs')

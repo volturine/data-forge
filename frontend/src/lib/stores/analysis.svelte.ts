@@ -1,4 +1,11 @@
-import type { Analysis, AnalysisTab, AnalysisUpdate, PipelineStep } from '$lib/types/analysis';
+import type {
+	Analysis,
+	AnalysisTab,
+	AnalysisUpdate,
+	AnalysisVariableDefinition,
+	DashboardDefinition,
+	PipelineStep
+} from '$lib/types/analysis';
 
 import type { SchemaInfo } from '$lib/types/datasource';
 import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
@@ -57,6 +64,10 @@ export class AnalysisStore {
 	current = $state<Analysis | null>(null);
 	tabs = $state<AnalysisTab[]>([]);
 	savedTabs = $state<AnalysisTab[]>([]);
+	variables = $state<AnalysisVariableDefinition[]>([]);
+	savedVariables = $state<AnalysisVariableDefinition[]>([]);
+	dashboards = $state<DashboardDefinition[]>([]);
+	savedDashboards = $state<DashboardDefinition[]>([]);
 	activeTabId = $state<string | null>(null);
 	sourceSchemas = $state(new SvelteMap<string, SchemaInfo>());
 	resourceConfig = $state<EngineResourceConfig | null>(null);
@@ -148,7 +159,16 @@ export class AnalysisStore {
 	}
 
 	private resolveTabs(analysis: Analysis): void {
-		const tabs = (analysis.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs;
+		const definition = analysis.pipeline_definition as {
+			tabs?: AnalysisTab[];
+			variables?: AnalysisVariableDefinition[];
+			dashboards?: DashboardDefinition[];
+		};
+		const tabs = definition?.tabs;
+		this.variables = cloneJson(definition?.variables ?? []);
+		this.savedVariables = cloneJson(definition?.variables ?? []);
+		this.dashboards = cloneJson(definition?.dashboards ?? []);
+		this.savedDashboards = cloneJson(definition?.dashboards ?? []);
 		if (tabs?.length) {
 			this.applyTabs(tabs);
 			return;
@@ -167,7 +187,9 @@ export class AnalysisStore {
 			(this.current.description ?? null) !== saved.description
 		)
 			return true;
-		return JSON.stringify(this.tabs) !== JSON.stringify(this.savedTabs);
+		if (JSON.stringify(this.tabs) !== JSON.stringify(this.savedTabs)) return true;
+		if (JSON.stringify(this.variables) !== JSON.stringify(this.savedVariables)) return true;
+		return JSON.stringify(this.dashboards) !== JSON.stringify(this.savedDashboards);
 	}
 
 	private logStep(action: string, step: PipelineStep, meta?: Record<string, unknown>): void {
@@ -584,7 +606,9 @@ export class AnalysisStore {
 		const update: AnalysisUpdate = {
 			name: this.current.name,
 			description: this.current.description,
-			tabs: this.tabs
+			tabs: this.tabs,
+			variables: this.variables,
+			dashboards: this.dashboards
 		};
 
 		const version = this.current.version ?? null;
@@ -593,7 +617,16 @@ export class AnalysisStore {
 			.andThen(({ analysis: updated, version: nextVersion }) => {
 				this.current = { ...updated, version: nextVersion };
 				this.lastSaved = { name: updated.name, description: updated.description ?? null };
-				const tabs = (updated.pipeline_definition as { tabs?: AnalysisTab[] })?.tabs ?? [];
+				const definition = updated.pipeline_definition as {
+					tabs?: AnalysisTab[];
+					variables?: AnalysisVariableDefinition[];
+					dashboards?: DashboardDefinition[];
+				};
+				const tabs = definition?.tabs ?? [];
+				this.variables = cloneJson(definition?.variables ?? []);
+				this.savedVariables = cloneJson(definition?.variables ?? []);
+				this.dashboards = cloneJson(definition?.dashboards ?? []);
+				this.savedDashboards = cloneJson(definition?.dashboards ?? []);
 				if (tabs.length) {
 					const sanitized = this.normalizeTabSteps(tabs).map((tab, i) => ensureTabDefaults(tab, i));
 					this.tabs = sanitized;
@@ -640,6 +673,10 @@ export class AnalysisStore {
 		this.current = null;
 		this.tabs = [];
 		this.savedTabs = [];
+		this.variables = [];
+		this.savedVariables = [];
+		this.dashboards = [];
+		this.savedDashboards = [];
 		this.activeTabId = null;
 		this.sourceSchemas.clear();
 		this.resourceConfig = null;
@@ -669,6 +706,14 @@ export class AnalysisStore {
 				steps: []
 			};
 		});
+	}
+
+	setVariables(variables: AnalysisVariableDefinition[]): void {
+		this.variables = cloneJson(variables);
+	}
+
+	setDashboards(dashboards: DashboardDefinition[]): void {
+		this.dashboards = cloneJson(dashboards);
 	}
 }
 

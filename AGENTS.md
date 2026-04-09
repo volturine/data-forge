@@ -101,6 +101,8 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 
 ## Learnings
 
+- Backend pytest commands should run from `backend/` with `uv run pytest tests/...`; invoking `pytest` from repo root may miss the backend virtualenv entrypoint.
+- When deleting or replacing backend tests, immediately clean up now-unused imports and local import ordering in the touched file before running `just verify`.
 - When adding API endpoints that mirror existing compute behavior, inspect the raw engine payload shape end-to-end before mapping it into API schemas. The engine returns `schema` + `data`; backend adapters must translate that shape explicitly instead of assuming preview-style fields already exist.
 - MCP tool contracts should reject unknown top-level args (`additionalProperties: false`) and expose path/query/payload placement metadata so AI prompts can describe exact input placement without drift.
 - Path-template failures in MCP execution should return structured `validation_error` responses, not indirect 404/422s, so AI agents can repair missing parameters.
@@ -116,3 +118,4 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 - When normalizing config objects, avoid duplicate-key object literals (for example `{ branch, ...normalized }`) because they hide overwrite order; build a single explicit normalized object first.
 - After broad enum/dataclass refactors, rerun focused schema-contract tests immediately; JSON schema often moves enum values under `$defs`/`$ref`, so tests that assert inline enums should resolve refs explicitly instead of assuming inlined `enum`.
 - In Svelte store modules, avoid native mutable collections like `Map`/`Set` in reactive code paths; prefer `SvelteMap`/`SvelteSet` (or plain objects/arrays) to satisfy `svelte/prefer-svelte-reactivity` and keep lint clean.
+- If the user explicitly asks for the full test suite, run every relevant test target for the touched surface area, not just `just verify` or `just test`; include `just test-e2e` when frontend behavior is affected.

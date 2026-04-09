@@ -190,6 +190,218 @@ export async function createAnalysis(
 	return ((await response.json()) as { id: string }).id;
 }
 
+export interface AnalysisWithDashboardResult {
+	analysisId: string;
+	tabId: string;
+	dashboardId: string;
+	widgetIds: Record<string, string>;
+}
+
+export async function createAnalysisWithDashboard(
+	request: APIRequestContext,
+	name: string,
+	datasourceId: string
+): Promise<AnalysisWithDashboardResult> {
+	const tabId = crypto.randomUUID();
+	const resultId = crypto.randomUUID();
+	const dashboardId = crypto.randomUUID();
+	const datasetWidgetId = crypto.randomUUID();
+	const metricWidgetId = crypto.randomUUID();
+	const headerWidgetId = crypto.randomUUID();
+
+	const response = await request.post(`${API_BASE}/analysis`, {
+		data: {
+			name,
+			description: 'E2E dashboard test',
+			tabs: [
+				{
+					id: tabId,
+					name: 'Source 1',
+					parent_id: null,
+					datasource: {
+						id: datasourceId,
+						analysis_tab_id: null,
+						config: { branch: 'master' }
+					},
+					output: {
+						result_id: resultId,
+						datasource_type: 'iceberg',
+						format: 'parquet',
+						filename: 'source_1'
+					},
+					steps: [
+						{
+							id: crypto.randomUUID(),
+							type: 'view',
+							config: {},
+							depends_on: [],
+							is_applied: true
+						}
+					]
+				}
+			],
+			variables: [],
+			dashboards: [
+				{
+					id: dashboardId,
+					name: 'Test Dashboard',
+					description: 'Created by e2e test',
+					layout: [
+						{ widget_id: datasetWidgetId, x: 0, y: 0, w: 12, h: 3 },
+						{ widget_id: metricWidgetId, x: 0, y: 3, w: 6, h: 2 },
+						{ widget_id: headerWidgetId, x: 6, y: 3, w: 6, h: 1 }
+					],
+					widgets: [
+						{
+							id: datasetWidgetId,
+							type: 'dataset_preview',
+							title: 'Dataset Preview',
+							source_tab_id: tabId,
+							config: { page_size: 25, searchable: true }
+						},
+						{
+							id: metricWidgetId,
+							type: 'metric_kpi',
+							title: 'Row Count',
+							source_tab_id: tabId,
+							config: { label: 'Total Rows', aggregation: 'count' }
+						},
+						{
+							id: headerWidgetId,
+							type: 'text_header',
+							title: 'Section Header',
+							source_tab_id: null,
+							config: { text: 'Summary', level: 2 }
+						}
+					]
+				}
+			]
+		}
+	});
+	if (!response.ok()) {
+		throw new Error(
+			`createAnalysisWithDashboard failed: ${response.status()} ${await response.text()}`
+		);
+	}
+	const analysisId = ((await response.json()) as { id: string }).id;
+	return {
+		analysisId,
+		tabId,
+		dashboardId,
+		widgetIds: {
+			dataset: datasetWidgetId,
+			metric: metricWidgetId,
+			header: headerWidgetId
+		}
+	};
+}
+
+export interface AnalysisWithChartDashboardResult {
+	analysisId: string;
+	tabId: string;
+	dashboardId: string;
+	widgetIds: Record<string, string>;
+}
+
+export async function createAnalysisWithChartDashboard(
+	request: APIRequestContext,
+	name: string,
+	datasourceId: string
+): Promise<AnalysisWithChartDashboardResult> {
+	const tabId = crypto.randomUUID();
+	const resultId = crypto.randomUUID();
+	const dashboardId = crypto.randomUUID();
+	const chartWidgetId = crypto.randomUUID();
+	const datasetWidgetId = crypto.randomUUID();
+
+	const response = await request.post(`${API_BASE}/analysis`, {
+		data: {
+			name,
+			description: 'E2E chart selection test',
+			tabs: [
+				{
+					id: tabId,
+					name: 'Source 1',
+					parent_id: null,
+					datasource: {
+						id: datasourceId,
+						analysis_tab_id: null,
+						config: { branch: 'master' }
+					},
+					output: {
+						result_id: resultId,
+						datasource_type: 'iceberg',
+						format: 'parquet',
+						filename: 'source_1'
+					},
+					steps: [
+						{
+							id: crypto.randomUUID(),
+							type: 'view',
+							config: {},
+							depends_on: [],
+							is_applied: true
+						}
+					]
+				}
+			],
+			variables: [],
+			dashboards: [
+				{
+					id: dashboardId,
+					name: 'Chart Dashboard',
+					description: 'Dashboard with chart + dataset for selection tests',
+					layout: [
+						{ widget_id: chartWidgetId, x: 0, y: 0, w: 12, h: 4 },
+						{ widget_id: datasetWidgetId, x: 0, y: 4, w: 12, h: 3 }
+					],
+					widgets: [
+						{
+							id: chartWidgetId,
+							type: 'chart',
+							title: 'City Chart',
+							source_tab_id: tabId,
+							config: {
+								chart_type: 'bar',
+								x_column: 'city',
+								y_column: 'age',
+								aggregation: 'sum',
+								selection_enabled: true,
+								selection_filters_widgets: true,
+								pan_zoom_enabled: false,
+								area_selection_enabled: false,
+								legend_position: 'right'
+							}
+						},
+						{
+							id: datasetWidgetId,
+							type: 'dataset_preview',
+							title: 'City Data',
+							source_tab_id: tabId,
+							config: { page_size: 25, searchable: true }
+						}
+					]
+				}
+			]
+		}
+	});
+	if (!response.ok()) {
+		throw new Error(
+			`createAnalysisWithChartDashboard failed: ${response.status()} ${await response.text()}`
+		);
+	}
+	const analysisId = ((await response.json()) as { id: string }).id;
+	return {
+		analysisId,
+		tabId,
+		dashboardId,
+		widgetIds: {
+			chart: chartWidgetId,
+			dataset: datasetWidgetId
+		}
+	};
+}
+
 // ── UDF ───────────────────────────────────────────────────────────────────────
 
 export async function createUdf(request: APIRequestContext, name: string): Promise<string> {

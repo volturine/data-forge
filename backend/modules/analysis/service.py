@@ -10,8 +10,17 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col
 
 from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError
+from modules.analysis.dashboard_utils import has_variable_refs, validate_analysis_pipeline_extensions
 from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
-from modules.analysis.pipeline_types import PipelineDefinition, PipelineStep, PipelineTab, TabDatasource, TabOutput
+from modules.analysis.pipeline_types import (
+    AnalysisVariable,
+    DashboardDefinition,
+    PipelineDefinition,
+    PipelineStep,
+    PipelineTab,
+    TabDatasource,
+    TabOutput,
+)
 from modules.analysis.schemas import (
     AnalysisCreateSchema,
     AnalysisGalleryItemSchema,
@@ -32,7 +41,7 @@ def _validate_analysis_payload(
     session: Session,  # type: ignore[type-arg]
     data: AnalysisCreateSchema | AnalysisUpdateSchema,
     analysis_id: str | None = None,
-) -> tuple[list[PipelineTab], list[str]]:
+) -> tuple[PipelineDefinition, list[str]]:
     if not data.tabs:
         raise ValueError('Analysis requires at least one tab')
     tabs_payload = [PipelineTab.from_dict(tab.model_dump()) for tab in data.tabs]
@@ -98,14 +107,23 @@ def _validate_analysis_payload(
     for tab in tabs_payload:
         step_ids: set[str] = set()
         for step in tab.steps:
-            validate_step(step.type, step.config)
+            if not has_variable_refs(step.config):
+                validate_step(step.type, step.config)
             if step.id:
                 step_ids.add(step.id)
             for dep_id in step.depends_on:
                 if dep_id not in step_ids:
                     raise ValueError(f"Step depends on unknown step '{dep_id}'")
 
-    return tabs_payload, datasource_ids
+    variables_payload = [AnalysisVariable.from_dict(variable.model_dump(mode='json')) for variable in data.variables]
+    dashboards_payload = [DashboardDefinition.from_dict(dashboard.model_dump(mode='json')) for dashboard in data.dashboards]
+    pipeline = PipelineDefinition(
+        tabs=tabs_payload,
+        variables=variables_payload,
+        dashboards=dashboards_payload,
+    )
+    validate_analysis_pipeline_extensions(pipeline.to_dict())
+    return pipeline, datasource_ids
 
 
 def validate_analysis(
@@ -113,8 +131,8 @@ def validate_analysis(
     data: AnalysisCreateSchema,
 ) -> dict[str, Any]:
     """Validate analysis payload without persisting."""
-    tabs_payload, _ = _validate_analysis_payload(session, data)
-    return {'valid': True, 'payload': {'tabs': [t.to_dict() for t in tabs_payload]}}
+    pipeline, _ = _validate_analysis_payload(session, data)
+    return {'valid': True, 'payload': pipeline.to_dict()}
 
 
 def create_analysis(
@@ -124,9 +142,8 @@ def create_analysis(
 ) -> AnalysisResponseSchema:
     analysis_id = str(uuid.uuid4())
 
-    tabs_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
-
-    pipeline_definition = PipelineDefinition(tabs=tabs_payload).to_dict()
+    pipeline_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
+    pipeline_definition = pipeline_payload.to_dict()
 
     now = datetime.now(UTC).replace(tzinfo=None)
     analysis = Analysis(
@@ -205,8 +222,8 @@ def update_analysis(
         analysis.description = data.description
 
     if data.tabs is not None:
-        tabs_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
-        analysis.pipeline_definition = PipelineDefinition(tabs=tabs_payload).to_dict()
+        pipeline_payload, datasource_ids = _validate_analysis_payload(session, data, analysis_id)
+        analysis.pipeline_definition = pipeline_payload.to_dict()
 
         session.execute(delete(AnalysisDataSource).where(col(AnalysisDataSource.analysis_id) == analysis_id))
         for ds_id in set(datasource_ids):

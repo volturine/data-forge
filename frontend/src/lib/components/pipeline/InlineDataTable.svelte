@@ -75,7 +75,8 @@
 		return buildAnalysisPipelinePayload(
 			analysisId,
 			analysisStore.tabs,
-			datasourceStore.datasources
+			datasourceStore.datasources,
+			analysisStore.variables
 		);
 	});
 

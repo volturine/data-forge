@@ -458,7 +458,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
 def test_restore_version_requires_datasource(test_db_session, client):
     analysis_id = str(uuid.uuid4())
     missing_ds_id = str(uuid.uuid4())
-    pipeline_definition = {
+    pipeline_definition: dict[str, Any] = {
         'steps': [],
         'tabs': [
             {
@@ -520,7 +520,7 @@ def test_restore_version_relinks_analysis_datasource(test_db_session, client):
         created_by_analysis_id='source-analysis',
         created_at=datetime.now(UTC),
     )
-    pipeline_definition = {
+    pipeline_definition: dict[str, Any] = {
         'steps': [],
         'tabs': [
             {
@@ -574,7 +574,7 @@ def test_restore_version_with_derived_tab_uses_internal_output_mapping(test_db_s
     analysis_id = str(uuid.uuid4())
     output_id = str(uuid.uuid4())
     derived_output_id = str(uuid.uuid4())
-    pipeline_definition = {
+    pipeline_definition: dict[str, Any] = {
         'steps': [],
         'tabs': [
             {
