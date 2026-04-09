@@ -84,18 +84,15 @@ describe('websocketRequest', () => {
 		expect(result._unsafeUnwrap()).toEqual({ step_id: 'step-1', total_rows: 1 });
 	});
 
-	test('uses explicit backend host and port in dev websocket URLs', async () => {
-		vi.stubEnv('DEV', 'true');
-		vi.stubEnv('VITE_BACKEND_HOST', 'backend.internal');
-		vi.stubEnv('VITE_BACKEND_PORT', '8012');
-
+	test('uses window.location.origin for websocket URL', async () => {
 		const resultPromise = websocketRequest('/v1/compute/ws', 'preview', {}, () =>
 			okAsync({ fallback: true })
 		);
 		const socket = MockWebSocket.instances[0];
 		const url = new URL(socket.url);
 
-		expect(url.origin).toBe('ws://backend.internal:8012');
+		// WebSocket always uses same-origin; Vite proxy handles forwarding in dev mode
+		expect(url.hostname).toBe('localhost');
 
 		socket.emit('open');
 		socket.emit('message', { data: JSON.stringify({ type: 'result', data: { ok: true } }) });

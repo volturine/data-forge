@@ -26,7 +26,7 @@ Browser  ──►  FastAPI (PORT 8000)
   for regular browser traffic. `CORS_ORIGINS` only needs a value when you have
   out-of-band clients (native apps, separate domains).
 - The frontend Vite dev server is **not running**. `FRONTEND_PORT`,
-  `VITE_BACKEND_HOST`, and `VITE_BACKEND_PORT` have no effect.
+  `BACKEND_HOST`, and `BACKEND_PORT` have no effect.
 - `AUTH_FRONTEND_URL` should be the same URL as the backend (e.g.
   `http://your-server:8000`).
 
@@ -40,15 +40,16 @@ Browser  ──►  FastAPI (PORT 8000)
 ```
 Browser  ──►  Vite dev server (FRONTEND_PORT 3000)
                   │
-                  └── /api/* proxy ──►  FastAPI (VITE_BACKEND_PORT 8000)
+                  └── /api/* proxy ──►  FastAPI (BACKEND_PORT 8000)
 ```
 
 - `PROD_MODE_ENABLED=false` (default) — FastAPI does not serve static files; the
   Vite dev server handles all browser requests and proxies `/api` to FastAPI.
 - Because the browser origin (`:3000`) differs from the API origin (`:8000`),
   FastAPI's `CORS_ORIGINS` **must** include the dev-server origin.
-- `FRONTEND_PORT`, `VITE_BACKEND_HOST`, and `VITE_BACKEND_PORT` wire the Vite
-  proxy and dev WebSocket connections to the correct backend address.
+- `FRONTEND_PORT`, `BACKEND_HOST`, and `BACKEND_PORT` wire the Vite
+  proxy to the correct backend address. WebSocket connections go through the
+  Vite proxy — no backend host/port is exposed to browser code.
 - `AUTH_FRONTEND_URL` should be the Vite dev-server URL (e.g.
   `http://localhost:5173` or `http://localhost:3000`).
 
@@ -69,7 +70,7 @@ If you only want the high-value knobs, start with these:
 - `AUTH_REQUIRED` — turn login on/off
 - `SETTINGS_ENCRYPTION_KEY` — strongly recommended when auth is enabled
 - `POLARS_MAX_THREADS`, `POLARS_MAX_MEMORY_MB`, `MAX_CONCURRENT_ENGINES` — performance limits
-- **Dev-only:** `VITE_BACKEND_HOST`, `VITE_BACKEND_PORT`, `FRONTEND_PORT` — frontend local-dev wiring
+- **Dev-only:** `BACKEND_HOST`, `BACKEND_PORT`, `FRONTEND_PORT` — Vite proxy wiring (Node.js only, not exposed to browser)
 
 ## How configuration is loaded
 
@@ -234,11 +235,11 @@ just dev
 > In production the Vite dev server is not running, so none of these have any
 > effect on the deployed application.
 
-| Variable            | Default     | Notes                                                              |
-| ------------------- | ----------- | ------------------------------------------------------------------ |
-| `FRONTEND_PORT`     | `3000`      | Local Vite dev-server port.                                        |
-| `VITE_BACKEND_HOST` | `127.0.0.1` | Backend hostname used by the Vite proxy and direct dev websockets. |
-| `VITE_BACKEND_PORT` | `8000`      | Backend port used by the Vite proxy and direct dev websockets.     |
+| Variable        | Default     | Notes                                                   |
+| --------------- | ----------- | ------------------------------------------------------- |
+| `FRONTEND_PORT` | `3000`      | Local Vite dev-server port.                             |
+| `BACKEND_HOST`  | `127.0.0.1` | Backend hostname used by the Vite proxy (Node.js only, not exposed to browser code). |
+| `BACKEND_PORT`  | `8000`      | Backend port used by the Vite proxy (Node.js only, not exposed to browser code). Falls back to the backend `PORT` env var. |
 
 ## Test and tooling variables
 
