@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Final, TypedDict, cast
 
 import polars as pl
 import pyarrow as pa  # type: ignore[import-untyped]
@@ -46,6 +46,28 @@ from modules.udf.models import Udf
 logger = logging.getLogger(__name__)
 
 BuildEmitter = Callable[[dict[str, object]], Awaitable[None]]
+
+
+class _UnsetType:
+    __slots__ = ()
+
+
+_UNSET: Final = _UnsetType()
+
+
+class _EngineRunFailureUpdateKwargs(TypedDict, total=False):
+    datasource_id: str
+    status: ComputeRunStatus
+    result_json: dict[str, object]
+    merge_result_json: bool
+    error_message: str
+    completed_at: datetime
+    duration_ms: int
+    step_timings: dict
+    query_plan: str | None
+    execution_entries: list[dict[str, object]]
+    progress: float
+    current_step: str | None
 
 
 def _utcnow() -> datetime:
@@ -757,6 +779,68 @@ def _load_engine_run_result_json(session: Session, run_id: str) -> dict[str, obj
     return _copy_json_dict(run.result_json)
 
 
+def _finalize_failed_engine_run(
+    session: Session,
+    *,
+    run_id: str,
+    existing_result: dict[str, object] | None,
+    execution_entries: list[dict[str, object]],
+    error: Exception,
+    completed_at: datetime,
+    duration_ms: int,
+    step_timings: dict,
+    query_plan: str | None | _UnsetType = _UNSET,
+    current_output_id: str | None = None,
+    current_output_name: str | None = None,
+    current_tab_id: str | None = None,
+    current_tab_name: str | None = None,
+    total_steps: int | None = None,
+    total_tabs: int | None = None,
+    resource_config: dict[str, int | None] | None = None,
+    result_entry: dict[str, object] | None = None,
+    log_entry: dict[str, object] | None = None,
+    summary_meta: dict[str, object] | None = None,
+    datasource_id: str | _UnsetType = _UNSET,
+    current_step: str | None | _UnsetType = _UNSET,
+) -> None:
+    result_json = _build_canonical_engine_run_result(
+        existing_result=existing_result,
+        summary_meta=summary_meta,
+        execution_entries=execution_entries,
+        current_output_id=current_output_id,
+        current_output_name=current_output_name,
+        current_tab_id=current_tab_id,
+        current_tab_name=current_tab_name,
+        total_steps=total_steps,
+        total_tabs=total_tabs,
+        resource_config=resource_config,
+        results=[result_entry] if result_entry is not None else None,
+        append_logs=[log_entry] if log_entry is not None else None,
+    )
+    kwargs: _EngineRunFailureUpdateKwargs = {
+        'status': ComputeRunStatus.FAILED,
+        'result_json': result_json,
+        'merge_result_json': False,
+        'error_message': str(error),
+        'completed_at': completed_at,
+        'duration_ms': duration_ms,
+        'step_timings': step_timings,
+        'execution_entries': execution_entries,
+        'progress': 0.0,
+    }
+    if not isinstance(datasource_id, _UnsetType):
+        kwargs['datasource_id'] = datasource_id
+    if not isinstance(query_plan, _UnsetType):
+        kwargs['query_plan'] = query_plan
+    if not isinstance(current_step, _UnsetType):
+        kwargs['current_step'] = current_step
+    engine_run_service.update_engine_run(
+        session,
+        run_id,
+        **kwargs,
+    )
+
+
 def _build_canonical_engine_run_result(
     *,
     existing_result: dict[str, object] | None,
@@ -1271,40 +1355,30 @@ def preview_step(
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_engine_run_execution_entries(
-            result_data if isinstance(locals().get('result_data'), dict) else None,
+            result_data if isinstance(result_data, dict) else None,
             duration_ms=duration_ms,
         )
-        result_json = _build_canonical_engine_run_result(
+        _finalize_failed_engine_run(
+            session,
+            run_id=run_response.id,
             existing_result=_load_engine_run_result_json(session, run_response.id),
-            summary_meta=None,
             execution_entries=execution_entries,
+            error=exc,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
             current_tab_id=tab_id,
             current_tab_name=tab_name,
             total_steps=len(preview_steps),
             total_tabs=1,
             resource_config=_resource_summary(engine),
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.FAILED,
-                    error=str(exc),
-                )
-            ],
-            append_logs=[_log_entry(message=str(exc), level='error', tab_id=tab_id, tab_name=tab_name)],
-        )
-        engine_run_service.update_engine_run(
-            session,
-            run_response.id,
-            status=ComputeRunStatus.FAILED,
-            result_json=result_json,
-            merge_result_json=False,
-            error_message=str(exc),
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            execution_entries=execution_entries,
-            progress=0.0,
+            result_entry=_result_entry(
+                tab_id=tab_id,
+                tab_name=tab_name,
+                status=BuildTabStatus.FAILED,
+                error=str(exc),
+            ),
+            log_entry=_log_entry(message=str(exc), level='error', tab_id=tab_id, tab_name=tab_name),
             current_step=current_step_id,
         )
         raise
@@ -1530,36 +1604,26 @@ def get_step_row_count(
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-        result_json = _build_canonical_engine_run_result(
+        _finalize_failed_engine_run(
+            session,
+            run_id=run_response.id,
             existing_result=_load_engine_run_result_json(session, run_response.id),
-            summary_meta=None,
             execution_entries=execution_entries,
+            error=exc,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
             current_tab_id=tab_id,
             current_tab_name=tab_name,
             total_steps=len(count_steps),
             total_tabs=1,
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.FAILED,
-                    error=str(exc),
-                )
-            ],
-            append_logs=[_log_entry(message=str(exc), level='error', tab_id=tab_id, tab_name=tab_name)],
-        )
-        engine_run_service.update_engine_run(
-            session,
-            run_response.id,
-            status=ComputeRunStatus.FAILED,
-            result_json=result_json,
-            merge_result_json=False,
-            error_message=str(exc),
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            execution_entries=execution_entries,
-            progress=0.0,
+            result_entry=_result_entry(
+                tab_id=tab_id,
+                tab_name=tab_name,
+                status=BuildTabStatus.FAILED,
+                error=str(exc),
+            ),
+            log_entry=_log_entry(message=str(exc), level='error', tab_id=tab_id, tab_name=tab_name),
             current_step=current_step_id,
         )
         raise
@@ -1966,13 +2030,20 @@ def export_data(
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-        result_json = _build_canonical_engine_run_result(
+        _finalize_failed_engine_run(
+            session,
+            run_id=run_response.id,
             existing_result=_load_engine_run_result_json(session, run_response.id),
+            execution_entries=execution_entries,
+            error=exc,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
+            query_plan=query_plan,
             summary_meta={
                 'source_datasource_id': datasource_id,
                 'source_datasource_name': source_datasource_name,
             },
-            execution_entries=execution_entries,
             current_output_id=result_id,
             current_output_name=initial_output_name if isinstance(initial_output_name, str) else filename,
             current_tab_id=tab_id,
@@ -1980,38 +2051,20 @@ def export_data(
             total_steps=len(export_steps) + 2,
             total_tabs=1,
             resource_config=_resource_summary(engine),
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.FAILED,
-                    output_id=result_id,
-                    output_name=initial_output_name if isinstance(initial_output_name, str) else filename,
-                    error=str(exc),
-                )
-            ],
-            append_logs=[
-                _log_entry(
-                    message=str(exc),
-                    level='error',
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                )
-            ],
-        )
-        engine_run_service.update_engine_run(
-            session,
-            run_response.id,
-            status=ComputeRunStatus.FAILED,
-            result_json=result_json,
-            merge_result_json=False,
-            error_message=str(exc),
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            query_plan=query_plan,
-            execution_entries=execution_entries,
-            progress=0.0,
+            result_entry=_result_entry(
+                tab_id=tab_id,
+                tab_name=tab_name,
+                status=BuildTabStatus.FAILED,
+                output_id=result_id,
+                output_name=initial_output_name if isinstance(initial_output_name, str) else filename,
+                error=str(exc),
+            ),
+            log_entry=_log_entry(
+                message=str(exc),
+                level='error',
+                tab_id=tab_id,
+                tab_name=tab_name,
+            ),
         )
         raise
     finally:
@@ -2214,38 +2267,28 @@ def download_step(
         completed_at = datetime.now(UTC)
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         execution_entries = _build_engine_run_execution_entries(result_data, duration_ms=duration_ms)
-        result_json = _build_canonical_engine_run_result(
+        _finalize_failed_engine_run(
+            session,
+            run_id=run_response.id,
             existing_result=_load_engine_run_result_json(session, run_response.id),
-            summary_meta=None,
             execution_entries=execution_entries,
+            error=exc,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            step_timings=step_timings,
+            query_plan=query_plan,
             current_tab_id=tab_id,
             current_tab_name=tab_name,
             total_steps=len(download_steps),
             total_tabs=1,
             resource_config=_resource_summary(engine),
-            results=[
-                _result_entry(
-                    tab_id=tab_id,
-                    tab_name=tab_name,
-                    status=BuildTabStatus.FAILED,
-                    error=str(exc),
-                )
-            ],
-            append_logs=[_log_entry(message=str(exc), level='error', tab_id=tab_id, tab_name=tab_name)],
-        )
-        engine_run_service.update_engine_run(
-            session,
-            run_response.id,
-            status=ComputeRunStatus.FAILED,
-            result_json=result_json,
-            merge_result_json=False,
-            error_message=str(exc),
-            completed_at=completed_at,
-            duration_ms=duration_ms,
-            step_timings=step_timings,
-            query_plan=query_plan,
-            execution_entries=execution_entries,
-            progress=0.0,
+            result_entry=_result_entry(
+                tab_id=tab_id,
+                tab_name=tab_name,
+                status=BuildTabStatus.FAILED,
+                error=str(exc),
+            ),
+            log_entry=_log_entry(message=str(exc), level='error', tab_id=tab_id, tab_name=tab_name),
         )
         raise
     finally:

@@ -132,34 +132,42 @@ describe('EngineRunsStreamStore', () => {
 		expect(store.runs[0].status).toBe('success');
 	});
 
-	test('applies update for new run by prepending', () => {
-		const store = new EngineRunsStreamStore();
-		store.connect({});
-
-		const socket = MockWebSocket.instances[0];
-		sendMessage(socket, { type: 'snapshot', runs: [makeRun('run-1')] });
-		sendMessage(socket, { type: 'update', run: makeRun('run-2') });
-
-		expect(store.runs).toHaveLength(2);
-		expect(store.runs[0].id).toBe('run-2');
-		expect(store.runs[1].id).toBe('run-1');
-	});
-
-	test('applies remove', () => {
+	test('applies update for new run sorted by created_at descending', () => {
 		const store = new EngineRunsStreamStore();
 		store.connect({});
 
 		const socket = MockWebSocket.instances[0];
 		sendMessage(socket, {
 			type: 'snapshot',
-			runs: [makeRun('run-1'), makeRun('run-2')]
+			runs: [makeRun('run-1', { created_at: '2025-01-01T00:02:00Z' })]
+		});
+		sendMessage(socket, {
+			type: 'update',
+			run: makeRun('run-2', { created_at: '2025-01-01T00:03:00Z' })
 		});
 
 		expect(store.runs).toHaveLength(2);
-
-		sendMessage(socket, { type: 'remove', run_id: 'run-1' });
-		expect(store.runs).toHaveLength(1);
 		expect(store.runs[0].id).toBe('run-2');
+		expect(store.runs[1].id).toBe('run-1');
+	});
+
+	test('sorts new runs by created_at even when arriving out of order', () => {
+		const store = new EngineRunsStreamStore();
+		store.connect({});
+
+		const socket = MockWebSocket.instances[0];
+		sendMessage(socket, {
+			type: 'snapshot',
+			runs: [makeRun('run-1', { created_at: '2025-01-01T00:03:00Z' })]
+		});
+		sendMessage(socket, {
+			type: 'update',
+			run: makeRun('run-2', { created_at: '2025-01-01T00:01:00Z' })
+		});
+
+		expect(store.runs).toHaveLength(2);
+		expect(store.runs[0].id).toBe('run-1');
+		expect(store.runs[1].id).toBe('run-2');
 	});
 
 	test('sets error on websocket error', () => {

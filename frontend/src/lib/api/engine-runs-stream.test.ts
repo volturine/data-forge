@@ -82,7 +82,6 @@ describe('connectEngineRunsStream', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -100,7 +99,6 @@ describe('connectEngineRunsStream', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -117,7 +115,6 @@ describe('connectEngineRunsStream', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -130,27 +127,10 @@ describe('connectEngineRunsStream', () => {
 		expect(callbacks.onUpdate).toHaveBeenCalledWith(run);
 	});
 
-	test('calls onRemove for remove messages', () => {
-		const callbacks = {
-			onSnapshot: vi.fn(),
-			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
-			onError: vi.fn(),
-			onClose: vi.fn()
-		};
-		connectEngineRunsStream({}, callbacks);
-
-		const socket = MockWebSocket.instances[0];
-		socket.emit('message', { data: JSON.stringify({ type: 'remove', run_id: 'run-1' }) });
-
-		expect(callbacks.onRemove).toHaveBeenCalledWith('run-1');
-	});
-
 	test('calls onError on websocket error', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -166,7 +146,6 @@ describe('connectEngineRunsStream', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -183,7 +162,6 @@ describe('connectEngineRunsStream', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -197,7 +175,6 @@ describe('connectEngineRunsStream', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};
@@ -208,14 +185,12 @@ describe('connectEngineRunsStream', () => {
 
 		expect(callbacks.onSnapshot).not.toHaveBeenCalled();
 		expect(callbacks.onUpdate).not.toHaveBeenCalled();
-		expect(callbacks.onRemove).not.toHaveBeenCalled();
 	});
 
 	test('no params produces URL without query string', () => {
 		const callbacks = {
 			onSnapshot: vi.fn(),
 			onUpdate: vi.fn(),
-			onRemove: vi.fn(),
 			onError: vi.fn(),
 			onClose: vi.fn()
 		};

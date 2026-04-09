@@ -494,7 +494,7 @@ test.describe('Monitoring – Builds tab', () => {
 
 			const detailRow = panel.locator('tr[data-build-detail]').first();
 			await expect(detailRow).toBeVisible({ timeout: 5_000 });
-			await expect(detailRow.getByText('Request Config')).toBeVisible();
+			await expect(detailRow.getByText('Request Payload')).toBeVisible();
 			await expect(detailRow.getByText('Result')).toBeVisible();
 			await screenshot(page, 'monitoring', 'build-row-expanded');
 		} finally {

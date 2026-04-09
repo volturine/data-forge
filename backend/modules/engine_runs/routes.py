@@ -14,7 +14,6 @@ from core.validation import EngineRunId, parse_analysis_id, parse_datasource_id,
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.engine_runs import schemas, service, watchers
-from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from modules.mcp.router import MCPRouter
 
@@ -109,7 +108,7 @@ def _list_params(
 def _parse_list_params(websocket: WebSocket) -> schemas.EngineRunListParams:
     raw_limit = websocket.query_params.get('limit')
     raw_offset = websocket.query_params.get('offset')
-    parsed = schemas.EngineRunListParams.model_validate(
+    params = schemas.EngineRunListParams.model_validate(
         {
             'analysis_id': websocket.query_params.get('analysis_id') or None,
             'datasource_id': websocket.query_params.get('datasource_id') or None,
@@ -119,14 +118,11 @@ def _parse_list_params(websocket: WebSocket) -> schemas.EngineRunListParams:
             'offset': int(raw_offset) if raw_offset is not None else 0,
         }
     )
-    return _list_params(
-        analysis_id=parsed.analysis_id,
-        datasource_id=parsed.datasource_id,
-        kind=parsed.kind,
-        status=parsed.status,
-        limit=parsed.limit,
-        offset=parsed.offset,
-    )
+    if params.analysis_id:
+        params.analysis_id = parse_analysis_id(params.analysis_id)
+    if params.datasource_id:
+        params.datasource_id = parse_datasource_id(params.datasource_id)
+    return params
 
 
 @router.websocket('/ws')
@@ -246,7 +242,7 @@ def list_runs(
 @handle_errors(operation='get engine run')
 def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
     """Get a single engine run by ID with full request/result JSON and step timings."""
-    run = session.get(EngineRun, parse_engine_run_id(run_id))
+    run = service.get_engine_run(session, parse_engine_run_id(run_id))
     if not run:
         raise HTTPException(status_code=404, detail='Engine run not found')
-    return service._serialize_run(run)
+    return run

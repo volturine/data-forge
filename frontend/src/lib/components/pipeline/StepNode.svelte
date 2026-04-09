@@ -446,6 +446,7 @@
 				onclick={() => onDelete(step.id)}
 				type="button"
 				title="Delete step"
+				data-action="delete"
 				disabled={readOnly}
 			>
 				<Trash2 size={11} />

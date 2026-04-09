@@ -339,6 +339,95 @@ def test_build_canonical_engine_run_result_persists_unified_detail_shape() -> No
     assert results[0]['output_name'] == 'output_salary_predictions'
 
 
+def test_finalize_failed_engine_run_preserves_omitted_current_step() -> None:
+    session = MagicMock()
+    error = RuntimeError('preview failed')
+
+    with patch('modules.compute.service.engine_run_service.update_engine_run') as update:
+        compute_service._finalize_failed_engine_run(
+            session,
+            run_id='run-1',
+            existing_result={'logs': []},
+            execution_entries=[],
+            error=error,
+            completed_at=datetime.now(UTC),
+            duration_ms=25,
+            step_timings={},
+            current_tab_id='tab-1',
+            current_tab_name='Tab 1',
+            total_steps=2,
+            total_tabs=1,
+            resource_config={'max_threads': 4, 'max_memory_mb': 256, 'streaming_chunk_size': None},
+            result_entry=compute_service._result_entry(
+                tab_id='tab-1',
+                tab_name='Tab 1',
+                status=compute_schemas.BuildTabStatus.FAILED,
+                error=str(error),
+            ),
+            log_entry=compute_service._log_entry(
+                message=str(error),
+                level='error',
+                tab_id='tab-1',
+                tab_name='Tab 1',
+            ),
+        )
+
+    kwargs = update.call_args.kwargs
+    assert kwargs['status'] == compute_schemas.ComputeRunStatus.FAILED
+    assert kwargs['error_message'] == 'preview failed'
+    assert 'current_step' not in kwargs
+    assert 'query_plan' not in kwargs
+
+
+def test_finalize_failed_engine_run_preserves_explicit_none_current_step_and_query_plan() -> None:
+    session = MagicMock()
+    error = RuntimeError('export failed')
+
+    with patch('modules.compute.service.engine_run_service.update_engine_run') as update:
+        compute_service._finalize_failed_engine_run(
+            session,
+            run_id='run-2',
+            existing_result={'results': []},
+            execution_entries=[{'key': 'step-1', 'label': 'Step 1', 'category': 'step', 'order': 0}],
+            error=error,
+            completed_at=datetime.now(UTC),
+            duration_ms=50,
+            step_timings={'step-1': 12.5},
+            query_plan=None,
+            summary_meta={'source_datasource_id': 'ds-1', 'source_datasource_name': 'Source 1'},
+            current_output_id='out-1',
+            current_output_name='Output 1',
+            current_tab_id='tab-1',
+            current_tab_name='Tab 1',
+            total_steps=4,
+            total_tabs=1,
+            resource_config={'max_threads': 2, 'max_memory_mb': 128, 'streaming_chunk_size': 1000},
+            result_entry=compute_service._result_entry(
+                tab_id='tab-1',
+                tab_name='Tab 1',
+                status=compute_schemas.BuildTabStatus.FAILED,
+                output_id='out-1',
+                output_name='Output 1',
+                error=str(error),
+            ),
+            log_entry=compute_service._log_entry(
+                message=str(error),
+                level='error',
+                tab_id='tab-1',
+                tab_name='Tab 1',
+            ),
+            current_step=None,
+        )
+
+    kwargs = update.call_args.kwargs
+    assert kwargs['status'] == compute_schemas.ComputeRunStatus.FAILED
+    assert kwargs['error_message'] == 'export failed'
+    assert 'current_step' in kwargs
+    assert kwargs['current_step'] is None
+    assert 'query_plan' in kwargs
+    assert kwargs['query_plan'] is None
+
+
 def test_schedule_stream_tasks_runs_on_main_loop() -> None:
     loop = asyncio.new_event_loop()
     progress_task = None
@@ -1517,6 +1606,7 @@ def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(te
             datasource_id='output-ds-1',
             datasource_name='output_salary_predictions',
             result_meta={'datasource_id': 'output-ds-1', 'datasource_name': 'output_salary_predictions'},
+            source_datasource_id='source-ds-1',
             read_duration_ms=12.0,
             write_duration_ms=7.0,
         )

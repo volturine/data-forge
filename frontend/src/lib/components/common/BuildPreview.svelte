@@ -135,11 +135,14 @@
 		}
 	});
 
+	// DOM: must imperatively reset activeTab because $derived cannot write to local mutable state
 	$effect(() => {
-		if (activeTab === 'plan' && !hasPlans) activeTab = 'steps';
-		if (activeTab === 'config' && !hasConfig) activeTab = 'steps';
-		if (activeTab === 'resources' && !hasResources) activeTab = 'steps';
-		if (activeTab === 'results' && !hasResults) activeTab = 'steps';
+		const invalid =
+			(activeTab === 'plan' && !hasPlans) ||
+			(activeTab === 'config' && !hasConfig) ||
+			(activeTab === 'resources' && !hasResources) ||
+			(activeTab === 'results' && !hasResults);
+		if (invalid) activeTab = 'steps';
 	});
 </script>
 
@@ -901,7 +904,7 @@
 				role="tabpanel"
 				aria-labelledby="tab-results"
 				class={css({ padding: '4' })}
-				data-testid="build-results-panel"
+				data-testid="build-results"
 			>
 				<div
 					class={css({

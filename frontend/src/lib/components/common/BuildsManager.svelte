@@ -57,6 +57,7 @@
 	let branchFilter = $state('');
 	let expandedId = $state<string | null>(null);
 	let expandedStore = $state<BuildStreamStore | null>(null);
+	let resultExpanded = $state(false);
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	const runDetailStores = new SvelteMap<string, BuildStreamStore>();
@@ -267,6 +268,7 @@
 
 	function toggleExpand(id: string) {
 		expandedId = expandedId === id ? null : id;
+		resultExpanded = false;
 	}
 
 	function resolveName(id: string, map: Map<string, string>): string {
@@ -275,7 +277,7 @@
 
 	function getKindLabel(kind: string): string {
 		if (kind === 'preview') return 'Preview';
-		if (kind === 'download' || kind === 'export') return 'Download';
+		if (kind === 'download') return 'Download';
 		if (kind === 'datasource_create') return 'Output Create';
 		if (kind === 'datasource_update') return 'Output Update';
 		if (kind === 'row_count') return 'Row Count';
@@ -301,7 +303,7 @@
 	function runStatusLabel(run: EngineRun): string {
 		const status = engineRunStatus(run);
 		if (status === 'running') return 'Running';
-		if (status === 'completed') return 'Completed';
+		if (status === 'completed') return 'Success';
 		return 'Failed';
 	}
 
@@ -531,6 +533,7 @@
 		</div>
 	{:else if stream.error && runs.length === 0}
 		<div
+			data-testid="stream-error"
 			class={css({
 				paddingX: '3',
 				paddingY: '2.5',
@@ -679,7 +682,7 @@
 									{:else if run.kind === 'datasource_update'}
 										<RefreshCw size={14} class={css({ color: 'fg.warning' })} />
 										<span>{getKindLabel(run.kind)}</span>
-									{:else if run.kind === 'download' || run.kind === 'export'}
+									{:else if run.kind === 'download'}
 										<Download size={14} class={css({ color: 'fg.success' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'row_count'}
@@ -822,6 +825,71 @@
 										overflow: 'hidden'
 									})}
 								>
+									<div
+										class={css({
+											padding: '4',
+											display: 'flex',
+											flexDirection: 'column',
+											gap: '3'
+										})}
+									>
+										<div
+											class={css({ display: 'flex', flexWrap: 'wrap', gap: '4', fontSize: 'sm' })}
+										>
+											<span class={css({ color: 'fg.secondary' })}>
+												<strong>Run ID:</strong>
+												{run.id}
+											</span>
+										</div>
+
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<strong class={css({ fontSize: 'sm', color: 'fg.primary' })}
+												>Request Payload</strong
+											>
+											<pre
+												class={css({
+													fontSize: 'xs',
+													backgroundColor: 'bg.secondary',
+													padding: '2',
+													borderRadius: 'md',
+													overflow: 'auto',
+													maxHeight: '200px',
+													margin: '0'
+												})}>{JSON.stringify(run.request_json, null, 2)}</pre>
+										</div>
+
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+											<button
+												type="button"
+												class={button({ variant: 'secondary', size: 'sm' })}
+												onclick={() => (resultExpanded = !resultExpanded)}
+											>
+												Result
+											</button>
+											{#if resultExpanded}
+												{#if run.result_json}
+													<div class={css({ fontSize: 'sm', color: 'fg.secondary' })}>
+														Result Metadata
+													</div>
+													<pre
+														class={css({
+															fontSize: 'xs',
+															backgroundColor: 'bg.secondary',
+															padding: '2',
+															borderRadius: 'md',
+															overflow: 'auto',
+															maxHeight: '200px',
+															margin: '0'
+														})}>{JSON.stringify(run.result_json, null, 2)}</pre>
+												{:else}
+													<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
+														No result data available
+													</div>
+												{/if}
+											{/if}
+										</div>
+									</div>
+
 									{#if expandedStore}
 										<div class={css({ width: '100%', overflowX: 'hidden' })}>
 											<BuildPreview store={expandedStore} title={getKindLabel(run.kind)} />

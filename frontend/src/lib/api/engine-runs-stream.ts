@@ -3,13 +3,11 @@ import type { EngineRun, ListEngineRunsParams } from './engine-runs';
 
 export type EngineRunsStreamMessage =
 	| { type: 'snapshot'; runs: EngineRun[] }
-	| { type: 'update'; run: EngineRun }
-	| { type: 'remove'; run_id: string };
+	| { type: 'update'; run: EngineRun };
 
 export interface EngineRunsStreamCallbacks {
 	onSnapshot: (runs: EngineRun[]) => void;
 	onUpdate: (run: EngineRun) => void;
-	onRemove: (runId: string) => void;
 	onError: (error: string) => void;
 	onClose: () => void;
 }
@@ -51,10 +49,6 @@ export function connectEngineRunsStream(
 		}
 		if (msg.type === 'update') {
 			callbacks.onUpdate(msg.run);
-			return;
-		}
-		if (msg.type === 'remove') {
-			callbacks.onRemove(msg.run_id);
 		}
 	});
 
