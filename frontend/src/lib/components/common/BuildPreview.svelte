@@ -19,7 +19,7 @@
 		PauseCircle,
 		PlayCircle
 	} from 'lucide-svelte';
-	import { css, cx, tabButton, chip, row, callout, spinner } from '$lib/styles/panda';
+	import { css, cx, tabButton, chip, callout, spinner } from '$lib/styles/panda';
 
 	interface Props {
 		store: BuildStreamStore;
@@ -36,6 +36,7 @@
 	let copied = $state(false);
 
 	const MEMORY_WARN_THRESHOLD = 80;
+	const rowClass = css({ display: 'flex', alignItems: 'center' });
 
 	const elapsedSec = $derived(store.elapsed > 0 ? (store.elapsed / 1000).toFixed(1) : '0.0');
 	const remainingSec = $derived(
@@ -183,7 +184,7 @@
 			backgroundColor: 'bg.secondary'
 		})}
 	>
-		<div class={cx(row, css({ gap: '2' }))}>
+		<div class={cx(rowClass, css({ gap: '2' }))}>
 			{#if store.status === 'connecting' || store.status === 'running'}
 				<Loader
 					size={14}
@@ -217,7 +218,7 @@
 			borderBottomWidth: '1'
 		})}
 	>
-		<div class={cx(row, css({ justifyContent: 'space-between', marginBottom: '2' }))}>
+		<div class={cx(rowClass, css({ justifyContent: 'space-between', marginBottom: '2' }))}>
 			<span class={css({ fontSize: 'xs', color: 'fg.secondary' })}>
 				{#if store.status === 'completed'}
 					Finished in {durationSec}s
@@ -233,13 +234,13 @@
 					Disconnected
 				{/if}
 			</span>
-			<div class={cx(row, css({ gap: '3', fontSize: 'xs', color: 'fg.muted' }))}>
-				<span class={cx(row, css({ gap: '1' }))}>
+			<div class={cx(rowClass, css({ gap: '3', fontSize: 'xs', color: 'fg.muted' }))}>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
 					<Clock size={11} />
 					{elapsedSec}s
 				</span>
 				{#if remainingSec}
-					<span class={cx(row, css({ gap: '1' }))}>
+					<span class={cx(rowClass, css({ gap: '1' }))}>
 						~{remainingSec}s left
 					</span>
 				{/if}
@@ -293,7 +294,7 @@
 			class={tabButton({ active: activeTab === 'steps' })}
 			onclick={() => (activeTab = 'steps')}
 		>
-			<span class={cx(row, css({ gap: '1' }))}>
+			<span class={cx(rowClass, css({ gap: '1' }))}>
 				<ListOrdered size={12} />
 				Steps
 			</span>
@@ -306,7 +307,7 @@
 				class={tabButton({ active: activeTab === 'plan' })}
 				onclick={() => (activeTab = 'plan')}
 			>
-				<span class={cx(row, css({ gap: '1' }))}>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
 					<FileText size={12} />
 					Plan
 				</span>
@@ -320,7 +321,7 @@
 				class={tabButton({ active: activeTab === 'resources' })}
 				onclick={() => (activeTab = 'resources')}
 			>
-				<span class={cx(row, css({ gap: '1' }))}>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
 					<Activity size={12} />
 					Resources
 					{#if memoryWarning}
@@ -337,7 +338,7 @@
 				class={tabButton({ active: activeTab === 'logs' })}
 				onclick={() => (activeTab = 'logs')}
 			>
-				<span class={cx(row, css({ gap: '1' }))}>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
 					<Terminal size={12} />
 					Logs
 					<span class={chip({ tone: 'neutral' })}>{store.logs.length}</span>
@@ -359,7 +360,7 @@
 					{#if store.status === 'connecting'}
 						<div
 							class={cx(
-								row,
+								rowClass,
 								css({
 									gap: '2',
 									justifyContent: 'center',
@@ -404,7 +405,7 @@
 							{/if}
 							<div
 								class={cx(
-									row,
+									rowClass,
 									css({
 										gap: '3',
 										paddingY: '1.5',
@@ -500,7 +501,7 @@
 				class={css({ padding: '4' })}
 				data-testid="build-plan-panel"
 			>
-				<div class={cx(row, css({ gap: '2', marginBottom: '3' }))}>
+				<div class={cx(rowClass, css({ gap: '2', marginBottom: '3' }))}>
 					<button
 						type="button"
 						class={tabButton({ active: planView === 'optimized' })}
@@ -556,7 +557,7 @@
 				{#if store.resourceConfig}
 					<div
 						class={cx(
-							row,
+							rowClass,
 							css({
 								gap: '3',
 								paddingX: '3',
@@ -621,7 +622,7 @@
 								gap: '2'
 							})}
 						>
-							<div class={cx(row, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
+							<div class={cx(rowClass, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
 								<Cpu size={12} />
 								CPU
 							</div>
@@ -645,7 +646,7 @@
 								gap: '2'
 							})}
 						>
-							<div class={cx(row, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
+							<div class={cx(rowClass, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
 								<MemoryStick size={12} />
 								Memory
 							</div>
@@ -695,7 +696,7 @@
 			>
 				<div
 					class={cx(
-						row,
+						rowClass,
 						css({
 							justifyContent: 'space-between',
 							paddingX: '3',
@@ -705,7 +706,7 @@
 						})
 					)}
 				>
-					<div class={cx(row, css({ gap: '1' }))} data-testid="log-level-filter">
+					<div class={cx(rowClass, css({ gap: '1' }))} data-testid="log-level-filter">
 						<button
 							type="button"
 							class={tabButton({ active: logLevel === 'all' })}
@@ -728,12 +729,12 @@
 							Errors ({errorLogCount})
 						</button>
 					</div>
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={cx(rowClass, css({ gap: '2' }))}>
 						{#if scrollPaused}
 							<button
 								type="button"
 								class={cx(
-									row,
+									rowClass,
 									css({
 										gap: '1',
 										fontSize: 'xs',
@@ -753,7 +754,7 @@
 							</button>
 						{:else if store.status === 'running'}
 							<span
-								class={cx(row, css({ gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
+								class={cx(rowClass, css({ gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
 								data-testid="log-auto-scroll"
 							>
 								<PauseCircle size={12} />
@@ -763,7 +764,7 @@
 						<button
 							type="button"
 							class={cx(
-								row,
+								rowClass,
 								css({
 									gap: '1',
 									fontSize: 'xs',
@@ -845,7 +846,7 @@
 				Results
 			</span>
 			{#each store.results as result (result.tab_id)}
-				<div class={cx(row, css({ gap: '2', fontSize: 'sm' }))}>
+				<div class={cx(rowClass, css({ gap: '2', fontSize: 'sm' }))}>
 					{#if result.status === 'success'}
 						<CheckCircle size={12} class={css({ color: 'fg.success' })} />
 					{:else}

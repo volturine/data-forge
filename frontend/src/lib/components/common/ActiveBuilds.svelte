@@ -12,7 +12,7 @@
 		Radio,
 		User
 	} from 'lucide-svelte';
-	import { css, cx, chip, row, spinner, tabButton } from '$lib/styles/panda';
+	import { css, cx, chip, spinner, tabButton } from '$lib/styles/panda';
 	import { untrack } from 'svelte';
 
 	interface Props {
@@ -29,6 +29,7 @@
 	let statusFilter = $state<'all' | 'running' | 'completed' | 'failed'>('all');
 
 	let connection: { close: () => void } | null = null;
+	const rowClass = css({ display: 'flex', alignItems: 'center' });
 
 	function progressToPercent(p: number): number {
 		return Math.min(Math.max(Math.round(p * 100), 0), 100);
@@ -145,8 +146,8 @@
 	class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}
 	data-testid="active-builds"
 >
-	<div class={cx(row, css({ justifyContent: 'space-between' }))}>
-		<div class={cx(row, css({ gap: '2' }))}>
+	<div class={cx(rowClass, css({ justifyContent: 'space-between' }))}>
+		<div class={cx(rowClass, css({ gap: '2' }))}>
 			<Radio size={14} class={css({ color: connected ? 'fg.success' : 'fg.muted' })} />
 			<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>Active Builds</span>
 			{#if hasActive}
@@ -154,14 +155,14 @@
 			{/if}
 		</div>
 		{#if !connected && !error}
-			<div class={cx(row, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
+			<div class={cx(rowClass, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
 				<div class={spinner({ size: 'sm' })}></div>
 				Connecting...
 			</div>
 		{/if}
 	</div>
 
-	<div class={cx(row, css({ gap: '1' }))} data-testid="active-builds-status-filter">
+	<div class={cx(rowClass, css({ gap: '1' }))} data-testid="active-builds-status-filter">
 		<button
 			type="button"
 			class={tabButton({ active: statusFilter === 'all' })}
@@ -280,7 +281,7 @@
 						{#if starter}
 							<span
 								class={cx(
-									row,
+									rowClass,
 									css({ gap: '1', fontSize: 'xs', color: 'fg.muted', flexShrink: '0' })
 								)}
 								data-testid="build-starter"
