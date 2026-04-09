@@ -145,15 +145,24 @@ Once the server is running, visit:
 
 Configuration is managed through `core/config.py` using Pydantic settings.
 
-Key settings:
-- `DATABASE_URL` - Database connection string (default: `sqlite:///${DATA_DIR}/app.db`)
-- `DATA_DIR` - Base data directory (default: `./data`)
-- `DEFAULT_NAMESPACE` - Default namespace for data directories (default: `default`)
-- `UPLOAD_CHUNK_SIZE` - Upload chunk size in bytes (default: 5MB)
-- `JOB_TIMEOUT` - Job execution timeout in seconds (default: 300)
-- `ENGINE_IDLE_TIMEOUT` - Idle engine timeout in seconds (default: 300)
+Local setup:
+
+```bash
+cp .env.example .env
+```
+
+Common settings:
+- `DATA_DIR` - Base writable data directory
+- `PORT` - Backend HTTP port
+- `CORS_ORIGINS` - Allowed browser origins
+- `UPLOAD_CHUNK_SIZE` - Upload chunk size in bytes
+- `JOB_TIMEOUT` - Job execution timeout in seconds
+- `ENGINE_IDLE_TIMEOUT` - Idle engine timeout in seconds
+- `AUTH_REQUIRED` - Whether authenticated routes require login
 
 Override in `.env` file or environment variables. Use `ENV_FILE` to point to a specific env file (set to empty to disable env-file loading).
+
+See [`../ENV_VARIABLES.md`](../ENV_VARIABLES.md) for the complete reference, including frontend development variables and notes about DB-seeded settings.
 
 ## Production Deployment
 

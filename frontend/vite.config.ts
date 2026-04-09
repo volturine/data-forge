@@ -2,7 +2,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const apiPort = parseInt(process.env.PORT || '8000', 10);
+const apiPort = parseInt(process.env.VITE_BACKEND_PORT || process.env.PORT || '8000', 10);
 const apiHost = process.env.VITE_BACKEND_HOST || '127.0.0.1';
 
 export default defineConfig({

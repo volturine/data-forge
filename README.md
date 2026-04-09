@@ -56,10 +56,19 @@ Backend: http://localhost:8000
 
 ## Configuration
 
-The backend can be configured using environment variables. Copy `.env.example` to `.env` and customize as needed:
+The app can be configured with backend and frontend environment variables.
+
+### Backend
 
 ```bash
 cd backend
+cp .env.example .env
+```
+
+### Frontend (local dev only)
+
+```bash
+cd frontend
 cp .env.example .env
 ```
 
@@ -68,12 +77,14 @@ cp .env.example .env
 | Variable                  | Default   | Description                                                |
 | ------------------------- | --------- | ---------------------------------------------------------- |
 | `DEBUG`                   | `false`   | Enable debug logging and SQL echo                          |
-| `ENGINE_IDLE_TIMEOUT`     | `300`     | Seconds before idle engines are cleaned up (reset on save) |
-| `ENGINE_POOLING_INTERVAL` | `5`       | Seconds between engine state checks                        |
+| `ENGINE_IDLE_TIMEOUT`     | `60`      | Seconds before idle engines are cleaned up (reset on save) |
+| `ENGINE_POOLING_INTERVAL` | `30`      | Seconds between engine state checks                        |
 | `JOB_TIMEOUT`             | `300`     | Maximum job execution time in seconds                      |
 | `UPLOAD_CHUNK_SIZE`       | `5242880` | Upload chunk size in bytes (5MB)                           |
+| `AUTH_REQUIRED`           | `false`   | Require login before accessing authenticated routes        |
+| `VITE_BACKEND_PORT`       | `8000`    | Frontend dev websocket/proxy backend port                  |
 
-See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for complete reference of all environment variables.
+See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for the complete backend/frontend env reference and setup examples.
 
 ## Architecture
 
@@ -147,7 +158,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
 ### Deployment & Configuration
 
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** — Complete deployment guide with Docker
-- **[ENV_VARIABLES.md](ENV_VARIABLES.md)** — Complete environment variable reference (26 variables)
+- **[ENV_VARIABLES.md](ENV_VARIABLES.md)** — Complete backend/frontend environment variable reference
 - **[DOCKERIZATION_SUMMARY.md](DOCKERIZATION_SUMMARY.md)** — Dockerization implementation details
 - **[DOCKERIZATION_PLAN.md](DOCKERIZATION_PLAN.md)** — Technical architecture plan
 

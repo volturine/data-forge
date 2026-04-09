@@ -29,10 +29,18 @@ function resolveDevBackendHost(): string {
 	return window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
 }
 
+function resolveDevBackendPort(): string {
+	const explicitPort = import.meta.env.VITE_BACKEND_PORT;
+	if (typeof explicitPort === 'string' && explicitPort.trim().length > 0) {
+		return explicitPort.trim();
+	}
+	return DEV_BACKEND_PORT;
+}
+
 function resolveWebsocketOrigin(): string {
 	if (!import.meta.env.DEV) return window.location.origin;
 	if (window.location.port !== DEV_FRONTEND_PORT) return window.location.origin;
-	return `${window.location.protocol}//${resolveDevBackendHost()}:${DEV_BACKEND_PORT}`;
+	return `${window.location.protocol}//${resolveDevBackendHost()}:${resolveDevBackendPort()}`;
 }
 
 export function buildWebsocketUrl(endpoint: string): string {
