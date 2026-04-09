@@ -411,6 +411,10 @@ test.describe('Analyses – output build flow', () => {
 			const stepsPanel = page.locator('[data-testid="build-steps-panel"]');
 			await expect(stepsPanel).toBeVisible({ timeout: 5_000 });
 
+			const resultsTab = preview.getByRole('tab', { name: /Results/i });
+			await expect(resultsTab).toBeVisible({ timeout: 5_000 });
+			await resultsTab.click();
+
 			const results = page.locator('[data-testid="build-results"]');
 			await expect(results).toBeVisible({ timeout: 5_000 });
 			await expect(results.getByText('Source 1')).toBeVisible();

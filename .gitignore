@@ -1,4 +1,5 @@
 .DS_Store
+/session-*.md
 
 # Data directory (uploads, results, exports, logs)
 /data/

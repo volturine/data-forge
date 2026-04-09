@@ -25,10 +25,6 @@ export class EngineRunsStreamStore {
 				this.clearSnapshotTimeout();
 				this.applyUpdate(run);
 			},
-			onRemove: (runId) => {
-				this.clearSnapshotTimeout();
-				this.runs = this.runs.filter((r) => r.id !== runId);
-			},
 			onError: (msg) => {
 				this.clearSnapshotTimeout();
 				this.error = msg;
@@ -54,7 +50,7 @@ export class EngineRunsStreamStore {
 			next[idx] = run;
 			this.runs = next;
 		} else {
-			this.runs = [run, ...this.runs];
+			this.runs = [run, ...this.runs].toSorted((a, b) => b.created_at.localeCompare(a.created_at));
 		}
 	}
 

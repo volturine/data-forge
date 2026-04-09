@@ -387,6 +387,7 @@
 				)}
 				class:ready={canDrop}
 				role="listitem"
+				data-hook="insert-zone"
 				data-index="0"
 				ondragenter={(e) => handleDragEnter(e, 0)}
 				ondragover={handleDragOver}
@@ -525,6 +526,7 @@
 					)}
 					class:ready={canDrop}
 					role="listitem"
+					data-hook="insert-zone"
 					data-index={i + 1}
 					ondragenter={(e) => handleDragEnter(e, i + 1)}
 					ondragover={handleDragOver}

@@ -150,10 +150,10 @@ test.describe('Navigation – error state regression', () => {
 	});
 
 	test('monitoring page handles API failure without crash', async ({ page }) => {
-		// Intercept all monitoring-related APIs to simulate failure
-		await page.route('**/api/v1/engine-runs**', (route) =>
-			route.fulfill({ status: 500, body: 'Internal Server Error' })
-		);
+		// Intercept the engine-runs WS before navigation so the handler is in place
+		await page.routeWebSocket(/\/api\/v1\/engine-runs\/ws/, (ws) => {
+			ws.close({ code: 1011, reason: 'Simulated server error' });
+		});
 
 		await page.goto('/monitoring');
 		await waitForLayoutReady(page);
@@ -166,17 +166,10 @@ test.describe('Navigation – error state regression', () => {
 		await expect(page.getByRole('tab', { name: 'Schedules' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Health Checks' })).toBeVisible();
 
-		// The builds panel should show error or empty state — not silently succeed
-		// Scope to visible, non-select text to avoid matching <option> values like "Failed"
+		// The builds panel should show the stream-error element regardless of
+		// which specific WS error message the store surfaces.
 		const panel = page.locator('#panel-builds');
-		await expect(
-			panel
-				.locator(':not(select):not(option)')
-				.getByText(/error|No engine runs/i)
-				.first()
-		).toBeVisible({
-			timeout: 10_000
-		});
+		await expect(panel.locator('[data-testid="stream-error"]')).toBeVisible({ timeout: 10_000 });
 	});
 });
 

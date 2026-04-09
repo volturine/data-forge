@@ -404,11 +404,11 @@ describe('BuildPreview', () => {
 				})
 			);
 
-			await fireEvent.click(screen.getByRole('tab', { name: /Resources/i }));
-			const config = screen.getByTestId('resource-config-summary');
+			await fireEvent.click(screen.getByRole('tab', { name: /Config/i }));
+			const config = screen.getByTestId('build-config-panel');
 			expect(within(config).getByText('8')).toBeInTheDocument();
 			expect(within(config).getByText('2048 MB')).toBeInTheDocument();
-			expect(within(config).getByText('10,000')).toBeInTheDocument();
+			expect(within(config).getByText('10000')).toBeInTheDocument();
 		});
 
 		test('shows memory warning icon on Resources tab', () => {
@@ -556,7 +556,7 @@ describe('BuildPreview', () => {
 	});
 
 	describe('results', () => {
-		test('shows results section after completion', () => {
+		test('shows results section after completion', async () => {
 			renderPreview(
 				makeDetail({
 					status: 'completed',
@@ -569,6 +569,7 @@ describe('BuildPreview', () => {
 					]
 				})
 			);
+			await fireEvent.click(screen.getByRole('tab', { name: /Results/i }));
 			const results = screen.getByTestId('build-results');
 			expect(within(results).getByText('Sheet 1')).toBeInTheDocument();
 			expect(within(results).getByText('Sheet 2')).toBeInTheDocument();

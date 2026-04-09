@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from modules.engine_runs import schemas
+
+logger = logging.getLogger(__name__)
+
+
+def _is_expected_send_shutdown(websocket: WebSocket, exc: Exception) -> bool:
+    if isinstance(exc, WebSocketDisconnect):
+        return True
+    if websocket.client_state is WebSocketState.DISCONNECTED:
+        return True
+    if websocket.application_state is WebSocketState.DISCONNECTED:
+        return True
+    if not isinstance(exc, RuntimeError):
+        return False
+    message = str(exc)
+    return 'Unexpected ASGI message' in message and 'websocket.send' in message
 
 
 @dataclass(slots=True)
@@ -22,6 +39,7 @@ class EngineRunWatcherRegistry:
     def __init__(self) -> None:
         self._lock = Lock()
         self._watchers: dict[str, dict[WebSocket, EngineRunListWatcher]] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
 
     def add(
         self,
@@ -74,12 +92,32 @@ class EngineRunWatcherRegistry:
                 self.discard(namespace, watcher.websocket)
 
     def _schedule_send(self, namespace: str, websocket: WebSocket, payload: dict[str, Any]) -> None:
-        asyncio.create_task(self._send(namespace, websocket, payload))
+        task = asyncio.create_task(self._send(namespace, websocket, payload))
+        with self._lock:
+            self._tasks.add(task)
+        task.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: asyncio.Task[None]) -> None:
+        with self._lock:
+            self._tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        logger.error(
+            'Engine run watcher task failed unexpectedly',
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
     async def _send(self, namespace: str, websocket: WebSocket, payload: dict[str, Any]) -> None:
         try:
             await websocket.send_json(payload)
-        except Exception:
+        except Exception as exc:
+            if _is_expected_send_shutdown(websocket, exc):
+                self.discard(namespace, websocket)
+                return
+            logger.warning('Engine run watcher send failed: %s', exc, exc_info=True)
             self.discard(namespace, websocket)
 
 

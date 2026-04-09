@@ -1,13 +1,12 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import WebSocketDisconnect
 from sqlmodel import Session
 
-from modules.engine_runs import service as engine_run_service
-from modules.engine_runs import schemas as engine_run_schemas
-from modules.engine_runs import watchers as engine_run_watchers
+from modules.engine_runs import schemas as engine_run_schemas, service as engine_run_service, watchers as engine_run_watchers
 from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 
@@ -423,5 +422,107 @@ def test_engine_run_broadcast_scopes_updates_by_namespace(test_db_session) -> No
 
         default_socket.send_json.assert_awaited_once()
         team_socket.send_json.assert_not_awaited()
+        engine_run_watchers.registry.discard('default', default_socket)
+        engine_run_watchers.registry.discard('team-a', team_socket)
+
+    asyncio.run(scenario())
+
+
+def test_engine_run_broadcast_skips_list_query_for_existing_watched_run_update(test_db_session) -> None:
+    async def scenario() -> None:
+        socket = MagicMock()
+        socket.send_json = AsyncMock()
+        params = engine_run_schemas.EngineRunListParams()
+        created = engine_run_service.create_engine_run(
+            test_db_session,
+            engine_run_service.create_engine_run_payload(
+                analysis_id='analysis-fast-path',
+                datasource_id='ds-fast-path',
+                kind=EngineRunKind.PREVIEW,
+                status=EngineRunStatus.RUNNING,
+                request_json={'kind': 'preview'},
+                result_json={'row_count': 1},
+                created_at=datetime.now(UTC),
+            ),
+        )
+
+        engine_run_watchers.registry.add(
+            'default',
+            socket,
+            loop=asyncio.get_running_loop(),
+            params=params,
+        )
+        engine_run_watchers.registry.set_run_ids('default', socket, (created.id,))
+
+        with patch('modules.engine_runs.service.list_engine_runs', wraps=engine_run_service.list_engine_runs) as mocked:
+            engine_run_service.apply_live_event(
+                test_db_session,
+                created.id,
+                {
+                    'type': 'progress',
+                    'progress': 0.5,
+                    'elapsed_ms': 120,
+                    'current_step': 'Filter rows',
+                    'current_step_index': 1,
+                    'total_steps': 3,
+                },
+            )
+
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+        mocked.assert_not_called()
+        socket.send_json.assert_awaited_once()
+        message = socket.send_json.await_args.args[0]
+        assert message['type'] == 'update'
+        assert message['run']['id'] == created.id
+        assert message['run']['progress'] == 0.5
+        engine_run_watchers.registry.discard('default', socket)
+
+    asyncio.run(scenario())
+
+
+def test_engine_run_watcher_send_swallows_expected_disconnect_cleanup(caplog) -> None:
+    async def scenario() -> None:
+        websocket = MagicMock()
+        websocket.send_json = AsyncMock(side_effect=WebSocketDisconnect())
+        params = engine_run_schemas.EngineRunListParams()
+        registry = engine_run_watchers.EngineRunWatcherRegistry()
+
+        registry.add(
+            'default',
+            websocket,
+            loop=asyncio.get_running_loop(),
+            params=params,
+        )
+
+        with caplog.at_level('WARNING'):
+            await registry._send('default', websocket, {'type': 'snapshot', 'runs': []})
+
+        assert registry.watchers('default') == []
+        assert 'Engine run watcher send failed' not in caplog.text
+
+    asyncio.run(scenario())
+
+
+def test_engine_run_watcher_send_logs_unexpected_failures(caplog) -> None:
+    async def scenario() -> None:
+        websocket = MagicMock()
+        websocket.send_json = AsyncMock(side_effect=RuntimeError('boom'))
+        params = engine_run_schemas.EngineRunListParams()
+        registry = engine_run_watchers.EngineRunWatcherRegistry()
+
+        registry.add(
+            'default',
+            websocket,
+            loop=asyncio.get_running_loop(),
+            params=params,
+        )
+
+        with caplog.at_level('WARNING'):
+            await registry._send('default', websocket, {'type': 'snapshot', 'runs': []})
+
+        assert registry.watchers('default') == []
+        assert 'Engine run watcher send failed: boom' in caplog.text
 
     asyncio.run(scenario())

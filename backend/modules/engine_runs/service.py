@@ -2,7 +2,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from fastapi import HTTPException as FastAPIHTTPException
 from sqlalchemy import desc, select
@@ -17,9 +17,10 @@ from modules.engine_runs.schemas import (
     ColumnDiff,
     EngineRunExecutionCategory,
     EngineRunExecutionEntry,
+    EngineRunKind,
+    EngineRunListParams,
     EngineRunListSnapshotMessage,
     EngineRunListUpdateMessage,
-    EngineRunKind,
     EngineRunResponseSchema,
     EngineRunResultSummary,
     EngineRunStatus,
@@ -52,7 +53,13 @@ class EngineRunPayload:
 
 
 _TIMING_SUFFIX_RE = re.compile(r'^(?P<base>.+?)_(?P<index>\d+)$')
-_UNSET = object()
+
+
+class _UnsetType:
+    __slots__ = ()
+
+
+_UNSET: Final = _UnsetType()
 _MAX_LIVE_RESOURCES = 120
 _MAX_LIVE_LOGS = 500
 
@@ -312,11 +319,28 @@ def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
     )
 
 
+def _run_matches_params(run: EngineRunResponseSchema, params: EngineRunListParams) -> bool:
+    if params.analysis_id is not None and run.analysis_id != params.analysis_id:
+        return False
+    if params.datasource_id is not None and run.datasource_id != params.datasource_id:
+        return False
+    if params.kind is not None and run.kind != params.kind:
+        return False
+    return params.status is None or run.status == params.status
+
+
 def _broadcast_engine_run_change(session: Session, run: EngineRunResponseSchema) -> None:
     namespace = get_namespace()
     scheduled: list[tuple[watchers.EngineRunListWatcher, dict[str, Any]]] = []
 
     for watcher in watchers.registry.watchers(namespace):
+        if run.id in watcher.run_ids and _run_matches_params(run, watcher.params):
+            scheduled.append((watcher, EngineRunListUpdateMessage(run=run).model_dump(mode='json')))
+            continue
+
+        if run.id not in watcher.run_ids and not _run_matches_params(run, watcher.params):
+            continue
+
         current_runs = list_engine_runs(
             session,
             analysis_id=watcher.params.analysis_id,
@@ -339,6 +363,13 @@ def _broadcast_engine_run_change(session: Session, run: EngineRunResponseSchema)
         scheduled.append((watcher, EngineRunListUpdateMessage(run=run).model_dump(mode='json')))
 
     watchers.registry.broadcast(namespace, scheduled)
+
+
+def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | None:
+    run = session.get(EngineRun, run_id)
+    if run is None:
+        return None
+    return _serialize_run(run)
 
 
 def _coerce_kind(kind: EngineRunKind | str) -> EngineRunKind:
@@ -390,62 +421,62 @@ def update_engine_run(
     session: Session,
     run_id: str,
     *,
-    analysis_id: str | None | object = _UNSET,
-    datasource_id: str | object = _UNSET,
-    kind: EngineRunKind | str | object = _UNSET,
-    status: EngineRunStatus | str | object = _UNSET,
-    request_json: dict[str, Any] | object = _UNSET,
-    result_json: dict[str, Any] | None | object = _UNSET,
+    analysis_id: str | None | _UnsetType = _UNSET,
+    datasource_id: str | _UnsetType = _UNSET,
+    kind: EngineRunKind | str | _UnsetType = _UNSET,
+    status: EngineRunStatus | str | _UnsetType = _UNSET,
+    request_json: dict[str, Any] | _UnsetType = _UNSET,
+    result_json: dict[str, Any] | None | _UnsetType = _UNSET,
     merge_result_json: bool = True,
-    error_message: str | None | object = _UNSET,
-    completed_at: datetime | None | object = _UNSET,
-    duration_ms: int | None | object = _UNSET,
-    step_timings: dict[str, float] | None | object = _UNSET,
-    query_plan: str | None | object = _UNSET,
-    execution_entries: list[dict[str, Any]] | None | object = _UNSET,
-    progress: float | object = _UNSET,
-    current_step: str | None | object = _UNSET,
-    triggered_by: str | None | object = _UNSET,
+    error_message: str | None | _UnsetType = _UNSET,
+    completed_at: datetime | None | _UnsetType = _UNSET,
+    duration_ms: int | None | _UnsetType = _UNSET,
+    step_timings: dict[str, float] | None | _UnsetType = _UNSET,
+    query_plan: str | None | _UnsetType = _UNSET,
+    execution_entries: list[dict[str, Any]] | None | _UnsetType = _UNSET,
+    progress: float | _UnsetType = _UNSET,
+    current_step: str | None | _UnsetType = _UNSET,
+    triggered_by: str | None | _UnsetType = _UNSET,
 ) -> EngineRunResponseSchema:
     run = session.get(EngineRun, run_id)
     if run is None:
         raise FastAPIHTTPException(status_code=404, detail=f'Engine run {run_id} not found')
     session.refresh(run)
 
-    if analysis_id is not _UNSET:
+    if not isinstance(analysis_id, _UnsetType):
         run.analysis_id = analysis_id if analysis_id is None or isinstance(analysis_id, str) else run.analysis_id
-    if datasource_id is not _UNSET and isinstance(datasource_id, str):
+    if not isinstance(datasource_id, _UnsetType) and isinstance(datasource_id, str):
         run.datasource_id = datasource_id
-    if kind is not _UNSET:
+    if not isinstance(kind, _UnsetType):
         run.kind = _coerce_kind(kind) if isinstance(kind, (EngineRunKind, str)) else run.kind
-    if status is not _UNSET:
+    if not isinstance(status, _UnsetType):
         run.status = _coerce_status(status) if isinstance(status, (EngineRunStatus, str)) else run.status
-    if request_json is not _UNSET and isinstance(request_json, dict):
+    if not isinstance(request_json, _UnsetType) and isinstance(request_json, dict):
         run.request_json = request_json
-    if result_json is not _UNSET:
+    if not isinstance(result_json, _UnsetType):
         if result_json is None:
             run.result_json = None
         elif isinstance(result_json, dict):
             base = _copy_result_json(run.result_json) if merge_result_json else {}
             base.update(result_json)
             run.result_json = base
-    if error_message is not _UNSET:
+    if not isinstance(error_message, _UnsetType):
         run.error_message = error_message if error_message is None or isinstance(error_message, str) else run.error_message
-    if completed_at is not _UNSET:
+    if not isinstance(completed_at, _UnsetType):
         run.completed_at = completed_at if completed_at is None or isinstance(completed_at, datetime) else run.completed_at
-    if duration_ms is not _UNSET:
+    if not isinstance(duration_ms, _UnsetType):
         run.duration_ms = duration_ms if duration_ms is None or isinstance(duration_ms, int) else run.duration_ms
-    if step_timings is not _UNSET:
+    if not isinstance(step_timings, _UnsetType):
         run.step_timings = normalize_step_timings(step_timings if isinstance(step_timings, dict) else None)
-    if query_plan is not _UNSET:
+    if not isinstance(query_plan, _UnsetType):
         run.query_plan = query_plan if query_plan is None or isinstance(query_plan, str) else run.query_plan
-    if progress is not _UNSET and isinstance(progress, (int, float)):
+    if not isinstance(progress, _UnsetType) and isinstance(progress, (int, float)):
         run.progress = float(progress)
-    if current_step is not _UNSET:
+    if not isinstance(current_step, _UnsetType):
         run.current_step = current_step if current_step is None or isinstance(current_step, str) else run.current_step
-    if triggered_by is not _UNSET:
+    if not isinstance(triggered_by, _UnsetType):
         run.triggered_by = triggered_by if triggered_by is None or isinstance(triggered_by, str) else run.triggered_by
-    if execution_entries is not _UNSET:
+    if not isinstance(execution_entries, _UnsetType):
         next_result_json = _copy_result_json(run.result_json)
         if execution_entries is None:
             next_result_json.pop('execution_entries', None)
