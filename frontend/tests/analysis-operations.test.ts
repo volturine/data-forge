@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createDatasource, createDatasourceWithDates, createAnalysis } from './utils/api.js';
 import { addStepAndOpenConfig } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';

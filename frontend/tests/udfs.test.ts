@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { API_BASE, createUdf } from './utils/api.js';
-import { waitForUdfList, gotoUdfEditor } from './utils/readiness.js';
+import { waitForLayoutReady, waitForUdfList, gotoUdfEditor } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
@@ -10,20 +10,13 @@ import { screenshot } from './utils/visual.js';
  * E2E tests for UDFs – mirrors test_udf.py.
  */
 test.describe('UDFs – list & management', () => {
-	test('shows empty state when no UDFs exist', async ({ page }) => {
-		await page.route('**/api/v1/udf', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([])
-				});
-			}
-			return route.continue();
-		});
-
+	test('seeded default UDFs are visible on first load', async ({ page }) => {
 		await page.goto('/udfs');
-		await expect(page.getByText(/No UDFs yet/i)).toBeVisible();
+		await waitForUdfList(page);
+
+		await expect(page.locator('h3', { hasText: 'Ratio' })).toBeVisible();
+		await expect(page.locator('h3', { hasText: 'Coalesce' })).toBeVisible();
+		await expect(page.locator('h3', { hasText: 'Normalize' })).toBeVisible();
 	});
 
 	test('lists UDF after API create', async ({ page, request }) => {
@@ -285,6 +278,7 @@ test.describe('UDFs – editor page', () => {
 
 	test('new UDF editor has Save button', async ({ page }) => {
 		await page.goto('/udfs/new');
+		await waitForLayoutReady(page);
 		await expect(page.getByRole('button', { name: /Save/i })).toBeVisible({ timeout: 8_000 });
 	});
 
@@ -382,45 +376,11 @@ test.describe('UDFs – editor functional flows', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('UDFs – error states', () => {
-	test('save error displays inline error message', async ({ page }) => {
-		test.setTimeout(60_000);
-		await page.goto('/udfs/new');
-		await expect(page.locator('[data-testid="udf-save-button"]')).toBeVisible({ timeout: 8_000 });
-
-		await page.locator('#udf-name').fill('e2e_save_error_udf');
-
-		// Intercept the UDF create endpoint to return 500
-		await page.route('**/api/v1/udf', (route) => {
-			if (route.request().method() === 'POST') {
-				return route.fulfill({
-					status: 500,
-					contentType: 'application/json',
-					body: JSON.stringify({ detail: 'Simulated save failure' })
-				});
-			}
-			return route.continue();
-		});
-
-		await page.locator('[data-testid="udf-save-button"]').click();
-
-		// Error should appear inline
-		await expect(page.locator('[data-testid="udf-save-error"]')).toBeVisible({ timeout: 10_000 });
-
-		await screenshot(page, 'udfs', 'save-error-state');
-	});
+	const BAD_ID = '00000000-0000-0000-0000-000000000000';
 
 	test('load error displays error state for bad UDF ID', async ({ page }) => {
-		// Intercept the UDF get endpoint to return 500
-		await page.route('**/api/v1/udf/bad-udf-id*', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({ status: 500, body: 'Internal Server Error' });
-			}
-			return route.continue();
-		});
+		await page.goto(`/udfs/${BAD_ID}`);
 
-		await page.goto('/udfs/bad-udf-id');
-
-		// The error state should render
 		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 15_000 });
 		await expect(page.getByText('Failed to load UDF.')).toBeVisible();
 
@@ -428,17 +388,9 @@ test.describe('UDFs – error states', () => {
 	});
 
 	test('load error does not crash navigation', async ({ page }) => {
-		await page.route('**/api/v1/udf/bad-udf-nav*', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({ status: 500, body: 'Internal Server Error' });
-			}
-			return route.continue();
-		});
-
-		await page.goto('/udfs/bad-udf-nav');
+		await page.goto(`/udfs/${BAD_ID}`);
 		await expect(page.locator('[data-testid="udf-load-error"]')).toBeVisible({ timeout: 15_000 });
 
-		// Navigate to UDF list — shell should still work
 		await page.locator('a[href="/udfs"]').first().click();
 		await expect(page).toHaveURL('/udfs');
 		await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible();

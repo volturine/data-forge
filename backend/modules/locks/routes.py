@@ -104,6 +104,45 @@ async def _heartbeat_lock(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+async def _acquire_lock(
+    resource_type: str,
+    resource_id: str,
+    owner_id: str | None,
+    ttl_seconds: int | None,
+) -> schemas.LockStatusResponse:
+    if owner_id is None:
+        raise HTTPException(status_code=401, detail='Lock owner identity is required')
+    try:
+        return await run_in_threadpool(
+            run_db,
+            service.acquire_lock,
+            resource_type,
+            resource_id,
+            owner_id,
+            ttl_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _release_lock(
+    resource_type: str,
+    resource_id: str,
+    owner_id: str | None,
+    lock_token: str,
+) -> bool:
+    if owner_id is None:
+        raise HTTPException(status_code=401, detail='Lock owner identity is required')
+    return await run_in_threadpool(
+        run_db,
+        service.release_lock,
+        resource_type,
+        resource_id,
+        owner_id,
+        lock_token,
+    )
+
+
 @router.post('', response_model=schemas.LockStatusResponse, mcp=True)
 @handle_errors(operation='acquire lock', value_error_status=409)
 async def acquire_lock(
@@ -217,6 +256,55 @@ async def lock_websocket(websocket: WebSocket) -> None:
                     await _send_status(websocket, watch_type, watch_id, status)
                     continue
 
+                if message.action == schemas.LockWebsocketAction.ACQUIRE:
+                    if watch_type is None or watch_id is None:
+                        await _send_error(websocket, 'watch must be called before acquire', 400)
+                        continue
+                    lock = await _acquire_lock(
+                        watch_type,
+                        watch_id,
+                        owner_id,
+                        message.ttl_seconds,
+                    )
+                    watch_token = lock.lock_token
+                    await _notify_watchers(watch_type, watch_id, lock)
+                    continue
+
+                if message.action == schemas.LockWebsocketAction.RELEASE:
+                    if watch_type is None or watch_id is None:
+                        await _send_error(websocket, 'watch must be called before release', 400)
+                        continue
+                    token_value = message.lock_token or watch_token
+                    if token_value is None:
+                        status, cleaned = await _lookup_lock_status(watch_type, watch_id)
+                        if cleaned:
+                            watch_token = None
+                            await _notify_watchers(watch_type, watch_id, None)
+                            continue
+                        if status is None:
+                            watch_token = None
+                        await _send_status(websocket, watch_type, watch_id, status)
+                        continue
+                    released = await _release_lock(
+                        watch_type,
+                        watch_id,
+                        owner_id,
+                        token_value,
+                    )
+                    if released:
+                        watch_token = None
+                        await _notify_watchers(watch_type, watch_id, None)
+                        continue
+                    status, cleaned = await _lookup_lock_status(watch_type, watch_id)
+                    if cleaned:
+                        watch_token = None
+                        await _notify_watchers(watch_type, watch_id, None)
+                        continue
+                    if status is None:
+                        watch_token = None
+                    await _send_status(websocket, watch_type, watch_id, status)
+                    continue
+
                 if watch_type is None or watch_id is None:
                     await _send_error(websocket, 'watch must be called before ping', 400)
                     continue
@@ -252,5 +340,9 @@ async def lock_websocket(websocket: WebSocket) -> None:
     finally:
         if watch_type is not None and watch_id is not None:
             await watchers.registry.discard(websocket, namespace, watch_type, watch_id)
+        if watch_type is not None and watch_id is not None and watch_token is not None and owner_id is not None:
+            released = await _release_lock(watch_type, watch_id, owner_id, watch_token)
+            if released:
+                await _notify_watchers(watch_type, watch_id, None)
         reset_namespace(token)
         await _safe_close_websocket(websocket)

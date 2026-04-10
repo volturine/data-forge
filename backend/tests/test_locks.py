@@ -121,6 +121,38 @@ class TestLockRoutes:
 
 
 class TestLockWebsocket:
+    def test_watch_can_acquire_and_release_over_websocket(self, client, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+        owner = run_settings_db(ensure_default_user)
+
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            assert websocket.receive_json() == {'type': 'connected'}
+            websocket.send_json({'action': 'watch', 'resource_type': 'analysis', 'resource_id': 'analysis-ws-0'})
+            assert websocket.receive_json() == {
+                'type': 'status',
+                'resource_type': 'analysis',
+                'resource_id': 'analysis-ws-0',
+                'lock': None,
+            }
+
+            websocket.send_json({'action': 'acquire'})
+            acquired = websocket.receive_json()
+
+            websocket.send_json({'action': 'release'})
+            released = websocket.receive_json()
+
+        assert acquired['type'] == 'status'
+        assert acquired['resource_type'] == 'analysis'
+        assert acquired['resource_id'] == 'analysis-ws-0'
+        assert acquired['lock']['owner_id'] == owner.id
+        assert acquired['lock']['is_expired'] is False
+        assert released == {
+            'type': 'status',
+            'resource_type': 'analysis',
+            'resource_id': 'analysis-ws-0',
+            'lock': None,
+        }
+
     def test_watch_receives_initial_and_release_updates(self, client, monkeypatch) -> None:
         monkeypatch.setattr('core.config.settings.auth_required', False)
         owner = run_settings_db(ensure_default_user)
@@ -156,6 +188,24 @@ class TestLockWebsocket:
             'resource_id': 'analysis-ws-1',
             'lock': None,
         }
+
+    def test_disconnect_releases_socket_owned_lock(self, client, test_db_session, monkeypatch) -> None:
+        monkeypatch.setattr('core.config.settings.auth_required', False)
+
+        with client.websocket_connect('/api/v1/locks/ws') as websocket:
+            assert websocket.receive_json() == {'type': 'connected'}
+            websocket.send_json({'action': 'watch', 'resource_type': 'analysis', 'resource_id': 'analysis-ws-disconnect'})
+            assert websocket.receive_json() == {
+                'type': 'status',
+                'resource_type': 'analysis',
+                'resource_id': 'analysis-ws-disconnect',
+                'lock': None,
+            }
+            websocket.send_json({'action': 'acquire'})
+            acquired = websocket.receive_json()
+            assert acquired['lock'] is not None
+
+        assert test_db_session.get(ResourceLock, ('analysis', 'analysis-ws-disconnect')) is None
 
     def test_watch_with_lock_token_heartbeats_default_owner_without_client_id(
         self,

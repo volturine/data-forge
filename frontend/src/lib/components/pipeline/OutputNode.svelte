@@ -52,6 +52,14 @@
 
 	const queryClient = useQueryClient();
 	const buildStore = new BuildStreamStore();
+	const analysisPipeline = $derived.by(() => {
+		if (!analysisId) return null;
+		return buildAnalysisPipelinePayload(
+			analysisId,
+			analysisStore.tabs,
+			datasourceStore.datasources
+		);
+	});
 	let toggling = $state(false);
 	let buildStarting = $state(false);
 	let previewOpen = $state(false);
@@ -899,7 +907,7 @@
 					_disabled: { cursor: 'not-allowed', opacity: '0.5' }
 				})}
 				onclick={handleManualBuild}
-				disabled={!analysisId || buildBusy || readOnly}
+				disabled={!analysisId || buildBusy || readOnly || !analysisPipeline}
 				title="Run analysis build"
 				type="button"
 				data-testid="output-build-button"

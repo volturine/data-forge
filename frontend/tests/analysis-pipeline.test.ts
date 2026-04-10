@@ -1,6 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import type { Page, APIRequestContext } from '@playwright/test';
 import { createDatasource, createDatasourceWithDates, API_BASE } from './utils/api.js';
+import { gotoAnalysisEditor } from './utils/analysis.js';
 import {
 	createCleanupPage,
 	deleteAnalysisViaUI,
@@ -84,7 +85,13 @@ async function createPipelineAnalysis(
 						result_id: resultId,
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'source_1'
+						filename: 'source_1',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'source_1',
+							branch: 'master'
+						}
 					},
 					steps: pipelineSteps
 				}
@@ -164,8 +171,15 @@ async function fetchPreviewViaAPI(
 						},
 						output: {
 							result_id: info.resultId,
+							datasource_type: 'iceberg',
 							format: 'parquet',
-							filename: 'source_1'
+							filename: 'source_1',
+							build_mode: 'full',
+							iceberg: {
+								namespace: 'outputs',
+								table_name: 'source_1',
+								branch: 'master'
+							}
 						},
 						steps: info.steps
 					}
@@ -197,10 +211,11 @@ async function leaveAnalysisPage(page: Page): Promise<void> {
 }
 
 /**
- * Navigate to the analysis page and wait for the inline data table to render.
+ * Navigate to the analysis editor using the standard readiness flow,
+ * then wait for the inline data table to render.
  */
 async function navigateAndWaitForTable(page: Page, analysisId: string): Promise<void> {
-	await page.goto(`/analysis/${analysisId}`);
+	await gotoAnalysisEditor(page, analysisId);
 	const table = page.locator('[data-testid="inline-data-table"]');
 	await expect(table).toBeVisible({ timeout: 30_000 });
 }
@@ -230,8 +245,8 @@ test.describe('Pipeline data verification', () => {
 		dsId = await createDatasource(request, dsName);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
@@ -817,8 +832,8 @@ test.describe('Pipeline data – pass-through operations', () => {
 		dsId = await createDatasource(request, dsName);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
@@ -864,7 +879,13 @@ test.describe('Pipeline data – pass-through operations', () => {
 							result_id: chartResultId,
 							datasource_type: 'iceberg',
 							format: 'parquet',
-							filename: 'source_1'
+							filename: 'source_1',
+							build_mode: 'full',
+							iceberg: {
+								namespace: 'outputs',
+								table_name: 'source_1',
+								branch: 'master'
+							}
 						},
 						steps: chartSteps
 					}
@@ -1015,8 +1036,8 @@ test.describe('Pipeline data – timeseries', () => {
 		dateDsId = await createDatasourceWithDates(request, dateDsName);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteDatasourceViaUI(page, dateDsName);
 		await page.close();
 		await context.close();
@@ -1086,8 +1107,8 @@ test.describe('Pipeline data – union by name', () => {
 		dsId2 = await createDatasource(request, dsName2);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteDatasourceViaUI(page, dsName1);
 		await deleteDatasourceViaUI(page, dsName2);
 		await page.close();

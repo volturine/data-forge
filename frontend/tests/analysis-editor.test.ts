@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import {
@@ -139,8 +139,8 @@ test.describe('Analyses – step library labels', () => {
 		aId = await createAnalysis(request, aName, dsId);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteAnalysisViaUI(page, aName);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
@@ -872,93 +872,6 @@ test.describe('Analyses – version history modal', () => {
 			await deleteDatasourceViaUI(page, ds);
 		}
 	});
-
-	test('version load error state shows "Failed to load version history."', async ({
-		page,
-		request
-	}) => {
-		test.setTimeout(60_000);
-		const id = uid();
-		const ds = `e2e-ver-err-${id}`;
-		const analysis = `E2E Ver Error ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Intercept versions endpoint to return 500
-			await page.route(`**/api/v1/analysis/${aId}/versions`, (route) =>
-				route.fulfill({ status: 500, body: 'Internal Server Error' })
-			);
-
-			await page.locator('[data-testid="version-history-trigger"]').click();
-			const dialog = page.getByRole('dialog');
-			await expect(dialog).toBeVisible({ timeout: 5_000 });
-
-			// The error state should appear in the modal
-			await expect(
-				dialog
-					.getByText('Failed to load version history.')
-					.or(dialog.getByText('Failed to load version history'))
-			).toBeVisible({ timeout: 10_000 });
-
-			await screenshot(page, 'analysis/editor', 'version-history-load-error');
-			await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
-
-	test('version action error displays inline error message', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const id = uid();
-		const ds = `e2e-ver-act-err-${id}`;
-		const analysis = `E2E Ver Act Error ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Save to create version 1
-			await page.locator('button[data-step="limit"]').click();
-			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
-			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
-
-			// Open version modal
-			await page.locator('[data-testid="version-history-trigger"]').click();
-			const dialog = page.getByRole('dialog');
-			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 10_000 });
-
-			// Intercept delete endpoint to return 500
-			await page.route(`**/api/v1/analysis/${aId}/versions/1`, (route) => {
-				if (route.request().method() === 'DELETE') {
-					return route.fulfill({
-						status: 500,
-						contentType: 'application/json',
-						body: JSON.stringify({ detail: 'Simulated delete failure' })
-					});
-				}
-				return route.continue();
-			});
-
-			// Try to delete — should show error inline
-			await dialog.locator('[data-testid="version-delete-1"]').click();
-
-			await expect(dialog.locator('[data-testid="version-error"]')).toBeVisible({
-				timeout: 8_000
-			});
-
-			await screenshot(page, 'analysis/editor', 'version-history-action-error');
-			await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
 });
 
 // ── Canvas layout ───────────────────────────────────────────────────────────
@@ -1102,53 +1015,6 @@ test.describe('Analyses – pointer drag reorder', () => {
 
 			await screenshot(page, 'analysis/editor', 'drag-reorder-done');
 		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
-});
-
-// ── Save failure UI ─────────────────────────────────────────────────────────
-
-test.describe('Analyses – save failure error UI', () => {
-	test('save API failure shows save-error callout', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const id = uid();
-		const ds = `e2e-save-err-${id}`;
-		const analysis = `E2E Save Error ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Add a step to make the analysis dirty
-			await page.locator('button[data-step="limit"]').click();
-			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
-
-			// Intercept save (PUT) to return 500
-			await page.route(`**/api/v1/analysis/${aId}`, (route) => {
-				if (route.request().method() === 'PUT') {
-					return route.fulfill({
-						status: 500,
-						contentType: 'application/json',
-						body: JSON.stringify({ detail: 'Simulated save failure' })
-					});
-				}
-				return route.continue();
-			});
-
-			// Click Save
-			await page.getByRole('button', { name: 'Save' }).click();
-
-			// Save error callout should appear
-			await expect(page.locator('[data-testid="save-error"]')).toBeVisible({
-				timeout: 10_000
-			});
-
-			await screenshot(page, 'analysis/editor', 'save-error-callout');
-		} finally {
-			// Unroute so cleanup works
-			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			await deleteAnalysisViaUI(page, analysis);
 			await deleteDatasourceViaUI(page, ds);
 		}

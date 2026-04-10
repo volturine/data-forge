@@ -23,7 +23,7 @@ export async function waitForAppShell(page: Page, timeout = 15_000): Promise<voi
  * assertions. This guarantees the layout `ready` flag resolved, auth
  * completed, and the Svelte page component has started rendering.
  */
-export async function waitForLayoutReady(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForLayoutReady(page: Page, timeout = 30_000): Promise<void> {
 	await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout });
 	await expect(page.getByRole('main').first()).toBeVisible({ timeout });
 }

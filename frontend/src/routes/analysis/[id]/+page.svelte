@@ -24,10 +24,14 @@
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
 	import { getStepSchema, spawnEngine } from '$lib/api/compute';
-	import { acquireLock, releaseLock, watchLock, type LockWatcher } from '$lib/api/locks';
-	import { authStore } from '$lib/stores/auth.svelte';
+	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import {
+		getEditorAccessState,
+		isEditorReadOnly,
+		type EditorLockMode
+	} from '$lib/utils/analysis-lock-state';
 	import { isChartStep } from '$lib/components/pipeline/utils';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
@@ -95,70 +99,85 @@
 	let lastLoadedVersion = $state<string | null>(null);
 	let hydratedGates = $state(new Set<string>());
 
-	let lockMode = $state<'pending' | 'owned' | 'other'>('pending');
-	let lockOwner = $state<string | null>(null);
-	const userId = $derived(authStore.user?.id ?? null);
-	let lockedByOther = $derived(
-		lockMode === 'other' && lockOwner !== null && (userId === null || lockOwner !== userId)
+	let lockMode = $state<EditorLockMode>('pending');
+	let lockIntent = $state<'editing' | 'released'>('editing');
+	const editorAccessState = $derived(
+		lockIntent === 'released' ? getEditorAccessState('released') : getEditorAccessState(lockMode)
 	);
-	const editorReadOnly = $derived(lockMode !== 'owned');
+	const lockedByOther = $derived(lockMode === 'other');
+	const editorReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
+	const saveButtonState = $derived.by(() => {
+		if (editorAccessState === 'pending') return 'pending';
+		if (editorAccessState === 'locked') return 'locked';
+		if (editorAccessState === 'unavailable') return 'readonly';
+		if (editorAccessState === 'released') return 'released';
+		if (isSaving) return 'saving';
+		if (isDirty) return 'dirty';
+		return 'clean';
+	});
+	const saveButtonLabel = $derived.by(() => {
+		if (editorAccessState === 'pending') return 'Connecting...';
+		if (editorAccessState === 'locked') return 'Locked';
+		if (editorAccessState === 'unavailable') return 'Read only';
+		if (editorAccessState === 'released') return 'Unlocked';
+		if (isSaving) return 'Saving...';
+		if (isDirty) return 'Save';
+		return 'Saved';
+	});
+	const lockButtonLabel = $derived.by(() => {
+		if (editorAccessState === 'editable') return 'Unlock';
+		if (editorAccessState === 'released') return 'Lock';
+		if (editorAccessState === 'locked') return 'Locked';
+		if (editorAccessState === 'pending') return 'Locking...';
+		return 'Retry lock';
+	});
+	const lockButtonDisabled = $derived(
+		editorAccessState === 'pending' || editorAccessState === 'locked'
+	);
 
-	function releaseCurrentLock(id: string, token: string): void {
-		releaseLock('analysis', id, token).match(
-			() => {},
-			() => {}
-		);
-	}
-
-	function startWatcher(id: string, token: string | null): LockWatcher {
-		return watchLock({
-			resourceType: 'analysis',
-			resourceId: id,
-			token,
-			onStatus: (lock) => {
-				lockOwner = lock?.owner_id ?? null;
-			}
-		});
+	function handleLockToggle(): void {
+		if (editorAccessState === 'pending' || editorAccessState === 'locked') return;
+		lockIntent = lockIntent === 'released' ? 'editing' : 'released';
 	}
 
 	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
 	$effect(() => {
-		const id = validAnalysisId;
-		if (!id) return;
+		const nextId = validAnalysisId;
+		if (!nextId) return;
+		const id = nextId;
+		if (lockIntent === 'released') {
+			lockMode = 'released';
+			return;
+		}
 
 		lockMode = 'pending';
-		lockOwner = null;
-
-		let token: string | null = null;
-		let watcher: LockWatcher | null = null;
 		let alive = true;
-
-		acquireLock('analysis', id).match(
-			(status) => {
-				if (!alive) {
-					releaseCurrentLock(id, status.lock_token);
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: id,
+			onStatus(lock, ownsLock) {
+				if (!alive) return;
+				if (lock === null) {
+					lockMode = 'pending';
+					session.acquire();
 					return;
 				}
-				token = status.lock_token;
-				lockMode = 'owned';
-				lockOwner = status.owner_id;
-				watcher = startWatcher(id, token);
+				lockMode = ownsLock ? 'owned' : 'other';
 			},
-			(error) => {
+			onError(error: LockSessionError) {
 				if (!alive) return;
-				if (error.status === 409) {
+				if (error.statusCode === 409) {
 					lockMode = 'other';
-					watcher = startWatcher(id, null);
+					return;
 				}
+				lockMode = 'error';
 			}
-		);
+		});
 
 		return () => {
 			alive = false;
-			watcher?.close();
-			if (token) releaseCurrentLock(id, token);
-			lockMode = 'pending';
-			lockOwner = null;
+			session.close();
+			lockMode = lockIntent === 'released' ? 'released' : 'pending';
 		};
 	});
 
@@ -1315,6 +1334,26 @@
 						class={css({
 							flex: '1',
 							height: '100%',
+							backgroundColor: editorAccessState === 'editable' ? 'bg.warning' : 'bg.tertiary',
+							border: 'none',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							cursor: 'pointer',
+							color: editorAccessState === 'editable' ? 'fg.warning' : 'fg.muted',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+						})}
+						onclick={handleLockToggle}
+						disabled={lockButtonDisabled}
+						type="button"
+						data-testid="lock-toggle-button"
+					>
+						{lockButtonLabel}
+					</button>
+					<button
+						class={css({
+							flex: '1',
+							height: '100%',
 							backgroundColor: 'bg.tertiary',
 							border: 'none',
 							fontSize: 'xs',
@@ -1354,15 +1393,9 @@
 							onclick={handleSave}
 							disabled={isSaving || analysisStore.loading || editorReadOnly}
 							type="button"
-							data-save-state={editorReadOnly
-								? 'locked'
-								: isSaving
-									? 'saving'
-									: isDirty
-										? 'dirty'
-										: 'clean'}
+							data-save-state={saveButtonState}
 						>
-							{editorReadOnly ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
+							{saveButtonLabel}
 						</button>
 						<button
 							class={css({
@@ -1397,11 +1430,36 @@
 			</div>
 		{/if}
 
+		{#if editorAccessState === 'pending'}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-pending-banner">
+				<Callout tone="info"
+					>Opening this analysis in read-only mode while edit access is being established.</Callout
+				>
+			</div>
+		{/if}
+
+		{#if editorAccessState === 'released'}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-released-banner">
+				<Callout tone="info"
+					>Editing is unlocked. This view stays read-only until you lock it again.</Callout
+				>
+			</div>
+		{/if}
+
 		{#if lockedByOther}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-banner">
 				<Callout tone="warn"
-					>This analysis is being edited by another user. Saving is disabled until the lock is
+					>Another user is editing this analysis. This view stays read-only until the lock is
 					released.</Callout
+				>
+			</div>
+		{/if}
+
+		{#if editorAccessState === 'unavailable'}
+			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-error-banner">
+				<Callout tone="error"
+					>Could not establish an edit session. This analysis is read-only until the connection
+					recovers.</Callout
 				>
 			</div>
 		{/if}
@@ -1415,6 +1473,7 @@
 				backgroundColor: 'bg.secondary'
 			})}
 			role="application"
+			data-editor-access-state={editorAccessState}
 		>
 			<div
 				class={css({

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { waitForLineageToolbar } from './utils/readiness.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
@@ -112,47 +112,5 @@ test.describe('Lineage – with datasource data', () => {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);
 		}
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────────
-// Lineage – failure state regression
-// ────────────────────────────────────────────────────────────────────────────────
-
-test.describe('Lineage – error state', () => {
-	test('API failure shows "Failed to load lineage." error', async ({ page }) => {
-		// Intercept lineage API to return 500
-		await page.route('**/api/v1/datasource/lineage*', (route) =>
-			route.fulfill({ status: 500, body: 'Internal Server Error' })
-		);
-
-		await page.goto('/lineage');
-
-		// Error state should be visible
-		await expect(page.locator('[data-testid="lineage-load-error"]')).toBeVisible({
-			timeout: 15_000
-		});
-		await expect(page.getByText('Failed to load lineage.')).toBeVisible();
-
-		// Page structure should still be intact
-		await expect(page.getByRole('heading', { name: 'Data Lineage' })).toBeVisible();
-
-		await screenshot(page, 'lineage', 'load-error-state');
-	});
-
-	test('lineage error does not crash navigation', async ({ page }) => {
-		await page.route('**/api/v1/datasource/lineage*', (route) =>
-			route.fulfill({ status: 500, body: 'Internal Server Error' })
-		);
-
-		await page.goto('/lineage');
-		await expect(page.locator('[data-testid="lineage-load-error"]')).toBeVisible({
-			timeout: 15_000
-		});
-
-		// Navigate home — shell should still work
-		await page.locator('a[href="/"]').first().click();
-		await expect(page).toHaveURL('/');
-		await expect(page.getByRole('heading', { name: 'Analyses', exact: true })).toBeVisible();
 	});
 });

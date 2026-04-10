@@ -4,23 +4,25 @@ import type { APIRequestContext } from '@playwright/test';
 
 const apiPort = process.env.PORT || '8000';
 export const API_BASE = `http://localhost:${apiPort}/api/v1`;
-export const AUTH_FILE = path.resolve('tests/.auth/state.json');
 
-export const E2E_EMAIL = 'e2e-test@example.com';
+export const AUTH_DIR = path.resolve('tests/.auth');
+export const META_FILE = path.join(AUTH_DIR, 'meta.json');
+
 export const E2E_PASSWORD = 'E2eTestPw12345';
-export const E2E_DISPLAY_NAME = 'E2E Test';
 
-// ── Auth helpers (shared by global-setup / global-teardown) ───────────────────
-
-export function readStoredSessionToken(): string | undefined {
-	try {
-		const raw = fs.readFileSync(AUTH_FILE, 'utf-8');
-		const state = JSON.parse(raw) as { cookies?: Array<{ name: string; value: string }> };
-		return state.cookies?.find((c) => c.name === 'session_token')?.value;
-	} catch {
-		return undefined;
-	}
+export function workerEmail(workerIndex: number): string {
+	return `e2e-worker-${workerIndex}@example.com`;
 }
+
+export function workerDisplayName(workerIndex: number): string {
+	return `E2E Worker ${workerIndex}`;
+}
+
+export function workerAuthFile(workerIndex: number): string {
+	return path.join(AUTH_DIR, `state-w${workerIndex}.json`);
+}
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
 
 export type DeleteOutcome = 'deleted' | 'unauthenticated' | 'forbidden' | 'error';
 export type LoginResult =
@@ -49,11 +51,11 @@ export async function deleteAccount(token: string): Promise<DeleteOutcome> {
 	return 'error';
 }
 
-export async function login(): Promise<LoginResult> {
+export async function loginAs(email: string): Promise<LoginResult> {
 	const resp = await fetch(`${API_BASE}/auth/login`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ email: E2E_EMAIL, password: E2E_PASSWORD })
+		body: JSON.stringify({ email, password: E2E_PASSWORD })
 	});
 	if (resp.ok) {
 		const token = parseSessionToken(resp);
@@ -63,6 +65,98 @@ export async function login(): Promise<LoginResult> {
 	if (resp.status === 401) return { status: 'invalid_credentials' };
 	return { status: 'error', code: resp.status };
 }
+
+export async function registerWorker(workerIndex: number): Promise<string> {
+	const resp = await fetch(`${API_BASE}/auth/register`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			email: workerEmail(workerIndex),
+			password: E2E_PASSWORD,
+			display_name: workerDisplayName(workerIndex)
+		})
+	});
+	if (!resp.ok) {
+		throw new Error(`Worker ${workerIndex} register failed: ${resp.status} ${await resp.text()}`);
+	}
+	const token = parseSessionToken(resp);
+	if (!token) {
+		throw new Error(`Worker ${workerIndex} register succeeded but no session_token received`);
+	}
+	return token;
+}
+
+export async function ensureWorkerClean(workerIndex: number): Promise<void> {
+	const email = workerEmail(workerIndex);
+	const result = await loginAs(email);
+	if (result.status === 'invalid_credentials') return;
+	if (result.status === 'error') {
+		throw new Error(`[worker ${workerIndex}] login probe failed with status ${result.code}`);
+	}
+
+	const outcome = await deleteAccount(result.token);
+	if (outcome === 'deleted') return;
+	if (outcome === 'forbidden') {
+		throw new Error(`[worker ${workerIndex}] cannot delete protected account`);
+	}
+	throw new Error(`[worker ${workerIndex}] delete returned '${outcome}'`);
+}
+
+export function readStoredSessionToken(authFile: string): string | undefined {
+	try {
+		const raw = fs.readFileSync(authFile, 'utf-8');
+		const state = JSON.parse(raw) as { cookies?: Array<{ name: string; value: string }> };
+		return state.cookies?.find((c) => c.name === 'session_token')?.value;
+	} catch {
+		return undefined;
+	}
+}
+
+const frontendPort = process.env.FRONTEND_PORT || '3000';
+const frontendOrigin = `http://localhost:${frontendPort}`;
+const apiOrigin = new URL(API_BASE).origin;
+
+export function buildStorageState(sessionToken: string | undefined): Record<string, unknown> {
+	const cookies = sessionToken
+		? [
+				{
+					name: 'session_token',
+					value: sessionToken,
+					domain: 'localhost',
+					path: '/',
+					expires: -1,
+					httpOnly: true,
+					secure: false,
+					sameSite: 'Lax'
+				}
+			]
+		: [];
+
+	return {
+		cookies,
+		origins: [
+			{ origin: apiOrigin, localStorage: [] },
+			{ origin: frontendOrigin, localStorage: [] }
+		]
+	};
+}
+
+export interface RunMeta {
+	authRequired: boolean;
+	stamp: string;
+}
+
+export function readMeta(): RunMeta {
+	try {
+		fs.mkdirSync(AUTH_DIR, { recursive: true });
+		const raw = fs.readFileSync(META_FILE, 'utf-8');
+		return JSON.parse(raw) as RunMeta;
+	} catch {
+		return { authRequired: true, stamp: Date.now().toString(36) };
+	}
+}
+
+// ── Datasource ────────────────────────────────────────────────────────────────
 
 const SAMPLE_CSV = 'id,name,age,city\n1,Alice,30,London\n2,Bob,25,Paris\n3,Charlie,35,Berlin\n';
 
@@ -78,8 +172,6 @@ function generateLargeCsv(rows: number): string {
 
 const DATE_CSV =
 	'id,name,event_date,amount\n1,Alice,2024-01-15,100\n2,Bob,2024-03-22,250\n3,Charlie,2024-06-10,75\n';
-
-// ── Datasource ────────────────────────────────────────────────────────────────
 
 export async function createDatasourceWithDates(
 	request: APIRequestContext,
@@ -169,7 +261,13 @@ export async function createAnalysis(
 						result_id: resultId,
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'source_1'
+						filename: 'source_1',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'source_1',
+							branch: 'master'
+						}
 					},
 					steps: [
 						{
@@ -218,7 +316,13 @@ export async function createMultiStepAnalysis(
 						result_id: resultId,
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'source_1'
+						filename: 'source_1',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'source_1',
+							branch: 'master'
+						}
 					},
 					steps: [
 						{

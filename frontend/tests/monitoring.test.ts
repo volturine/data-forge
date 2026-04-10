@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
 	createDatasource,
 	createSchedule,
@@ -594,8 +594,7 @@ test.describe('Monitoring – Active Builds section', () => {
 
 	test('triggering a build shows it in Active Builds and expands to BuildPreview', async ({
 		page,
-		request,
-		context
+		request
 	}) => {
 		test.setTimeout(180_000);
 		const dsName = `e2e-active-build-ds-${uid()}`;
@@ -603,9 +602,10 @@ test.describe('Monitoring – Active Builds section', () => {
 		const dsId = await createLargeDatasource(request, dsName, 2000);
 		const aId = await createMultiStepAnalysis(request, aName, dsId);
 		try {
-			const monitorPage = await context.newPage();
+			const monitorPage = await page.context().newPage();
 
 			await monitorPage.goto('/monitoring?tab=builds');
+			await waitForLayoutReady(monitorPage);
 			await expect(monitorPage.getByRole('tab', { name: 'Builds' })).toHaveAttribute(
 				'aria-selected',
 				'true'

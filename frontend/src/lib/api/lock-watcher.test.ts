@@ -1,13 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { watchLock } from './locks';
-
-vi.mock('$lib/stores/clientIdentity.svelte', () => ({
-	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'sig-1' })
-}));
-
-vi.mock('$lib/stores/namespace.svelte', () => ({
-	getNamespace: () => 'default'
-}));
+import { openLockSession } from './locks';
 
 type Listener = (event?: { data?: string; code?: number; reason?: string }) => void;
 
@@ -44,7 +36,7 @@ class MockWebSocket {
 	}
 }
 
-describe('watchLock', () => {
+describe('openLockSession', () => {
 	beforeEach(() => {
 		MockWebSocket.instances = [];
 		vi.stubGlobal('WebSocket', MockWebSocket);
@@ -56,28 +48,42 @@ describe('watchLock', () => {
 		vi.unstubAllGlobals();
 	});
 
-	test('sends watch on open and forwards status updates', () => {
-		const statuses: Array<{ owner_id: string } | null> = [];
-		const watcher = watchLock({
+	test('sends watch on open, acquires ownership, and releases with the owned token', () => {
+		const statuses: Array<{ owner_id: string; ownsLock: boolean } | null> = [];
+		const session = openLockSession({
 			resourceType: 'analysis',
 			resourceId: 'a-1',
-			token: 'tok-1',
-			onStatus: (lock) => statuses.push(lock ? { owner_id: lock.owner_id } : null)
+			onStatus: (lock, ownsLock) => {
+				if (!lock) {
+					statuses.push(null);
+					return;
+				}
+				statuses.push({ owner_id: lock.owner_id, ownsLock });
+			}
 		});
 
 		const socket = MockWebSocket.instances[0];
 		socket.emit('open');
 
-		const watchMsg = JSON.parse(socket.sent[0]);
-		expect(watchMsg).toEqual({
+		expect(JSON.parse(socket.sent[0])).toEqual({
 			action: 'watch',
 			resource_type: 'analysis',
-			resource_id: 'a-1',
-			lock_token: 'tok-1'
+			resource_id: 'a-1'
 		});
 
 		socket.emit('message', { data: JSON.stringify({ type: 'connected' }) });
-		expect(statuses).toHaveLength(0);
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'status',
+				resource_type: 'analysis',
+				resource_id: 'a-1',
+				lock: null
+			})
+		});
+		expect(statuses).toEqual([null]);
+
+		session.acquire();
+		expect(JSON.parse(socket.sent[1])).toEqual({ action: 'acquire' });
 
 		socket.emit('message', {
 			data: JSON.stringify({
@@ -87,7 +93,10 @@ describe('watchLock', () => {
 				lock: { owner_id: 'client-1', lock_token: 'tok-1' }
 			})
 		});
-		expect(statuses).toEqual([{ owner_id: 'client-1' }]);
+		expect(statuses).toEqual([null, { owner_id: 'client-1', ownsLock: true }]);
+
+		session.release();
+		expect(JSON.parse(socket.sent[2])).toEqual({ action: 'release', lock_token: 'tok-1' });
 
 		socket.emit('message', {
 			data: JSON.stringify({
@@ -97,65 +106,82 @@ describe('watchLock', () => {
 				lock: null
 			})
 		});
-		expect(statuses).toEqual([{ owner_id: 'client-1' }, null]);
+		expect(statuses).toEqual([null, { owner_id: 'client-1', ownsLock: true }, null]);
 
-		watcher.close();
+		session.close();
 	});
 
-	test('sends ping at configured interval', () => {
-		const watcher = watchLock({
+	test('pings with the owned token after a successful acquire', () => {
+		const session = openLockSession({
 			resourceType: 'analysis',
 			resourceId: 'a-2',
-			token: 'tok-2',
 			pingMs: 5_000,
 			onStatus: () => {}
 		});
 
 		const socket = MockWebSocket.instances[0];
 		socket.emit('open');
-		expect(socket.sent).toHaveLength(1);
+		session.acquire();
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'status',
+				resource_type: 'analysis',
+				resource_id: 'a-2',
+				lock: { owner_id: 'client-1', lock_token: 'tok-2' }
+			})
+		});
 
 		vi.advanceTimersByTime(5_000);
-		expect(socket.sent).toHaveLength(2);
-		const ping = JSON.parse(socket.sent[1]);
-		expect(ping).toEqual({ action: 'ping', lock_token: 'tok-2' });
+		expect(JSON.parse(socket.sent[2])).toEqual({ action: 'ping', lock_token: 'tok-2' });
 
-		vi.advanceTimersByTime(5_000);
-		expect(socket.sent).toHaveLength(3);
-
-		watcher.close();
+		session.close();
 	});
 
-	test('watch without token omits lock_token field', () => {
-		const watcher = watchLock({
+	test('pings without a token before ownership is acquired', () => {
+		const session = openLockSession({
 			resourceType: 'analysis',
 			resourceId: 'a-3',
-			token: null,
+			pingMs: 5_000,
 			onStatus: () => {}
 		});
 
 		const socket = MockWebSocket.instances[0];
 		socket.emit('open');
 
-		const watchMsg = JSON.parse(socket.sent[0]);
-		expect(watchMsg).toEqual({
-			action: 'watch',
-			resource_type: 'analysis',
-			resource_id: 'a-3'
+		vi.advanceTimersByTime(5_000);
+		expect(JSON.parse(socket.sent[1])).toEqual({ action: 'ping' });
+
+		session.close();
+	});
+
+	test('forwards websocket errors with status codes', () => {
+		const errors: Array<{ error: string; statusCode: number }> = [];
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'a-4',
+			onStatus: () => {},
+			onError: (error) => errors.push(error)
 		});
 
-		vi.advanceTimersByTime(10_000);
-		const ping = JSON.parse(socket.sent[1]);
-		expect(ping).toEqual({ action: 'ping' });
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		socket.emit('message', {
+			data: JSON.stringify({
+				type: 'error',
+				error: 'analysis a-4 is locked by another owner',
+				status_code: 409
+			})
+		});
 
-		watcher.close();
+		expect(errors).toEqual([{ error: 'analysis a-4 is locked by another owner', statusCode: 409 }]);
+
+		session.close();
 	});
 
 	test('close stops ping timer', () => {
-		const watcher = watchLock({
+		const session = openLockSession({
 			resourceType: 'analysis',
-			resourceId: 'a-4',
-			token: null,
+			resourceId: 'a-5',
 			pingMs: 5_000,
 			onStatus: () => {}
 		});
@@ -164,7 +190,7 @@ describe('watchLock', () => {
 		socket.emit('open');
 		expect(socket.sent).toHaveLength(1);
 
-		watcher.close();
+		session.close();
 		vi.advanceTimersByTime(10_000);
 		expect(socket.sent).toHaveLength(1);
 	});

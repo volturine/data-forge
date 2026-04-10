@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { screenshot } from './utils/visual.js';
 import { waitForAppShell, waitForSettingsForm } from './utils/readiness.js';
 
