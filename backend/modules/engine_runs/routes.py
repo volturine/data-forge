@@ -1,14 +1,54 @@
-from fastapi import Depends, HTTPException
+import logging
+
+from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 from sqlmodel import Session
+from starlette.websockets import WebSocketState
 
 from core.database import get_db
 from core.error_handlers import handle_errors
+from core.namespace import get_namespace, reset_namespace, set_namespace_context
 from core.validation import EngineRunId, parse_analysis_id, parse_datasource_id, parse_engine_run_id
-from modules.engine_runs import schemas, service
+from modules.engine_runs import schemas, service, watchers
 from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from modules.mcp.router import MCPRouter
 
+logger = logging.getLogger(__name__)
+
 router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
+
+
+async def _safe_close_websocket(websocket: WebSocket) -> None:
+    if websocket.client_state is WebSocketState.DISCONNECTED:
+        return
+    if websocket.application_state is WebSocketState.DISCONNECTED:
+        return
+    try:
+        await websocket.close()
+    except RuntimeError:
+        return
+
+
+def _parse_list_params(websocket: WebSocket) -> schemas.EngineRunListParams:
+    params = schemas.EngineRunListParams.model_validate(dict(websocket.query_params))
+    if params.analysis_id is not None:
+        params.analysis_id = parse_analysis_id(params.analysis_id)
+    if params.datasource_id is not None:
+        params.datasource_id = parse_datasource_id(params.datasource_id)
+    return params
+
+
+async def _send_websocket_error(websocket: WebSocket, error: str, status_code: int) -> None:
+    if websocket.client_state is WebSocketState.DISCONNECTED:
+        return
+    if websocket.application_state is WebSocketState.DISCONNECTED:
+        return
+    try:
+        await websocket.send_json(schemas.EngineRunWebsocketErrorMessage(error=error, status_code=status_code).model_dump(mode='json'))
+    except RuntimeError:
+        return
+    except WebSocketDisconnect:
+        return
 
 
 @router.get('/compare', response_model=schemas.BuildComparisonResponse, mcp=True)
@@ -67,3 +107,32 @@ def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail='Engine run not found')
     return run
+
+
+@router.websocket('/ws')
+async def engine_run_list_websocket(websocket: WebSocket) -> None:
+    token = None
+    watch: watchers.EngineRunWatch | None = None
+    await websocket.accept()
+    try:
+        token = set_namespace_context(websocket.headers.get('X-Namespace') or websocket.query_params.get('namespace'))
+        watch = watchers.EngineRunWatch.from_params(get_namespace(), _parse_list_params(websocket))
+        await watchers.registry.add(websocket, watch)
+        await websocket.send_json((await watchers.registry.snapshot(watch)).model_dump(mode='json'))
+        while True:
+            await websocket.receive()
+    except ValidationError as exc:
+        await _send_websocket_error(websocket, str(exc), 400)
+    except ValueError as exc:
+        await _send_websocket_error(websocket, str(exc), 400)
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        logger.error('Engine run websocket error: %s', exc, exc_info=True)
+        await _send_websocket_error(websocket, 'An internal error occurred', 500)
+    finally:
+        if watch is not None:
+            await watchers.registry.discard(websocket, watch)
+        if token is not None:
+            reset_namespace(token)
+        await _safe_close_websocket(websocket)

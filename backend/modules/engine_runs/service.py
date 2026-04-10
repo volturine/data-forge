@@ -8,6 +8,7 @@ from fastapi import HTTPException as FastAPIHTTPException
 from sqlalchemy import desc, select
 from sqlmodel import Session
 
+from core.namespace import get_namespace
 from modules.analysis.step_types import get_step_type_label
 from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import (
@@ -24,6 +25,7 @@ from modules.engine_runs.schemas import (
     TimingDiff,
 )
 from modules.engine_runs.utils import normalize_step_timings
+from modules.engine_runs.watchers import registry as watcher_registry
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +231,9 @@ def create_engine_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    return _serialize_run(run)
+    response = _serialize_run(run)
+    watcher_registry.notify(get_namespace())
+    return response
 
 
 def update_engine_run(
@@ -304,7 +308,9 @@ def update_engine_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    return _serialize_run(run)
+    response = _serialize_run(run)
+    watcher_registry.notify(get_namespace())
+    return response
 
 
 def create_engine_run_payload(
