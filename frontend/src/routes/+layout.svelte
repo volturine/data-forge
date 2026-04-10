@@ -7,7 +7,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { css, spinner } from '$lib/styles/panda';
 	import { PanelLeftClose } from 'lucide-svelte';
-	import SettingsPopup from '$lib/components/common/SettingsPopup.svelte';
+	// SettingsPopup removed — settings now live under /profile tabs
 	import EnginesPopup from '$lib/components/common/EnginesPopup.svelte';
 	import NamespacePickerModal from '$lib/components/common/NamespacePickerModal.svelte';
 	import ChatPanel from '$lib/components/common/ChatPanel.svelte';
@@ -36,7 +36,7 @@
 		typeof document === 'undefined' ? null : document.documentElement.getAttribute('data-theme');
 	const initialTheme = themeAttribute === 'dark' ? 'dark' : 'light';
 	let theme = $state<'light' | 'dark'>(initialTheme);
-	let settingsOpen = $state(false);
+	// settingsOpen removed — settings now live under /profile tabs
 	let enginesOpen = $state(false);
 	let sidebarCollapsed = $state(false);
 	let sidebarHovered = $state(false);
@@ -279,7 +279,7 @@
 					onToggle={toggleSidebar}
 					{theme}
 					onToggleTheme={toggleTheme}
-					onOpenSettings={() => (settingsOpen = true)}
+					onOpenSettings={undefined}
 					onOpenEngines={() => (enginesOpen = !enginesOpen)}
 					onOpenChat={handleOpenChat}
 					onOpenNamespace={openNamespace}
@@ -336,7 +336,6 @@
 			</main>
 		</div>
 
-		<SettingsPopup bind:open={settingsOpen} />
 		<EnginesPopup bind:open={enginesOpen} anchor={enginesTrigger} />
 		<NamespacePickerModal
 			open={namespaceOpen}

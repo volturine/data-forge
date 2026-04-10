@@ -224,7 +224,44 @@ export async function openSchemaTabAndWait(page: Page, timeout = 15_000): Promis
  * completes — success or failure. The Save button is the strongest
  * readiness signal: it sits at the bottom of the form branch and proves
  * the entire settings form tree has rendered.
+ *
+ * @deprecated Settings now live under the profile page tabs. Use
+ * {@link waitForProfileTab} instead.
  */
 export async function waitForSettingsForm(dialog: Locator, timeout = 10_000): Promise<void> {
 	await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
+}
+
+/**
+ * Wait for the profile page tabbed interface to be ready.
+ *
+ * Readiness signal: the tab list renders and at least one tab is selected.
+ * Call after `page.goto('/profile')` or navigating to a specific hash tab.
+ */
+export async function waitForProfileTabs(page: Page, timeout = 15_000): Promise<void> {
+	await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible({ timeout });
+	await expect(page.getByRole('tab', { selected: true })).toBeVisible({ timeout });
+}
+
+/**
+ * Navigate to a specific profile tab and wait for it to load.
+ *
+ * Clicks the tab button and waits for the corresponding panel to be visible
+ * and for any loading spinners to clear. For settings tabs (notifications,
+ * ai-providers, system) the Save button is the readiness signal.
+ */
+export async function waitForProfileTab(
+	page: Page,
+	tabName: string,
+	timeout = 15_000
+): Promise<void> {
+	const tab = page.getByRole('tab', { name: tabName });
+	await expect(tab).toBeVisible({ timeout });
+	await tab.click();
+	await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout });
+
+	// For settings tabs, wait for Save button (proves data loaded)
+	if (['Notifications', 'AI Providers', 'System'].includes(tabName)) {
+		await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
+	}
 }

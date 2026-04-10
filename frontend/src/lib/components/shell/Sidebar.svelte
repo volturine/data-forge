@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import {
 		LayoutGrid,
 		Database,
@@ -25,7 +26,8 @@
 		onToggle: () => void;
 		theme: 'light' | 'dark';
 		onToggleTheme: () => void;
-		onOpenSettings: () => void;
+		/** @deprecated Settings now live under /profile#system */
+		onOpenSettings?: () => void;
 		onOpenEngines: () => void;
 		onOpenChat: () => void;
 		onOpenNamespace: () => void;
@@ -43,7 +45,7 @@
 		onToggle,
 		theme,
 		onToggleTheme,
-		onOpenSettings,
+		onOpenSettings: _onOpenSettings,
 		onOpenEngines,
 		onOpenChat,
 		onOpenNamespace,
@@ -340,7 +342,7 @@
 
 		<button
 			class={sidebarBtnClass}
-			onclick={onOpenSettings}
+			onclick={() => void goto(resolve('/profile#system' as '/'))}
 			title={collapsed ? 'Settings' : 'Settings'}
 			aria-label="Settings"
 			type="button"

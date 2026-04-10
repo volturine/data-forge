@@ -6,7 +6,7 @@ import {
 	spawnEngine as spawnEngineViaApi
 } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
-import { waitForAppShell, waitForSettingsForm } from './utils/readiness.js';
+import { waitForAppShell, waitForLayoutReady } from './utils/readiness.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 
@@ -90,44 +90,21 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 });
 
-test.describe('Navigation – settings popup', () => {
-	test('settings popup opens and shows SMTP, Telegram, Debug sections', async ({ page }) => {
+test.describe('Navigation – settings via sidebar', () => {
+	test('settings button navigates to profile page system tab', async ({ page }) => {
 		await page.goto('/');
 		await waitForAppShell(page);
 		await page.getByRole('button', { name: 'Settings' }).click();
 
-		const dialog = page.getByRole('dialog');
-		await expect(dialog).toBeVisible({ timeout: 5_000 });
-		await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
-		await waitForSettingsForm(dialog);
+		// Should navigate to profile page with system tab
+		await page.waitForURL(/\/profile#system/, { timeout: 10_000 });
+		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
+		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
 
-		// Sections are collapsed by default; assert toggles first, then expand SMTP
-		// before checking its contents.
-		await expect(dialog.getByText('SMTP', { exact: true })).toBeVisible();
-		await expect(dialog.getByText('Telegram', { exact: true })).toBeVisible();
-		await expect(dialog.getByText('Debug', { exact: true })).toBeVisible();
-
-		await dialog.getByRole('button', { name: 'SMTP' }).click();
-		await expect(dialog.locator('#smtp-host')).toBeVisible();
-		await expect(dialog.locator('#smtp-port')).toBeVisible();
-
-		await screenshot(page, 'navigation', 'settings-popup-open');
-	});
-
-	test('settings save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
-		await page.getByRole('button', { name: 'Settings' }).click();
-
-		const dialog = page.getByRole('dialog');
-		await waitForSettingsForm(dialog);
-
-		const saveBtn = dialog.getByRole('button', { name: 'Save' });
-		await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
-		await saveBtn.click();
-		await expect(dialog.getByText('Settings saved')).toBeVisible({ timeout: 5_000 });
-
-		await screenshot(page, 'navigation', 'settings-save-success');
+		await screenshot(page, 'navigation', 'settings-via-sidebar');
 	});
 });
 
