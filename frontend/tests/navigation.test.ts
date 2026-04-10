@@ -150,9 +150,12 @@ test.describe('Navigation – error state regression', () => {
 	});
 
 	test('monitoring page handles API failure without crash', async ({ page }) => {
-		// Intercept the engine-runs WS before navigation so the handler is in place
-		await page.routeWebSocket(/\/api\/v1\/engine-runs\/ws/, (ws) => {
-			ws.close({ code: 1011, reason: 'Simulated server error' });
+		// Intercept the REST history endpoint used by BuildsManager
+		await page.route('**/api/v1/engine-runs**', (route) => {
+			if (route.request().method() === 'GET') {
+				return route.fulfill({ status: 500, body: 'Internal Server Error' });
+			}
+			return route.continue();
 		});
 
 		await page.goto('/monitoring');
@@ -166,8 +169,7 @@ test.describe('Navigation – error state regression', () => {
 		await expect(page.getByRole('tab', { name: 'Schedules' })).toBeVisible();
 		await expect(page.getByRole('tab', { name: 'Health Checks' })).toBeVisible();
 
-		// The builds panel should show the stream-error element regardless of
-		// which specific WS error message the store surfaces.
+		// The builds panel should show the error element when the query fails
 		const panel = page.locator('#panel-builds');
 		await expect(panel.locator('[data-testid="stream-error"]')).toBeVisible({ timeout: 10_000 });
 	});

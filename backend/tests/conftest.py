@@ -148,15 +148,6 @@ def clear_active_build_registry():
     asyncio.run(registry.clear())
 
 
-@pytest.fixture(autouse=True, scope='function')
-def clear_engine_run_watchers():
-    from modules.engine_runs.watchers import registry
-
-    registry.clear()
-    yield
-    registry.clear()
-
-
 @pytest.fixture(scope='function')
 def temp_upload_dir(tmp_path: Path) -> Path:
     upload_dir = tmp_path / 'uploads'

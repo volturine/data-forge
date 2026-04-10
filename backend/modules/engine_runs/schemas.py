@@ -92,11 +92,6 @@ class EngineRunListSnapshotMessage(BaseModel):
     runs: list[EngineRunResponseSchema]
 
 
-class EngineRunListUpdateMessage(BaseModel):
-    type: Literal['update'] = 'update'
-    run: EngineRunResponseSchema
-
-
 class EngineRunWebsocketErrorMessage(BaseModel):
     type: Literal['error'] = 'error'
     error: str

@@ -1,12 +1,7 @@
-import asyncio
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import WebSocketDisconnect
-from sqlmodel import Session
-
-from modules.engine_runs import schemas as engine_run_schemas, service as engine_run_service, watchers as engine_run_watchers
+from modules.engine_runs import service as engine_run_service
 from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 
@@ -161,69 +156,7 @@ def test_update_engine_run_reuses_existing_row(test_db_session):
     assert updated.result_json['datasource_name'] == 'output_salary_predictions'
 
 
-def test_apply_live_event_enriches_existing_run(test_db_session):
-    created = engine_run_service.create_engine_run(
-        test_db_session,
-        engine_run_service.create_engine_run_payload(
-            analysis_id='analysis-live',
-            datasource_id='output-ds-1',
-            kind=EngineRunKind.DATASOURCE_UPDATE,
-            status=EngineRunStatus.RUNNING,
-            request_json={'kind': 'datasource_update'},
-            result_json={'steps': [], 'query_plans': [], 'resources': [], 'logs': []},
-            created_at=datetime.now(UTC),
-        ),
-    )
-
-    engine_run_service.apply_live_event(
-        test_db_session,
-        created.id,
-        {
-            'type': 'step_complete',
-            'build_step_index': 0,
-            'step_index': 0,
-            'step_id': 'tab-1:initial_read',
-            'step_name': 'Initial Read',
-            'step_type': 'read',
-            'duration_ms': 12,
-            'tab_id': 'tab-1',
-            'tab_name': 'View',
-            'current_output_id': 'output-ds-1',
-            'current_output_name': 'output_salary_predictions',
-        },
-    )
-    enriched = engine_run_service.apply_live_event(
-        test_db_session,
-        created.id,
-        {
-            'type': 'step_complete',
-            'build_step_index': 1,
-            'step_index': 1,
-            'step_id': 'step-1',
-            'step_name': 'Filter rows',
-            'step_type': 'filter',
-            'duration_ms': 25,
-            'row_count': 3,
-            'tab_id': 'tab-1',
-            'tab_name': 'View',
-            'current_output_id': 'output-ds-1',
-            'current_output_name': 'output_salary_predictions',
-        },
-    )
-
-    assert enriched is not None
-    assert enriched.status == EngineRunStatus.RUNNING
-    assert enriched.result_json is not None
-    assert enriched.result_json['current_output_name'] == 'output_salary_predictions'
-    steps = enriched.result_json['steps']
-    assert isinstance(steps, list)
-    assert [step['step_name'] for step in steps] == ['Initial Read', 'Filter rows']
-    assert enriched.execution_entries[0].label == 'Initial Read'
-    assert enriched.execution_entries[1].label == 'Filter rows'
-    assert enriched.step_timings == {'filter_1': 25.0}
-
-
-def test_update_engine_run_preserves_live_metadata_from_other_session(test_db_session, test_engine):
+def test_update_engine_run_replaces_result_json_when_merge_disabled(test_db_session):
     created = engine_run_service.create_engine_run(
         test_db_session,
         engine_run_service.create_engine_run_payload(
@@ -232,52 +165,10 @@ def test_update_engine_run_preserves_live_metadata_from_other_session(test_db_se
             kind=EngineRunKind.DATASOURCE_UPDATE,
             status=EngineRunStatus.RUNNING,
             request_json={'kind': 'datasource_update'},
-            result_json={'steps': [], 'query_plans': [], 'resources': [], 'logs': []},
+            result_json={'current_output_name': 'stale-output', 'logs': [{'message': 'old'}]},
             created_at=datetime.now(UTC),
         ),
     )
-
-    with Session(test_engine) as other_session:
-        engine_run_service.apply_live_event(
-            other_session,
-            created.id,
-            {
-                'type': 'step_complete',
-                'build_step_index': 0,
-                'step_index': 0,
-                'step_id': 'tab-1:initial_read',
-                'step_name': 'Initial Read',
-                'step_type': 'read',
-                'duration_ms': 12,
-                'tab_id': 'tab-1',
-                'tab_name': 'View',
-                'current_output_id': 'output-ds-1',
-                'current_output_name': 'output_salary_predictions',
-            },
-        )
-        engine_run_service.apply_live_event(
-            other_session,
-            created.id,
-            {
-                'type': 'resources',
-                'emitted_at': '2026-04-08T12:00:00Z',
-                'cpu_percent': 25,
-                'memory_mb': 128,
-                'memory_limit_mb': 512,
-                'active_threads': 4,
-                'max_threads': 8,
-            },
-        )
-        engine_run_service.apply_live_event(
-            other_session,
-            created.id,
-            {
-                'type': 'log',
-                'emitted_at': '2026-04-08T12:00:01Z',
-                'level': 'info',
-                'message': 'Running build',
-            },
-        )
 
     updated = engine_run_service.update_engine_run(
         test_db_session,
@@ -287,19 +178,18 @@ def test_update_engine_run_preserves_live_metadata_from_other_session(test_db_se
         duration_ms=321,
         completed_at=datetime.now(UTC),
         result_json={'datasource_name': 'output_salary_predictions'},
+        merge_result_json=False,
     )
 
     assert updated.result_json is not None
     assert updated.result_json['datasource_name'] == 'output_salary_predictions'
-    assert updated.result_json['current_output_name'] == 'output_salary_predictions'
-    assert updated.result_json['steps'][0]['step_name'] == 'Initial Read'
-    assert updated.result_json['resources'][0]['cpu_percent'] == 25
-    assert updated.result_json['logs'][0]['message'] == 'Running build'
+    assert 'current_output_name' not in updated.result_json
+    assert 'logs' not in updated.result_json
 
 
-def test_engine_run_list_websocket_sends_snapshot_and_updates(client, test_db_session) -> None:
+def test_engine_run_list_websocket_refreshes_snapshot_after_changes(client, test_db_session) -> None:
     with client.websocket_connect('/api/v1/engine-runs/ws?namespace=default') as websocket:
-        snapshot = websocket.receive_json()
+        initial = websocket.receive_json()
         created = engine_run_service.create_engine_run(
             test_db_session,
             engine_run_service.create_engine_run_payload(
@@ -312,20 +202,7 @@ def test_engine_run_list_websocket_sends_snapshot_and_updates(client, test_db_se
                 created_at=datetime.now(UTC),
             ),
         )
-        created_message = websocket.receive_json()
-        engine_run_service.apply_live_event(
-            test_db_session,
-            created.id,
-            {
-                'type': 'progress',
-                'progress': 0.5,
-                'elapsed_ms': 150,
-                'current_step': 'Filter rows',
-                'current_step_index': 1,
-                'total_steps': 3,
-            },
-        )
-        live_message = websocket.receive_json()
+        running = websocket.receive_json()
         engine_run_service.update_engine_run(
             test_db_session,
             created.id,
@@ -334,24 +211,21 @@ def test_engine_run_list_websocket_sends_snapshot_and_updates(client, test_db_se
             duration_ms=300,
             completed_at=datetime.now(UTC),
             result_json={'row_count': 2},
+            merge_result_json=False,
         )
-        terminal_message = websocket.receive_json()
+        completed = websocket.receive_json()
 
-    assert snapshot == {'type': 'snapshot', 'runs': []}
-    assert created_message['type'] == 'snapshot'
-    assert created_message['runs'][0]['id'] == created.id
-    assert created_message['runs'][0]['status'] == 'running'
-    assert live_message['type'] == 'update'
-    assert live_message['run']['id'] == created.id
-    assert live_message['run']['progress'] == 0.5
-    assert live_message['run']['current_step'] == 'Filter rows'
-    assert terminal_message['type'] == 'update'
-    assert terminal_message['run']['id'] == created.id
-    assert terminal_message['run']['status'] == 'success'
-    assert terminal_message['run']['progress'] == 1.0
+    assert initial == {'type': 'snapshot', 'runs': []}
+    assert running['type'] == 'snapshot'
+    assert running['runs'][0]['id'] == created.id
+    assert running['runs'][0]['status'] == 'running'
+    assert completed['type'] == 'snapshot'
+    assert completed['runs'][0]['id'] == created.id
+    assert completed['runs'][0]['status'] == 'success'
+    assert completed['runs'][0]['progress'] == 1.0
 
 
-def test_engine_run_list_websocket_refreshes_snapshot_when_filtered_membership_changes(client, test_db_session) -> None:
+def test_engine_run_list_websocket_refreshes_filtered_membership(client, test_db_session) -> None:
     with client.websocket_connect('/api/v1/engine-runs/ws?namespace=default&status=running') as websocket:
         initial = websocket.receive_json()
         created = engine_run_service.create_engine_run(
@@ -366,7 +240,7 @@ def test_engine_run_list_websocket_refreshes_snapshot_when_filtered_membership_c
                 created_at=datetime.now(UTC),
             ),
         )
-        created_message = websocket.receive_json()
+        running = websocket.receive_json()
         engine_run_service.update_engine_run(
             test_db_session,
             created.id,
@@ -375,154 +249,9 @@ def test_engine_run_list_websocket_refreshes_snapshot_when_filtered_membership_c
             completed_at=datetime.now(UTC),
             duration_ms=250,
         )
-        completed_message = websocket.receive_json()
+        completed = websocket.receive_json()
 
     assert initial == {'type': 'snapshot', 'runs': []}
-    assert created_message['type'] == 'snapshot'
-    assert [run['id'] for run in created_message['runs']] == [created.id]
-    assert completed_message == {'type': 'snapshot', 'runs': []}
-
-
-def test_engine_run_broadcast_scopes_updates_by_namespace(test_db_session) -> None:
-    async def scenario() -> None:
-        default_socket = MagicMock()
-        default_socket.send_json = AsyncMock()
-        team_socket = MagicMock()
-        team_socket.send_json = AsyncMock()
-        params = engine_run_schemas.EngineRunListParams()
-
-        engine_run_watchers.registry.add(
-            'default',
-            default_socket,
-            loop=asyncio.get_running_loop(),
-            params=params,
-        )
-        engine_run_watchers.registry.add(
-            'team-a',
-            team_socket,
-            loop=asyncio.get_running_loop(),
-            params=params,
-        )
-
-        engine_run_service.create_engine_run(
-            test_db_session,
-            engine_run_service.create_engine_run_payload(
-                analysis_id='analysis-default',
-                datasource_id='ds-default',
-                kind=EngineRunKind.PREVIEW,
-                status=EngineRunStatus.RUNNING,
-                request_json={'kind': 'preview'},
-                result_json={'row_count': 1},
-                created_at=datetime.now(UTC),
-            ),
-        )
-
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-
-        default_socket.send_json.assert_awaited_once()
-        team_socket.send_json.assert_not_awaited()
-        engine_run_watchers.registry.discard('default', default_socket)
-        engine_run_watchers.registry.discard('team-a', team_socket)
-
-    asyncio.run(scenario())
-
-
-def test_engine_run_broadcast_skips_list_query_for_existing_watched_run_update(test_db_session) -> None:
-    async def scenario() -> None:
-        socket = MagicMock()
-        socket.send_json = AsyncMock()
-        params = engine_run_schemas.EngineRunListParams()
-        created = engine_run_service.create_engine_run(
-            test_db_session,
-            engine_run_service.create_engine_run_payload(
-                analysis_id='analysis-fast-path',
-                datasource_id='ds-fast-path',
-                kind=EngineRunKind.PREVIEW,
-                status=EngineRunStatus.RUNNING,
-                request_json={'kind': 'preview'},
-                result_json={'row_count': 1},
-                created_at=datetime.now(UTC),
-            ),
-        )
-
-        engine_run_watchers.registry.add(
-            'default',
-            socket,
-            loop=asyncio.get_running_loop(),
-            params=params,
-        )
-        engine_run_watchers.registry.set_run_ids('default', socket, (created.id,))
-
-        with patch('modules.engine_runs.service.list_engine_runs', wraps=engine_run_service.list_engine_runs) as mocked:
-            engine_run_service.apply_live_event(
-                test_db_session,
-                created.id,
-                {
-                    'type': 'progress',
-                    'progress': 0.5,
-                    'elapsed_ms': 120,
-                    'current_step': 'Filter rows',
-                    'current_step_index': 1,
-                    'total_steps': 3,
-                },
-            )
-
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
-
-        mocked.assert_not_called()
-        socket.send_json.assert_awaited_once()
-        message = socket.send_json.await_args.args[0]
-        assert message['type'] == 'update'
-        assert message['run']['id'] == created.id
-        assert message['run']['progress'] == 0.5
-        engine_run_watchers.registry.discard('default', socket)
-
-    asyncio.run(scenario())
-
-
-def test_engine_run_watcher_send_swallows_expected_disconnect_cleanup(caplog) -> None:
-    async def scenario() -> None:
-        websocket = MagicMock()
-        websocket.send_json = AsyncMock(side_effect=WebSocketDisconnect())
-        params = engine_run_schemas.EngineRunListParams()
-        registry = engine_run_watchers.EngineRunWatcherRegistry()
-
-        registry.add(
-            'default',
-            websocket,
-            loop=asyncio.get_running_loop(),
-            params=params,
-        )
-
-        with caplog.at_level('WARNING'):
-            await registry._send('default', websocket, {'type': 'snapshot', 'runs': []})
-
-        assert registry.watchers('default') == []
-        assert 'Engine run watcher send failed' not in caplog.text
-
-    asyncio.run(scenario())
-
-
-def test_engine_run_watcher_send_logs_unexpected_failures(caplog) -> None:
-    async def scenario() -> None:
-        websocket = MagicMock()
-        websocket.send_json = AsyncMock(side_effect=RuntimeError('boom'))
-        params = engine_run_schemas.EngineRunListParams()
-        registry = engine_run_watchers.EngineRunWatcherRegistry()
-
-        registry.add(
-            'default',
-            websocket,
-            loop=asyncio.get_running_loop(),
-            params=params,
-        )
-
-        with caplog.at_level('WARNING'):
-            await registry._send('default', websocket, {'type': 'snapshot', 'runs': []})
-
-        assert registry.watchers('default') == []
-        assert 'Engine run watcher send failed: boom' in caplog.text
-
-    asyncio.run(scenario())
+    assert running['type'] == 'snapshot'
+    assert [run['id'] for run in running['runs']] == [created.id]
+    assert completed == {'type': 'snapshot', 'runs': []}

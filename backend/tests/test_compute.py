@@ -26,6 +26,7 @@ from modules.compute.operations.datasource import _analysis_stack_var
 from modules.compute.routes import _safe_close_websocket, _safe_send_json
 from modules.compute.utils import await_engine_result
 from modules.datasource.models import DataSource
+from modules.engine_runs import service as engine_run_service
 from modules.engine_runs.models import EngineRun
 
 
@@ -461,7 +462,6 @@ def test_schedule_stream_tasks_runs_on_main_loop() -> None:
                     tab_name='Tab 1',
                     current_output_id=None,
                     current_output_name=None,
-                    engine_run_id=None,
                     emitter=emitter,
                     read_stage=None,
                 )
@@ -518,7 +518,6 @@ def test_start_stream_tasks_skips_when_loop_unavailable() -> None:
         tab_name='Tab 1',
         current_output_id=None,
         current_output_name=None,
-        engine_run_id=None,
         emitter=None,
         build=build,
         read_stage=None,
@@ -586,7 +585,6 @@ def test_stream_engine_events_drains_final_events_after_job_finish() -> None:
             tab_name='Tab 1',
             current_output_id=None,
             current_output_name=None,
-            engine_run_id=None,
             emitter=emitter,
             read_stage=None,
         )
@@ -1683,6 +1681,66 @@ def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(te
     assert isinstance(complete_results, list)
     typed_complete_results = cast(list[dict[str, object]], complete_results)
     assert typed_complete_results[0]['output_name'] == 'output_salary_predictions'
+
+
+def test_finalize_failed_engine_run_persists_failure_state(test_db_session) -> None:
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-failed-build',
+            datasource_id='output-1',
+            kind='datasource_update',
+            status='running',
+            request_json={'kind': 'datasource_update'},
+            result_json=compute_service._initial_live_run_result(
+                current_output_id='output-1',
+                current_output_name='output_table',
+                current_tab_id='tab1',
+                current_tab_name='Tab 1',
+                total_steps=1,
+                total_tabs=1,
+            ),
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    compute_service._finalize_failed_engine_run(
+        test_db_session,
+        run_id=created.id,
+        existing_result=compute_service._load_engine_run_result_json(test_db_session, created.id),
+        execution_entries=[],
+        error=RuntimeError('build exploded'),
+        completed_at=datetime.now(UTC),
+        duration_ms=40,
+        step_timings={},
+        current_output_id='output-1',
+        current_output_name='output_table',
+        current_tab_id='tab1',
+        current_tab_name='Tab 1',
+        total_steps=1,
+        total_tabs=1,
+        resource_config=None,
+        result_entry={
+            'tab_id': 'tab1',
+            'tab_name': 'Tab 1',
+            'status': 'failed',
+            'output_id': 'output-1',
+            'output_name': 'output_table',
+            'error': 'build exploded',
+        },
+        log_entry={'timestamp': datetime.now(UTC).isoformat(), 'level': 'error', 'message': 'build exploded'},
+    )
+
+    test_db_session.expire_all()
+    run = test_db_session.get(EngineRun, created.id)
+
+    assert run is not None
+    assert run.status == 'failed'
+    assert run.error_message == 'build exploded'
+    assert run.result_json['results'][0]['status'] == 'failed'
+    assert run.result_json['current_output_name'] == 'output_table'
+    assert run.result_json['steps'] == []
+    assert run.result_json['logs'][0]['message'] == 'build exploded'
 
 
 def test_active_build_registry_prunes_old_finished_builds(test_user) -> None:

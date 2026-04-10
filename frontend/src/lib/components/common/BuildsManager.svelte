@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { type EngineRun, type ListEngineRunsParams } from '$lib/api/engine-runs';
+	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
 	import { page as pageState } from '$app/state';
@@ -25,7 +25,6 @@
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import { EngineRunsStreamStore } from '$lib/stores/engine-runs-stream.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, cx, spinner, button, emptyText, input } from '$lib/styles/panda';
 	import {
@@ -36,7 +35,6 @@
 		engineRunOutputName,
 		engineRunStatus
 	} from '$lib/utils/engine-run-build-detail';
-	import { untrack } from 'svelte';
 
 	interface Props {
 		compact?: boolean;
@@ -64,30 +62,32 @@
 	const limit = 50;
 	const previewsVisible = $derived(!compact || showPreviews);
 
-	const params = $derived({
+	const queryParams = $derived({
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
 		datasource_id: (pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined,
 		kind: kindFilter || undefined,
 		status:
 			statusFilter === 'running'
-				? 'running'
+				? ('running' as const)
 				: statusFilter === 'completed'
-					? 'success'
+					? ('success' as const)
 					: statusFilter === 'failed'
-						? 'failed'
+						? ('failed' as const)
 						: undefined,
 		limit,
 		offset: (page - 1) * limit
 	});
 
-	const stream = new EngineRunsStreamStore();
-
-	// WS lifecycle: reconnect whenever filter/pagination params change, disconnect on destroy
-	$effect(() => {
-		const currentParams = params;
-		untrack(() => stream.connect(currentParams as ListEngineRunsParams));
-		return () => stream.disconnect();
-	});
+	const runsQuery = createQuery(() => ({
+		queryKey: ['engine-runs', queryParams],
+		queryFn: async () => {
+			const result = await listEngineRuns(queryParams);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		retry: 0,
+		refetchInterval: 15_000
+	}));
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources-lookup'],
@@ -125,7 +125,7 @@
 		return map;
 	});
 
-	const runs = $derived(stream.runs);
+	const runs = $derived(runsQuery.data ?? []);
 
 	const datasourceId = $derived(
 		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
@@ -317,11 +317,13 @@
 		return store;
 	}
 
+	// Side effect: mutates expandedStore state and triggers store creation via runDetailStore
 	$effect(() => {
 		const expandedRun = runs.find((run) => run.id === expandedId) ?? null;
 		expandedStore = expandedRun ? runDetailStore(expandedRun) : null;
 	});
 
+	// Side effect: cleanup callback to close WebSocket stores on component destroy
 	$effect(() => {
 		return () => {
 			for (const store of runDetailStores.values()) {
@@ -520,7 +522,7 @@
 		</div>
 	{/if}
 
-	{#if !stream.connected && !stream.error && runs.length === 0}
+	{#if runsQuery.isLoading}
 		<div
 			class={css({
 				display: 'flex',
@@ -531,7 +533,7 @@
 		>
 			<div class={spinner()}></div>
 		</div>
-	{:else if stream.error && runs.length === 0}
+	{:else if runsQuery.isError}
 		<div
 			data-testid="stream-error"
 			class={css({
@@ -549,7 +551,7 @@
 				color: 'fg.error'
 			})}
 		>
-			{stream.error}
+			{runsQuery.error?.message ?? 'Failed to load builds'}
 		</div>
 	{:else if !hasAnyBuildRows}
 		<div

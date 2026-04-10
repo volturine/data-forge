@@ -142,7 +142,6 @@ async def _emit_progress(
     tab_name: str | None,
     current_output_id: str | None = None,
     current_output_name: str | None = None,
-    engine_run_id: str | None = None,
 ) -> None:
     await _emit_build_event(
         emitter,
@@ -158,7 +157,6 @@ async def _emit_progress(
             'tab_name': tab_name,
             'current_output_id': current_output_id,
             'current_output_name': current_output_name,
-            'engine_run_id': engine_run_id,
         },
     )
 
@@ -1753,7 +1751,6 @@ def export_data(
         if job_started is not None:
             job_started(
                 {
-                    'engine_run_id': run_response.id,
                     'job_id': job_id,
                     'engine': engine,
                     'steps': export_steps,
@@ -1880,7 +1877,6 @@ def export_data(
             build_stage_event(
                 {
                     'stage': 'write_start',
-                    'engine_run_id': run_response.id,
                     'read_duration_ms': float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None,
                 }
             )
@@ -1938,7 +1934,7 @@ def export_data(
         )
         write_duration_ms = (time.perf_counter() - write_started) * 1000
         if build_stage_event is not None:
-            build_stage_event({'stage': 'write_complete', 'engine_run_id': run_response.id, 'write_duration_ms': write_duration_ms})
+            build_stage_event({'stage': 'write_complete', 'write_duration_ms': write_duration_ms})
         ds_id = target_ds.id
         result_meta['datasource_id'] = ds_id
         result_meta['datasource_name'] = datasource_name
@@ -2390,7 +2386,6 @@ async def _stream_engine_events(
     tab_name: str | None,
     current_output_id: str | None,
     current_output_name: str | None,
-    engine_run_id: str | None,
     emitter: BuildEmitter | None,
     read_stage: _SyntheticBuildStage | None = None,
 ) -> None:
@@ -2434,7 +2429,6 @@ async def _stream_engine_events(
                     'tab_name': tab_name,
                     'current_output_id': current_output_id,
                     'current_output_name': current_output_name,
-                    'engine_run_id': engine_run_id,
                 },
             )
             completed_steps += 1
@@ -2451,7 +2445,6 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
             )
 
         step_index = payload.get('step_index')
@@ -2462,7 +2455,6 @@ async def _stream_engine_events(
         payload['tab_name'] = tab_name
         payload['current_output_id'] = current_output_id
         payload['current_output_name'] = current_output_name
-        payload['engine_run_id'] = engine_run_id
         await _emit_build_event(emitter, payload)
 
         if emitted_type == 'step_complete':
@@ -2482,7 +2474,6 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
             )
         if emitted_type == 'step_failed':
             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -2500,7 +2491,6 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
-                engine_run_id=engine_run_id,
             )
             return
 
@@ -2511,7 +2501,6 @@ async def _stream_resource_events(
     emitter: BuildEmitter | None,
     tab_id: str | None,
     tab_name: str | None,
-    engine_run_id: str | None,
 ) -> None:
     async for resource in monitor_engine_resources(engine):
         await _emit_build_event(
@@ -2520,7 +2509,6 @@ async def _stream_resource_events(
                 'type': 'resources',
                 'tab_id': tab_id,
                 'tab_name': tab_name,
-                'engine_run_id': engine_run_id,
                 **resource,
             },
         )
@@ -2539,7 +2527,6 @@ def _schedule_stream_tasks(
     tab_name: str | None,
     current_output_id: str | None,
     current_output_name: str | None,
-    engine_run_id: str | None,
     emitter: BuildEmitter | None,
     read_stage: _SyntheticBuildStage | None,
 ) -> tuple[asyncio.Task, asyncio.Task]:
@@ -2555,7 +2542,6 @@ def _schedule_stream_tasks(
             tab_name=tab_name,
             current_output_id=current_output_id,
             current_output_name=current_output_name,
-            engine_run_id=engine_run_id,
             emitter=emitter,
             read_stage=read_stage,
         )
@@ -2566,7 +2552,6 @@ def _schedule_stream_tasks(
             emitter=emitter,
             tab_id=tab_id,
             tab_name=tab_name,
-            engine_run_id=engine_run_id,
         )
     )
     return progress_task, resource_task
@@ -2585,7 +2570,6 @@ def _start_stream_tasks(
     tab_name: str | None,
     current_output_id: str | None,
     current_output_name: str | None,
-    engine_run_id: str | None,
     emitter: BuildEmitter | None,
     build: ActiveBuild,
     read_stage: _SyntheticBuildStage | None,
@@ -2612,7 +2596,6 @@ def _start_stream_tasks(
                     tab_name=tab_name,
                     current_output_id=current_output_id,
                     current_output_name=current_output_name,
-                    engine_run_id=engine_run_id,
                     emitter=emitter,
                     read_stage=read_stage,
                 )
@@ -2891,8 +2874,6 @@ async def run_analysis_build_stream(
                 nonlocal progress_task, resource_task
                 job_id = info.get('job_id')
                 engine = info.get('engine')
-                engine_run_id_value = info.get('engine_run_id')
-                engine_run_id: str | None = engine_run_id_value if isinstance(engine_run_id_value, str) else None
                 if not isinstance(job_id, str) or engine is None:
                     return
                 next_progress_task, next_resource_task = _start_stream_tasks(
@@ -2907,7 +2888,6 @@ async def run_analysis_build_stream(
                     tab_name=current_tab_name,
                     current_output_id=current_output_id_value,
                     current_output_name=current_output_name_value,
-                    engine_run_id=engine_run_id,
                     emitter=emitter,
                     build=build,
                     read_stage=current_read_stage,
@@ -2928,8 +2908,6 @@ async def run_analysis_build_stream(
                 current_write_stage: _SyntheticBuildStage = write_stage,
             ) -> None:
                 stage = info.get('stage')
-                engine_run_id_value = info.get('engine_run_id')
-                engine_run_id: str | None = engine_run_id_value if isinstance(engine_run_id_value, str) else None
                 if not isinstance(stage, str) or loop.is_closed() or not loop.is_running():
                     return
 
@@ -2959,7 +2937,6 @@ async def run_analysis_build_stream(
                                     'tab_name': current_tab_name,
                                     'current_output_id': current_output_id_value,
                                     'current_output_name': current_output_name_value,
-                                    'engine_run_id': engine_run_id,
                                 },
                             )
                             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -2975,7 +2952,6 @@ async def run_analysis_build_stream(
                                 tab_name=current_tab_name,
                                 current_output_id=current_output_id_value,
                                 current_output_name=current_output_name_value,
-                                engine_run_id=engine_run_id,
                             )
                         current_write_stage.started = True
                         current_write_stage.started_at = time.perf_counter()
@@ -2993,7 +2969,6 @@ async def run_analysis_build_stream(
                                 'tab_name': current_tab_name,
                                 'current_output_id': current_output_id_value,
                                 'current_output_name': current_output_name_value,
-                                'engine_run_id': engine_run_id,
                             },
                         )
                         return
@@ -3022,7 +2997,6 @@ async def run_analysis_build_stream(
                                 'tab_name': current_tab_name,
                                 'current_output_id': current_output_id_value,
                                 'current_output_name': current_output_name_value,
-                                'engine_run_id': engine_run_id,
                             },
                         )
                         elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -3038,7 +3012,6 @@ async def run_analysis_build_stream(
                             tab_name=current_tab_name,
                             current_output_id=current_output_id_value,
                             current_output_name=current_output_name_value,
-                            engine_run_id=engine_run_id,
                         )
 
                 future = asyncio.run_coroutine_threadsafe(emit_stage_updates(), loop)

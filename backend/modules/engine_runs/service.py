@@ -8,9 +8,7 @@ from fastapi import HTTPException as FastAPIHTTPException
 from sqlalchemy import desc, select
 from sqlmodel import Session
 
-from core.namespace import get_namespace
 from modules.analysis.step_types import get_step_type_label
-from modules.engine_runs import watchers
 from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import (
     BuildComparisonResponse,
@@ -18,9 +16,6 @@ from modules.engine_runs.schemas import (
     EngineRunExecutionCategory,
     EngineRunExecutionEntry,
     EngineRunKind,
-    EngineRunListParams,
-    EngineRunListSnapshotMessage,
-    EngineRunListUpdateMessage,
     EngineRunResponseSchema,
     EngineRunResultSummary,
     EngineRunStatus,
@@ -60,8 +55,6 @@ class _UnsetType:
 
 
 _UNSET: Final = _UnsetType()
-_MAX_LIVE_RESOURCES = 120
-_MAX_LIVE_LOGS = 500
 
 
 def _step_label_for_timing_key(key: str) -> tuple[str, str]:
@@ -167,136 +160,6 @@ def _copy_result_json(value: dict[str, Any] | None) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _payload_str(payload: dict[str, Any], key: str) -> str | None:
-    value = payload.get(key)
-    return value if isinstance(value, str) and value else None
-
-
-def _payload_int(payload: dict[str, Any], key: str) -> int | None:
-    value = payload.get(key)
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    return None
-
-
-def _payload_float(payload: dict[str, Any], key: str) -> float | None:
-    value = payload.get(key)
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
-
-
-def _upsert_live_item(items: list[dict[str, Any]], item: dict[str, Any], *, keys: tuple[str, ...]) -> list[dict[str, Any]]:
-    next_items = [existing for existing in items if any(existing.get(key) != item.get(key) for key in keys)]
-    next_items.append(item)
-    if 'build_step_index' in item:
-        next_items.sort(key=lambda existing: int(existing.get('build_step_index', 0)))
-    return next_items
-
-
-def _step_timings_from_live_steps(steps: list[dict[str, Any]]) -> dict[str, float]:
-    timings: dict[str, float] = {}
-    counters: dict[str, int] = {}
-    for step in sorted(steps, key=lambda item: int(item.get('build_step_index', 0))):
-        state = step.get('state')
-        step_type = step.get('step_type')
-        duration_ms = step.get('duration_ms')
-        if state != 'completed' or not isinstance(step_type, str) or step_type in {'read', 'write'}:
-            continue
-        if not isinstance(duration_ms, (int, float)):
-            continue
-        counters[step_type] = counters.get(step_type, 0) + 1
-        key = f'{step_type}_{counters[step_type]}'
-        timings[key] = round(float(duration_ms), 2)
-    return timings
-
-
-def _execution_entries_from_live_result(result_json: dict[str, Any], total_duration_ms: int | None) -> list[dict[str, Any]]:
-    steps_raw = result_json.get('steps')
-    steps = [step for step in steps_raw if isinstance(step, dict)] if isinstance(steps_raw, list) else []
-    plans_raw = result_json.get('query_plans')
-    plans = [plan for plan in plans_raw if isinstance(plan, dict)] if isinstance(plans_raw, list) else []
-    total = float(total_duration_ms) if isinstance(total_duration_ms, int) and total_duration_ms > 0 else None
-    timed_total = 0.0
-    for step in steps:
-        duration_ms = step.get('duration_ms')
-        if isinstance(duration_ms, (int, float)):
-            timed_total += float(duration_ms)
-    denominator = total if total is not None else (timed_total if timed_total > 0 else None)
-
-    entries: list[dict[str, Any]] = []
-
-    def append_entry(
-        *,
-        key: str,
-        label: str,
-        category: EngineRunExecutionCategory,
-        order: int,
-        duration_ms: float | None = None,
-        optimized_plan: str | None = None,
-        unoptimized_plan: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        share_pct = round((duration_ms / denominator) * 100, 1) if duration_ms is not None and denominator else None
-        entries.append(
-            {
-                'key': key,
-                'label': label,
-                'category': category,
-                'order': order,
-                'duration_ms': round(duration_ms, 2) if duration_ms is not None else None,
-                'share_pct': share_pct,
-                'optimized_plan': optimized_plan,
-                'unoptimized_plan': unoptimized_plan,
-                'metadata': metadata,
-            }
-        )
-
-    order = 0
-    for plan in plans:
-        append_entry(
-            key=f'query_plan_{order}',
-            label='Query Plan',
-            category=EngineRunExecutionCategory.PLAN,
-            order=order,
-            optimized_plan=plan.get('optimized_plan') if isinstance(plan.get('optimized_plan'), str) else None,
-            unoptimized_plan=plan.get('unoptimized_plan') if isinstance(plan.get('unoptimized_plan'), str) else None,
-        )
-        order += 1
-
-    for step in sorted(steps, key=lambda item: int(item.get('build_step_index', 0))):
-        step_name = step.get('step_name')
-        if not isinstance(step_name, str) or not step_name:
-            continue
-        step_type = step.get('step_type') if isinstance(step.get('step_type'), str) else 'unknown'
-        duration_ms = step.get('duration_ms')
-        category = EngineRunExecutionCategory.STEP
-        metadata: dict[str, Any] | None = {'step_type': step_type}
-        if step_type == 'read':
-            category = EngineRunExecutionCategory.READ
-            metadata = None
-        elif step_type == 'write':
-            category = EngineRunExecutionCategory.WRITE
-            metadata = None
-        append_entry(
-            key=str(step.get('step_id') or f'step_{order}'),
-            label=step_name,
-            category=category,
-            order=order,
-            duration_ms=float(duration_ms) if isinstance(duration_ms, (int, float)) else None,
-            metadata=metadata,
-        )
-        order += 1
-
-    return entries
-
-
 def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
     result_json = run.result_json if isinstance(run.result_json, dict) else {}
     execution_entries_raw = result_json.get('execution_entries')
@@ -317,52 +180,6 @@ def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
             'execution_entries': execution_entries,
         }
     )
-
-
-def _run_matches_params(run: EngineRunResponseSchema, params: EngineRunListParams) -> bool:
-    if params.analysis_id is not None and run.analysis_id != params.analysis_id:
-        return False
-    if params.datasource_id is not None and run.datasource_id != params.datasource_id:
-        return False
-    if params.kind is not None and run.kind != params.kind:
-        return False
-    return params.status is None or run.status == params.status
-
-
-def _broadcast_engine_run_change(session: Session, run: EngineRunResponseSchema) -> None:
-    namespace = get_namespace()
-    scheduled: list[tuple[watchers.EngineRunListWatcher, dict[str, Any]]] = []
-
-    for watcher in watchers.registry.watchers(namespace):
-        if run.id in watcher.run_ids and _run_matches_params(run, watcher.params):
-            scheduled.append((watcher, EngineRunListUpdateMessage(run=run).model_dump(mode='json')))
-            continue
-
-        if run.id not in watcher.run_ids and not _run_matches_params(run, watcher.params):
-            continue
-
-        current_runs = list_engine_runs(
-            session,
-            analysis_id=watcher.params.analysis_id,
-            datasource_id=watcher.params.datasource_id,
-            kind=watcher.params.kind,
-            status=watcher.params.status,
-            limit=watcher.params.limit,
-            offset=watcher.params.offset,
-        )
-        current_ids = tuple(item.id for item in current_runs)
-
-        if current_ids != watcher.run_ids:
-            watchers.registry.set_run_ids(namespace, watcher.websocket, current_ids)
-            scheduled.append((watcher, EngineRunListSnapshotMessage(runs=current_runs).model_dump(mode='json')))
-            continue
-
-        if run.id not in current_ids:
-            continue
-
-        scheduled.append((watcher, EngineRunListUpdateMessage(run=run).model_dump(mode='json')))
-
-    watchers.registry.broadcast(namespace, scheduled)
 
 
 def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | None:
@@ -412,9 +229,7 @@ def create_engine_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    serialized = _serialize_run(run)
-    _broadcast_engine_run_change(session, serialized)
-    return serialized
+    return _serialize_run(run)
 
 
 def update_engine_run(
@@ -489,136 +304,7 @@ def update_engine_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    serialized = _serialize_run(run)
-    _broadcast_engine_run_change(session, serialized)
-    return serialized
-
-
-def apply_live_event(
-    session: Session,
-    run_id: str,
-    payload: dict[str, Any],
-) -> EngineRunResponseSchema | None:
-    run = session.get(EngineRun, run_id)
-    if run is None:
-        return None
-
-    result_json = _copy_result_json(run.result_json)
-    event_type = _payload_str(payload, 'type')
-    if event_type is None:
-        return _serialize_run(run)
-
-    current_tab_id = _payload_str(payload, 'tab_id')
-    current_tab_name = _payload_str(payload, 'tab_name')
-    current_output_id = _payload_str(payload, 'current_output_id')
-    current_output_name = _payload_str(payload, 'current_output_name')
-    if current_tab_id is not None:
-        result_json['current_tab_id'] = current_tab_id
-    if current_tab_name is not None:
-        result_json['current_tab_name'] = current_tab_name
-    if current_output_id is not None:
-        result_json['current_output_id'] = current_output_id
-    if current_output_name is not None:
-        result_json['current_output_name'] = current_output_name
-
-    if event_type == 'plan':
-        plans_raw = result_json.get('query_plans')
-        plans = [plan for plan in plans_raw if isinstance(plan, dict)] if isinstance(plans_raw, list) else []
-        result_json['query_plans'] = _upsert_live_item(
-            plans,
-            {
-                'tab_id': current_tab_id,
-                'tab_name': current_tab_name,
-                'optimized_plan': _payload_str(payload, 'optimized_plan') or '',
-                'unoptimized_plan': _payload_str(payload, 'unoptimized_plan') or '',
-            },
-            keys=('tab_id', 'tab_name'),
-        )
-        if run.query_plan is None:
-            run.query_plan = _payload_str(payload, 'optimized_plan') or _payload_str(payload, 'unoptimized_plan')
-
-    if event_type in {'step_start', 'step_complete', 'step_failed'}:
-        steps_raw = result_json.get('steps')
-        steps = [step for step in steps_raw if isinstance(step, dict)] if isinstance(steps_raw, list) else []
-        next_state = 'running' if event_type == 'step_start' else 'completed' if event_type == 'step_complete' else 'failed'
-        result_json['steps'] = _upsert_live_item(
-            steps,
-            {
-                'build_step_index': _payload_int(payload, 'build_step_index') or 0,
-                'step_index': _payload_int(payload, 'step_index') or 0,
-                'step_id': _payload_str(payload, 'step_id') or 'unknown',
-                'step_name': _payload_str(payload, 'step_name') or 'Unnamed step',
-                'step_type': _payload_str(payload, 'step_type') or 'unknown',
-                'tab_id': current_tab_id,
-                'tab_name': current_tab_name,
-                'state': next_state,
-                'duration_ms': _payload_int(payload, 'duration_ms'),
-                'row_count': _payload_int(payload, 'row_count'),
-                'error': _payload_str(payload, 'error'),
-            },
-            keys=('build_step_index',),
-        )
-        run.step_timings = _step_timings_from_live_steps(result_json['steps'])
-
-    if event_type == 'progress':
-        progress = _payload_float(payload, 'progress')
-        elapsed_ms = _payload_int(payload, 'elapsed_ms')
-        if progress is not None:
-            run.progress = progress
-        if elapsed_ms is not None:
-            run.duration_ms = elapsed_ms
-        run.current_step = _payload_str(payload, 'current_step')
-        result_json['estimated_remaining_ms'] = _payload_int(payload, 'estimated_remaining_ms')
-        result_json['current_step_index'] = _payload_int(payload, 'current_step_index')
-        result_json['total_steps'] = _payload_int(payload, 'total_steps') or result_json.get('total_steps', 0)
-
-    if event_type == 'resources':
-        resources_raw = result_json.get('resources')
-        resources = [resource for resource in resources_raw if isinstance(resource, dict)] if isinstance(resources_raw, list) else []
-        resource = {
-            'sampled_at': _payload_str(payload, 'emitted_at') or datetime.now(UTC).isoformat(),
-            'cpu_percent': _payload_float(payload, 'cpu_percent') or 0.0,
-            'memory_mb': _payload_float(payload, 'memory_mb') or 0.0,
-            'memory_limit_mb': _payload_float(payload, 'memory_limit_mb'),
-            'active_threads': _payload_int(payload, 'active_threads') or 0,
-            'max_threads': _payload_int(payload, 'max_threads'),
-        }
-        next_resources = [*resources, resource]
-        result_json['resources'] = next_resources[-_MAX_LIVE_RESOURCES:]
-        result_json['latest_resources'] = resource
-
-    if event_type == 'log':
-        logs_raw = result_json.get('logs')
-        logs = [entry for entry in logs_raw if isinstance(entry, dict)] if isinstance(logs_raw, list) else []
-        next_logs = [
-            *logs,
-            {
-                'timestamp': _payload_str(payload, 'emitted_at') or datetime.now(UTC).isoformat(),
-                'level': _payload_str(payload, 'level') or 'info',
-                'message': _payload_str(payload, 'message') or '',
-                'step_name': _payload_str(payload, 'step_name'),
-                'step_id': _payload_str(payload, 'step_id'),
-                'tab_id': current_tab_id,
-                'tab_name': current_tab_name,
-            },
-        ]
-        result_json['logs'] = next_logs[-_MAX_LIVE_LOGS:]
-
-    if event_type == 'resource_config':
-        result_json['resource_config'] = {
-            'max_threads': _payload_int(payload, 'max_threads'),
-            'max_memory_mb': _payload_int(payload, 'max_memory_mb'),
-            'streaming_chunk_size': _payload_int(payload, 'streaming_chunk_size'),
-        }
-
-    result_json['execution_entries'] = _execution_entries_from_live_result(result_json, run.duration_ms)
-    run.result_json = result_json
-    session.add(run)
-    session.commit()
-    session.refresh(run)
-    serialized = _serialize_run(run)
-    _broadcast_engine_run_change(session, serialized)
-    return serialized
+    return _serialize_run(run)
 
 
 def create_engine_run_payload(
