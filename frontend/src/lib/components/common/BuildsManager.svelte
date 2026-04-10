@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import type { EngineRun } from '$lib/api/engine-runs';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
+	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import { page as pageState } from '$app/state';
 	import {
 		Search,
@@ -78,16 +79,13 @@
 		offset: (page - 1) * limit
 	});
 
-	const runsQuery = createQuery(() => ({
-		queryKey: ['engine-runs', queryParams],
-		queryFn: async () => {
-			const result = await listEngineRuns(queryParams);
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		retry: 0,
-		refetchInterval: 15_000
-	}));
+	const engineRunsStore = new EngineRunsStore();
+	// Side effect: WS connection depends on queryParams and must be cleaned up on destroy
+	$effect(() => {
+		const params = queryParams;
+		engineRunsStore.start(params);
+		return () => engineRunsStore.close();
+	});
 
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources-lookup'],
@@ -125,7 +123,7 @@
 		return map;
 	});
 
-	const runs = $derived(runsQuery.data ?? []);
+	const runs = $derived(engineRunsStore.runs);
 
 	const datasourceId = $derived(
 		(pageState.url.searchParams.get('datasource_id') ?? undefined) || undefined
@@ -522,7 +520,7 @@
 		</div>
 	{/if}
 
-	{#if runsQuery.isLoading}
+	{#if engineRunsStore.status === 'connecting'}
 		<div
 			class={css({
 				display: 'flex',
@@ -533,7 +531,7 @@
 		>
 			<div class={spinner()}></div>
 		</div>
-	{:else if runsQuery.isError}
+	{:else if engineRunsStore.status === 'error'}
 		<div
 			data-testid="stream-error"
 			class={css({
@@ -551,7 +549,7 @@
 				color: 'fg.error'
 			})}
 		>
-			{runsQuery.error?.message ?? 'Failed to load builds'}
+			{engineRunsStore.error ?? 'Failed to load builds'}
 		</div>
 	{:else if !hasAnyBuildRows}
 		<div

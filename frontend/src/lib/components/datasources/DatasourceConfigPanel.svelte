@@ -7,7 +7,8 @@
 		refreshDatasource,
 		updateDatasource
 	} from '$lib/api/datasource';
-	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import { type EngineRun } from '$lib/api/engine-runs';
+	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import { listHealthChecks, listHealthCheckResults } from '$lib/api/healthcheck';
 	import {
 		Save,
@@ -71,16 +72,13 @@
 		staleTime: Infinity
 	}));
 
-	const runsQuery = createQuery(() => ({
-		queryKey: ['datasource-runs', datasource.id],
-		queryFn: async () => {
-			const result = await listEngineRuns({ datasource_id: datasource.id, limit: 50 });
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		},
-		enabled: !!datasource.id,
-		retry: false
-	}));
+	const engineRunsStore = new EngineRunsStore();
+	// Side effect: WS connection depends on datasource.id and must be cleaned up on destroy
+	$effect(() => {
+		if (!datasource.id) return;
+		engineRunsStore.start({ datasource_id: datasource.id, limit: 50 });
+		return () => engineRunsStore.close();
+	});
 
 	const healthChecksQuery = createQuery(() => ({
 		queryKey: ['datasource-healthchecks-count', datasource.id],
@@ -401,7 +399,6 @@
 				queryClient.invalidateQueries({ queryKey: ['datasource-schema', ds.id] });
 				queryClient.invalidateQueries({ queryKey: ['datasource-preview', ds.id] });
 				queryClient.invalidateQueries({ queryKey: ['datasources'] });
-				queryClient.invalidateQueries({ queryKey: ['datasource-runs', ds.id] });
 			}
 		}
 	}
@@ -452,7 +449,6 @@
 			setSchema(nextSchema);
 			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
 			queryClient.invalidateQueries({ queryKey: ['datasource-preview', datasource.id] });
-			queryClient.invalidateQueries({ queryKey: ['datasource-runs', datasource.id] });
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Failed to refresh schema';
 		} finally {
@@ -480,10 +476,10 @@
 	const ds = $derived(datasourceQuery.data ?? datasource);
 	const csv = $derived(isCsv(ds));
 	const excel = $derived(isExcel(ds));
-	const runs = $derived(runsQuery.data ?? []);
+	const runs = $derived(engineRunsStore.runs);
 	const filteredRuns = $derived.by(() => {
 		if (showPreviews) return runs;
-		return runs.filter((run) => run.kind !== 'preview');
+		return runs.filter((run: EngineRun) => run.kind !== 'preview');
 	});
 	const isOutputDatasource = $derived(ds.created_by === 'analysis');
 	const scheduleAnalysisId = $derived(
@@ -1301,7 +1297,7 @@
 						Show previews
 					{/if}
 				</button>
-				{#if runsQuery.isLoading}
+				{#if engineRunsStore.status === 'connecting'}
 					<div
 						class={css({
 							display: 'flex',
@@ -1316,14 +1312,14 @@
 						<Loader size={24} class={css({ animation: 'spin 1s linear infinite' })} />
 						<p class={css({ fontSize: 'sm' })}>Loading runs...</p>
 					</div>
-				{:else if runsQuery.isError}
+				{:else if engineRunsStore.status === 'error'}
 					<Callout tone="error">
 						<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '3' })}>
 							<CircleAlert size={20} />
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 								<p class={css({ margin: '0', fontWeight: 'semibold' })}>Failed to load runs</p>
 								<p class={css({ margin: '0', fontSize: 'sm', opacity: '0.8' })}>
-									{runsQuery.error instanceof Error ? runsQuery.error.message : 'Unknown error'}
+									{engineRunsStore.error ?? 'Unknown error'}
 								</p>
 							</div>
 						</div>

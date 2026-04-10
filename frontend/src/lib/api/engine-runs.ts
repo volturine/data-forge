@@ -1,6 +1,7 @@
 import { apiRequest } from './client';
 import type { ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
+import { buildWebsocketUrl } from './websocket';
 
 export interface EngineRunExecutionEntry {
 	key: string;
@@ -106,4 +107,73 @@ export function compareEngineRuns(
 		params.set('datasource_id', datasourceId);
 	}
 	return apiRequest<BuildComparison>(`/v1/engine-runs/compare?${params.toString()}`);
+}
+
+export type EngineRunsSnapshotMessage = { type: 'snapshot'; runs: EngineRun[] };
+export type EngineRunsErrorMessage = { type: 'error'; error: string; status_code?: number };
+export type EngineRunsStreamMessage = EngineRunsSnapshotMessage | EngineRunsErrorMessage;
+
+export interface EngineRunsStreamCallbacks {
+	onSnapshot: (runs: EngineRun[]) => void;
+	onError: (error: string) => void;
+	onClose: () => void;
+}
+
+function parseEngineRunsMessage(data: string): EngineRunsStreamMessage | null {
+	try {
+		return JSON.parse(data) as EngineRunsStreamMessage;
+	} catch {
+		return null;
+	}
+}
+
+function buildEngineRunsEndpoint(params?: ListEngineRunsParams): string {
+	const query = new URLSearchParams();
+	if (params?.analysis_id) query.set('analysis_id', params.analysis_id);
+	if (params?.datasource_id) query.set('datasource_id', params.datasource_id);
+	if (params?.kind) query.set('kind', params.kind);
+	if (params?.status) query.set('status', params.status);
+	if (params?.limit !== undefined) query.set('limit', String(params.limit));
+	if (params?.offset !== undefined) query.set('offset', String(params.offset));
+	const suffix = query.toString() ? `?${query.toString()}` : '';
+	return `/v1/engine-runs/ws${suffix}`;
+}
+
+export function connectEngineRunsStream(
+	params: ListEngineRunsParams | undefined,
+	callbacks: EngineRunsStreamCallbacks
+): { close: () => void } {
+	const url = buildWebsocketUrl(buildEngineRunsEndpoint(params));
+	const socket = new WebSocket(url);
+
+	socket.addEventListener('message', (event) => {
+		const msg = parseEngineRunsMessage(event.data as string);
+		if (!msg) return;
+		if (msg.type === 'snapshot') {
+			callbacks.onSnapshot(msg.runs);
+			return;
+		}
+		if (msg.type === 'error') {
+			callbacks.onError(msg.error);
+		}
+	});
+
+	socket.addEventListener('error', () => {
+		callbacks.onError('WebSocket connection failed');
+	});
+
+	socket.addEventListener('close', (event) => {
+		if (event.code !== 1000 && event.code !== 1005) {
+			callbacks.onError(event.reason || `Connection closed (code ${event.code})`);
+		}
+		callbacks.onClose();
+	});
+
+	return {
+		close() {
+			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+				socket.close(1000);
+			}
+		}
+	};
 }

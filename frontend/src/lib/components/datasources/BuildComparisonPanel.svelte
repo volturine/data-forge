@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import type { EngineRun } from '$lib/api/engine-runs';
 	import { compareDatasourceSnapshots, listIcebergSnapshots } from '$lib/api/datasource';
 	import type { SnapshotCompareResponse } from '$lib/api/datasource';
 	import type { DataSource } from '$lib/types/datasource';
@@ -8,6 +8,7 @@
 	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
+	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import { css, cx, button, input } from '$lib/styles/panda';
 
 	interface Props {
@@ -23,14 +24,12 @@
 	let runSearch = $state('');
 	let rowLimit = $state(100);
 
-	const runsQuery = createQuery(() => ({
-		queryKey: ['engine-runs', datasource.id],
-		queryFn: async () => {
-			const result = await listEngineRuns({ datasource_id: datasource.id, limit: 50 });
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		}
-	}));
+	const engineRunsStore = new EngineRunsStore();
+	// Side effect: WS connection depends on datasource.id and must be cleaned up on destroy
+	$effect(() => {
+		engineRunsStore.start({ datasource_id: datasource.id, limit: 50 });
+		return () => engineRunsStore.close();
+	});
 
 	const snapshotsQuery = createQuery(() => ({
 		queryKey: ['iceberg-snapshots', datasource.id],
@@ -43,7 +42,7 @@
 	}));
 
 	const runs = $derived(
-		(runsQuery.data ?? []).filter(
+		engineRunsStore.runs.filter(
 			(run) =>
 				(run.kind === 'datasource_update' || run.kind === 'datasource_create') &&
 				run.status === 'success'
@@ -281,11 +280,11 @@
 					>
 						Select builds
 					</div>
-					{#if runsQuery.isLoading}
+					{#if engineRunsStore.status === 'connecting'}
 						<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>Loading runs...</div>
-					{:else if runsQuery.isError}
+					{:else if engineRunsStore.status === 'error'}
 						<div class={css({ fontSize: 'sm', color: 'fg.error' })}>
-							{runsQuery.error instanceof Error ? runsQuery.error.message : 'Failed to load runs'}
+							{engineRunsStore.error ?? 'Failed to load runs'}
 						</div>
 					{:else if runs.length === 0}
 						<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
