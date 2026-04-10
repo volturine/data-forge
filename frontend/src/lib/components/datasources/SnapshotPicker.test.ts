@@ -1,18 +1,59 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { okAsync } from 'neverthrow';
 import SnapshotPicker from './SnapshotPicker.svelte';
+import type { EngineRun } from '$lib/api/engine-runs';
+
+vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' })
+}));
+
+vi.mock('$lib/stores/namespace.svelte', () => ({
+	getNamespace: () => 'default'
+}));
 
 const mockApiRequest = vi.fn();
 vi.mock('$lib/api/client', () => ({
-	apiRequest: (...args: unknown[]) => mockApiRequest(...args)
+	apiRequest: (...args: unknown[]) => mockApiRequest(...args),
+	BASE_URL: '/api'
 }));
 
-const mockListEngineRuns = vi.fn();
-vi.mock('$lib/api/engine-runs', () => ({
-	listEngineRuns: (...args: unknown[]) => mockListEngineRuns(...args)
-}));
+type Listener = (event?: { data?: string; code?: number; reason?: string }) => void;
+
+class MockWebSocket {
+	static instances: MockWebSocket[] = [];
+
+	url: string;
+	readyState = 1;
+	private listeners = new Map<string, Listener[]>();
+
+	static readonly OPEN = 1;
+	static readonly CONNECTING = 0;
+
+	constructor(url: string) {
+		this.url = url;
+		MockWebSocket.instances.push(this);
+	}
+
+	addEventListener(type: string, listener: Listener) {
+		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+	}
+
+	close(_code?: number) {
+		this.readyState = 3;
+	}
+
+	emit(type: string, event?: { data?: string; code?: number; reason?: string }) {
+		for (const listener of this.listeners.get(type) ?? []) {
+			listener(event);
+		}
+	}
+}
+
+function sendSnapshot(socket: MockWebSocket, runs: EngineRun[]) {
+	socket.emit('message', { data: JSON.stringify({ type: 'snapshot', runs }) });
+}
 
 function renderPicker(props: Record<string, unknown> = {}) {
 	return render(SnapshotPicker, {
@@ -46,9 +87,41 @@ function makeSnapshots(
 	};
 }
 
+function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
+	return {
+		id: 'run-1',
+		analysis_id: null,
+		datasource_id: 'ds-1',
+		kind: 'datasource_update',
+		status: 'success',
+		request_json: {},
+		result_json: null,
+		error_message: null,
+		created_at: '2024-06-15T12:00:00Z',
+		completed_at: '2024-06-15T12:01:00Z',
+		duration_ms: 60000,
+		step_timings: {},
+		query_plan: null,
+		progress: 100,
+		current_step: null,
+		triggered_by: null,
+		execution_entries: [],
+		...overrides
+	};
+}
+
+function latestSocket(): MockWebSocket | undefined {
+	return MockWebSocket.instances[MockWebSocket.instances.length - 1];
+}
+
 beforeEach(() => {
+	MockWebSocket.instances = [];
+	vi.stubGlobal('WebSocket', MockWebSocket);
 	mockApiRequest.mockReset();
-	mockListEngineRuns.mockReset();
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
 });
 
 describe('SnapshotPicker', () => {
@@ -590,29 +663,6 @@ describe('SnapshotPicker', () => {
 	});
 
 	describe('showBuildPreviews fallback', () => {
-		function makeRun(overrides: Record<string, unknown> = {}) {
-			return {
-				id: 'run-1',
-				analysis_id: null,
-				datasource_id: 'ds-1',
-				kind: 'datasource_update',
-				status: 'success',
-				request_json: {},
-				result_json: null,
-				error_message: null,
-				created_at: '2024-06-15T12:00:00Z',
-				completed_at: '2024-06-15T12:01:00Z',
-				duration_ms: 60000,
-				step_timings: {},
-				query_plan: null,
-				progress: 100,
-				current_step: null,
-				triggered_by: null,
-				execution_entries: [],
-				...overrides
-			};
-		}
-
 		test('shows all snapshots when build runs exist but map is empty', async () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(
@@ -622,12 +672,10 @@ describe('SnapshotPicker', () => {
 					])
 				)
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: null })]);
-				}
-			});
 			renderPicker({ showBuildPreviews: true });
+			await tick();
+			const socket = latestSocket()!;
+			sendSnapshot(socket, [makeRun({ id: 'run-1', result_json: null })]);
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -645,12 +693,10 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([]);
-				}
-			});
 			renderPicker({ showBuildPreviews: true });
+			await tick();
+			const socket = latestSocket()!;
+			sendSnapshot(socket, []);
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -669,12 +715,10 @@ describe('SnapshotPicker', () => {
 					])
 				)
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: { snapshot_id: 'snap-a' } })]);
-				}
-			});
 			renderPicker({ showBuildPreviews: true });
+			await tick();
+			const socket = latestSocket()!;
+			sendSnapshot(socket, [makeRun({ id: 'run-1', result_json: { snapshot_id: 'snap-a' } })]);
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -691,13 +735,11 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN20, current: true }]))
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: {} })]);
-				}
-			});
 			const onUiChange = vi.fn();
 			renderPicker({ showBuildPreviews: true, onUiChange });
+			await tick();
+			const socket = latestSocket()!;
+			sendSnapshot(socket, [makeRun({ id: 'run-1', result_json: {} })]);
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -715,13 +757,11 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: null })]);
-				}
-			});
 			const onUiChange = vi.fn();
 			renderPicker({ showBuildPreviews: true, onUiChange });
+			await tick();
+			const socket = latestSocket()!;
+			sendSnapshot(socket, [makeRun({ id: 'run-1', result_json: null })]);
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 

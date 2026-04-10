@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { apiRequest } from '$lib/api/client';
-	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import type { EngineRun } from '$lib/api/engine-runs';
+	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
@@ -53,7 +54,25 @@
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
-	let buildRuns = $state<EngineRun[]>([]);
+	const buildRunsStore = new EngineRunsStore();
+	// Side effect: WS connection depends on datasource/build-preview state and must be cleaned up
+	$effect(() => {
+		if (!showBuildPreviews || !datasourceId) return;
+		buildRunsStore.start({ datasource_id: datasourceId, limit: 50 });
+		return () => buildRunsStore.close();
+	});
+	const buildRuns = $derived.by(() => {
+		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
+		return buildRunsStore.runs.filter((run: EngineRun) => {
+			if (!(run.kind === 'datasource_update' || run.kind === 'datasource_create')) return false;
+			if (run.status !== 'success') return false;
+			if (!branchValue) return true;
+			const payload = run.request_json as Record<string, unknown>;
+			const opts = payload.iceberg_options as Record<string, unknown> | undefined;
+			const runBranch = opts?.branch as string | undefined;
+			return runBranch === branchValue;
+		});
+	});
 	const runSnapshotMap = $derived(buildSnapshotMap(buildRuns, toSnapshotRefs(snapshotList)));
 	const filteredSnapshotList = $derived.by(() => {
 		if (!showBuildPreviews) return snapshotList;
@@ -130,7 +149,7 @@
 		deleteConfirmId = null;
 		deleteLoading = false;
 		deleteError = null;
-		buildRuns = [];
+		buildRunsStore.reset();
 	});
 
 	function formatSnapshotKey(timestampMs: number) {
@@ -278,31 +297,6 @@
 				snapshotList = [];
 			}
 		);
-		if (showBuildPreviews) {
-			loadBuildRuns();
-		}
-	}
-
-	function loadBuildRuns() {
-		if (!datasourceId) return;
-		listEngineRuns({ datasource_id: datasourceId, limit: 50 }).match(
-			(result) => {
-				const branchValue =
-					branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
-				buildRuns = result.filter((run) => {
-					if (!(run.kind === 'datasource_update' || run.kind === 'datasource_create')) return false;
-					if (run.status !== 'success') return false;
-					if (!branchValue) return true;
-					const payload = run.request_json as Record<string, unknown>;
-					const opts = payload.iceberg_options as Record<string, unknown> | undefined;
-					const runBranch = opts?.branch as string | undefined;
-					return runBranch === branchValue;
-				});
-			},
-			() => {
-				buildRuns = [];
-			}
-		);
 	}
 
 	function getIcebergSnapshots(nextId: string) {
@@ -386,9 +380,6 @@
 		updatePopoverPosition();
 		if (!snapshotsLoading) {
 			loadSnapshots();
-		}
-		if (showBuildPreviews && !buildRuns.length) {
-			loadBuildRuns();
 		}
 	}
 
