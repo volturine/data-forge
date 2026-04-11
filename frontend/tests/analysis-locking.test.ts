@@ -66,10 +66,15 @@ test.describe('Analyses – multi-user locking', () => {
 			});
 
 			await gotoReadOnlyAnalysisEditor(viewerPage, analysisId);
-			await expect(viewerPage.locator('[data-testid="lock-banner"]')).toBeVisible({
+			const viewerEditor = viewerPage.locator('[role="application"]');
+			await expect(viewerEditor).toHaveAttribute('data-editor-access-state', 'locked', {
 				timeout: 10_000
 			});
-			await expect(viewerPage.getByTestId('lock-toggle-button')).toHaveText('Locked');
+			await expect(viewerPage.getByTestId('lock-toggle-button')).toHaveAttribute(
+				'aria-label',
+				'Locked'
+			);
+			await expect(viewerPage.getByTestId('lock-toggle-button')).toBeDisabled();
 			await expect(viewerPage.locator('[data-save-state="locked"]')).toBeVisible();
 			await expect(viewerPage.locator('button[data-step="filter"]').first()).toBeDisabled();
 
@@ -79,11 +84,14 @@ test.describe('Analyses – multi-user locking', () => {
 				'released',
 				{ timeout: 10_000 }
 			);
-			await expect(ownerPage.locator('[data-testid="lock-released-banner"]')).toBeVisible({
-				timeout: 10_000
-			});
+			await expect(ownerPage.getByTestId('lock-toggle-button')).toHaveAttribute(
+				'aria-label',
+				'Lock',
+				{
+					timeout: 10_000
+				}
+			);
 
-			const viewerEditor = viewerPage.locator('[role="application"]');
 			await expect(viewerEditor).toHaveAttribute('data-editor-access-state', 'editable', {
 				timeout: 30_000
 			});

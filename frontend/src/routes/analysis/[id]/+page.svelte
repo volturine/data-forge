@@ -1349,6 +1349,7 @@
 						onclick={handleLockToggle}
 						disabled={lockButtonDisabled}
 						type="button"
+						aria-label={lockButtonLabel}
 						title={lockButtonLabel}
 						data-testid="lock-toggle-button"
 					>

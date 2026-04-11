@@ -9,8 +9,9 @@ from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
 from string import hexdigits
+from typing import Any, cast
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, update
 from sqlmodel import Session, create_engine, select
 
 from core.config import settings
@@ -65,9 +66,8 @@ def _clear_owned_resources(session: Session, user_id: str) -> None:
     for table_name, model in ownership_models.items():
         if table_name not in tables:
             continue
-        for item in session.exec(select(model).where(model.owner_id == user_id)).all():
-            item.owner_id = None
-            session.add(item)
+        owner_id_column = cast(Any, model.owner_id)
+        session.exec(update(model).where(owner_id_column == user_id).values(owner_id=None))
 
 
 def _namespace_db_files() -> list[Path]:

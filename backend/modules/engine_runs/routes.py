@@ -18,10 +18,12 @@ logger = logging.getLogger(__name__)
 router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
 
 
+def _websocket_disconnected(websocket: WebSocket) -> bool:
+    return websocket.client_state is WebSocketState.DISCONNECTED or websocket.application_state is WebSocketState.DISCONNECTED
+
+
 async def _safe_close_websocket(websocket: WebSocket) -> None:
-    if websocket.client_state is WebSocketState.DISCONNECTED:
-        return
-    if websocket.application_state is WebSocketState.DISCONNECTED:
+    if _websocket_disconnected(websocket):
         return
     try:
         await websocket.close()
@@ -39,16 +41,14 @@ def _parse_list_params(websocket: WebSocket) -> schemas.EngineRunListParams:
 
 
 async def _send_websocket_error(websocket: WebSocket, error: str, status_code: int) -> None:
-    if websocket.client_state is WebSocketState.DISCONNECTED:
-        return
-    if websocket.application_state is WebSocketState.DISCONNECTED:
+    if _websocket_disconnected(websocket):
         return
     try:
         await websocket.send_json(schemas.EngineRunWebsocketErrorMessage(error=error, status_code=status_code).model_dump(mode='json'))
-    except RuntimeError:
-        return
-    except WebSocketDisconnect:
-        return
+    except (WebSocketDisconnect, RuntimeError):
+        if _websocket_disconnected(websocket):
+            return
+        raise
 
 
 @router.get('/compare', response_model=schemas.BuildComparisonResponse, mcp=True)
@@ -120,13 +120,15 @@ async def engine_run_list_websocket(websocket: WebSocket) -> None:
         await watchers.registry.add(websocket, watch)
         await websocket.send_json((await watchers.registry.snapshot(watch)).model_dump(mode='json'))
         while True:
-            await websocket.receive()
-    except ValidationError as exc:
+            if (await websocket.receive())['type'] == 'websocket.disconnect':
+                return
+    except (ValidationError, ValueError) as exc:
         await _send_websocket_error(websocket, str(exc), 400)
-    except ValueError as exc:
-        await _send_websocket_error(websocket, str(exc), 400)
-    except WebSocketDisconnect:
-        return
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        if _websocket_disconnected(websocket):
+            return
+        logger.error('Engine run websocket error: %s', exc, exc_info=True)
+        await _send_websocket_error(websocket, 'An internal error occurred', 500)
     except Exception as exc:
         logger.error('Engine run websocket error: %s', exc, exc_info=True)
         await _send_websocket_error(websocket, 'An internal error occurred', 500)

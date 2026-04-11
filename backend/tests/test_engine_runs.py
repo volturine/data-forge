@@ -1,7 +1,13 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
-from modules.engine_runs import service as engine_run_service
+from starlette.websockets import WebSocketState
+
+from modules.engine_runs import routes as engine_run_routes, service as engine_run_service
 from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 
@@ -226,3 +232,96 @@ def test_engine_run_list_websocket_refreshes_filtered_membership(client, test_db
     assert running['type'] == 'snapshot'
     assert [run['id'] for run in running['runs']] == [created.id]
     assert completed == {'type': 'snapshot', 'runs': []}
+
+
+def test_engine_run_list_websocket_treats_disconnect_runtimeerror_on_receive_as_normal(monkeypatch) -> None:
+    websocket = SimpleNamespace(
+        headers={},
+        query_params={},
+        client_state=WebSocketState.CONNECTED,
+        application_state=WebSocketState.CONNECTED,
+    )
+    websocket.accept = AsyncMock()
+    websocket.send_json = AsyncMock()
+    websocket.close = AsyncMock()
+
+    async def receive_disconnect_race() -> dict[str, str]:
+        websocket.client_state = WebSocketState.DISCONNECTED
+        raise RuntimeError('Cannot call "receive" once a disconnect message has been received.')
+
+    websocket.receive = AsyncMock(side_effect=receive_disconnect_race)
+
+    watch = object()
+    monkeypatch.setattr(engine_run_routes, 'set_namespace_context', lambda *_args, **_kwargs: 'token')
+    monkeypatch.setattr(engine_run_routes, 'reset_namespace', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine_run_routes, 'get_namespace', lambda: 'default')
+    monkeypatch.setattr(engine_run_routes, '_parse_list_params', lambda _websocket: engine_run_routes.schemas.EngineRunListParams())
+    monkeypatch.setattr(engine_run_routes.watchers.EngineRunWatch, 'from_params', lambda *_args, **_kwargs: watch)
+    add_mock = AsyncMock()
+    discard_mock = AsyncMock()
+    snapshot_mock = AsyncMock(return_value=SimpleNamespace(model_dump=lambda **_kwargs: {'type': 'snapshot', 'runs': []}))
+    monkeypatch.setattr(engine_run_routes.watchers.registry, 'add', add_mock)
+    monkeypatch.setattr(engine_run_routes.watchers.registry, 'discard', discard_mock)
+    monkeypatch.setattr(
+        engine_run_routes.watchers.registry,
+        'snapshot',
+        snapshot_mock,
+    )
+    logger_error = AsyncMock()
+    monkeypatch.setattr(engine_run_routes.logger, 'error', logger_error)
+
+    asyncio.run(engine_run_routes.engine_run_list_websocket(cast(Any, websocket)))
+
+    websocket.accept.assert_awaited_once()
+    add_mock.assert_awaited_once_with(websocket, watch)
+    snapshot_mock.assert_awaited_once_with(watch)
+    websocket.send_json.assert_awaited_once_with({'type': 'snapshot', 'runs': []})
+    discard_mock.assert_awaited_once_with(websocket, watch)
+    logger_error.assert_not_called()
+
+
+def test_engine_run_list_websocket_treats_disconnect_runtimeerror_on_send_as_normal(monkeypatch) -> None:
+    websocket = SimpleNamespace(
+        headers={},
+        query_params={},
+        client_state=WebSocketState.CONNECTED,
+        application_state=WebSocketState.CONNECTED,
+    )
+    websocket.accept = AsyncMock()
+    websocket.receive = AsyncMock()
+    websocket.close = AsyncMock()
+
+    async def send_disconnect_race(_payload: dict[str, Any]) -> None:
+        websocket.application_state = WebSocketState.DISCONNECTED
+        raise RuntimeError('Cannot call "send" once a close message has been sent.')
+
+    websocket.send_json = AsyncMock(side_effect=send_disconnect_race)
+
+    watch = object()
+    monkeypatch.setattr(engine_run_routes, 'set_namespace_context', lambda *_args, **_kwargs: 'token')
+    monkeypatch.setattr(engine_run_routes, 'reset_namespace', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine_run_routes, 'get_namespace', lambda: 'default')
+    monkeypatch.setattr(engine_run_routes, '_parse_list_params', lambda _websocket: engine_run_routes.schemas.EngineRunListParams())
+    monkeypatch.setattr(engine_run_routes.watchers.EngineRunWatch, 'from_params', lambda *_args, **_kwargs: watch)
+    add_mock = AsyncMock()
+    discard_mock = AsyncMock()
+    snapshot_mock = AsyncMock(return_value=SimpleNamespace(model_dump=lambda **_kwargs: {'type': 'snapshot', 'runs': []}))
+    monkeypatch.setattr(engine_run_routes.watchers.registry, 'add', add_mock)
+    monkeypatch.setattr(engine_run_routes.watchers.registry, 'discard', discard_mock)
+    monkeypatch.setattr(
+        engine_run_routes.watchers.registry,
+        'snapshot',
+        snapshot_mock,
+    )
+    logger_error = AsyncMock()
+    monkeypatch.setattr(engine_run_routes.logger, 'error', logger_error)
+
+    asyncio.run(engine_run_routes.engine_run_list_websocket(cast(Any, websocket)))
+
+    websocket.accept.assert_awaited_once()
+    add_mock.assert_awaited_once_with(websocket, watch)
+    snapshot_mock.assert_awaited_once_with(watch)
+    websocket.send_json.assert_awaited_once_with({'type': 'snapshot', 'runs': []})
+    websocket.receive.assert_not_called()
+    discard_mock.assert_awaited_once_with(websocket, watch)
+    logger_error.assert_not_called()
