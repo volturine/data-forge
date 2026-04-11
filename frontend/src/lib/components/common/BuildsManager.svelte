@@ -56,7 +56,6 @@
 	let branchFilter = $state('');
 	let expandedId = $state<string | null>(null);
 	let expandedStore = $state<BuildStreamStore | null>(null);
-	let resultExpanded = $state(false);
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	const runDetailStores = new SvelteMap<string, BuildStreamStore>();
@@ -266,7 +265,6 @@
 
 	function toggleExpand(id: string) {
 		expandedId = expandedId === id ? null : id;
-		resultExpanded = false;
 	}
 
 	function resolveName(id: string, map: Map<string, string>): string {
@@ -825,74 +823,14 @@
 										overflow: 'hidden'
 									})}
 								>
-									<div
-										class={css({
-											padding: '4',
-											display: 'flex',
-											flexDirection: 'column',
-											gap: '3'
-										})}
-									>
-										<div
-											class={css({ display: 'flex', flexWrap: 'wrap', gap: '4', fontSize: 'sm' })}
-										>
-											<span class={css({ color: 'fg.secondary' })}>
-												<strong>Run ID:</strong>
-												{run.id}
-											</span>
-										</div>
-
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<strong class={css({ fontSize: 'sm', color: 'fg.primary' })}
-												>Request Payload</strong
-											>
-											<pre
-												class={css({
-													fontSize: 'xs',
-													backgroundColor: 'bg.secondary',
-													padding: '2',
-													borderRadius: 'md',
-													overflow: 'auto',
-													maxHeight: '200px',
-													margin: '0'
-												})}>{JSON.stringify(run.request_json, null, 2)}</pre>
-										</div>
-
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<button
-												type="button"
-												class={button({ variant: 'secondary', size: 'sm' })}
-												onclick={() => (resultExpanded = !resultExpanded)}
-											>
-												Result
-											</button>
-											{#if resultExpanded}
-												{#if run.result_json}
-													<div class={css({ fontSize: 'sm', color: 'fg.secondary' })}>
-														Result Metadata
-													</div>
-													<pre
-														class={css({
-															fontSize: 'xs',
-															backgroundColor: 'bg.secondary',
-															padding: '2',
-															borderRadius: 'md',
-															overflow: 'auto',
-															maxHeight: '200px',
-															margin: '0'
-														})}>{JSON.stringify(run.result_json, null, 2)}</pre>
-												{:else}
-													<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-														No result data available
-													</div>
-												{/if}
-											{/if}
-										</div>
-									</div>
-
 									{#if expandedStore}
 										<div class={css({ width: '100%', overflowX: 'hidden' })}>
-											<BuildPreview store={expandedStore} title={getKindLabel(run.kind)} />
+											<BuildPreview
+												store={expandedStore}
+												title={getKindLabel(run.kind)}
+												requestJson={run.request_json}
+												resultJson={run.result_json}
+											/>
 										</div>
 									{/if}
 								</td>

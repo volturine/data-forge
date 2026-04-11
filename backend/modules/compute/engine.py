@@ -441,9 +441,15 @@ class PolarsComputeEngine:
                     else:
                         raise ValueError(f'Unknown command type: {type(command).__name__}')
 
+                    read_duration_ms: float | None = None
+                    write_duration_ms: float | None = None
                     if isinstance(result_data, dict):
                         step_timings = result_data.pop('step_timings', step_timings)
                         query_plan = result_data.pop('query_plan', query_plan)
+                        raw_read = result_data.pop('read_duration_ms', None)
+                        raw_write = result_data.pop('write_duration_ms', None)
+                        read_duration_ms = float(raw_read) if isinstance(raw_read, (int, float)) else None
+                        write_duration_ms = float(raw_write) if isinstance(raw_write, (int, float)) else None
 
                     logger.debug(f'Job {job_id}: Completed successfully')
                     result_queue.put(
@@ -453,6 +459,8 @@ class PolarsComputeEngine:
                             error=None,
                             step_timings=step_timings,
                             query_plan=query_plan,
+                            read_duration_ms=read_duration_ms,
+                            write_duration_ms=write_duration_ms,
                         )
                     )
 

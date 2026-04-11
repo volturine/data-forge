@@ -132,6 +132,8 @@ def test_await_engine_result_returns_immediate_result_before_poll_loop() -> None
         'error_details': {},
         'step_timings': {},
         'query_plan': None,
+        'read_duration_ms': None,
+        'write_duration_ms': None,
     }
     assert calls == [('result', 0)]
 
@@ -652,14 +654,15 @@ class TestComputePreview:
         mock_engine.preview.return_value = 'preview-job-123'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': {
+            EngineResult(
+                job_id='preview-job-123',
+                data={
                     'schema': {'name': 'String', 'age': 'Int64'},
                     'data': [{'name': 'Bob', 'age': 30}, {'name': 'Charlie', 'age': 35}],
                     'row_count': 2,
                 },
-                'error': None,
-            },
+                error=None,
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -724,14 +727,15 @@ class TestComputePreview:
         mock_engine.preview.return_value = 'preview-job-ws'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': {
+            EngineResult(
+                job_id='preview-job-ws',
+                data={
                     'schema': {'name': 'String'},
                     'data': [{'name': 'Bob'}],
                     'row_count': 1,
                 },
-                'error': None,
-            },
+                error=None,
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -814,12 +818,13 @@ class TestComputePreview:
         mock_engine.preview.return_value = 'preview-job-124'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': None,
-                'error': 'Invalid operation type',
-                'error_kind': 'value_error',
-                'error_details': {},
-            },
+            EngineResult(
+                job_id='preview-job-124',
+                data=None,
+                error='Invalid operation type',
+                error_kind='value_error',
+                error_details={},
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -914,12 +919,13 @@ class TestComputePreview:
         mock_engine.preview.return_value = 'preview-job-125'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': None,
-                'error': 'Iceberg metadata_path not found: /tmp/path',
-                'error_kind': 'datasource_metadata_missing',
-                'error_details': {'metadata_path': '/tmp/path'},
-            },
+            EngineResult(
+                job_id='preview-job-125',
+                data=None,
+                error='Iceberg metadata_path not found: /tmp/path',
+                error_kind='datasource_metadata_missing',
+                error_details={'metadata_path': '/tmp/path'},
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -1028,10 +1034,11 @@ class TestComputePreview:
         mock_engine.preview.return_value = 'preview-job-125'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': {'schema': {}, 'data': [], 'row_count': 0},
-                'error': None,
-            },
+            EngineResult(
+                job_id='preview-job-125',
+                data={'schema': {}, 'data': [], 'row_count': 0},
+                error=None,
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -1093,15 +1100,16 @@ class TestComputePreview:
         mock_engine.preview.return_value = 'preview-job-126'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': {
+            EngineResult(
+                job_id='preview-job-126',
+                data={
                     'schema': {'name': 'String'},
                     'data': [{'name': 'Bob'}],
                     'row_count': 1,
                     'query_plans': {'optimized': 'opt', 'unoptimized': 'unopt'},
                 },
-                'error': None,
-            },
+                error=None,
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -1844,14 +1852,15 @@ class TestComputeExport:
         mock_engine.preview.return_value = 'preview-job-126'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': {
+            EngineResult(
+                job_id='preview-job-126',
+                data={
                     'schema': {'id': 'Int64', 'name': 'String'},
                     'data': [{'id': 1, 'name': 'Alice'}],
                     'row_count': 1,
                 },
-                'error': None,
-            },
+                error=None,
+            ),
         ]
 
         mock_manager.get_engine.return_value = None
@@ -1925,12 +1934,11 @@ class TestComputeRowCount:
         mock_engine.get_row_count.return_value = 'row-count-job-123'
         mock_engine.get_result.side_effect = [
             None,
-            {
-                'data': {
-                    'row_count': 42,
-                },
-                'error': None,
-            },
+            EngineResult(
+                job_id='row-count-job-123',
+                data={'row_count': 42},
+                error=None,
+            ),
         ]
 
         mock_manager.get_engine.return_value = None

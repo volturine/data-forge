@@ -33,17 +33,6 @@ function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
 				max_memory_mb: 512,
 				streaming_chunk_size: 1000
 			},
-			steps: [
-				{
-					build_step_index: 0,
-					step_index: 0,
-					step_id: 'tab-1:initial_read',
-					step_name: 'Initial Read',
-					step_type: 'read',
-					state: 'completed',
-					duration_ms: 12
-				}
-			],
 			resources: [
 				{
 					sampled_at: '2026-04-08T12:00:00Z',
@@ -80,7 +69,41 @@ function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
 		progress: 0.5,
 		current_step: 'Filter rows',
 		triggered_by: 'user',
-		execution_entries: [],
+		execution_entries: [
+			{
+				key: 'initial_read',
+				label: 'Initial Read',
+				category: 'read',
+				order: 0,
+				duration_ms: 12,
+				share_pct: 6.0,
+				optimized_plan: null,
+				unoptimized_plan: null,
+				metadata: null
+			},
+			{
+				key: 'view_0',
+				label: 'View',
+				category: 'step',
+				order: 1,
+				duration_ms: 0,
+				share_pct: 0,
+				optimized_plan: null,
+				unoptimized_plan: null,
+				metadata: { step_type: 'view' }
+			},
+			{
+				key: 'write_output',
+				label: 'Write Output',
+				category: 'write',
+				order: 2,
+				duration_ms: 13,
+				share_pct: 6.5,
+				optimized_plan: null,
+				unoptimized_plan: null,
+				metadata: null
+			}
+		],
 		...overrides
 	};
 }
@@ -96,7 +119,11 @@ describe('engineRunBuildDetail', () => {
 		expect(engineRunDatasourceName(run)).toBe('Source 1');
 		expect(detail.status).toBe('running');
 		expect(detail.current_output_name).toBe('output_salary_predictions');
+		expect(detail.steps).toHaveLength(3);
 		expect(detail.steps[0]?.step_name).toBe('Initial Read');
+		expect(detail.steps[0]?.duration_ms).toBe(12);
+		expect(detail.steps[1]?.step_name).toBe('View');
+		expect(detail.steps[2]?.step_name).toBe('Write Output');
 		expect(detail.latest_resources?.cpu_percent).toBe(25);
 		expect(detail.logs[0]?.message).toBe('Running build');
 		expect(detail.resource_config).toEqual({

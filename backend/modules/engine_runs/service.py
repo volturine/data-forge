@@ -165,16 +165,11 @@ def _copy_result_json(value: dict[str, Any] | None) -> dict[str, Any]:
 def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
     result_json = run.result_json if isinstance(run.result_json, dict) else {}
     execution_entries_raw = result_json.get('execution_entries')
-    if isinstance(execution_entries_raw, list):
-        execution_entries = [EngineRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in execution_entries_raw]
-    else:
-        query_plans = result_json.get('query_plans')
-        execution_entries = build_execution_entries(
-            step_timings=run.step_timings,
-            query_plans=query_plans if isinstance(query_plans, dict) else None,
-            query_plan=run.query_plan,
-            total_duration_ms=run.duration_ms,
-        )
+    execution_entries = (
+        [EngineRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in execution_entries_raw]
+        if isinstance(execution_entries_raw, list)
+        else []
+    )
     return EngineRunResponseSchema.model_validate(
         {
             **run.model_dump(),

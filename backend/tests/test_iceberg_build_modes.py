@@ -7,6 +7,7 @@ from pyiceberg.types import NestedField, StringType
 from sqlmodel import Session
 
 from core.namespace import namespace_paths
+from modules.compute.core.base import EngineResult
 from modules.compute.service import _sync_iceberg_schema, export_data
 from modules.datasource.models import DataSource
 
@@ -139,11 +140,11 @@ class TestBuildModeWiring:
         engine = MagicMock()
         engine.is_process_alive.return_value = True
         engine.export.return_value = 'job-1'
-        engine.get_result.return_value = {
-            'data': {'row_count': 1},
-            'error': None,
-            'step_timings': {},
-        }
+        engine.get_result.return_value = EngineResult(
+            job_id='job-1',
+            data={'row_count': 1},
+            error=None,
+        )
         return engine
 
     def _make_manager_mock(self) -> MagicMock:

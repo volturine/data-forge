@@ -8,6 +8,7 @@ from core.namespace import namespace_paths
 from modules.analysis.models import Analysis, AnalysisStatus
 from modules.analysis.schemas import AnalysisUpdateSchema, TabDatasourceConfig, TabDatasourceSchema, TabOutputSchema, TabSchema
 from modules.analysis.service import update_analysis
+from modules.compute.core.base import EngineResult
 from modules.compute.service import _upsert_output_datasource, export_data
 from modules.datasource.models import DataSource
 from modules.datasource.service import create_analysis_datasource
@@ -445,11 +446,11 @@ class TestRunAnalysisBuildOutputDatasource:
         engine_mock = MagicMock()
         engine_mock.is_process_alive.return_value = True
         engine_mock.export.return_value = 'job-1'
-        engine_mock.get_result.return_value = {
-            'data': {'row_count': 1},
-            'error': None,
-            'step_timings': {},
-        }
+        engine_mock.get_result.return_value = EngineResult(
+            job_id='job-1',
+            data={'row_count': 1},
+            error=None,
+        )
         manager_mock = MagicMock()
         manager_mock.get_engine.return_value = engine_mock
         manager_mock.get_or_create_engine.return_value = engine_mock

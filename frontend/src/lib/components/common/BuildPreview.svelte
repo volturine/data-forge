@@ -17,7 +17,8 @@
 		Copy,
 		Settings,
 		PauseCircle,
-		PlayCircle
+		PlayCircle,
+		Braces
 	} from 'lucide-svelte';
 	import { css, cx, tabButton, chip, callout, spinner } from '$lib/styles/panda';
 	import { buildStepLabel } from '$lib/utils/build-step-label';
@@ -25,11 +26,13 @@
 	interface Props {
 		store: BuildStreamStore;
 		title?: string;
+		requestJson?: Record<string, unknown> | null;
+		resultJson?: Record<string, unknown> | null;
 	}
 
-	const { store, title = 'Build' }: Props = $props();
+	const { store, title = 'Build', requestJson = null, resultJson = null }: Props = $props();
 
-	type PreviewTab = 'steps' | 'plan' | 'config' | 'resources' | 'logs' | 'results';
+	type PreviewTab = 'steps' | 'plan' | 'config' | 'resources' | 'logs' | 'results' | 'payload';
 	let activeTab = $state<PreviewTab>('steps');
 	let logsRef = $state<HTMLElement>();
 	let planView = $state<'optimized' | 'unoptimized'>('optimized');
@@ -50,6 +53,7 @@
 	const hasPlans = $derived(store.queryPlans.length > 0);
 	const hasLogs = $derived(store.status !== 'connecting');
 	const hasResults = $derived(store.results.length > 0);
+	const hasPayload = $derived(requestJson !== null || resultJson !== null);
 
 	const filteredLogs = $derived.by((): BuildLogEntry[] => {
 		if (logLevel === 'all') return store.logs;
@@ -141,7 +145,8 @@
 			(activeTab === 'plan' && !hasPlans) ||
 			(activeTab === 'config' && !hasConfig) ||
 			(activeTab === 'resources' && !hasResources) ||
-			(activeTab === 'results' && !hasResults);
+			(activeTab === 'results' && !hasResults) ||
+			(activeTab === 'payload' && !hasPayload);
 		if (invalid) activeTab = 'steps';
 	});
 </script>
@@ -385,6 +390,20 @@
 					<FileText size={12} />
 					Results
 					<span class={chip({ tone: 'neutral' })}>{store.results.length}</span>
+				</span>
+			</button>
+		{/if}
+		{#if hasPayload}
+			<button
+				role="tab"
+				aria-selected={activeTab === 'payload'}
+				aria-controls="build-panel-payload"
+				class={tabButton({ active: activeTab === 'payload' })}
+				onclick={() => (activeTab = 'payload')}
+			>
+				<span class={cx(rowClass, css({ gap: '1' }))}>
+					<Braces size={12} />
+					Payload
 				</span>
 			</button>
 		{/if}
@@ -936,6 +955,65 @@
 							{/if}
 						</div>
 					{/each}
+				</div>
+			</div>
+		{:else if activeTab === 'payload' && hasPayload}
+			<div
+				id="build-panel-payload"
+				role="tabpanel"
+				aria-labelledby="tab-payload"
+				class={css({ padding: '4' })}
+				data-testid="build-payload-panel"
+			>
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
+					{#if requestJson}
+						<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+							<span
+								class={css({
+									fontSize: '2xs',
+									textTransform: 'uppercase',
+									letterSpacing: 'widest',
+									color: 'fg.faint'
+								})}>Request</span
+							>
+							<pre
+								class={css({
+									fontSize: 'xs',
+									backgroundColor: 'bg.tertiary',
+									padding: '3',
+									overflow: 'auto',
+									maxHeight: 'list',
+									margin: '0',
+									fontFamily: 'mono',
+									whiteSpace: 'pre-wrap',
+									wordBreak: 'break-all'
+								})}>{JSON.stringify(requestJson, null, 2)}</pre>
+						</div>
+					{/if}
+					{#if resultJson}
+						<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+							<span
+								class={css({
+									fontSize: '2xs',
+									textTransform: 'uppercase',
+									letterSpacing: 'widest',
+									color: 'fg.faint'
+								})}>Result</span
+							>
+							<pre
+								class={css({
+									fontSize: 'xs',
+									backgroundColor: 'bg.tertiary',
+									padding: '3',
+									overflow: 'auto',
+									maxHeight: 'list',
+									margin: '0',
+									fontFamily: 'mono',
+									whiteSpace: 'pre-wrap',
+									wordBreak: 'break-all'
+								})}>{JSON.stringify(resultJson, null, 2)}</pre>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}

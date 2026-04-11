@@ -880,13 +880,11 @@ def _build_canonical_engine_run_result(
     plan_snapshots = _normalize_query_plan_snapshots(result.get('query_plans'), tab_id=current_tab_id, tab_name=current_tab_name)
     result['query_plans'] = plan_snapshots
 
-    existing_steps = result.get('steps')
-    if not isinstance(existing_steps, list) or not existing_steps:
-        result['steps'] = _build_step_snapshots_from_execution_entries(
-            execution_entries,
-            tab_id=current_tab_id,
-            tab_name=current_tab_name,
-        )
+    result['steps'] = _build_step_snapshots_from_execution_entries(
+        execution_entries,
+        tab_id=current_tab_id,
+        tab_name=current_tab_name,
+    )
 
     resources = result.get('resources')
     normalized_resources = [resource for resource in resources if isinstance(resource, dict)] if isinstance(resources, list) else []

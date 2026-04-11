@@ -1360,7 +1360,7 @@
 					</button>
 					<button
 						class={css({
-							flex: '1',
+							width: '1/2',
 							minWidth: '0',
 							height: '100%',
 							backgroundColor: 'bg.tertiary',
@@ -1369,6 +1369,7 @@
 							fontWeight: 'medium',
 							cursor: 'pointer',
 							color: 'fg.muted',
+							borderRadius: 'xs',
 							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
 							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 						})}
@@ -1381,7 +1382,7 @@
 					<div
 						class={css({
 							display: 'flex',
-							flex: '1',
+							width: '1/2',
 							minWidth: '0',
 							borderRadius: 'xs',
 							overflow: 'hidden',

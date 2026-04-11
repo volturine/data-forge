@@ -1,4 +1,4 @@
-import type { EngineRun } from '$lib/api/engine-runs';
+import type { EngineRun, EngineRunExecutionEntry } from '$lib/api/engine-runs';
 import type {
 	ActiveBuildDetail,
 	BuildLogEntry,
@@ -35,18 +35,6 @@ function readResourceConfig(value: unknown): BuildResourceConfigSummary | null {
 		max_memory_mb: readNumber(config.max_memory_mb),
 		streaming_chunk_size: readNumber(config.streaming_chunk_size)
 	};
-}
-
-function readQueryPlans(result: Record<string, unknown> | null): BuildQueryPlanSnapshotWire[] {
-	const plans = readArray<Record<string, unknown>>(result?.query_plans);
-	return plans.map(
-		(plan): BuildQueryPlanSnapshotWire => ({
-			tab_id: readString(plan.tab_id),
-			tab_name: readString(plan.tab_name),
-			optimized_plan: readString(plan.optimized_plan) ?? '',
-			unoptimized_plan: readString(plan.unoptimized_plan) ?? ''
-		})
-	);
 }
 
 function readBuildResults(
@@ -123,24 +111,56 @@ export function engineRunResourceConfig(run: EngineRun): BuildResourceConfigSumm
 	return readResourceConfig(result?.resource_config);
 }
 
-export function engineRunBuildDetail(run: EngineRun): ActiveBuildDetail {
-	const result = readObject(run.result_json);
-	const steps = readArray<Record<string, unknown>>(result?.steps).map(
-		(step): BuildStepSnapshotWire => ({
-			build_step_index: readNumber(step.build_step_index) ?? 0,
-			step_index: readNumber(step.step_index) ?? 0,
-			step_id: readString(step.step_id) ?? 'unknown',
-			step_name: readString(step.step_name) ?? 'Unnamed step',
-			step_type: readString(step.step_type) ?? 'unknown',
-			tab_id: readString(step.tab_id),
-			tab_name: readString(step.tab_name),
-			state: readString(step.state) ?? 'pending',
-			duration_ms: readNumber(step.duration_ms),
-			row_count: readNumber(step.row_count),
-			error: readString(step.error)
+function stepsFromExecutionEntries(
+	entries: EngineRunExecutionEntry[],
+	tabId: string | null,
+	tabName: string | null,
+	runStatus: string
+): BuildStepSnapshotWire[] {
+	const nonPlan = entries.filter((e) => e.category !== 'plan').sort((a, b) => a.order - b.order);
+	return nonPlan.map(
+		(entry, index): BuildStepSnapshotWire => ({
+			build_step_index: index,
+			step_index: index,
+			step_id: entry.key,
+			step_name: entry.label,
+			step_type: entry.category,
+			tab_id: tabId,
+			tab_name: tabName,
+			state: runStatus === 'failed' && index === nonPlan.length - 1 ? 'failed' : 'completed',
+			duration_ms: entry.duration_ms,
+			row_count: null,
+			error: null
 		})
 	);
-	const queryPlans = readQueryPlans(result);
+}
+
+function queryPlansFromExecutionEntries(
+	entries: EngineRunExecutionEntry[],
+	tabId: string | null,
+	tabName: string | null
+): BuildQueryPlanSnapshotWire[] {
+	return entries
+		.filter((e) => e.category === 'plan')
+		.filter((e) => e.optimized_plan || e.unoptimized_plan)
+		.map(
+			(entry): BuildQueryPlanSnapshotWire => ({
+				tab_id: tabId,
+				tab_name: tabName,
+				optimized_plan: entry.optimized_plan ?? '',
+				unoptimized_plan: entry.unoptimized_plan ?? ''
+			})
+		);
+}
+
+export function engineRunBuildDetail(run: EngineRun): ActiveBuildDetail {
+	const result = readObject(run.result_json);
+	const tabId = readString(result?.current_tab_id);
+	const tabName = readString(result?.current_tab_name);
+
+	const steps = stepsFromExecutionEntries(run.execution_entries, tabId, tabName, run.status);
+	const queryPlans = queryPlansFromExecutionEntries(run.execution_entries, tabId, tabName);
+
 	const resources = readArray<Record<string, unknown>>(result?.resources).map(
 		(resource): BuildResourceSnapshot => ({
 			sampled_at: readString(resource.sampled_at) ?? run.created_at,

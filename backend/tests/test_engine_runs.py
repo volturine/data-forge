@@ -95,35 +95,6 @@ def test_list_engine_runs_pagination(test_db_session):
     assert len(second) == 1
 
 
-def test_list_engine_runs_derives_unified_execution_entries_from_legacy_fields(test_db_session):
-    run = EngineRun(
-        id=str(uuid.uuid4()),
-        analysis_id='analysis-legacy',
-        datasource_id='ds-legacy',
-        kind=EngineRunKind.PREVIEW,
-        status=EngineRunStatus.SUCCESS,
-        request_json={},
-        result_json={'query_plans': {'optimized': 'opt plan', 'unoptimized': 'raw plan'}},
-        created_at=datetime.now(UTC),
-        duration_ms=100,
-        step_timings={'filter_1': 35.0, 'select_2': 15.0},
-        query_plan='fallback plan',
-        progress=1.0,
-    )
-    test_db_session.add(run)
-    test_db_session.commit()
-
-    result = engine_run_service.list_engine_runs(test_db_session, analysis_id='analysis-legacy')
-
-    assert len(result) == 1
-    entries = result[0].execution_entries
-    assert [entry.key for entry in entries] == ['query_plan', 'filter_1', 'select_2']
-    assert entries[0].optimized_plan == 'opt plan'
-    assert entries[0].unoptimized_plan == 'raw plan'
-    assert entries[1].label == 'Filter 1'
-    assert entries[2].label == 'Select 2'
-
-
 def test_update_engine_run_reuses_existing_row(test_db_session):
     created = engine_run_service.create_engine_run(
         test_db_session,
