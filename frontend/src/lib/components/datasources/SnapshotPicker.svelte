@@ -15,6 +15,7 @@
 		branch?: string | null;
 		label?: string;
 		persistOpen?: boolean;
+		disabled?: boolean;
 		onConfigChange?: (config: Record<string, unknown>) => void;
 		onUiChange?: (updates: { open?: boolean; month?: string; day?: string }) => void;
 		onSelect?: (snapshotId: string | null, timestampMs?: number) => void;
@@ -27,6 +28,7 @@
 		datasourceConfig,
 		label = 'Time Travel',
 		persistOpen = false,
+		disabled = false,
 		onConfigChange,
 		onUiChange,
 		onSelect,
@@ -370,6 +372,7 @@
 	}
 
 	function toggleSnapshots() {
+		if (disabled) return;
 		const next = !snapshotsOpen;
 		snapshotsOpen = next;
 		hasOpened = true;
@@ -440,17 +443,19 @@
 			css({
 				display: 'flex',
 				width: '100%',
-				cursor: 'pointer',
+				cursor: disabled ? 'default' : 'pointer',
 				alignItems: 'center',
 				justifyContent: 'space-between',
 				borderWidth: '1',
 				backgroundColor: 'bg.secondary',
 				padding: '2',
 				paddingX: '3',
-				_hover: { backgroundColor: 'bg.tertiary' }
+				_hover: disabled ? {} : { backgroundColor: 'bg.tertiary' },
+				_disabled: { opacity: '0.7', cursor: 'default' }
 			})
 		)}
 		onclick={toggleSnapshots}
+		{disabled}
 		type="button"
 		bind:this={triggerRef}
 	>

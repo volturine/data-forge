@@ -51,6 +51,8 @@
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { css, cx, spinner, button, input } from '$lib/styles/panda';
 	import {
+		Lock,
+		LockOpen,
 		ChevronDown,
 		ChevronLeft,
 		ChevronRight,
@@ -119,7 +121,7 @@
 		if (editorAccessState === 'pending') return 'Connecting...';
 		if (editorAccessState === 'locked') return 'Locked';
 		if (editorAccessState === 'unavailable') return 'Read only';
-		if (editorAccessState === 'released') return 'Unlocked';
+		if (editorAccessState === 'released') return 'Read only';
 		if (isSaving) return 'Saving...';
 		if (isDirty) return 'Save';
 		return 'Saved';
@@ -1332,27 +1334,34 @@
 				<div class={css({ display: 'flex', height: '100%', flex: '1', padding: '1', gap: '1' })}>
 					<button
 						class={css({
-							flex: '1',
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
 							height: '100%',
-							backgroundColor: editorAccessState === 'editable' ? 'bg.warning' : 'bg.tertiary',
+							paddingX: '2',
+							backgroundColor: 'transparent',
 							border: 'none',
-							fontSize: 'xs',
-							fontWeight: 'medium',
 							cursor: 'pointer',
 							color: editorAccessState === 'editable' ? 'fg.warning' : 'fg.muted',
-							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+							_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' },
 							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
 						})}
 						onclick={handleLockToggle}
 						disabled={lockButtonDisabled}
 						type="button"
+						title={lockButtonLabel}
 						data-testid="lock-toggle-button"
 					>
-						{lockButtonLabel}
+						{#if editorAccessState === 'editable'}
+							<LockOpen size={14} />
+						{:else}
+							<Lock size={14} />
+						{/if}
 					</button>
 					<button
 						class={css({
 							flex: '1',
+							minWidth: '0',
 							height: '100%',
 							backgroundColor: 'bg.tertiary',
 							border: 'none',
@@ -1373,6 +1382,7 @@
 						class={css({
 							display: 'flex',
 							flex: '1',
+							minWidth: '0',
 							borderRadius: 'xs',
 							overflow: 'hidden',
 							...(isDirty ? { backgroundColor: 'bg.warning' } : { backgroundColor: 'bg.tertiary' })
@@ -1427,40 +1437,6 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
-			</div>
-		{/if}
-
-		{#if editorAccessState === 'pending'}
-			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-pending-banner">
-				<Callout tone="info"
-					>Opening this analysis in read-only mode while edit access is being established.</Callout
-				>
-			</div>
-		{/if}
-
-		{#if editorAccessState === 'released'}
-			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-released-banner">
-				<Callout tone="info"
-					>Editing is unlocked. This view stays read-only until you lock it again.</Callout
-				>
-			</div>
-		{/if}
-
-		{#if lockedByOther}
-			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-banner">
-				<Callout tone="warn"
-					>Another user is editing this analysis. This view stays read-only until the lock is
-					released.</Callout
-				>
-			</div>
-		{/if}
-
-		{#if editorAccessState === 'unavailable'}
-			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-error-banner">
-				<Callout tone="error"
-					>Could not establish an edit session. This analysis is read-only until the connection
-					recovers.</Callout
-				>
 			</div>
 		{/if}
 

@@ -238,10 +238,6 @@
 	);
 	const isDragActive = $derived(drag.active);
 	const snapshotConfig = $derived(activeTab?.datasource?.config ?? {});
-	const readOnlySnapshotId = $derived.by(() => {
-		const snapshotId = (snapshotConfig as Record<string, unknown>)['time_travel_snapshot_id'];
-		return typeof snapshotId === 'string' ? snapshotId : null;
-	});
 	const snapshotBranch = $derived.by((): string | null => {
 		const branch = activeTab?.datasource?.config?.branch;
 		return typeof branch === 'string' ? branch : null;
@@ -571,69 +567,27 @@
 							})}
 						>
 							<div class={css({ minWidth: '0', flex: '1' })}>
-								{#if readOnly}
-									<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-										<span
-											class={css({
-												fontSize: '2xs',
-												textTransform: 'uppercase',
-												color: 'fg.muted'
-											})}
-										>
-											Time Travel
-										</span>
-										<span class={css({ fontSize: 'xs', color: 'fg.primary' })}>
-											{readOnlySnapshotId ?? 'Latest'}
-										</span>
-									</div>
-								{:else}
-									<SnapshotPicker
-										datasourceId={datasource.id}
-										datasourceConfig={snapshotConfig}
-										label="Time Travel"
-										persistOpen
-										branch={snapshotBranch}
-										showBuildPreviews={!isOutputSource}
-										onConfigChange={updateSnapshotConfig}
-										onUiChange={updateTimeTravelUi}
-										onSelect={handleSnapshotSelect}
-									/>
-								{/if}
+								<SnapshotPicker
+									datasourceId={datasource.id}
+									datasourceConfig={snapshotConfig}
+									label="Time Travel"
+									persistOpen
+									disabled={readOnly}
+									branch={snapshotBranch}
+									showBuildPreviews={!isOutputSource}
+									onConfigChange={updateSnapshotConfig}
+									onUiChange={updateTimeTravelUi}
+									onSelect={handleSnapshotSelect}
+								/>
 							</div>
 							<div class={css({ minWidth: 'colMd', flexShrink: '0' })}>
-								{#if readOnly}
-									<div
-										class={css({
-											display: 'flex',
-											flexDirection: 'column',
-											gap: '1',
-											borderWidth: '1',
-											backgroundColor: 'bg.secondary',
-											paddingX: '3',
-											paddingY: '2'
-										})}
-									>
-										<span
-											class={css({
-												fontSize: '2xs',
-												textTransform: 'uppercase',
-												color: 'fg.muted'
-											})}
-										>
-											Branch
-										</span>
-										<span class={css({ fontSize: 'sm', color: 'fg.primary' })}>
-											{branchValue || 'master'}
-										</span>
-									</div>
-								{:else}
-									<BranchPicker
-										branches={getDatasourceBranches(resolvedDatasource)}
-										value={branchValue}
-										placeholder="master"
-										onChange={applyBranchValue}
-									/>
-								{/if}
+								<BranchPicker
+									branches={getDatasourceBranches(resolvedDatasource)}
+									value={branchValue}
+									placeholder="master"
+									disabled={readOnly}
+									onChange={applyBranchValue}
+								/>
 							</div>
 						</div>
 					{/if}

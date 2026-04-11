@@ -14,6 +14,7 @@
 		value: string;
 		placeholder?: string;
 		allowCreate?: boolean;
+		disabled?: boolean;
 		onChange: (value: string) => void;
 	}
 
@@ -22,6 +23,7 @@
 		value = $bindable(),
 		placeholder = 'Select branch',
 		allowCreate = false,
+		disabled = false,
 		onChange
 	}: Props = $props();
 
@@ -147,6 +149,7 @@
 	value={currentValue}
 	onChange={handleChange}
 	{placeholder}
+	{disabled}
 	searchPlaceholder="Search branches..."
 	menuClass={css({ position: 'fixed', zIndex: 'popover' })}
 	menuAction={portal}
