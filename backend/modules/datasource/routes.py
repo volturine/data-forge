@@ -491,6 +491,11 @@ async def confirm_excel(
             cell_range=resolved_cell_range,
             owner_id=user.id if user else None,
         )
+    except AppError:
+        if target_path.exists():
+            target_path.unlink()
+        await clear_preflight(parse_preflight_id(preflight_id))
+        raise
     except Exception as e:
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if target_path.exists():

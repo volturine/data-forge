@@ -361,30 +361,33 @@ def resolve_excel_selection(
     named_range: str | None = None,
     cell_range: str | None = None,
 ) -> tuple[str, int, int, int, int]:
-    workbook = _open_excel_workbook(file_path, table_name=table_name)
     try:
-        target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
-        if not target_sheet:
-            raise ValueError('No sheets found in file')
-        resolved = _resolve_excel_bounds(
-            workbook,
-            target_sheet,
-            start_row,
-            start_col,
-            end_col,
-            end_row,
-            table_name,
-            named_range,
-            cell_range,
-        )
-        sheet = workbook[resolved.sheet_name]
-        end_row_value = resolved.end_row
-        if end_row_value is None:
-            end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
-        _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
-        return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
-    finally:
-        workbook.close()
+        workbook = _open_excel_workbook(file_path, table_name=table_name)
+        try:
+            target_sheet = sheet_name or (workbook.sheetnames[0] if workbook.sheetnames else None)
+            if not target_sheet:
+                raise ValueError('No sheets found in file')
+            resolved = _resolve_excel_bounds(
+                workbook,
+                target_sheet,
+                start_row,
+                start_col,
+                end_col,
+                end_row,
+                table_name,
+                named_range,
+                cell_range,
+            )
+            sheet = workbook[resolved.sheet_name]
+            end_row_value = resolved.end_row
+            if end_row_value is None:
+                end_row_value = _detect_end_row(sheet, resolved.start_row, resolved.start_col, resolved.end_col)
+            _validate_excel_bounds(sheet, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value)
+            return resolved.sheet_name, resolved.start_row, resolved.start_col, resolved.end_col, end_row_value
+        finally:
+            workbook.close()
+    except ValueError as exc:
+        raise DataSourceValidationError(str(exc), details={'file_path': str(file_path)}) from exc
 
 
 @dataclass

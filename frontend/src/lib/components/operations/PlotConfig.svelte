@@ -74,7 +74,7 @@
 
 	interface Props {
 		schema: Schema;
-		config?: Record<string, unknown>;
+		config?: PlotConfigData;
 	}
 
 	const defaultConfig = {
@@ -114,7 +114,7 @@
 
 	const configDefaults = defaultConfig satisfies Record<string, unknown>;
 
-	function toPlotConfig(value: Record<string, unknown>): PlotConfigData {
+	function toPlotConfig(value: PlotConfigData | Record<string, unknown>): PlotConfigData {
 		const normalized = normalizeConfig('chart', value);
 		return { ...defaultConfig, ...normalized } as PlotConfigData;
 	}

@@ -20,6 +20,7 @@
 		SampleConfigData,
 		LimitConfigData,
 		TopKConfigData,
+		PlotConfigData,
 		UnpivotConfigData,
 		UnionByNameConfigData
 	} from '$lib/types/operation-config';
@@ -151,6 +152,7 @@
 	const sampleConfigBinding = bindDraftConfig<SampleConfigData>();
 	const limitConfigBinding = bindDraftConfig<LimitConfigData>();
 	const topKConfigBinding = bindDraftConfig<TopKConfigData>();
+	const plotConfigBinding = bindDraftConfig<PlotConfigData>();
 	const unpivotConfigBinding = bindDraftConfig<UnpivotConfigData>();
 	const unionByNameConfigBinding = bindDraftConfig<UnionByNameConfigData>();
 	const notificationConfigBinding = bindDraftConfig<NotificationConfigData>();
@@ -486,7 +488,7 @@
 			{:else if step.type === 'union_by_name'}
 				<UnionByNameConfig schema={inputSchema} bind:config={unionByNameConfigBinding.value} />
 			{:else if step.type === 'chart'}
-				<PlotConfig schema={inputSchema} bind:config={draftConfig} />
+				<PlotConfig schema={inputSchema} bind:config={plotConfigBinding.value} />
 			{:else if step.type === 'notification'}
 				<NotificationConfig
 					schema={inputSchema}
