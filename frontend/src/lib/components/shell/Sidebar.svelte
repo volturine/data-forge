@@ -6,7 +6,7 @@
 		Database,
 		Activity,
 		GitBranch,
-		Code2,
+		CodeXml,
 		PanelLeftOpen,
 		Sun,
 		Moon,
@@ -69,7 +69,7 @@
 		{ href: '/datasources', label: 'Data Sources', icon: Database, prefix: '/datasources' },
 		{ href: '/monitoring', label: 'Monitoring', icon: Activity, prefix: '/monitoring' },
 		{ href: '/lineage', label: 'Lineage', icon: GitBranch, prefix: '/lineage' },
-		{ href: '/udfs', label: 'UDFs', icon: Code2, prefix: '/udfs' }
+		{ href: '/udfs', label: 'UDFs', icon: CodeXml, prefix: '/udfs' }
 	] as const;
 
 	function isActive(item: (typeof navItems)[number]): boolean {

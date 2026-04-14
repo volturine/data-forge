@@ -14,7 +14,7 @@
 		Loader,
 		X,
 		Database,
-		BarChart3,
+		ChartColumn,
 		ArrowRight,
 		ArrowDown,
 		LayoutGrid,
@@ -358,7 +358,7 @@
 						{#if selectedType === 'datasource'}
 							<Database size={16} />
 						{:else}
-							<BarChart3 size={16} />
+							<ChartColumn size={16} />
 						{/if}
 					</div>
 				{/if}

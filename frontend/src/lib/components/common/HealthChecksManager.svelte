@@ -19,7 +19,7 @@
 		Trash2,
 		Check,
 		X,
-		AlertTriangle,
+		TriangleAlert,
 		HeartPulse,
 		Plus,
 		ChevronDown,
@@ -1260,7 +1260,7 @@
 												backgroundColor: 'bg.tertiary'
 											})}
 										>
-											<AlertTriangle size={12} class={css({ color: 'fg.muted' })} />
+											<TriangleAlert size={12} class={css({ color: 'fg.muted' })} />
 										</div>
 									{/if}
 								</td>

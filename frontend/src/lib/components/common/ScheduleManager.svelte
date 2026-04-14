@@ -18,8 +18,8 @@
 		Link,
 		Database,
 		ArrowRight,
-		HelpCircle,
-		BarChart3,
+		CircleQuestionMark,
+		ChartColumn,
 		Search
 	} from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -530,7 +530,7 @@
 					onclick={() => (showHelp = !showHelp)}
 					title="Show help"
 				>
-					<HelpCircle size={14} />
+					<CircleQuestionMark size={14} />
 				</button>
 			</div>
 		</div>
@@ -612,7 +612,7 @@
 				{#if currentTarget}
 					<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-							<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
+							<ChartColumn size={14} class={css({ color: 'accent.primary' })} />
 							<span class={css({ fontWeight: 'medium' })}>
 								{currentTarget.datasourceName}
 							</span>
@@ -674,7 +674,7 @@
 						{#if selectedDatasource}
 							<div class={css({ backgroundColor: 'bg.secondary', padding: '3', fontSize: 'sm' })}>
 								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-									<BarChart3 size={14} class={css({ color: 'accent.primary' })} />
+									<ChartColumn size={14} class={css({ color: 'accent.primary' })} />
 									<span class={css({ fontWeight: 'medium' })}>{selectedDatasource.name}</span>
 								</div>
 								<div
@@ -1438,7 +1438,7 @@
 											})}
 											title={resolveDatasource(schedule.datasource_id)}
 										>
-											<BarChart3 size={10} class={css({ flexShrink: '0', color: 'fg.muted' })} />
+											<ChartColumn size={10} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 											{resolveDatasource(schedule.datasource_id)}
 										</span>
 									</td>
@@ -1605,7 +1605,7 @@
 													>Target Datasource</span
 												>
 												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
-													<BarChart3 size={10} class={css({ color: 'fg.muted' })} />
+													<ChartColumn size={10} class={css({ color: 'fg.muted' })} />
 													<span class={css({ fontSize: '2xs', color: 'fg.secondary' })}>
 														{resolveDatasource(schedule.datasource_id)}
 													</span>

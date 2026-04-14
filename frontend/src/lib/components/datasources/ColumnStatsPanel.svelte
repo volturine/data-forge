@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { BarChart3, X } from 'lucide-svelte';
+	import { ChartColumn, X } from 'lucide-svelte';
 	import { getColumnStats } from '$lib/api/datasource';
 	import type { HistogramBin } from '$lib/api/datasource';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
@@ -76,7 +76,7 @@
 			<PanelHeader>
 				{#snippet title()}
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-						<BarChart3 size={16} />
+						<ChartColumn size={16} />
 						<h3 class={css({ margin: '0', fontSize: 'xs', fontWeight: 'semibold' })}>
 							Column Stats
 						</h3>

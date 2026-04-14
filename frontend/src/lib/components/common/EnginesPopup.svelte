@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { X, Power, Loader2 } from 'lucide-svelte';
+	import { X, Power, LoaderCircle } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import type { EngineStatus } from '$lib/types/compute';
@@ -172,7 +172,7 @@
 					color: 'fg.muted'
 				})}
 			>
-				<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
+				<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 				Loading engines...
 			</div>
 		{:else if enginesStore.engines.length === 0}
@@ -248,7 +248,7 @@
 							title="Shutdown engine"
 						>
 							{#if shuttingDown.has(engine.analysis_id)}
-								<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
+								<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Power size={14} />
 							{/if}

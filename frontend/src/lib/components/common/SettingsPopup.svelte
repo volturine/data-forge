@@ -6,11 +6,11 @@
 		MessageCircle,
 		Database,
 		ChevronDown,
-		CheckCircle,
-		XCircle,
+		CircleCheckBig,
+		CircleX,
 		Send,
 		Save,
-		Loader2,
+		LoaderCircle,
 		Trash2
 	} from 'lucide-svelte';
 	import {
@@ -337,7 +337,7 @@
 				color: 'fg.muted'
 			})}
 		>
-			<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
+			<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 			Loading settings...
 		</div>
 	{:else}
@@ -361,9 +361,9 @@
 					})}
 				>
 					{#if feedback.type === 'success'}
-						<CheckCircle size={12} />
+						<CircleCheckBig size={12} />
 					{:else}
-						<XCircle size={12} />
+						<CircleX size={12} />
 					{/if}
 					{feedback.message}
 				</div>
@@ -740,7 +740,7 @@
 						type="button"
 					>
 						{#if testingSmtp}
-							<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
+							<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 						{:else}
 							<Send size={12} />
 						{/if}
@@ -1052,7 +1052,7 @@
 				type="button"
 			>
 				{#if saving}
-					<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
+					<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 				{:else}
 					<Save size={12} />
 				{/if}

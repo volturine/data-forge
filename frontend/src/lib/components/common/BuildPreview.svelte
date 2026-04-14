@@ -2,8 +2,8 @@
 	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import type { QueryPlan, BuildLogEntry } from '$lib/types/build-stream';
 	import {
-		CheckCircle,
-		XCircle,
+		CircleCheckBig,
+		CircleX,
 		Loader,
 		Clock,
 		Cpu,
@@ -13,11 +13,11 @@
 		Activity,
 		ScrollText,
 		Terminal,
-		AlertTriangle,
+		TriangleAlert,
 		Copy,
 		Settings,
-		PauseCircle,
-		PlayCircle,
+		CirclePause,
+		CirclePlay,
 		Braces
 	} from 'lucide-svelte';
 	import { css, cx, tabButton, chip, callout, spinner } from '$lib/styles/panda';
@@ -210,11 +210,11 @@
 					class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
 				/>
 			{:else if store.status === 'completed'}
-				<CheckCircle size={14} class={css({ color: 'fg.success' })} />
+				<CircleCheckBig size={14} class={css({ color: 'fg.success' })} />
 			{:else if store.status === 'failed'}
-				<XCircle size={14} class={css({ color: 'fg.error' })} />
+				<CircleX size={14} class={css({ color: 'fg.error' })} />
 			{:else}
-				<AlertTriangle size={14} class={css({ color: 'fg.warning' })} />
+				<TriangleAlert size={14} class={css({ color: 'fg.warning' })} />
 			{/if}
 			<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
 				{title}
@@ -358,7 +358,7 @@
 					<Activity size={12} />
 					Resources
 					{#if memoryWarning}
-						<AlertTriangle size={10} class={css({ color: 'fg.warning' })} />
+						<TriangleAlert size={10} class={css({ color: 'fg.warning' })} />
 					{/if}
 				</span>
 			</button>
@@ -498,9 +498,9 @@
 											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
 										/>
 									{:else if step.state === 'completed'}
-										<CheckCircle size={12} class={css({ color: 'fg.success' })} />
+										<CircleCheckBig size={12} class={css({ color: 'fg.success' })} />
 									{:else}
-										<XCircle size={12} class={css({ color: 'fg.error' })} />
+										<CircleX size={12} class={css({ color: 'fg.error' })} />
 									{/if}
 								</div>
 								<span
@@ -691,7 +691,7 @@
 						class={cx(callout({ tone: 'warn' }), css({ marginBottom: '3' }))}
 						data-testid="memory-warning"
 					>
-						<AlertTriangle size={12} />
+						<TriangleAlert size={12} />
 						Memory usage at {store.memoryPercent}% of allocated — exceeds {MEMORY_WARN_THRESHOLD}%
 						threshold
 					</div>
@@ -852,7 +852,7 @@
 								title="Resume auto-scroll"
 								data-testid="log-resume-scroll"
 							>
-								<PlayCircle size={12} />
+								<CirclePlay size={12} />
 								Resume
 							</button>
 						{:else if store.status === 'running'}
@@ -860,7 +860,7 @@
 								class={cx(rowClass, css({ gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
 								data-testid="log-auto-scroll"
 							>
-								<PauseCircle size={12} />
+								<CirclePause size={12} />
 								Auto-scroll
 							</span>
 						{/if}
@@ -935,9 +935,9 @@
 					{#each store.results as result (result.tab_id)}
 						<div class={cx(rowClass, css({ gap: '2', fontSize: 'sm' }))}>
 							{#if result.status === 'success'}
-								<CheckCircle size={12} class={css({ color: 'fg.success' })} />
+								<CircleCheckBig size={12} class={css({ color: 'fg.success' })} />
 							{:else}
-								<XCircle size={12} class={css({ color: 'fg.error' })} />
+								<CircleX size={12} class={css({ color: 'fg.error' })} />
 							{/if}
 							<span>{result.tab_name}</span>
 							<span

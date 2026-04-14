@@ -6,14 +6,14 @@
 		ReferenceLineConfig
 	} from '$lib/types/operation-config';
 	import {
-		BarChart2,
-		LineChart,
-		AreaChart,
-		ScatterChart,
-		PieChart,
-		BarChart3,
+		ChartNoAxesColumn,
+		ChartLine,
+		ChartArea,
+		ChartScatter,
+		ChartPie,
+		ChartColumn,
 		LayoutGrid,
-		BoxSelect,
+		SquareDashed,
 		Plus,
 		X
 	} from 'lucide-svelte';
@@ -145,18 +145,18 @@
 	const chartTypeGrid: Array<{
 		value: PlotConfigData['chart_type'];
 		label: string;
-		icon: typeof BarChart2;
+		icon: typeof ChartNoAxesColumn;
 		rotate?: boolean;
 	}> = [
-		{ value: 'bar', label: 'Bar', icon: BarChart2 },
-		{ value: 'horizontal_bar', label: 'H. Bar', icon: BarChart2, rotate: true },
-		{ value: 'line', label: 'Line', icon: LineChart },
-		{ value: 'area', label: 'Area', icon: AreaChart },
-		{ value: 'scatter', label: 'Scatter', icon: ScatterChart },
-		{ value: 'pie', label: 'Pie', icon: PieChart },
-		{ value: 'histogram', label: 'Hist', icon: BarChart3 },
+		{ value: 'bar', label: 'Bar', icon: ChartNoAxesColumn },
+		{ value: 'horizontal_bar', label: 'H. Bar', icon: ChartNoAxesColumn, rotate: true },
+		{ value: 'line', label: 'Line', icon: ChartLine },
+		{ value: 'area', label: 'Area', icon: ChartArea },
+		{ value: 'scatter', label: 'Scatter', icon: ChartScatter },
+		{ value: 'pie', label: 'Pie', icon: ChartPie },
+		{ value: 'histogram', label: 'Hist', icon: ChartColumn },
 		{ value: 'heatgrid', label: 'Heat', icon: LayoutGrid },
-		{ value: 'boxplot', label: 'Box', icon: BoxSelect }
+		{ value: 'boxplot', label: 'Box', icon: SquareDashed }
 	];
 
 	const aggregations = [

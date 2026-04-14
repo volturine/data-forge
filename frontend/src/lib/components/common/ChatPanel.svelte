@@ -9,9 +9,9 @@
 		Trash2,
 		Settings2,
 		Search,
-		Loader2,
+		LoaderCircle,
 		Wrench,
-		AlertCircle,
+		CircleAlert,
 		Copy,
 		ClipboardCheck,
 		ArrowDown,
@@ -20,8 +20,8 @@
 		Minimize2,
 		Eye,
 		Play,
-		CheckCircle2,
-		XCircle,
+		CircleCheck,
+		CircleX,
 		History,
 		RefreshCw,
 		ShieldAlert,
@@ -770,7 +770,7 @@
 						</button>
 					</div>
 					{#if chatStore.loading}
-						<Loader2
+						<LoaderCircle
 							size={10}
 							class={css({ animation: 'spin 1s linear infinite', flexShrink: '0' })}
 						/>
@@ -877,7 +877,7 @@
 							type="button"
 						>
 							{#if chatStore.modelsLoading}
-								<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
+								<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Search size={12} />
 							{/if}
@@ -1580,7 +1580,7 @@
 									color: 'fg.error'
 								})}
 							>
-								<AlertCircle size={10} class={css({ flexShrink: '0', marginTop: '1px' })} />
+								<CircleAlert size={10} class={css({ flexShrink: '0', marginTop: '1px' })} />
 								<pre
 									class={css({
 										margin: '0',
@@ -1749,7 +1749,7 @@
 								type="button"
 							>
 								{#if tc.status === 'running'}
-									<Loader2
+									<LoaderCircle
 										size={11}
 										class={css({
 											animation: 'spin 1s linear infinite',
@@ -1760,9 +1760,9 @@
 								{:else if tc.status === 'confirming'}
 									<ShieldAlert size={11} class={css({ flexShrink: '0', color: 'fg.warning' })} />
 								{:else if tc.status === 'done'}
-									<CheckCircle2 size={11} class={css({ flexShrink: '0', color: 'fg.success' })} />
+									<CircleCheck size={11} class={css({ flexShrink: '0', color: 'fg.success' })} />
 								{:else}
-									<XCircle size={11} class={css({ flexShrink: '0', color: 'fg.error' })} />
+									<CircleX size={11} class={css({ flexShrink: '0', color: 'fg.error' })} />
 								{/if}
 								<Wrench size={9} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 								<span
@@ -2168,7 +2168,7 @@
 						flexShrink: '0'
 					})}
 				>
-					<AlertCircle size={11} class={css({ color: 'fg.error', flexShrink: '0' })} />
+					<CircleAlert size={11} class={css({ color: 'fg.error', flexShrink: '0' })} />
 					<span
 						class={css({
 							flex: '1',
@@ -2442,7 +2442,7 @@
 									color: 'fg.muted'
 								})}
 							>
-								<Loader2
+								<LoaderCircle
 									size={12}
 									class={css({ animation: 'spin 1s linear infinite', display: 'inline' })}
 								/> Loading\u2026
