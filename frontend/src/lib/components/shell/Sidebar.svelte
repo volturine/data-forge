@@ -19,7 +19,6 @@
 	} from 'lucide-svelte';
 	import { css, cx } from '$lib/styles/panda';
 	import { enginesStore } from '$lib/stores/engines.svelte';
-	import { untrack } from 'svelte';
 
 	interface Props {
 		collapsed: boolean;
@@ -59,12 +58,6 @@
 	}: Props = $props();
 
 	const currentPath = $derived(page.url.pathname);
-
-	// Subscription: $derived can't manage the engines stream lifecycle.
-	$effect(() => {
-		untrack(() => enginesStore.startStream());
-		return () => enginesStore.stopStream();
-	});
 
 	const navItems = [
 		{ href: '/', label: 'Analyses', icon: LayoutGrid, prefix: '/analysis' },

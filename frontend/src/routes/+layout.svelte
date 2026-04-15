@@ -120,6 +120,14 @@
 		return () => chatStore.destroy();
 	});
 
+	// Subscription: keep the engines stream owned by the app shell, not individual widgets.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		if (!ready) return;
+		untrack(() => enginesStore.startStream());
+		return () => enginesStore.stopStream();
+	});
+
 	// DOM: global capture-phase arbiter for overlay Escape / outside-click.
 	$effect(() => {
 		if (typeof window === 'undefined') return;
