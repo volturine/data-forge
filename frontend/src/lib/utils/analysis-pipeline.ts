@@ -8,16 +8,17 @@ import type { DataSource } from '$lib/types/datasource';
 import { applySteps } from '$lib/utils/pipeline';
 import { isRecord } from '$lib/utils/json';
 
-type PipelineSourceConfig = {
-	source_type: DataSource['source_type'];
-	analysis_id?: string;
-	analysis_tab_id?: string | null;
-} & Record<string, unknown>;
+type PipelineDatasource = {
+	id: string;
+	analysis_tab_id: string | null;
+	source_type?: DataSource['source_type'] | 'analysis';
+	config: AnalysisTabDatasourceConfig;
+};
 
 type PipelineTab = {
 	id: string;
 	name: string;
-	datasource: AnalysisTab['datasource'];
+	datasource: PipelineDatasource;
 	output: AnalysisTabOutput;
 	steps: PipelineStep[];
 };
@@ -25,7 +26,6 @@ type PipelineTab = {
 export type AnalysisPipelinePayload = {
 	analysis_id: string;
 	tabs: PipelineTab[];
-	sources: Record<string, PipelineSourceConfig>;
 };
 
 function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
@@ -83,6 +83,77 @@ function collectSourceIds(tabs: AnalysisTab[]): Set<string> {
 	return new Set(tabs.flatMap((tab) => [...collectTabSourceIds(tab)]));
 }
 
+function toPipelineDatasource(args: {
+	analysisId: string;
+	datasource: AnalysisTab['datasource'];
+	datasourceMap: Map<string, DataSource>;
+	outputById: Map<string, string>;
+}): PipelineDatasource | null {
+	const config = normalizeSnapshotConfig(args.datasource.config);
+	if (args.datasource.analysis_tab_id) {
+		return {
+			id: args.datasource.id,
+			analysis_tab_id: args.datasource.analysis_tab_id,
+			source_type: 'analysis',
+			config
+		};
+	}
+	const upstreamTabId = args.outputById.get(args.datasource.id);
+	if (upstreamTabId) {
+		return {
+			id: args.datasource.id,
+			analysis_tab_id: upstreamTabId,
+			source_type: 'analysis',
+			config
+		};
+	}
+	const ds = args.datasourceMap.get(args.datasource.id);
+	if (!ds) return null;
+	return {
+		id: args.datasource.id,
+		analysis_tab_id: null,
+		source_type: ds.source_type,
+		config: { ...toDatasourceConfig(ds.config), ...config }
+	};
+}
+
+function enrichStepConfig(args: {
+	config: Record<string, unknown>;
+	datasourceMap: Map<string, DataSource>;
+	outputById: Map<string, string>;
+}): Record<string, unknown> {
+	const next = { ...args.config };
+	const rightSource = next.right_source ?? next.rightDataSource;
+	if (typeof rightSource === 'string' && rightSource && !args.outputById.has(rightSource)) {
+		const ds = args.datasourceMap.get(rightSource);
+		if (!ds) return next;
+		next.right_source_datasource = {
+			id: rightSource,
+			analysis_tab_id: null,
+			source_type: ds.source_type,
+			config: toDatasourceConfig(ds.config)
+		} satisfies PipelineDatasource;
+	}
+	const sources = next.sources;
+	const ids = typeof sources === 'string' ? [sources] : Array.isArray(sources) ? sources : [];
+	const refs: PipelineDatasource[] = [];
+	for (const source of ids) {
+		if (typeof source !== 'string' || !source || args.outputById.has(source)) continue;
+		const ds = args.datasourceMap.get(source);
+		if (!ds) continue;
+		refs.push({
+			id: source,
+			analysis_tab_id: null,
+			source_type: ds.source_type,
+			config: toDatasourceConfig(ds.config)
+		});
+	}
+	if (refs.length > 0) {
+		next.source_datasources = refs;
+	}
+	return next;
+}
+
 export function buildAnalysisPipelinePayload(
 	analysisId: string,
 	tabs: AnalysisTab[],
@@ -93,9 +164,9 @@ export function buildAnalysisPipelinePayload(
 
 	const sourceIds = collectSourceIds(tabs);
 	const datasourceMap = new Map(datasources.map((ds) => [ds.id, ds]));
-	const sources: Record<string, PipelineSourceConfig> = {};
 	const missing: string[] = [];
 	const outputByTabId = new Map<string, string>();
+	const outputById = new Map<string, string>();
 	for (const tab of tabs) {
 		if (!tab.id) continue;
 		const outputId = tab.output.result_id;
@@ -104,20 +175,14 @@ export function buildAnalysisPipelinePayload(
 			continue;
 		}
 		outputByTabId.set(tab.id, outputId);
-		sources[outputId] = {
-			source_type: 'analysis',
-			analysis_id: analysisId,
-			analysis_tab_id: tab.id
-		};
+		outputById.set(outputId, tab.id);
 	}
 	for (const id of sourceIds) {
-		if (sources[id]) continue;
+		if (outputById.has(id)) continue;
 		const ds = datasourceMap.get(id);
 		if (!ds) {
 			missing.push(id);
-			continue;
 		}
-		sources[id] = { source_type: ds.source_type, ...ds.config };
 	}
 	if (missing.length) {
 		return null;
@@ -125,26 +190,32 @@ export function buildAnalysisPipelinePayload(
 
 	const pipelineTabs = tabs.map((tab) => {
 		const outputId = outputByTabId.get(tab.id);
-		const config = normalizeSnapshotConfig(tab.datasource.config);
-		const datasourceId = tab.datasource.id;
-		const analysisTabId = tab.datasource.analysis_tab_id;
-		if (!datasourceId || !outputId) return null;
+		const datasource = toPipelineDatasource({
+			analysisId,
+			datasource: tab.datasource,
+			datasourceMap,
+			outputById
+		});
+		if (!datasource || !outputId) return null;
 		return {
 			id: tab.id,
 			name: tab.name,
-			datasource: {
-				id: datasourceId,
-				analysis_tab_id: analysisTabId ?? null,
-				config
-			},
+			datasource,
 			output: { ...tab.output, result_id: outputId },
-			steps: applySteps(tab.steps ?? [])
+			steps: applySteps(tab.steps ?? []).map((step) => {
+				const config = step.config;
+				if (!isRecord(config)) return step;
+				return {
+					...step,
+					config: enrichStepConfig({ config, datasourceMap, outputById })
+				};
+			})
 		};
 	});
 
 	const tabsPayload = pipelineTabs.filter((tab): tab is PipelineTab => tab !== null);
 	if (tabsPayload.length !== pipelineTabs.length) return null;
-	return { analysis_id: analysisId, tabs: tabsPayload, sources };
+	return { analysis_id: analysisId, tabs: tabsPayload };
 }
 
 export function buildDatasourceConfig(args: {
@@ -182,6 +253,7 @@ export function buildDatasourcePipelinePayload(args: {
 			datasource: {
 				id: datasource.id,
 				analysis_tab_id: null,
+				source_type: datasource.source_type,
 				config: normalizedConfig
 			},
 			output: {
@@ -196,9 +268,6 @@ export function buildDatasourcePipelinePayload(args: {
 	];
 	return {
 		analysis_id: datasource.id,
-		tabs,
-		sources: {
-			[datasource.id]: { source_type: datasource.source_type, ...datasource.config }
-		}
+		tabs
 	};
 }

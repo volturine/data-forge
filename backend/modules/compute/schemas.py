@@ -70,6 +70,7 @@ class AnalysisPipelineDatasource(BaseModel):
 
     id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     analysis_tab_id: str | None
+    source_type: str | None = None
     config: AnalysisPipelineDatasourceConfig
 
 
@@ -104,7 +105,6 @@ class AnalysisPipelinePayload(BaseModel):
 
     analysis_id: str
     tabs: list[AnalysisPipelineTab]
-    sources: dict[str, dict]
 
     @field_validator('tabs')
     @classmethod

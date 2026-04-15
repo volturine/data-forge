@@ -100,8 +100,7 @@ const DETAIL_BASE: ActiveBuildDetail = {
 const MINIMAL_BUILD_REQUEST = {
 	analysis_pipeline: {
 		analysis_id: 'analysis-1',
-		tabs: [],
-		sources: {}
+		tabs: []
 	}
 } satisfies BuildRequest;
 
@@ -168,8 +167,7 @@ describe('BuildStreamStore', () => {
 		expect(mockStartActiveBuild).toHaveBeenCalledWith({
 			analysis_pipeline: {
 				analysis_id: 'analysis-1',
-				tabs: [],
-				sources: {}
+				tabs: []
 			},
 			tab_id: null
 		});

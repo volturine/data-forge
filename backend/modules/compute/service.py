@@ -1090,10 +1090,9 @@ def _get_additional_datasources(
     """Extract and fetch additional datasources referenced in pipeline steps (e.g., for joins)."""
     steps = apply_steps(steps)
     additional: dict[str, dict] = {}
-    sources = analysis_pipeline.get('sources')
-    pipeline_sources = {str(k): v for k, v in sources.items() if isinstance(v, dict)} if isinstance(sources, dict) else None
     pipeline_id = analysis_pipeline.get('analysis_id')
     analysis_id = str(pipeline_id) if pipeline_id is not None else None
+    output_to_tab = _pipeline_output_to_tab_id(analysis_pipeline)
 
     for step in steps:
         config = step.get('config', {})
@@ -1108,14 +1107,16 @@ def _get_additional_datasources(
         for source_id in source_ids:
             if source_id in additional:
                 continue
-            if pipeline_sources and source_id in pipeline_sources:
-                config_override = pipeline_sources[source_id]
-            else:
-                datasource = session.get(DataSource, source_id)
-                if not datasource:
-                    continue
-                config_override = {'source_type': datasource.source_type, **datasource.config}
-            if analysis_id and config_override.get('source_type') == 'analysis' and str(config_override.get('analysis_id')) == analysis_id:
+            config_override = _resolve_step_source_config(
+                session=session,
+                source_id=source_id,
+                step_config=config if isinstance(config, dict) else {},
+                analysis_pipeline=analysis_pipeline,
+                output_to_tab=output_to_tab,
+            )
+            if config_override is None:
+                continue
+            if analysis_id and config_override.get('source_type') == 'analysis':
                 config_override = {**config_override, 'analysis_pipeline': analysis_pipeline}
             additional[source_id] = config_override
 
@@ -1151,8 +1152,123 @@ def _hydrate_udfs(session: Session, steps: list[dict]) -> list[dict]:
     return next_steps
 
 
+def _pipeline_output_to_tab_id(pipeline: dict) -> dict[str, str]:
+    tabs = pipeline.get('tabs', [])
+    if not isinstance(tabs, list):
+        return {}
+    output_to_tab: dict[str, str] = {}
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        tab_id = tab.get('id')
+        output = tab.get('output')
+        output_id = output.get('result_id') if isinstance(output, dict) else None
+        if isinstance(tab_id, str) and isinstance(output_id, str) and output_id:
+            output_to_tab[output_id] = tab_id
+    return output_to_tab
+
+
+def _step_source_payload(step_config: dict, source_id: str) -> dict | None:
+    direct = step_config.get('right_source_datasource')
+    if isinstance(direct, dict) and direct.get('id') == source_id:
+        return direct
+    raw_many = step_config.get('source_datasources')
+    if not isinstance(raw_many, list):
+        return None
+    return next(
+        (item for item in raw_many if isinstance(item, dict) and isinstance(item.get('id'), str) and item.get('id') == source_id),
+        None,
+    )
+
+
+def _pipeline_datasource_payload(pipeline: dict, datasource_id: str) -> dict | None:
+    tabs = pipeline.get('tabs', [])
+    if not isinstance(tabs, list):
+        return None
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict):
+            continue
+        if datasource.get('id') != datasource_id:
+            continue
+        return datasource
+    return None
+
+
+def _resolve_pipeline_datasource_config(
+    session: Session | None,
+    pipeline: dict,
+    datasource: dict,
+) -> dict:
+    datasource_id = datasource.get('id')
+    if not isinstance(datasource_id, str) or not datasource_id:
+        raise ValueError('analysis_pipeline tab missing datasource.id')
+    overrides = datasource.get('config')
+    if not isinstance(overrides, dict):
+        raise ValueError('analysis_pipeline tab datasource.config must be a dict')
+    branch = overrides.get('branch')
+    if not isinstance(branch, str) or not branch.strip():
+        raise ValueError('analysis_pipeline tab datasource.config.branch is required')
+    analysis_tab_id = datasource.get('analysis_tab_id')
+    output_to_tab = _pipeline_output_to_tab_id(pipeline)
+    if isinstance(analysis_tab_id, str) and analysis_tab_id:
+        return {
+            'source_type': 'analysis',
+            'analysis_id': str(pipeline.get('analysis_id') or ''),
+            'analysis_tab_id': analysis_tab_id,
+            **overrides,
+        }
+    if datasource_id in output_to_tab:
+        return {
+            'source_type': 'analysis',
+            'analysis_id': str(pipeline.get('analysis_id') or ''),
+            'analysis_tab_id': output_to_tab[datasource_id],
+            **overrides,
+        }
+    source_type = datasource.get('source_type')
+    if isinstance(source_type, str) and source_type.strip():
+        return {'source_type': source_type, **overrides}
+    if session is None:
+        raise ValueError(f'Analysis pipeline missing datasource metadata for {datasource_id}')
+    datasource_model = session.get(DataSource, datasource_id)
+    if datasource_model is None:
+        raise ValueError(f'analysis_pipeline missing datasource config for {datasource_id}')
+    return {'source_type': datasource_model.source_type, **datasource_model.config, **overrides}
+
+
+def _resolve_step_source_config(
+    *,
+    session: Session | None,
+    source_id: str,
+    step_config: dict,
+    analysis_pipeline: dict,
+    output_to_tab: dict[str, str],
+) -> dict | None:
+    if source_id in output_to_tab:
+        return {
+            'source_type': 'analysis',
+            'analysis_id': str(analysis_pipeline.get('analysis_id') or ''),
+            'analysis_tab_id': output_to_tab[source_id],
+        }
+    embedded = _step_source_payload(step_config, source_id)
+    if isinstance(embedded, dict):
+        return _resolve_pipeline_datasource_config(session, analysis_pipeline, embedded)
+    payload = _pipeline_datasource_payload(analysis_pipeline, source_id)
+    if isinstance(payload, dict):
+        return _resolve_pipeline_datasource_config(session, analysis_pipeline, payload)
+    if session is None:
+        raise ValueError(f'Analysis pipeline missing datasource config for {source_id}')
+    datasource = session.get(DataSource, source_id)
+    if datasource is None:
+        return None
+    return {'source_type': datasource.source_type, **datasource.config}
+
+
 def _resolve_pipeline_request(
     pipeline: dict,
+    session: Session,
     tab_id: str | None,
     target_step_id: str,
 ) -> dict:
@@ -1188,22 +1304,7 @@ def _resolve_pipeline_request(
     if not isinstance(steps, list):
         raise ValueError('analysis_pipeline tab steps must be a list')
 
-    sources = pipeline.get('sources', {})
-    if not isinstance(sources, dict) or not sources:
-        raise ValueError('analysis_pipeline missing datasource configs')
-
-    datasource_config = sources.get(str(datasource_id))
-    if not isinstance(datasource_config, dict):
-        raise ValueError(f'analysis_pipeline missing datasource config for {datasource_id}')
-
-    overrides = datasource.get('config') or {}
-    if not isinstance(overrides, dict):
-        raise ValueError('analysis_pipeline tab datasource.config must be a dict')
-    branch = overrides.get('branch')
-    if not isinstance(branch, str) or not branch.strip():
-        raise ValueError('analysis_pipeline tab datasource.config.branch is required')
-
-    merged = {**datasource_config, **overrides}
+    merged = _resolve_pipeline_datasource_config(session, pipeline, datasource)
     analysis_id = pipeline.get('analysis_id')
     analysis_id = str(analysis_id) if analysis_id is not None else None
     if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
@@ -1224,9 +1325,8 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
     pipeline = analysis.pipeline_definition
     tabs = pipeline.get('tabs', []) if isinstance(pipeline, dict) else []
     if not isinstance(tabs, list) or not tabs:
-        return {'analysis_id': str(analysis.id), 'tabs': [], 'sources': {}}
+        return {'analysis_id': str(analysis.id), 'tabs': []}
 
-    sources: dict[str, dict] = {}
     output_map: dict[str, str] = {}
     for tab in tabs:
         tab_id = tab.get('id')
@@ -1239,11 +1339,44 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
         output_id = str(output_id)
         if output_id and tab_id:
             output_map[str(tab_id)] = str(output_id)
-            sources[str(output_id)] = {
-                'source_type': 'analysis',
-                'analysis_id': str(analysis.id),
-                'analysis_tab_id': str(tab_id),
-            }
+
+    output_to_tab = {output_id: tab_id for tab_id, output_id in output_map.items()}
+
+    def enrich_step(step: dict) -> dict:
+        config = step.get('config')
+        if not isinstance(config, dict):
+            return step
+        next_config = dict(config)
+        right_source = next_config.get('right_source') or next_config.get('rightDataSource')
+        if isinstance(right_source, str) and right_source and right_source not in output_to_tab:
+            datasource_model = session.get(DataSource, right_source)
+            if datasource_model is not None:
+                next_config['right_source_datasource'] = {
+                    'id': right_source,
+                    'analysis_tab_id': None,
+                    'source_type': datasource_model.source_type,
+                    'config': {'branch': 'master', **datasource_model.config},
+                }
+        raw_sources = next_config.get('sources')
+        source_ids = [raw_sources] if isinstance(raw_sources, str) else raw_sources if isinstance(raw_sources, list) else []
+        refs: list[dict] = []
+        for source in source_ids:
+            if not isinstance(source, str) or not source or source in output_to_tab:
+                continue
+            datasource_model = session.get(DataSource, source)
+            if datasource_model is None:
+                continue
+            refs.append(
+                {
+                    'id': source,
+                    'analysis_tab_id': None,
+                    'source_type': datasource_model.source_type,
+                    'config': {'branch': 'master', **datasource_model.config},
+                }
+            )
+        if refs:
+            next_config['source_datasources'] = refs
+        return {**step, 'config': next_config}
 
     next_tabs: list[dict] = []
     for tab in tabs:
@@ -1266,22 +1399,46 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
 
         if not tab_datasource_id:
             raise ValueError('Analysis pipeline tab missing datasource.id')
-        if datasource_id and str(datasource_id) != output_id and str(datasource_id) != str(tab_datasource_id):
-            next_tabs.append({**tab, 'datasource': {**datasource, 'id': tab_datasource_id, 'config': config}})
-            continue
-        if str(tab_datasource_id) not in sources:
+        analysis_tab_id = datasource.get('analysis_tab_id') if isinstance(datasource.get('analysis_tab_id'), str) else None
+        source_type = 'analysis' if analysis_tab_id or str(tab_datasource_id) in output_to_tab else None
+        merged_config = dict(config)
+        if source_type is None:
             datasource_model = session.get(DataSource, str(tab_datasource_id))
             if datasource_model:
-                sources[str(tab_datasource_id)] = {
-                    'source_type': datasource_model.source_type,
-                    **datasource_model.config,
+                source_type = datasource_model.source_type
+                merged_config = {'branch': branch, **datasource_model.config, **config}
+        if datasource_id and str(datasource_id) != output_id and str(datasource_id) != str(tab_datasource_id):
+            next_tabs.append(
+                {
+                    **tab,
+                    'datasource': {
+                        **datasource,
+                        'id': tab_datasource_id,
+                        'analysis_tab_id': analysis_tab_id,
+                        'source_type': source_type,
+                        'config': merged_config,
+                    },
+                    'steps': [enrich_step(step) for step in tab.get('steps', []) if isinstance(step, dict)],
                 }
-        next_tabs.append({**tab, 'datasource': {**datasource, 'id': tab_datasource_id, 'config': config}})
+            )
+            continue
+        next_tabs.append(
+            {
+                **tab,
+                'datasource': {
+                    **datasource,
+                    'id': tab_datasource_id,
+                    'analysis_tab_id': analysis_tab_id,
+                    'source_type': source_type,
+                    'config': merged_config,
+                },
+                'steps': [enrich_step(step) for step in tab.get('steps', []) if isinstance(step, dict)],
+            }
+        )
 
     return {
         'analysis_id': str(analysis.id),
         'tabs': next_tabs,
-        'sources': sources,
     }
 
 
@@ -1307,7 +1464,7 @@ def preview_step(
 
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -1510,7 +1667,7 @@ def get_step_schema(
     if timeout is None:
         timeout = settings.job_timeout
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -1586,7 +1743,7 @@ def get_step_row_count(
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -1772,7 +1929,7 @@ def export_data(
     started_at = datetime.now(UTC)
     started_perf = time.perf_counter()
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
@@ -2217,7 +2374,7 @@ def download_step(
     if timeout is None:
         timeout = settings.job_timeout
 
-    resolved = _resolve_pipeline_request(analysis_pipeline, tab_id, target_step_id)
+    resolved = _resolve_pipeline_request(analysis_pipeline, session, tab_id, target_step_id)
     datasource_id = resolved['datasource_id']
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']

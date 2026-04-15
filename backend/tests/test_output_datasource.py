@@ -484,12 +484,6 @@ class TestRunAnalysisBuildOutputDatasource:
                             'steps': [],
                         },
                     ],
-                    'sources': {
-                        sample_datasource.id: {
-                            'source_type': sample_datasource.source_type,
-                            **sample_datasource.config,
-                        },
-                    },
                 },
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},

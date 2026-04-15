@@ -128,12 +128,6 @@ class TestBuildModeWiring:
                     'steps': [],
                 },
             ],
-            'sources': {
-                datasource.id: {
-                    'source_type': datasource.source_type,
-                    **datasource.config,
-                },
-            },
         }
 
     def _make_engine_mock(self) -> MagicMock:

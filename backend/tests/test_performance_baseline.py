@@ -33,12 +33,6 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
                 'steps': [],
             },
         ],
-        'sources': {
-            sample_datasource.id: {
-                'source_type': sample_datasource.source_type,
-                **sample_datasource.config,
-            },
-        },
     }
 
     manager = ProcessManager()

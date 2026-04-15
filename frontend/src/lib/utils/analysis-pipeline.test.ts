@@ -64,21 +64,18 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.tabs[0].steps).toEqual([]);
 	});
 
-	test('creates analysis source entry for each tab output', () => {
+	test('marks derived outputs through tab datasource metadata', () => {
 		const result = buildAnalysisPipelinePayload('a-1', [tab()], [datasource()]);
-		expect(result!.sources['out-1']).toEqual({
-			source_type: 'analysis',
-			analysis_id: 'a-1',
-			analysis_tab_id: 'tab-1'
-		});
+		expect(result!.tabs[0].output.result_id).toBe('out-1');
 	});
 
-	test('includes datasource source entry', () => {
+	test('embeds persisted datasource metadata on tab datasource', () => {
 		const result = buildAnalysisPipelinePayload('a-1', [tab()], [datasource()]);
-		expect(result!.sources['ds-1']).toEqual({
+		expect(result!.tabs[0].datasource).toEqual({
+			id: 'ds-1',
+			analysis_tab_id: null,
 			source_type: 'file',
-			file_path: '/data/test.csv',
-			file_type: 'csv'
+			config: { branch: 'main', file_path: '/data/test.csv', file_type: 'csv' }
 		});
 	});
 
@@ -108,10 +105,8 @@ describe('buildAnalysisPipelinePayload', () => {
 		const result = buildAnalysisPipelinePayload('a-1', tabs, ds);
 		expect(result).not.toBeNull();
 		expect(result!.tabs).toHaveLength(2);
-		expect(Object.keys(result!.sources)).toContain('out-1');
-		expect(Object.keys(result!.sources)).toContain('out-2');
-		expect(Object.keys(result!.sources)).toContain('ds-1');
-		expect(Object.keys(result!.sources)).toContain('ds-2');
+		expect(result!.tabs[0].datasource.id).toBe('ds-1');
+		expect(result!.tabs[1].datasource.id).toBe('ds-2');
 	});
 
 	test('collects right_source from join step config', () => {
@@ -127,7 +122,7 @@ describe('buildAnalysisPipelinePayload', () => {
 		const ds = [datasource(), datasource({ id: 'ds-join', name: 'Join DS' })];
 		const result = buildAnalysisPipelinePayload('a-1', [t], ds);
 		expect(result).not.toBeNull();
-		expect(Object.keys(result!.sources)).toContain('ds-join');
+		expect(result!.tabs[0].steps[0].config).toHaveProperty('right_source_datasource');
 	});
 
 	test('collects sources array from union step config', () => {
@@ -147,8 +142,7 @@ describe('buildAnalysisPipelinePayload', () => {
 		];
 		const result = buildAnalysisPipelinePayload('a-1', [t], ds);
 		expect(result).not.toBeNull();
-		expect(Object.keys(result!.sources)).toContain('ds-u1');
-		expect(Object.keys(result!.sources)).toContain('ds-u2');
+		expect(result!.tabs[0].steps[0].config).toHaveProperty('source_datasources');
 	});
 
 	test('returns null when a referenced source from step is missing', () => {
@@ -197,14 +191,14 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.tabs[0].output.iceberg).toEqual({ namespace: 'ns', table_name: 'tbl' });
 	});
 
-	test('does not duplicate source entries for output IDs that match datasource IDs', () => {
+	test('prefers analysis source_type when datasource id matches output id', () => {
 		const t = tab({
 			datasource: { id: 'out-1', analysis_tab_id: null, config: { branch: 'main' } },
 			output: { result_id: 'out-1', format: 'csv', filename: 'out' }
 		});
 		const result = buildAnalysisPipelinePayload('a-1', [t], [datasource({ id: 'out-1' })]);
 		expect(result).not.toBeNull();
-		expect(result!.sources['out-1'].source_type).toBe('analysis');
+		expect(result!.tabs[0].datasource.source_type).toBe('analysis');
 	});
 
 	test('derived tab uses upstream tab output as datasource source', () => {
@@ -223,8 +217,7 @@ describe('buildAnalysisPipelinePayload', () => {
 		expect(result!.tabs).toHaveLength(2);
 		expect(result!.tabs[1].datasource.analysis_tab_id).toBe('tab-1');
 		expect(result!.tabs[1].datasource.id).toBe('out-1');
-		expect(result!.sources['out-1'].source_type).toBe('analysis');
-		expect(result!.sources['out-1'].analysis_tab_id).toBe('tab-1');
+		expect(result!.tabs[1].datasource.source_type).toBe('analysis');
 	});
 
 	test('derived tab does not require matching datasource in datasource list', () => {
@@ -240,8 +233,8 @@ describe('buildAnalysisPipelinePayload', () => {
 		});
 		const result = buildAnalysisPipelinePayload('a-1', [upstream, derived], [datasource()]);
 		expect(result).not.toBeNull();
-		expect(Object.keys(result!.sources)).toContain('out-1');
-		expect(Object.keys(result!.sources)).toContain('out-2');
+		expect(result!.tabs[0].output.result_id).toBe('out-1');
+		expect(result!.tabs[1].output.result_id).toBe('out-2');
 	});
 
 	test('three-tab chain: upstream → derived → second derived', () => {
@@ -264,9 +257,8 @@ describe('buildAnalysisPipelinePayload', () => {
 		const result = buildAnalysisPipelinePayload('a-1', [t1, t2, t3], [datasource()]);
 		expect(result).not.toBeNull();
 		expect(result!.tabs).toHaveLength(3);
-		expect(result!.sources['out-1'].analysis_tab_id).toBe('tab-1');
-		expect(result!.sources['out-2'].analysis_tab_id).toBe('tab-2');
-		expect(result!.sources['out-3'].analysis_tab_id).toBe('tab-3');
+		expect(result!.tabs[1].datasource.analysis_tab_id).toBe('tab-1');
+		expect(result!.tabs[2].datasource.analysis_tab_id).toBe('tab-2');
 	});
 
 	test('normalizes time-travel fields in tab datasource config', () => {
@@ -429,14 +421,12 @@ describe('buildDatasourcePipelinePayload', () => {
 		expect(result.tabs[0].output.filename).toBe('export');
 	});
 
-	test('sources contains datasource config', () => {
+	test('datasource payload keeps source_type without duplicating datasource config', () => {
 		const ds = datasource();
 		const result = buildDatasourcePipelinePayload({ datasource: ds });
-		expect(result.sources['ds-1']).toEqual({
-			source_type: 'file',
-			file_path: '/data/test.csv',
-			file_type: 'csv'
-		});
+		expect(result.tabs[0].datasource.source_type).toBe('file');
+		expect(result.tabs[0].datasource.config.branch).toBe('master');
+		expect(result.tabs[0].datasource.config.file_path).toBeUndefined();
 	});
 
 	test('output has correct format and build_mode', () => {

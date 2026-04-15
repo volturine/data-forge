@@ -711,17 +711,6 @@ class TestComputePreview:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -846,16 +835,6 @@ class TestComputePreview:
                         'steps': [],
                     },
                 ],
-                'sources': {
-                    missing_id: {
-                        'source_type': 'file',
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -886,17 +865,6 @@ class TestComputePreview:
                         'steps': [{'id': 'step1', 'type': 'view', 'config': {}}],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -951,7 +919,6 @@ class TestComputePreview:
 
     def test_preview_step_missing_metadata_preflight_skips_engine(self, client):
         missing_id = str(uuid.uuid4())
-        missing_metadata_path = str(namespace_paths().clean_dir / str(uuid.uuid4()))
         payload = {
             'analysis_id': 'analysis-id',
             'analysis_pipeline': {
@@ -973,18 +940,6 @@ class TestComputePreview:
                         'steps': [{'id': 'step1', 'type': 'view', 'config': {}}],
                     },
                 ],
-                'sources': {
-                    missing_id: {
-                        'source_type': 'iceberg',
-                        'metadata_path': missing_metadata_path,
-                        'branch': 'master',
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -997,7 +952,7 @@ class TestComputePreview:
 
         response = client.post('/api/v1/compute/preview', json=payload)
 
-        assert response.status_code == 409
+        assert response.status_code == 400
         mock_engine.preview.assert_not_called()
 
     def test_preview_step_specific_target(self, client, sample_datasource: DataSource):
@@ -1026,17 +981,6 @@ class TestComputePreview:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step2',
         }
@@ -1090,17 +1034,6 @@ class TestComputePreview:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
             'row_limit': 10,
@@ -1416,12 +1349,6 @@ def test_build_stream_websocket_emits_snapshot_and_terminal_event(client, sample
                     ],
                 }
             ],
-            'sources': {
-                sample_datasource.id: {
-                    'source_type': sample_datasource.source_type,
-                    **sample_datasource.config,
-                }
-            },
         },
         'tab_id': 'tab1',
     }
@@ -1575,12 +1502,6 @@ def test_start_active_build_notifies_active_build_list_watchers(client, sample_d
                     'steps': [],
                 }
             ],
-            'sources': {
-                sample_datasource.id: {
-                    'source_type': sample_datasource.source_type,
-                    **sample_datasource.config,
-                }
-            },
         },
         'tab_id': 'tab1',
     }
@@ -2155,17 +2076,6 @@ class TestComputeExport:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
             'format': 'csv',
@@ -2240,17 +2150,6 @@ class TestComputeRowCount:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -2585,9 +2484,9 @@ class TestEngineLifecycle:
 
 
 class TestBuildAnalysisPipelinePayloadDerived:
-    """Verify derived tabs preserve analysis_id in sources (not overwritten by DB placeholder)."""
+    """Verify derived tabs are encoded inline in pipeline tab datasource metadata."""
 
-    def test_derived_tab_sources_contain_analysis_id(self, test_db_session, sample_datasource: DataSource):
+    def test_derived_tab_datasource_contains_analysis_metadata(self, test_db_session, sample_datasource: DataSource):
         from datetime import UTC, datetime
 
         from modules.analysis.models import Analysis, AnalysisStatus
@@ -2640,12 +2539,10 @@ class TestBuildAnalysisPipelinePayloadDerived:
 
         payload = build_analysis_pipeline_payload(test_db_session, analysis)
 
-        # The source for tab1_result_id must have analysis_id (set by first loop),
-        # not be overwritten by the DB placeholder (which only has analysis_tab_id).
-        source = payload['sources'][tab1_result_id]
-        assert source['source_type'] == 'analysis'
-        assert source['analysis_id'] == analysis_id
-        assert source['analysis_tab_id'] == 'tab1'
+        tab2 = payload['tabs'][1]
+        assert tab2['datasource']['id'] == tab1_result_id
+        assert tab2['datasource']['source_type'] == 'analysis'
+        assert tab2['datasource']['analysis_tab_id'] == 'tab1'
 
 
 class TestDownloadStepFiltering:
