@@ -120,6 +120,10 @@ def test_export_code_polars_includes_join_groupby_sort(client, sample_datasource
     assert payload['filename'].endswith('_pipeline.py')
     assert payload['warnings'] == []
     assert 'import polars as pl' in payload['code']
+    assert 'tab_1_right_source_source.show(limit=5)' in payload['code']
+    assert 'tab_2_left_source_source.show(limit=5)' in payload['code']
+    assert 'tab_1_right_source_step_1 =' not in payload['code']
+    assert 'tab_2_left_source_step_1 =' not in payload['code']
     assert '.join(' in payload['code']
     assert '.group_by(' in payload['code']
     assert '.sort(' in payload['code']

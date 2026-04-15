@@ -419,6 +419,7 @@ def generate_polars_code(
         current_var = source_var
         for step_index, step in enumerate(tab.steps, start=1):
             next_var = f'{tab_slug}_step_{step_index}'
+            advance_var = True
             lines.append(f'# Step {step_index}: {step.type}')
             config = step.config if isinstance(step.config, dict) else {}
 
@@ -621,8 +622,10 @@ def generate_polars_code(
             elif step.type == 'limit':
                 n = config.get('n', 100)
                 lines.append(f'{next_var} = {current_var}.limit({int(n) if isinstance(n, int) else 100})')
+            elif step.type == 'view':
+                lines.append(f'{current_var}.show(limit=5)')
+                advance_var = False
             elif step.type in {
-                'view',
                 'download',
                 'export',
                 'chart',
@@ -644,7 +647,8 @@ def generate_polars_code(
                     f'Step "{step.type}" in tab "{tab.name}" is not fully exportable to pure Polars. Original config: {_safe_json(config)}',
                 )
 
-            current_var = next_var
+            if advance_var:
+                current_var = next_var
 
         tab_last_var[tab.id] = current_var
         lines.append(f'{tab_slug}_result = {current_var}')
