@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { screenshot } from './utils/visual.js';
 import { waitForAppShell, waitForProfileTabs, waitForProfileTab } from './utils/readiness.js';
 
@@ -342,7 +342,7 @@ test.describe('Profile – System tab', () => {
 		await page.goto('/profile#system');
 		await waitForProfileTab(page, 'System');
 
-		await expect(page.getByText('Debug')).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Debug' })).toBeVisible();
 		await expect(page.getByText('IndexedDB Inspector')).toBeVisible();
 		await expect(page.getByRole('switch', { name: 'Toggle IndexedDB inspector' })).toBeVisible();
 

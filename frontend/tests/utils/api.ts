@@ -480,34 +480,51 @@ export async function createLongRunningAnalysis(
 	let parentId = viewId;
 
 	for (let i = 0; i < stepPairs; i++) {
-		const filterId = crypto.randomUUID();
+		const joinId = crypto.randomUUID();
 		steps.push({
-			id: filterId,
-			type: 'filter',
+			id: joinId,
+			type: 'join',
 			config: {
-				conditions: [
+				how: 'inner',
+				right_source: datasourceId,
+				join_columns: [
 					{
-						column: 'age',
-						operator: '>',
-						value: 10 + (i % 20),
-						value_type: 'number',
-						dtype: 'Int64'
+						id: crypto.randomUUID(),
+						left_column: 'city',
+						right_column: 'city'
 					}
 				],
-				logic: 'AND'
+				right_columns: ['age', 'id'],
+				suffix: `_right_${i}`
 			},
 			depends_on: [parentId],
 			is_applied: true
 		});
-		parentId = filterId;
+		parentId = joinId;
+
+		const groupId = crypto.randomUUID();
+		steps.push({
+			id: groupId,
+			type: 'groupby',
+			config: {
+				group_by: ['city'],
+				aggregations: [
+					{ column: 'age', function: 'count', alias: `row_count_${i}` },
+					{ column: 'age', function: 'mean', alias: `avg_age_${i}` }
+				]
+			},
+			depends_on: [parentId],
+			is_applied: true
+		});
+		parentId = groupId;
 
 		const sortId = crypto.randomUUID();
 		steps.push({
 			id: sortId,
 			type: 'sort',
 			config: {
-				columns: ['name'],
-				descending: [i % 2 === 0]
+				columns: [`row_count_${i}`],
+				descending: [true]
 			},
 			depends_on: [parentId],
 			is_applied: true

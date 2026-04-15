@@ -1,4 +1,5 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect } from './fixtures.js';
+import type { APIRequestContext } from '@playwright/test';
 import { API_BASE, createDatasource } from './utils/api.js';
 import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';

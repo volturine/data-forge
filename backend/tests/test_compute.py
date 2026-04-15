@@ -255,6 +255,21 @@ def test_engine_progress_queue_returns_matching_event() -> None:
     assert event.event['type'] == 'progress'
 
 
+def test_engine_shutdown_closes_queues_even_when_not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = PolarsComputeEngine('analysis')
+    engine.is_running = False
+    closed = {'value': False}
+
+    def fake_close() -> None:
+        closed['value'] = True
+
+    monkeypatch.setattr(engine, '_close_queues', fake_close)
+
+    engine.shutdown()
+
+    assert closed['value'] is True
+
+
 def test_build_canonical_engine_run_result_persists_unified_detail_shape() -> None:
     result = compute_service._build_canonical_engine_run_result(
         existing_result={

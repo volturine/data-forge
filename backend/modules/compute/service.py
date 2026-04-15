@@ -1871,6 +1871,7 @@ def export_data(
                 {
                     'job_id': job_id,
                     'engine': engine,
+                    'engine_run_id': run_response.id,
                     'steps': export_steps,
                     'tab_id': tab_id,
                 }
@@ -2925,8 +2926,31 @@ async def run_analysis_build_stream(
                 nonlocal progress_task, resource_task
                 job_id = info.get('job_id')
                 engine = info.get('engine')
+                run_id = info.get('engine_run_id')
                 if not isinstance(job_id, str) or engine is None:
                     return
+
+                async def emit_run_started() -> None:
+                    payload: dict[str, object] = {
+                        'type': 'progress',
+                        'progress': build.progress,
+                        'elapsed_ms': build.elapsed_ms,
+                        'estimated_remaining_ms': build.estimated_remaining_ms,
+                        'current_step': build.current_step,
+                        'current_step_index': build.current_step_index,
+                        'total_steps': total_steps,
+                        'tab_id': current_tab_id,
+                        'tab_name': current_tab_name,
+                        'current_output_id': current_output_id_value,
+                        'current_output_name': current_output_name_value,
+                    }
+                    if isinstance(run_id, str):
+                        payload['engine_run_id'] = run_id
+                    await _emit_build_event(emitter, payload)
+
+                future = asyncio.run_coroutine_threadsafe(emit_run_started(), loop)
+                future.result()
+
                 next_progress_task, next_resource_task = _start_stream_tasks(
                     loop,
                     engine=engine,

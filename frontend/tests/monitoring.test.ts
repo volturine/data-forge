@@ -613,7 +613,7 @@ test.describe('Monitoring – live build history', () => {
 			await expect(page.locator('[data-testid="build-preview"]')).toBeVisible({ timeout: 10_000 });
 
 			const monitorBuildRow = monitorPanel.locator(
-				`[data-build-analysis-name="${aName}"][data-build-kind="preview"]`
+				`[data-build-source="active"][data-build-analysis-name="${aName}"][data-build-kind="preview"]`
 			);
 			await expect(monitorBuildRow).toBeVisible({ timeout: 10_000 });
 			await monitorBuildRow.click();

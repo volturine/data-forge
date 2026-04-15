@@ -30,6 +30,7 @@
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
+	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, cx, spinner, button, emptyText, input } from '$lib/styles/panda';
 	import {
@@ -48,17 +49,11 @@
 		embedded?: boolean;
 	}
 
-	type ActiveBuildRow = {
-		build_id: string;
-		analysis_id: string;
-		analysis_name: string;
-		started_at: string;
-		elapsed_ms: number;
-		current_kind: string | null;
-		current_datasource_id: string | null;
-		current_output_name: string | null;
-		current_step: string | null;
+	type CancelTarget = {
+		id: string;
 	};
+
+	type ActiveBuildRow = ActiveBuildSummary;
 
 	let { compact = false, searchQuery, showPreviews = false, embedded = false }: Props = $props();
 
@@ -66,7 +61,7 @@
 	const effectiveSearch = $derived(searchQuery ?? search);
 	let kindFilter = $state<string>('');
 	let statusFilter = $state<'all' | 'running' | 'completed' | 'failed' | 'cancelled'>('all');
-	let cancelTarget = $state<EngineRun | null>(null);
+	let cancelTarget = $state<CancelTarget | null>(null);
 	let cancelPending = $state(false);
 	let cancelError = $state<string | null>(null);
 	let dateFrom = $state('');
@@ -107,12 +102,13 @@
 	const activeBuildSignature = $derived(
 		activeBuildsStore.builds.map((build) => build.build_id).join('|')
 	);
-	const activeRunKeys = $derived.by(() => {
-		const keys = new SvelteSet<string>();
+	const activeRunIds = $derived.by(() => {
+		const ids = new SvelteSet<string>();
 		for (const build of activeBuildsStore.builds) {
-			keys.add(activeRunKey(build.analysis_id, build.current_kind ?? 'preview'));
+			if (!build.current_engine_run_id) continue;
+			ids.add(build.current_engine_run_id);
 		}
-		return keys;
+		return ids;
 	});
 	const activeBuildStatus = $derived(activeBuildsStore.status);
 	let lastActiveBuildSignature = $state('');
@@ -219,7 +215,7 @@
 
 		result = result.filter((run) => {
 			if (run.status !== 'running') return true;
-			return !activeRunKeys.has(activeRunKey(run.analysis_id, run.kind));
+			return !activeRunIds.has(run.id);
 		});
 
 		if (!previewsVisible && kindFilter !== 'preview') {
@@ -412,7 +408,17 @@
 	function requestCancelRun(run: EngineRun): void {
 		if (!canCancelRun(run) || cancelPending) return;
 		cancelError = null;
-		cancelTarget = run;
+		cancelTarget = { id: run.id };
+	}
+
+	function canCancelActiveBuild(build: ActiveBuildRow): boolean {
+		return build.status === 'running' && !!build.current_engine_run_id;
+	}
+
+	function requestCancelActiveBuild(build: ActiveBuildRow): void {
+		if (!canCancelActiveBuild(build) || cancelPending) return;
+		cancelError = null;
+		cancelTarget = { id: build.current_engine_run_id ?? '' };
 	}
 
 	function closeCancelDialog(): void {
@@ -445,13 +451,6 @@
 		}
 		store.applySnapshot(engineRunBuildDetail(run));
 		return store;
-	}
-
-	function activeRunKey(
-		analysisId: string | null | undefined,
-		kind: string | null | undefined
-	): string {
-		return `${analysisId ?? ''}|${kind ?? ''}`;
 	}
 
 	function activeDatasourceName(build: {
@@ -498,7 +497,16 @@
 		const target = cancelTarget;
 		if (!target) return;
 		const latest = runs.find((run) => run.id === target.id);
-		if (!latest || latest.status !== 'running') {
+		if (latest) {
+			if (latest.status === 'running') return;
+			cancelTarget = null;
+			cancelPending = false;
+			return;
+		}
+		const active = activeBuildsStore.builds.some(
+			(build) => build.current_engine_run_id === target.id && build.status === 'running'
+		);
+		if (!active) {
 			cancelTarget = null;
 			cancelPending = false;
 		}
@@ -825,6 +833,7 @@
 					{#each visibleActiveBuilds as build (build.build_id)}
 						<tr
 							data-build-row={build.build_id}
+							data-build-source="active"
 							data-build-status="running"
 							data-build-kind={build.current_kind ?? 'preview'}
 							data-build-datasource-name={activeDatasourceName(build)}
@@ -860,18 +869,42 @@
 								</span>
 							</td>
 							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span
-									class={cx(
-										summaryCellClass,
-										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-									)}
+								<div
+									class={css({
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'space-between',
+										gap: '2'
+									})}
 								>
-									<Loader
-										size={14}
-										class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
-									/>
-									<span class={css({ color: 'accent.primary' })}>Running</span>
-								</span>
+									<span
+										class={cx(
+											summaryCellClass,
+											css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
+										)}
+									>
+										<Loader
+											size={14}
+											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
+										/>
+										<span class={css({ color: 'accent.primary' })}>Running</span>
+									</span>
+									{#if canCancelActiveBuild(build)}
+										<button
+											type="button"
+											class={button({ variant: 'ghost', size: 'sm' })}
+											onclick={(event) => {
+												event.stopPropagation();
+												requestCancelActiveBuild(build);
+											}}
+											disabled={cancelPending}
+											aria-label="Cancel build"
+											data-testid={`build-row-cancel-${build.build_id}`}
+										>
+											<CircleX size={12} />
+										</button>
+									{/if}
+								</div>
 							</td>
 							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
 								<span class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}>
@@ -945,6 +978,9 @@
 											<BuildPreview
 												store={expandedStore}
 												title={getKindLabel(build.current_kind ?? 'preview')}
+												onCancel={() => requestCancelActiveBuild(build)}
+												canCancel={canCancelActiveBuild(build)}
+												{cancelPending}
 											/>
 										</div>
 									{/if}
@@ -955,6 +991,7 @@
 					{#each filteredRuns as run (run.id)}
 						<tr
 							data-build-row={run.id}
+							data-build-source="history"
 							data-build-status={engineRunStatus(run)}
 							data-build-kind={run.kind}
 							data-build-datasource-name={engineRunDatasourceName(run) ??
