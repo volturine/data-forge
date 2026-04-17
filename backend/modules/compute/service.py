@@ -1914,6 +1914,7 @@ def export_data(
     job_started: Callable[[dict[str, object]], None] | None = None,
     build_stage_event: Callable[[dict[str, object]], None] | None = None,
     resources: list[dict[str, object]] | None = None,
+    resources_fn: Callable[[], list[dict[str, object]]] | None = None,
 ) -> ExportDatasourceResult:
     if result_id is None:
         raise ValueError('Output exports require result_id')
@@ -2238,7 +2239,7 @@ def export_data(
             total_steps=len(export_steps) + 2,
             total_tabs=1,
             resource_config=_resource_summary(engine),
-            resources=resources,
+            resources=resources_fn() if resources_fn is not None else resources,
             results=[
                 _result_entry(
                     tab_id=tab_id,
@@ -2316,7 +2317,7 @@ def export_data(
             total_steps=len(export_steps) + 2,
             total_tabs=1,
             resource_config=_resource_summary(engine),
-            resources=resources,
+            resources=resources_fn() if resources_fn is not None else resources,
             result_entry=_result_entry(
                 tab_id=tab_id,
                 tab_name=tab_name,
@@ -3306,7 +3307,7 @@ async def run_analysis_build_stream(
                         build_mode=current_build_mode,
                         job_started=handle_job_started,
                         build_stage_event=handle_stage_event,
-                        resources=[item.model_dump(mode='json') for item in build.resources],
+                        resources_fn=lambda: [item.model_dump(mode='json') for item in build.resources],
                     )
                     build.current_engine_run_id = result.engine_run_id
                     return result
