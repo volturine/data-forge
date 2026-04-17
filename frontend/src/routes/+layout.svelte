@@ -287,7 +287,6 @@
 					onToggle={toggleSidebar}
 					{theme}
 					onToggleTheme={toggleTheme}
-					onOpenSettings={undefined}
 					onOpenEngines={() => (enginesOpen = !enginesOpen)}
 					onOpenChat={handleOpenChat}
 					onOpenNamespace={openNamespace}

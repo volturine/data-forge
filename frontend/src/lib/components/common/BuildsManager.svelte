@@ -4,16 +4,16 @@
 	import { cancelBuild } from '$lib/api/compute';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
+	import type { ActiveBuildDetail } from '$lib/types/build-stream';
+	import { getActiveBuildByEngineRun } from '$lib/api/build-stream';
+	import { getEngineRun } from '$lib/api/engine-runs';
 	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
-	import { ActiveBuildsStore } from '$lib/stores/active-builds.svelte';
 	import { page as pageState } from '$app/state';
 	import {
 		Search,
 		CircleCheck,
 		CircleX,
 		Loader,
-		Eye,
-		EyeOff,
 		Download,
 		ChevronLeft,
 		ChevronRight,
@@ -23,14 +23,12 @@
 		CalendarClock,
 		Database,
 		RefreshCw,
-		Hash,
-		Activity
+		Hash
 	} from 'lucide-svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
-	import type { ActiveBuildSummary } from '$lib/types/build-stream';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { css, cx, spinner, button, emptyText, input } from '$lib/styles/panda';
 	import {
@@ -45,7 +43,6 @@
 	interface Props {
 		compact?: boolean;
 		searchQuery?: string;
-		showPreviews?: boolean;
 		embedded?: boolean;
 	}
 
@@ -53,9 +50,7 @@
 		id: string;
 	};
 
-	type ActiveBuildRow = ActiveBuildSummary;
-
-	let { compact = false, searchQuery, showPreviews = false, embedded = false }: Props = $props();
+	let { compact = false, searchQuery, embedded = false }: Props = $props();
 
 	let search = $state('');
 	const effectiveSearch = $derived(searchQuery ?? search);
@@ -69,15 +64,12 @@
 	let page = $state(1);
 	let branchFilter = $state('');
 	let expandedId = $state<string | null>(null);
-	let expandedActiveBuild = $state<ActiveBuildRow | null>(null);
+	let expandedLiveId = $state<string | null>(null);
 	let expandedStore = $state<BuildStreamStore | null>(null);
-	let resultExpanded = $state(false);
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	const runDetailStores = new SvelteMap<string, BuildStreamStore>();
-	const activeDetailStores = new SvelteMap<string, BuildStreamStore>();
 	const limit = 50;
-	const previewsVisible = $derived(!compact || showPreviews);
 
 	const queryParams = $derived({
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
@@ -98,21 +90,6 @@
 	});
 
 	const engineRunsStore = new EngineRunsStore();
-	const activeBuildsStore = new ActiveBuildsStore();
-	const activeBuildSignature = $derived(
-		activeBuildsStore.builds.map((build) => build.build_id).join('|')
-	);
-	const activeRunIds = $derived.by(() => {
-		const ids = new SvelteSet<string>();
-		for (const build of activeBuildsStore.builds) {
-			if (!build.current_engine_run_id) continue;
-			ids.add(build.current_engine_run_id);
-		}
-		return ids;
-	});
-	const activeBuildStatus = $derived(activeBuildsStore.status);
-	let lastActiveBuildSignature = $state('');
-	let hadActiveBuildConnection = $state(false);
 
 	// Network: fetch build history when filters change.
 	$effect(() => {
@@ -121,39 +98,11 @@
 		return () => engineRunsStore.close();
 	});
 
-	// Network: refresh history when the live build set changes.
-	$effect(() => {
-		const signature = activeBuildSignature;
-		if (signature === lastActiveBuildSignature) return;
-		const hadActiveBuilds = lastActiveBuildSignature.length > 0;
-		lastActiveBuildSignature = signature;
-		if (!signature && !hadActiveBuilds) return;
-		engineRunsStore.refresh();
-	});
-
-	// Network: refresh history once the live-build websocket is connected.
-	$effect(() => {
-		const status = activeBuildStatus;
-		if (status !== 'connected') {
-			hadActiveBuildConnection = false;
-			return;
-		}
-		if (hadActiveBuildConnection) return;
-		hadActiveBuildConnection = true;
-		engineRunsStore.refresh();
-	});
-
-	// Side effect: WS connection for live active builds, must be cleaned up on destroy
-	$effect(() => {
-		activeBuildsStore.start();
-		return () => activeBuildsStore.close();
-	});
-
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources-lookup'],
 		queryFn: async () => {
 			const result = await listDatasources();
-			if (result.isErr()) return [];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 60_000
@@ -163,7 +112,7 @@
 		queryKey: ['analyses-lookup'],
 		queryFn: async () => {
 			const result = await listAnalyses();
-			if (result.isErr()) return [];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 60_000
@@ -195,7 +144,7 @@
 		queryFn: async () => {
 			if (!datasourceId) return null;
 			const result = await getDatasource(datasourceId);
-			if (result.isErr()) return null;
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		enabled: !!datasourceId
@@ -211,16 +160,7 @@
 	});
 
 	const filteredRuns = $derived.by(() => {
-		let result = runs;
-
-		result = result.filter((run) => {
-			if (run.status !== 'running') return true;
-			return !activeRunIds.has(run.id);
-		});
-
-		if (!previewsVisible && kindFilter !== 'preview') {
-			result = result.filter((run) => run.kind !== 'preview');
-		}
+		let result = runs.filter((run) => run.kind !== 'preview');
 
 		if (effectiveSearch) {
 			const q = effectiveSearch.toLowerCase();
@@ -262,16 +202,7 @@
 		return sortRuns(result);
 	});
 
-	const visibleActiveBuilds = $derived.by(() => {
-		const current = activeBuildsStore.builds;
-		const expanded = expandedActiveBuild;
-		if (!expanded) return current;
-		if (current.some((build) => build.build_id === expanded.build_id)) return current;
-		if (expandedId !== expanded.build_id) return current;
-		return [expanded, ...current];
-	});
-
-	const hasAnyBuildRows = $derived(activeBuildsStore.count > 0 || filteredRuns.length > 0);
+	const hasAnyBuildRows = $derived(filteredRuns.length > 0);
 
 	function sortRuns(list: EngineRun[]): EngineRun[] {
 		const dir = sortDir === 'asc' ? 1 : -1;
@@ -342,8 +273,6 @@
 
 	function toggleExpand(id: string) {
 		expandedId = expandedId === id ? null : id;
-		resultExpanded = false;
-		if (expandedId === null) expandedActiveBuild = null;
 	}
 
 	function resolveName(id: string, map: Map<string, string>): string {
@@ -411,16 +340,6 @@
 		cancelTarget = { id: run.id };
 	}
 
-	function canCancelActiveBuild(build: ActiveBuildRow): boolean {
-		return build.status === 'running' && !!build.current_engine_run_id;
-	}
-
-	function requestCancelActiveBuild(build: ActiveBuildRow): void {
-		if (!canCancelActiveBuild(build) || cancelPending) return;
-		cancelError = null;
-		cancelTarget = { id: build.current_engine_run_id ?? '' };
-	}
-
 	function closeCancelDialog(): void {
 		if (cancelPending) return;
 		cancelTarget = null;
@@ -443,6 +362,10 @@
 		cancelPending = false;
 	}
 
+	async function refreshHistory(): Promise<void> {
+		engineRunsStore.refresh();
+	}
+
 	function runDetailStore(run: EngineRun): BuildStreamStore {
 		let store = runDetailStores.get(run.id);
 		if (!store) {
@@ -453,43 +376,70 @@
 		return store;
 	}
 
-	function activeDatasourceName(build: {
-		current_datasource_id: string | null;
-		current_output_name: string | null;
-	}): string {
-		if (build.current_datasource_id) {
-			return dsNames.get(build.current_datasource_id) ?? build.current_datasource_id;
-		}
-		return build.current_output_name ?? '-';
+	function replaceRun(next: EngineRun): void {
+		engineRunsStore.replaceRun(next);
 	}
 
-	function activeDetailStore(id: string): BuildStreamStore {
-		let store = activeDetailStores.get(id);
-		if (!store) {
-			store = new BuildStreamStore();
-			activeDetailStores.set(id, store);
+	async function syncExpandedRun(runId: string): Promise<void> {
+		const run = runs.find((item) => item.id === runId);
+		if (!run) return;
+		const store = runDetailStore(run);
+		if (engineRunStatus(run) !== 'running') {
+			store.close();
+			store.applySnapshot(engineRunBuildDetail(run));
+			expandedLiveId = null;
+			expandedStore = store;
+			return;
 		}
-		if (store.buildId !== id || store.status === 'disconnected') {
-			store.watch(id);
+		const live = await getActiveBuildByEngineRun(run.id).match(
+			(detail: ActiveBuildDetail) => detail,
+			() => null
+		);
+		if (expandedId !== runId) return;
+		if (!live) {
+			store.close();
+			store.applySnapshot(engineRunBuildDetail(run));
+			expandedLiveId = null;
+			expandedStore = store;
+			return;
 		}
-		return store;
+		store.watch(live.build_id);
+		store.applySnapshot(live);
+		expandedLiveId = runId;
+		expandedStore = store;
 	}
 
-	// Side effect: mutates expandedStore state and triggers store creation via runDetailStore
+	// Side effect: mutates expandedStore state and binds live detail only for expanded running rows.
 	$effect(() => {
-		const live = activeBuildsStore.builds.find((build) => build.build_id === expandedId) ?? null;
-		if (live) {
-			expandedActiveBuild = live;
-			expandedStore = activeDetailStore(live.build_id);
-			return;
-		}
-		if (expandedActiveBuild && expandedActiveBuild.build_id === expandedId) {
-			expandedStore = activeDetailStore(expandedActiveBuild.build_id);
-			return;
+		for (const [runId, store] of runDetailStores) {
+			if (runId === expandedId) continue;
+			store.close();
 		}
 		const expandedRun = runs.find((run) => run.id === expandedId) ?? null;
-		if (!expandedRun) expandedActiveBuild = null;
-		expandedStore = expandedRun ? runDetailStore(expandedRun) : null;
+		if (!expandedRun) {
+			expandedLiveId = null;
+			expandedStore = null;
+			return;
+		}
+		void syncExpandedRun(expandedRun.id);
+	});
+
+	// Side effect: when a live row reaches terminal state, replace that row with persisted history once.
+	$effect(() => {
+		const liveId = expandedLiveId;
+		const store = expandedStore;
+		if (!liveId || !store || !store.done || !store.engineRunId) return;
+		expandedLiveId = null;
+		void getEngineRun(store.engineRunId).match(
+			(persisted) => {
+				if (expandedId !== liveId) return;
+				store.close();
+				replaceRun(persisted);
+				store.applySnapshot(engineRunBuildDetail(persisted));
+				expandedStore = store;
+			},
+			() => {}
+		);
 	});
 
 	// Side effect: cleanup callback to close WebSocket stores on component destroy
@@ -497,16 +447,7 @@
 		const target = cancelTarget;
 		if (!target) return;
 		const latest = runs.find((run) => run.id === target.id);
-		if (latest) {
-			if (latest.status === 'running') return;
-			cancelTarget = null;
-			cancelPending = false;
-			return;
-		}
-		const active = activeBuildsStore.builds.some(
-			(build) => build.current_engine_run_id === target.id && build.status === 'running'
-		);
-		if (!active) {
+		if (!latest || latest.status !== 'running') {
 			cancelTarget = null;
 			cancelPending = false;
 		}
@@ -517,12 +458,7 @@
 			for (const store of runDetailStores.values()) {
 				store.close();
 			}
-			for (const store of activeDetailStores.values()) {
-				store.close();
-			}
 			runDetailStores.clear();
-			activeDetailStores.clear();
-			activeBuildsStore.reset();
 		};
 	});
 
@@ -579,26 +515,6 @@
 					/>
 				</div>
 			</div>
-			<button
-				class={cx(
-					button({ variant: 'ghost', size: 'sm' }),
-					css({
-						borderWidth: '1',
-						fontSize: 'xs',
-						width: 'fit-content'
-					})
-				)}
-				onclick={() => (showPreviews = !showPreviews)}
-				aria-pressed={showPreviews}
-			>
-				{#if showPreviews}
-					<Eye size={12} />
-					Hide previews
-				{:else}
-					<EyeOff size={12} />
-					Show previews
-				{/if}
-			</button>
 		{/if}
 	{:else}
 		<div
@@ -655,7 +571,6 @@
 				bind:value={kindFilter}
 			>
 				<option value="">All types</option>
-				<option value="preview">Preview</option>
 				<option value="download">Download</option>
 				<option value="datasource_create">Output Create</option>
 				<option value="datasource_update">Output Update</option>
@@ -713,6 +628,14 @@
 					bind:value={dateTo}
 				/>
 			</div>
+			<button
+				type="button"
+				class={button({ variant: 'ghost', size: 'sm' })}
+				onclick={() => void refreshHistory()}
+			>
+				<RefreshCw size={14} />
+				Refresh History
+			</button>
 		</div>
 	{/if}
 
@@ -830,172 +753,16 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each visibleActiveBuilds as build (build.build_id)}
-						<tr
-							data-build-row={build.build_id}
-							data-build-source="active"
-							data-build-status="running"
-							data-build-kind={build.current_kind ?? 'preview'}
-							data-build-datasource-name={activeDatasourceName(build)}
-							data-build-analysis-name={build.analysis_name}
-							data-build-output-name={build.current_output_name ?? ''}
-							class={cx(
-								css({
-									cursor: 'pointer',
-									backgroundColor: 'bg.secondary',
-									_hover: { backgroundColor: 'bg.hover' }
-								}),
-								expandedId === build.build_id && css({ backgroundColor: 'bg.secondary' })
-							)}
-							onclick={() => toggleExpand(build.build_id)}
-						>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<ChevronDown
-									size={14}
-									class={expandedId === build.build_id
-										? undefined
-										: css({ transform: 'rotate(-90deg)' })}
-								/>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span
-									class={cx(
-										summaryCellClass,
-										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-									)}
-								>
-									<Activity size={14} class={css({ color: 'accent.primary' })} />
-									<span>{getKindLabel(build.current_kind ?? 'preview')}</span>
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<div
-									class={css({
-										display: 'flex',
-										alignItems: 'center',
-										justifyContent: 'space-between',
-										gap: '2'
-									})}
-								>
-									<span
-										class={cx(
-											summaryCellClass,
-											css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-										)}
-									>
-										<Loader
-											size={14}
-											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
-										/>
-										<span class={css({ color: 'accent.primary' })}>Running</span>
-									</span>
-									{#if canCancelActiveBuild(build)}
-										<button
-											type="button"
-											class={button({ variant: 'ghost', size: 'sm' })}
-											onclick={(event) => {
-												event.stopPropagation();
-												requestCancelActiveBuild(build);
-											}}
-											disabled={cancelPending}
-											aria-label="Cancel build"
-											data-testid={`build-row-cancel-${build.build_id}`}
-										>
-											<CircleX size={12} />
-										</button>
-									{/if}
-								</div>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}>
-									{activeDatasourceName(build)}
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}>
-									{build.analysis_name}
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-									<span
-										class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
-									>
-										{build.current_output_name ?? '-'}
-									</span>
-									{#if build.current_step}
-										<span
-											class={css({
-												fontSize: 'xs',
-												color: 'fg.tertiary',
-												overflow: 'hidden',
-												textOverflow: 'ellipsis',
-												whiteSpace: 'nowrap'
-											})}
-										>
-											{build.current_step}
-										</span>
-									{/if}
-								</div>
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2',
-									fontFamily: 'mono',
-									fontSize: 'xs',
-									whiteSpace: 'nowrap'
-								})}
-							>
-								{formatDuration(build.elapsed_ms)}
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2',
-									color: 'fg.secondary',
-									whiteSpace: 'nowrap'
-								})}
-							>
-								{formatDate(build.started_at)}
-							</td>
-						</tr>
-						{#if expandedId === build.build_id}
-							<tr data-build-detail={build.build_id}>
-								<td
-									colspan="8"
-									class={css({
-										borderBottomWidth: '1',
-										backgroundColor: 'bg.primary',
-										padding: '0',
-										overflow: 'hidden'
-									})}
-								>
-									{#if expandedStore}
-										<div class={css({ width: '100%', overflowX: 'hidden' })}>
-											<BuildPreview
-												store={expandedStore}
-												title={getKindLabel(build.current_kind ?? 'preview')}
-												onCancel={() => requestCancelActiveBuild(build)}
-												canCancel={canCancelActiveBuild(build)}
-												{cancelPending}
-											/>
-										</div>
-									{/if}
-								</td>
-							</tr>
-						{/if}
-					{/each}
 					{#each filteredRuns as run (run.id)}
 						<tr
 							data-build-row={run.id}
 							data-build-source="history"
 							data-build-status={engineRunStatus(run)}
 							data-build-kind={run.kind}
+							data-build-datasource-id={engineRunDatasourceId(run)}
 							data-build-datasource-name={engineRunDatasourceName(run) ??
 								resolveName(engineRunDatasourceId(run), dsNames)}
+							data-build-analysis-id={run.analysis_id ?? ''}
 							data-build-analysis-name={run.analysis_id
 								? resolveName(run.analysis_id, analysisNames)
 								: ''}
@@ -1034,10 +801,7 @@
 										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
 									)}
 								>
-									{#if run.kind === 'preview'}
-										<Eye size={14} class={css({ color: 'accent.primary' })} />
-										<span>{getKindLabel(run.kind)}</span>
-									{:else if run.kind === 'datasource_create'}
+									{#if run.kind === 'datasource_create'}
 										<Database size={14} class={css({ color: 'accent.primary' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'datasource_update'}
@@ -1244,57 +1008,6 @@
 													<strong>Last Completed Step:</strong>
 													{lastCompletedStep(run) ?? '-'}
 												</span>
-											{/if}
-										</div>
-
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<strong class={css({ fontSize: 'sm', color: 'fg.primary' })}
-												>Request Payload</strong
-											>
-											<pre
-												class={css({
-													fontSize: 'xs',
-													backgroundColor: 'bg.secondary',
-													padding: '2',
-													borderRadius: 'md',
-													overflow: 'auto',
-													maxHeight: '200px',
-													margin: '0'
-												})}>{JSON.stringify(run.request_json, null, 2)}</pre>
-										</div>
-
-										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-											<button
-												type="button"
-												class={button({ variant: 'secondary', size: 'sm' })}
-												onclick={() => (resultExpanded = !resultExpanded)}
-											>
-												Result
-											</button>
-											{#if resultExpanded}
-												{#if engineRunStatus(run) === 'cancelled'}
-													<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-														No result data available for cancelled build
-													</div>
-												{:else if run.result_json}
-													<div class={css({ fontSize: 'sm', color: 'fg.secondary' })}>
-														Result Metadata
-													</div>
-													<pre
-														class={css({
-															fontSize: 'xs',
-															backgroundColor: 'bg.secondary',
-															padding: '2',
-															borderRadius: 'md',
-															overflow: 'auto',
-															maxHeight: '200px',
-															margin: '0'
-														})}>{JSON.stringify(run.result_json, null, 2)}</pre>
-												{:else}
-													<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
-														No result data available
-													</div>
-												{/if}
 											{/if}
 										</div>
 									</div>

@@ -73,10 +73,9 @@
 		queryKey: ['datasources-lookup', 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true);
-			if (result.isErr()) return [] as DataSource[];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		},
-		staleTime: 60_000
+		}
 	}));
 
 	const datasourceMap = $derived(
@@ -348,6 +347,7 @@
 	}
 
 	function openCreate() {
+		void datasourcesQuery.refetch();
 		creating = true;
 	}
 
@@ -967,7 +967,7 @@
 		>
 			<div class={spinner()}></div>
 		</div>
-	{:else if schedulesQuery.isError}
+	{:else if datasourcesQuery.isError || allSchedulesQuery.isError || schedulesQuery.isError}
 		<div
 			class={css({
 				paddingX: '3',
@@ -984,9 +984,13 @@
 				color: 'fg.error'
 			})}
 		>
-			{schedulesQuery.error instanceof Error
-				? schedulesQuery.error.message
-				: 'Error loading schedules.'}
+			{datasourcesQuery.error instanceof Error
+				? datasourcesQuery.error.message
+				: allSchedulesQuery.error instanceof Error
+					? allSchedulesQuery.error.message
+					: schedulesQuery.error instanceof Error
+						? schedulesQuery.error.message
+						: 'Error loading schedules.'}
 		</div>
 	{:else if schedules.length === 0 && !creating}
 		<div

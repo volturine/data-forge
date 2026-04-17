@@ -550,7 +550,13 @@ export async function createLongRunningAnalysis(
 						result_id: resultId,
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'source_1'
+						filename: 'source_1',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'source_1',
+							branch: 'master'
+						}
 					},
 					steps
 				}

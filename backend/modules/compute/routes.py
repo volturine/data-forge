@@ -257,7 +257,7 @@ def preview_step(
     (the step to preview, or 'source' for raw data). Returns column names, types, data rows,
     and total row count. Use row_limit and page for pagination.
     """
-    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+    analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
 
     return service.preview_step(
         session=session,
@@ -285,13 +285,13 @@ def get_step_schema(
     Useful for configuring downstream steps that need to know available columns
     (e.g., pivot, unpivot, select). Returns column names and their Polars dtypes.
     """
-    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+    analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
 
     return service.get_step_schema(
         session=session,
         manager=manager,
         target_step_id=request.target_step_id,
-        analysis_id=analysis_id or '',
+        analysis_id=analysis_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         tab_id=request.tab_id,
     )
@@ -305,13 +305,13 @@ def get_step_row_count(
     manager: ProcessManager = Depends(get_manager),
 ):
     """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
-    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+    analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
 
     return service.get_step_row_count(
         session=session,
         manager=manager,
         target_step_id=request.target_step_id,
-        analysis_id=analysis_id or '',
+        analysis_id=analysis_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
@@ -492,6 +492,27 @@ async def get_active_build(
     return build.detail()
 
 
+@router.get('/builds/active/by-engine-run/{engine_run_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
+@handle_errors(operation='get active build by engine run')
+async def get_active_build_by_engine_run(
+    engine_run_id: EngineRunId,
+    _user: User = Depends(get_current_user),
+):
+    run_id = parse_engine_run_id(engine_run_id)
+    builds = await build_registry.list_builds(status=schemas.ActiveBuildStatus.RUNNING)
+    namespace = get_namespace()
+    match = next(
+        (build for build in builds if build.namespace == namespace and build.current_engine_run_id == run_id),
+        None,
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail='Active build not found')
+    build = await build_registry.get_build(match.build_id)
+    if build is None or build.namespace != namespace:
+        raise HTTPException(status_code=404, detail='Active build not found')
+    return build.detail()
+
+
 # Engine lifecycle endpoints
 
 
@@ -572,6 +593,14 @@ async def engine_list_stream(websocket: WebSocket) -> None:
             websocket,
             schemas.EngineWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json'),
         )
+    except RuntimeError as exc:
+        if _is_disconnect_runtime_error(exc):
+            return
+        logger.error('Engine websocket error: %s', exc, exc_info=True)
+        await _safe_send_json(
+            websocket,
+            schemas.EngineWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
+        )
     except Exception as exc:
         logger.error('Engine websocket error: %s', exc, exc_info=True)
         await _safe_send_json(
@@ -599,6 +628,14 @@ async def build_list_stream(websocket: WebSocket) -> None:
     except HTTPException as exc:
         await _safe_send_json(
             websocket, schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json')
+        )
+    except RuntimeError as exc:
+        if _is_disconnect_runtime_error(exc):
+            return
+        logger.error('Build list websocket error: %s', exc, exc_info=True)
+        await _safe_send_json(
+            websocket,
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
         logger.error('Build list websocket error: %s', exc, exc_info=True)
@@ -629,6 +666,14 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
     except HTTPException as exc:
         await _safe_send_json(
             websocket, schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json')
+        )
+    except RuntimeError as exc:
+        if _is_disconnect_runtime_error(exc):
+            return
+        logger.error('Active build websocket error: %s', exc, exc_info=True)
+        await _safe_send_json(
+            websocket,
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
         logger.error('Active build websocket error: %s', exc, exc_info=True)

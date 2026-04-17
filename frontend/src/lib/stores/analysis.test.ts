@@ -45,7 +45,9 @@ function makeTab(overrides: Partial<AnalysisTab> = {}): AnalysisTab {
 		output: {
 			result_id: '550e8400-e29b-41d4-a716-446655440000',
 			format: 'parquet',
-			filename: 'source_1'
+			filename: 'source_1',
+			build_mode: 'full',
+			iceberg: { namespace: 'outputs', table_name: 'source_1', branch: 'master' }
 		},
 		steps: [],
 		...overrides
@@ -760,7 +762,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 		expect(store.tabs[0].steps[0].type).toBe('filter');
 	});
 
-	test('infers depends_on when steps lack dependency metadata', () => {
+	test('rejects steps that lack dependency metadata', () => {
 		const stepA = makeStep({ id: 'A' });
 		delete stepA.depends_on;
 		const stepB = makeStep({ id: 'B' });
@@ -780,12 +782,10 @@ describe('AnalysisStore.normalizeSteps', () => {
 			thumbnail: null
 		};
 		store.current = analysis;
-		store.applyAnalysis(analysis);
-		expect(store.tabs[0].steps[0].depends_on).toEqual([]);
-		expect(store.tabs[0].steps[1].depends_on).toEqual(['A']);
+		expect(() => store.applyAnalysis(analysis)).toThrow(/missing depends_on/);
 	});
 
-	test('defaults is_applied to true when absent', () => {
+	test('rejects steps that lack is_applied', () => {
 		const step = makeStep({ id: 'A' });
 		delete step.is_applied;
 		const tab = makeTab({
@@ -803,8 +803,7 @@ describe('AnalysisStore.normalizeSteps', () => {
 			thumbnail: null
 		};
 		store.current = analysis;
-		store.applyAnalysis(analysis);
-		expect(store.tabs[0].steps[0].is_applied).toBe(true);
+		expect(() => store.applyAnalysis(analysis)).toThrow(/missing is_applied/);
 	});
 });
 

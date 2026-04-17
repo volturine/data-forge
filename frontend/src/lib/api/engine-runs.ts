@@ -56,8 +56,11 @@ function buildQueryString(params?: ListEngineRunsParams): string {
 	return str ? `?${str}` : '';
 }
 
-export function listEngineRuns(params?: ListEngineRunsParams): ResultAsync<EngineRun[], ApiError> {
-	return apiRequest<EngineRun[]>(`/v1/engine-runs${buildQueryString(params)}`);
+export function listEngineRuns(
+	params?: ListEngineRunsParams,
+	signal?: AbortSignal
+): ResultAsync<EngineRun[], ApiError> {
+	return apiRequest<EngineRun[]>(`/v1/engine-runs${buildQueryString(params)}`, { signal });
 }
 
 export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {

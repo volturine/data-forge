@@ -226,14 +226,7 @@ def _normalize_filter_conditions(config: dict[str, Any]) -> list[dict[str, Any]]
 
     legacy_column = config.get('column')
     if isinstance(legacy_column, str) and legacy_column:
-        return [
-            {
-                'column': legacy_column,
-                'operator': config.get('operator', '='),
-                'value': config.get('value'),
-                'value_type': config.get('value_type', 'string'),
-            },
-        ]
+        raise ValueError('legacy single-condition filter config is not supported; provide conditions[] explicitly')
     return []
 
 

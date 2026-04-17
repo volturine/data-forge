@@ -23,22 +23,21 @@ async function waitForAnyVisible(locator: Locator, timeout: number): Promise<voi
 }
 
 /**
- * Wait for the app shell to finish hydrating by confirming the Settings
- * button in the sidebar is visible and enabled. The sidebar only renders
- * once the layout `ready` flag is true (configStore loaded, auth resolved),
- * so a visible actionable button is a stronger readiness signal than the
- * container element alone.
+ * Wait for the app shell to finish hydrating by confirming the main
+ * navigation sidebar is visible. The sidebar only renders once the layout
+ * `ready` flag is true (configStore loaded, auth resolved), so the labeled
+ * navigation container is the stable shell readiness signal.
  *
- * Call before any interaction with shell-level UI (Settings, theme toggle,
+ * Call before any interaction with shell-level UI (profile, theme toggle,
  * nav links) that lives outside page-specific content.
  */
 export async function waitForAppShell(page: Page, timeout = 15_000): Promise<void> {
-	await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout });
+	await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout });
 }
 
 /**
  * Shared layout readiness gate. Confirms:
- *  1. The sidebar Settings button is visible (app shell hydrated).
+ *  1. The main navigation sidebar is visible (app shell hydrated).
  *  2. The `<main>` content area has mounted (page slot rendered).
  *
  * Use as the first await after `page.goto(...)` before any page-specific
@@ -46,7 +45,7 @@ export async function waitForAppShell(page: Page, timeout = 15_000): Promise<voi
  * completed, and the Svelte page component has started rendering.
  */
 export async function waitForLayoutReady(page: Page, timeout = 30_000): Promise<void> {
-	await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout });
+	await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout });
 	await waitForAnyVisible(page.locator('main'), timeout);
 }
 

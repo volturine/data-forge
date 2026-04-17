@@ -47,10 +47,9 @@
 		queryKey: ['datasources-lookup', 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true);
-			if (result.isErr()) return [] as DataSource[];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		},
-		staleTime: 60_000
+		}
 	}));
 
 	const datasourceMap = $derived.by(() => {
@@ -80,12 +79,13 @@
 					critical: !!(check as { critical?: boolean }).critical
 				}));
 			}
+			if (datasourcesQuery.error instanceof Error) throw datasourcesQuery.error;
 			const sources = datasourcesQuery.data ?? [];
 			if (sources.length === 0) return [];
 			const all = await Promise.all(
 				sources.map(async (ds) => {
 					const result = await listHealthChecks(ds.id);
-					if (result.isErr()) return [];
+					if (result.isErr()) throw new Error(result.error.message);
 					return result.value;
 				})
 			);
@@ -105,12 +105,13 @@
 				if (result.isErr()) throw new Error(result.error.message);
 				return result.value;
 			}
+			if (datasourcesQuery.error instanceof Error) throw datasourcesQuery.error;
 			const sources = datasourcesQuery.data ?? [];
 			if (sources.length === 0) return [];
 			const all = await Promise.all(
 				sources.map(async (ds) => {
 					const result = await listHealthCheckResults(ds.id, 20);
-					if (result.isErr()) return [];
+					if (result.isErr()) throw new Error(result.error.message);
 					return result.value;
 				})
 			);
@@ -1044,7 +1045,7 @@
 		>
 			<Loader size={20} class={css({ animation: 'spin 1s linear infinite' })} />
 		</div>
-	{:else if listQuery.isError}
+	{:else if datasourcesQuery.isError || listQuery.isError || resultsQuery.isError}
 		<div
 			class={css({
 				borderWidth: '1',
@@ -1056,7 +1057,13 @@
 				color: 'fg.error'
 			})}
 		>
-			Failed to load health checks.
+			{datasourcesQuery.error instanceof Error
+				? datasourcesQuery.error.message
+				: listQuery.error instanceof Error
+					? listQuery.error.message
+					: resultsQuery.error instanceof Error
+						? resultsQuery.error.message
+						: 'Failed to load health checks.'}
 		</div>
 	{:else if checks.length === 0 && !creating}
 		<div

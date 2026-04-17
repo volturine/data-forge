@@ -8,9 +8,12 @@
 just verify          # REQUIRED before declaring any task done (format + check)
 just format          # ruff format + prettier
 just test            # backend pytest
+just test-e2e        # e2e tests with Playwright
 just check           # ruff + mypy + svelte-check + eslint
 just dev             # start both servers
 ```
+
+- E2E must be run only via `just test-e2e`. Do not run Playwright e2e commands directly.
 
 ## Package Managers
 
@@ -21,6 +24,7 @@ just dev             # start both servers
 
 - Run `just verify` before declaring any task done or asking for review
 - If `just verify` fails, fix the underlying issues immediately
+- After `just verify` passes, run tests (`just test` and/or `just test-e2e`) to confirm functionality
 - Do not ignore or suppress warnings, even if they seem unrelated
 - Write backend Python tests for new/changed functionality
 - Pre-existing warnings are tech debt — fix them, do not ignore them
@@ -49,6 +53,11 @@ just dev             # start both servers
 - **Fix warnings, not just errors.** Treat warnings as bugs
 - **Autonomous completion.** Continue until every requirement is implemented, tested, and verified
 - **No legacy support.** New features/redesigns must not preserve legacy paths or backward compatibility
+- **No polling.** Do not add polling/interval refresh logic.
+- **No fallback logic.** Do not add permissive fallback/defaulting behavior unless the user explicitly asks for it.
+- **Build start is HTTP-only.** Never redesign build start around websockets.
+- **Monitoring history is explicit.** Monitoring engine-run rows are history data and should only gain new rows on explicit refresh.
+- **Live build websockets are scoped.** Websocket use for builds is limited to engine status in the left panel and live build preview/detail views, including the expanded Monitoring row for a running build.
 
 ## Frontend Development
 
@@ -120,3 +129,5 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 - Svelte 5 `$effect` blocks run in declaration order. When a "reset" effect (e.g., datasource switch) calls `.reset()` / `.close()` on a store, and a "start" effect calls `.start()` on that same store, the reset effect MUST be declared before the start effect. Otherwise the start effect fires first, begins an async fetch, and the reset effect fires second and aborts the in-flight request — leaving the store permanently empty.
 - When using pinned icon libraries (for example `lucide-svelte`), verify the icon export exists in the installed version before wiring it into status/cancel UI; missing exports can crash Svelte render paths in e2e flows.
 - Build cancellation must be terminal-state authoritative: before writing success state, re-check persisted run status and preserve `cancelled` if another request set it mid-flight, otherwise cancellation can be overwritten by late success finalization.
+- Do not run frontend e2e specs directly with Playwright/Bun commands; use `just test-e2e` only so the intended environment and orchestration stay consistent.
+- Monitoring builds architecture is strict: no polling, no separate live-preview row, no build-list websocket auto-refresh for history rows. Start builds via HTTP, show new history rows only after explicit refresh, and use websocket only for live preview/detail on the running build itself.

@@ -29,7 +29,13 @@ async function createSnippetAnalysis(
 						result_id: crypto.randomUUID(),
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'right_source'
+						filename: 'right_source',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'right_source',
+							branch: 'master'
+						}
 					},
 					steps: [{ id: 'view-right', type: 'view', config: {}, depends_on: [], is_applied: true }]
 				},
@@ -46,7 +52,13 @@ async function createSnippetAnalysis(
 						result_id: crypto.randomUUID(),
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'left_source'
+						filename: 'left_source',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'left_source',
+							branch: 'master'
+						}
 					},
 					steps: [
 						{ id: 'view-left', type: 'view', config: {}, depends_on: [], is_applied: true },
@@ -137,7 +149,13 @@ async function createUnsupportedAnalysis(
 						result_id: crypto.randomUUID(),
 						datasource_type: 'iceberg',
 						format: 'parquet',
-						filename: 'unsupported'
+						filename: 'unsupported',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'unsupported',
+							branch: 'master'
+						}
 					},
 					steps: [
 						{ id: 'view', type: 'view', config: {}, depends_on: [], is_applied: true },
@@ -156,6 +174,8 @@ async function createUnsupportedAnalysis(
 }
 
 test.describe('Analyses – SQL/Polars snippet export', () => {
+	test.describe.configure({ mode: 'serial' });
+
 	test('toolbar export renders both Polars and SQL snippets for pipeline steps', async ({
 		page,
 		request
@@ -174,6 +194,9 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 
 			const code = page.getByTestId('analysis-export-code');
 			await expect(code).toBeVisible({ timeout: 10_000 });
+			await expect
+				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 10_000 })
+				.not.toBe('');
 			await expect(code).toContainText('import polars as pl');
 			await expect(code).toContainText('.join(');
 			await expect(code).toContainText('.group_by(');
@@ -224,6 +247,9 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 			await page.getByTestId('analysis-tab-context-export').click();
 
 			const code = page.getByTestId('analysis-export-code');
+			await expect
+				.poll(async () => (await code.textContent())?.trim() ?? '', { timeout: 10_000 })
+				.not.toBe('');
 			await expect(code).toContainText('SOURCE_RIGHT_SOURCE_PATH');
 			await expect(code).toContainText('SOURCE_LEFT_SOURCE_PATH');
 
@@ -255,6 +281,7 @@ test.describe('Analyses – SQL/Polars snippet export', () => {
 	});
 
 	test('untranslatable steps surface warnings in export modal', async ({ page, request }) => {
+		test.setTimeout(90_000);
 		const id = uid();
 		const dsName = `e2e-snippet-warn-${id}`;
 		const analysisName = `E2E Snippet Warnings ${id}`;

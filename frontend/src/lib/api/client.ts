@@ -94,8 +94,9 @@ function apiFetch<T>(
 	parse: (response: Response) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
+	const request = { ...options, headers } satisfies RequestInit;
 	return ResultAsync.fromPromise(
-		fetch(`${BASE_URL}${endpoint}`, { ...options, headers }),
+		fetch(`${BASE_URL}${endpoint}`, request),
 		(error): ApiError =>
 			createApiError('network', error instanceof Error ? error.message : 'Network error')
 	).andThen((response) => {

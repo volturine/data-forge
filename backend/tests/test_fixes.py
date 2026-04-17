@@ -1054,7 +1054,7 @@ class TestAssertSelectOnly:
 
 
 class TestParseDatetimeString:
-    """_parse_datetime_string fallback format coverage."""
+    """_parse_datetime_string accepts ISO 8601 only."""
 
     def test_iso8601(self):
         from datetime import datetime
@@ -1070,13 +1070,11 @@ class TestParseDatetimeString:
         dt = _parse_datetime_string('2024-06-15T12:30:00Z')
         assert dt.year == 2024 and dt.month == 6 and dt.day == 15
 
-    def test_space_separated(self):
-        from datetime import datetime
-
+    def test_non_iso_rejected(self):
         from modules.compute.operations.filter import _parse_datetime_string
 
-        dt = _parse_datetime_string('2024-06-15 12:30:00')
-        assert dt == datetime(2024, 6, 15, 12, 30, 0)
+        with pytest.raises(ValueError, match='Accepted format: ISO 8601'):
+            _parse_datetime_string('2024-06-15 12:30:00')
 
     def test_invalid_raises(self):
         from modules.compute.operations.filter import _parse_datetime_string

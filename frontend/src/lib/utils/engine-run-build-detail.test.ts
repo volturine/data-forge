@@ -165,4 +165,75 @@ describe('engineRunBuildDetail', () => {
 		expect(detail.cancelled_at).toBe('2026-04-10T10:15:00Z');
 		expect(detail.cancelled_by).toBe('test@example.com');
 	});
+
+	it('uses persisted latest_resources when full resource history is absent', () => {
+		const run = makeRun({
+			status: 'success',
+			result_json: {
+				current_output_id: 'output-ds-1',
+				current_output_name: 'output_salary_predictions',
+				latest_resources: {
+					sampled_at: '2026-04-08T12:01:00Z',
+					cpu_percent: 62,
+					memory_mb: 256,
+					memory_limit_mb: 512,
+					active_threads: 6,
+					max_threads: 8
+				},
+				resources: []
+			}
+		});
+		const detail = engineRunBuildDetail(run);
+
+		expect(detail.status).toBe('completed');
+		expect(detail.resources).toEqual([]);
+		expect(detail.latest_resources?.cpu_percent).toBe(62);
+		expect(detail.latest_resources?.memory_mb).toBe(256);
+	});
+
+	it('ignores incomplete persisted resource and log entries instead of defaulting fields', () => {
+		const run = makeRun({
+			result_json: {
+				resources: [
+					{
+						cpu_percent: 62,
+						memory_mb: 256,
+						active_threads: 6
+					}
+				],
+				latest_resources: {
+					cpu_percent: 30,
+					memory_mb: 120,
+					active_threads: 2
+				},
+				logs: [
+					{
+						message: 'missing required fields'
+					}
+				],
+				results: [
+					{
+						status: 'success',
+						output_name: 'missing tab metadata'
+					}
+				]
+			}
+		});
+		const detail = engineRunBuildDetail(run);
+
+		expect(detail.resources).toEqual([]);
+		expect(detail.latest_resources).toBeNull();
+		expect(detail.logs).toEqual([]);
+		expect(detail.results).toEqual([]);
+	});
+
+	it('does not fall back output name from datasource_name', () => {
+		const run = makeRun({
+			result_json: {
+				datasource_name: 'should-not-be-used'
+			}
+		});
+
+		expect(engineRunOutputName(run)).toBeNull();
+	});
 });

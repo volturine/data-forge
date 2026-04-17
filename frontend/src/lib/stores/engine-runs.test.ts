@@ -70,7 +70,7 @@ describe('EngineRunsStore', () => {
 		expect(store.status).toBe('connected');
 		expect(store.runs).toEqual(runs);
 		expect(store.error).toBeNull();
-		expect(mockListEngineRuns).toHaveBeenCalledWith({ datasource_id: 'ds-1' });
+		expect(mockListEngineRuns).toHaveBeenCalledWith({ datasource_id: 'ds-1' }, expect.anything());
 		store.close();
 	});
 
@@ -131,7 +131,10 @@ describe('EngineRunsStore', () => {
 
 		store.load({ datasource_id: 'ds-2' });
 		expect(mockListEngineRuns).toHaveBeenCalledTimes(2);
-		expect(mockListEngineRuns).toHaveBeenLastCalledWith({ datasource_id: 'ds-2' });
+		expect(mockListEngineRuns).toHaveBeenLastCalledWith(
+			{ datasource_id: 'ds-2' },
+			expect.anything()
+		);
 		store.close();
 	});
 
@@ -161,14 +164,37 @@ describe('EngineRunsStore', () => {
 	test('params are forwarded to listEngineRuns', () => {
 		const store = new EngineRunsStore();
 		store.load({ datasource_id: 'ds-42', limit: 25 });
-		expect(mockListEngineRuns).toHaveBeenCalledWith({ datasource_id: 'ds-42', limit: 25 });
+		expect(mockListEngineRuns).toHaveBeenCalledWith(
+			{ datasource_id: 'ds-42', limit: 25 },
+			expect.anything()
+		);
 		store.close();
 	});
 
 	test('no params calls listEngineRuns with undefined', () => {
 		const store = new EngineRunsStore();
 		store.load();
-		expect(mockListEngineRuns).toHaveBeenCalledWith(undefined);
+		expect(mockListEngineRuns).toHaveBeenCalledWith(undefined, expect.anything());
+		store.close();
+	});
+
+	test('refresh coalesces while a request is in flight', async () => {
+		const pending: { resolve: ((runs: EngineRun[]) => void) | null } = { resolve: null };
+		mockListEngineRuns.mockImplementation(() => ({
+			match: (onOk: (runs: EngineRun[]) => void) => {
+				pending.resolve = onOk;
+			}
+		}));
+
+		const store = new EngineRunsStore();
+		store.load({ datasource_id: 'ds-1' });
+		store.refresh();
+
+		expect(mockListEngineRuns).toHaveBeenCalledTimes(1);
+		pending.resolve?.([makeRun()]);
+		await Promise.resolve();
+
+		expect(mockListEngineRuns).toHaveBeenCalledTimes(2);
 		store.close();
 	});
 

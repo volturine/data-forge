@@ -39,8 +39,8 @@ describe('isUuid', () => {
 });
 
 describe('buildOutputConfig', () => {
-	test('builds config with defaults', () => {
-		const config = buildOutputConfig({ outputId: 'abc-123' });
+	test('builds config with required explicit values', () => {
+		const config = buildOutputConfig({ outputId: 'abc-123', name: 'Export', branch: 'main' });
 		expect(config.result_id).toBe('abc-123');
 		expect(config.format).toBe('parquet');
 		expect(config.filename).toBe('export');
@@ -48,29 +48,31 @@ describe('buildOutputConfig', () => {
 		expect(config.iceberg).toEqual({
 			namespace: 'outputs',
 			table_name: 'export',
-			branch: 'master'
+			branch: 'main'
 		});
 	});
 
 	test('slugifies name for filename and table_name', () => {
-		const config = buildOutputConfig({ outputId: 'x', name: 'My Report' });
+		const config = buildOutputConfig({ outputId: 'x', name: 'My Report', branch: 'main' });
 		expect(config.filename).toBe('my_report');
 		expect((config.iceberg as Record<string, unknown>).table_name).toBe('my_report');
 	});
 
 	test('uses custom branch', () => {
-		const config = buildOutputConfig({ outputId: 'x', branch: 'dev' });
+		const config = buildOutputConfig({ outputId: 'x', name: 'Export', branch: 'dev' });
 		expect((config.iceberg as Record<string, unknown>).branch).toBe('dev');
 	});
 
-	test('falls back to master for empty branch', () => {
-		const config = buildOutputConfig({ outputId: 'x', branch: '' });
-		expect((config.iceberg as Record<string, unknown>).branch).toBe('master');
+	test('throws for empty branch', () => {
+		expect(() => buildOutputConfig({ outputId: 'x', name: 'Export', branch: '' })).toThrow(
+			/branch is required/
+		);
 	});
 
-	test('falls back to master for null branch', () => {
-		const config = buildOutputConfig({ outputId: 'x', branch: null });
-		expect((config.iceberg as Record<string, unknown>).branch).toBe('master');
+	test('throws for missing name', () => {
+		expect(() => buildOutputConfig({ outputId: 'x', name: '', branch: 'main' })).toThrow(
+			/name is required/
+		);
 	});
 });
 
@@ -79,30 +81,42 @@ describe('ensureTabDefaults', () => {
 
 	test('preserves existing filename and iceberg.table_name', () => {
 		const tab = makeTab({
-			output: { result_id: validUuid, format: 'parquet', filename: 'my_export' }
+			output: {
+				result_id: validUuid,
+				format: 'parquet',
+				filename: 'my_export',
+				build_mode: 'full',
+				iceberg: { namespace: 'outputs', table_name: 'my_export', branch: 'master' }
+			}
 		});
 		const result = ensureTabDefaults(tab, 0);
 		expect(result.output.filename).toBe('my_export');
 		expect((result.output.iceberg as Record<string, unknown>).table_name).toBe('my_export');
 	});
 
-	test('does not generate timestamp-based name when filename is missing', () => {
+	test('throws when filename is missing', () => {
 		const tab = makeTab({
-			output: { result_id: validUuid, format: 'parquet', filename: '' }
+			output: {
+				result_id: validUuid,
+				format: 'parquet',
+				filename: '',
+				build_mode: 'full',
+				iceberg: { namespace: 'outputs', table_name: 'my_export', branch: 'master' }
+			}
 		});
-		const result = ensureTabDefaults(tab, 0);
-		expect(result.output.filename).not.toMatch(/^output-\d+$/);
-		expect(result.output.filename).toBe('export');
+		expect(() => ensureTabDefaults(tab, 0)).toThrow(/output.filename/);
 	});
 
-	test('does not generate timestamp-based iceberg.table_name when iceberg is missing', () => {
+	test('throws when iceberg config is missing', () => {
 		const tab = makeTab({
-			output: { result_id: validUuid, format: 'parquet', filename: '' }
+			output: {
+				result_id: validUuid,
+				format: 'parquet',
+				filename: 'my_export',
+				build_mode: 'full'
+			}
 		});
-		const result = ensureTabDefaults(tab, 0);
-		const iceberg = result.output.iceberg as Record<string, unknown>;
-		expect(iceberg.table_name).not.toMatch(/^output-\d+$/);
-		expect(iceberg.table_name).toBe('export');
+		expect(() => ensureTabDefaults(tab, 0)).toThrow(/output.iceberg/);
 	});
 
 	test('throws for missing result_id', () => {
@@ -126,7 +140,9 @@ function makeTab(overrides: Partial<AnalysisTab> = {}): AnalysisTab {
 		output: {
 			result_id: '550e8400-e29b-41d4-a716-446655440000',
 			format: 'parquet',
-			filename: 'source_1'
+			filename: 'source_1',
+			build_mode: 'full',
+			iceberg: { namespace: 'outputs', table_name: 'source_1', branch: 'master' }
 		},
 		steps: [],
 		...overrides

@@ -15,6 +15,7 @@ import type { BuildRequest } from '$lib/api/compute';
 
 const MAX_LOGS = 500;
 const MAX_RESOURCE_HISTORY = 120;
+const RECONNECT_DELAY_MS = 1_000;
 
 function wireStepState(raw: string): BuildStepState {
 	if (
@@ -51,6 +52,10 @@ export class BuildStreamStore {
 	duration = $state<number | null>(null);
 
 	private connection: { close: () => void } | null = null;
+	private generation = 0;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private shouldReconnect = false;
+	private targetBuildId: string | null = null;
 
 	done = $derived(
 		this.status === 'completed' || this.status === 'failed' || this.status === 'cancelled'
@@ -67,27 +72,19 @@ export class BuildStreamStore {
 
 	start(request: BuildRequest): void {
 		this.reset();
+		const generation = ++this.generation;
+		this.shouldReconnect = true;
 		this.status = 'connecting';
 		void startActiveBuild(request).match(
 			(build) => {
+				if (generation !== this.generation) return;
 				this.applySnapshot(build);
-				this.connection = connectBuildDetailStream(build.build_id, {
-					onSnapshot: (nextBuild: ActiveBuildDetail) => {
-						this.applySnapshot(nextBuild);
-					},
-					onEvent: (event: BuildEvent) => {
-						this.applyEvent(event);
-					},
-					onError: (msg: string) => {
-						this.error = msg;
-						if (!this.done) this.status = 'disconnected';
-					},
-					onClose: () => {
-						if (!this.done) this.status = 'disconnected';
-					}
-				});
+				this.targetBuildId = build.build_id;
+				this.openConnection(build.build_id, generation);
 			},
 			(err) => {
+				if (generation !== this.generation) return;
+				this.shouldReconnect = false;
 				this.error = err.message;
 				this.status = 'disconnected';
 			}
@@ -96,34 +93,28 @@ export class BuildStreamStore {
 
 	watch(buildId: string): void {
 		this.reset();
+		const generation = ++this.generation;
+		this.shouldReconnect = true;
+		this.targetBuildId = buildId;
 		this.buildId = buildId;
 		this.status = 'connecting';
-		this.connection = connectBuildDetailStream(buildId, {
-			onSnapshot: (build: ActiveBuildDetail) => {
-				this.applySnapshot(build);
-			},
-			onEvent: (event: BuildEvent) => {
-				this.applyEvent(event);
-			},
-			onError: (msg: string) => {
-				this.error = msg;
-				if (!this.done) this.status = 'disconnected';
-			},
-			onClose: () => {
-				if (!this.done) this.status = 'disconnected';
-			}
-		});
+		this.openConnection(buildId, generation);
 	}
 
 	close(): void {
+		this.shouldReconnect = false;
+		this.generation += 1;
+		this.clearReconnectTimer();
 		this.connection?.close();
 		this.connection = null;
+		this.status = 'disconnected';
 	}
 
 	reset(): void {
 		this.close();
 		this.status = 'disconnected';
 		this.buildId = null;
+		this.targetBuildId = null;
 		this.engineRunId = null;
 		this.analysisId = null;
 		this.progress = 0;
@@ -142,6 +133,54 @@ export class BuildStreamStore {
 		this.results = [];
 		this.error = null;
 		this.duration = null;
+	}
+
+	private openConnection(buildId: string, generation: number): void {
+		this.clearReconnectTimer();
+		this.connection = connectBuildDetailStream(buildId, {
+			onSnapshot: (build: ActiveBuildDetail) => {
+				if (generation !== this.generation) return;
+				this.applySnapshot(build);
+			},
+			onEvent: (event: BuildEvent) => {
+				if (generation !== this.generation) return;
+				this.applyEvent(event);
+				if (!this.done) this.error = null;
+			},
+			onError: (msg: string) => {
+				if (generation !== this.generation) return;
+				if (!this.done && this.shouldReconnect) return;
+				this.error = msg;
+			},
+			onClose: () => {
+				if (generation !== this.generation) return;
+				this.connection = null;
+				if (!this.shouldReconnect || this.done) {
+					if (!this.done) this.status = 'disconnected';
+					return;
+				}
+				this.scheduleReconnect(buildId, generation);
+			}
+		});
+	}
+
+	private scheduleReconnect(buildId: string, generation: number): void {
+		if (this.reconnectTimer !== null) return;
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			if (generation !== this.generation) return;
+			if (!this.shouldReconnect || this.done) return;
+			if (this.targetBuildId !== buildId) return;
+			if (!this.buildId) this.buildId = buildId;
+			if (this.status === 'disconnected') this.status = 'connecting';
+			this.openConnection(buildId, generation);
+		}, RECONNECT_DELAY_MS);
+	}
+
+	private clearReconnectTimer(): void {
+		if (this.reconnectTimer === null) return;
+		clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = null;
 	}
 
 	applySnapshot(build: ActiveBuildDetail): void {

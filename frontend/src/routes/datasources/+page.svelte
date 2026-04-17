@@ -119,12 +119,12 @@
 	function selectDatasource(id: string | null) {
 		selectedId = id;
 		showConfig = id;
-		selectedBranch = id ? 'master' : null;
+		selectedBranch = null;
 		showComparison = false;
 		if (id) {
 			const ds = datasources.find((d) => d.id === id);
 			const config = (ds?.config ?? {}) as Record<string, unknown>;
-			snapshotConfig = { ...config, branch: 'master' };
+			snapshotConfig = Object.keys(config).length > 0 ? { ...config } : null;
 		} else {
 			snapshotConfig = null;
 		}
@@ -137,18 +137,12 @@
 		const selected = selectedDatasource;
 		if (!selectedId) return;
 		if (!selected) return;
-		if (snapshotConfig?.branch) return;
+		if (snapshotConfig) return;
 		const nextConfig = (selected.config ?? {}) as Record<string, unknown>;
-		const nextBranch = selectedBranch ?? 'master';
-		const travelId = snapshotConfig?.time_travel_snapshot_id as string | undefined;
-		const travelTs = snapshotConfig?.time_travel_snapshot_timestamp_ms as number | undefined;
-		const travelUi = snapshotConfig?.time_travel_ui as Record<string, unknown> | undefined;
-		const merged = { ...nextConfig, branch: nextBranch } as Record<string, unknown>;
-		if (travelId) merged.time_travel_snapshot_id = travelId;
-		if (travelTs) merged.time_travel_snapshot_timestamp_ms = travelTs;
-		if (travelUi) merged.time_travel_ui = travelUi;
+		if (Object.keys(nextConfig).length === 0) return;
+		const merged = { ...nextConfig } as Record<string, unknown>;
 		snapshotConfig = merged;
-		selectedBranch = nextBranch;
+		selectedBranch = typeof merged.branch === 'string' ? merged.branch : null;
 	});
 
 	function handleDelete(id: string) {

@@ -62,10 +62,16 @@ function makeDetail(overrides: Partial<ActiveBuildDetail> = {}): ActiveBuildDeta
 	};
 }
 
-function renderPreview(detail?: ActiveBuildDetail) {
+function renderPreview(
+	detail?: ActiveBuildDetail,
+	props?: {
+		requestJson?: Record<string, unknown> | null;
+		resultJson?: Record<string, unknown> | null;
+	}
+) {
 	const store = new BuildStreamStore();
 	if (detail) store.applySnapshot(detail);
-	render(BuildPreview, { props: { store } });
+	render(BuildPreview, { props: { store, ...props } });
 	return store;
 }
 
@@ -594,6 +600,20 @@ describe('BuildPreview', () => {
 		test('does not show results section when no results', () => {
 			renderPreview(makeDetail());
 			expect(screen.queryByTestId('build-results')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('payload tab', () => {
+		test('shows request and result payloads only in the payload panel', async () => {
+			renderPreview(makeDetail(), {
+				requestJson: { analysis_id: 'a-1', steps: [{ type: 'select' }] },
+				resultJson: { rows_written: 10, output_id: 'out-1' }
+			});
+
+			await fireEvent.click(screen.getByRole('tab', { name: /Payload/i }));
+			const panel = screen.getByTestId('build-payload-panel');
+			expect(within(panel).getByTestId('build-payload-request')).toHaveTextContent('analysis_id');
+			expect(within(panel).getByTestId('build-payload-result')).toHaveTextContent('rows_written');
 		});
 	});
 });

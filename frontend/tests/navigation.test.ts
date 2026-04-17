@@ -90,21 +90,20 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 });
 
-test.describe('Navigation – settings via sidebar', () => {
-	test('settings button navigates to profile page system tab', async ({ page }) => {
+test.describe('Navigation – profile access', () => {
+	test('profile link navigates to profile page', async ({ page }) => {
 		await page.goto('/');
 		await waitForAppShell(page);
-		await page.getByRole('button', { name: 'Settings' }).click();
+		await page.getByRole('link', { name: 'Profile' }).click();
 
-		// Should navigate to profile page with system tab
-		await page.waitForURL(/\/profile#system/, { timeout: 10_000 });
+		await page.waitForURL(/\/profile/, { timeout: 10_000 });
 		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
+		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
 
-		await screenshot(page, 'navigation', 'settings-via-sidebar');
+		await screenshot(page, 'navigation', 'profile-via-sidebar');
 	});
 });
 

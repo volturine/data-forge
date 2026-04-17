@@ -538,7 +538,7 @@ class TestConvertNotificationConfig:
         assert result['recipient'] == '111,222'
         assert result['subscriber_ids'] == ['111', '222']
 
-    def test_camelCase_support(self):
+    def test_camelcase_fields_are_ignored(self):
         result = convert_notification_config(
             {
                 'inputColumns': ['a', 'b'],
@@ -547,10 +547,10 @@ class TestConvertNotificationConfig:
                 'subjectTemplate': 'sub',
             },
         )
-        assert result['input_columns'] == ['a', 'b']
-        assert result['output_column'] == 'stat'
-        assert result['message_template'] == 'tpl'
-        assert result['subject_template'] == 'sub'
+        assert result['input_columns'] == []
+        assert result['output_column'] == 'notification_status'
+        assert result['message_template'] == '{{message}}'
+        assert result['subject_template'] == 'Notification'
 
     def test_recipient_column_passthrough(self):
         result = convert_notification_config({'recipient_column': 'chat'})

@@ -18,7 +18,7 @@
 		Settings,
 		CirclePause,
 		CirclePlay,
-		Braces
+		FileCode
 	} from 'lucide-svelte';
 	import { css, cx, tabButton, chip, callout, spinner } from '$lib/styles/panda';
 	import { buildStepLabel } from '$lib/utils/build-step-label';
@@ -92,7 +92,7 @@
 		if (store.status === 'failed' || store.status === 'disconnected') return 'error' as const;
 		return 'accent' as const;
 	});
-	const showCancel = $derived(!!onCancel && canCancel && store.status === 'running');
+	const showCancel = $derived(!!onCancel && canCancel);
 
 	const memoryWarning = $derived(store.memoryPercent > MEMORY_WARN_THRESHOLD);
 
@@ -452,7 +452,7 @@
 				onclick={() => (activeTab = 'payload')}
 			>
 				<span class={cx(rowClass, css({ gap: '1' }))}>
-					<Braces size={12} />
+					<FileCode size={12} />
 					Payload
 				</span>
 			</button>

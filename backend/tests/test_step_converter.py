@@ -24,14 +24,14 @@ def test_convert_groupby_config_prefers_group_by() -> None:
     assert result['aggregations'] == [{'column': 'score', 'function': 'sum', 'alias': 'total'}]
 
 
-def test_convert_groupby_config_falls_back_to_legacy_groupby() -> None:
+def test_convert_groupby_config_ignores_legacy_groupby() -> None:
     result = convert_groupby_config(
         {
             'groupBy': ['team'],
             'aggregations': [{'column': 'score', 'function': 'sum'}],
         },
     )
-    assert result['group_by'] == ['team']
+    assert result['group_by'] == []
     assert result['aggregations'] == [{'column': 'score', 'function': 'sum', 'alias': None}]
 
 

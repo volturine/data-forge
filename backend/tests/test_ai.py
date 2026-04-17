@@ -626,7 +626,7 @@ class TestConvertAIConfig:
         config = {
             'provider': 'openai',
             'model': 'gpt-4o',
-            'input_column': 'text',
+            'input_columns': ['text'],
             'output_column': 'result',
             'prompt_template': 'Classify: {{text}}',
             'batch_size': 5,
@@ -642,7 +642,7 @@ class TestConvertAIConfig:
         assert result['batch_size'] == 5
         assert result['request_options'] == '{"temperature": 0.2}'
 
-    def test_camelcase_fallback(self):
+    def test_camelcase_fields_are_ignored(self):
         config = {
             'inputColumn': 'text',
             'outputColumn': 'result',
@@ -650,10 +650,10 @@ class TestConvertAIConfig:
             'requestOptions': '{"temperature": 0.5}',
         }
         result = convert_ai_config(config)
-        assert result['input_columns'] == ['text']
-        assert result['output_column'] == 'result'
-        assert result['prompt_template'] == 'Hello {{text}}'
-        assert result['request_options'] == '{"temperature": 0.5}'
+        assert result['input_columns'] == []
+        assert result['output_column'] == 'ai_result'
+        assert result['prompt_template'] == 'Classify this text: {{text}}'
+        assert result['request_options'] is None
 
     def test_multi_column_conversion(self):
         config = {
@@ -664,14 +664,14 @@ class TestConvertAIConfig:
         result = convert_ai_config(config)
         assert result['input_columns'] == ['title', 'body']
 
-    def test_legacy_and_multi_merged(self):
+    def test_legacy_input_column_is_ignored_when_input_columns_present(self):
         config = {
             'input_column': 'extra',
             'input_columns': ['title', 'body'],
             'output_column': 'result',
         }
         result = convert_ai_config(config)
-        assert result['input_columns'] == ['extra', 'title', 'body']
+        assert result['input_columns'] == ['title', 'body']
 
     def test_legacy_no_duplicate(self):
         config = {

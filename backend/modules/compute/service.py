@@ -156,6 +156,7 @@ async def _emit_progress(
     tab_name: str | None,
     current_output_id: str | None = None,
     current_output_name: str | None = None,
+    engine_run_id: str | None = None,
 ) -> None:
     await _emit_build_event(
         emitter,
@@ -171,6 +172,7 @@ async def _emit_progress(
             'tab_name': tab_name,
             'current_output_id': current_output_id,
             'current_output_name': current_output_name,
+            'engine_run_id': engine_run_id,
         },
     )
 
@@ -196,6 +198,7 @@ class ExportDatasourceResult:
     datasource_name: str
     result_meta: dict
     source_datasource_id: str
+    engine_run_id: str
     source_datasource_name: str | None = None
     read_duration_ms: float | None = None
     write_duration_ms: float | None = None
@@ -910,6 +913,7 @@ def _finalize_failed_engine_run(
     total_steps: int | None = None,
     total_tabs: int | None = None,
     resource_config: dict[str, int | None] | None = None,
+    resources: list[dict[str, object]] | None = None,
     result_entry: dict[str, object] | None = None,
     log_entry: dict[str, object] | None = None,
     summary_meta: dict[str, object] | None = None,
@@ -927,6 +931,7 @@ def _finalize_failed_engine_run(
         total_steps=total_steps,
         total_tabs=total_tabs,
         resource_config=resource_config,
+        resources=resources,
         results=[result_entry] if result_entry is not None else None,
         append_logs=[log_entry] if log_entry is not None else None,
     )
@@ -966,6 +971,7 @@ def _build_canonical_engine_run_result(
     total_steps: int | None = None,
     total_tabs: int | None = None,
     resource_config: dict[str, int | None] | None = None,
+    resources: list[dict[str, object]] | None = None,
     results: list[dict[str, object]] | None = None,
     append_logs: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
@@ -991,6 +997,8 @@ def _build_canonical_engine_run_result(
 
     if resource_config is not None:
         result['resource_config'] = resource_config
+    if resources is not None:
+        result['resources'] = [resource for resource in resources if isinstance(resource, dict)]
 
     plan_snapshots = _normalize_query_plan_snapshots(result.get('query_plans'), tab_id=current_tab_id, tab_name=current_tab_name)
     result['query_plans'] = plan_snapshots
@@ -1001,8 +1009,8 @@ def _build_canonical_engine_run_result(
         tab_name=current_tab_name,
     )
 
-    resources = result.get('resources')
-    normalized_resources = [resource for resource in resources if isinstance(resource, dict)] if isinstance(resources, list) else []
+    raw_resources = result.get('resources')
+    normalized_resources = [resource for resource in raw_resources if isinstance(resource, dict)] if isinstance(raw_resources, list) else []
     result['resources'] = normalized_resources
     logs = result.get('logs')
     normalized_logs = [entry for entry in logs if isinstance(entry, dict)] if isinstance(logs, list) else []
@@ -1055,7 +1063,7 @@ def _resolve_branch_value(config: dict) -> str:
     branch = config.get('branch')
     if isinstance(branch, str) and branch.strip():
         return branch.strip()
-    return 'master'
+    raise ValueError('branch is required')
 
 
 def _set_snapshot_metadata(config: dict, snapshot_id: str | None, snapshot_timestamp_ms: int | None) -> dict:
@@ -1214,16 +1222,22 @@ def _resolve_pipeline_datasource_config(
     analysis_tab_id = datasource.get('analysis_tab_id')
     output_to_tab = _pipeline_output_to_tab_id(pipeline)
     if isinstance(analysis_tab_id, str) and analysis_tab_id:
+        analysis_id = pipeline.get('analysis_id')
+        if not isinstance(analysis_id, str) or not analysis_id:
+            raise ValueError('analysis_pipeline analysis_id is required for analysis sources')
         return {
             'source_type': 'analysis',
-            'analysis_id': str(pipeline.get('analysis_id') or ''),
+            'analysis_id': analysis_id,
             'analysis_tab_id': analysis_tab_id,
             **overrides,
         }
     if datasource_id in output_to_tab:
+        analysis_id = pipeline.get('analysis_id')
+        if not isinstance(analysis_id, str) or not analysis_id:
+            raise ValueError('analysis_pipeline analysis_id is required for analysis outputs')
         return {
             'source_type': 'analysis',
-            'analysis_id': str(pipeline.get('analysis_id') or ''),
+            'analysis_id': analysis_id,
             'analysis_tab_id': output_to_tab[datasource_id],
             **overrides,
         }
@@ -1247,9 +1261,12 @@ def _resolve_step_source_config(
     output_to_tab: dict[str, str],
 ) -> dict | None:
     if source_id in output_to_tab:
+        analysis_id = analysis_pipeline.get('analysis_id')
+        if not isinstance(analysis_id, str) or not analysis_id:
+            raise ValueError('analysis_pipeline analysis_id is required for analysis sources')
         return {
             'source_type': 'analysis',
-            'analysis_id': str(analysis_pipeline.get('analysis_id') or ''),
+            'analysis_id': analysis_id,
             'analysis_tab_id': output_to_tab[source_id],
         }
     embedded = _step_source_payload(step_config, source_id)
@@ -1355,7 +1372,7 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
                     'id': right_source,
                     'analysis_tab_id': None,
                     'source_type': datasource_model.source_type,
-                    'config': {'branch': 'master', **datasource_model.config},
+                    'config': dict(datasource_model.config),
                 }
         raw_sources = next_config.get('sources')
         source_ids = [raw_sources] if isinstance(raw_sources, str) else raw_sources if isinstance(raw_sources, list) else []
@@ -1371,7 +1388,7 @@ def build_analysis_pipeline_payload(session: Session, analysis: Analysis, dataso
                     'id': source,
                     'analysis_tab_id': None,
                     'source_type': datasource_model.source_type,
-                    'config': {'branch': 'master', **datasource_model.config},
+                    'config': dict(datasource_model.config),
                 }
             )
         if refs:
@@ -1469,13 +1486,13 @@ def preview_step(
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
-    analysis_id_value = resolved['analysis_id'] or analysis_id
+    analysis_id_value = resolved['analysis_id'] if resolved['analysis_id'] is not None else analysis_id
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Preview requires datasource_config')
 
     if not analysis_id_value:
-        analysis_id_value = f'__preview__{datasource_id}'
+        raise ValueError('Preview requires analysis_id')
 
     config: dict = datasource_config
     _preflight_datasource_for_compute(
@@ -1488,22 +1505,9 @@ def preview_step(
 
     branch = _resolve_branch_value(config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
-    request_payload = _ensure_request_branch(
-        request_json
-        or {
-            'analysis_id': run_analysis_id,
-            'datasource_id': datasource_id,
-            'steps': steps,
-            'target_step_id': target_step_id,
-            'row_limit': row_limit,
-            'page': page,
-            'resource_config': resource_config,
-            'analysis_pipeline': analysis_pipeline,
-            'tab_id': tab_id,
-            'iceberg_options': {'branch': branch},
-        },
-        branch,
-    )
+    if request_json is None:
+        raise ValueError('Preview requires request_json')
+    request_payload = _ensure_request_branch(request_json, branch)
 
     steps = apply_steps(steps)
 
@@ -1672,7 +1676,7 @@ def get_step_schema(
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
-    analysis_id_value = resolved['analysis_id'] or analysis_id
+    analysis_id_value = resolved['analysis_id'] if resolved['analysis_id'] is not None else analysis_id
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Schema fetch requires datasource_config')
@@ -1748,12 +1752,12 @@ def get_step_row_count(
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
-    analysis_id_value = resolved['analysis_id'] or analysis_id
+    analysis_id_value = resolved['analysis_id'] if resolved['analysis_id'] is not None else analysis_id
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Row count requires datasource_config')
     if not analysis_id_value:
-        analysis_id_value = f'__row_count__{datasource_id}'
+        raise ValueError('Row count requires analysis_id')
 
     config: dict = datasource_config
     _preflight_datasource_for_compute(
@@ -1764,18 +1768,9 @@ def get_step_row_count(
     branch = _resolve_branch_value(config)
     tab_name = _tab_name_from_pipeline(analysis_pipeline, tab_id)
 
-    request_payload = _ensure_request_branch(
-        request_json
-        or {
-            'analysis_id': analysis_id_value,
-            'datasource_id': datasource_id,
-            'steps': steps,
-            'target_step_id': target_step_id,
-            'analysis_pipeline': analysis_pipeline,
-            'tab_id': tab_id,
-        },
-        branch,
-    )
+    if request_json is None:
+        raise ValueError('Row count requires request_json')
+    request_payload = _ensure_request_branch(request_json, branch)
 
     steps = apply_steps(steps)
 
@@ -1918,6 +1913,7 @@ def export_data(
     build_mode: str = 'full',
     job_started: Callable[[dict[str, object]], None] | None = None,
     build_stage_event: Callable[[dict[str, object]], None] | None = None,
+    resources: list[dict[str, object]] | None = None,
 ) -> ExportDatasourceResult:
     if result_id is None:
         raise ValueError('Output exports require result_id')
@@ -1934,7 +1930,7 @@ def export_data(
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
-    analysis_id_value = resolved['analysis_id'] or analysis_id
+    analysis_id_value = resolved['analysis_id'] if resolved['analysis_id'] is not None else analysis_id
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Export requires datasource_config')
@@ -1948,23 +1944,9 @@ def export_data(
     existing_output_ds = session.get(DataSource, result_id)
     run_kind = _result_kind(existing_output_ds)
 
-    request_payload = _ensure_request_branch(
-        request_json
-        or {
-            'analysis_id': analysis_id_value,
-            'datasource_id': datasource_id,
-            'steps': steps,
-            'target_step_id': target_step_id,
-            'format': 'parquet',
-            'filename': filename,
-            'destination': 'datasource',
-            'iceberg_options': iceberg_options,
-            'analysis_pipeline': analysis_pipeline,
-            'tab_id': tab_id,
-            'build_mode': build_mode,
-        },
-        branch,
-    )
+    if request_json is None:
+        raise ValueError('Export requires request_json')
+    request_payload = _ensure_request_branch(request_json, branch)
 
     steps = apply_steps(steps)
 
@@ -2014,6 +1996,7 @@ def export_data(
             triggered_by=triggered_by,
         ),
     )
+    session.info['active_build_engine_run_id'] = run_response.id
 
     try:
         job_id = engine.export(
@@ -2255,6 +2238,7 @@ def export_data(
             total_steps=len(export_steps) + 2,
             total_tabs=1,
             resource_config=_resource_summary(engine),
+            resources=resources,
             results=[
                 _result_entry(
                     tab_id=tab_id,
@@ -2296,6 +2280,7 @@ def export_data(
             datasource_name=datasource_name,
             result_meta=result_meta,
             source_datasource_id=datasource_id,
+            engine_run_id=run_response.id,
             source_datasource_name=source_datasource_name,
             read_duration_ms=float(read_duration_ms) if isinstance(read_duration_ms, (int, float)) else None,
             write_duration_ms=write_duration_ms,
@@ -2331,6 +2316,7 @@ def export_data(
             total_steps=len(export_steps) + 2,
             total_tabs=1,
             resource_config=_resource_summary(engine),
+            resources=resources,
             result_entry=_result_entry(
                 tab_id=tab_id,
                 tab_name=tab_name,
@@ -2379,7 +2365,7 @@ def download_step(
     steps = resolved['steps']
     target_step_id = resolved['target_step_id']
     datasource_config = resolved['datasource_config']
-    analysis_id_value = resolved['analysis_id'] or analysis_id
+    analysis_id_value = resolved['analysis_id'] if resolved['analysis_id'] is not None else analysis_id
 
     if not isinstance(datasource_config, dict):
         raise ValueError('Download requires datasource_config')
@@ -2390,7 +2376,7 @@ def download_step(
     )
 
     if not analysis_id_value:
-        analysis_id_value = f'__download__{datasource_id}'
+        raise ValueError('Download requires analysis_id')
 
     download_steps = [step for step in steps if step.get('type') != 'download']
     target_step = next((step for step in steps if step.get('id') == target_step_id), None)
@@ -2662,6 +2648,7 @@ async def _stream_engine_events(
     *,
     engine,
     job_id: str,
+    engine_run_id: str | None = None,
     build_step_base: int,
     engine_step_offset: int,
     total_steps: int,
@@ -2713,6 +2700,7 @@ async def _stream_engine_events(
                     'tab_name': tab_name,
                     'current_output_id': current_output_id,
                     'current_output_name': current_output_name,
+                    'engine_run_id': engine_run_id,
                 },
             )
             completed_steps += 1
@@ -2729,6 +2717,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
+                engine_run_id=engine_run_id,
             )
 
         step_index = payload.get('step_index')
@@ -2739,6 +2728,7 @@ async def _stream_engine_events(
         payload['tab_name'] = tab_name
         payload['current_output_id'] = current_output_id
         payload['current_output_name'] = current_output_name
+        payload['engine_run_id'] = payload.get('engine_run_id') or engine_run_id
         await _emit_build_event(emitter, payload)
 
         if emitted_type == 'step_complete':
@@ -2758,6 +2748,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
+                engine_run_id=engine_run_id,
             )
         if emitted_type == 'step_failed':
             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -2775,6 +2766,7 @@ async def _stream_engine_events(
                 tab_name=tab_name,
                 current_output_id=current_output_id,
                 current_output_name=current_output_name,
+                engine_run_id=engine_run_id,
             )
             return
 
@@ -2803,6 +2795,7 @@ def _schedule_stream_tasks(
     *,
     engine,
     job_id: str,
+    engine_run_id: str | None = None,
     build_step_base: int,
     engine_step_offset: int,
     total_steps: int,
@@ -2818,6 +2811,7 @@ def _schedule_stream_tasks(
         _stream_engine_events(
             engine=engine,
             job_id=job_id,
+            engine_run_id=engine_run_id,
             build_step_base=build_step_base,
             engine_step_offset=engine_step_offset,
             total_steps=total_steps,
@@ -2846,6 +2840,7 @@ def _start_stream_tasks(
     *,
     engine,
     job_id: str,
+    engine_run_id: str | None = None,
     build_step_base: int,
     engine_step_offset: int,
     total_steps: int,
@@ -2872,6 +2867,7 @@ def _start_stream_tasks(
                     loop,
                     engine=engine,
                     job_id=job_id,
+                    engine_run_id=engine_run_id,
                     build_step_base=build_step_base,
                     engine_step_offset=engine_step_offset,
                     total_steps=total_steps,
@@ -2948,6 +2944,7 @@ async def run_analysis_build_stream(
         tab_name=None,
         current_output_id=None,
         current_output_name=None,
+        engine_run_id=build.current_engine_run_id,
     )
 
     results: list[dict] = []
@@ -3002,20 +2999,33 @@ async def run_analysis_build_stream(
             build_step_base += max(len(steps), 1)
             continue
 
-        filename = output_config.get('filename', f'{tab_name}_out')
+        raw_filename = output_config.get('filename')
+        if not isinstance(raw_filename, str) or not raw_filename.strip():
+            raise ValueError(f'Build output filename is required for tab {tab_id}')
+        filename = raw_filename.strip()
         result_id = output_config.get('result_id') if isinstance(output_config.get('result_id'), str) else None
         current_output_id, current_output_name = _resolve_live_output_metadata(output_config, tab_name)
         iceberg_cfg = output_config.get('iceberg')
-        iceberg_options = (
-            {
-                'table_name': iceberg_cfg.get('table_name', 'exported_data'),
-                'namespace': iceberg_cfg.get('namespace', 'outputs'),
-                'branch': iceberg_cfg.get('branch', 'master'),
-            }
-            if isinstance(iceberg_cfg, dict)
-            else None
-        )
-        tab_build_mode = output_config.get('build_mode', 'full')
+        if not isinstance(iceberg_cfg, dict):
+            raise ValueError(f'Build output iceberg config is required for tab {tab_id}')
+        table_name = iceberg_cfg.get('table_name')
+        namespace = iceberg_cfg.get('namespace')
+        branch = iceberg_cfg.get('branch')
+        if not isinstance(table_name, str) or not table_name.strip():
+            raise ValueError(f'Build output iceberg.table_name is required for tab {tab_id}')
+        if not isinstance(namespace, str) or not namespace.strip():
+            raise ValueError(f'Build output iceberg.namespace is required for tab {tab_id}')
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError(f'Build output iceberg.branch is required for tab {tab_id}')
+        iceberg_options = {
+            'table_name': table_name,
+            'namespace': namespace,
+            'branch': branch,
+        }
+        raw_build_mode = output_config.get('build_mode')
+        if raw_build_mode not in {'full', 'incremental', 'recreate'}:
+            raise ValueError(f'Build output build_mode is required for tab {tab_id}')
+        tab_build_mode = raw_build_mode
         build.current_output_id = current_output_id
         build.current_output_name = current_output_name
 
@@ -3067,6 +3077,7 @@ async def run_analysis_build_stream(
                     'tab_name': tab_name,
                     'current_output_id': current_output_id,
                     'current_output_name': current_output_name,
+                    'engine_run_id': build.current_engine_run_id,
                 },
             )
 
@@ -3086,6 +3097,8 @@ async def run_analysis_build_stream(
                 run_id = info.get('engine_run_id')
                 if not isinstance(job_id, str) or engine is None:
                     return
+                if isinstance(run_id, str):
+                    build.current_engine_run_id = run_id
 
                 async def emit_run_started() -> None:
                     payload: dict[str, object] = {
@@ -3112,6 +3125,7 @@ async def run_analysis_build_stream(
                     loop,
                     engine=engine,
                     job_id=job_id,
+                    engine_run_id=run_id if isinstance(run_id, str) else build.current_engine_run_id,
                     build_step_base=current_build_step_base,
                     engine_step_offset=1,
                     total_steps=total_steps,
@@ -3169,6 +3183,7 @@ async def run_analysis_build_stream(
                                     'tab_name': current_tab_name,
                                     'current_output_id': current_output_id_value,
                                     'current_output_name': current_output_name_value,
+                                    'engine_run_id': build.current_engine_run_id,
                                 },
                             )
                             elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -3184,6 +3199,7 @@ async def run_analysis_build_stream(
                                 tab_name=current_tab_name,
                                 current_output_id=current_output_id_value,
                                 current_output_name=current_output_name_value,
+                                engine_run_id=build.current_engine_run_id,
                             )
                         current_write_stage.started = True
                         current_write_stage.started_at = time.perf_counter()
@@ -3201,6 +3217,7 @@ async def run_analysis_build_stream(
                                 'tab_name': current_tab_name,
                                 'current_output_id': current_output_id_value,
                                 'current_output_name': current_output_name_value,
+                                'engine_run_id': build.current_engine_run_id,
                             },
                         )
                         return
@@ -3229,6 +3246,7 @@ async def run_analysis_build_stream(
                                 'tab_name': current_tab_name,
                                 'current_output_id': current_output_id_value,
                                 'current_output_name': current_output_name_value,
+                                'engine_run_id': build.current_engine_run_id,
                             },
                         )
                         elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -3244,6 +3262,7 @@ async def run_analysis_build_stream(
                             tab_name=current_tab_name,
                             current_output_id=current_output_id_value,
                             current_output_name=current_output_name_value,
+                            engine_run_id=build.current_engine_run_id,
                         )
 
                 future = asyncio.run_coroutine_threadsafe(emit_stage_updates(), loop)
@@ -3261,7 +3280,18 @@ async def run_analysis_build_stream(
                 session_gen = get_db()
                 thread_session = next(session_gen)
                 try:
-                    return export_data(
+                    request_json = {
+                        'analysis_pipeline': pipeline,
+                        'analysis_id': analysis_id_value,
+                        'tab_id': current_tab_id,
+                        'target_step_id': current_target_step_id,
+                        'format': 'parquet',
+                        'filename': current_filename,
+                        'destination': 'datasource',
+                        'result_id': current_result_id,
+                        'iceberg_options': current_iceberg_options,
+                    }
+                    result = export_data(
                         session=thread_session,
                         manager=manager,
                         target_step_id=current_target_step_id,
@@ -3271,11 +3301,15 @@ async def run_analysis_build_stream(
                         analysis_id=analysis_id_value,
                         tab_id=current_tab_id,
                         triggered_by=triggered_by,
+                        request_json=request_json,
                         result_id=current_result_id,
                         build_mode=current_build_mode,
                         job_started=handle_job_started,
                         build_stage_event=handle_stage_event,
+                        resources=[item.model_dump(mode='json') for item in build.resources],
                     )
+                    build.current_engine_run_id = result.engine_run_id
+                    return result
                 finally:
                     thread_session.close()
                     session_gen.close()
@@ -3343,6 +3377,7 @@ async def run_analysis_build_stream(
                         'tab_name': tab_name,
                         'current_output_id': current_output_id,
                         'current_output_name': current_output_name,
+                        'engine_run_id': build.current_engine_run_id,
                     },
                 )
             elif not read_stage.completed:
@@ -3361,6 +3396,7 @@ async def run_analysis_build_stream(
                         'tab_name': tab_name,
                         'current_output_id': current_output_id,
                         'current_output_name': current_output_name,
+                        'engine_run_id': build.current_engine_run_id,
                     },
                 )
             results.append(
@@ -3420,6 +3456,7 @@ async def run_analysis_build_stream(
                 'results': results,
                 'duration_ms': elapsed_ms,
                 'error': 'One or more tabs failed',
+                'engine_run_id': build.current_engine_run_id,
                 'current_output_id': build.current_output_id,
                 'current_output_name': build.current_output_name,
             },
@@ -3434,6 +3471,7 @@ async def run_analysis_build_stream(
                 'tabs_built': tabs_built,
                 'results': results,
                 'duration_ms': elapsed_ms,
+                'engine_run_id': build.current_engine_run_id,
                 'current_output_id': build.current_output_id,
                 'current_output_name': build.current_output_name,
             },

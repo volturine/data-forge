@@ -222,93 +222,15 @@ export function getDefaultConfig(stepType: string): StepConfig {
 }
 
 /**
- * Ensure a config has all required fields by merging with defaults.
- * Used when loading saved analyses to handle backward compatibility.
- * Preserves all existing config fields while adding any missing defaults.
+ * Normalize step config without inventing missing values.
  */
 export function normalizeConfig(stepType: string, config: Record<string, unknown>): StepConfig {
-	const normalizedType = normalizePipelineStepType(stepType);
-	const defaults = getDefaultConfig(normalizedType);
-
 	if (isChartStepType(stepType)) {
 		const chartAliasType = chartTypeForStep(stepType);
-		config = chartAliasType ? { ...config, chart_type: chartAliasType } : config;
-	}
-	if (stepType === 'export') {
-		const cleaned = { ...config } as Record<string, unknown>;
-		delete cleaned.iceberg_options;
-		cleaned.destination = 'download';
-		return { ...defaults, ...cleaned };
-	}
-
-	// Migrate legacy groupBy → group_by (camelCase → snake_case)
-	if (stepType === 'groupby' && 'groupBy' in config && !('group_by' in config)) {
-		config = { ...config, group_by: config.groupBy };
-		delete config.groupBy;
-	}
-
-	// Migrate legacy topk keys: by → column, reverse → descending
-	if (stepType === 'topk') {
-		if ('by' in config && !('column' in config)) {
-			config = { ...config, column: config.by };
-			delete config.by;
-		}
-		if ('reverse' in config && !('descending' in config)) {
-			config = { ...config, descending: config.reverse };
-			delete config.reverse;
+		if (chartAliasType) {
+			return { ...cloneJson(config), chart_type: chartAliasType };
 		}
 	}
 
-	// Handle filter-specific normalization for backward compatibility
-	if (stepType === 'filter' && Array.isArray(config.conditions)) {
-		const conditions = config.conditions as Array<Record<string, unknown>>;
-		config.conditions = conditions.map((cond) => ({
-			column: cond.column ?? '',
-			operator: cond.operator ?? '=',
-			value: cond.value ?? '',
-			value_type: cond.value_type ?? 'string',
-			...(cond.compare_column ? { compare_column: cond.compare_column } : {})
-		}));
-	}
-
-	const merged = { ...defaults, ...config };
-
-	// Stabilize null/undefined → '' for string fields bound to HTML inputs.
-	// HTML inputs convert null to "", which would mutate config and trigger
-	// infinite reactivity loops with TanStack Query keys.
-	if (normalizedType === 'ai') {
-		const ai = merged as Record<string, unknown>;
-		if (!Array.isArray(ai.input_columns)) {
-			ai.input_columns = [];
-		}
-		ai.endpoint_url = ai.endpoint_url ?? '';
-		ai.api_key = ai.api_key ?? '';
-	}
-	if (normalizedType === 'notification') {
-		const notif = merged as Record<string, unknown>;
-		if (!Array.isArray(notif.input_columns)) {
-			notif.input_columns = [];
-		}
-		notif.bot_token = notif.bot_token ?? '';
-		notif.recipient = notif.recipient ?? '';
-		notif.recipient_source = notif.recipient_source ?? 'manual';
-		notif.recipient_column = notif.recipient_column ?? '';
-		if (!Array.isArray(notif.subscriber_ids)) {
-			notif.subscriber_ids = [];
-		}
-	}
-	if (normalizedType === 'chart') {
-		const chart = merged as Record<string, unknown>;
-		chart.x_axis_label = chart.x_axis_label ?? '';
-		chart.y_axis_label = chart.y_axis_label ?? '';
-		chart.title = chart.title ?? '';
-		if (!Array.isArray(chart.overlays)) {
-			chart.overlays = [];
-		}
-		if (!Array.isArray(chart.reference_lines)) {
-			chart.reference_lines = [];
-		}
-	}
-
-	return merged;
+	return cloneJson(config);
 }

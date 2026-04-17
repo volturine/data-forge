@@ -30,8 +30,18 @@ export type AnalysisPipelinePayload = {
 
 function toDatasourceConfig(config: Record<string, unknown>): AnalysisTabDatasourceConfig {
 	const branchRaw = config.branch;
-	const branch = typeof branchRaw === 'string' && branchRaw.trim() ? branchRaw : 'master';
+	if (typeof branchRaw !== 'string' || !branchRaw.trim()) {
+		throw new Error('datasource config.branch is required');
+	}
+	const branch = branchRaw.trim();
 	return { ...config, branch };
+}
+
+function mergeDatasourceConfig(
+	persisted: Record<string, unknown>,
+	overrides: Record<string, unknown>
+): AnalysisTabDatasourceConfig {
+	return normalizeSnapshotConfig({ ...persisted, ...overrides });
 }
 
 /**
@@ -66,7 +76,7 @@ function collectTabSourceIds(tab: AnalysisTab): Set<string> {
 		const config = step.config ?? {};
 		if (!isRecord(config)) continue;
 		const cfg = config;
-		const rightSource = cfg.right_source ?? cfg.rightDataSource;
+		const rightSource = cfg.right_source;
 		if (typeof rightSource === 'string' && rightSource) ids.add(rightSource);
 		const sources = cfg.sources;
 		if (typeof sources === 'string' && sources) ids.add(sources);
@@ -109,49 +119,15 @@ function toPipelineDatasource(args: {
 	}
 	const ds = args.datasourceMap.get(args.datasource.id);
 	if (!ds) return null;
+	if (!isRecord(ds.config)) {
+		throw new Error(`datasource ${ds.id} config is invalid`);
+	}
 	return {
 		id: args.datasource.id,
 		analysis_tab_id: null,
 		source_type: ds.source_type,
-		config: { ...toDatasourceConfig(ds.config), ...config }
+		config: mergeDatasourceConfig(ds.config, config)
 	};
-}
-
-function enrichStepConfig(args: {
-	config: Record<string, unknown>;
-	datasourceMap: Map<string, DataSource>;
-	outputById: Map<string, string>;
-}): Record<string, unknown> {
-	const next = { ...args.config };
-	const rightSource = next.right_source ?? next.rightDataSource;
-	if (typeof rightSource === 'string' && rightSource && !args.outputById.has(rightSource)) {
-		const ds = args.datasourceMap.get(rightSource);
-		if (!ds) return next;
-		next.right_source_datasource = {
-			id: rightSource,
-			analysis_tab_id: null,
-			source_type: ds.source_type,
-			config: toDatasourceConfig(ds.config)
-		} satisfies PipelineDatasource;
-	}
-	const sources = next.sources;
-	const ids = typeof sources === 'string' ? [sources] : Array.isArray(sources) ? sources : [];
-	const refs: PipelineDatasource[] = [];
-	for (const source of ids) {
-		if (typeof source !== 'string' || !source || args.outputById.has(source)) continue;
-		const ds = args.datasourceMap.get(source);
-		if (!ds) continue;
-		refs.push({
-			id: source,
-			analysis_tab_id: null,
-			source_type: ds.source_type,
-			config: toDatasourceConfig(ds.config)
-		});
-	}
-	if (refs.length > 0) {
-		next.source_datasources = refs;
-	}
-	return next;
 }
 
 export function buildAnalysisPipelinePayload(
@@ -202,14 +178,7 @@ export function buildAnalysisPipelinePayload(
 			name: tab.name,
 			datasource,
 			output: { ...tab.output, result_id: outputId },
-			steps: applySteps(tab.steps ?? []).map((step) => {
-				const config = step.config;
-				if (!isRecord(config)) return step;
-				return {
-					...step,
-					config: enrichStepConfig({ config, datasourceMap, outputById })
-				};
-			})
+			steps: applySteps(tab.steps ?? [])
 		};
 	});
 
@@ -239,17 +208,23 @@ export function buildDatasourceConfig(args: {
 
 export function buildDatasourcePipelinePayload(args: {
 	datasource: DataSource;
-	datasourceConfig?: Record<string, unknown> | null;
+	datasourceConfig: Record<string, unknown>;
 }): AnalysisPipelinePayload {
 	const datasource = args.datasource;
-	const normalized = normalizeSnapshotConfig(args.datasourceConfig ?? { branch: 'master' });
-	const branch = normalized.branch.trim() || 'master';
+	const normalized = normalizeSnapshotConfig(args.datasourceConfig);
+	const branch = normalized.branch.trim();
+	if (!branch) {
+		throw new Error('datasourceConfig.branch is required');
+	}
 	const normalizedConfig: AnalysisTabDatasourceConfig = { ...normalized, branch };
-	const filename = (datasource.name ?? 'export').replace(/\s+/g, '_').toLowerCase();
+	if (!datasource.name || !datasource.name.trim()) {
+		throw new Error('datasource.name is required');
+	}
+	const filename = datasource.name.trim().replace(/\s+/g, '_').toLowerCase();
 	const tabs: PipelineTab[] = [
 		{
 			id: `datasource-${datasource.id}`,
-			name: datasource.name ?? 'Datasource',
+			name: datasource.name,
 			datasource: {
 				id: datasource.id,
 				analysis_tab_id: null,
@@ -259,7 +234,7 @@ export function buildDatasourcePipelinePayload(args: {
 			output: {
 				result_id: datasource.id,
 				format: 'parquet',
-				filename: datasource.name ?? 'export',
+				filename: datasource.name,
 				build_mode: 'full',
 				iceberg: { namespace: 'outputs', table_name: filename, branch }
 			},

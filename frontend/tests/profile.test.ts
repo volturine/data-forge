@@ -377,21 +377,6 @@ test.describe('Profile – settings redirect', () => {
 // ────────────────────────────────────────────────────────────────────────────────
 
 test.describe('Profile – sidebar navigation', () => {
-	test('sidebar Settings button navigates to /profile#system', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
-
-		await page.getByRole('button', { name: 'Settings' }).click();
-		await page.waitForURL(/\/profile#system/, { timeout: 10_000 });
-
-		await expect(page.getByRole('tab', { name: 'System' })).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
-
-		await screenshot(page, 'profile', 'sidebar-settings-navigation');
-	});
-
 	test('sidebar Profile link navigates to /profile', async ({ page }) => {
 		await page.goto('/');
 		await waitForAppShell(page);
@@ -399,7 +384,12 @@ test.describe('Profile – sidebar navigation', () => {
 		await page.getByRole('link', { name: 'Profile' }).click();
 		await page.waitForURL(/\/profile/, { timeout: 10_000 });
 
-		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
+		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+
+		await screenshot(page, 'profile', 'sidebar-profile-navigation');
 	});
 });
 

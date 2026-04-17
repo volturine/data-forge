@@ -46,6 +46,7 @@ def test_performance_baseline(test_db_session, sample_datasource, sample_analysi
             row_limit=100,
             page=1,
             analysis_id=analysis_id,
+            request_json={'analysis_id': analysis_id, 'analysis_pipeline': pipeline, 'target_step_id': 'source'},
         )
 
         schema_result, schema_ms = _measure(

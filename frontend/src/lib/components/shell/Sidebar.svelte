@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { goto } from '$app/navigation';
 	import {
 		LayoutGrid,
 		Database,
@@ -11,7 +10,6 @@
 		PanelLeftOpen,
 		Sun,
 		Moon,
-		Settings,
 		MessageSquare,
 		Cpu,
 		LogOut,
@@ -25,8 +23,6 @@
 		onToggle: () => void;
 		theme: 'light' | 'dark';
 		onToggleTheme: () => void;
-		/** @deprecated Settings now live under /profile#system */
-		onOpenSettings?: () => void;
 		onOpenEngines: () => void;
 		onOpenChat: () => void;
 		onOpenNamespace: () => void;
@@ -44,7 +40,6 @@
 		onToggle,
 		theme,
 		onToggleTheme,
-		onOpenSettings: _onOpenSettings,
 		onOpenEngines,
 		onOpenChat,
 		onOpenNamespace,
@@ -330,21 +325,6 @@
 			</span>
 			{#if !collapsed}
 				<span>Engines</span>
-			{/if}
-		</button>
-
-		<button
-			class={sidebarBtnClass}
-			onclick={() => void goto(resolve('/profile#system' as '/'))}
-			title={collapsed ? 'Settings' : 'Settings'}
-			aria-label="Settings"
-			type="button"
-		>
-			<span class={iconWrapClass}>
-				<Settings size={16} />
-			</span>
-			{#if !collapsed}
-				<span>Settings</span>
 			{/if}
 		</button>
 

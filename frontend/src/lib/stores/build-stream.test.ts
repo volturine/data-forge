@@ -139,6 +139,7 @@ describe('BuildStreamStore', () => {
 		vi.clearAllMocks();
 		mockStartSuccess();
 		vi.stubGlobal('WebSocket', MockWebSocket);
+		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
@@ -199,6 +200,34 @@ describe('BuildStreamStore', () => {
 		expect(store.buildId).toBe('build-2');
 	});
 
+	test('stale close from previous connection does not disconnect a new build', () => {
+		const store = new BuildStreamStore();
+		store.watch('build-1');
+		const first = MockWebSocket.instances[0];
+
+		store.start(BUILD_REQUEST_WITH_NULL_TAB);
+		const second = MockWebSocket.instances[1];
+
+		first.emit('close', { code: 1000, reason: 'stale close' });
+		expect(store.status).toBe('running');
+		expect(store.buildId).toBe('build-1');
+
+		second.emit('open');
+		msg(second, {
+			build_id: 'build-1',
+			type: 'progress',
+			progress: 0.5,
+			elapsed_ms: 1000,
+			estimated_remaining_ms: 1000,
+			current_step: 'Running',
+			current_step_index: 0,
+			total_steps: 1
+		});
+
+		expect(store.status).toBe('running');
+		expect(store.progress).toBe(0.5);
+	});
+
 	test('watch applies snapshot, event, error, and close callbacks', () => {
 		const store = new BuildStreamStore();
 		store.watch('build-3');
@@ -227,14 +256,17 @@ describe('BuildStreamStore', () => {
 		expect(store.currentStep).toBe('Filter');
 
 		socket.emit('error');
-		expect(store.error).toBe('WebSocket connection failed');
-		expect(store.status).toBe('disconnected');
+		expect(store.error).toBeNull();
+		expect(store.status).toBe('running');
 
 		store.watch('build-4');
 		const next = MockWebSocket.instances[1];
 		next.emit('close', { code: 1006, reason: 'Connection lost' });
-		expect(store.status).toBe('disconnected');
-		expect(store.error).toBe('Connection lost');
+		expect(store.status).toBe('connecting');
+		expect(store.error).toBeNull();
+		vi.advanceTimersByTime(1000);
+		expect(MockWebSocket.instances).toHaveLength(3);
+		expect(MockWebSocket.instances[2].url).toContain('/v1/compute/ws/builds/build-4');
 	});
 
 	test('applies snapshot', () => {
@@ -778,7 +810,7 @@ describe('BuildStreamStore', () => {
 		expect(store.steps[0].duration).toBe(200);
 	});
 
-	test('disconnected status on unexpected close', () => {
+	test('reconnects after unexpected close during live build', () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);
 
@@ -786,7 +818,11 @@ describe('BuildStreamStore', () => {
 		socket.emit('open');
 		socket.emit('close', { code: 1006, reason: 'Connection lost' });
 
-		expect(store.status).toBe('disconnected');
+		expect(store.status).toBe('running');
+		expect(store.error).toBeNull();
+		vi.advanceTimersByTime(1000);
+		expect(MockWebSocket.instances).toHaveLength(2);
+		expect(MockWebSocket.instances[1].url).toContain('/v1/compute/ws/builds/build-1');
 	});
 
 	test('surfaces HTTP build-start failures', () => {
@@ -817,6 +853,22 @@ describe('BuildStreamStore', () => {
 
 		socket.emit('close', { code: 1000, reason: '' });
 		expect(store.status).toBe('completed');
+		vi.advanceTimersByTime(1000);
+		expect(MockWebSocket.instances).toHaveLength(1);
+	});
+
+	test('close stops reconnect attempts', () => {
+		const store = new BuildStreamStore();
+		store.watch('build-9');
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		socket.emit('close', { code: 1006, reason: 'Connection lost' });
+
+		store.close();
+		vi.advanceTimersByTime(1000);
+		expect(MockWebSocket.instances).toHaveLength(1);
+		expect(store.status).toBe('disconnected');
 	});
 
 	test('memoryPercent is 0 when no resources', () => {

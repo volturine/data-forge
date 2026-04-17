@@ -23,7 +23,14 @@ from modules.compute.engine import PolarsComputeEngine
 from modules.compute.live import ActiveBuild, registry as active_build_registry
 from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import _analysis_stack_var
-from modules.compute.routes import _safe_close_websocket, _safe_send_json, _wait_for_websocket_disconnect
+from modules.compute.routes import (
+    _safe_close_websocket,
+    _safe_send_json,
+    _wait_for_websocket_disconnect,
+    active_build_stream,
+    build_list_stream,
+    engine_list_stream,
+)
 from modules.compute.utils import await_engine_result
 from modules.datasource.models import DataSource
 from modules.engine_runs import service as engine_run_service
@@ -1199,6 +1206,55 @@ def test_get_active_build_returns_resource_config_summary(client, test_user) -> 
     }
 
 
+def test_get_active_build_by_engine_run_returns_detail(client, test_db_session, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-live-by-run',
+            analysis_name='Analysis Live By Run',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-live-by-run',
+            datasource_id='output-ds-live-by-run',
+            kind='datasource_create',
+            status='running',
+            request_json={'kind': 'datasource_create'},
+            result_json={},
+        ),
+    )
+    test_db_session.commit()
+    asyncio.run(
+        active_build_registry.apply_event(
+            build.build_id,
+            {
+                'type': 'progress',
+                'build_id': build.build_id,
+                'analysis_id': 'analysis-live-by-run',
+                'emitted_at': datetime.now(UTC).isoformat(),
+                'engine_run_id': created.id,
+                'progress': 0.25,
+                'elapsed_ms': 900,
+                'total_steps': 3,
+                'current_step': 'Load source',
+                'current_step_index': 0,
+            },
+        )
+    )
+
+    response = client.get(f'/api/v1/compute/builds/active/by-engine-run/{created.id}')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['build_id'] == build.build_id
+    assert payload['current_engine_run_id'] == created.id
+    assert payload['status'] == 'running'
+
+
 def test_cancel_build_marks_running_run_cancelled(client, test_db_session, test_user) -> None:
     created = engine_run_service.create_engine_run(
         test_db_session,
@@ -1733,6 +1789,7 @@ def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(te
             datasource_name='output_salary_predictions',
             result_meta={'datasource_id': 'output-ds-1', 'datasource_name': 'output_salary_predictions'},
             source_datasource_id='source-ds-1',
+            engine_run_id='run-1',
             read_duration_ms=12.0,
             write_duration_ms=7.0,
         )
@@ -1799,12 +1856,14 @@ def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(te
 
     assert stored.current_output_id == 'output-ds-1'
     assert stored.current_output_name == 'output_salary_predictions'
+    assert stored.current_engine_run_id == 'run-1'
     assert [step.step_name for step in stored.detail().steps] == ['Initial Read', 'Filter rows', 'Write Output']
     assert [step.step_type for step in stored.detail().steps] == ['read', 'filter', 'write']
     assert stored.detail().steps[0].duration_ms is not None
     assert stored.detail().steps[2].duration_ms == 7
     assert stored.detail().results[0].output_name == 'output_salary_predictions'
     complete = next(event for event in emitted if event['type'] == 'complete')
+    assert complete['engine_run_id'] == 'run-1'
     complete_results = complete.get('results')
     assert isinstance(complete_results, list)
     typed_complete_results = cast(list[dict[str, object]], complete_results)
@@ -1941,6 +2000,105 @@ def test_wait_for_websocket_disconnect_treats_receive_disconnect_runtimeerror_as
     websocket.receive = AsyncMock(side_effect=receive_disconnect_race)
 
     asyncio.run(_wait_for_websocket_disconnect(websocket))
+
+
+def test_engine_list_stream_treats_disconnect_runtimeerror_as_normal(monkeypatch) -> None:
+    websocket = MagicMock()
+    websocket.headers.get.return_value = None
+    websocket.query_params.get.return_value = 'default'
+    websocket.accept = AsyncMock()
+    websocket.close = AsyncMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError('Cannot call "receive" once a disconnect message has been received')
+
+    add = AsyncMock()
+    remove = AsyncMock()
+    snap = AsyncMock()
+
+    monkeypatch.setattr('modules.compute.routes._require_websocket_user', AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr('modules.compute.routes._send_engine_snapshot', snap)
+    monkeypatch.setattr('modules.compute.routes._wait_for_websocket_disconnect', boom)
+    monkeypatch.setattr('modules.compute.routes._safe_send_json', AsyncMock())
+    monkeypatch.setattr('modules.compute.routes.engine_registry.add_watcher', add)
+    monkeypatch.setattr('modules.compute.routes.engine_registry.remove_watcher', remove)
+
+    asyncio.run(engine_list_stream(websocket))
+
+    add.assert_awaited_once()
+    remove.assert_awaited_once()
+    snap.assert_awaited_once()
+
+
+def test_build_list_stream_treats_disconnect_runtimeerror_as_normal(monkeypatch) -> None:
+    websocket = MagicMock()
+    websocket.headers.get.return_value = None
+    websocket.query_params.get.return_value = 'default'
+    websocket.accept = AsyncMock()
+    websocket.close = AsyncMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError('Cannot call "send" once a close message has been sent')
+
+    add = AsyncMock()
+    remove = AsyncMock()
+    snap = AsyncMock()
+
+    monkeypatch.setattr('modules.compute.routes._require_websocket_user', AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr('modules.compute.routes._send_build_list_snapshot', snap)
+    monkeypatch.setattr('modules.compute.routes._wait_for_websocket_disconnect', boom)
+    monkeypatch.setattr('modules.compute.routes._safe_send_json', AsyncMock())
+    monkeypatch.setattr('modules.compute.routes.build_registry.add_list_watcher', add)
+    monkeypatch.setattr('modules.compute.routes.build_registry.remove_list_watcher', remove)
+
+    asyncio.run(build_list_stream(websocket))
+
+    add.assert_awaited_once()
+    remove.assert_awaited_once()
+    snap.assert_awaited_once()
+
+
+def test_active_build_stream_treats_disconnect_runtimeerror_as_normal(monkeypatch, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-stream',
+            analysis_name='Stream Build',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    websocket = MagicMock()
+    websocket.headers.get.return_value = None
+    websocket.query_params.get.return_value = 'default'
+    websocket.accept = AsyncMock()
+    websocket.close = AsyncMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError('Unexpected ASGI message after websocket.close')
+
+    add = AsyncMock()
+    remove = AsyncMock()
+    snap = AsyncMock()
+
+    monkeypatch.setattr('modules.compute.routes._require_websocket_user', AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr('modules.compute.routes._send_build_snapshot', snap)
+    monkeypatch.setattr('modules.compute.routes._wait_for_websocket_disconnect', boom)
+    monkeypatch.setattr('modules.compute.routes._safe_send_json', AsyncMock())
+    monkeypatch.setattr('modules.compute.routes.build_registry.add_watcher', add)
+    monkeypatch.setattr('modules.compute.routes.build_registry.remove_watcher', remove)
+
+    asyncio.run(active_build_stream(websocket, build.build_id))
+
+    add.assert_awaited_once()
+    remove.assert_awaited_once()
+    snap.assert_awaited_once_with(websocket, build.build_id)
 
 
 def test_active_build_registry_tracks_and_drops_finished_task(test_user) -> None:
