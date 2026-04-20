@@ -203,4 +203,57 @@ describe('openLockSession', () => {
 		vi.advanceTimersByTime(10_000);
 		expect(socket.sent).toHaveLength(1);
 	});
+
+	test('reconnects and re-watches after a transient close', () => {
+		const statuses: Array<{ ownsLock: boolean } | null> = [];
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'a-6',
+			onStatus: (lock, ownsLock) => {
+				if (!lock) {
+					statuses.push(null);
+					return;
+				}
+				statuses.push({ ownsLock });
+			}
+		});
+
+		const first = MockWebSocket.instances[0];
+		first.emit('open');
+		expect(JSON.parse(first.sent[0])).toEqual({
+			action: 'watch',
+			resource_type: 'analysis',
+			resource_id: 'a-6'
+		});
+
+		first.emit('close', { code: 1006, reason: 'Connection lost' });
+		expect(statuses).toEqual([null]);
+
+		vi.advanceTimersByTime(1_000);
+		expect(MockWebSocket.instances).toHaveLength(2);
+
+		const second = MockWebSocket.instances[1];
+		second.emit('open');
+		expect(JSON.parse(second.sent[0])).toEqual({
+			action: 'watch',
+			resource_type: 'analysis',
+			resource_id: 'a-6'
+		});
+
+		session.close();
+	});
+
+	test('manual close prevents reconnect after socket close', () => {
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: 'a-7',
+			onStatus: () => {}
+		});
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+		session.close();
+		vi.advanceTimersByTime(1_000);
+		expect(MockWebSocket.instances).toHaveLength(1);
+	});
 });

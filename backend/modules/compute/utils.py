@@ -115,6 +115,7 @@ def _engine_result_to_dict(result: EngineResult) -> dict[str, Any]:
         'query_plan': result.query_plan,
         'read_duration_ms': result.read_duration_ms,
         'write_duration_ms': result.write_duration_ms,
+        'collect_duration_ms': result.collect_duration_ms,
     }
 
 

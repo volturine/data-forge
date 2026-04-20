@@ -3,7 +3,7 @@
 	import { preflightExcel, preflightExcelFromPath, previewExcel } from '$lib/api/excel';
 	import type { ExcelParams } from '$lib/api/excel';
 	import DataTable from '$lib/components/common/DataTable.svelte';
-	import { css, cx, button, input, label } from '$lib/styles/panda';
+	import { css, button, label } from '$lib/styles/panda';
 
 	interface ExcelConfig {
 		sheet_name: string;
@@ -425,14 +425,11 @@
 		<button
 			type="button"
 			class={dirty
-				? cx(
-						button({ variant: 'secondary' }),
-						css({
-							backgroundColor: 'bg.warning',
-							color: 'fg.warning',
-							borderColor: 'border.warning'
-						})
-					)
+				? `${button({ variant: 'secondary' })} ${css({
+						backgroundColor: 'bg.warning',
+						color: 'fg.warning',
+						borderColor: 'border.warning'
+					})}`
 				: button({ variant: 'secondary' })}
 			onclick={handleRefreshClick}
 			disabled={disabled || previewLoading}
@@ -476,7 +473,23 @@
 				value={selectedSheet}
 				onchange={(event) => applySheet(event.currentTarget.value)}
 				disabled={disabled || previewLoading || !sheetNames.length}
-				class={cx(input(), css({ paddingX: '3', paddingY: '2', fontSize: 'sm' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3',
+					paddingY: '2',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 			>
 				<option value="">Select sheet</option>
 				{#each sheetNames as sheet (sheet)}
@@ -491,7 +504,23 @@
 				value={selectedTable}
 				onchange={(event) => applyTable(event.currentTarget.value)}
 				disabled={disabled || previewLoading || !selectedSheet}
-				class={cx(input(), css({ paddingX: '3', paddingY: '2', fontSize: 'sm' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3',
+					paddingY: '2',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 			>
 				<option value="">Manual selection</option>
 				{#each tableMap[selectedSheet] ?? [] as table (table)}
@@ -506,7 +535,23 @@
 				value={selectedRange}
 				onchange={(event) => applyNamedRange(event.currentTarget.value)}
 				disabled={disabled || previewLoading}
-				class={cx(input(), css({ paddingX: '3', paddingY: '2', fontSize: 'sm' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3',
+					paddingY: '2',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 			>
 				<option value="">None</option>
 				{#each namedRanges as range (range)}
@@ -528,7 +573,23 @@
 				}}
 				disabled={disabled || previewLoading}
 				placeholder="A1:D50"
-				class={cx(input(), css({ paddingX: '3', paddingY: '2', fontSize: 'sm' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3',
+					paddingY: '2',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 			/>
 			<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
 				Optional A1 range (use Sheet1!A1:D50).
@@ -545,8 +606,17 @@
 			disabled={disabled || previewLoading}
 			class={css({ height: 'iconSm', width: 'iconSm', cursor: 'pointer' })}
 		/>
-		<label for="excel-header" class={cx(label({ variant: 'field' }), css({ margin: '0' }))}
-			>First row is header</label
+		<label
+			for="excel-header"
+			class={css({
+				display: 'block',
+				fontSize: 'sm',
+				fontWeight: 'medium',
+				color: 'fg.secondary',
+				textTransform: 'none',
+				letterSpacing: 'normal',
+				margin: '0'
+			})}>First row is header</label
 		>
 	</div>
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 	import { getAllColumnTypes } from '$lib/utils/column-types';
 
 	interface ColumnTypeOption {
@@ -59,8 +59,8 @@
 	{@const item = payload.option as ColumnTypeOption}
 	<button
 		type="button"
-		class={cx(
-			css({
+		class={css(
+			{
 				minWidth: '0',
 				width: '100%',
 				paddingX: '3',
@@ -77,9 +77,9 @@
 				fontSize: 'sm',
 				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
 				_hover: { backgroundColor: 'bg.hover' }
-			}),
-			css({ minWidth: 'auto', padding: '2', justifyContent: 'center' }),
-			payload.selected && css({ backgroundColor: 'bg.hover' })
+			},
+			{ minWidth: 'auto', padding: '2', justifyContent: 'center' },
+			payload.selected && { backgroundColor: 'bg.hover' }
 		)}
 		onclick={payload.onSelect}
 		role="option"

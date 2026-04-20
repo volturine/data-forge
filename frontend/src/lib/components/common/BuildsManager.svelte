@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
 	import type { EngineRun } from '$lib/api/engine-runs';
+	import { cancelBuild } from '$lib/api/compute';
 	import { getDatasource, listDatasources } from '$lib/api/datasource';
 	import { listAnalyses } from '$lib/api/analysis';
+	import type { ActiveBuildDetail } from '$lib/types/build-stream';
+	import { getActiveBuildByEngineRun } from '$lib/api/build-stream';
+	import { getEngineRun } from '$lib/api/engine-runs';
 	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
-	import { ActiveBuildsStore } from '$lib/stores/active-builds.svelte';
 	import { page as pageState } from '$app/state';
 	import {
 		Search,
 		CircleCheck,
 		CircleX,
 		Loader,
-		Eye,
-		EyeOff,
 		Download,
 		ChevronLeft,
 		ChevronRight,
@@ -22,14 +23,14 @@
 		CalendarClock,
 		Database,
 		RefreshCw,
-		Hash,
-		Activity
+		Hash
 	} from 'lucide-svelte';
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import { css, cx, spinner, button, emptyText, input } from '$lib/styles/panda';
+	import { css, spinner, button, emptyText, input } from '$lib/styles/panda';
 	import {
 		engineRunBuildDetail,
 		engineRunCurrentTabName,
@@ -42,41 +43,33 @@
 	interface Props {
 		compact?: boolean;
 		searchQuery?: string;
-		showPreviews?: boolean;
 		embedded?: boolean;
 	}
 
-	type ActiveBuildRow = {
-		build_id: string;
-		analysis_id: string;
-		analysis_name: string;
-		started_at: string;
-		elapsed_ms: number;
-		current_kind: string | null;
-		current_datasource_id: string | null;
-		current_output_name: string | null;
-		current_step: string | null;
+	type CancelTarget = {
+		id: string;
 	};
 
-	let { compact = false, searchQuery, showPreviews = false, embedded = false }: Props = $props();
+	let { compact = false, searchQuery, embedded = false }: Props = $props();
 
 	let search = $state('');
 	const effectiveSearch = $derived(searchQuery ?? search);
 	let kindFilter = $state<string>('');
-	let statusFilter = $state<'all' | 'running' | 'completed' | 'failed'>('all');
+	let statusFilter = $state<'all' | 'running' | 'completed' | 'failed' | 'cancelled'>('all');
+	let cancelTarget = $state<CancelTarget | null>(null);
+	let cancelPending = $state(false);
+	let cancelError = $state<string | null>(null);
 	let dateFrom = $state('');
 	let dateTo = $state('');
 	let page = $state(1);
 	let branchFilter = $state('');
 	let expandedId = $state<string | null>(null);
-	let expandedActiveBuild = $state<ActiveBuildRow | null>(null);
+	let expandedLiveId = $state<string | null>(null);
 	let expandedStore = $state<BuildStreamStore | null>(null);
 	let sortColumn = $state<string>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	const runDetailStores = new SvelteMap<string, BuildStreamStore>();
-	const activeDetailStores = new SvelteMap<string, BuildStreamStore>();
 	const limit = 50;
-	const previewsVisible = $derived(!compact || showPreviews);
 
 	const queryParams = $derived({
 		analysis_id: (pageState.url.searchParams.get('analysis_id') ?? undefined) || undefined,
@@ -89,26 +82,14 @@
 					? ('success' as const)
 					: statusFilter === 'failed'
 						? ('failed' as const)
-						: undefined,
+						: statusFilter === 'cancelled'
+							? ('cancelled' as const)
+							: undefined,
 		limit,
 		offset: (page - 1) * limit
 	});
 
 	const engineRunsStore = new EngineRunsStore();
-	const activeBuildsStore = new ActiveBuildsStore();
-	const activeBuildSignature = $derived(
-		activeBuildsStore.builds.map((build) => build.build_id).join('|')
-	);
-	const activeRunKeys = $derived.by(() => {
-		const keys = new SvelteSet<string>();
-		for (const build of activeBuildsStore.builds) {
-			keys.add(activeRunKey(build.analysis_id, build.current_kind ?? 'preview'));
-		}
-		return keys;
-	});
-	const activeBuildStatus = $derived(activeBuildsStore.status);
-	let lastActiveBuildSignature = $state('');
-	let hadActiveBuildConnection = $state(false);
 
 	// Network: fetch build history when filters change.
 	$effect(() => {
@@ -117,39 +98,11 @@
 		return () => engineRunsStore.close();
 	});
 
-	// Network: refresh history when the live build set changes.
-	$effect(() => {
-		const signature = activeBuildSignature;
-		if (signature === lastActiveBuildSignature) return;
-		const hadActiveBuilds = lastActiveBuildSignature.length > 0;
-		lastActiveBuildSignature = signature;
-		if (!signature && !hadActiveBuilds) return;
-		engineRunsStore.refresh();
-	});
-
-	// Network: refresh history once the live-build websocket is connected.
-	$effect(() => {
-		const status = activeBuildStatus;
-		if (status !== 'connected') {
-			hadActiveBuildConnection = false;
-			return;
-		}
-		if (hadActiveBuildConnection) return;
-		hadActiveBuildConnection = true;
-		engineRunsStore.refresh();
-	});
-
-	// Side effect: WS connection for live active builds, must be cleaned up on destroy
-	$effect(() => {
-		activeBuildsStore.start();
-		return () => activeBuildsStore.close();
-	});
-
 	const datasourcesQuery = createQuery(() => ({
 		queryKey: ['datasources-lookup'],
 		queryFn: async () => {
 			const result = await listDatasources();
-			if (result.isErr()) return [];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 60_000
@@ -159,7 +112,7 @@
 		queryKey: ['analyses-lookup'],
 		queryFn: async () => {
 			const result = await listAnalyses();
-			if (result.isErr()) return [];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		staleTime: 60_000
@@ -191,7 +144,7 @@
 		queryFn: async () => {
 			if (!datasourceId) return null;
 			const result = await getDatasource(datasourceId);
-			if (result.isErr()) return null;
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
 		enabled: !!datasourceId
@@ -207,16 +160,7 @@
 	});
 
 	const filteredRuns = $derived.by(() => {
-		let result = runs;
-
-		result = result.filter((run) => {
-			if (run.status !== 'running') return true;
-			return !activeRunKeys.has(activeRunKey(run.analysis_id, run.kind));
-		});
-
-		if (!previewsVisible && kindFilter !== 'preview') {
-			result = result.filter((run) => run.kind !== 'preview');
-		}
+		let result = runs.filter((run) => run.kind !== 'preview');
 
 		if (effectiveSearch) {
 			const q = effectiveSearch.toLowerCase();
@@ -258,16 +202,7 @@
 		return sortRuns(result);
 	});
 
-	const visibleActiveBuilds = $derived.by(() => {
-		const current = activeBuildsStore.builds;
-		const expanded = expandedActiveBuild;
-		if (!expanded) return current;
-		if (current.some((build) => build.build_id === expanded.build_id)) return current;
-		if (expandedId !== expanded.build_id) return current;
-		return [expanded, ...current];
-	});
-
-	const hasAnyBuildRows = $derived(activeBuildsStore.count > 0 || filteredRuns.length > 0);
+	const hasAnyBuildRows = $derived(filteredRuns.length > 0);
 
 	function sortRuns(list: EngineRun[]): EngineRun[] {
 		const dir = sortDir === 'asc' ? 1 : -1;
@@ -338,7 +273,6 @@
 
 	function toggleExpand(id: string) {
 		expandedId = expandedId === id ? null : id;
-		if (expandedId === null) expandedActiveBuild = null;
 	}
 
 	function resolveName(id: string, map: Map<string, string>): string {
@@ -374,7 +308,62 @@
 		const status = engineRunStatus(run);
 		if (status === 'running') return 'Running';
 		if (status === 'completed') return 'Success';
+		if (status === 'cancelled') return 'Cancelled';
 		return 'Failed';
+	}
+
+	function readResultString(run: EngineRun, key: string): string | null {
+		if (!run.result_json) return null;
+		const value = run.result_json[key];
+		return typeof value === 'string' && value.length > 0 ? value : null;
+	}
+
+	function cancelledAt(run: EngineRun): string | null {
+		return readResultString(run, 'cancelled_at');
+	}
+
+	function cancelledBy(run: EngineRun): string | null {
+		return readResultString(run, 'cancelled_by');
+	}
+
+	function lastCompletedStep(run: EngineRun): string | null {
+		return readResultString(run, 'last_completed_step');
+	}
+
+	function canCancelRun(run: EngineRun): boolean {
+		return run.status === 'running';
+	}
+
+	function requestCancelRun(run: EngineRun): void {
+		if (!canCancelRun(run) || cancelPending) return;
+		cancelError = null;
+		cancelTarget = { id: run.id };
+	}
+
+	function closeCancelDialog(): void {
+		if (cancelPending) return;
+		cancelTarget = null;
+	}
+
+	async function confirmCancelRun(): Promise<void> {
+		const target = cancelTarget;
+		if (!target || cancelPending) return;
+		cancelPending = true;
+		cancelError = null;
+		const result = await cancelBuild(target.id);
+		result.match(
+			() => {
+				cancelTarget = null;
+			},
+			(err) => {
+				cancelError = err.message;
+			}
+		);
+		cancelPending = false;
+	}
+
+	async function refreshHistory(): Promise<void> {
+		engineRunsStore.refresh();
 	}
 
 	function runDetailStore(run: EngineRun): BuildStreamStore {
@@ -387,80 +376,133 @@
 		return store;
 	}
 
-	function activeRunKey(
-		analysisId: string | null | undefined,
-		kind: string | null | undefined
-	): string {
-		return `${analysisId ?? ''}|${kind ?? ''}`;
+	function replaceRun(next: EngineRun): void {
+		engineRunsStore.replaceRun(next);
 	}
 
-	function activeDatasourceName(build: {
-		current_datasource_id: string | null;
-		current_output_name: string | null;
-	}): string {
-		if (build.current_datasource_id) {
-			return dsNames.get(build.current_datasource_id) ?? build.current_datasource_id;
+	async function syncExpandedRun(runId: string): Promise<void> {
+		const run = runs.find((item) => item.id === runId);
+		if (!run) return;
+		const store = runDetailStore(run);
+		if (engineRunStatus(run) !== 'running') {
+			store.close();
+			store.applySnapshot(engineRunBuildDetail(run));
+			expandedLiveId = null;
+			expandedStore = store;
+			return;
 		}
-		return build.current_output_name ?? '-';
+		const live = await getActiveBuildByEngineRun(run.id).match(
+			(detail: ActiveBuildDetail) => detail,
+			() => null
+		);
+		if (expandedId !== runId) return;
+		if (!live) {
+			const persisted = await getEngineRun(run.id).match(
+				(r: EngineRun) => r,
+				() => null
+			);
+			if (expandedId !== runId) return;
+			const source = persisted ?? run;
+			if (persisted) replaceRun(persisted);
+			store.close();
+			store.applySnapshot(engineRunBuildDetail(source));
+			expandedLiveId = null;
+			expandedStore = store;
+			return;
+		}
+		store.watch(live.build_id);
+		store.applySnapshot(live);
+		expandedLiveId = runId;
+		expandedStore = store;
 	}
 
-	function activeDetailStore(id: string): BuildStreamStore {
-		let store = activeDetailStores.get(id);
-		if (!store) {
-			store = new BuildStreamStore();
-			activeDetailStores.set(id, store);
-		}
-		if (store.buildId !== id || store.status === 'disconnected') {
-			store.watch(id);
-		}
-		return store;
-	}
-
-	// Side effect: mutates expandedStore state and triggers store creation via runDetailStore
+	// Side effect: mutates expandedStore state and binds live detail only for expanded running rows.
 	$effect(() => {
-		const live = activeBuildsStore.builds.find((build) => build.build_id === expandedId) ?? null;
-		if (live) {
-			expandedActiveBuild = live;
-			expandedStore = activeDetailStore(live.build_id);
-			return;
-		}
-		if (expandedActiveBuild && expandedActiveBuild.build_id === expandedId) {
-			expandedStore = activeDetailStore(expandedActiveBuild.build_id);
-			return;
+		for (const [runId, store] of runDetailStores) {
+			if (runId === expandedId) continue;
+			store.close();
 		}
 		const expandedRun = runs.find((run) => run.id === expandedId) ?? null;
-		if (!expandedRun) expandedActiveBuild = null;
-		expandedStore = expandedRun ? runDetailStore(expandedRun) : null;
+		if (!expandedRun) {
+			expandedLiveId = null;
+			expandedStore = null;
+			return;
+		}
+		void syncExpandedRun(expandedRun.id);
+	});
+
+	// Side effect: when a live row reaches terminal state, replace that row with persisted history once.
+	$effect(() => {
+		const liveId = expandedLiveId;
+		const store = expandedStore;
+		if (!liveId || !store || !store.done || !store.engineRunId) return;
+		expandedLiveId = null;
+		void getEngineRun(store.engineRunId).match(
+			(persisted) => {
+				if (expandedId !== liveId) return;
+				store.close();
+				replaceRun(persisted);
+				store.applySnapshot(engineRunBuildDetail(persisted));
+				expandedStore = store;
+			},
+			(err) => {
+				console.warn('Failed to fetch persisted run after build done:', err.message);
+			}
+		);
+	});
+
+	// Side effect: when a live stream disconnects (WS endpoint gone), recover from persisted state.
+	$effect(() => {
+		const liveId = expandedLiveId;
+		const store = expandedStore;
+		if (!liveId || !store || store.status !== 'disconnected') return;
+		if (store.done) return;
+		expandedLiveId = null;
+		const engineRunId = store.engineRunId;
+		if (!engineRunId) return;
+		void getEngineRun(engineRunId).match(
+			(persisted) => {
+				if (expandedId !== liveId) return;
+				store.close();
+				replaceRun(persisted);
+				store.applySnapshot(engineRunBuildDetail(persisted));
+				expandedStore = store;
+			},
+			(err) => {
+				console.warn('Failed to fetch persisted run after WS disconnect:', err.message);
+			}
+		);
 	});
 
 	// Side effect: cleanup callback to close WebSocket stores on component destroy
+	$effect(() => {
+		const target = cancelTarget;
+		if (!target) return;
+		const latest = runs.find((run) => run.id === target.id);
+		if (!latest || latest.status !== 'running') {
+			cancelTarget = null;
+			cancelPending = false;
+		}
+	});
+
 	$effect(() => {
 		return () => {
 			for (const store of runDetailStores.values()) {
 				store.close();
 			}
-			for (const store of activeDetailStores.values()) {
-				store.close();
-			}
 			runDetailStores.clear();
-			activeDetailStores.clear();
-			activeBuildsStore.reset();
 		};
-	});
-
-	const summaryCellClass = css({
-		display: 'block',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap'
 	});
 </script>
 
 <div
-	class={cx(
-		'builds-page',
-		css({ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' })
-	)}
+	class={css({
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		width: '100%'
+	})}
+	data-builds-page
 >
 	{#if !compact && !embedded}
 		<header
@@ -501,26 +543,6 @@
 					/>
 				</div>
 			</div>
-			<button
-				class={cx(
-					button({ variant: 'ghost', size: 'sm' }),
-					css({
-						borderWidth: '1',
-						fontSize: 'xs',
-						width: 'fit-content'
-					})
-				)}
-				onclick={() => (showPreviews = !showPreviews)}
-				aria-pressed={showPreviews}
-			>
-				{#if showPreviews}
-					<Eye size={12} />
-					Hide previews
-				{:else}
-					<EyeOff size={12} />
-					Show previews
-				{/if}
-			</button>
 		{/if}
 	{:else}
 		<div
@@ -555,52 +577,55 @@
 				</div>
 			{/if}
 			<select
-				class={cx(
-					input(),
-					css({
-						backgroundColor: 'bg.primary',
-						paddingX: '3',
-						paddingY: '1.5',
-						fontSize: 'sm',
-						'& option': {
-							backgroundColor: 'bg.secondary',
-							color: 'fg.primary'
-						},
-						'& option:checked': {
-							backgroundColor: 'bg.accent',
-							color: 'accent.primary'
-						}
-					})
-				)}
+				class={css({
+					width: 'full',
+					borderWidth: '1',
+					borderRadius: '0',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' },
+					paddingX: '3',
+					paddingY: '1.5',
+					fontSize: 'sm',
+					'& option:checked': {
+						backgroundColor: 'bg.accent',
+						color: 'accent.primary'
+					}
+				})}
 				id="builds-kind-filter"
 				aria-label="Filter by type"
 				bind:value={kindFilter}
 			>
 				<option value="">All types</option>
-				<option value="preview">Preview</option>
 				<option value="download">Download</option>
 				<option value="datasource_create">Output Create</option>
 				<option value="datasource_update">Output Update</option>
 				<option value="row_count">Row Count</option>
 			</select>
 			<select
-				class={cx(
-					input(),
-					css({
-						backgroundColor: 'bg.primary',
-						paddingX: '3',
-						paddingY: '1.5',
-						fontSize: 'sm',
-						'& option': {
-							backgroundColor: 'bg.secondary',
-							color: 'fg.primary'
-						},
-						'& option:checked': {
-							backgroundColor: 'bg.accent',
-							color: 'accent.primary'
-						}
-					})
-				)}
+				class={css({
+					width: 'full',
+					borderWidth: '1',
+					borderRadius: '0',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' },
+					paddingX: '3',
+					paddingY: '1.5',
+					fontSize: 'sm',
+					'& option:checked': {
+						backgroundColor: 'bg.accent',
+						color: 'accent.primary'
+					}
+				})}
 				id="builds-status-filter"
 				aria-label="Filter by status"
 				bind:value={statusFilter}
@@ -609,6 +634,7 @@
 				<option value="running">Running</option>
 				<option value="completed">Completed</option>
 				<option value="failed">Failed</option>
+				<option value="cancelled">Cancelled</option>
 			</select>
 			<BranchPicker
 				branches={branchOptions}
@@ -620,7 +646,24 @@
 				<span class={css({ color: 'fg.muted' })}>From</span>
 				<input
 					type="date"
-					class={cx(input(), css({ paddingY: '1', fontSize: 'sm', cursor: 'pointer' }))}
+					class={css({
+						width: 'full',
+						fontSize: 'sm',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						paddingX: '3.5',
+						paddingY: '1',
+						cursor: 'pointer',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' }
+					})}
 					id="builds-date-from"
 					aria-label="From date"
 					bind:value={dateFrom}
@@ -628,12 +671,37 @@
 				<span class={css({ color: 'fg.muted' })}>To</span>
 				<input
 					type="date"
-					class={cx(input(), css({ paddingY: '1', fontSize: 'sm', cursor: 'pointer' }))}
+					class={css({
+						width: 'full',
+						fontSize: 'sm',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						paddingX: '3.5',
+						paddingY: '1',
+						cursor: 'pointer',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' }
+					})}
 					id="builds-date-to"
 					aria-label="To date"
 					bind:value={dateTo}
 				/>
 			</div>
+			<button
+				type="button"
+				class={button({ variant: 'ghost', size: 'sm' })}
+				onclick={() => void refreshHistory()}
+			>
+				<RefreshCw size={14} />
+				Refresh History
+			</button>
 		</div>
 	{/if}
 
@@ -751,153 +819,26 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each visibleActiveBuilds as build (build.build_id)}
-						<tr
-							data-build-row={build.build_id}
-							data-build-status="running"
-							data-build-kind={build.current_kind ?? 'preview'}
-							data-build-datasource-name={activeDatasourceName(build)}
-							data-build-analysis-name={build.analysis_name}
-							data-build-output-name={build.current_output_name ?? ''}
-							class={cx(
-								css({
-									cursor: 'pointer',
-									backgroundColor: 'bg.secondary',
-									_hover: { backgroundColor: 'bg.hover' }
-								}),
-								expandedId === build.build_id && css({ backgroundColor: 'bg.secondary' })
-							)}
-							onclick={() => toggleExpand(build.build_id)}
-						>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<ChevronDown
-									size={14}
-									class={expandedId === build.build_id
-										? undefined
-										: css({ transform: 'rotate(-90deg)' })}
-								/>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span
-									class={cx(
-										summaryCellClass,
-										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-									)}
-								>
-									<Activity size={14} class={css({ color: 'accent.primary' })} />
-									<span>{getKindLabel(build.current_kind ?? 'preview')}</span>
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span
-									class={cx(
-										summaryCellClass,
-										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-									)}
-								>
-									<Loader
-										size={14}
-										class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
-									/>
-									<span class={css({ color: 'accent.primary' })}>Running</span>
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}>
-									{activeDatasourceName(build)}
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<span class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}>
-									{build.analysis_name}
-								</span>
-							</td>
-							<td class={css({ borderBottomWidth: '1', paddingX: '3', paddingY: '2' })}>
-								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-									<span
-										class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
-									>
-										{build.current_output_name ?? '-'}
-									</span>
-									{#if build.current_step}
-										<span
-											class={css({
-												fontSize: 'xs',
-												color: 'fg.tertiary',
-												overflow: 'hidden',
-												textOverflow: 'ellipsis',
-												whiteSpace: 'nowrap'
-											})}
-										>
-											{build.current_step}
-										</span>
-									{/if}
-								</div>
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2',
-									fontFamily: 'mono',
-									fontSize: 'xs',
-									whiteSpace: 'nowrap'
-								})}
-							>
-								{formatDuration(build.elapsed_ms)}
-							</td>
-							<td
-								class={css({
-									borderBottomWidth: '1',
-									paddingX: '3',
-									paddingY: '2',
-									color: 'fg.secondary',
-									whiteSpace: 'nowrap'
-								})}
-							>
-								{formatDate(build.started_at)}
-							</td>
-						</tr>
-						{#if expandedId === build.build_id}
-							<tr data-build-detail={build.build_id}>
-								<td
-									colspan="8"
-									class={css({
-										borderBottomWidth: '1',
-										backgroundColor: 'bg.primary',
-										padding: '0',
-										overflow: 'hidden'
-									})}
-								>
-									{#if expandedStore}
-										<div class={css({ width: '100%', overflowX: 'hidden' })}>
-											<BuildPreview
-												store={expandedStore}
-												title={getKindLabel(build.current_kind ?? 'preview')}
-											/>
-										</div>
-									{/if}
-								</td>
-							</tr>
-						{/if}
-					{/each}
 					{#each filteredRuns as run (run.id)}
 						<tr
 							data-build-row={run.id}
+							data-build-source="history"
 							data-build-status={engineRunStatus(run)}
 							data-build-kind={run.kind}
+							data-build-datasource-id={engineRunDatasourceId(run)}
 							data-build-datasource-name={engineRunDatasourceName(run) ??
 								resolveName(engineRunDatasourceId(run), dsNames)}
+							data-build-analysis-id={run.analysis_id ?? ''}
 							data-build-analysis-name={run.analysis_id
 								? resolveName(run.analysis_id, analysisNames)
 								: ''}
 							data-build-output-name={engineRunOutputName(run) ?? ''}
-							class={cx(
-								css({
+							class={css(
+								{
 									cursor: 'pointer',
 									_hover: { backgroundColor: 'bg.hover' }
-								}),
-								expandedId === run.id && css({ backgroundColor: 'bg.secondary' })
+								},
+								expandedId === run.id && { backgroundColor: 'bg.secondary' }
 							)}
 							onclick={() => toggleExpand(run.id)}
 						>
@@ -921,15 +862,21 @@
 								})}
 							>
 								<span
-									class={cx(
-										summaryCellClass,
-										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-									)}
+									class={[
+										css({
+											display: 'block',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap'
+										}),
+										css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											gap: '1.5'
+										})
+									]}
 								>
-									{#if run.kind === 'preview'}
-										<Eye size={14} class={css({ color: 'accent.primary' })} />
-										<span>{getKindLabel(run.kind)}</span>
-									{:else if run.kind === 'datasource_create'}
+									{#if run.kind === 'datasource_create'}
 										<Database size={14} class={css({ color: 'accent.primary' })} />
 										<span>{getKindLabel(run.kind)}</span>
 									{:else if run.kind === 'datasource_update'}
@@ -972,26 +919,65 @@
 									paddingY: '2'
 								})}
 							>
-								<span
-									class={cx(
-										summaryCellClass,
-										css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })
-									)}
+								<div
+									class={css({
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'space-between',
+										gap: '2'
+									})}
 								>
-									{#if engineRunStatus(run) === 'running'}
-										<Loader
-											size={14}
-											class={css({ color: 'accent.primary', animation: 'spin 1s linear infinite' })}
-										/>
-										<span class={css({ color: 'accent.primary' })}>{runStatusLabel(run)}</span>
-									{:else if engineRunStatus(run) === 'completed'}
-										<CircleCheck size={14} class={css({ color: 'fg.success' })} />
-										<span class={css({ color: 'fg.success' })}>{runStatusLabel(run)}</span>
-									{:else}
-										<CircleX size={14} class={css({ color: 'fg.error' })} />
-										<span class={css({ color: 'fg.error' })}>{runStatusLabel(run)}</span>
+									<span
+										class={[
+											css({
+												display: 'block',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap'
+											}),
+											css({
+												display: 'inline-flex',
+												alignItems: 'center',
+												gap: '1.5'
+											})
+										]}
+									>
+										{#if engineRunStatus(run) === 'running'}
+											<Loader
+												size={14}
+												class={css({
+													color: 'accent.primary',
+													animation: 'spin 1s linear infinite'
+												})}
+											/>
+											<span class={css({ color: 'accent.primary' })}>{runStatusLabel(run)}</span>
+										{:else if engineRunStatus(run) === 'completed'}
+											<CircleCheck size={14} class={css({ color: 'fg.success' })} />
+											<span class={css({ color: 'fg.success' })}>{runStatusLabel(run)}</span>
+										{:else if engineRunStatus(run) === 'cancelled'}
+											<CircleX size={14} class={css({ color: 'fg.warning' })} />
+											<span class={css({ color: 'fg.warning' })}>{runStatusLabel(run)}</span>
+										{:else}
+											<CircleX size={14} class={css({ color: 'fg.error' })} />
+											<span class={css({ color: 'fg.error' })}>{runStatusLabel(run)}</span>
+										{/if}
+									</span>
+									{#if canCancelRun(run)}
+										<button
+											type="button"
+											class={button({ variant: 'ghost', size: 'sm' })}
+											onclick={(event) => {
+												event.stopPropagation();
+												requestCancelRun(run);
+											}}
+											disabled={cancelPending}
+											aria-label="Cancel build"
+											data-testid={`build-row-cancel-${run.id}`}
+										>
+											<CircleX size={12} />
+										</button>
 									{/if}
-								</span>
+								</div>
 							</td>
 							<td
 								class={css({
@@ -1001,7 +987,14 @@
 								})}
 							>
 								<span
-									class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
+									class={css({
+										display: 'block',
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap',
+										fontSize: 'xs',
+										color: 'fg.secondary'
+									})}
 									title={engineRunDatasourceId(run)}
 								>
 									{engineRunDatasourceName(run) ?? resolveName(engineRunDatasourceId(run), dsNames)}
@@ -1016,7 +1009,14 @@
 							>
 								{#if run.analysis_id}
 									<span
-										class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
+										class={css({
+											display: 'block',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											fontSize: 'xs',
+											color: 'fg.secondary'
+										})}
 										title={run.analysis_id}
 									>
 										{resolveName(run.analysis_id, analysisNames)}
@@ -1034,7 +1034,14 @@
 							>
 								{#if engineRunOutputName(run)}
 									<span
-										class={cx(summaryCellClass, css({ fontSize: 'xs', color: 'fg.secondary' }))}
+										class={css({
+											display: 'block',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+											fontSize: 'xs',
+											color: 'fg.secondary'
+										})}
 										title={engineRunOutputName(run) ?? ''}
 									>
 										{engineRunOutputName(run)}
@@ -1078,6 +1085,38 @@
 										overflow: 'hidden'
 									})}
 								>
+									<div
+										class={css({
+											padding: '4',
+											display: 'flex',
+											flexDirection: 'column',
+											gap: '3'
+										})}
+									>
+										<div
+											class={css({ display: 'flex', flexWrap: 'wrap', gap: '4', fontSize: 'sm' })}
+										>
+											<span class={css({ color: 'fg.secondary' })}>
+												<strong>Run ID:</strong>
+												{run.id}
+											</span>
+											{#if engineRunStatus(run) === 'cancelled'}
+												<span class={css({ color: 'fg.warning' })}>
+													<strong>Cancelled At:</strong>
+													{cancelledAt(run) ? formatDate(cancelledAt(run) ?? '') : '-'}
+												</span>
+												<span class={css({ color: 'fg.warning' })}>
+													<strong>Cancelled By:</strong>
+													{cancelledBy(run) ?? '-'}
+												</span>
+												<span class={css({ color: 'fg.warning' })}>
+													<strong>Last Completed Step:</strong>
+													{lastCompletedStep(run) ?? '-'}
+												</span>
+											{/if}
+										</div>
+									</div>
+
 									{#if expandedStore}
 										<div class={css({ width: '100%', overflowX: 'hidden' })}>
 											<BuildPreview
@@ -1131,3 +1170,31 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	show={cancelTarget !== null}
+	heading="Cancel this build?"
+	message="Cancel this build? Any partial results will be discarded."
+	confirmText={cancelPending ? 'Cancelling...' : 'Cancel Build'}
+	cancelText="Keep running"
+	onConfirm={confirmCancelRun}
+	onCancel={closeCancelDialog}
+/>
+
+{#if cancelError}
+	<div
+		class={css({
+			marginTop: '2',
+			borderWidth: '1',
+			borderColor: 'border.error',
+			backgroundColor: 'bg.error',
+			paddingX: '3',
+			paddingY: '2',
+			fontSize: 'xs',
+			color: 'fg.error'
+		})}
+		data-testid="build-cancel-error"
+	>
+		{cancelError}
+	</div>
+{/if}

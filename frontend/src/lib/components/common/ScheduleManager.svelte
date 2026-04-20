@@ -24,7 +24,7 @@
 	} from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner, emptyText, label, input } from '$lib/styles/panda';
+	import { css, spinner, emptyText, label } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -73,10 +73,9 @@
 		queryKey: ['datasources-lookup', 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true);
-			if (result.isErr()) return [] as DataSource[];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		},
-		staleTime: 60_000
+		}
 	}));
 
 	const datasourceMap = $derived(
@@ -348,6 +347,7 @@
 	}
 
 	function openCreate() {
+		void datasourcesQuery.refetch();
 		creating = true;
 	}
 
@@ -458,16 +458,27 @@
 							id="sched-search"
 							aria-label="Search schedules"
 							placeholder="Search schedules, datasources, or IDs..."
-							class={cx(
-								input(),
-								css({
-									backgroundColor: 'transparent',
-									paddingX: '3',
-									paddingY: '1.5',
-									paddingLeft: '8',
-									fontSize: 'sm'
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed'
+								},
+								_placeholder: { color: 'fg.muted' },
+								backgroundColor: 'transparent',
+								paddingX: '3',
+								paddingY: '1.5',
+								paddingLeft: '8',
+								fontSize: 'sm'
+							})}
 							bind:value={searchQuery}
 						/>
 					</div>
@@ -577,14 +588,14 @@
 
 	{#if creating}
 		<div
-			class={cx(
-				css({
+			class={css(
+				{
 					marginBottom: '4',
 					borderWidth: '1',
 					backgroundColor: 'bg.primary',
 					padding: '4'
-				}),
-				!compact && css({ marginBottom: '6' })
+				},
+				!compact && { marginBottom: '6' }
 			)}
 		>
 			<h3 class={css({ margin: '0', marginBottom: '4', fontSize: 'sm', fontWeight: 'medium' })}>
@@ -653,15 +664,26 @@
 							<label for="schedule-datasource" class={label()}> Select output dataset </label>
 							<select
 								id="schedule-datasource"
-								class={cx(
-									input(),
-									css({
-										backgroundColor: 'transparent',
-										paddingX: '2',
-										paddingY: '1.5',
-										fontSize: 'xs'
-									})
-								)}
+								class={css({
+									width: 'full',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed'
+									},
+									_placeholder: { color: 'fg.muted' },
+									backgroundColor: 'transparent',
+									paddingX: '2',
+									paddingY: '1.5',
+									fontSize: 'xs'
+								})}
 								bind:value={newDatasourceId}
 							>
 								<option value="">Select output dataset...</option>
@@ -756,16 +778,26 @@
 								>
 									<input
 										type="text"
-										class={cx(
-											input(),
-											css({
-												width: 'colMd',
-												backgroundColor: 'transparent',
-												paddingX: '2',
-												paddingY: '1',
-												fontSize: 'xs'
-											})
-										)}
+										class={css({
+											color: 'fg.primary',
+											borderWidth: '1',
+											borderRadius: '0',
+											transitionProperty: 'border-color',
+											transitionDuration: '160ms',
+											transitionTimingFunction: 'ease',
+											_focus: { outline: 'none' },
+											_focusVisible: { borderColor: 'border.accent' },
+											_disabled: {
+												opacity: '0.5',
+												cursor: 'not-allowed'
+											},
+											_placeholder: { color: 'fg.muted' },
+											width: 'colMd',
+											backgroundColor: 'transparent',
+											paddingX: '2',
+											paddingY: '1',
+											fontSize: 'xs'
+										})}
 										name="cron"
 										bind:value={newCron}
 										placeholder="0 * * * *"
@@ -818,15 +850,26 @@
 							{#if triggerType === 'depends'}
 								<div class={css({ marginTop: '2' })}>
 									<select
-										class={cx(
-											input(),
-											css({
-												backgroundColor: 'transparent',
-												paddingX: '2',
-												paddingY: '1',
-												fontSize: 'xs'
-											})
-										)}
+										class={css({
+											width: 'full',
+											color: 'fg.primary',
+											borderWidth: '1',
+											borderRadius: '0',
+											transitionProperty: 'border-color',
+											transitionDuration: '160ms',
+											transitionTimingFunction: 'ease',
+											_focus: { outline: 'none' },
+											_focusVisible: { borderColor: 'border.accent' },
+											_disabled: {
+												opacity: '0.5',
+												cursor: 'not-allowed'
+											},
+											_placeholder: { color: 'fg.muted' },
+											backgroundColor: 'transparent',
+											paddingX: '2',
+											paddingY: '1',
+											fontSize: 'xs'
+										})}
 										name="depends_on"
 										bind:value={newDependsOn}
 									>
@@ -880,15 +923,26 @@
 							{#if triggerType === 'event'}
 								<div class={css({ marginTop: '2' })}>
 									<select
-										class={cx(
-											input(),
-											css({
-												backgroundColor: 'transparent',
-												paddingX: '2',
-												paddingY: '1',
-												fontSize: 'xs'
-											})
-										)}
+										class={css({
+											width: 'full',
+											color: 'fg.primary',
+											borderWidth: '1',
+											borderRadius: '0',
+											transitionProperty: 'border-color',
+											transitionDuration: '160ms',
+											transitionTimingFunction: 'ease',
+											_focus: { outline: 'none' },
+											_focusVisible: { borderColor: 'border.accent' },
+											_disabled: {
+												opacity: '0.5',
+												cursor: 'not-allowed'
+											},
+											_placeholder: { color: 'fg.muted' },
+											backgroundColor: 'transparent',
+											paddingX: '2',
+											paddingY: '1',
+											fontSize: 'xs'
+										})}
 										name="trigger_datasource"
 										bind:value={newTrigger}
 									>
@@ -967,7 +1021,7 @@
 		>
 			<div class={spinner()}></div>
 		</div>
-	{:else if schedulesQuery.isError}
+	{:else if datasourcesQuery.isError || allSchedulesQuery.isError || schedulesQuery.isError}
 		<div
 			class={css({
 				paddingX: '3',
@@ -984,20 +1038,24 @@
 				color: 'fg.error'
 			})}
 		>
-			{schedulesQuery.error instanceof Error
-				? schedulesQuery.error.message
-				: 'Error loading schedules.'}
+			{datasourcesQuery.error instanceof Error
+				? datasourcesQuery.error.message
+				: allSchedulesQuery.error instanceof Error
+					? allSchedulesQuery.error.message
+					: schedulesQuery.error instanceof Error
+						? schedulesQuery.error.message
+						: 'Error loading schedules.'}
 		</div>
 	{:else if schedules.length === 0 && !creating}
 		<div
-			class={cx(
-				css({
+			class={css(
+				{
 					borderWidth: '1',
 					borderStyle: 'dashed',
 					padding: '6',
 					textAlign: 'center'
-				}),
-				!compact && css({ padding: '8' })
+				},
+				!compact && { padding: '8' }
 			)}
 		>
 			<Calendar
@@ -1031,13 +1089,13 @@
 					{@const triggerTypeValue = getTriggerType(schedule)}
 					{@const triggerDesc = getTriggerDescription(schedule)}
 					<div
-						class={cx(
+						class={[
 							'group',
 							css({
 								borderWidth: '1',
 								backgroundColor: 'bg.primary'
 							})
-						)}
+						]}
 					>
 						<div
 							class={css({
@@ -1060,9 +1118,9 @@
 						>
 							<ChevronDown
 								size={10}
-								class={cx(
-									css({ flexShrink: '0', color: 'fg.muted' }),
-									expandedId === schedule.id ? '' : css({ transform: 'rotate(-90deg)' })
+								class={css(
+									{ flexShrink: '0', color: 'fg.muted' },
+									!(expandedId === schedule.id) && { transform: 'rotate(-90deg)' }
 								)}
 							/>
 							{#if triggerTypeValue === 'cron'}
@@ -1116,7 +1174,6 @@
 									border: 'none',
 									backgroundColor: 'transparent',
 									padding: '0',
-									color: 'fg.tertiary',
 									_hover: { color: 'fg.error' },
 									_focusVisible: {
 										color: 'fg.error',
@@ -1147,15 +1204,26 @@
 												<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 													<input
 														type="text"
-														class={cx(
-															input(),
-															css({
-																backgroundColor: 'transparent',
-																paddingX: '1.5',
-																paddingY: '0.5',
-																fontSize: '2xs'
-															})
-														)}
+														class={css({
+															width: 'full',
+															color: 'fg.primary',
+															borderWidth: '1',
+															borderRadius: '0',
+															transitionProperty: 'border-color',
+															transitionDuration: '160ms',
+															transitionTimingFunction: 'ease',
+															_focus: { outline: 'none' },
+															_focusVisible: { borderColor: 'border.accent' },
+															_disabled: {
+																opacity: '0.5',
+																cursor: 'not-allowed'
+															},
+															_placeholder: { color: 'fg.muted' },
+															backgroundColor: 'transparent',
+															paddingX: '1.5',
+															paddingY: '0.5',
+															fontSize: '2xs'
+														})}
 														id="sched-{schedule.id}-cron"
 														aria-label="Cron expression"
 														bind:value={editCronValue}
@@ -1225,15 +1293,26 @@
 										<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 											<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>Depends On</span>
 											<select
-												class={cx(
-													input(),
-													css({
-														backgroundColor: 'transparent',
-														paddingX: '1.5',
-														paddingY: '0.5',
-														fontSize: '2xs'
-													})
-												)}
+												class={css({
+													width: 'full',
+													color: 'fg.primary',
+													borderWidth: '1',
+													borderRadius: '0',
+													transitionProperty: 'border-color',
+													transitionDuration: '160ms',
+													transitionTimingFunction: 'ease',
+													_focus: { outline: 'none' },
+													_focusVisible: { borderColor: 'border.accent' },
+													_disabled: {
+														opacity: '0.5',
+														cursor: 'not-allowed'
+													},
+													_placeholder: { color: 'fg.muted' },
+													backgroundColor: 'transparent',
+													paddingX: '1.5',
+													paddingY: '0.5',
+													fontSize: '2xs'
+												})}
 												id="sched-{schedule.id}-depends"
 												aria-label="Depends on schedule"
 												value={schedule.depends_on ?? ''}
@@ -1252,15 +1331,26 @@
 												>On Datasource Update</span
 											>
 											<select
-												class={cx(
-													input(),
-													css({
-														backgroundColor: 'transparent',
-														paddingX: '1.5',
-														paddingY: '0.5',
-														fontSize: '2xs'
-													})
-												)}
+												class={css({
+													width: 'full',
+													color: 'fg.primary',
+													borderWidth: '1',
+													borderRadius: '0',
+													transitionProperty: 'border-color',
+													transitionDuration: '160ms',
+													transitionTimingFunction: 'ease',
+													_focus: { outline: 'none' },
+													_focusVisible: { borderColor: 'border.accent' },
+													_disabled: {
+														opacity: '0.5',
+														cursor: 'not-allowed'
+													},
+													_placeholder: { color: 'fg.muted' },
+													backgroundColor: 'transparent',
+													paddingX: '1.5',
+													paddingY: '0.5',
+													fontSize: '2xs'
+												})}
 												id="sched-{schedule.id}-trigger"
 												aria-label="Trigger datasource"
 												value={schedule.trigger_on_datasource_id ?? ''}
@@ -1411,9 +1501,9 @@
 								>
 									<ChevronDown
 										size={12}
-										class={cx(
-											css({ transition: 'transform 160ms' }),
-											expandedId === schedule.id ? '' : css({ transform: 'rotate(-90deg)' })
+										class={css(
+											{ transition: 'transform 160ms' },
+											!(expandedId === schedule.id) && { transform: 'rotate(-90deg)' }
 										)}
 									/>
 								</td>
@@ -1560,7 +1650,6 @@
 											border: 'none',
 											backgroundColor: 'transparent',
 											padding: '0.5',
-											color: 'fg.muted',
 											_hover: { color: 'fg.error' },
 											_focusVisible: {
 												color: 'fg.error',
@@ -1626,16 +1715,26 @@
 														<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 															<input
 																type="text"
-																class={cx(
-																	input(),
-																	css({
-																		width: 'colMd',
-																		backgroundColor: 'transparent',
-																		paddingX: '1.5',
-																		paddingY: '0.5',
-																		fontSize: '2xs'
-																	})
-																)}
+																class={css({
+																	color: 'fg.primary',
+																	borderWidth: '1',
+																	borderRadius: '0',
+																	transitionProperty: 'border-color',
+																	transitionDuration: '160ms',
+																	transitionTimingFunction: 'ease',
+																	_focus: { outline: 'none' },
+																	_focusVisible: { borderColor: 'border.accent' },
+																	_disabled: {
+																		opacity: '0.5',
+																		cursor: 'not-allowed'
+																	},
+																	_placeholder: { color: 'fg.muted' },
+																	width: 'colMd',
+																	backgroundColor: 'transparent',
+																	paddingX: '1.5',
+																	paddingY: '0.5',
+																	fontSize: '2xs'
+																})}
 																id="sched-{schedule.id}-cron"
 																aria-label="Cron expression"
 																bind:value={editCronValue}
@@ -1715,15 +1814,26 @@
 													>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
-															class={cx(
-																input(),
-																css({
-																	backgroundColor: 'transparent',
-																	paddingX: '1.5',
-																	paddingY: '0.5',
-																	fontSize: '2xs'
-																})
-															)}
+															class={css({
+																width: 'full',
+																color: 'fg.primary',
+																borderWidth: '1',
+																borderRadius: '0',
+																transitionProperty: 'border-color',
+																transitionDuration: '160ms',
+																transitionTimingFunction: 'ease',
+																_focus: { outline: 'none' },
+																_focusVisible: { borderColor: 'border.accent' },
+																_disabled: {
+																	opacity: '0.5',
+																	cursor: 'not-allowed'
+																},
+																_placeholder: { color: 'fg.muted' },
+																backgroundColor: 'transparent',
+																paddingX: '1.5',
+																paddingY: '0.5',
+																fontSize: '2xs'
+															})}
 															id="sched-{schedule.id}-depends"
 															aria-label="Depends on schedule"
 															value={schedule.depends_on ?? ''}
@@ -1747,15 +1857,26 @@
 													>
 													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														<select
-															class={cx(
-																input(),
-																css({
-																	backgroundColor: 'transparent',
-																	paddingX: '1.5',
-																	paddingY: '0.5',
-																	fontSize: '2xs'
-																})
-															)}
+															class={css({
+																width: 'full',
+																color: 'fg.primary',
+																borderWidth: '1',
+																borderRadius: '0',
+																transitionProperty: 'border-color',
+																transitionDuration: '160ms',
+																transitionTimingFunction: 'ease',
+																_focus: { outline: 'none' },
+																_focusVisible: { borderColor: 'border.accent' },
+																_disabled: {
+																	opacity: '0.5',
+																	cursor: 'not-allowed'
+																},
+																_placeholder: { color: 'fg.muted' },
+																backgroundColor: 'transparent',
+																paddingX: '1.5',
+																paddingY: '0.5',
+																fontSize: '2xs'
+															})}
 															id="sched-{schedule.id}-trigger"
 															aria-label="Trigger datasource"
 															value={schedule.trigger_on_datasource_id ?? ''}

@@ -66,7 +66,7 @@
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { Settings2, X } from 'lucide-svelte';
-	import { css, cx, spinner, button } from '$lib/styles/panda';
+	import { css, spinner, button } from '$lib/styles/panda';
 
 	type WithColumnsConfigShape = {
 		expressions: Array<{
@@ -284,7 +284,7 @@
 
 {#if step === null}
 	<div
-		class={cx(
+		class={[
 			'step-config',
 			css({
 				boxSizing: 'border-box',
@@ -299,7 +299,7 @@
 				backgroundColor: 'bg.primary',
 				color: 'fg.primary'
 			})
-		)}
+		]}
 	>
 		<div
 			class={css({
@@ -323,7 +323,7 @@
 	</div>
 {:else}
 	<div
-		class={cx(
+		class={[
 			'step-config',
 			css({
 				boxSizing: 'border-box',
@@ -336,7 +336,7 @@
 				backgroundColor: 'bg.primary',
 				color: 'fg.primary'
 			})
-		)}
+		]}
 		data-step-config={step.type}
 	>
 		<PanelHeader>

@@ -10,7 +10,7 @@
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, spinner, button, chip, cx, input, label } from '$lib/styles/panda';
+	import { css, spinner, button, chip, input, label } from '$lib/styles/panda';
 
 	const queryClient = useQueryClient();
 
@@ -186,7 +186,24 @@
 			type="text"
 			placeholder="Search UDFs..."
 			bind:value={search}
-			class={cx(input(), css({ maxWidth: 'popover' }))}
+			class={css({
+				width: 'full',
+				fontSize: 'sm2',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				maxWidth: 'popover',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' }
+			})}
 		/>
 	</div>
 

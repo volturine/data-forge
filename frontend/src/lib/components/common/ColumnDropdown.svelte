@@ -2,7 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface ColumnOption {
 		id: string;
@@ -65,8 +65,8 @@
 	<button
 		type="button"
 		data-column-option={item.label}
-		class={cx(
-			css({
+		class={css(
+			{
 				minWidth: '0',
 				width: '100%',
 				paddingX: '3',
@@ -83,8 +83,8 @@
 				fontSize: 'sm',
 				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
 				_hover: { backgroundColor: 'bg.hover' }
-			}),
-			isSelected && css({ backgroundColor: 'bg.hover' })
+			},
+			isSelected && { backgroundColor: 'bg.hover' }
 		)}
 		onclick={onPick}
 		role="option"

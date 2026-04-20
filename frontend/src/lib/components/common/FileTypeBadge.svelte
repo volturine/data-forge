@@ -6,7 +6,7 @@
 		type FileType,
 		type SourceType
 	} from '$lib/utils/file-types';
-	import { css, cx, badge } from '$lib/styles/panda';
+	import { css, badge } from '$lib/styles/panda';
 
 	interface Props {
 		fileType?: FileType;
@@ -56,7 +56,7 @@
 </script>
 
 <span
-	class={cx(
+	class={[
 		badge({ tone: 'file' }),
 		css({
 			flexShrink: '0',
@@ -69,7 +69,7 @@
 			paddingY: sizes[size].paddingY,
 			...variants[variant]
 		})
-	)}
+	]}
 	role="img"
 	aria-label="{config.label} file type"
 	title={config.description}

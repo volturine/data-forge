@@ -91,11 +91,23 @@ export async function gotoAnalysisEditor(
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
+	let lastError: unknown;
 
-	await page.goto(`/analysis/${analysisId}`);
-	await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
-	await waitForLayoutReady(page, remaining());
-	await waitForAnalysisEditor(page, deadline, 'editable');
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			await page.goto(`/analysis/${analysisId}`);
+			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
+			await waitForLayoutReady(page, remaining());
+			await waitForAnalysisEditor(page, deadline, 'editable');
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 1 || remaining() <= 1_500) throw error;
+			await page.waitForTimeout(500);
+		}
+	}
+
+	throw lastError;
 }
 
 export async function gotoReadOnlyAnalysisEditor(
@@ -105,11 +117,23 @@ export async function gotoReadOnlyAnalysisEditor(
 ): Promise<void> {
 	const deadline = Date.now() + timeout;
 	const remaining = () => Math.max(deadline - Date.now(), 1_000);
+	let lastError: unknown;
 
-	await page.goto(`/analysis/${analysisId}`);
-	await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
-	await waitForLayoutReady(page, remaining());
-	await waitForAnalysisEditor(page, deadline, 'locked');
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			await page.goto(`/analysis/${analysisId}`);
+			await expect(page).toHaveURL(`/analysis/${analysisId}`, { timeout: remaining() });
+			await waitForLayoutReady(page, remaining());
+			await waitForAnalysisEditor(page, deadline, 'locked');
+			return;
+		} catch (error) {
+			lastError = error;
+			if (attempt === 1 || remaining() <= 1_500) throw error;
+			await page.waitForTimeout(500);
+		}
+	}
+
+	throw lastError;
 }
 
 /**

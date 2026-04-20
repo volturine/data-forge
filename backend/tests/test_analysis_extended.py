@@ -319,11 +319,10 @@ class TestAnalysisPipeline:
         assert response.status_code in [200, 201, 400, 422]
 
 
-class TestAnalysisStatus:
-    """Test analysis status management."""
+class TestAnalysisPayloadContracts:
+    """Test analysis API contract boundaries."""
 
-    def test_update_analysis_status(self, client, sample_analysis: Analysis):
-        """Test updating analysis status."""
+    def test_update_analysis_rejects_status_field(self, client, sample_analysis: Analysis):
         payload = {
             'status': 'running',
             'tabs': sample_analysis.pipeline_definition['tabs'],
@@ -331,36 +330,36 @@ class TestAnalysisStatus:
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data['status'] == 'running'
+        assert response.status_code == 422
 
-    def test_invalid_status_transition(self, client, sample_analysis: Analysis):
-        """Test invalid status value."""
+    def test_create_analysis_rejects_status_field(self, client, sample_datasource: DataSource):
         payload = {
-            'status': 'invalid_status',
-            'tabs': sample_analysis.pipeline_definition['tabs'],
+            'name': 'Status Should Fail',
+            'status': 'draft',
+            'tabs': [
+                {
+                    'id': 'tab1',
+                    'name': 'Source',
+                    'parent_id': None,
+                    'datasource': {
+                        'id': sample_datasource.id,
+                        'analysis_tab_id': None,
+                        'config': {'branch': 'master'},
+                    },
+                    'output': {
+                        'result_id': '11111111-1111-4111-8111-111111111111',
+                        'datasource_type': 'iceberg',
+                        'format': 'parquet',
+                        'filename': 'source_1',
+                    },
+                    'steps': [],
+                },
+            ],
         }
 
-        response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
+        response = client.post('/api/v1/analysis', json=payload)
 
-        # Should either reject or accept (validation depends on implementation)
-        assert response.status_code in [200, 400, 422]
-
-    def test_analysis_lifecycle_statuses(self, client, sample_analysis: Analysis):
-        """Test analysis through different statuses."""
-        statuses = ['draft', 'running', 'completed', 'error']
-
-        for status in statuses:
-            payload = {
-                'status': status,
-                'tabs': sample_analysis.pipeline_definition['tabs'],
-            }
-            response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
-
-            if response.status_code == 200:
-                data = response.json()
-                assert data['status'] == status
+        assert response.status_code == 422
 
 
 class TestAnalysisListing:

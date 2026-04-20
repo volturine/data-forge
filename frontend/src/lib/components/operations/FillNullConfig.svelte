@@ -4,7 +4,7 @@
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, stepConfig, label, input } from '$lib/styles/panda';
+	import { css, stepConfig, label } from '$lib/styles/panda';
 
 	interface FillNullConfigData {
 		strategy: string;
@@ -55,7 +55,24 @@
 			id="fill-select-strategy"
 			data-testid="fill-strategy-select"
 			bind:value={config.strategy}
-			class={cx(input(), css({ marginBottom: '2' }))}
+			class={css({
+				width: 'full',
+				fontSize: 'sm2',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				marginBottom: '2',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' }
+			})}
 		>
 			{#each strategies as strategy (strategy.value)}
 				<option value={strategy.value}>{strategy.label}</option>
@@ -65,15 +82,15 @@
 
 	{#if currentStrategy?.needsValue}
 		<div
-			class={cx(
-				css({
+			class={css(
+				{
 					marginBottom: '0',
 					paddingBottom: '5',
 					backgroundColor: 'transparent',
 
 					border: 'none'
-				}),
-				css({ borderTopWidth: '1', paddingTop: '5' })
+				},
+				{ borderTopWidth: '1', paddingTop: '5' }
 			)}
 			role="group"
 			aria-labelledby="fill-value-heading"
@@ -85,7 +102,24 @@
 				type="text"
 				bind:value={config.value}
 				placeholder="Enter value (e.g., 0, N/A)"
-				class={cx(input(), css({ marginBottom: '2' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm2',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3.5',
+					paddingY: '2.25',
+					marginBottom: '2',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 			/>
 			<ColumnTypeDropdown
 				value={config.value_type ?? 'Utf8'}
@@ -96,16 +130,15 @@
 	{/if}
 
 	<div
-		class={cx(
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				backgroundColor: 'transparent',
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
 
-				border: 'none'
-			}),
-			css({ borderTopWidth: '1', paddingTop: '5' })
-		)}
+			border: 'none',
+			borderTopWidth: '1',
+			paddingTop: '5'
+		})}
 		role="group"
 		aria-labelledby="target-columns-heading"
 	>

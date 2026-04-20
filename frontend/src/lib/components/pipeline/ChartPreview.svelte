@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as d3 from 'd3';
 	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
-	import { css, cx, button } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 	import { downloadBlob } from '$lib/api/compute';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
@@ -3848,256 +3848,225 @@
 		styleChart(svg);
 	}
 
-	const outerCss = css({ width: '100%', backgroundColor: 'bg.primary', padding: '3' });
-
-	const toolbarCss = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		paddingY: '1.5',
-		paddingX: '2.5',
-		borderBottomWidth: '1'
-	});
-
-	const controlsCss = css({ display: 'flex', gap: '1.5' });
-
-	const wrapperCss = css({
-		position: 'relative',
-		width: '100%',
-		overflow: 'hidden',
-		contain: 'content'
-	});
-
-	const areaCss = css({ width: '100%', height: '100%' });
-
-	const emptyCss = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		height: '100%',
-		color: 'fg.muted',
-		fontSize: 'xs'
-	});
-
-	const tooltipCss = css({
-		position: 'absolute',
-		pointerEvents: 'none',
-		paddingX: '3',
-		paddingY: '2',
-		backgroundColor: 'bg.primary',
-		borderWidth: '1',
-		fontSize: 'sm',
-		boxShadow: 'lg',
-		wordBreak: 'break-word',
-		zIndex: 'tooltip',
-		transition: 'opacity 75ms'
-	});
-
-	const tooltipVisibleCss = css({ opacity: '1' });
-	const tooltipHiddenCss = css({ opacity: '0' });
-
-	const legendBaseCss = css({
-		display: 'flex',
-		flexWrap: 'wrap',
-		alignItems: 'center',
-		rowGap: '1',
-		columnGap: '2',
-		backgroundColor: 'bg.secondary',
-		borderBottomWidth: '1'
-	});
-
-	const legendCollapsedCss = css({
-		background: 'transparent',
-		border: 'none',
-		justifyContent: 'flex-end'
-	});
-
-	const legendBottomCss = css({ borderTopWidth: '1', borderBottom: 'none' });
-
-	const legendBottomCollapsedCss = css({ justifyContent: 'flex-start' });
-
-	const pillCss = css({
-		display: 'flex',
-		alignItems: 'center',
-		gap: 'px',
-		paddingY: '1',
-		paddingX: '2',
-		background: 'color-mix(in srgb, {colors.bg.primary} 90%, transparent)',
-		borderWidth: '1',
-		borderRadius: 'pill',
-		cursor: 'pointer',
-		transition: 'background 120ms ease, border-color 120ms ease',
-		_hover: {
-			background: 'bg.secondary'
-		}
-	});
-
-	const dotCss = css({
-		width: 'barTall',
-		height: 'barTall',
-		borderRadius: '50%',
-		flexShrink: '0',
-		transition: 'opacity 120ms ease'
-	});
-
-	const dotFadedCss = css({ opacity: '0.3' });
-
-	const handleCss = css({
-		flexShrink: '0',
-		alignSelf: 'stretch',
-		width: 'bar',
-		borderRadius: 'xs',
-		marginLeft: 'px',
-		cursor: 'pointer',
-		opacity: '0',
-		backgroundColor: 'bg.indicator',
-		transition: 'opacity 150ms ease',
-		'.group:hover &': { opacity: '0.15' },
-		_hover: { opacity: '0.5' }
-	});
-
-	const sideCss = css({
-		position: 'absolute',
-		top: '7',
-		maxHeight: 'calc(100% - 44px)',
-		display: 'flex',
-		flexDirection: 'row',
-		alignItems: 'flex-start',
-		zIndex: '5'
-	});
-
-	const sideRightCss = css({ right: '6' });
-	const sideLeftCss = css({ left: '16' });
-
-	const tabCss = css({
-		flexShrink: '0',
-		alignSelf: 'center',
-		width: 'icon',
-		height: 'rowXl',
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		cursor: 'pointer',
-		background: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
-		borderWidth: '1',
-		color: 'fg.muted',
-		transition: 'background-color 120ms ease, color 120ms ease',
-		_hover: {
-			background: 'bg.tertiary',
-			color: 'fg.primary'
-		},
-		'& :global(svg)': { stroke: 'currentColor' }
-	});
-
-	const tabRightCss = css({
-		borderTopLeftRadius: 'sm2',
-		borderBottomLeftRadius: 'sm2',
-		borderRightWidth: '0'
-	});
-
-	const tabLeftCss = css({
-		borderTopRightRadius: 'sm2',
-		borderBottomRightRadius: 'sm2',
-		borderLeftWidth: '0'
-	});
-
-	const tabCollapsedCss = css({
-		borderRadius: 'sm2',
-		borderWidth: '1'
-	});
-
-	const itemsCss = css({
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 'px',
-		paddingX: '1.5',
-		paddingTop: '1.5',
-		paddingBottom: '2',
-		maxHeight: 'calc(100vh - 200px)',
-		overflowY: 'auto',
-		backgroundColor: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
-		borderWidth: '1'
-	});
-
-	const itemsRightCss = css({
-		borderTopRightRadius: 'md2',
-		borderBottomRightRadius: 'md2'
-	});
-	const itemsLeftCss = css({
-		borderTopLeftRadius: 'md2',
-		borderBottomLeftRadius: 'md2'
-	});
-
-	const legendItemCss = css({
-		display: 'flex',
-		alignItems: 'center',
-		gap: '1',
-		background: 'none',
-		border: 'none',
-		paddingY: '0.5',
-		paddingX: '1',
-		cursor: 'pointer',
-		fontSize: '2xs',
-		fontFamily: 'mono',
-		color: 'fg.muted',
-
-		transition: 'opacity 120ms ease',
-		whiteSpace: 'nowrap',
-		_hover: {
-			color: 'fg.primary',
-			backgroundColor: 'bg.tertiary'
-		}
-	});
-
-	const legendItemDimmedCss = css({ opacity: '0.35' });
-
-	const swatchCss = css({
-		width: 'dot',
-		height: 'dot',
-		borderRadius: 'xxs',
-		flexShrink: '0'
-	});
-
-	const legendTopCss = $derived(cx(legendBaseCss, legendCollapsed ? legendCollapsedCss : ''));
+	const legendTopCss = $derived(
+		legendCollapsed
+			? css({
+					display: 'flex',
+					flexWrap: 'wrap',
+					alignItems: 'center',
+					rowGap: '1',
+					columnGap: '2',
+					background: 'transparent',
+					border: 'none',
+					justifyContent: 'flex-end'
+				})
+			: css({
+					display: 'flex',
+					flexWrap: 'wrap',
+					alignItems: 'center',
+					rowGap: '1',
+					columnGap: '2',
+					backgroundColor: 'bg.secondary',
+					borderBottomWidth: '1'
+				})
+	);
 
 	const legendBottomFullCss = $derived(
-		cx(
-			legendBaseCss,
-			legendBottomCss,
-			legendCollapsed ? cx(legendCollapsedCss, legendBottomCollapsedCss) : ''
-		)
+		legendCollapsed
+			? css({
+					display: 'flex',
+					flexWrap: 'wrap',
+					alignItems: 'center',
+					rowGap: '1',
+					columnGap: '2',
+					background: 'transparent',
+					border: 'none',
+					justifyContent: 'flex-start'
+				})
+			: css({
+					display: 'flex',
+					flexWrap: 'wrap',
+					alignItems: 'center',
+					rowGap: '1',
+					columnGap: '2',
+					backgroundColor: 'bg.secondary',
+					borderTopWidth: '1',
+					borderBottom: 'none'
+				})
 	);
 
 	const sidePanelCss = $derived(
-		cx(sideCss, legendPosition === 'right' ? sideRightCss : sideLeftCss)
+		legendPosition === 'right'
+			? css({
+					position: 'absolute',
+					top: '7',
+					right: '6',
+					maxHeight: 'calc(100% - 44px)',
+					display: 'flex',
+					flexDirection: 'row',
+					alignItems: 'flex-start',
+					zIndex: '5'
+				})
+			: css({
+					position: 'absolute',
+					top: '7',
+					left: '16',
+					maxHeight: 'calc(100% - 44px)',
+					display: 'flex',
+					flexDirection: 'row',
+					alignItems: 'flex-start',
+					zIndex: '5'
+				})
 	);
 
-	const sideTabCss = $derived(
-		cx(
-			tabCss,
-			legendPosition === 'right' ? tabRightCss : tabLeftCss,
-			legendCollapsed ? tabCollapsedCss : ''
-		)
-	);
+	const sideTabCss = $derived.by(() => {
+		if (legendPosition === 'right') {
+			return legendCollapsed
+				? css({
+						flexShrink: '0',
+						alignSelf: 'center',
+						width: 'icon',
+						height: 'rowXl',
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						cursor: 'pointer',
+						background: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+						borderWidth: '1',
+						borderRadius: 'sm2',
+						color: 'fg.muted',
+						transition: 'background-color 120ms ease, color 120ms ease',
+						_hover: { background: 'bg.tertiary', color: 'fg.primary' },
+						'& :global(svg)': { stroke: 'currentColor' }
+					})
+				: css({
+						flexShrink: '0',
+						alignSelf: 'center',
+						width: 'icon',
+						height: 'rowXl',
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						cursor: 'pointer',
+						background: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+						borderWidth: '1',
+						borderTopLeftRadius: 'sm2',
+						borderBottomLeftRadius: 'sm2',
+						borderRightWidth: '0',
+						color: 'fg.muted',
+						transition: 'background-color 120ms ease, color 120ms ease',
+						_hover: { background: 'bg.tertiary', color: 'fg.primary' },
+						'& :global(svg)': { stroke: 'currentColor' }
+					});
+		}
+		return legendCollapsed
+			? css({
+					flexShrink: '0',
+					alignSelf: 'center',
+					width: 'icon',
+					height: 'rowXl',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					cursor: 'pointer',
+					background: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+					borderWidth: '1',
+					borderRadius: 'sm2',
+					color: 'fg.muted',
+					transition: 'background-color 120ms ease, color 120ms ease',
+					_hover: { background: 'bg.tertiary', color: 'fg.primary' },
+					'& :global(svg)': { stroke: 'currentColor' }
+				})
+			: css({
+					flexShrink: '0',
+					alignSelf: 'center',
+					width: 'icon',
+					height: 'rowXl',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					cursor: 'pointer',
+					background: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+					borderWidth: '1',
+					borderTopRightRadius: 'sm2',
+					borderBottomRightRadius: 'sm2',
+					borderLeftWidth: '0',
+					color: 'fg.muted',
+					transition: 'background-color 120ms ease, color 120ms ease',
+					_hover: { background: 'bg.tertiary', color: 'fg.primary' },
+					'& :global(svg)': { stroke: 'currentColor' }
+				});
+	});
 
 	const sideItemsCss = $derived(
-		cx(itemsCss, legendPosition === 'right' ? itemsRightCss : itemsLeftCss)
+		legendPosition === 'right'
+			? css({
+					display: 'flex',
+					flexDirection: 'column',
+					gap: 'px',
+					paddingX: '1.5',
+					paddingTop: '1.5',
+					paddingBottom: '2',
+					maxHeight: 'calc(100vh - 200px)',
+					overflowY: 'auto',
+					backgroundColor: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+					borderWidth: '1',
+					borderTopRightRadius: 'md2',
+					borderBottomRightRadius: 'md2'
+				})
+			: css({
+					display: 'flex',
+					flexDirection: 'column',
+					gap: 'px',
+					paddingX: '1.5',
+					paddingTop: '1.5',
+					paddingBottom: '2',
+					maxHeight: 'calc(100vh - 200px)',
+					overflowY: 'auto',
+					backgroundColor: 'color-mix(in srgb, {colors.bg.secondary} 95%, transparent)',
+					borderWidth: '1',
+					borderTopLeftRadius: 'md2',
+					borderBottomLeftRadius: 'md2'
+				})
 	);
 </script>
 
-<div class={outerCss} data-testid="chart-preview">
+<div
+	class={css({ width: '100%', backgroundColor: 'bg.primary', padding: '3' })}
+	data-testid="chart-preview"
+>
 	{#if htmlLegend && legendPosition === 'top'}
-		<div class={cx('group', legendTopCss)}>
+		<div class={legendTopCss} data-legend-group>
 			{#if legendCollapsed}
 				<button
 					type="button"
-					class={pillCss}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: 'px',
+						paddingY: '1',
+						paddingX: '2',
+						borderWidth: '1',
+						borderRadius: 'pill',
+						cursor: 'pointer',
+						transition: 'background 120ms ease, border-color 120ms ease',
+						_hover: { background: 'bg.secondary' }
+					})}
 					onclick={() => (legendCollapsed = false)}
 					title="Show legend"
 				>
 					{#each htmlLegend.labels.slice(0, 12) as label (label)}
 						<span
-							class={cx(dotCss, !isSeriesVisible(label) ? dotFadedCss : '')}
+							class={[
+								css({
+									width: 'barTall',
+									height: 'barTall',
+									borderRadius: '50%',
+									flexShrink: '0',
+									transition: 'opacity 120ms ease'
+								}),
+								!isSeriesVisible(label) && css({ opacity: '0.3' })
+							]}
 							style:background={htmlLegend.getColor(label)}
 						></span>
 					{/each}
@@ -4106,17 +4075,50 @@
 				{#each htmlLegend.labels as label (label)}
 					<button
 						type="button"
-						class={cx(legendItemCss, !isSeriesVisible(label) ? legendItemDimmedCss : '')}
+						class={[
+							css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '1',
+								background: 'none',
+								border: 'none',
+								paddingY: '0.5',
+								paddingX: '1',
+								cursor: 'pointer',
+								fontSize: '2xs',
+								fontFamily: 'mono',
+								color: 'fg.muted',
+								transition: 'opacity 120ms ease',
+								whiteSpace: 'nowrap',
+								_hover: { color: 'fg.primary', backgroundColor: 'bg.tertiary' }
+							}),
+							!isSeriesVisible(label) && css({ opacity: '0.35' })
+						]}
 						onclick={(e) => htmlLegend?.onClick(label, e)}
 					>
-						<span class={swatchCss} style:background={htmlLegend.getColor(label)}></span>
+						<span
+							class={css({ width: 'dot', height: 'dot', borderRadius: 'xxs', flexShrink: '0' })}
+							style:background={htmlLegend.getColor(label)}
+						></span>
 						{label.length > 14 ? label.slice(0, 14) + '…' : label}
 					</button>
 				{/each}
 				<div
 					role="button"
 					tabindex="0"
-					class={handleCss}
+					class={css({
+						flexShrink: '0',
+						alignSelf: 'stretch',
+						width: 'bar',
+						borderRadius: 'xs',
+						marginLeft: 'px',
+						cursor: 'pointer',
+						opacity: '0',
+						backgroundColor: 'bg.indicator',
+						transition: 'opacity 150ms ease',
+						'[data-legend-group]:hover &': { opacity: '0.15' },
+						_hover: { opacity: '0.5' }
+					})}
 					onclick={() => (legendCollapsed = true)}
 					onkeydown={(e) => e.key === 'Enter' && (legendCollapsed = true)}
 					title="Minimize legend"
@@ -4124,17 +4126,29 @@
 			{/if}
 		</div>
 	{/if}
-	<div class={toolbarCss}>
-		<div class={controlsCss}>
+	<div
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: 'space-between',
+			paddingY: '1.5',
+			paddingX: '2.5',
+			borderBottomWidth: '1'
+		})}
+	>
+		<div class={css({ display: 'flex', gap: '1.5' })}>
 			<button
 				type="button"
-				class={cx(
-					button({ variant: 'ghost', size: 'sm' }),
-					css({
-						borderWidth: '1',
-						fontSize: 'xs'
-					})
-				)}
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'transparent',
+					color: 'fg.secondary',
+					borderColor: 'transparent',
+					fontSize: 'xs',
+					paddingX: '2',
+					paddingY: '1',
+					'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
 				aria-label="Export chart as PNG"
 				onclick={exportChartPng}
 			>
@@ -4142,13 +4156,16 @@
 			</button>
 			<button
 				type="button"
-				class={cx(
-					button({ variant: 'ghost', size: 'sm' }),
-					css({
-						borderWidth: '1',
-						fontSize: 'xs'
-					})
-				)}
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'transparent',
+					color: 'fg.secondary',
+					borderColor: 'transparent',
+					fontSize: 'xs',
+					paddingX: '2',
+					paddingY: '1',
+					'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
 				aria-label="Export chart data as CSV"
 				onclick={exportChartCsv}
 			>
@@ -4158,13 +4175,16 @@
 		{#if zoomEnabled && zoomActive}
 			<button
 				type="button"
-				class={cx(
-					button({ variant: 'ghost', size: 'sm' }),
-					css({
-						borderWidth: '1',
-						fontSize: 'xs'
-					})
-				)}
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'transparent',
+					color: 'fg.secondary',
+					borderColor: 'transparent',
+					fontSize: 'xs',
+					paddingX: '2',
+					paddingY: '1',
+					'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
 				aria-label="Reset chart zoom"
 				onclick={resetZoom}
 			>
@@ -4172,15 +4192,45 @@
 			</button>
 		{/if}
 	</div>
-	<div class={wrapperCss} bind:this={wrapperEl} style="height: {height}px">
-		<div class={areaCss} bind:this={chartEl}>
+	<div
+		class={css({ position: 'relative', width: '100%', overflow: 'hidden', contain: 'content' })}
+		bind:this={wrapperEl}
+		style="height: {height}px"
+	>
+		<div class={css({ width: '100%', height: '100%' })} bind:this={chartEl}>
 			{#if data.length === 0}
-				<div class={emptyCss}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						height: '100%',
+						color: 'fg.muted',
+						fontSize: 'xs'
+					})}
+				>
 					<span>No data to display</span>
 				</div>
 			{/if}
 		</div>
-		<div class={cx(tooltipCss, tipVisible ? tooltipVisibleCss : tooltipHiddenCss)}>
+		<div
+			class={[
+				css({
+					position: 'absolute',
+					pointerEvents: 'none',
+					paddingX: '3',
+					paddingY: '2',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					fontSize: 'sm',
+					boxShadow: 'lg',
+					wordBreak: 'break-word',
+					zIndex: 'tooltip',
+					transition: 'opacity 75ms'
+				}),
+				tipVisible ? css({ opacity: '1' }) : css({ opacity: '0' })
+			]}
+		>
 			{#if tipTitle}<strong>{tipTitle}</strong>{/if}
 			{#each tipLines as line, i (i)}
 				{#if tipTitle || tipLines.length > 1}<br />{/if}
@@ -4192,7 +4242,7 @@
 			<div class={sidePanelCss}>
 				{#if legendPosition === 'right'}
 					<button
-						class={cx(css({ padding: '0' }), sideTabCss)}
+						class={sideTabCss}
 						onclick={() => (legendCollapsed = !legendCollapsed)}
 						title={legendCollapsed ? 'Show legend' : 'Hide legend'}
 					>
@@ -4208,10 +4258,31 @@
 						{#each htmlLegend.labels as label (label)}
 							<button
 								type="button"
-								class={cx(legendItemCss, !isSeriesVisible(label) ? legendItemDimmedCss : '')}
+								class={[
+									css({
+										display: 'flex',
+										alignItems: 'center',
+										gap: '1',
+										background: 'none',
+										border: 'none',
+										paddingY: '0.5',
+										paddingX: '1',
+										cursor: 'pointer',
+										fontSize: '2xs',
+										fontFamily: 'mono',
+										color: 'fg.muted',
+										transition: 'opacity 120ms ease',
+										whiteSpace: 'nowrap',
+										_hover: { color: 'fg.primary', backgroundColor: 'bg.tertiary' }
+									}),
+									!isSeriesVisible(label) && css({ opacity: '0.35' })
+								]}
 								onclick={(e) => htmlLegend?.onClick(label, e)}
 							>
-								<span class={swatchCss} style:background={htmlLegend.getColor(label)}></span>
+								<span
+									class={css({ width: 'dot', height: 'dot', borderRadius: 'xxs', flexShrink: '0' })}
+									style:background={htmlLegend.getColor(label)}
+								></span>
 								{label.length > 14 ? label.slice(0, 14) + '…' : label}
 							</button>
 						{/each}
@@ -4219,7 +4290,7 @@
 				{/if}
 				{#if legendPosition === 'left'}
 					<button
-						class={cx(css({ padding: '0' }), sideTabCss)}
+						class={sideTabCss}
 						onclick={() => (legendCollapsed = !legendCollapsed)}
 						title={legendCollapsed ? 'Show legend' : 'Hide legend'}
 					>
@@ -4234,17 +4305,37 @@
 		{/if}
 	</div>
 	{#if htmlLegend && legendPosition === 'bottom'}
-		<div class={cx('group', legendBottomFullCss)}>
+		<div class={legendBottomFullCss} data-legend-group>
 			{#if legendCollapsed}
 				<button
 					type="button"
-					class={pillCss}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: 'px',
+						paddingY: '1',
+						paddingX: '2',
+						borderWidth: '1',
+						borderRadius: 'pill',
+						cursor: 'pointer',
+						transition: 'background 120ms ease, border-color 120ms ease',
+						_hover: { background: 'bg.secondary' }
+					})}
 					onclick={() => (legendCollapsed = false)}
 					title="Show legend"
 				>
 					{#each htmlLegend.labels.slice(0, 12) as label (label)}
 						<span
-							class={cx(dotCss, !isSeriesVisible(label) ? dotFadedCss : '')}
+							class={[
+								css({
+									width: 'barTall',
+									height: 'barTall',
+									borderRadius: '50%',
+									flexShrink: '0',
+									transition: 'opacity 120ms ease'
+								}),
+								!isSeriesVisible(label) && css({ opacity: '0.3' })
+							]}
 							style:background={htmlLegend.getColor(label)}
 						></span>
 					{/each}
@@ -4253,17 +4344,50 @@
 				{#each htmlLegend.labels as label (label)}
 					<button
 						type="button"
-						class={cx(legendItemCss, !isSeriesVisible(label) ? legendItemDimmedCss : '')}
+						class={[
+							css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '1',
+								background: 'none',
+								border: 'none',
+								paddingY: '0.5',
+								paddingX: '1',
+								cursor: 'pointer',
+								fontSize: '2xs',
+								fontFamily: 'mono',
+								color: 'fg.muted',
+								transition: 'opacity 120ms ease',
+								whiteSpace: 'nowrap',
+								_hover: { color: 'fg.primary', backgroundColor: 'bg.tertiary' }
+							}),
+							!isSeriesVisible(label) && css({ opacity: '0.35' })
+						]}
 						onclick={(e) => htmlLegend?.onClick(label, e)}
 					>
-						<span class={swatchCss} style:background={htmlLegend.getColor(label)}></span>
+						<span
+							class={css({ width: 'dot', height: 'dot', borderRadius: 'xxs', flexShrink: '0' })}
+							style:background={htmlLegend.getColor(label)}
+						></span>
 						{label.length > 14 ? label.slice(0, 14) + '…' : label}
 					</button>
 				{/each}
 				<div
 					role="button"
 					tabindex="0"
-					class={handleCss}
+					class={css({
+						flexShrink: '0',
+						alignSelf: 'stretch',
+						width: 'bar',
+						borderRadius: 'xs',
+						marginLeft: 'px',
+						cursor: 'pointer',
+						opacity: '0',
+						backgroundColor: 'bg.indicator',
+						transition: 'opacity 150ms ease',
+						'[data-legend-group]:hover &': { opacity: '0.15' },
+						_hover: { opacity: '0.5' }
+					})}
 					onclick={() => (legendCollapsed = true)}
 					onkeydown={(e) => e.key === 'Enter' && (legendCollapsed = true)}
 					title="Minimize legend"

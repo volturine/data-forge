@@ -10,22 +10,19 @@
 		PanelLeftOpen,
 		Sun,
 		Moon,
-		Settings,
 		MessageSquare,
 		Cpu,
 		LogOut,
 		User
 	} from 'lucide-svelte';
-	import { css, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 	import { enginesStore } from '$lib/stores/engines.svelte';
-	import { untrack } from 'svelte';
 
 	interface Props {
 		collapsed: boolean;
 		onToggle: () => void;
 		theme: 'light' | 'dark';
 		onToggleTheme: () => void;
-		onOpenSettings: () => void;
 		onOpenEngines: () => void;
 		onOpenChat: () => void;
 		onOpenNamespace: () => void;
@@ -43,7 +40,6 @@
 		onToggle,
 		theme,
 		onToggleTheme,
-		onOpenSettings,
 		onOpenEngines,
 		onOpenChat,
 		onOpenNamespace,
@@ -57,12 +53,6 @@
 	}: Props = $props();
 
 	const currentPath = $derived(page.url.pathname);
-
-	// Subscription: $derived can't manage the engines stream lifecycle.
-	$effect(() => {
-		untrack(() => enginesStore.startStream());
-		return () => enginesStore.stopStream();
-	});
 
 	const navItems = [
 		{ href: '/', label: 'Analyses', icon: LayoutGrid, prefix: '/analysis' },
@@ -144,24 +134,7 @@
 		})
 	);
 
-	const iconWrapClass = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		flexShrink: 0,
-		width: '5',
-		height: '5'
-	});
-
 	const profileActive = $derived(currentPath.startsWith('/profile'));
-
-	const sectionClass = css({
-		display: 'flex',
-		flexDirection: 'column',
-		gap: '0.5',
-		paddingY: '2',
-		borderTopWidth: '1'
-	});
 </script>
 
 <aside class={sidebarClass} aria-label="Main navigation">
@@ -176,19 +149,28 @@
 	>
 		{#if collapsed}
 			<button
-				class={cx(
+				class={[
 					sidebarBtnClass,
 					css({
 						paddingX: '0',
 						borderLeftWidth: '0',
 						justifyContent: 'center'
 					})
-				)}
+				]}
 				onclick={onToggle}
 				type="button"
 				aria-label="Expand sidebar"
 			>
-				<span class={iconWrapClass}>
+				<span
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						flexShrink: 0,
+						width: '5',
+						height: '5'
+					})}
+				>
 					<PanelLeftOpen size={16} />
 				</span>
 			</button>
@@ -260,7 +242,16 @@
 				title={collapsed ? item.label : undefined}
 				aria-current={active ? 'page' : undefined}
 			>
-				<span class={iconWrapClass}>
+				<span
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						flexShrink: 0,
+						width: '5',
+						height: '5'
+					})}
+				>
 					<item.icon size={16} />
 				</span>
 				{#if !collapsed}
@@ -270,7 +261,17 @@
 		{/each}
 	</nav>
 
-	<div class={sectionClass} role="group" aria-label="Tools">
+	<div
+		class={css({
+			display: 'flex',
+			flexDirection: 'column',
+			gap: '0.5',
+			paddingY: '2',
+			borderTopWidth: '1'
+		})}
+		role="group"
+		aria-label="Tools"
+	>
 		<button
 			class={sidebarBtnClass}
 			onclick={onOpenChat}
@@ -278,7 +279,16 @@
 			aria-label="AI Assistant"
 			type="button"
 		>
-			<span class={iconWrapClass}>
+			<span
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					flexShrink: 0,
+					width: '5',
+					height: '5'
+				})}
+			>
 				<MessageSquare size={16} />
 			</span>
 			{#if !collapsed}
@@ -287,12 +297,12 @@
 		</button>
 
 		<button
-			class={cx(
+			class={[
 				sidebarBtnClass,
 				css({
 					color: enginesStore.count > 0 ? 'fg.secondary' : 'fg.tertiary'
 				})
-			)}
+			]}
 			title={collapsed ? 'Engines' : 'Engine Monitor'}
 			aria-label="Engine Monitor"
 			type="button"
@@ -340,27 +350,21 @@
 
 		<button
 			class={sidebarBtnClass}
-			onclick={onOpenSettings}
-			title={collapsed ? 'Settings' : 'Settings'}
-			aria-label="Settings"
-			type="button"
-		>
-			<span class={iconWrapClass}>
-				<Settings size={16} />
-			</span>
-			{#if !collapsed}
-				<span>Settings</span>
-			{/if}
-		</button>
-
-		<button
-			class={sidebarBtnClass}
 			onclick={onToggleTheme}
 			title={collapsed ? (theme === 'light' ? 'Light' : 'Dark') : 'Toggle theme'}
 			aria-label="Toggle theme"
 			type="button"
 		>
-			<span class={iconWrapClass}>
+			<span
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					flexShrink: 0,
+					width: '5',
+					height: '5'
+				})}
+			>
 				{#if theme === 'light'}
 					<Sun size={16} />
 				{:else}
@@ -374,14 +378,33 @@
 	</div>
 
 	{#if authenticated || !authRequired}
-		<div class={sectionClass} role="group" aria-label="Account">
+		<div
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '0.5',
+				paddingY: '2',
+				borderTopWidth: '1'
+			})}
+			role="group"
+			aria-label="Account"
+		>
 			<a
 				href={resolve('/profile' as '/')}
 				class={navLinkClass(profileActive)}
 				title={collapsed ? 'Profile' : undefined}
 				aria-current={profileActive ? 'page' : undefined}
 			>
-				<span class={iconWrapClass}>
+				<span
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						flexShrink: 0,
+						width: '5',
+						height: '5'
+					})}
+				>
 					{#if avatarUrl}
 						<img
 							src={avatarUrl}
@@ -410,7 +433,16 @@
 					aria-label="Sign out"
 					type="button"
 				>
-					<span class={iconWrapClass}>
+					<span
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							flexShrink: 0,
+							width: '5',
+							height: '5'
+						})}
+					>
 						<LogOut size={16} />
 					</span>
 					{#if !collapsed}

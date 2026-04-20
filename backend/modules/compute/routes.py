@@ -2,7 +2,7 @@ import asyncio
 import logging
 from urllib.parse import quote
 
-from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from sqlmodel import Session
@@ -13,14 +13,15 @@ from core.dependencies import get_manager
 from core.error_handlers import handle_errors
 from core.exceptions import EngineNotFoundError
 from core.namespace import get_namespace, reset_namespace, set_namespace_context
-from core.validation import AnalysisId, DataSourceId, parse_analysis_id, parse_datasource_id
+from core.validation import AnalysisId, DataSourceId, EngineRunId, parse_analysis_id, parse_datasource_id, parse_engine_run_id
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.compute import schemas, service
 from modules.compute.engine_live import registry as engine_registry
 from modules.compute.live import ActiveBuildContext, registry as build_registry
 from modules.compute.manager import ProcessManager
-from modules.engine_runs.schemas import EngineRunKind
+from modules.engine_runs import service as engine_run_service
+from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from modules.mcp.router import MCPRouter
 
 logger = logging.getLogger(__name__)
@@ -256,7 +257,7 @@ def preview_step(
     (the step to preview, or 'source' for raw data). Returns column names, types, data rows,
     and total row count. Use row_limit and page for pagination.
     """
-    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+    analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
 
     return service.preview_step(
         session=session,
@@ -284,13 +285,13 @@ def get_step_schema(
     Useful for configuring downstream steps that need to know available columns
     (e.g., pivot, unpivot, select). Returns column names and their Polars dtypes.
     """
-    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+    analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
 
     return service.get_step_schema(
         session=session,
         manager=manager,
         target_step_id=request.target_step_id,
-        analysis_id=analysis_id or '',
+        analysis_id=analysis_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         tab_id=request.tab_id,
     )
@@ -304,13 +305,13 @@ def get_step_row_count(
     manager: ProcessManager = Depends(get_manager),
 ):
     """Get the row count of a pipeline step result without fetching data. Faster than a full preview."""
-    analysis_id = request.analysis_id or request.analysis_pipeline.analysis_id
+    analysis_id = request.analysis_id if request.analysis_id is not None else request.analysis_pipeline.analysis_id
 
     return service.get_step_row_count(
         session=session,
         manager=manager,
         target_step_id=request.target_step_id,
-        analysis_id=analysis_id or '',
+        analysis_id=analysis_id,
         analysis_pipeline=request.analysis_pipeline.model_dump(mode='json'),
         tab_id=request.tab_id,
         request_json=request.model_dump(mode='json'),
@@ -408,6 +409,110 @@ async def start_active_build(
     return build.detail()
 
 
+@router.post('/cancel/{engine_run_id}', response_model=schemas.CancelBuildResponse, mcp=True)
+@handle_errors(operation='cancel build')
+async def cancel_build(
+    engine_run_id: EngineRunId,
+    session: Session = Depends(get_db),
+    manager: ProcessManager = Depends(get_manager),
+    user: User = Depends(get_current_user),
+):
+    run_id = parse_engine_run_id(engine_run_id)
+    run = engine_run_service.get_engine_run(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='Engine run not found')
+    if run.status != EngineRunStatus.RUNNING:
+        raise HTTPException(status_code=400, detail='Only running builds can be cancelled')
+
+    cancelled_by = user.email or user.display_name or user.id
+    cancelled = service.cancel_engine_run(
+        session,
+        manager,
+        run_id,
+        cancelled_by=cancelled_by,
+    )
+
+    active = await build_registry.list_builds()
+    match = next(
+        (
+            item
+            for item in active
+            if item.namespace == get_namespace()
+            and item.current_engine_run_id == run_id
+            and item.status == schemas.ActiveBuildStatus.RUNNING
+        ),
+        None,
+    )
+    if match is not None:
+        await _emit_active_build_event(
+            match.build_id,
+            match.analysis_id,
+            {
+                'type': 'cancelled',
+                'engine_run_id': run_id,
+                'progress': match.progress,
+                'elapsed_ms': cancelled.duration_ms or match.elapsed_ms,
+                'total_steps': match.total_steps,
+                'tabs_built': 0,
+                'results': [],
+                'duration_ms': cancelled.duration_ms or match.elapsed_ms,
+                'cancelled_at': cancelled.cancelled_at.isoformat(),
+                'cancelled_by': cancelled.cancelled_by,
+                'current_output_id': match.current_output_id,
+                'current_output_name': match.current_output_name,
+            },
+        )
+
+    return cancelled
+
+
+@router.get('/builds/active', response_model=schemas.ActiveBuildListResponse, mcp=True)
+@handle_errors(operation='list active builds')
+async def list_active_builds(
+    request: Request,
+    status: schemas.ActiveBuildStatus | None = None,
+    _user: User = Depends(get_current_user),
+):
+    del request
+    builds = await build_registry.list_builds(status=status or schemas.ActiveBuildStatus.RUNNING)
+    namespace = get_namespace()
+    visible = [build for build in builds if build.namespace == namespace]
+    return schemas.ActiveBuildListResponse(builds=visible, total=len(visible))
+
+
+@router.get('/builds/active/{build_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
+@handle_errors(operation='get active build')
+async def get_active_build(
+    build_id: str,
+    _user: User = Depends(get_current_user),
+):
+    build = await build_registry.get_build(build_id)
+    if build is None or build.namespace != get_namespace():
+        raise HTTPException(status_code=404, detail='Active build not found')
+    return build.detail()
+
+
+@router.get('/builds/active/by-engine-run/{engine_run_id}', response_model=schemas.ActiveBuildDetail, mcp=True)
+@handle_errors(operation='get active build by engine run')
+async def get_active_build_by_engine_run(
+    engine_run_id: EngineRunId,
+    _user: User = Depends(get_current_user),
+):
+    run_id = parse_engine_run_id(engine_run_id)
+    builds = await build_registry.list_builds(status=schemas.ActiveBuildStatus.RUNNING)
+    namespace = get_namespace()
+    match = next(
+        (build for build in builds if build.namespace == namespace and build.current_engine_run_id == run_id),
+        None,
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail='Active build not found')
+    build = await build_registry.get_build(match.build_id)
+    if build is None or build.namespace != namespace:
+        raise HTTPException(status_code=404, detail='Active build not found')
+    return build.detail()
+
+
 # Engine lifecycle endpoints
 
 
@@ -488,6 +593,14 @@ async def engine_list_stream(websocket: WebSocket) -> None:
             websocket,
             schemas.EngineWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json'),
         )
+    except RuntimeError as exc:
+        if _is_disconnect_runtime_error(exc):
+            return
+        logger.error('Engine websocket error: %s', exc, exc_info=True)
+        await _safe_send_json(
+            websocket,
+            schemas.EngineWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
+        )
     except Exception as exc:
         logger.error('Engine websocket error: %s', exc, exc_info=True)
         await _safe_send_json(
@@ -515,6 +628,14 @@ async def build_list_stream(websocket: WebSocket) -> None:
     except HTTPException as exc:
         await _safe_send_json(
             websocket, schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json')
+        )
+    except RuntimeError as exc:
+        if _is_disconnect_runtime_error(exc):
+            return
+        logger.error('Build list websocket error: %s', exc, exc_info=True)
+        await _safe_send_json(
+            websocket,
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
         logger.error('Build list websocket error: %s', exc, exc_info=True)
@@ -545,6 +666,14 @@ async def active_build_stream(websocket: WebSocket, build_id: str) -> None:
     except HTTPException as exc:
         await _safe_send_json(
             websocket, schemas.BuildWebsocketErrorMessage(error=str(exc.detail), status_code=exc.status_code).model_dump(mode='json')
+        )
+    except RuntimeError as exc:
+        if _is_disconnect_runtime_error(exc):
+            return
+        logger.error('Active build websocket error: %s', exc, exc_info=True)
+        await _safe_send_json(
+            websocket,
+            schemas.BuildWebsocketErrorMessage(error='An internal error occurred').model_dump(mode='json'),
         )
     except Exception as exc:
         logger.error('Active build websocket error: %s', exc, exc_info=True)

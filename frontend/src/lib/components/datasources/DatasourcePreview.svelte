@@ -63,9 +63,10 @@
 			);
 		}
 		if (!resolvedDatasource) return null;
+		if (!datasourceConfig) return null;
 		return buildDatasourcePipelinePayload({
 			datasource: resolvedDatasource,
-			datasourceConfig: datasourceConfig ?? { branch: 'master' }
+			datasourceConfig
 		});
 	});
 

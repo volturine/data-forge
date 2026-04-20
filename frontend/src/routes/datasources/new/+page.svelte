@@ -10,7 +10,7 @@
 
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Check, X } from 'lucide-svelte';
-	import { css, cx, button, input, tabButton, label } from '$lib/styles/panda';
+	import { css, button, input, tabButton, label } from '$lib/styles/panda';
 
 	type Tab = 'file' | 'database';
 
@@ -270,7 +270,13 @@
 		<h1 class={css({ margin: '0', fontSize: '2xl', fontWeight: 'semibold' })}>Add Data Source</h1>
 		<a
 			href={resolve('/datasources')}
-			class={cx(button({ variant: 'secondary' }), css({ textDecoration: 'none' }))}
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'transparent',
+				color: 'fg.primary',
+				textDecoration: 'none',
+				'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
+			})}
 			data-sveltekit-reload
 		>
 			Cancel
@@ -491,7 +497,15 @@
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 								<label
 									for="csv-delimiter"
-									class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}
+									class={css({
+										display: 'block',
+										fontSize: 'xs',
+										fontWeight: 'medium',
+										color: 'fg.secondary',
+										textTransform: 'none',
+										letterSpacing: 'normal',
+										marginBottom: '1.5'
+									})}
 								>
 									Delimiter
 								</label>
@@ -511,7 +525,15 @@
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 								<label
 									for="csv-quote"
-									class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}
+									class={css({
+										display: 'block',
+										fontSize: 'xs',
+										fontWeight: 'medium',
+										color: 'fg.secondary',
+										textTransform: 'none',
+										letterSpacing: 'normal',
+										marginBottom: '1.5'
+									})}
 								>
 									Quote
 								</label>
@@ -524,7 +546,15 @@
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 								<label
 									for="csv-encoding"
-									class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}
+									class={css({
+										display: 'block',
+										fontSize: 'xs',
+										fontWeight: 'medium',
+										color: 'fg.secondary',
+										textTransform: 'none',
+										letterSpacing: 'normal',
+										marginBottom: '1.5'
+									})}
 								>
 									Encoding
 								</label>
@@ -543,7 +573,15 @@
 							<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 								<label
 									for="csv-skip-rows"
-									class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}
+									class={css({
+										display: 'block',
+										fontSize: 'xs',
+										fontWeight: 'medium',
+										color: 'fg.secondary',
+										textTransform: 'none',
+										letterSpacing: 'normal',
+										marginBottom: '1.5'
+									})}
 								>
 									Skip Rows
 								</label>
@@ -706,7 +744,24 @@
 						placeholder="SELECT * FROM table"
 						rows="5"
 						disabled={loading}
-						class={cx(input(), css({ resize: 'vertical' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							resize: 'vertical',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 					></textarea>
 				</div>
 

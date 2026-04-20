@@ -3,7 +3,7 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { listNamespaces } from '$lib/api/namespaces';
 	import { normalizeNamespace } from '$lib/utils/namespace';
-	import { css, cx, input } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -159,15 +159,23 @@
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '2', padding: '2' })}>
 			<input
 				id="namespace-picker-search"
-				class={cx(
-					input(),
-					css({
-						paddingX: '2',
-						paddingY: '1.5',
-						fontSize: 'sm',
-						_focus: { borderColor: 'border.accent' }
-					})
-				)}
+				class={css({
+					width: 'full',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' },
+					paddingX: '2',
+					paddingY: '1.5',
+					fontSize: 'sm',
+					_focus: { borderColor: 'border.accent' }
+				})}
 				type="text"
 				bind:this={searchInput}
 				bind:value={searchQuery}

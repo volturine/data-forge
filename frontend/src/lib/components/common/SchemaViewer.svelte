@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import { css, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		schema: Schema;
@@ -11,14 +11,14 @@
 </script>
 
 <div
-	class={cx(
+	class={[
 		'schema-viewer',
 		css({
 			overflow: 'hidden',
 			borderWidth: '1',
 			backgroundColor: 'bg.primary'
 		})
-	)}
+	]}
 >
 	<div
 		class={css({

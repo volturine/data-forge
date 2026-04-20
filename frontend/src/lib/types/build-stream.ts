@@ -7,7 +7,8 @@ export type BuildEventType =
 	| 'resources'
 	| 'log'
 	| 'complete'
-	| 'failed';
+	| 'failed'
+	| 'cancelled';
 
 export interface BuildEventBase {
 	type: BuildEventType;
@@ -20,6 +21,7 @@ export interface BuildEventBase {
 	tab_name?: string | null;
 	current_output_id?: string | null;
 	current_output_name?: string | null;
+	engine_run_id?: string | null;
 }
 
 export interface PlanEvent extends BuildEventBase {
@@ -109,6 +111,18 @@ export interface FailedEvent extends BuildEventBase {
 	error: string | null;
 }
 
+export interface CancelledEvent extends BuildEventBase {
+	type: 'cancelled';
+	progress: number;
+	elapsed_ms: number;
+	total_steps: number;
+	tabs_built: number;
+	results: BuildTabResult[];
+	duration_ms: number;
+	cancelled_at: string;
+	cancelled_by: string | null;
+}
+
 export type BuildEvent =
 	| PlanEvent
 	| StepStartEvent
@@ -118,7 +132,8 @@ export type BuildEvent =
 	| ResourcesEvent
 	| LogEvent
 	| CompleteEvent
-	| FailedEvent;
+	| FailedEvent
+	| CancelledEvent;
 
 export interface BuildTabResult {
 	tab_id: string;
@@ -129,7 +144,13 @@ export interface BuildTabResult {
 	error?: string | null;
 }
 
-export type BuildStatus = 'connecting' | 'running' | 'completed' | 'failed' | 'disconnected';
+export type BuildStatus =
+	| 'connecting'
+	| 'running'
+	| 'completed'
+	| 'failed'
+	| 'cancelled'
+	| 'disconnected';
 
 export type BuildStepState = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
@@ -191,7 +212,7 @@ export interface ActiveBuildSummary {
 	analysis_id: string;
 	analysis_name: string;
 	namespace: string;
-	status: string;
+	status: 'running' | 'completed' | 'failed' | 'cancelled';
 	started_at: string;
 	starter: BuildStarter;
 	resource_config: BuildResourceConfigSummary | null;
@@ -207,7 +228,10 @@ export interface ActiveBuildSummary {
 	current_tab_name: string | null;
 	current_output_id: string | null;
 	current_output_name: string | null;
+	current_engine_run_id: string | null;
 	total_tabs: number;
+	cancelled_at: string | null;
+	cancelled_by: string | null;
 }
 
 export interface ActiveBuildDetail extends ActiveBuildSummary {

@@ -458,6 +458,95 @@ export async function createMultiStepAnalysis(
 	return ((await response.json()) as { id: string }).id;
 }
 
+export async function createLongRunningAnalysis(
+	request: APIRequestContext,
+	name: string,
+	datasourceId: string
+): Promise<string> {
+	const resultId = crypto.randomUUID();
+	const tabId = crypto.randomUUID();
+	const viewId = crypto.randomUUID();
+	const joinId = crypto.randomUUID();
+	const sortId = crypto.randomUUID();
+
+	const steps: Array<Record<string, unknown>> = [
+		{
+			id: viewId,
+			type: 'view',
+			config: {},
+			depends_on: [],
+			is_applied: true
+		},
+		{
+			id: joinId,
+			type: 'join',
+			config: {
+				how: 'inner',
+				right_source: datasourceId,
+				join_columns: [
+					{
+						id: crypto.randomUUID(),
+						left_column: 'city',
+						right_column: 'city'
+					}
+				],
+				right_columns: ['age', 'id'],
+				suffix: '_right'
+			},
+			depends_on: [viewId],
+			is_applied: true
+		},
+		{
+			id: sortId,
+			type: 'sort',
+			config: {
+				columns: ['name'],
+				descending: [false]
+			},
+			depends_on: [joinId],
+			is_applied: true
+		}
+	];
+
+	const response = await request.post(`${API_BASE}/analysis`, {
+		data: {
+			name,
+			description: null,
+			tabs: [
+				{
+					id: tabId,
+					name: 'Source 1',
+					parent_id: null,
+					datasource: {
+						id: datasourceId,
+						analysis_tab_id: null,
+						config: { branch: 'master' }
+					},
+					output: {
+						result_id: resultId,
+						datasource_type: 'iceberg',
+						format: 'parquet',
+						filename: 'source_1',
+						build_mode: 'full',
+						iceberg: {
+							namespace: 'outputs',
+							table_name: 'source_1',
+							branch: 'master'
+						}
+					},
+					steps
+				}
+			]
+		}
+	});
+	if (!response.ok()) {
+		throw new Error(
+			`createLongRunningAnalysis failed: ${response.status()} ${await response.text()}`
+		);
+	}
+	return ((await response.json()) as { id: string }).id;
+}
+
 // ── UDF ───────────────────────────────────────────────────────────────────────
 
 export async function createUdf(request: APIRequestContext, name: string): Promise<string> {

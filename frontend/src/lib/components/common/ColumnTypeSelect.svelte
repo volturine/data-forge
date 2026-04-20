@@ -2,7 +2,7 @@
 	import { getColumnTypesByCategory, CATEGORY_REGISTRY } from '$lib/utils/column-types';
 	import type { ColumnTypeCategory } from '$lib/utils/column-types';
 	import ColumnTypeBadge from './ColumnTypeBadge.svelte';
-	import { css, cx, input } from '$lib/styles/panda';
+	import { css, input } from '$lib/styles/panda';
 
 	interface Props {
 		/** Selected column type value */
@@ -73,7 +73,7 @@
 		{value}
 		onchange={handleChange}
 		{disabled}
-		class={cx(
+		class={[
 			input(),
 			css({
 				cursor: 'pointer',
@@ -85,7 +85,7 @@
 				: size === 'lg'
 					? css({ paddingX: '3', paddingY: '2', fontSize: 'sm', minWidth: 'listSm' })
 					: css({ paddingX: '2.5', paddingY: '1.5', fontSize: 'sm', minWidth: 'inputSm' })
-		)}
+		]}
 	>
 		{#if placeholder}
 			<option value="">{placeholder}</option>

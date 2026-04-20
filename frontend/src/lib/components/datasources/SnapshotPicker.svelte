@@ -5,7 +5,7 @@
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner } from '$lib/styles/panda';
+	import { css, spinner } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -437,7 +437,7 @@
 
 <div>
 	<button
-		class={cx(
+		class={[
 			'engine-header',
 			css({
 				display: 'flex',
@@ -452,7 +452,7 @@
 				_hover: disabled ? {} : { backgroundColor: 'bg.tertiary' },
 				_disabled: { opacity: '0.7', cursor: 'default' }
 			})
-		)}
+		]}
 		onclick={toggleSnapshots}
 		{disabled}
 		type="button"
@@ -509,10 +509,10 @@
 				</span>
 			{/if}
 			<span
-				class={cx(
-					css({ color: 'fg.muted' }),
-					css({ display: 'flex', alignItems: 'center' }),
-					snapshotsOpen && css({ transform: 'rotate(180deg)' })
+				class={css(
+					{ color: 'fg.muted' },
+					{ display: 'flex', alignItems: 'center' },
+					snapshotsOpen && { transform: 'rotate(180deg)' }
 				)}
 			>
 				<ChevronDown size={12} />
@@ -687,21 +687,21 @@
 							{#each calendarDays as day (day.key)}
 								{#if day.inMonth}
 									<button
-										class={cx(
-											css({
+										class={css(
+											{
 												position: 'relative',
 												height: 'rowXl',
 												borderWidth: '1',
 												backgroundColor: 'transparent',
 												fontSize: 'xs'
-											}),
+											},
 											day.count > 0
-												? css({
+												? {
 														backgroundColor: 'bg.muted',
 														_hover: { backgroundColor: 'bg.hover' }
-													})
-												: css({ cursor: 'default', opacity: '0.4' }),
-											selectedDay === day.key ? css({ backgroundColor: 'bg.tertiary' }) : ''
+													}
+												: { cursor: 'default', opacity: '0.4' },
+											selectedDay === day.key && { backgroundColor: 'bg.tertiary' }
 										)}
 										onclick={() => day.count > 0 && selectDay(day.key)}
 										type="button"
@@ -745,8 +745,8 @@
 						{#if selectedDay}
 							{#each filteredSnapshots as snap (snap.id)}
 								<div
-									class={cx(
-										css({
+									class={css(
+										{
 											display: 'flex',
 											width: '100%',
 											alignItems: 'center',
@@ -757,10 +757,10 @@
 											textAlign: 'left',
 											fontSize: 'xs',
 											_hover: { backgroundColor: 'bg.tertiary' }
-										}),
-										timeTravelId === snap.id || (!timeTravelId && snap.is_current)
-											? css({ backgroundColor: 'bg.tertiary' })
-											: ''
+										},
+										(timeTravelId === snap.id || (!timeTravelId && snap.is_current)) && {
+											backgroundColor: 'bg.tertiary'
+										}
 									)}
 								>
 									<button
@@ -778,11 +778,11 @@
 										type="button"
 									>
 										<span
-											class={cx(
-												css({ fontFamily: 'mono' }),
+											class={css(
+												{ fontFamily: 'mono' },
 												timeTravelId === snap.id
-													? css({ color: 'fg.primary' })
-													: css({ color: 'fg.secondary' })
+													? { color: 'fg.primary' }
+													: { color: 'fg.secondary' }
 											)}
 										>
 											{formatSnapshotTime(snap.timestamp)}

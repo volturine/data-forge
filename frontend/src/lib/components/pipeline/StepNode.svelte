@@ -21,7 +21,7 @@
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner, button } from '$lib/styles/panda';
+	import { css, spinner } from '$lib/styles/panda';
 
 	interface Props {
 		step: PipelineStep;
@@ -315,7 +315,7 @@
 </script>
 
 <div
-	class={cx(
+	class={[
 		'step-node',
 		nodeWidthClass,
 		isDragging &&
@@ -329,12 +329,12 @@
 			containIntrinsicSize: isChart || step.type === 'view' ? 'auto 600px' : 'auto 200px',
 			...(step.type === 'view' || isChart ? { width: '85%', minWidth: 'listLg' } : {})
 		})
-	)}
+	]}
 	data-step-id={step.id}
 	data-step-type={step.type}
 >
 	<div
-		class={cx(
+		class={[
 			'step-content',
 			css({
 				borderWidth: '1',
@@ -346,7 +346,7 @@
 					opacity: '0.7',
 					transform: 'scale(0.98)'
 				})
-		)}
+		]}
 		role="listitem"
 	>
 		<div
@@ -360,7 +360,7 @@
 			})}
 		>
 			<button
-				class={cx(
+				class={[
 					'drag-handle',
 					css({
 						display: 'flex',
@@ -384,7 +384,7 @@
 								}
 							: {})
 					})
-				)}
+				]}
 				title="Drag to reorder"
 				type="button"
 				onpointerdown={startDrag}
@@ -455,14 +455,12 @@
 
 		<div class={css({ paddingX: '4', paddingY: '3' })}>
 			<div
-				class={cx(
+				class={[
 					'step-summary',
 					css({
 						paddingX: '3',
 						paddingY: '2',
 						fontSize: 'xs2',
-						backgroundColor: 'bg.secondary',
-						color: 'fg.tertiary',
 						lineHeight: 'relaxed',
 						...(!isApplied
 							? {
@@ -472,7 +470,7 @@
 								}
 							: {})
 					})
-				)}
+				]}
 			>
 				{summary}
 			</div>
@@ -480,24 +478,20 @@
 
 		<div class={css({ borderTopWidth: '1', display: 'flex', gap: '0' })}>
 			<button
-				class={cx(
+				class={[
 					'action-btn',
 					css({
 						flex: '1',
 						cursor: 'pointer',
 						border: 'none',
-						backgroundColor: 'transparent',
 						paddingY: '2.5',
 						fontWeight: 'medium',
 						textTransform: 'uppercase',
 						letterSpacing: 'widest',
 						fontSize: '3xs',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
 						...(!isApplied
 							? {
 									borderStyle: 'dashed',
-									color: 'fg.muted',
 									_hover: {
 										backgroundColor: 'bg.tertiary',
 										color: 'fg.secondary'
@@ -505,7 +499,7 @@
 								}
 							: {})
 					})
-				)}
+				]}
 				onclick={() => onToggleApply(step.id)}
 				type="button"
 				title={isApplied ? 'Disable step' : 'Enable step'}
@@ -516,7 +510,7 @@
 			</button>
 			<div class={css({ width: 'px', backgroundColor: 'bg.muted', flexShrink: '0' })}></div>
 			<button
-				class={cx(
+				class={[
 					'action-btn',
 					css({
 						flex: '1',
@@ -531,7 +525,7 @@
 						color: 'fg.muted',
 						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 					})
-				)}
+				]}
 				onclick={() => onEdit(step.id)}
 				type="button"
 				data-action="edit"
@@ -556,7 +550,13 @@
 		{#if step.type === 'download' && datasourceId && analysisId}
 			<div class={css({ borderTopWidth: '1', padding: '3' })}>
 				<button
-					class={cx(button({ variant: 'primary' }), css({ width: '100%' }))}
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse',
+						width: '100%',
+						'&:hover:not(:disabled)': { opacity: '0.9' }
+					})}
 					onclick={() => handleDownload()}
 					disabled={!isApplied || !analysisPipeline}
 				>

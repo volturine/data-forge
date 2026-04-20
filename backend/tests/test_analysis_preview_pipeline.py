@@ -31,12 +31,6 @@ def test_preview_analysis_uses_pipeline_payload(client, sample_datasource: DataS
                 ],
             },
         ],
-        'sources': {
-            sample_datasource.id: {
-                'source_type': sample_datasource.source_type,
-                **sample_datasource.config,
-            },
-        },
     }
 
     def fake_preview_step(*_args, **kwargs):

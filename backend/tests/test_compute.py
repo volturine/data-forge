@@ -23,7 +23,14 @@ from modules.compute.engine import PolarsComputeEngine
 from modules.compute.live import ActiveBuild, registry as active_build_registry
 from modules.compute.manager import ProcessManager
 from modules.compute.operations.datasource import _analysis_stack_var
-from modules.compute.routes import _safe_close_websocket, _safe_send_json, _wait_for_websocket_disconnect
+from modules.compute.routes import (
+    _safe_close_websocket,
+    _safe_send_json,
+    _wait_for_websocket_disconnect,
+    active_build_stream,
+    build_list_stream,
+    engine_list_stream,
+)
 from modules.compute.utils import await_engine_result
 from modules.datasource.models import DataSource
 from modules.engine_runs import service as engine_run_service
@@ -197,6 +204,7 @@ def test_await_engine_result_returns_immediate_result_before_poll_loop() -> None
         'query_plan': None,
         'read_duration_ms': None,
         'write_duration_ms': None,
+        'collect_duration_ms': None,
     }
     assert calls == [('result', 0)]
 
@@ -253,6 +261,21 @@ def test_engine_progress_queue_returns_matching_event() -> None:
     assert event is not None
     assert event.job_id == 'job-1'
     assert event.event['type'] == 'progress'
+
+
+def test_engine_shutdown_closes_queues_even_when_not_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = PolarsComputeEngine('analysis')
+    engine.is_running = False
+    closed = {'value': False}
+
+    def fake_close() -> None:
+        closed['value'] = True
+
+    monkeypatch.setattr(engine, '_close_queues', fake_close)
+
+    engine.shutdown()
+
+    assert closed['value'] is True
 
 
 def test_build_canonical_engine_run_result_persists_unified_detail_shape() -> None:
@@ -696,17 +719,6 @@ class TestComputePreview:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -831,16 +843,6 @@ class TestComputePreview:
                         'steps': [],
                     },
                 ],
-                'sources': {
-                    missing_id: {
-                        'source_type': 'file',
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -871,17 +873,6 @@ class TestComputePreview:
                         'steps': [{'id': 'step1', 'type': 'view', 'config': {}}],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -936,7 +927,6 @@ class TestComputePreview:
 
     def test_preview_step_missing_metadata_preflight_skips_engine(self, client):
         missing_id = str(uuid.uuid4())
-        missing_metadata_path = str(namespace_paths().clean_dir / str(uuid.uuid4()))
         payload = {
             'analysis_id': 'analysis-id',
             'analysis_pipeline': {
@@ -958,18 +948,6 @@ class TestComputePreview:
                         'steps': [{'id': 'step1', 'type': 'view', 'config': {}}],
                     },
                 ],
-                'sources': {
-                    missing_id: {
-                        'source_type': 'iceberg',
-                        'metadata_path': missing_metadata_path,
-                        'branch': 'master',
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -982,7 +960,7 @@ class TestComputePreview:
 
         response = client.post('/api/v1/compute/preview', json=payload)
 
-        assert response.status_code == 409
+        assert response.status_code == 400
         mock_engine.preview.assert_not_called()
 
     def test_preview_step_specific_target(self, client, sample_datasource: DataSource):
@@ -1011,17 +989,6 @@ class TestComputePreview:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step2',
         }
@@ -1075,17 +1042,6 @@ class TestComputePreview:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
             'row_limit': 10,
@@ -1132,7 +1088,297 @@ class TestComputePreview:
         assert run.result_json['execution_entries'][0]['key'] == 'query_plan'
 
 
-def test_start_active_build_returns_snapshot_and_detail_stream_updates(client, sample_datasource: DataSource, test_user) -> None:
+def test_list_active_builds_returns_running_build(client, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-1',
+            analysis_name='Analysis 1',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    asyncio.run(
+        active_build_registry.apply_event(
+            build.build_id,
+            {
+                'type': 'progress',
+                'build_id': build.build_id,
+                'analysis_id': 'analysis-1',
+                'emitted_at': datetime.now(UTC).isoformat(),
+                'progress': 0.5,
+                'elapsed_ms': 1200,
+                'total_steps': 4,
+                'current_step': 'Filter rows',
+                'current_step_index': 1,
+            },
+        )
+    )
+
+    response = client.get('/api/v1/compute/builds/active')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['total'] == 1
+    assert payload['builds'][0]['build_id'] == build.build_id
+    assert payload['builds'][0]['status'] == 'running'
+    assert payload['builds'][0]['progress'] == 0.5
+    assert payload['builds'][0]['starter']['user_id'] == test_user.id
+
+
+def test_get_active_build_returns_detail(client, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-2',
+            analysis_name='Analysis 2',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    emitted_at = datetime.now(UTC).isoformat()
+    asyncio.run(
+        active_build_registry.apply_event(
+            build.build_id,
+            {
+                'type': 'step_start',
+                'build_id': build.build_id,
+                'analysis_id': 'analysis-2',
+                'emitted_at': emitted_at,
+                'build_step_index': 0,
+                'step_index': 0,
+                'step_id': 'step-1',
+                'step_name': 'Load source',
+                'step_type': 'source',
+                'total_steps': 1,
+            },
+        )
+    )
+    asyncio.run(
+        active_build_registry.apply_event(
+            build.build_id,
+            {
+                'type': 'log',
+                'build_id': build.build_id,
+                'analysis_id': 'analysis-2',
+                'emitted_at': emitted_at,
+                'level': 'info',
+                'message': 'Started build',
+            },
+        )
+    )
+
+    response = client.get(f'/api/v1/compute/builds/active/{build.build_id}')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['build_id'] == build.build_id
+    assert payload['steps'][0]['step_id'] == 'step-1'
+    assert payload['steps'][0]['state'] == 'running'
+    assert payload['logs'][0]['message'] == 'Started build'
+
+
+def test_get_active_build_returns_resource_config_summary(client, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-config',
+            analysis_name='Analysis Config',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    registry_build = asyncio.run(active_build_registry.get_build(build.build_id))
+    assert registry_build is not None
+    registry_build.resource_config = compute_schemas.BuildResourceConfigSummary(
+        max_threads=6,
+        max_memory_mb=1024,
+        streaming_chunk_size=2000,
+    )
+
+    response = client.get(f'/api/v1/compute/builds/active/{build.build_id}')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['resource_config'] == {
+        'max_threads': 6,
+        'max_memory_mb': 1024,
+        'streaming_chunk_size': 2000,
+    }
+
+
+def test_get_active_build_by_engine_run_returns_detail(client, test_db_session, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-live-by-run',
+            analysis_name='Analysis Live By Run',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-live-by-run',
+            datasource_id='output-ds-live-by-run',
+            kind='datasource_create',
+            status='running',
+            request_json={'kind': 'datasource_create'},
+            result_json={},
+        ),
+    )
+    test_db_session.commit()
+    asyncio.run(
+        active_build_registry.apply_event(
+            build.build_id,
+            {
+                'type': 'progress',
+                'build_id': build.build_id,
+                'analysis_id': 'analysis-live-by-run',
+                'emitted_at': datetime.now(UTC).isoformat(),
+                'engine_run_id': created.id,
+                'progress': 0.25,
+                'elapsed_ms': 900,
+                'total_steps': 3,
+                'current_step': 'Load source',
+                'current_step_index': 0,
+            },
+        )
+    )
+
+    response = client.get(f'/api/v1/compute/builds/active/by-engine-run/{created.id}')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['build_id'] == build.build_id
+    assert payload['current_engine_run_id'] == created.id
+    assert payload['status'] == 'running'
+
+
+def test_cancel_build_marks_running_run_cancelled(client, test_db_session, test_user) -> None:
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-cancel',
+            datasource_id='output-ds-1',
+            kind='datasource_update',
+            status='running',
+            request_json={'kind': 'datasource_update'},
+            result_json={
+                'steps': [
+                    {
+                        'build_step_index': 0,
+                        'step_index': 0,
+                        'step_id': 'step-1',
+                        'step_name': 'Load source',
+                        'step_type': 'read',
+                        'state': 'completed',
+                    }
+                ],
+                'results': [{'tab_id': 'tab-1', 'tab_name': 'View', 'status': 'success'}],
+            },
+            created_at=datetime.now(UTC),
+            progress=0.42,
+            current_step='Filter rows',
+        ),
+    )
+    mock_manager = MagicMock()
+    app.dependency_overrides[get_manager] = lambda: mock_manager
+
+    response = client.post(f'/api/v1/compute/cancel/{created.id}')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['id'] == created.id
+    assert payload['status'] == 'cancelled'
+    assert payload['cancelled_by'] == test_user.email
+
+    run = test_db_session.get(EngineRun, created.id)
+    assert run is not None
+    test_db_session.refresh(run)
+    assert run.status == 'cancelled'
+    assert run.error_message == f'Cancelled by {test_user.email}'
+    assert isinstance(run.result_json, dict)
+    assert run.result_json['results'] == []
+    assert run.result_json['cancelled_by'] == test_user.email
+    assert run.result_json['last_completed_step'] == 'Load source'
+    mock_manager.shutdown_engine.assert_called_once_with('analysis-cancel')
+
+
+def test_cancel_build_requires_running_status(client, test_db_session) -> None:
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-not-running',
+            datasource_id='output-ds-2',
+            kind='datasource_update',
+            status='success',
+            request_json={'kind': 'datasource_update'},
+            result_json={},
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    response = client.post(f'/api/v1/compute/cancel/{created.id}')
+
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'Only running builds can be cancelled'
+
+
+def test_cancel_build_updates_active_build_registry(client, test_db_session, test_user) -> None:
+    created = engine_run_service.create_engine_run(
+        test_db_session,
+        engine_run_service.create_engine_run_payload(
+            analysis_id='analysis-live-cancel',
+            datasource_id='output-ds-3',
+            kind='datasource_update',
+            status='running',
+            request_json={'kind': 'datasource_update'},
+            result_json={},
+            created_at=datetime.now(UTC),
+        ),
+    )
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-live-cancel',
+            analysis_name='Live Cancel',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    asyncio.run(
+        active_build_registry.apply_event(
+            build.build_id,
+            {
+                'type': 'progress',
+                'build_id': build.build_id,
+                'analysis_id': 'analysis-live-cancel',
+                'emitted_at': datetime.now(UTC).isoformat(),
+                'engine_run_id': created.id,
+                'progress': 0.35,
+                'elapsed_ms': 1200,
+                'total_steps': 4,
+                'current_step': 'Sort',
+                'current_step_index': 1,
+            },
+        )
+    )
+    mock_manager = MagicMock()
+    app.dependency_overrides[get_manager] = lambda: mock_manager
+
+    response = client.post(f'/api/v1/compute/cancel/{created.id}')
+
+    assert response.status_code == 200
+    updated = asyncio.run(active_build_registry.get_build(build.build_id))
+    assert updated is not None
+    assert updated.status == compute_schemas.ActiveBuildStatus.CANCELLED
+    assert updated.cancelled_by == test_user.email
+    assert updated.current_engine_run_id == created.id
+
+
+def test_build_stream_websocket_emits_snapshot_and_terminal_event(client, sample_datasource: DataSource, test_user) -> None:
     payload = {
         'analysis_pipeline': {
             'analysis_id': 'analysis-stream',
@@ -1160,12 +1406,6 @@ def test_start_active_build_returns_snapshot_and_detail_stream_updates(client, s
                     ],
                 }
             ],
-            'sources': {
-                sample_datasource.id: {
-                    'source_type': sample_datasource.source_type,
-                    **sample_datasource.config,
-                }
-            },
         },
         'tab_id': 'tab1',
     }
@@ -1319,12 +1559,6 @@ def test_start_active_build_notifies_active_build_list_watchers(client, sample_d
                     'steps': [],
                 }
             ],
-            'sources': {
-                sample_datasource.id: {
-                    'source_type': sample_datasource.source_type,
-                    **sample_datasource.config,
-                }
-            },
         },
         'tab_id': 'tab1',
     }
@@ -1556,6 +1790,7 @@ def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(te
             datasource_name='output_salary_predictions',
             result_meta={'datasource_id': 'output-ds-1', 'datasource_name': 'output_salary_predictions'},
             source_datasource_id='source-ds-1',
+            engine_run_id='run-1',
             read_duration_ms=12.0,
             write_duration_ms=7.0,
         )
@@ -1622,12 +1857,14 @@ def test_run_analysis_build_stream_tracks_output_target_and_read_write_stages(te
 
     assert stored.current_output_id == 'output-ds-1'
     assert stored.current_output_name == 'output_salary_predictions'
+    assert stored.current_engine_run_id == 'run-1'
     assert [step.step_name for step in stored.detail().steps] == ['Initial Read', 'Filter rows', 'Write Output']
     assert [step.step_type for step in stored.detail().steps] == ['read', 'filter', 'write']
     assert stored.detail().steps[0].duration_ms is not None
     assert stored.detail().steps[2].duration_ms == 7
     assert stored.detail().results[0].output_name == 'output_salary_predictions'
     complete = next(event for event in emitted if event['type'] == 'complete')
+    assert complete['engine_run_id'] == 'run-1'
     complete_results = complete.get('results')
     assert isinstance(complete_results, list)
     typed_complete_results = cast(list[dict[str, object]], complete_results)
@@ -1766,6 +2003,105 @@ def test_wait_for_websocket_disconnect_treats_receive_disconnect_runtimeerror_as
     asyncio.run(_wait_for_websocket_disconnect(websocket))
 
 
+def test_engine_list_stream_treats_disconnect_runtimeerror_as_normal(monkeypatch) -> None:
+    websocket = MagicMock()
+    websocket.headers.get.return_value = None
+    websocket.query_params.get.return_value = 'default'
+    websocket.accept = AsyncMock()
+    websocket.close = AsyncMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError('Cannot call "receive" once a disconnect message has been received')
+
+    add = AsyncMock()
+    remove = AsyncMock()
+    snap = AsyncMock()
+
+    monkeypatch.setattr('modules.compute.routes._require_websocket_user', AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr('modules.compute.routes._send_engine_snapshot', snap)
+    monkeypatch.setattr('modules.compute.routes._wait_for_websocket_disconnect', boom)
+    monkeypatch.setattr('modules.compute.routes._safe_send_json', AsyncMock())
+    monkeypatch.setattr('modules.compute.routes.engine_registry.add_watcher', add)
+    monkeypatch.setattr('modules.compute.routes.engine_registry.remove_watcher', remove)
+
+    asyncio.run(engine_list_stream(websocket))
+
+    add.assert_awaited_once()
+    remove.assert_awaited_once()
+    snap.assert_awaited_once()
+
+
+def test_build_list_stream_treats_disconnect_runtimeerror_as_normal(monkeypatch) -> None:
+    websocket = MagicMock()
+    websocket.headers.get.return_value = None
+    websocket.query_params.get.return_value = 'default'
+    websocket.accept = AsyncMock()
+    websocket.close = AsyncMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError('Cannot call "send" once a close message has been sent')
+
+    add = AsyncMock()
+    remove = AsyncMock()
+    snap = AsyncMock()
+
+    monkeypatch.setattr('modules.compute.routes._require_websocket_user', AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr('modules.compute.routes._send_build_list_snapshot', snap)
+    monkeypatch.setattr('modules.compute.routes._wait_for_websocket_disconnect', boom)
+    monkeypatch.setattr('modules.compute.routes._safe_send_json', AsyncMock())
+    monkeypatch.setattr('modules.compute.routes.build_registry.add_list_watcher', add)
+    monkeypatch.setattr('modules.compute.routes.build_registry.remove_list_watcher', remove)
+
+    asyncio.run(build_list_stream(websocket))
+
+    add.assert_awaited_once()
+    remove.assert_awaited_once()
+    snap.assert_awaited_once()
+
+
+def test_active_build_stream_treats_disconnect_runtimeerror_as_normal(monkeypatch, test_user) -> None:
+    build = asyncio.run(
+        active_build_registry.create_build(
+            analysis_id='analysis-stream',
+            analysis_name='Stream Build',
+            namespace='default',
+            starter=compute_service._build_starter(test_user),
+            total_tabs=1,
+        )
+    )
+    websocket = MagicMock()
+    websocket.headers.get.return_value = None
+    websocket.query_params.get.return_value = 'default'
+    websocket.accept = AsyncMock()
+    websocket.close = AsyncMock()
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.application_state = WebSocketState.CONNECTED
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError('Unexpected ASGI message after websocket.close')
+
+    add = AsyncMock()
+    remove = AsyncMock()
+    snap = AsyncMock()
+
+    monkeypatch.setattr('modules.compute.routes._require_websocket_user', AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr('modules.compute.routes._send_build_snapshot', snap)
+    monkeypatch.setattr('modules.compute.routes._wait_for_websocket_disconnect', boom)
+    monkeypatch.setattr('modules.compute.routes._safe_send_json', AsyncMock())
+    monkeypatch.setattr('modules.compute.routes.build_registry.add_watcher', add)
+    monkeypatch.setattr('modules.compute.routes.build_registry.remove_watcher', remove)
+
+    asyncio.run(active_build_stream(websocket, build.build_id))
+
+    add.assert_awaited_once()
+    remove.assert_awaited_once()
+    snap.assert_awaited_once_with(websocket, build.build_id)
+
+
 def test_active_build_registry_tracks_and_drops_finished_task(test_user) -> None:
     async def run() -> None:
         build = await active_build_registry.create_build(
@@ -1899,17 +2235,6 @@ class TestComputeExport:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
             'format': 'csv',
@@ -1984,17 +2309,6 @@ class TestComputeRowCount:
                         ],
                     },
                 ],
-                'sources': {
-                    sample_datasource.id: {
-                        'source_type': sample_datasource.source_type,
-                        **sample_datasource.config,
-                    },
-                    'out-1': {
-                        'source_type': 'analysis',
-                        'analysis_id': 'analysis-id',
-                        'analysis_tab_id': 'tab1',
-                    },
-                },
             },
             'target_step_id': 'step1',
         }
@@ -2329,9 +2643,9 @@ class TestEngineLifecycle:
 
 
 class TestBuildAnalysisPipelinePayloadDerived:
-    """Verify derived tabs preserve analysis_id in sources (not overwritten by DB placeholder)."""
+    """Verify derived tabs are encoded inline in pipeline tab datasource metadata."""
 
-    def test_derived_tab_sources_contain_analysis_id(self, test_db_session, sample_datasource: DataSource):
+    def test_derived_tab_datasource_contains_analysis_metadata(self, test_db_session, sample_datasource: DataSource):
         from datetime import UTC, datetime
 
         from modules.analysis.models import Analysis, AnalysisStatus
@@ -2384,12 +2698,10 @@ class TestBuildAnalysisPipelinePayloadDerived:
 
         payload = build_analysis_pipeline_payload(test_db_session, analysis)
 
-        # The source for tab1_result_id must have analysis_id (set by first loop),
-        # not be overwritten by the DB placeholder (which only has analysis_tab_id).
-        source = payload['sources'][tab1_result_id]
-        assert source['source_type'] == 'analysis'
-        assert source['analysis_id'] == analysis_id
-        assert source['analysis_tab_id'] == 'tab1'
+        tab2 = payload['tabs'][1]
+        assert tab2['datasource']['id'] == tab1_result_id
+        assert tab2['datasource']['source_type'] == 'analysis'
+        assert tab2['datasource']['analysis_tab_id'] == 'tab1'
 
 
 class TestDownloadStepFiltering:

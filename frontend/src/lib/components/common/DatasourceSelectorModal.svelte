@@ -5,7 +5,7 @@
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { css, cx, input } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		show: boolean;
@@ -84,18 +84,16 @@
 	onClose={handleClose}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
-	panelClass={cx(
-		css({
-			display: 'flex',
-			maxHeight: '80vh',
-			width: '100%',
-			maxWidth: 'modalSm',
-			flexDirection: 'column',
-			borderWidth: '1',
-			backgroundColor: 'bg.primary',
-			outline: 'none'
-		})
-	)}
+	panelClass={css({
+		display: 'flex',
+		maxHeight: '80vh',
+		width: '100%',
+		maxWidth: 'modalSm',
+		flexDirection: 'column',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary',
+		outline: 'none'
+	})}
 	ariaLabelledby="modal-title"
 	{content}
 />
@@ -190,15 +188,23 @@
 			</div>
 		{/if}
 		<input
-			class={cx(
-				input(),
-				css({
-					paddingX: '3',
-					paddingY: '3',
-					fontSize: 'sm',
-					_focus: { borderColor: 'border.accent' }
-				})
-			)}
+			class={css({
+				width: 'full',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				paddingX: '3',
+				paddingY: '3',
+				fontSize: 'sm',
+				_focus: { borderColor: 'border.accent' }
+			})}
 			type="text"
 			bind:this={searchInput}
 			id="dsm-search"

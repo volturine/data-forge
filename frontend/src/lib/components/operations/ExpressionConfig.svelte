@@ -2,7 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, label, stepConfig, cx, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, input } from '$lib/styles/panda';
 
 	interface ExpressionConfigData {
 		expression: string;
@@ -42,7 +42,25 @@
 		<textarea
 			id="expr-textarea-expression"
 			data-testid="expr-expression-textarea"
-			class={cx(input(), css({ resize: 'vertical', marginBottom: '2' }))}
+			class={css({
+				width: 'full',
+				fontSize: 'sm2',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				resize: 'vertical',
+				marginBottom: '2',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' }
+			})}
 			bind:value={config.expression}
 			placeholder="e.g., pl.col(&quot;price&quot;) * 1.2"
 			rows="4"

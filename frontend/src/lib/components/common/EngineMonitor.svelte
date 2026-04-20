@@ -238,8 +238,6 @@
 										justifyContent: 'center',
 										borderWidth: '1',
 										padding: '1',
-										backgroundColor: 'transparent',
-										color: 'fg.muted',
 										_hover: {
 											backgroundColor: 'bg.error',
 											borderColor: 'border.error',

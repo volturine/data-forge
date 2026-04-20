@@ -59,53 +59,6 @@
 		})
 	);
 
-	const headerClass = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		gap: '2',
-		position: 'sticky',
-		top: '0',
-		zIndex: 'header',
-		borderBottomWidth: '1',
-		paddingX: '4',
-		paddingY: '3',
-		backgroundColor: 'bg.panel'
-	});
-
-	const closeBtnClass = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		borderWidth: '0',
-		backgroundColor: 'transparent',
-		padding: '1',
-		color: 'fg.muted',
-		transitionProperty: 'color, background-color',
-		transitionDuration: '160ms',
-		transitionTimingFunction: 'ease',
-		_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
-	});
-
-	const loadingClass = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		flex: '1',
-		padding: '8'
-	});
-
-	const emptyClass = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		flex: '1',
-		padding: '8',
-		color: 'fg.muted',
-		fontSize: 'sm',
-		textAlign: 'center'
-	});
-
 	function handleClose() {
 		if (onClose) return onClose();
 		collapsed = true;
@@ -114,7 +67,21 @@
 
 <div class={panelClass} aria-label={`${title} panel`}>
 	{#if !collapsed}
-		<div class={headerClass}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				gap: '2',
+				position: 'sticky',
+				top: '0',
+				zIndex: 'header',
+				borderBottomWidth: '1',
+				paddingX: '4',
+				paddingY: '3',
+				backgroundColor: 'bg.panel'
+			})}
+		>
 			<div
 				class={css({ display: 'flex', alignItems: 'center', gap: '2', minWidth: '0', flex: '1' })}
 			>
@@ -137,7 +104,19 @@
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '1', flexShrink: 0 })}>
 				{#if collapsible}
 					<button
-						class={closeBtnClass}
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							borderWidth: '0',
+							backgroundColor: 'transparent',
+							padding: '1',
+							color: 'fg.muted',
+							transitionProperty: 'color, background-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
+						})}
 						onclick={() => (collapsed = true)}
 						title="Collapse panel"
 						aria-label="Collapse panel"
@@ -148,7 +127,19 @@
 				{/if}
 				{#if onClose}
 					<button
-						class={closeBtnClass}
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							borderWidth: '0',
+							backgroundColor: 'transparent',
+							padding: '1',
+							color: 'fg.muted',
+							transitionProperty: 'color, background-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' }
+						})}
 						onclick={handleClose}
 						title="Close panel"
 						aria-label="Close panel"
@@ -161,11 +152,30 @@
 		</div>
 
 		{#if loading}
-			<div class={loadingClass}>
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					flex: '1',
+					padding: '8'
+				})}
+			>
 				<div class={spinnerRecipe()}></div>
 			</div>
 		{:else if empty}
-			<div class={emptyClass}>
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					flex: '1',
+					padding: '8',
+					color: 'fg.muted',
+					fontSize: 'sm',
+					textAlign: 'center'
+				})}
+			>
 				{@render empty()}
 			</div>
 		{:else}

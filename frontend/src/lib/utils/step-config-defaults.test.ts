@@ -92,9 +92,9 @@ describe('getDefaultConfig', () => {
 });
 
 describe('normalizeConfig', () => {
-	test('merges missing fields from defaults', () => {
+	test('does not inject missing fields', () => {
 		const config = normalizeConfig('limit', {});
-		expect(config).toEqual({ n: 100 });
+		expect(config).toEqual({});
 	});
 
 	test('preserves existing config values', () => {
@@ -114,18 +114,22 @@ describe('normalizeConfig', () => {
 		expect(config).toHaveProperty('x_column', 'age');
 	});
 
-	test('export step removes iceberg_options and sets destination', () => {
+	test('export step preserves provided config', () => {
 		const config = normalizeConfig('export', {
 			format: 'parquet',
 			filename: 'out',
 			iceberg_options: { table: 'foo' },
 			destination: 'iceberg'
 		});
-		expect(config).not.toHaveProperty('iceberg_options');
-		expect(config).toHaveProperty('destination', 'download');
+		expect(config).toEqual({
+			format: 'parquet',
+			filename: 'out',
+			iceberg_options: { table: 'foo' },
+			destination: 'iceberg'
+		});
 	});
 
-	test('normalizes filter conditions with missing fields', () => {
+	test('filter preserves provided conditions', () => {
 		const config = normalizeConfig('filter', {
 			conditions: [{ column: 'age' }],
 			logic: 'OR'
@@ -133,16 +137,11 @@ describe('normalizeConfig', () => {
 		const conditions = (config as Record<string, unknown>).conditions as Array<
 			Record<string, unknown>
 		>;
-		expect(conditions[0]).toEqual({
-			column: 'age',
-			operator: '=',
-			value: '',
-			value_type: 'string'
-		});
+		expect(conditions[0]).toEqual({ column: 'age' });
 		expect(config).toHaveProperty('logic', 'OR');
 	});
 
-	test('normalizes filter condition with compare_column', () => {
+	test('filter preserves compare_column without injecting other fields', () => {
 		const config = normalizeConfig('filter', {
 			conditions: [{ column: 'a', compare_column: 'b' }],
 			logic: 'AND'
@@ -151,9 +150,10 @@ describe('normalizeConfig', () => {
 			Record<string, unknown>
 		>;
 		expect(conditions[0]).toHaveProperty('compare_column', 'b');
+		expect(conditions[0]).toEqual({ column: 'a', compare_column: 'b' });
 	});
 
-	test('stabilizes ai config null fields', () => {
+	test('ai preserves explicit null fields', () => {
 		const config = normalizeConfig('ai', {
 			provider: 'openai',
 			model: 'gpt-4',
@@ -161,12 +161,16 @@ describe('normalizeConfig', () => {
 			endpoint_url: null,
 			api_key: null
 		});
-		expect(config).toHaveProperty('input_columns', []);
-		expect(config).toHaveProperty('endpoint_url', '');
-		expect(config).toHaveProperty('api_key', '');
+		expect(config).toEqual({
+			provider: 'openai',
+			model: 'gpt-4',
+			input_columns: null,
+			endpoint_url: null,
+			api_key: null
+		});
 	});
 
-	test('stabilizes notification config null fields', () => {
+	test('notification preserves explicit null fields', () => {
 		const config = normalizeConfig('notification', {
 			method: 'telegram',
 			input_columns: null,
@@ -176,15 +180,18 @@ describe('normalizeConfig', () => {
 			recipient_column: null,
 			subscriber_ids: null
 		});
-		expect(config).toHaveProperty('input_columns', []);
-		expect(config).toHaveProperty('bot_token', '');
-		expect(config).toHaveProperty('recipient', '');
-		expect(config).toHaveProperty('recipient_source', 'manual');
-		expect(config).toHaveProperty('recipient_column', '');
-		expect(config).toHaveProperty('subscriber_ids', []);
+		expect(config).toEqual({
+			method: 'telegram',
+			input_columns: null,
+			bot_token: null,
+			recipient: null,
+			recipient_source: null,
+			recipient_column: null,
+			subscriber_ids: null
+		});
 	});
 
-	test('stabilizes chart config null fields', () => {
+	test('chart preserves explicit null fields', () => {
 		const config = normalizeConfig('chart', {
 			chart_type: 'line',
 			x_axis_label: null,
@@ -193,11 +200,14 @@ describe('normalizeConfig', () => {
 			overlays: null,
 			reference_lines: null
 		});
-		expect(config).toHaveProperty('x_axis_label', '');
-		expect(config).toHaveProperty('y_axis_label', '');
-		expect(config).toHaveProperty('title', '');
-		expect(config).toHaveProperty('overlays', []);
-		expect(config).toHaveProperty('reference_lines', []);
+		expect(config).toEqual({
+			chart_type: 'line',
+			x_axis_label: null,
+			y_axis_label: null,
+			title: null,
+			overlays: null,
+			reference_lines: null
+		});
 	});
 
 	test('returns empty object for unknown type with empty config', () => {
@@ -209,19 +219,16 @@ describe('normalizeConfig', () => {
 		expect(config).toEqual({ custom: 42 });
 	});
 
-	test('migrates legacy groupBy to group_by without mutating input', () => {
+	test('does not migrate legacy groupBy to group_by', () => {
 		const input = {
 			groupBy: ['region'],
 			aggregations: [{ column: 'sales', function: 'sum', alias: 'total' }]
 		};
-		const original = { ...input };
 		const config = normalizeConfig('groupby', input);
-		expect(config).toHaveProperty('group_by', ['region']);
-		expect(config).not.toHaveProperty('groupBy');
-		expect(input).toEqual(original);
+		expect(config).toEqual(input);
 	});
 
-	test('does not overwrite existing group_by with legacy groupBy', () => {
+	test('keeps explicit group_by and ignores legacy groupBy', () => {
 		const config = normalizeConfig('groupby', {
 			groupBy: ['old'],
 			group_by: ['new'],
@@ -230,18 +237,13 @@ describe('normalizeConfig', () => {
 		expect(config).toHaveProperty('group_by', ['new']);
 	});
 
-	test('migrates legacy topk by to column without mutating input', () => {
+	test('does not migrate legacy topk by or reverse', () => {
 		const input = { by: 'score', k: 5, reverse: true };
-		const original = { ...input };
 		const config = normalizeConfig('topk', input);
-		expect(config).toHaveProperty('column', 'score');
-		expect(config).toHaveProperty('descending', true);
-		expect(config).not.toHaveProperty('by');
-		expect(config).not.toHaveProperty('reverse');
-		expect(input).toEqual(original);
+		expect(config).toEqual(input);
 	});
 
-	test('does not overwrite existing topk column with legacy by', () => {
+	test('keeps explicit topk column when legacy by is also present', () => {
 		const config = normalizeConfig('topk', { by: 'old', column: 'new', k: 3, descending: false });
 		expect(config).toHaveProperty('column', 'new');
 	});
@@ -251,17 +253,13 @@ describe('normalizeConfig', () => {
 		expect(config).toHaveProperty('descending', false);
 	});
 
-	test('migrates only topk by when reverse is absent', () => {
+	test('does not migrate legacy topk by when reverse is absent', () => {
 		const config = normalizeConfig('topk', { by: 'price', k: 10 });
-		expect(config).toHaveProperty('column', 'price');
-		expect(config).toHaveProperty('descending', false);
-		expect(config).not.toHaveProperty('by');
+		expect(config).toEqual({ by: 'price', k: 10 });
 	});
 
-	test('migrates only topk reverse when by is absent', () => {
+	test('does not migrate legacy topk reverse when by is absent', () => {
 		const config = normalizeConfig('topk', { column: 'price', k: 10, reverse: true });
-		expect(config).toHaveProperty('column', 'price');
-		expect(config).toHaveProperty('descending', true);
-		expect(config).not.toHaveProperty('reverse');
+		expect(config).toEqual({ column: 'price', k: 10, reverse: true });
 	});
 });

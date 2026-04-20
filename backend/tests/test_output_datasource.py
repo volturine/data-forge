@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from core.namespace import namespace_paths
 from modules.analysis.models import Analysis, AnalysisStatus
@@ -13,6 +13,7 @@ from modules.compute.service import _upsert_output_datasource, export_data
 from modules.datasource.models import DataSource
 from modules.datasource.service import create_analysis_datasource
 from modules.datasource.source_types import DataSourceType
+from modules.engine_runs.models import EngineRun
 
 _OUT_A = str(uuid.uuid4())
 _OUT_B = str(uuid.uuid4())
@@ -484,13 +485,8 @@ class TestRunAnalysisBuildOutputDatasource:
                             'steps': [],
                         },
                     ],
-                    'sources': {
-                        sample_datasource.id: {
-                            'source_type': sample_datasource.source_type,
-                            **sample_datasource.config,
-                        },
-                    },
                 },
+                request_json={'analysis_id': analysis_id, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,
@@ -508,6 +504,112 @@ class TestRunAnalysisBuildOutputDatasource:
         assert output_ds.config['current_snapshot_timestamp_ms'] == 1000
         assert output_ds.config['snapshot_id'] == '123'
         assert output_ds.config['snapshot_timestamp_ms'] == 1000
+
+    def test_export_persists_resource_history_in_engine_run(self, test_db_session: Session, sample_datasource: DataSource):
+        output_ds_id = str(uuid.uuid4())
+        analysis_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+
+        analysis = Analysis(
+            id=analysis_id,
+            name='Output Resource History',
+            description='',
+            pipeline_definition={
+                'steps': [],
+                'tabs': [
+                    {
+                        'id': 'tab1',
+                        'name': 'Main',
+                        'datasource': {
+                            'id': sample_datasource.id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'steps': [],
+                        'output': {
+                            'result_id': output_ds_id,
+                            'format': 'parquet',
+                            'filename': 'test_out',
+                            'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                        },
+                    }
+                ],
+            },
+            status=AnalysisStatus.DRAFT,
+            created_at=now,
+            updated_at=now,
+        )
+        test_db_session.add(analysis)
+        test_db_session.commit()
+
+        mock_catalog = MagicMock()
+        mock_table = MagicMock()
+        mock_catalog.table_exists.return_value = False
+        mock_catalog.create_table.return_value = mock_table
+        mock_table.current_snapshot.return_value = MagicMock(snapshot_id=123, timestamp_ms=1000)
+
+        engine_mock = MagicMock()
+        engine_mock.is_process_alive.return_value = True
+        engine_mock.export.return_value = 'job-1'
+        engine_mock.get_result.return_value = EngineResult(job_id='job-1', data={'row_count': 1}, error=None)
+        manager_mock = MagicMock()
+        manager_mock.get_engine.return_value = engine_mock
+        manager_mock.get_or_create_engine.return_value = engine_mock
+
+        resources = [
+            {
+                'sampled_at': now.isoformat(),
+                'cpu_percent': 25.0,
+                'memory_mb': 512.0,
+                'memory_limit_mb': 1024.0,
+                'active_threads': 2,
+                'max_threads': 8,
+            }
+        ]
+
+        with (
+            patch('modules.compute.service.load_catalog', return_value=mock_catalog),
+            patch('modules.compute.service.pl.read_parquet') as mock_read,
+            patch('modules.compute.service.os.path.getsize', return_value=100),
+        ):
+            mock_read.return_value.to_arrow.return_value = MagicMock(schema=MagicMock())
+            export_data(
+                session=test_db_session,
+                manager=manager_mock,
+                target_step_id='source',
+                analysis_pipeline={
+                    'analysis_id': analysis_id,
+                    'tabs': [
+                        {
+                            'id': 'tab1',
+                            'datasource': {
+                                'id': sample_datasource.id,
+                                'analysis_tab_id': None,
+                                'config': {'branch': 'master'},
+                            },
+                            'output': {
+                                'result_id': output_ds_id,
+                                'format': 'parquet',
+                                'filename': 'test_out',
+                                'iceberg': {'namespace': 'ns', 'table_name': 'tbl'},
+                            },
+                            'steps': [],
+                        }
+                    ],
+                },
+                request_json={'analysis_id': analysis_id, 'target_step_id': 'source'},
+                filename='test_out',
+                iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
+                result_id=output_ds_id,
+                resources=resources,
+            )
+
+        runs = test_db_session.exec(select(EngineRun)).all()
+        run = runs[-1]
+        assert run is not None
+        assert isinstance(run.result_json, dict)
+        assert run.result_json['resources'] == resources
+        assert run.result_json['latest_resources'] == resources[0]
 
     def test_tab_missing_output_filename_fails(self, test_db_session: Session, sample_datasource: DataSource):
         analysis_id = str(uuid.uuid4())

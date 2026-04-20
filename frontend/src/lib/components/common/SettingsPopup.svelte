@@ -29,7 +29,7 @@
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, input, cx, label } from '$lib/styles/panda';
+	import { css, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		open: boolean;
@@ -76,22 +76,6 @@
 	let smtpCollapsed = $state(true);
 	let telegramCollapsed = $state(true);
 	let debugCollapsed = $state(true);
-
-	const sectionToggle = css({
-		display: 'flex',
-		width: '100%',
-		cursor: 'pointer',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		border: 'none',
-		backgroundColor: 'transparent',
-		padding: '0',
-		textAlign: 'left',
-		transition: 'color 150ms',
-		_hover: { color: 'fg.primary' }
-	});
-	const sectionToggleLabel = css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' });
-	const sectionChevron = css({ transition: 'transform 150ms' });
 
 	// Network: $derived can't fetch settings on open.
 	$effect(() => {
@@ -370,20 +354,32 @@
 			{/if}
 
 			<button
-				class={sectionToggle}
+				class={css({
+					display: 'flex',
+					width: '100%',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0',
+					textAlign: 'left',
+					transition: 'color 150ms',
+					_hover: { color: 'fg.primary' }
+				})}
 				type="button"
 				aria-expanded={!aiProvidersCollapsed}
 				aria-controls="settings-ai-providers"
 				onclick={() => (aiProvidersCollapsed = !aiProvidersCollapsed)}
 			>
-				<span class={sectionToggleLabel}>
+				<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
 					<SectionHeader>AI Providers</SectionHeader>
 				</span>
 				<ChevronDown
 					size={14}
-					class={cx(
-						sectionChevron,
-						aiProvidersCollapsed ? css({ transform: 'rotate(-90deg)' }) : ''
+					class={css(
+						{ transition: 'transform 150ms' },
+						aiProvidersCollapsed && { transform: 'rotate(-90deg)' }
 					)}
 				/>
 			</button>
@@ -392,9 +388,9 @@
 				id="settings-ai-providers"
 				hidden={aiProvidersCollapsed}
 				aria-hidden={aiProvidersCollapsed}
-				class={cx(
-					css({ display: 'flex', flexDirection: 'column', gap: '4' }),
-					aiProvidersCollapsed ? css({ display: 'none' }) : ''
+				class={css(
+					{ display: 'flex', flexDirection: 'column', gap: '4' },
+					aiProvidersCollapsed && { display: 'none' }
 				)}
 			>
 				<div
@@ -626,19 +622,34 @@
 			></div>
 
 			<button
-				class={sectionToggle}
+				class={css({
+					display: 'flex',
+					width: '100%',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0',
+					textAlign: 'left',
+					transition: 'color 150ms',
+					_hover: { color: 'fg.primary' }
+				})}
 				type="button"
 				aria-expanded={!smtpCollapsed}
 				aria-controls="settings-smtp"
 				onclick={() => (smtpCollapsed = !smtpCollapsed)}
 			>
-				<span class={sectionToggleLabel}>
+				<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
 					<Mail size={12} />
 					<SectionHeader>SMTP</SectionHeader>
 				</span>
 				<ChevronDown
 					size={14}
-					class={cx(sectionChevron, smtpCollapsed ? css({ transform: 'rotate(-90deg)' }) : '')}
+					class={css(
+						{ transition: 'transform 150ms' },
+						smtpCollapsed && { transform: 'rotate(-90deg)' }
+					)}
 				/>
 			</button>
 
@@ -646,9 +657,9 @@
 				id="settings-smtp"
 				hidden={smtpCollapsed}
 				aria-hidden={smtpCollapsed}
-				class={cx(
-					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
-					smtpCollapsed ? css({ display: 'none' }) : ''
+				class={css(
+					{ display: 'flex', flexDirection: 'column', gap: '2' },
+					smtpCollapsed && { display: 'none' }
 				)}
 			>
 				<div
@@ -705,7 +716,20 @@
 				</div>
 
 				<div class={css({ display: 'flex', alignItems: 'flex-end', gap: '2' })}>
-					<label class={cx(label({ variant: 'wrapper' }), css({ flex: '1' }))}>
+					<label
+						class={css({
+							display: 'flex',
+							flexDirection: 'column',
+							gap: '1',
+							fontSize: 'xs2',
+							fontWeight: 'semibold',
+							color: 'fg.muted',
+							marginBottom: '0',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							flex: '1'
+						})}
+					>
 						<span class={css({ fontSize: 'xs', color: 'fg.tertiary' })}>Test recipient</span>
 						<input
 							type="email"
@@ -756,13 +780,25 @@
 			></div>
 
 			<button
-				class={sectionToggle}
+				class={css({
+					display: 'flex',
+					width: '100%',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0',
+					textAlign: 'left',
+					transition: 'color 150ms',
+					_hover: { color: 'fg.primary' }
+				})}
 				type="button"
 				aria-expanded={!telegramCollapsed}
 				aria-controls="settings-telegram"
 				onclick={() => (telegramCollapsed = !telegramCollapsed)}
 			>
-				<span class={sectionToggleLabel}>
+				<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
 					<MessageCircle size={12} />
 					<SectionHeader>Telegram</SectionHeader>
 				</span>
@@ -781,9 +817,9 @@
 					{/if}
 					<ChevronDown
 						size={14}
-						class={cx(
-							sectionChevron,
-							telegramCollapsed ? css({ transform: 'rotate(-90deg)' }) : ''
+						class={css(
+							{ transition: 'transform 150ms' },
+							telegramCollapsed && { transform: 'rotate(-90deg)' }
 						)}
 					/>
 				</span>
@@ -793,9 +829,9 @@
 				id="settings-telegram"
 				hidden={telegramCollapsed}
 				aria-hidden={telegramCollapsed}
-				class={cx(
-					css({ display: 'flex', flexDirection: 'column', gap: '2' }),
-					telegramCollapsed ? css({ display: 'none' }) : ''
+				class={css(
+					{ display: 'flex', flexDirection: 'column', gap: '2' },
+					telegramCollapsed && { display: 'none' }
 				)}
 			>
 				<label class={label({ variant: 'wrapper' })}>
@@ -955,19 +991,34 @@
 			></div>
 
 			<button
-				class={sectionToggle}
+				class={css({
+					display: 'flex',
+					width: '100%',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0',
+					textAlign: 'left',
+					transition: 'color 150ms',
+					_hover: { color: 'fg.primary' }
+				})}
 				type="button"
 				aria-expanded={!debugCollapsed}
 				aria-controls="settings-debug"
 				onclick={() => (debugCollapsed = !debugCollapsed)}
 			>
-				<span class={sectionToggleLabel}>
+				<span class={css({ display: 'inline-flex', alignItems: 'center', gap: '1.5' })}>
 					<Database size={12} />
 					<SectionHeader>Debug</SectionHeader>
 				</span>
 				<ChevronDown
 					size={14}
-					class={cx(sectionChevron, debugCollapsed ? css({ transform: 'rotate(-90deg)' }) : '')}
+					class={css(
+						{ transition: 'transform 150ms' },
+						debugCollapsed && { transform: 'rotate(-90deg)' }
+					)}
 				/>
 			</button>
 

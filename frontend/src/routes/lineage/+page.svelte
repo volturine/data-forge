@@ -24,7 +24,7 @@
 		Layers,
 		GitBranch
 	} from 'lucide-svelte';
-	import { css, cx, button, input, toggleButton, chip } from '$lib/styles/panda';
+	import { css, button, toggleButton, chip } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 	type LineageGraphApi = {
@@ -180,14 +180,23 @@
 		>
 			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<select
-					class={cx(
-						input(),
-						css({
-							fontSize: 'xs',
-							paddingX: '2',
-							paddingY: '1'
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						fontSize: 'xs',
+						paddingX: '2',
+						paddingY: '1'
+					})}
 					id="lineage-ds"
 					aria-label="Output datasource"
 					value={selectedDatasourceId}
@@ -199,14 +208,23 @@
 					{/each}
 				</select>
 				<select
-					class={cx(
-						input(),
-						css({
-							fontSize: 'xs',
-							paddingX: '2',
-							paddingY: '1'
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						fontSize: 'xs',
+						paddingX: '2',
+						paddingY: '1'
+					})}
 					id="lineage-branch"
 					aria-label="Branch"
 					value={selectedBranch}
@@ -387,7 +405,15 @@
 				</div>
 				{#if selectedNode}
 					<button
-						class={cx(button({ variant: 'ghost', size: 'sm' }), css({ padding: '1' }))}
+						class={css({
+							borderWidth: '1',
+							backgroundColor: 'transparent',
+							color: 'fg.secondary',
+							borderColor: 'transparent',
+							fontSize: 'xs',
+							padding: '1',
+							'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
+						})}
 						onclick={closePanel}
 						title="Close panel"
 						aria-label="Close panel"

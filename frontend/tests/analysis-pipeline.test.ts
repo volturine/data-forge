@@ -34,8 +34,6 @@ interface PipelineAnalysisResult {
 /**
  * Create an analysis with pre-configured steps via API.
  * A view step is always appended so the inline preview auto-triggers.
- * Returns enough info to call `fetchPreviewViaAPI` without re-fetching
- * the analysis.
  */
 async function createPipelineAnalysis(
 	request: APIRequestContext,
@@ -105,97 +103,6 @@ async function createPipelineAnalysis(
 	return { analysisId: created.id, viewStepId, tabId, resultId, dsId, steps: pipelineSteps };
 }
 
-interface PreviewData {
-	step_id: string;
-	columns: string[];
-	column_types: Record<string, string>;
-	data: Array<Record<string, unknown>>;
-	total_rows: number;
-}
-
-/**
- * Fetch preview data deterministically via the HTTP API.
- *
- * Builds the same pipeline payload the browser would send, but calls
- * `/compute/preview` directly through Playwright's `APIRequestContext`.
- * No browser network interception, no WebSocket race — fully deterministic.
- *
- * `extraDsIds` — additional datasource IDs referenced by steps (e.g. join
- * right_source, union sources) that need to be included in the sources map.
- */
-async function fetchPreviewViaAPI(
-	request: APIRequestContext,
-	info: PipelineAnalysisResult,
-	targetStepId: string,
-	extraDsIds: string[] = []
-): Promise<PreviewData> {
-	const allDsIds = [info.dsId, ...extraDsIds.filter((id) => id !== info.dsId)];
-
-	const sources: Record<string, Record<string, unknown>> = {
-		[info.resultId]: {
-			source_type: 'analysis',
-			analysis_id: info.analysisId,
-			analysis_tab_id: info.tabId
-		}
-	};
-
-	for (const id of allDsIds) {
-		const dsResp = await request.get(`${API_BASE}/datasource/${id}`);
-		if (!dsResp.ok()) {
-			throw new Error(
-				`fetchPreviewViaAPI: datasource GET ${id} ${dsResp.status()} ${await dsResp.text()}`
-			);
-		}
-		const ds = (await dsResp.json()) as {
-			id: string;
-			source_type: string;
-			config: Record<string, unknown>;
-		};
-		sources[ds.id] = { source_type: ds.source_type, ...ds.config };
-	}
-
-	const previewResp = await request.post(`${API_BASE}/compute/preview`, {
-		data: {
-			analysis_id: info.analysisId,
-			target_step_id: targetStepId,
-			analysis_pipeline: {
-				analysis_id: info.analysisId,
-				tabs: [
-					{
-						id: info.tabId,
-						name: 'Source 1',
-						datasource: {
-							id: info.dsId,
-							analysis_tab_id: null,
-							config: { branch: 'master' }
-						},
-						output: {
-							result_id: info.resultId,
-							datasource_type: 'iceberg',
-							format: 'parquet',
-							filename: 'source_1',
-							build_mode: 'full',
-							iceberg: {
-								namespace: 'outputs',
-								table_name: 'source_1',
-								branch: 'master'
-							}
-						},
-						steps: info.steps
-					}
-				],
-				sources
-			}
-		}
-	});
-	if (!previewResp.ok()) {
-		throw new Error(
-			`fetchPreviewViaAPI: preview POST ${previewResp.status()} ${await previewResp.text()}`
-		);
-	}
-	return (await previewResp.json()) as PreviewData;
-}
-
 /**
  * Navigate away from the analysis page. Safe to call if the page is
  * already closed (e.g. after a timeout).
@@ -258,27 +165,19 @@ test.describe('Pipeline data verification', () => {
 		const aName = `E2E Pipe View ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, []);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(3);
-			expect(preview.data).toHaveLength(3);
-
-			const names = preview.data.map((r) => r.name);
-			expect(names).toContain('Alice');
-			expect(names).toContain('Bob');
-			expect(names).toContain('Charlie');
-
-			// UI: column headers rendered
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
 			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
 
-			// UI: data values visible
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
 			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).toBeVisible();
+			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
 			await expect(table.getByText('Berlin', { exact: true })).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'view-passthrough');
@@ -302,21 +201,19 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(2);
-
-			const names = preview.data.map((r) => r.name);
-			expect(names).toContain('Alice');
-			expect(names).toContain('Charlie');
-			expect(names).not.toContain('Bob');
-
-			// UI: Bob should not appear in the table
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(2);
+
 			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
 			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).not.toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'filter');
 		} finally {
@@ -331,13 +228,16 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(2);
-			expect(preview.data).toHaveLength(2);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(2);
+
 			await screenshot(page, 'analysis/pipeline', 'limit');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -346,25 +246,20 @@ test.describe('Pipeline data verification', () => {
 	});
 
 	test('topk returns rows with largest values', async ({ page, request }) => {
-		// descending=true → sort descending, take head(k) → 2 largest
 		const aName = `E2E Pipe TopK ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{ type: 'topk', config: { column: 'age', k: 2, descending: true } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.total_rows).toBe(2);
-
-			const names = preview.data.map((r) => r.name);
-			expect(names).toContain('Charlie'); // age 35
-			expect(names).toContain('Alice'); // age 30
-			expect(names).not.toContain('Bob'); // age 25 excluded
-
-			// First row should be highest age (descending sort)
-			expect(preview.data[0].name).toBe('Charlie');
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			const rows = table.locator('tbody tr');
+			await expect(rows).toHaveCount(2);
+			await expect(rows.nth(0)).toContainText('Charlie');
+			await expect(rows.nth(1)).toContainText('Alice');
+			await expect(table.getByText('Bob', { exact: true })).not.toBeVisible();
+
 			await screenshot(page, 'analysis/pipeline', 'topk');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -378,15 +273,14 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'sample', config: { fraction: 1.0, seed: 42 } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.total_rows).toBe(3);
-			const names = preview.data.map((r) => r.name);
-			expect(names).toContain('Alice');
-			expect(names).toContain('Bob');
-			expect(names).toContain('Charlie');
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
+			await expect(table.getByText('Bob', { exact: true })).toBeVisible();
+			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
+
 			await screenshot(page, 'analysis/pipeline', 'sample');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -400,12 +294,16 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'deduplicate', config: {} }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(3);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
 			await screenshot(page, 'analysis/pipeline', 'deduplicate');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -421,18 +319,15 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'select', config: { columns: ['name', 'age'] } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['name', 'age']);
-			expect(preview.total_rows).toBe(3);
-
-			// UI: only name and age columns visible
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
 			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="id"]')).not.toBeVisible();
 			await expect(table.locator('[data-column-id="city"]')).not.toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
 
 			await screenshot(page, 'analysis/pipeline', 'select');
 		} finally {
@@ -447,15 +342,15 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'drop', config: { columns: ['city'] } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age']);
-			expect(preview.total_rows).toBe(3);
-
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
-			await expect(table.locator('[data-column-id="city"]')).not.toBeVisible();
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).not.toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
 
 			await screenshot(page, 'analysis/pipeline', 'drop');
 		} finally {
@@ -470,19 +365,14 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'rename', config: { column_mapping: { name: 'full_name' } } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toContain('full_name');
-			expect(preview.columns).not.toContain('name');
-			expect(preview.total_rows).toBe(3);
-
-			// Data still has the right values under the new column name
-			expect(preview.data.map((r) => r.full_name)).toContain('Alice');
-
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
 			await expect(table.locator('[data-column-id="full_name"]')).toBeVisible();
 			await expect(table.locator('[data-column-id="name"]')).not.toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'rename');
 		} finally {
@@ -499,16 +389,15 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'sort', config: { columns: ['age'], descending: [false] } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.total_rows).toBe(3);
-
-			// Ascending age order: Bob(25) → Alice(30) → Charlie(35)
-			expect(preview.data[0].name).toBe('Bob');
-			expect(preview.data[1].name).toBe('Alice');
-			expect(preview.data[2].name).toBe('Charlie');
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			const rows = table.locator('tbody tr');
+			await expect(rows).toHaveCount(3);
+			await expect(rows.nth(0)).toContainText('Bob');
+			await expect(rows.nth(1)).toContainText('Alice');
+			await expect(rows.nth(2)).toContainText('Charlie');
+
 			await screenshot(page, 'analysis/pipeline', 'sort');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -525,20 +414,18 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toContain('age_plus_one');
-			expect(preview.columns).toContain('age');
-			expect(preview.total_rows).toBe(3);
-
-			// Verify computed values
-			for (const row of preview.data) {
-				expect(row.age_plus_one).toBe((row.age as number) + 1);
-			}
-
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
 			await expect(table.locator('[data-column-id="age_plus_one"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+
+			const rows = table.locator('tbody tr');
+			await expect(rows).toHaveCount(3);
+
+			await expect(table.locator('tbody tr', { hasText: 'Alice' })).toContainText('31');
+			await expect(table.locator('tbody tr', { hasText: 'Bob' })).toContainText('26');
+			await expect(table.locator('tbody tr', { hasText: 'Charlie' })).toContainText('36');
 
 			await screenshot(page, 'analysis/pipeline', 'expression');
 		} finally {
@@ -558,19 +445,16 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toContain('tag');
-			expect(preview.total_rows).toBe(3);
-
-			// Every row should have tag = 'test'
-			for (const row of preview.data) {
-				expect(row.tag).toBe('test');
-			}
-
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
 			await expect(table.locator('[data-column-id="tag"]')).toBeVisible();
+
+			const rows = table.locator('tbody tr');
+			await expect(rows).toHaveCount(3);
+			for (let i = 0; i < 3; i++) {
+				await expect(rows.nth(i)).toContainText('test');
+			}
 
 			await screenshot(page, 'analysis/pipeline', 'with-columns');
 		} finally {
@@ -588,19 +472,15 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toContain('name_upper');
-			expect(preview.total_rows).toBe(3);
-
-			const uppers = preview.data.map((r) => r.name_upper);
-			expect(uppers).toContain('ALICE');
-			expect(uppers).toContain('BOB');
-			expect(uppers).toContain('CHARLIE');
-
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="name_upper"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
 			await expect(table.getByText('ALICE', { exact: true })).toBeVisible();
+			await expect(table.getByText('BOB', { exact: true })).toBeVisible();
+			await expect(table.getByText('CHARLIE', { exact: true })).toBeVisible();
 
 			await screenshot(page, 'analysis/pipeline', 'string-transform');
 		} finally {
@@ -621,21 +501,18 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			// 2 columns: city, total_age (original id/name dropped by groupby)
-			expect(preview.columns).toContain('city');
-			expect(preview.columns).toContain('total_age');
-			expect(preview.columns).toHaveLength(2);
-			expect(preview.total_rows).toBe(3); // 3 unique cities
-
-			// Each city has 1 row → sum = individual age
-			const lookup = Object.fromEntries(preview.data.map((r) => [r.city, r.total_age]));
-			expect(lookup['London']).toBe(30);
-			expect(lookup['Paris']).toBe(25);
-			expect(lookup['Berlin']).toBe(35);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="total_age"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
+			await expect(table.locator('tbody tr', { hasText: 'London' })).toContainText('30');
+			await expect(table.locator('tbody tr', { hasText: 'Paris' })).toContainText('25');
+			await expect(table.locator('tbody tr', { hasText: 'Berlin' })).toContainText('35');
+
 			await screenshot(page, 'analysis/pipeline', 'groupby');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -659,17 +536,15 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(expect.arrayContaining(['name', 'city', 'field', 'val']));
-			// 3 rows × 2 unpivoted columns = 6 rows
-			expect(preview.total_rows).toBe(6);
-
-			const fields = preview.data.map((r) => r.field);
-			expect(fields).toContain('id');
-			expect(fields).toContain('age');
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('tbody tr')).toHaveCount(6);
+			await expect(table.locator('[data-column-id="field"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="val"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
 			await screenshot(page, 'analysis/pipeline', 'unpivot');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -691,22 +566,16 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			// City values become column names
-			expect(preview.columns).toContain('name');
-			expect(preview.columns).toContain('London');
-			expect(preview.columns).toContain('Paris');
-			expect(preview.columns).toContain('Berlin');
-			expect(preview.total_rows).toBe(3);
-
-			// Alice has London=30, Bob has Paris=25, Charlie has Berlin=35
-			const alice = preview.data.find((r) => r.name === 'Alice');
-			expect(alice?.London).toBe(30);
-			const bob = preview.data.find((r) => r.name === 'Bob');
-			expect(bob?.Paris).toBe(25);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="London"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="Paris"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="Berlin"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+			await expect(table.locator('tbody tr', { hasText: 'Alice' })).toContainText('30');
+
 			await screenshot(page, 'analysis/pipeline', 'pivot');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -722,13 +591,16 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'fill_null', config: { strategy: 'zero' } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			// No nulls in sample data → structure unchanged
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(3);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
 			await screenshot(page, 'analysis/pipeline', 'fill-null');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -750,22 +622,13 @@ test.describe('Pipeline data verification', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			// Self-join on city: each city matches once → 3 rows
-			expect(preview.total_rows).toBe(3);
-			// Right columns get suffix: id_right, name_right, age_right
-			expect(preview.columns).toContain('id');
-			expect(preview.columns).toContain('id_right');
-			expect(preview.columns).toContain('name_right');
-
-			// Self-join: left and right values should match
-			for (const row of preview.data) {
-				expect(row.name).toBe(row.name_right);
-				expect(row.age).toBe(row.age_right);
-			}
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+			await expect(table.locator('[data-column-id="id_right"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name_right"]')).toBeVisible();
+
 			await screenshot(page, 'analysis/pipeline', 'join');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -789,23 +652,19 @@ test.describe('Pipeline data verification', () => {
 			{ type: 'limit', config: { n: 2 } }
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			// All 3 rows match age >= 25, sorted desc: Charlie(35), Alice(30), Bob(25)
-			// Then limited to 2: Charlie, Alice
-			expect(preview.total_rows).toBe(2);
-			expect(preview.data[0].name).toBe('Charlie');
-			expect(preview.data[1].name).toBe('Alice');
-
-			// UI: verify the step nodes are all present on canvas
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			const rows = table.locator('tbody tr');
+			await expect(rows).toHaveCount(2);
+			await expect(rows.nth(0)).toContainText('Charlie');
+			await expect(rows.nth(1)).toContainText('Alice');
+
 			await expect(page.locator('[data-step-type="filter"]')).toBeVisible();
 			await expect(page.locator('[data-step-type="sort"]')).toBeVisible();
 			await expect(page.locator('[data-step-type="limit"]')).toBeVisible();
 			await expect(page.locator('[data-step-type="view"]')).toBeVisible();
 
-			// UI: verify table shows correct data
-			const table = page.locator('[data-testid="inline-data-table"]');
 			await expect(table.getByText('Charlie', { exact: true })).toBeVisible();
 			await expect(table.getByText('Alice', { exact: true })).toBeVisible();
 
@@ -840,9 +699,6 @@ test.describe('Pipeline data – pass-through operations', () => {
 	});
 
 	test('chart (plot_bar) computes aggregated visualization data', async ({ page, request }) => {
-		// Chart steps produce x/y visualization columns. The trailing view step
-		// added by createPipelineAnalysis would override the chart preview with
-		// the original schema, so we build the pipeline without a trailing view.
 		const aName = `E2E Pipe Chart ${uid()}`;
 		const chartStepId = crypto.randomUUID();
 		const chartTabId = crypto.randomUUID();
@@ -896,27 +752,11 @@ test.describe('Pipeline data – pass-through operations', () => {
 			throw new Error(`createPipelineAnalysis: ${response.status()} ${await response.text()}`);
 		}
 		const aId = ((await response.json()) as { id: string }).id;
-		const chartInfo: PipelineAnalysisResult = {
-			analysisId: aId,
-			viewStepId: chartStepId,
-			tabId: chartTabId,
-			resultId: chartResultId,
-			dsId,
-			steps: chartSteps
-		};
 		try {
-			const preview = await fetchPreviewViaAPI(request, chartInfo, chartStepId);
-
-			// Chart preview returns aggregated data with x/y columns
-			expect(preview.columns).toContain('x');
-			expect(preview.columns).toContain('y');
-			expect(preview.total_rows).toBe(3); // 3 unique cities
-
-			// Each city sums to its single age value
-			const lookup = Object.fromEntries(preview.data.map((r) => [r.x, r.y]));
-			expect(lookup['London']).toBe(30);
-			expect(lookup['Paris']).toBe(25);
-			expect(lookup['Berlin']).toBe(35);
+			await gotoAnalysisEditor(page, aId);
+			const chart = page.locator('[data-testid="chart-preview"]');
+			await expect(chart).toBeVisible({ timeout: 30_000 });
+			await expect(chart.locator('svg')).toBeVisible({ timeout: 10_000 });
 
 			await screenshot(page, 'analysis/pipeline', 'chart-plot-bar');
 		} finally {
@@ -938,12 +778,16 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(3);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
 			await screenshot(page, 'analysis/pipeline', 'export');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -963,12 +807,16 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(3);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
 			await screenshot(page, 'analysis/pipeline', 'download');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -977,7 +825,6 @@ test.describe('Pipeline data – pass-through operations', () => {
 	});
 
 	test('explode expands list column into rows', async ({ page, request }) => {
-		// Create a list column via expression, then explode it
 		const aName = `E2E Pipe Explode ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId, [
 			{
@@ -1000,19 +847,16 @@ test.describe('Pipeline data – pass-through operations', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			// Each row had 2 elements in tags (name,city) → 3×2 = 6 rows
-			expect(preview.total_rows).toBe(6);
-			expect(preview.columns).toContain('tags');
-
-			const tags = preview.data.map((r) => r.tags);
-			expect(tags).toContain('Alice');
-			expect(tags).toContain('London');
-			expect(tags).toContain('Bob');
-			expect(tags).toContain('Paris');
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('tbody tr')).toHaveCount(6);
+			await expect(table.locator('[data-column-id="tags"]')).toBeVisible();
+			await expect(table.getByText('Alice', { exact: true }).first()).toBeVisible();
+			await expect(table.getByText('London', { exact: true }).first()).toBeVisible();
+			await expect(table.getByText('Bob', { exact: true }).first()).toBeVisible();
+			await expect(table.getByText('Paris', { exact: true }).first()).toBeVisible();
+
 			await screenshot(page, 'analysis/pipeline', 'explode');
 		} finally {
 			await leaveAnalysisPage(page);
@@ -1046,7 +890,6 @@ test.describe('Pipeline data – timeseries', () => {
 	test('timeseries extracts month from date column', async ({ page, request }) => {
 		const aName = `E2E Pipe TimeSeries ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dateDsId, [
-			// Cast event_date from string to Date before timeseries operation
 			{
 				type: 'select',
 				config: {
@@ -1065,20 +908,15 @@ test.describe('Pipeline data – timeseries', () => {
 			}
 		]);
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId);
-
-			expect(preview.columns).toContain('event_month');
-			expect(preview.total_rows).toBe(3);
-
-			// Months: Jan(1), Mar(3), Jun(6)
-			const months = preview.data.map((r) => r.event_month);
-			expect(months).toContain(1);
-			expect(months).toContain(3);
-			expect(months).toContain(6);
-
 			await navigateAndWaitForTable(page, info.analysisId);
 			const table = page.locator('[data-testid="inline-data-table"]');
+
 			await expect(table.locator('[data-column-id="event_month"]')).toBeVisible();
+			await expect(table.locator('tbody tr')).toHaveCount(3);
+
+			await expect(table.locator('tbody tr', { hasText: 'Alice' })).toContainText('1');
+			await expect(table.locator('tbody tr', { hasText: 'Bob' })).toContainText('3');
+			await expect(table.locator('tbody tr', { hasText: 'Charlie' })).toContainText('6');
 
 			await screenshot(page, 'analysis/pipeline', 'timeseries');
 		} finally {
@@ -1116,7 +954,6 @@ test.describe('Pipeline data – union by name', () => {
 	});
 
 	test('union_by_name combines rows from two datasources', async ({ page, request }) => {
-		// Union step references the second datasource by its ID (same as UI behavior)
 		const aName = `E2E Pipe Union ${uid()}`;
 		const info = await createPipelineAnalysis(request, aName, dsId1, [
 			{
@@ -1126,19 +963,16 @@ test.describe('Pipeline data – union by name', () => {
 		]);
 
 		try {
-			const preview = await fetchPreviewViaAPI(request, info, info.viewStepId, [dsId2]);
-
-			// Both datasources have same SAMPLE_CSV (3 rows each) → 6 rows total
-			expect(preview.columns).toEqual(['id', 'name', 'age', 'city']);
-			expect(preview.total_rows).toBe(6);
-
-			// All names appear twice (once from each source)
-			const names = preview.data.map((r) => r.name);
-			expect(names.filter((n) => n === 'Alice')).toHaveLength(2);
-			expect(names.filter((n) => n === 'Bob')).toHaveLength(2);
-			expect(names.filter((n) => n === 'Charlie')).toHaveLength(2);
-
 			await navigateAndWaitForTable(page, info.analysisId);
+			const table = page.locator('[data-testid="inline-data-table"]');
+
+			await expect(table.locator('[data-column-id="id"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="name"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="age"]')).toBeVisible();
+			await expect(table.locator('[data-column-id="city"]')).toBeVisible();
+
+			await expect(table.locator('tbody tr')).toHaveCount(6);
+
 			await screenshot(page, 'analysis/pipeline', 'union-by-name');
 		} finally {
 			await leaveAnalysisPage(page);

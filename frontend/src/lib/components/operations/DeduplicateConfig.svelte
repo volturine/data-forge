@@ -3,7 +3,7 @@
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, label, stepConfig } from '$lib/styles/panda';
+	import { css, stepConfig } from '$lib/styles/panda';
 
 	interface DeduplicateConfigData {
 		subset: string[] | null;
@@ -40,10 +40,20 @@
 		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 			{#each keepStrategies as strategy (strategy.value)}
 				<label
-					class={cx(
-						label({ variant: 'checkbox' }),
-						css({ paddingY: '2', _hover: { color: 'fg.primary' } })
-					)}
+					class={css({
+						display: 'flex',
+						cursor: 'pointer',
+						alignItems: 'center',
+						gap: '3',
+						fontSize: 'sm',
+						fontWeight: 'normal',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '0',
+						paddingY: '2',
+						_hover: { color: 'fg.primary' }
+					})}
 				>
 					<input
 						type="radio"
@@ -59,15 +69,15 @@
 	</div>
 
 	<div
-		class={cx(
-			css({
+		class={css(
+			{
 				marginBottom: '0',
 				paddingBottom: '5',
 				backgroundColor: 'transparent',
 
 				border: 'none'
-			}),
-			css({ borderTopWidth: '1', paddingTop: '5' })
+			},
+			{ borderTopWidth: '1', paddingTop: '5' }
 		)}
 		role="group"
 		aria-labelledby="column-subset-heading"

@@ -5,7 +5,7 @@
 	import DateTimeInput from '$lib/components/common/DateTimeInput.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
-	import { css, cx, label, input } from '$lib/styles/panda';
+	import { css, input } from '$lib/styles/panda';
 
 	const uid = $props.id();
 
@@ -306,7 +306,17 @@
 								paddingBottom: '2'
 							})}
 						>
-							<span class={cx(label(), css({ fontWeight: 'semibold' }))}>#{i + 1}</span>
+							<span
+								class={css({
+									display: 'block',
+									fontSize: 'xs2',
+									fontWeight: 'semibold',
+									color: 'fg.muted',
+									marginBottom: '1.5',
+									textTransform: 'uppercase',
+									letterSpacing: 'wider'
+								})}>#{i + 1}</span
+							>
 							{#if cond.column}
 								<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>{cond.column}</span>
 							{/if}
@@ -321,10 +331,7 @@
 									alignItems: 'center',
 									justifyContent: 'center',
 									borderWidth: '1',
-									borderColor: 'border.transparent',
-									backgroundColor: 'transparent',
 									padding: '0',
-									color: 'fg.muted',
 									_hover: {
 										borderColor: 'border.error',
 										backgroundColor: 'bg.error',
@@ -425,7 +432,17 @@
 											gap: '2'
 										})}
 									>
-										<span class={cx(label(), css({ fontWeight: 'normal' }))}>Compare to</span>
+										<span
+											class={css({
+												display: 'block',
+												fontSize: 'xs2',
+												fontWeight: 'normal',
+												color: 'fg.muted',
+												marginBottom: '1.5',
+												textTransform: 'uppercase',
+												letterSpacing: 'wider'
+											})}>Compare to</span
+										>
 										<div class={css({ display: 'flex' })} role="radiogroup" aria-label="Value mode">
 											<ToggleButton
 												active={!isColumn}
@@ -581,7 +598,17 @@
 										minWidth: 'list'
 									})}
 								>
-									<span class={cx(label(), css({ fontWeight: 'normal' }))}>Value</span>
+									<span
+										class={css({
+											display: 'block',
+											fontSize: 'xs2',
+											fontWeight: 'normal',
+											color: 'fg.muted',
+											marginBottom: '1.5',
+											textTransform: 'uppercase',
+											letterSpacing: 'wider'
+										})}>Value</span
+									>
 									<div
 										class={css({
 											display: 'flex',

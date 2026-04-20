@@ -25,7 +25,6 @@
 
 	const activeTab = $derived(resolveTab(page.url.searchParams.get('tab')));
 	let search = $state('');
-	let showPreviews = $state(true);
 
 	function selectTab(key: TabKey) {
 		goto(resolve(`/monitoring?tab=${key}` as '/'), {
@@ -126,7 +125,7 @@
 			aria-labelledby="tab-builds"
 			class={css({ marginTop: '4', display: 'flex', flexDirection: 'column', gap: '4' })}
 		>
-			<BuildsManager searchQuery={search} {showPreviews} embedded />
+			<BuildsManager searchQuery={search} embedded />
 		</div>
 	{:else if activeTab === 'schedules'}
 		<div

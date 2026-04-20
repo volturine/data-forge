@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { drag } from '$lib/stores/drag.svelte';
-	import { css, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		fromStepIndex: number;
@@ -23,23 +23,21 @@
 	const cx_ = width / 2;
 
 	const isDragActive = $derived(drag.active);
-	const lineClass = $derived(
-		cx(
-			'connection-line',
-			css({
-				display: 'flex',
-				width: 'full',
-				flexShrink: '0',
-				alignItems: 'center',
-				justifyContent: 'center',
-				position: 'relative',
-				zIndex: '1',
-				height: 'pipelineConnection',
-				color: isDragActive ? (highlighted ? 'fg.primary' : 'fg.faint') : 'fg.faint',
-				_hover: { color: 'fg.primary' }
-			})
-		)
-	);
+	const lineClass = $derived([
+		'connection-line',
+		css({
+			display: 'flex',
+			width: 'full',
+			flexShrink: '0',
+			alignItems: 'center',
+			justifyContent: 'center',
+			position: 'relative',
+			zIndex: '1',
+			height: 'pipelineConnection',
+			color: isDragActive ? (highlighted ? 'fg.primary' : 'fg.faint') : 'fg.faint',
+			_hover: { color: 'fg.primary' }
+		})
+	]);
 </script>
 
 <div class={lineClass}>

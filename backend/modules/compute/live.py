@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -58,6 +59,20 @@ def _safe_str(value: object) -> str | None:
     return None
 
 
+def _safe_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.endswith('Z'):
+            raw = raw[:-1] + '+00:00'
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(raw)
+    return None
+
+
 def _sanitize_log_message(value: object) -> str:
     if not isinstance(value, str):
         return ''
@@ -99,7 +114,11 @@ def _consume_throttled(build: ActiveBuild, payload: dict) -> list[dict]:
     event_type = _safe_str(payload.get('type'))
     if event_type is None:
         return []
-    if event_type in {schemas.BuildEventType.COMPLETE.value, schemas.BuildEventType.FAILED.value}:
+    if event_type in {
+        schemas.BuildEventType.COMPLETE.value,
+        schemas.BuildEventType.FAILED.value,
+        schemas.BuildEventType.CANCELLED.value,
+    }:
         queued = list(build.last_throttled_event.values())
         build.last_throttled_event.clear()
         return queued
@@ -154,8 +173,11 @@ class ActiveBuild:
     current_tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
+    current_engine_run_id: str | None = None
     duration_ms: int | None = None
     error: str | None = None
+    cancelled_at: datetime | None = None
+    cancelled_by: str | None = None
     updated_at: datetime = field(default_factory=_utcnow)
     finished_at: datetime | None = None
     results: list[schemas.BuildTabResult] = field(default_factory=list)
@@ -194,12 +216,21 @@ class ActiveBuild:
         if self.duration_ms is None and self.status == schemas.ActiveBuildStatus.RUNNING:
             self.duration_ms = elapsed_ms
 
-    def update_status(self, status: schemas.ActiveBuildStatus, duration_ms: int, error: str | None = None) -> None:
+    def update_status(
+        self,
+        status: schemas.ActiveBuildStatus,
+        duration_ms: int,
+        error: str | None = None,
+        cancelled_at: datetime | None = None,
+        cancelled_by: str | None = None,
+    ) -> None:
         now = _utcnow()
         self.status = status
         self.duration_ms = duration_ms
         self.elapsed_ms = duration_ms
         self.error = error
+        self.cancelled_at = cancelled_at
+        self.cancelled_by = cancelled_by
         self.updated_at = now
         self.finished_at = now
 
@@ -242,7 +273,10 @@ class ActiveBuild:
             current_tab_name=self.current_tab_name,
             current_output_id=self.current_output_id,
             current_output_name=self.current_output_name,
+            current_engine_run_id=self.current_engine_run_id,
             total_tabs=self.total_tabs,
+            cancelled_at=self.cancelled_at,
+            cancelled_by=self.cancelled_by,
         )
 
     def detail(self) -> schemas.ActiveBuildDetail:
@@ -432,7 +466,11 @@ class ActiveBuildRegistry:
                     for websocket in stale:
                         watchers.discard(websocket)
         await self.publish_list_snapshot(namespace)
-        if event_type not in {schemas.BuildEventType.COMPLETE.value, schemas.BuildEventType.FAILED.value}:
+        if event_type not in {
+            schemas.BuildEventType.COMPLETE.value,
+            schemas.BuildEventType.FAILED.value,
+            schemas.BuildEventType.CANCELLED.value,
+        }:
             return
         async with self._lock:
             self._prune_finished_locked()
@@ -489,6 +527,7 @@ class ActiveBuildRegistry:
             build.current_tab_name = _safe_str(normalized.get('tab_name')) or build.current_tab_name
             build.current_output_id = _safe_str(normalized.get('current_output_id')) or build.current_output_id
             build.current_output_name = _safe_str(normalized.get('current_output_name')) or build.current_output_name
+            build.current_engine_run_id = _safe_str(normalized.get('engine_run_id')) or build.current_engine_run_id
             if event_type == schemas.BuildEventType.PLAN.value:
                 optimized = _safe_str(normalized.get('optimized_plan')) or ''
                 unoptimized = _safe_str(normalized.get('unoptimized_plan')) or ''
@@ -606,6 +645,25 @@ class ActiveBuildRegistry:
                     duration_ms=_safe_int(normalized.get('duration_ms')) or build.elapsed_ms,
                     error=_safe_str(normalized.get('error')),
                 )
+            if event_type == schemas.BuildEventType.CANCELLED.value:
+                build.results = [
+                    schemas.BuildTabResult.model_validate(item) for item in normalized.get('results', []) if isinstance(item, dict)
+                ]
+                build.update_progress(
+                    progress=_safe_float(normalized.get('progress'), build.progress),
+                    elapsed_ms=_safe_int(normalized.get('elapsed_ms')) or build.elapsed_ms,
+                    estimated_remaining_ms=None,
+                    current_step=build.current_step,
+                    current_step_index=build.current_step_index,
+                    total_steps=_safe_int(normalized.get('total_steps')) or build.total_steps,
+                )
+                build.update_status(
+                    schemas.ActiveBuildStatus.CANCELLED,
+                    duration_ms=_safe_int(normalized.get('duration_ms')) or build.elapsed_ms,
+                    error='Build cancelled',
+                    cancelled_at=_safe_datetime(normalized.get('cancelled_at')),
+                    cancelled_by=_safe_str(normalized.get('cancelled_by')),
+                )
             return ActiveBuildContext(
                 current_kind=build.current_kind,
                 current_datasource_id=build.current_datasource_id,
@@ -620,7 +678,11 @@ class ActiveBuildRegistry:
         removable: set[str] = set()
         finished: list[ActiveBuild] = []
         for build in self._builds.values():
-            if build.status not in {schemas.ActiveBuildStatus.COMPLETED, schemas.ActiveBuildStatus.FAILED}:
+            if build.status not in {
+                schemas.ActiveBuildStatus.COMPLETED,
+                schemas.ActiveBuildStatus.FAILED,
+                schemas.ActiveBuildStatus.CANCELLED,
+            }:
                 continue
             finished.append(build)
             finished_at = build.finished_at or build.updated_at

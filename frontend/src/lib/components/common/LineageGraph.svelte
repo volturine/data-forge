@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { LineageNode, LineageResponse, NodeKind, EdgeType } from '$lib/api/lineage';
 	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from 'lucide-svelte';
-	import { css, cx, button } from '$lib/styles/panda';
+	import { css, button } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 
@@ -586,16 +586,14 @@
 					{@const isInternal = node.kind === 'internal'}
 					{#if pos}
 						<div
-							class={cx(
+							class={[
 								'lineage-node',
 								css({
 									width: '240px',
 									background: 'canvas.lineageNode',
-									cursor: 'grab',
 									transition: 'box-shadow 160ms ease, transform 160ms ease',
 									_active: {
-										cursor: 'grabbing',
-										boxShadow: 'panel'
+										cursor: 'grabbing'
 									},
 									position: 'absolute',
 									display: 'flex',
@@ -607,7 +605,7 @@
 									boxShadow: 'sm',
 									borderLeftWidth: isInternal ? '1' : '3'
 								})
-							)}
+							]}
 							style:border-left-color={kindBorderColor[node.kind]}
 							style:border-style={isInternal ? 'dashed' : 'solid'}
 							use:setPosition={pos}

@@ -12,41 +12,41 @@ export function isUuid(value: string | null | undefined): boolean {
 	return typeof value === 'string' && uuidPattern.test(value);
 }
 
-const defaultBranch = 'master';
-const defaultNamespace = 'outputs';
-const defaultBuildMode = 'full';
-const defaultFormat = 'parquet';
-const outputNameFallback = 'export';
-
 export function generateOutputName(): string {
 	return `output-${Date.now()}`;
 }
 
-function cleanBranch(value: unknown): string {
-	const trimmed = typeof value === 'string' ? value.trim() : '';
-	return trimmed || defaultBranch;
+function requireString(value: unknown, field: string): string {
+	if (typeof value !== 'string') {
+		throw new Error(`${field} is required`);
+	}
+	const trimmed = value.trim();
+	if (!trimmed) {
+		throw new Error(`${field} is required`);
+	}
+	return trimmed;
 }
 
-function toSlug(value: string): string {
-	return value.trim().replace(/\s+/g, '_').toLowerCase() || outputNameFallback;
+function toSlug(value: string, field: string): string {
+	const trimmed = requireString(value, field);
+	return trimmed.replace(/\s+/g, '_').toLowerCase();
 }
 
 export function buildOutputConfig(args: {
 	outputId: string;
-	name?: string | null;
-	branch?: string | null;
+	name: string;
+	branch: string;
 }): AnalysisTabOutput {
-	const outputId = args.outputId;
-	const name = args.name ?? outputNameFallback;
-	const tableName = toSlug(name);
-	const branch = cleanBranch(args.branch);
+	const outputId = requireString(args.outputId, 'outputId');
+	const tableName = toSlug(args.name, 'name');
+	const branch = requireString(args.branch, 'branch');
 	return {
 		result_id: outputId,
-		format: defaultFormat,
+		format: 'parquet',
 		filename: tableName,
-		build_mode: defaultBuildMode,
+		build_mode: 'full',
 		iceberg: {
-			namespace: defaultNamespace,
+			namespace: 'outputs',
 			table_name: tableName,
 			branch
 		}
@@ -54,19 +54,23 @@ export function buildOutputConfig(args: {
 }
 
 export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab {
-	const fallbackDatasource: AnalysisTabDatasource = {
-		id: '',
-		analysis_tab_id: null,
-		config: { branch: defaultBranch }
-	};
-	const datasource = tab.datasource ?? fallbackDatasource;
-	const config = datasource.config ?? { branch: defaultBranch };
-	const branch = cleanBranch(config.branch);
+	if (!tab.datasource) {
+		throw new Error(`Tab ${tab.id ?? index} missing datasource`);
+	}
+	const datasource = tab.datasource;
+	if (!datasource.config || !isRecord(datasource.config)) {
+		throw new Error(`Tab ${tab.id ?? index} missing datasource.config`);
+	}
+	const config = datasource.config;
+	const branch = requireString(config.branch, `Tab ${tab.id ?? index} datasource.config.branch`);
 	const normalizedDatasource: AnalysisTabDatasource = {
 		...datasource,
 		config: { ...config, branch }
 	};
-	const output = (tab.output ?? {}) as Partial<AnalysisTabOutput>;
+	if (!tab.output || !isRecord(tab.output)) {
+		throw new Error(`Tab ${tab.id ?? index} missing output`);
+	}
+	const output = tab.output as Partial<AnalysisTabOutput>;
 	const outputId =
 		typeof output.result_id === 'string' && isUuid(output.result_id) ? output.result_id : null;
 	if (!outputId) {
@@ -74,20 +78,37 @@ export function ensureTabDefaults(tab: AnalysisTab, index: number): AnalysisTab 
 			`Tab ${tab.id ?? index} has missing or invalid output.result_id — expected a UUID v4`
 		);
 	}
-	const existingName =
-		typeof output.filename === 'string' && output.filename ? output.filename : null;
-	const defaults = buildOutputConfig({ outputId, name: existingName, branch });
+	const filename = requireString(output.filename, `Tab ${tab.id ?? index} output.filename`);
+	if (
+		output.build_mode !== 'full' &&
+		output.build_mode !== 'incremental' &&
+		output.build_mode !== 'recreate'
+	) {
+		throw new Error(`Tab ${tab.id ?? index} output.build_mode is required`);
+	}
 	const icebergRaw = output.iceberg;
-	const iceberg = isRecord(icebergRaw)
-		? { ...(defaults.iceberg ?? {}), ...icebergRaw }
-		: defaults.iceberg;
-	const filename = existingName ? toSlug(existingName) : defaults.filename;
+	if (!isRecord(icebergRaw)) {
+		throw new Error(`Tab ${tab.id ?? index} output.iceberg is required`);
+	}
+	const namespace = requireString(
+		icebergRaw.namespace,
+		`Tab ${tab.id ?? index} output.iceberg.namespace`
+	);
+	const tableName = requireString(
+		icebergRaw.table_name,
+		`Tab ${tab.id ?? index} output.iceberg.table_name`
+	);
+	const icebergBranch = requireString(
+		icebergRaw.branch,
+		`Tab ${tab.id ?? index} output.iceberg.branch`
+	);
 	const normalizedOutput: AnalysisTabOutput = {
-		...defaults,
 		...output,
-		result_id: defaults.result_id,
+		result_id: outputId,
+		format: requireString(output.format, `Tab ${tab.id ?? index} output.format`),
 		filename,
-		iceberg
+		build_mode: output.build_mode,
+		iceberg: { ...icebergRaw, namespace, table_name: tableName, branch: icebergBranch }
 	};
 	const normalizedConfig: AnalysisTabDatasourceConfig = normalizedDatasource.config;
 	return {

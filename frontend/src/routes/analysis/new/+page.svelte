@@ -11,7 +11,7 @@
 	import type { AnalysisCreate, PipelineStep } from '$lib/types/analysis';
 	import { buildOutputConfig, generateOutputName } from '$lib/utils/analysis-tab';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
-	import { css, cx, spinner, button, label, input } from '$lib/styles/panda';
+	import { css, spinner, button, label } from '$lib/styles/panda';
 
 	let step = $state(1);
 	let name = $state('');
@@ -269,7 +269,22 @@
 						type="text"
 						bind:value={name}
 						placeholder="My Data Analysis"
-						class={cx(input(), css({ padding: '3', fontSize: 'sm' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							padding: '3',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 					/>
 				</div>
 				<div class={css({ marginBottom: '5', display: 'flex', flexDirection: 'column', gap: '2' })}>
@@ -279,10 +294,26 @@
 						bind:value={description}
 						placeholder="Describe what this analysis does..."
 						rows="4"
-						class={cx(
-							input(),
-							css({ minHeight: 'fieldSm', resize: 'vertical', padding: '3', fontSize: 'sm' })
-						)}
+						class={css({
+							width: 'full',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							minHeight: 'fieldSm',
+							resize: 'vertical',
+							padding: '3',
+							fontSize: 'sm'
+						})}
 					></textarea>
 				</div>
 			</div>

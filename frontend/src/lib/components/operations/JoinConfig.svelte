@@ -10,7 +10,7 @@
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { X } from 'lucide-svelte';
-	import { css, stepConfig, cx, label, input } from '$lib/styles/panda';
+	import { css, stepConfig, label, input } from '$lib/styles/panda';
 
 	const _uid = $props.id();
 
@@ -256,8 +256,17 @@
 					aria-label={`Join column pair ${_index + 1}`}
 				>
 					<div class={css({ flex: '1' })} role="group" aria-label="Left Column">
-						<label for={`join-left-${joinCol.id}`} class={cx(label(), css({ marginBottom: '1' }))}
-							>Left Column</label
+						<label
+							for={`join-left-${joinCol.id}`}
+							class={css({
+								display: 'block',
+								fontSize: 'xs2',
+								fontWeight: 'semibold',
+								color: 'fg.muted',
+								marginBottom: '1',
+								textTransform: 'uppercase',
+								letterSpacing: 'wider'
+							})}>Left Column</label
 						>
 						<ColumnDropdown
 							{schema}
@@ -267,8 +276,17 @@
 						/>
 					</div>
 					<div class={css({ flex: '1' })} role="group" aria-label="Right Column">
-						<label for={`join-right-${joinCol.id}`} class={cx(label(), css({ marginBottom: '1' }))}
-							>Right Column</label
+						<label
+							for={`join-right-${joinCol.id}`}
+							class={css({
+								display: 'block',
+								fontSize: 'xs2',
+								fontWeight: 'semibold',
+								color: 'fg.muted',
+								marginBottom: '1',
+								textTransform: 'uppercase',
+								letterSpacing: 'wider'
+							})}>Right Column</label
 						>
 						<ColumnDropdown
 							schema={{ columns: rightColumns, row_count: rightSchema?.row_count ?? 0 }}
@@ -370,7 +388,19 @@
 			placeholder="_right"
 			aria-describedby="join-suffix-hint"
 		/>
-		<span id="join-suffix-hint" class={cx(label(), css({ marginTop: '1' }))}>
+		<span
+			id="join-suffix-hint"
+			class={css({
+				display: 'block',
+				fontSize: 'xs2',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider',
+				marginTop: '1'
+			})}
+		>
 			Suffix for columns from the right dataset (when names collide)
 		</span>
 	</div>

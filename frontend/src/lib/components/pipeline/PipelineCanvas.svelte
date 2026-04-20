@@ -1,13 +1,14 @@
 <script lang="ts">
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import type { DataSource } from '$lib/types/datasource';
+	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
 	import StepNode from './StepNode.svelte';
 	import OutputNode from './OutputNode.svelte';
 	import ConnectionLine from './ConnectionLine.svelte';
 	import DatasourceNode from './DatasourceNode.svelte';
-	import { css, cx } from '$lib/styles/panda';
-	import { ClipboardPaste, Plus, Eye } from 'lucide-svelte';
+	import { css } from '$lib/styles/panda';
+	import { ClipboardPaste, Plus, Eye, ArrowDown } from 'lucide-svelte';
 	import { stepTypes, isChartStep } from './utils';
 
 	export interface ClipboardStep {
@@ -18,6 +19,7 @@
 
 	interface Props {
 		steps: PipelineStep[];
+		buildStore: BuildStreamStore;
 		analysisId?: string;
 		datasourceId?: string;
 		datasource?: DataSource | null;
@@ -38,6 +40,7 @@
 
 	let {
 		steps,
+		buildStore,
 		analysisId,
 		datasourceId,
 		datasource = null,
@@ -62,6 +65,9 @@
 
 	let lastTabId = $state<string | null>(null);
 	let pasteError = $state<string | null>(null);
+	let canvasEl = $state<HTMLElement | null>(null);
+	let outputEl = $state<HTMLElement | null>(null);
+	let outputVisible = $state(true);
 
 	// $effect: drag reset is a UI side effect not derivable from state
 	// Subscription: $derived can't reset drag UI on tab change.
@@ -82,6 +88,23 @@
 		const timer = window.setTimeout(() => (pasteError = null), 3000);
 		return () => window.clearTimeout(timer);
 	});
+
+	// DOM: IntersectionObserver to track output node visibility for scroll button
+	$effect(() => {
+		if (!outputEl) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				outputVisible = entries[0]?.isIntersecting ?? true;
+			},
+			{ threshold: 0.1 }
+		);
+		observer.observe(outputEl);
+		return () => observer.disconnect();
+	});
+
+	function scrollToOutput() {
+		outputEl?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+	}
 
 	function buildTarget(index: number): DropTarget {
 		return {
@@ -296,7 +319,7 @@
 		return () => window.clearInterval(intervalId);
 	});
 
-	const insertControls = cx(
+	const insertControls = [
 		'insert-controls-group',
 		css({
 			display: 'flex',
@@ -310,210 +333,57 @@
 			transitionDuration: '150ms',
 			zIndex: '2'
 		})
-	);
-
-	const insertBtn = css({
-		display: 'inline-flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		padding: '0.5',
-		borderRadius: 'xs',
-		color: 'fg.faint',
-		backgroundColor: 'transparent',
-		border: 'none',
-		cursor: 'pointer',
-		transitionProperty: 'color',
-		transitionDuration: '150ms',
-		_hover: {
-			color: 'fg.primary'
-		}
-	});
-
-	const inertPlus = css({
-		display: 'inline-flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		padding: '0.5',
-		color: 'fg.faint'
-	});
+	];
 </script>
 
 <div
-	class={cx(
-		'pipeline-canvas',
-		css({
-			flex: '1',
-			overflowY: 'auto',
-			padding: '8',
-			backgroundColor: 'bg.secondary',
-			minHeight: 'panel'
-		})
-	)}
+	class={css({
+		flex: '1',
+		width: '100%',
+		display: 'flex',
+		flexDirection: 'column',
+		position: 'relative',
+		minHeight: 'panel',
+		overflow: 'hidden'
+	})}
 >
 	<div
-		class={css({
-			marginX: 'auto',
-			display: 'flex',
-			width: '100%',
-			maxWidth: '100%',
-			flexDirection: 'column',
-			alignItems: 'center'
-		})}
-		role="list"
+		bind:this={canvasEl}
+		class={[
+			'pipeline-canvas',
+			css({
+				flex: '1',
+				overflowY: 'auto',
+				padding: '8',
+				backgroundColor: 'bg.secondary'
+			})
+		]}
 	>
-		<DatasourceNode
-			{datasource}
-			{datasourceLabel}
-			{analysisId}
-			tabName={_tabName}
-			{activeTab}
-			onChangeDatasource={_onChangeDatasource}
-			onRenameTab={_onRenameTab}
-			onDuplicateTab={_onDuplicateTab}
-			{readOnly}
-		/>
-		{#if shouldShowInsert(0)}
-			<div
-				class={cx(
-					'insert-zone',
-					css({
-						display: 'flex',
-						width: '100%',
-						cursor: canDrop ? 'pointer' : 'default',
-						flexDirection: 'column',
-						alignItems: 'center',
-						paddingY: '0'
-					})
-				)}
-				class:ready={canDrop}
-				role="listitem"
-				data-hook="insert-zone"
-				data-index="0"
-				ondragenter={(e) => handleDragEnter(e, 0)}
-				ondragover={handleDragOver}
-				ondragleave={handleDragLeave}
-				ondrop={(e) => handleDrop(e, 0)}
-			>
-				{#if canDrop}
-					<ConnectionLine
-						fromStepIndex={-1}
-						toStepIndex={0}
-						totalSteps={steps.length + 1}
-						highlighted={hoverIndex === 0}
-					/>
-					<div
-						class={css({
-							marginY: '2',
-							display: 'flex',
-							minHeight: 'row',
-							width: 'min(55%, 480px)',
-							flexShrink: '0',
-							alignItems: 'center',
-							justifyContent: 'center',
-							borderWidth: '2',
-							borderStyle: 'dashed',
-							paddingX: '4',
-							paddingY: '2',
-							textAlign: 'center',
-							borderColor: hoverIndex === 0 && !drag.valid ? 'error.border' : 'border.primary',
-							backgroundColor:
-								hoverIndex === 0 && !drag.valid
-									? 'bg.error'
-									: hoverIndex === 0
-										? 'bg.tertiary'
-										: 'transparent',
-							_hover: { backgroundColor: 'bg.hover' }
-						})}
-					>
-						{#if hoverIndex === 0}
-							<span
-								class={css({
-									fontFamily: 'mono',
-									fontSize: 'sm',
-									fontWeight: 'medium',
-									textTransform: 'lowercase'
-								})}>{drag.type ?? 'step'}</span
-							>
-						{/if}
-					</div>
-					{#if steps.length > 0}
-						<ConnectionLine
-							fromStepIndex={-1}
-							toStepIndex={0}
-							totalSteps={steps.length + 1}
-							highlighted={hoverIndex === 0}
-						/>
-					{/if}
-				{:else}
-					<div
-						class={css({
-							position: 'relative',
-							display: 'flex',
-							flexDirection: 'column',
-							alignItems: 'center',
-							justifyContent: 'center'
-						})}
-					>
-						<ConnectionLine
-							fromStepIndex={-1}
-							toStepIndex={0}
-							totalSteps={steps.length + 1}
-							highlighted={false}
-							arrow={false}
-						/>
-						{#if steps.length > 0}
-							<ConnectionLine
-								fromStepIndex={-1}
-								toStepIndex={0}
-								totalSteps={steps.length + 1}
-								highlighted={false}
-							/>
-						{/if}
-						{#if !readOnly}
-							<div class={insertControls}>
-								<button class={insertBtn} title="Insert view" onclick={() => handleInsertView(0)}>
-									<Eye size={14} />
-								</button>
-								<div class={inertPlus} aria-hidden="true">
-									<Plus size={14} />
-								</div>
-								<button class={insertBtn} title="Paste step" onclick={() => handlePaste(0)}>
-									<ClipboardPaste size={14} />
-								</button>
-							</div>
-						{/if}
-					</div>
-				{/if}
-			</div>
-		{:else if steps.length > 0}
-			<div
-				class={css({
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'center',
-					paddingY: '0'
-				})}
-				aria-hidden="true"
-			>
-				<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
-			</div>
-		{/if}
-		{#each steps as step, i (step.id)}
-			<StepNode
-				{step}
-				index={i}
+		<div
+			class={css({
+				marginX: 'auto',
+				display: 'flex',
+				width: '100%',
+				maxWidth: '100%',
+				flexDirection: 'column',
+				alignItems: 'center'
+			})}
+			role="list"
+		>
+			<DatasourceNode
+				{datasource}
+				{datasourceLabel}
 				{analysisId}
-				{datasourceId}
-				allSteps={steps}
-				onEdit={onStepClick}
-				onDelete={onStepDelete}
-				onToggleApply={onStepToggle}
-				onTouchMove={onMoveStep}
+				tabName={_tabName}
+				{activeTab}
+				onChangeDatasource={_onChangeDatasource}
+				onRenameTab={_onRenameTab}
+				onDuplicateTab={_onDuplicateTab}
 				{readOnly}
 			/>
-			{#if shouldShowInsert(i + 1)}
+			{#if shouldShowInsert(0)}
 				<div
-					class={cx(
+					class={[
 						'insert-zone',
 						css({
 							display: 'flex',
@@ -523,25 +393,23 @@
 							alignItems: 'center',
 							paddingY: '0'
 						})
-					)}
+					]}
 					class:ready={canDrop}
 					role="listitem"
 					data-hook="insert-zone"
-					data-index={i + 1}
-					ondragenter={(e) => handleDragEnter(e, i + 1)}
+					data-index="0"
+					ondragenter={(e) => handleDragEnter(e, 0)}
 					ondragover={handleDragOver}
 					ondragleave={handleDragLeave}
-					ondrop={(e) => handleDrop(e, i + 1)}
+					ondrop={(e) => handleDrop(e, 0)}
 				>
 					{#if canDrop}
-						{#if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
-							<ConnectionLine
-								fromStepIndex={i}
-								toStepIndex={i + 1}
-								totalSteps={steps.length}
-								highlighted={hoverIndex === i + 1}
-							/>
-						{/if}
+						<ConnectionLine
+							fromStepIndex={-1}
+							toStepIndex={0}
+							totalSteps={steps.length + 1}
+							highlighted={hoverIndex === 0}
+						/>
 						<div
 							class={css({
 								marginY: '2',
@@ -556,18 +424,17 @@
 								paddingX: '4',
 								paddingY: '2',
 								textAlign: 'center',
-								borderColor:
-									hoverIndex === i + 1 && !drag.valid ? 'error.border' : 'border.primary',
+								borderColor: hoverIndex === 0 && !drag.valid ? 'error.border' : 'border.primary',
 								backgroundColor:
-									hoverIndex === i + 1 && !drag.valid
+									hoverIndex === 0 && !drag.valid
 										? 'bg.error'
-										: hoverIndex === i + 1
+										: hoverIndex === 0
 											? 'bg.tertiary'
 											: 'transparent',
 								_hover: { backgroundColor: 'bg.hover' }
 							})}
 						>
-							{#if hoverIndex === i + 1}
+							{#if hoverIndex === 0}
 								<span
 									class={css({
 										fontFamily: 'mono',
@@ -578,12 +445,14 @@
 								>
 							{/if}
 						</div>
-						<ConnectionLine
-							fromStepIndex={i}
-							toStepIndex={i + 1}
-							totalSteps={steps.length}
-							highlighted={hoverIndex === i + 1}
-						/>
+						{#if steps.length > 0}
+							<ConnectionLine
+								fromStepIndex={-1}
+								toStepIndex={0}
+								totalSteps={steps.length + 1}
+								highlighted={hoverIndex === 0}
+							/>
+						{/if}
 					{:else}
 						<div
 							class={css({
@@ -595,31 +464,70 @@
 							})}
 						>
 							<ConnectionLine
-								fromStepIndex={i}
-								toStepIndex={i + 1}
-								totalSteps={steps.length}
+								fromStepIndex={-1}
+								toStepIndex={0}
+								totalSteps={steps.length + 1}
 								highlighted={false}
 								arrow={false}
 							/>
-							<ConnectionLine
-								fromStepIndex={i}
-								toStepIndex={i + 1}
-								totalSteps={steps.length}
-								highlighted={false}
-							/>
+							{#if steps.length > 0}
+								<ConnectionLine
+									fromStepIndex={-1}
+									toStepIndex={0}
+									totalSteps={steps.length + 1}
+									highlighted={false}
+								/>
+							{/if}
 							{#if !readOnly}
 								<div class={insertControls}>
 									<button
-										class={insertBtn}
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											justifyContent: 'center',
+											padding: '0.5',
+											borderRadius: 'xs',
+											backgroundColor: 'transparent',
+											border: 'none',
+											cursor: 'pointer',
+											transitionProperty: 'color',
+											transitionDuration: '150ms',
+											_hover: { color: 'fg.primary' }
+										})}
 										title="Insert view"
-										onclick={() => handleInsertView(i + 1)}
+										onclick={() => handleInsertView(0)}
 									>
 										<Eye size={14} />
 									</button>
-									<div class={inertPlus} aria-hidden="true">
+									<div
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											justifyContent: 'center',
+											padding: '0.5',
+											color: 'fg.faint'
+										})}
+										aria-hidden="true"
+									>
 										<Plus size={14} />
 									</div>
-									<button class={insertBtn} title="Paste step" onclick={() => handlePaste(i + 1)}>
+									<button
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											justifyContent: 'center',
+											padding: '0.5',
+											borderRadius: 'xs',
+											backgroundColor: 'transparent',
+											border: 'none',
+											cursor: 'pointer',
+											transitionProperty: 'color',
+											transitionDuration: '150ms',
+											_hover: { color: 'fg.primary' }
+										})}
+										title="Paste step"
+										onclick={() => handlePaste(0)}
+									>
 										<ClipboardPaste size={14} />
 									</button>
 								</div>
@@ -627,7 +535,7 @@
 						</div>
 					{/if}
 				</div>
-			{:else if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
+			{:else if steps.length > 0}
 				<div
 					class={css({
 						display: 'flex',
@@ -637,44 +545,259 @@
 					})}
 					aria-hidden="true"
 				>
-					<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
+					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={steps.length} />
 				</div>
 			{/if}
-		{/each}
-		{#if steps.length === 0}
+			{#each steps as step, i (step.id)}
+				<StepNode
+					{step}
+					index={i}
+					{analysisId}
+					{datasourceId}
+					allSteps={steps}
+					onEdit={onStepClick}
+					onDelete={onStepDelete}
+					onToggleApply={onStepToggle}
+					onTouchMove={onMoveStep}
+					{readOnly}
+				/>
+				{#if shouldShowInsert(i + 1)}
+					<div
+						class={[
+							'insert-zone',
+							css({
+								display: 'flex',
+								width: '100%',
+								cursor: canDrop ? 'pointer' : 'default',
+								flexDirection: 'column',
+								alignItems: 'center',
+								paddingY: '0'
+							})
+						]}
+						class:ready={canDrop}
+						role="listitem"
+						data-hook="insert-zone"
+						data-index={i + 1}
+						ondragenter={(e) => handleDragEnter(e, i + 1)}
+						ondragover={handleDragOver}
+						ondragleave={handleDragLeave}
+						ondrop={(e) => handleDrop(e, i + 1)}
+					>
+						{#if canDrop}
+							{#if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
+								<ConnectionLine
+									fromStepIndex={i}
+									toStepIndex={i + 1}
+									totalSteps={steps.length}
+									highlighted={hoverIndex === i + 1}
+								/>
+							{/if}
+							<div
+								class={css({
+									marginY: '2',
+									display: 'flex',
+									minHeight: 'row',
+									width: 'min(55%, 480px)',
+									flexShrink: '0',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '2',
+									borderStyle: 'dashed',
+									paddingX: '4',
+									paddingY: '2',
+									textAlign: 'center',
+									borderColor:
+										hoverIndex === i + 1 && !drag.valid ? 'error.border' : 'border.primary',
+									backgroundColor:
+										hoverIndex === i + 1 && !drag.valid
+											? 'bg.error'
+											: hoverIndex === i + 1
+												? 'bg.tertiary'
+												: 'transparent',
+									_hover: { backgroundColor: 'bg.hover' }
+								})}
+							>
+								{#if hoverIndex === i + 1}
+									<span
+										class={css({
+											fontFamily: 'mono',
+											fontSize: 'sm',
+											fontWeight: 'medium',
+											textTransform: 'lowercase'
+										})}>{drag.type ?? 'step'}</span
+									>
+								{/if}
+							</div>
+							<ConnectionLine
+								fromStepIndex={i}
+								toStepIndex={i + 1}
+								totalSteps={steps.length}
+								highlighted={hoverIndex === i + 1}
+							/>
+						{:else}
+							<div
+								class={css({
+									position: 'relative',
+									display: 'flex',
+									flexDirection: 'column',
+									alignItems: 'center',
+									justifyContent: 'center'
+								})}
+							>
+								<ConnectionLine
+									fromStepIndex={i}
+									toStepIndex={i + 1}
+									totalSteps={steps.length}
+									highlighted={false}
+									arrow={false}
+								/>
+								<ConnectionLine
+									fromStepIndex={i}
+									toStepIndex={i + 1}
+									totalSteps={steps.length}
+									highlighted={false}
+								/>
+								{#if !readOnly}
+									<div class={insertControls}>
+										<button
+											class={css({
+												display: 'inline-flex',
+												alignItems: 'center',
+												justifyContent: 'center',
+												padding: '0.5',
+												borderRadius: 'xs',
+												backgroundColor: 'transparent',
+												border: 'none',
+												cursor: 'pointer',
+												transitionProperty: 'color',
+												transitionDuration: '150ms',
+												_hover: { color: 'fg.primary' }
+											})}
+											title="Insert view"
+											onclick={() => handleInsertView(i + 1)}
+										>
+											<Eye size={14} />
+										</button>
+										<div
+											class={css({
+												display: 'inline-flex',
+												alignItems: 'center',
+												justifyContent: 'center',
+												padding: '0.5',
+												color: 'fg.faint'
+											})}
+											aria-hidden="true"
+										>
+											<Plus size={14} />
+										</div>
+										<button
+											class={css({
+												display: 'inline-flex',
+												alignItems: 'center',
+												justifyContent: 'center',
+												padding: '0.5',
+												borderRadius: 'xs',
+												backgroundColor: 'transparent',
+												border: 'none',
+												cursor: 'pointer',
+												transitionProperty: 'color',
+												transitionDuration: '150ms',
+												_hover: { color: 'fg.primary' }
+											})}
+											title="Paste step"
+											onclick={() => handlePaste(i + 1)}
+										>
+											<ClipboardPaste size={14} />
+										</button>
+									</div>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{:else if i < steps.length - 1 || !drag.isReorder || drag.stepId !== step.id}
+					<div
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							paddingY: '0'
+						})}
+						aria-hidden="true"
+					>
+						<ConnectionLine fromStepIndex={i} toStepIndex={i + 1} totalSteps={steps.length} />
+					</div>
+				{/if}
+			{/each}
+			{#if steps.length === 0}
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						paddingY: '0'
+					})}
+					aria-hidden="true"
+				>
+					<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
+				</div>
+			{/if}
+			<div
+				bind:this={outputEl}
+				class={css({ width: '100%', display: 'flex', justifyContent: 'center' })}
+			>
+				<OutputNode {buildStore} {analysisId} {datasourceId} {activeTab} {readOnly} />
+			</div>
+		</div>
+		{#if pasteError}
 			<div
 				class={css({
-					display: 'flex',
-					alignItems: 'center',
-					justifyContent: 'center',
-					paddingY: '0'
+					position: 'fixed',
+					bottom: '4',
+					left: '50%',
+					transform: 'translateX(-50%)',
+					backgroundColor: 'bg.error',
+					borderWidth: '1',
+					borderColor: 'border.error',
+					color: 'fg.error',
+					paddingX: '4',
+					paddingY: '2',
+					fontSize: 'sm',
+					zIndex: 'toast'
 				})}
-				aria-hidden="true"
 			>
-				<ConnectionLine fromStepIndex={-1} toStepIndex={0} totalSteps={1} />
+				{pasteError}
 			</div>
 		{/if}
-		<OutputNode {analysisId} {datasourceId} {activeTab} {readOnly} />
 	</div>
-	{#if pasteError}
-		<div
+	{#if !outputVisible}
+		<button
+			onclick={scrollToOutput}
+			title="Scroll to output"
 			class={css({
-				position: 'fixed',
-				bottom: '4',
-				left: '50%',
-				transform: 'translateX(-50%)',
-				backgroundColor: 'bg.error',
+				position: 'absolute',
+				bottom: '0',
+				right: '0',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				padding: '0',
+				width: '10',
+				height: '10',
+				borderRadius: 'md',
 				borderWidth: '1',
-				borderColor: 'border.error',
-				color: 'fg.error',
-				paddingX: '4',
-				paddingY: '2',
-				fontSize: 'sm',
-				zIndex: 'toast'
+				borderColor: 'border.primary',
+				cursor: 'pointer',
+				boxShadow: 'md',
+				transitionProperty: 'color, background-color, border-color',
+				transitionDuration: '150ms',
+				_hover: {
+					backgroundColor: 'bg.hover',
+					color: 'fg.primary'
+				}
 			})}
 		>
-			{pasteError}
-		</div>
+			<ArrowDown size={18} />
+		</button>
 	{/if}
 </div>
 

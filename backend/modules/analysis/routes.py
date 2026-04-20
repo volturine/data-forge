@@ -15,6 +15,7 @@ from modules.auth.dependencies import get_optional_user
 from modules.auth.models import User
 from modules.compute import service as compute_service
 from modules.compute.manager import ProcessManager
+from modules.export import service as export_service
 from modules.locks import service as lock_service
 from modules.mcp.router import MCPRouter
 
@@ -228,6 +229,26 @@ async def preview_analysis(
         'rows': preview.data,
         'row_count': preview.total_rows,
     }
+
+
+@router.post(
+    '/{analysis_id}/export-code',
+    response_model=schemas.CodeExportResponseSchema,
+    mcp=True,
+)
+@handle_errors(operation='export analysis code', value_error_status=400)
+async def export_analysis_code(
+    analysis_id: AnalysisId,
+    data: schemas.CodeExportRequestSchema,
+    session: Session = Depends(get_db),
+):
+    """Export an analysis (or specific tab) as executable Polars Python or SQL."""
+    return export_service.export_analysis_code(
+        session,
+        parse_analysis_id(analysis_id),
+        format_name=data.format.value,
+        tab_id=data.tab_id,
+    )
 
 
 class AddStepBody(BaseModel):

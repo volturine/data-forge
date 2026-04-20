@@ -1,10 +1,10 @@
 import re
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
-from modules.analysis.models import AnalysisStatus
 from modules.analysis.step_types import is_step_type
 
 
@@ -89,11 +89,17 @@ def _reject_pipeline_steps(data: Any) -> Any:
     return data
 
 
+def _reject_status(data: Any) -> Any:
+    if isinstance(data, dict) and 'status' in data:
+        raise ValueError("'status' is not accepted on analysis payloads; build lifecycle is tracked separately")
+    return data
+
+
 class _RejectPipelineStepsModel(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def reject_pipeline_steps(cls, data: Any) -> Any:
-        return _reject_pipeline_steps(data)
+        return _reject_status(_reject_pipeline_steps(data))
 
 
 class AnalysisCreateSchema(_RejectPipelineStepsModel):
@@ -105,7 +111,6 @@ class AnalysisCreateSchema(_RejectPipelineStepsModel):
 class AnalysisUpdateSchema(_RejectPipelineStepsModel):
     name: str | None = None
     description: str | None = None
-    status: AnalysisStatus | None = None
     tabs: list[TabSchema]
 
 
@@ -116,7 +121,6 @@ class AnalysisResponseSchema(BaseModel):
     name: str
     description: str | None
     pipeline_definition: dict[str, Any]
-    status: AnalysisStatus
     created_at: datetime
     updated_at: datetime
     result_path: str | None
@@ -131,3 +135,25 @@ class AnalysisGalleryItemSchema(BaseModel):
     thumbnail: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class CodeExportFormat(StrEnum):
+    POLARS = 'polars'
+    SQL = 'sql'
+
+
+class CodeExportRequestSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    format: CodeExportFormat
+    tab_id: str | None = None
+
+
+class CodeExportResponseSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    code: str
+    warnings: list[str] = Field(default_factory=list)
+    filename: str
+    format: CodeExportFormat
+    tab_id: str | None = None

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { css, cx, button, input, label, spinner } from '$lib/styles/panda';
+	import { css, button, input, label, spinner } from '$lib/styles/panda';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { GitBranch } from 'lucide-svelte';
 
@@ -108,10 +108,30 @@
 	</div>
 
 	<div class={css({ display: 'flex', gap: '3' })}>
-		<button type="button" class={cx(button(), css({ flex: '1' }))} onclick={() => oauth('google')}>
+		<button
+			type="button"
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'transparent',
+				color: 'fg.primary',
+				flex: '1',
+				'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
+			})}
+			onclick={() => oauth('google')}
+		>
 			Google
 		</button>
-		<button type="button" class={cx(button(), css({ flex: '1' }))} onclick={() => oauth('github')}>
+		<button
+			type="button"
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'transparent',
+				color: 'fg.primary',
+				flex: '1',
+				'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
+			})}
+			onclick={() => oauth('github')}
+		>
 			<GitBranch size={16} />
 			GitHub
 		</button>

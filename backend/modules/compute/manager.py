@@ -120,6 +120,7 @@ class ProcessManager:
             if shutdown_target:
                 shutdown_target.shutdown()
 
+            evict_engine: ComputeEngine | None = None
             with self._engines_lock:
                 if len(self._engines) >= settings.max_concurrent_engines:
                     idle_key: str | None = None
@@ -137,7 +138,7 @@ class ProcessManager:
                             f'Max concurrent engines limit reached ({settings.max_concurrent_engines}), '
                             f'evicting idle engine {idle_analysis_id} in namespace {idle_namespace} to spawn {analysis_id}',
                         )
-                        idle_info.engine.shutdown()
+                        evict_engine = idle_info.engine
                         del self._engines[idle_key]
                     else:
                         logger.warning(
@@ -149,6 +150,10 @@ class ProcessManager:
                             f'Please wait for existing analyses to complete or increase MAX_CONCURRENT_ENGINES.',
                         )
 
+            if evict_engine is not None:
+                evict_engine.shutdown()
+
+            with self._engines_lock:
                 logger.info(f'Spawning new engine for analysis {analysis_id} ({len(self._engines) + 1}/{settings.max_concurrent_engines})')
                 engine = self._engine_factory(analysis_id, normalized_config)
                 engine.start()

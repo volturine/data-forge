@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Search, X, Trash2 } from 'lucide-svelte';
-	import { css, input, cx, label } from '$lib/styles/panda';
+	import { css, input } from '$lib/styles/panda';
 
 	export type SortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc';
 
@@ -100,7 +100,16 @@
 	>
 		<label
 			for="sort-select"
-			class={cx(label(), css({ whiteSpace: 'nowrap', fontWeight: 'medium' }))}
+			class={css({
+				display: 'block',
+				fontSize: 'xs2',
+				fontWeight: 'medium',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider',
+				whiteSpace: 'nowrap'
+			})}
 		>
 			Sort:
 		</label>
@@ -108,15 +117,27 @@
 			id="sort-select"
 			value={sortOption}
 			onchange={(e) => onSort((e.target as HTMLSelectElement).value as SortOption)}
-			class={cx(
-				input(),
-				css({
-					cursor: 'pointer',
-					appearance: 'none',
-					paddingRight: '8',
-					smDown: { flex: '1' }
-				})
-			)}
+			class={css({
+				width: 'full',
+				fontSize: 'sm2',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				cursor: 'pointer',
+				appearance: 'none',
+				paddingRight: '8',
+				smDown: { flex: '1' }
+			})}
 		>
 			<option value="newest">Newest</option>
 			<option value="oldest">Oldest</option>

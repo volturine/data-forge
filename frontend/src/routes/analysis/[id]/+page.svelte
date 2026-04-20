@@ -6,6 +6,7 @@
 	import { MediaQuery } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import {
 		buildOutputConfig,
@@ -16,14 +17,17 @@
 		validatePipelineTabs
 	} from '$lib/utils/analysis-tab';
 	import {
+		exportAnalysisCode,
 		getAnalysisWithHeaders,
 		listAnalysisVersions,
 		restoreAnalysisVersion,
 		renameAnalysisVersion,
-		deleteAnalysisVersion
+		deleteAnalysisVersion,
+		type CodeExportFormat,
+		type CodeExportResponse
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { getEngineDefaults, getStepSchema } from '$lib/api/compute';
+	import { downloadBlob, getEngineDefaults, getStepSchema } from '$lib/api/compute';
 	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
@@ -50,7 +54,7 @@
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { css, cx, spinner, button, input } from '$lib/styles/panda';
+	import { css, spinner, button } from '$lib/styles/panda';
 	import {
 		Lock,
 		LockOpen,
@@ -59,6 +63,8 @@
 		ChevronLeft,
 		ChevronRight,
 		ChevronUp,
+		Copy,
+		Download,
 		PanelRight,
 		PanelBottom,
 		Pencil,
@@ -72,6 +78,7 @@
 	let lastAnalysisId = $state<string | null>(null);
 
 	let selectedStepId = $state<string | null>(null);
+	const buildStore = new BuildStreamStore();
 	const selectedStepState = $derived.by(() => {
 		if (!selectedStepId) return null;
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
@@ -94,6 +101,7 @@
 	$effect(() => {
 		return () => {
 			if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+			buildStore.close();
 		};
 	});
 
@@ -314,6 +322,20 @@
 	let versionError = $state<string | null>(null);
 	let editingVersionId = $state<string | null>(null);
 	let editingVersionName = $state('');
+	let showExportModal = $state(false);
+	let exportScopeTabId = $state<string | null>(null);
+	let exportFormat = $state<CodeExportFormat>('polars');
+	let exportCopied = $state(false);
+	let exportError = $state<string | null>(null);
+	let tabContextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
+	let exportByFormat = $state<Record<CodeExportFormat, CodeExportResponse | null>>({
+		polars: null,
+		sql: null
+	});
+	let exportLoadingByFormat = $state<Record<CodeExportFormat, boolean>>({
+		polars: false,
+		sql: false
+	});
 
 	// Responsive: auto-collapse panes on narrow screens
 	const isNarrowScreen = new MediaQuery('max-width: 900px');
@@ -395,6 +417,30 @@
 			return result.value;
 		}
 	}));
+
+	// DOM: context menu dismissal is event-driven and cannot be expressed as derived state.
+	$effect(() => {
+		if (!tabContextMenu) return;
+		const onPointerDown = (event: PointerEvent) => {
+			const target = event.target as Node | null;
+			const menu = document.querySelector('[data-testid="analysis-tab-context-menu"]');
+			if (menu && target && menu.contains(target)) {
+				return;
+			}
+			tabContextMenu = null;
+		};
+		window.addEventListener('pointerdown', onPointerDown);
+		return () => window.removeEventListener('pointerdown', onPointerDown);
+	});
+
+	// Timer: copied state is transient UI feedback.
+	$effect(() => {
+		if (!exportCopied) return;
+		const timer = window.setTimeout(() => {
+			exportCopied = false;
+		}, 1200);
+		return () => window.clearTimeout(timer);
+	});
 
 	const analysisTabs = $derived.by(() => {
 		const title = analysisStore.current?.name ?? analysisQuery.data?.name ?? 'Analysis';
@@ -612,6 +658,16 @@
 		return data.find((ds) => ds.id === datasourceId) ?? null;
 	});
 	const datasourceLabel = $derived(analysisTabName ?? currentDatasource?.name ?? null);
+	const exportResponse = $derived(exportByFormat[exportFormat]);
+	const exportWarnings = $derived(exportResponse?.warnings ?? []);
+	const exportCode = $derived(exportResponse?.code ?? '');
+	const exportFilename = $derived(exportResponse?.filename ?? '');
+	const exportLoading = $derived(exportLoadingByFormat[exportFormat]);
+	const exportScopeTabName = $derived.by(() => {
+		if (!exportScopeTabId) return null;
+		const tab = analysisStore.tabs.find((item) => item.id === exportScopeTabId);
+		return tab?.name ?? null;
+	});
 
 	function buildStep(type: string): PipelineStep {
 		const base: PipelineStep = {
@@ -1028,6 +1084,77 @@
 		}
 		versionsQuery.refetch();
 	}
+
+	function resetExportState() {
+		exportByFormat = { polars: null, sql: null };
+		exportLoadingByFormat = { polars: false, sql: false };
+		exportError = null;
+		exportCopied = false;
+	}
+
+	async function loadExportCode(format: CodeExportFormat) {
+		if (!validAnalysisId) return;
+		if (exportLoadingByFormat[format]) return;
+		exportLoadingByFormat = { ...exportLoadingByFormat, [format]: true };
+		exportError = null;
+		const result = await exportAnalysisCode(validAnalysisId, {
+			format,
+			tab_id: exportScopeTabId
+		});
+		if (result.isErr()) {
+			exportError = result.error.message;
+			exportLoadingByFormat = { ...exportLoadingByFormat, [format]: false };
+			return;
+		}
+		exportByFormat = { ...exportByFormat, [format]: result.value };
+		exportLoadingByFormat = { ...exportLoadingByFormat, [format]: false };
+	}
+
+	function openExportModal(tabId: string | null = null) {
+		exportScopeTabId = tabId;
+		showExportModal = true;
+		exportFormat = 'polars';
+		tabContextMenu = null;
+		resetExportState();
+		void loadExportCode('polars');
+	}
+
+	function closeExportModal() {
+		showExportModal = false;
+		exportScopeTabId = null;
+		exportError = null;
+		exportCopied = false;
+	}
+
+	function selectExportFormat(format: CodeExportFormat) {
+		exportFormat = format;
+		exportError = null;
+		if (!exportByFormat[format]) {
+			void loadExportCode(format);
+		}
+	}
+
+	async function copyExportCode() {
+		if (!exportCode) return;
+		try {
+			await navigator.clipboard.writeText(exportCode);
+			exportCopied = true;
+		} catch {
+			exportError = 'Clipboard write failed. Copy manually from the code block.';
+		}
+	}
+
+	function downloadExportCodeFile() {
+		if (!exportCode || !exportFilename) return;
+		const type = exportFormat === 'sql' ? 'text/sql;charset=utf-8' : 'text/x-python;charset=utf-8';
+		downloadBlob(new Blob([exportCode], { type }), exportFilename);
+	}
+
+	function handleTabContextMenu(event: MouseEvent, tabId: string) {
+		event.preventDefault();
+		event.stopPropagation();
+		tabContextMenu = { tabId, x: event.clientX, y: event.clientY };
+	}
 </script>
 
 {#if analysisQuery.isLoading}
@@ -1078,7 +1205,13 @@
 			{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}
 		</p>
 		<button
-			class={cx(button({ variant: 'primary' }), css({ marginTop: '4' }))}
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'accent.primary',
+				color: 'fg.inverse',
+				marginTop: '4',
+				'&:hover:not(:disabled)': { opacity: '0.9' }
+			})}
 			onclick={() => goto(resolve('/analysis/new'))}
 			type="button"
 		>
@@ -1245,6 +1378,7 @@
 										cursor: 'pointer'
 									})}
 									onclick={() => handleSelectTab(tab.id)}
+									oncontextmenu={(event) => handleTabContextMenu(event, tab.id)}
 									type="button"
 									data-testid={`tab-button-${tab.id}`}
 									data-tab-name={tab.name}
@@ -1410,6 +1544,28 @@
 							fontSize: 'xs',
 							fontWeight: 'medium',
 							cursor: 'pointer',
+							color: 'fg.faint',
+							borderRadius: 'xs',
+							paddingX: '2.5',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+						})}
+						onclick={() => openExportModal(null)}
+						type="button"
+						title="Export pipeline as code"
+						data-testid="analysis-export-toolbar-button"
+					>
+						Export
+					</button>
+					<button
+						class={css({
+							flex: '1 1 0',
+							minWidth: '0',
+							height: '100%',
+							backgroundColor: 'bg.tertiary',
+							border: 'none',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							cursor: 'pointer',
 							color: isDirty ? 'fg.primary' : 'fg.muted',
 							borderRadius: 'xs',
 							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
@@ -1531,6 +1687,7 @@
 					})}
 				>
 					<PipelineCanvas
+						{buildStore}
 						steps={analysisStore.pipeline}
 						analysisId={analysisId || undefined}
 						datasourceId={previewDatasourceId || undefined}
@@ -1663,6 +1820,207 @@
 	onSelect={handleDatasourceSelect}
 	onClose={closeDatasourceModal}
 />
+
+{#if tabContextMenu}
+	<div
+		class={css({
+			position: 'fixed',
+			top: '0',
+			left: '0',
+			zIndex: '1003'
+		})}
+		style:transform={`translate(${tabContextMenu.x}px, ${tabContextMenu.y}px)`}
+		data-testid="analysis-tab-context-menu"
+	>
+		<button
+			class={css({
+				display: 'block',
+				borderWidth: '1',
+				backgroundColor: 'bg.primary',
+				paddingX: '3',
+				paddingY: '2',
+				fontSize: 'xs',
+				color: 'fg.primary',
+				textAlign: 'left',
+				cursor: 'pointer',
+				whiteSpace: 'nowrap',
+				_hover: { backgroundColor: 'bg.hover' }
+			})}
+			type="button"
+			onclick={() => openExportModal(tabContextMenu?.tabId ?? null)}
+			data-testid="analysis-tab-context-export"
+		>
+			Export as Code
+		</button>
+	</div>
+{/if}
+
+{#snippet exportModalContent()}
+	<div
+		class={css({
+			display: 'flex',
+			justifyContent: 'space-between',
+			alignItems: 'center',
+			paddingX: '4',
+			paddingY: '3',
+			borderBottomWidth: '1',
+			'& h2': { margin: '0', fontSize: 'md', color: 'fg.primary' }
+		})}
+	>
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+			<h2 id="analysis-export-title">Export Code</h2>
+			<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+				{exportScopeTabName ? `Tab: ${exportScopeTabName}` : 'Scope: Full pipeline'}
+			</span>
+		</div>
+		<button
+			class={css({
+				background: 'transparent',
+				border: 'none',
+				color: 'fg.muted',
+				cursor: 'pointer',
+				fontSize: 'xl',
+				padding: '1',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				transitionProperty: 'color, background-color',
+				transitionDuration: 'normal',
+				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+			})}
+			onclick={closeExportModal}
+			aria-label="Close export modal"
+		>
+			<X size={16} />
+		</button>
+	</div>
+	<div
+		class={css({
+			display: 'flex',
+			flexDirection: 'column',
+			gap: '3',
+			padding: '4',
+			minHeight: '0',
+			overflow: 'auto'
+		})}
+	>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				gap: '2',
+				flexWrap: 'wrap'
+			})}
+		>
+			<div role="tablist" aria-label="Export format" class={css({ display: 'flex', gap: '1' })}>
+				<button
+					class={button({
+						variant: exportFormat === 'polars' ? 'primary' : 'secondary',
+						size: 'sm'
+					})}
+					type="button"
+					role="tab"
+					aria-selected={exportFormat === 'polars'}
+					onclick={() => selectExportFormat('polars')}
+					data-testid="analysis-export-format-polars"
+				>
+					Polars (Python)
+				</button>
+				<button
+					class={button({ variant: exportFormat === 'sql' ? 'primary' : 'secondary', size: 'sm' })}
+					type="button"
+					role="tab"
+					aria-selected={exportFormat === 'sql'}
+					onclick={() => selectExportFormat('sql')}
+					data-testid="analysis-export-format-sql"
+				>
+					SQL
+				</button>
+			</div>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<button
+					class={button({ variant: 'secondary', size: 'sm' })}
+					type="button"
+					onclick={copyExportCode}
+					disabled={!exportCode || exportLoading}
+					data-testid="analysis-export-copy"
+				>
+					<Copy size={13} />
+					{exportCopied ? 'Copied' : 'Copy to Clipboard'}
+				</button>
+				<button
+					class={button({ variant: 'secondary', size: 'sm' })}
+					type="button"
+					onclick={downloadExportCodeFile}
+					disabled={!exportCode || exportLoading}
+					data-testid="analysis-export-download"
+				>
+					<Download size={13} />
+					Download
+				</button>
+			</div>
+		</div>
+
+		{#if exportFilename}
+			<div
+				class={css({ fontSize: 'xs', color: 'fg.muted' })}
+				data-testid="analysis-export-filename"
+			>
+				{exportFilename}
+			</div>
+		{/if}
+
+		{#if exportError}
+			<div data-testid="analysis-export-error">
+				<Callout tone="error">{exportError}</Callout>
+			</div>
+		{/if}
+
+		{#if exportWarnings.length > 0}
+			<div data-testid="analysis-export-warnings">
+				<Callout tone="warn">
+					{#each exportWarnings as warning, idx (idx)}
+						<div>{warning}</div>
+					{/each}
+				</Callout>
+			</div>
+		{/if}
+
+		{#if exportLoading}
+			<div class={css({ display: 'flex', justifyContent: 'center', paddingY: '8' })}>
+				<div class={spinner()}></div>
+			</div>
+		{:else}
+			<pre
+				class={css({
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					lineHeight: '1.45',
+					backgroundColor: 'bg.secondary',
+					borderWidth: '1',
+					padding: '3',
+					overflowX: 'auto',
+					whiteSpace: 'pre'
+				})}
+				data-testid="analysis-export-code"
+				data-language={exportFormat}><code>{exportCode}</code></pre>
+		{/if}
+	</div>
+	<div
+		class={css({
+			paddingX: '4',
+			paddingY: '3',
+			borderTopWidth: '1',
+			display: 'flex',
+			justifyContent: 'flex-end'
+		})}
+	>
+		<button class={button({ variant: 'secondary' })} onclick={closeExportModal} type="button"
+			>Close</button
+		>
+	</div>
+{/snippet}
 
 {#snippet versionModalContent()}
 	<div
@@ -1804,16 +2162,27 @@
 							{#if editingVersionId === version.id}
 								<input
 									type="text"
-									class={cx(
-										input(),
-										css({
-											fontSize: 'sm',
-											fontWeight: 'semibold',
-											backgroundColor: 'transparent',
-											paddingX: '1',
-											paddingY: '0.5'
-										})
-									)}
+									class={css({
+										width: 'full',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed'
+										},
+										_placeholder: { color: 'fg.muted' },
+										fontSize: 'sm',
+										fontWeight: 'semibold',
+										backgroundColor: 'transparent',
+										paddingX: '1',
+										paddingY: '0.5'
+									})}
 									id="version-name-{version.id}"
 									aria-label="Version name"
 									bind:value={editingVersionName}
@@ -1870,7 +2239,7 @@
 								<Trash2 size={14} />
 							</button>
 							<button
-								class={cx(button({ variant: 'secondary', size: 'sm' }))}
+								class={button({ variant: 'secondary', size: 'sm' })}
 								data-testid="version-restore-{version.version}"
 								onclick={() => handleRestoreVersion(version.version)}
 								type="button"
@@ -1916,6 +2285,24 @@
 	})}
 	ariaLabelledby="analysis-version-title"
 	content={versionModalContent}
+/>
+
+<BaseModal
+	open={showExportModal}
+	onClose={closeExportModal}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	panelClass={css({
+		width: 'min(960px, 96vw)',
+		maxHeight: '86vh',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		display: 'flex',
+		flexDirection: 'column',
+		_focus: { outline: 'none' }
+	})}
+	ariaLabelledby="analysis-export-title"
+	content={exportModalContent}
 />
 
 <DragPreview />

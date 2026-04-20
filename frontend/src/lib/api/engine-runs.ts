@@ -5,7 +5,7 @@ import type { ResultAsync } from 'neverthrow';
 export interface EngineRunExecutionEntry {
 	key: string;
 	label: string;
-	category: 'read' | 'step' | 'plan' | 'write';
+	category: 'read' | 'step' | 'plan' | 'compute' | 'write';
 	order: number;
 	duration_ms: number | null;
 	share_pct: number | null;
@@ -19,7 +19,7 @@ export interface EngineRun {
 	analysis_id: string | null;
 	datasource_id: string;
 	kind: string;
-	status: 'running' | 'success' | 'failed';
+	status: 'running' | 'success' | 'failed' | 'cancelled';
 	request_json: Record<string, unknown>;
 	result_json: Record<string, unknown> | null;
 	error_message: string | null;
@@ -38,7 +38,7 @@ export interface ListEngineRunsParams {
 	analysis_id?: string;
 	datasource_id?: string;
 	kind?: string;
-	status?: 'running' | 'success' | 'failed';
+	status?: 'running' | 'success' | 'failed' | 'cancelled';
 	limit?: number;
 	offset?: number;
 }
@@ -56,8 +56,11 @@ function buildQueryString(params?: ListEngineRunsParams): string {
 	return str ? `?${str}` : '';
 }
 
-export function listEngineRuns(params?: ListEngineRunsParams): ResultAsync<EngineRun[], ApiError> {
-	return apiRequest<EngineRun[]>(`/v1/engine-runs${buildQueryString(params)}`);
+export function listEngineRuns(
+	params?: ListEngineRunsParams,
+	signal?: AbortSignal
+): ResultAsync<EngineRun[], ApiError> {
+	return apiRequest<EngineRun[]>(`/v1/engine-runs${buildQueryString(params)}`, { signal });
 }
 
 export function getEngineRun(id: string): ResultAsync<EngineRun, ApiError> {

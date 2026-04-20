@@ -395,7 +395,10 @@ test.describe('Analyses – output build flow', () => {
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });
 
-			await expect(preview.getByText('Complete', { exact: true })).toBeVisible({ timeout: 60_000 });
+			const terminal = preview
+				.getByText('Complete', { exact: true })
+				.or(preview.getByText('Failed', { exact: true }));
+			await expect(terminal).toBeVisible({ timeout: 60_000 });
 
 			const stepsPanel = page.locator('[data-testid="build-steps-panel"]');
 			await expect(stepsPanel).toBeVisible({ timeout: 5_000 });

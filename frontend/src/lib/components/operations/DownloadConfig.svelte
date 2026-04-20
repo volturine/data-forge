@@ -8,7 +8,7 @@
 		config?: DownloadConfigData;
 	}
 
-	import { css, cx, label, stepConfig, input } from '$lib/styles/panda';
+	import { css, stepConfig, input } from '$lib/styles/panda';
 
 	let { config = $bindable({ format: 'csv', filename: 'download' }) }: Props = $props();
 
@@ -32,7 +32,20 @@
 			border: 'none'
 		})}
 	>
-		<label for="download-filename" class={cx(label({ variant: 'wrapper' }), css({ gap: '3' }))}>
+		<label
+			for="download-filename"
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3',
+				fontSize: 'xs2',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '0',
+				textTransform: 'none',
+				letterSpacing: 'normal'
+			})}
+		>
 			Filename
 			<input
 				id="download-filename"
@@ -55,18 +68,31 @@
 		</p>
 	</div>
 	<div
-		class={cx(
-			css({
+		class={css(
+			{
 				marginBottom: '0',
 				paddingBottom: '5',
 				backgroundColor: 'transparent',
 
 				border: 'none'
-			}),
-			css({ borderTopWidth: '1', paddingTop: '5' })
+			},
+			{ borderTopWidth: '1', paddingTop: '5' }
 		)}
 	>
-		<label for="download-format" class={cx(label({ variant: 'wrapper' }), css({ gap: '3' }))}>
+		<label
+			for="download-format"
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3',
+				fontSize: 'xs2',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '0',
+				textTransform: 'none',
+				letterSpacing: 'normal'
+			})}
+		>
 			Format
 			<select id="download-format" class={input()} bind:value={config.format}>
 				{#each formats as fmt (fmt.value)}

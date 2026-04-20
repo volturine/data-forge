@@ -222,16 +222,13 @@ export class AnalysisStore {
 	}
 
 	private normalizeSteps(steps: PipelineStep[]): PipelineStep[] {
-		if (!steps.length) return steps;
-		const hasDependencies = steps.some((step) => (step.depends_on ?? []).length > 0);
-		return steps.map((step, index) => {
-			const depends_on = hasDependencies
-				? step.depends_on
-				: index === 0
-					? []
-					: steps[index - 1]?.id
-						? [steps[index - 1].id]
-						: [];
+		return steps.map((step) => {
+			if (!Array.isArray(step.depends_on)) {
+				throw new Error(`Step ${step.id} missing depends_on`);
+			}
+			if (typeof step.is_applied !== 'boolean') {
+				throw new Error(`Step ${step.id} missing is_applied`);
+			}
 			return {
 				...step,
 				type: normalizeStepType(step.type),
@@ -239,8 +236,8 @@ export class AnalysisStore {
 					string,
 					unknown
 				>,
-				depends_on,
-				is_applied: step.is_applied !== false
+				depends_on: step.depends_on,
+				is_applied: step.is_applied
 			};
 		});
 	}

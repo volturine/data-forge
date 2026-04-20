@@ -9,7 +9,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
-	import { css, cx, button, input } from '$lib/styles/panda';
+	import { css, button } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource;
@@ -243,7 +243,7 @@
 		</div>
 	{:else}
 		<div
-			class={cx(
+			class={[
 				css({
 					flex: '1',
 					minHeight: '0',
@@ -255,7 +255,7 @@
 					contain: 'content'
 				}),
 				'datasource-comparison-scroll'
-			)}
+			]}
 		>
 			<div
 				class={css({
@@ -308,7 +308,27 @@
 									id="bcp-search"
 									aria-label="Search builds"
 									placeholder="Search builds by ID or date..."
-									class={cx(input({ variant: 'search' }), css({ fontSize: 'xs' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'xs',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingLeft: '8',
+										paddingRight: '2',
+										paddingY: '1.5',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 									bind:value={runSearch}
 								/>
 							</div>
@@ -318,7 +338,7 @@
 								</p>
 							{:else}
 								<div
-									class={cx(
+									class={[
 										css({
 											maxHeight: 'previewXl',
 											display: 'flex',
@@ -328,12 +348,12 @@
 											contain: 'content'
 										}),
 										'datasource-comparison-scroll'
-									)}
+									]}
 								>
 									{#each visibleRuns as run (run.id)}
 										<button
-											class={cx(
-												css({
+											class={css(
+												{
 													display: 'flex',
 													width: '100%',
 													alignItems: 'flex-start',
@@ -345,10 +365,11 @@
 													textAlign: 'left',
 													fontSize: 'sm',
 													_hover: { backgroundColor: 'bg.hover' }
-												}),
-												selected.has(run.id)
-													? css({ backgroundColor: 'bg.accent', color: 'accent.primary' })
-													: ''
+												},
+												selected.has(run.id) && {
+													backgroundColor: 'bg.accent',
+													color: 'accent.primary'
+												}
 											)}
 											onclick={() => toggleSelect(run.id)}
 										>
@@ -513,10 +534,10 @@
 						>
 							<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>Row Count Delta</div>
 							<div
-								class={cx(
+								class={[
 									css({ marginTop: '1', fontFamily: 'mono', fontSize: 'lg' }),
 									rowDeltaClass(comparison.row_count_delta)
-								)}
+								]}
 							>
 								{formatDelta(comparison.row_count_delta)}
 							</div>
@@ -699,10 +720,10 @@
 							})}
 						>
 							<div
-								class={cx(
+								class={[
 									css({ maxHeight: 'listTall', overflow: 'auto', contain: 'content' }),
 									'datasource-comparison-scroll'
-								)}
+								]}
 							>
 								<table class={css({ width: '100%', borderCollapse: 'collapse', fontSize: 'sm' })}>
 									<thead
@@ -812,10 +833,10 @@
 														<span>{stat.null_b}</span>
 														{#if stat.null_delta !== null}
 															<span
-																class={cx(
+																class={[
 																	css({ marginLeft: '1', fontSize: '2xs' }),
 																	nullDeltaClass(stat.null_delta)
-																)}
+																]}
 															>
 																({formatDelta(stat.null_delta)})
 															</span>
@@ -837,10 +858,10 @@
 														<span>{stat.unique_b}</span>
 														{#if stat.unique_delta !== null}
 															<span
-																class={cx(
+																class={[
 																	css({ marginLeft: '1', fontSize: '2xs' }),
 																	uniqueDeltaClass(stat.unique_delta)
-																)}
+																]}
 															>
 																({formatDelta(stat.unique_delta)})
 															</span>
@@ -917,10 +938,10 @@
 								Snapshot A preview
 							</div>
 							<div
-								class={cx(
+								class={[
 									css({ height: 'listLg', contain: 'content' }),
 									'datasource-comparison-scroll'
-								)}
+								]}
 							>
 								<DataTable
 									columns={previewColumns(comparison.preview_a)}
@@ -950,10 +971,10 @@
 								Snapshot B preview
 							</div>
 							<div
-								class={cx(
+								class={[
 									css({ height: 'listLg', contain: 'content' }),
 									'datasource-comparison-scroll'
-								)}
+								]}
 							>
 								<DataTable
 									columns={previewColumns(comparison.preview_b)}

@@ -26,7 +26,7 @@
 	import BranchPicker from '$lib/components/common/BranchPicker.svelte';
 	import SnapshotPicker from '$lib/components/datasources/SnapshotPicker.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
-	import { css, cx, input, label } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource | null;
@@ -261,9 +261,9 @@
 	}
 </script>
 
-<div class={cx('datasource-node', css({ position: 'relative', width: '60%' }))}>
+<div class={css({ position: 'relative', width: '60%' })}>
 	<div
-		class={cx(
+		class={[
 			'node-content',
 			css({
 				backgroundColor: 'bg.primary',
@@ -274,7 +274,7 @@
 					borderStyle: 'dashed',
 					opacity: '0.85'
 				})
-		)}
+		]}
 	>
 		<!-- Header with icon and badge -->
 		<div
@@ -331,8 +331,6 @@
 					justifyContent: 'center',
 					gap: '1',
 					borderWidth: '1',
-					backgroundColor: 'bg.tertiary',
-					color: 'fg.faint',
 					paddingX: '1.5',
 					paddingY: '0',
 					minHeight: 'iconMd',
@@ -398,15 +396,27 @@
 				{#if isEditing}
 					<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 						<input
-							class={cx(
-								input(),
-								css({
-									minWidth: 'fieldSm',
-									paddingX: '2',
-									paddingY: '0.5',
-									fontSize: 'sm'
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								minWidth: 'fieldSm',
+								paddingX: '2',
+								paddingY: '0.5',
+								fontSize: 'sm'
+							})}
 							id="ds-node-name"
 							bind:value={draftName}
 							onkeydown={(e) => {
@@ -474,10 +484,7 @@
 								alignItems: 'center',
 								justifyContent: 'center',
 								borderWidth: '1',
-								color: 'fg.muted',
-								backgroundColor: 'bg.primary',
 								padding: '0',
-								opacity: '0.5',
 								lineHeight: '1',
 								_hover: {
 									color: 'fg.primary',
@@ -617,7 +624,7 @@
 				})}
 			>
 				<button
-					class={cx(
+					class={[
 						'engine-header',
 						css({
 							display: 'flex',
@@ -631,7 +638,7 @@
 							paddingX: '3',
 							_hover: { backgroundColor: 'bg.tertiary' }
 						})
-					)}
+					]}
 					onclick={() => (engineExpanded = !engineExpanded)}
 					type="button"
 				>
@@ -659,10 +666,10 @@
 							{effectiveThreads} threads, {effectiveMemoryGb}GB
 						</span>
 						<span
-							class={cx(
-								css({ color: 'fg.muted' }),
-								css({ display: 'flex', alignItems: 'center' }),
-								engineExpanded && css({ transform: 'rotate(180deg)' })
+							class={css(
+								{ color: 'fg.muted' },
+								{ display: 'flex', alignItems: 'center' },
+								engineExpanded && { transform: 'rotate(180deg)' }
 							)}
 						>
 							<ChevronDown size={12} />
@@ -684,25 +691,42 @@
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 							<label
 								for="threads-input"
-								class={cx(
-									label({ variant: 'field' }),
-									css({ minWidth: 'labelSm', fontSize: 'xs' })
-								)}
+								class={css({
+									display: 'block',
+									fontWeight: 'medium',
+									color: 'fg.secondary',
+									marginBottom: '1.5',
+									textTransform: 'none',
+									letterSpacing: 'normal',
+									minWidth: 'labelSm',
+									fontSize: 'xs'
+								})}
 							>
 								Threads
 							</label>
 							<input
 								id="threads-input"
-								class={cx(
-									input(),
-									css({
-										flex: '1',
-										backgroundColor: 'bg.secondary',
-										paddingY: '1',
-										paddingX: '2',
-										fontSize: 'xs'
-									})
-								)}
+								class={css({
+									width: 'full',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed'
+									},
+									_placeholder: { color: 'fg.muted' },
+									flex: '1',
+									backgroundColor: 'bg.secondary',
+									paddingY: '1',
+									paddingX: '2',
+									fontSize: 'xs'
+								})}
 								type="number"
 								min="1"
 								max="64"
@@ -726,25 +750,42 @@
 						<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 							<label
 								for="memory-select"
-								class={cx(
-									label({ variant: 'field' }),
-									css({ minWidth: 'labelSm', fontSize: 'xs' })
-								)}
+								class={css({
+									display: 'block',
+									fontWeight: 'medium',
+									color: 'fg.secondary',
+									marginBottom: '1.5',
+									textTransform: 'none',
+									letterSpacing: 'normal',
+									minWidth: 'labelSm',
+									fontSize: 'xs'
+								})}
 							>
 								Memory
 							</label>
 							<select
 								id="memory-select"
-								class={cx(
-									input(),
-									css({
-										flex: '1',
-										backgroundColor: 'bg.secondary',
-										paddingY: '1',
-										paddingX: '2',
-										fontSize: 'xs'
-									})
-								)}
+								class={css({
+									width: 'full',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed'
+									},
+									_placeholder: { color: 'fg.muted' },
+									flex: '1',
+									backgroundColor: 'bg.secondary',
+									paddingY: '1',
+									paddingX: '2',
+									fontSize: 'xs'
+								})}
 								value={effectiveMemoryGb}
 								onchange={(e) => setMemoryGb(parseInt(e.currentTarget.value) || 0)}
 								disabled={readOnly}
@@ -774,7 +815,7 @@
 		<!-- Action Button -->
 		{#if onChangeDatasource}
 			<button
-				class={cx(
+				class={[
 					'change-source-btn',
 					css({
 						marginX: '4',
@@ -786,8 +827,6 @@
 						justifyContent: 'center',
 						gap: '2',
 						borderWidth: '1',
-						backgroundColor: 'bg.secondary',
-						color: 'fg.muted',
 						paddingY: '2',
 						paddingX: '3',
 						fontSize: 'xs2',
@@ -799,7 +838,7 @@
 							'& svg': { opacity: '1' }
 						}
 					})
-				)}
+				]}
 				onclick={onChangeDatasource}
 				type="button"
 				disabled={readOnly}

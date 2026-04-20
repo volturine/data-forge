@@ -8,7 +8,7 @@
 		X,
 		Clock
 	} from 'lucide-svelte';
-	import { css, cx, input } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -49,40 +49,6 @@
 		'November',
 		'December'
 	] as const;
-
-	const navBtn = css({
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		height: 'row',
-		width: 'row',
-		padding: '0',
-		cursor: 'pointer',
-		border: 'none',
-		background: 'transparent',
-		color: 'fg.secondary',
-		_hover: { backgroundColor: 'bg.tertiary' }
-	});
-
-	const headerBtn = css({
-		fontSize: 'xs',
-		fontWeight: 'semibold',
-		cursor: 'pointer',
-		border: 'none',
-		background: 'transparent',
-		padding: '0',
-		_hover: { color: 'fg.muted' }
-	});
-
-	const gridCell = css({
-		height: 'rowXl',
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		fontSize: 'xs',
-		cursor: 'pointer',
-		_hover: { backgroundColor: 'bg.tertiary' }
-	});
 
 	let { value, onChange, id, withTime = true }: Props = $props();
 
@@ -274,8 +240,23 @@
 			type="button"
 			onclick={toggle}
 			{id}
-			class={cx(
-				input(),
+			class={[
+				css({
+					fontSize: 'sm2',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingY: '2.25',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				}),
+				css({ width: 'full', paddingX: '3.5' }),
 				css({
 					display: 'flex',
 					alignItems: 'center',
@@ -285,7 +266,7 @@
 					minWidth: '0',
 					textAlign: 'left'
 				})
-			)}
+			]}
 		>
 			<Calendar size={14} />
 			<span
@@ -304,8 +285,22 @@
 			<button
 				type="button"
 				onclick={clear}
-				class={cx(
-					input(),
+				class={[
+					css({
+						fontSize: 'sm2',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						paddingY: '2.25',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' }
+					}),
 					css({
 						display: 'flex',
 						alignItems: 'center',
@@ -315,7 +310,7 @@
 						paddingX: '2',
 						flexShrink: '0'
 					})
-				)}
+				]}
 			>
 				<X size={14} />
 			</button>
@@ -344,28 +339,116 @@
 			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<div class={css({ display: 'flex', alignItems: 'center' })}>
 					{#if mode === 'date'}
-						<button type="button" onclick={() => shiftYear(-1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shiftYear(-1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronsLeft size={16} />
 						</button>
-						<button type="button" onclick={() => shift(-1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shift(-1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronLeft size={16} />
 						</button>
 					{:else if mode === 'month'}
-						<button type="button" onclick={() => shiftYear(-1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shiftYear(-1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronLeft size={16} />
 						</button>
 					{:else}
-						<button type="button" onclick={() => shiftPage(-1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shiftPage(-1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronLeft size={16} />
 						</button>
 					{/if}
 				</div>
 				{#if mode === 'date'}
 					<span class={css({ display: 'flex', gap: '1' })}>
-						<button type="button" onclick={enterMonth} class={headerBtn}>
+						<button
+							type="button"
+							onclick={enterMonth}
+							class={css({
+								fontSize: 'xs',
+								fontWeight: 'semibold',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								padding: '0',
+								_hover: { color: 'fg.muted' }
+							})}
+						>
 							{MONTHS_FULL[currentMonth - 1]}
 						</button>
-						<button type="button" onclick={enterYear} class={headerBtn}>
+						<button
+							type="button"
+							onclick={enterYear}
+							class={css({
+								fontSize: 'xs',
+								fontWeight: 'semibold',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								padding: '0',
+								_hover: { color: 'fg.muted' }
+							})}
+						>
 							{currentYear}
 						</button>
 					</span>
@@ -376,18 +459,82 @@
 				{/if}
 				<div class={css({ display: 'flex', alignItems: 'center' })}>
 					{#if mode === 'date'}
-						<button type="button" onclick={() => shift(1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shift(1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronRight size={16} />
 						</button>
-						<button type="button" onclick={() => shiftYear(1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shiftYear(1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronsRight size={16} />
 						</button>
 					{:else if mode === 'month'}
-						<button type="button" onclick={() => shiftYear(1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shiftYear(1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronRight size={16} />
 						</button>
 					{:else}
-						<button type="button" onclick={() => shiftPage(1)} class={navBtn}>
+						<button
+							type="button"
+							onclick={() => shiftPage(1)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								height: 'row',
+								width: 'row',
+								padding: '0',
+								cursor: 'pointer',
+								border: 'none',
+								background: 'transparent',
+								color: 'fg.secondary',
+								_hover: { backgroundColor: 'bg.tertiary' }
+							})}
+						>
 							<ChevronRight size={16} />
 						</button>
 					{/if}
@@ -407,14 +554,22 @@
 							<button
 								type="button"
 								onclick={() => pickYear(y)}
-								class={cx(
-									gridCell,
+								class={[
+									css({
+										height: 'rowXl',
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'center',
+										fontSize: 'xs',
+										cursor: 'pointer',
+										_hover: { backgroundColor: 'bg.tertiary' }
+									}),
 									css({
 										borderWidth: currentYear === y ? '1' : '0',
 										borderColor: currentYear === y ? 'border.primary' : 'transparent',
 										backgroundColor: currentYear === y ? 'bg.tertiary' : 'transparent'
 									})
-								)}
+								]}
 							>
 								{y}
 							</button>
@@ -434,14 +589,22 @@
 							<button
 								type="button"
 								onclick={() => pickMonth(i + 1)}
-								class={cx(
-									gridCell,
+								class={[
+									css({
+										height: 'rowXl',
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'center',
+										fontSize: 'xs',
+										cursor: 'pointer',
+										_hover: { backgroundColor: 'bg.tertiary' }
+									}),
 									css({
 										borderWidth: currentMonth === i + 1 ? '1' : '0',
 										borderColor: currentMonth === i + 1 ? 'border.primary' : 'transparent',
 										backgroundColor: currentMonth === i + 1 ? 'bg.tertiary' : 'transparent'
 									})
-								)}
+								]}
 							>
 								{m}
 							</button>
@@ -474,14 +637,22 @@
 								<button
 									type="button"
 									onclick={() => pick(cell.key)}
-									class={cx(
-										gridCell,
+									class={[
+										css({
+											height: 'rowXl',
+											display: 'flex',
+											alignItems: 'center',
+											justifyContent: 'center',
+											fontSize: 'xs',
+											cursor: 'pointer',
+											_hover: { backgroundColor: 'bg.tertiary' }
+										}),
 										css({
 											borderWidth: date === cell.key ? '1' : '0',
 											borderColor: date === cell.key ? 'border.primary' : 'transparent',
 											backgroundColor: date === cell.key ? 'bg.tertiary' : 'transparent'
 										})
-									)}
+									]}
 								>
 									{cell.day}
 								</button>
@@ -541,7 +712,28 @@
 						value={hour}
 						onfocus={(e) => (e.target as HTMLInputElement).select()}
 						onchange={handleHour}
-						class={cx(input(), css({ width: '2.5rem', textAlign: 'center', paddingX: '1' }))}
+						class={[
+							css({
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								backgroundColor: 'bg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							}),
+							css({ width: '2.5rem', textAlign: 'center', paddingX: '1' })
+						]}
 					/>
 					<span class={css({ color: 'fg.muted', fontSize: 'sm2' })}>:</span>
 					<input
@@ -552,7 +744,28 @@
 						value={minute}
 						onfocus={(e) => (e.target as HTMLInputElement).select()}
 						onchange={handleMinute}
-						class={cx(input(), css({ width: '2.5rem', textAlign: 'center', paddingX: '1' }))}
+						class={[
+							css({
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								backgroundColor: 'bg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							}),
+							css({ width: '2.5rem', textAlign: 'center', paddingX: '1' })
+						]}
 					/>
 					<button
 						type="button"

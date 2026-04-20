@@ -1,5 +1,7 @@
 import { buildWebsocketUrl, preferHttp } from './websocket';
 
+const RECONNECT_DELAY_MS = 1_000;
+
 export interface LockStatus {
 	resource_type: string;
 	resource_id: string;
@@ -69,6 +71,7 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 	const pingMs = options.pingMs ?? DEFAULT_PING_MS;
 	let socket: WebSocket | null = null;
 	let timer: number | null = null;
+	let reconnectTimer: number | null = null;
 	let closed = false;
 	let opened = false;
 	let awaitingAcquire = false;
@@ -81,6 +84,13 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		}
 	}
 
+	function clearReconnectTimer(): void {
+		if (reconnectTimer !== null) {
+			window.clearTimeout(reconnectTimer);
+			reconnectTimer = null;
+		}
+	}
+
 	function send(message: Record<string, unknown>): void {
 		if (!socket || socket.readyState !== WebSocket.OPEN) return;
 		socket.send(JSON.stringify(message));
@@ -88,10 +98,27 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 
 	function cleanup(): void {
 		clearTimer();
+		clearReconnectTimer();
 		if (socket !== null) {
 			socket.close();
 			socket = null;
 		}
+	}
+
+	function resetOwnership(): void {
+		opened = false;
+		awaitingAcquire = false;
+		ownedToken = null;
+		options.onStatus(null, false);
+	}
+
+	function scheduleReconnect(): void {
+		if (closed || reconnectTimer !== null) return;
+		reconnectTimer = window.setTimeout(() => {
+			reconnectTimer = null;
+			if (closed) return;
+			connect();
+		}, RECONNECT_DELAY_MS);
 	}
 
 	function startPing(): void {
@@ -126,46 +153,61 @@ export function openLockSession(options: LockSessionOptions): LockSession {
 		options.onStatus(lock, false);
 	}
 
-	socket = new WebSocket(buildWebsocketUrl('/v1/locks/ws'));
+	function connect(): void {
+		clearReconnectTimer();
+		socket = new WebSocket(buildWebsocketUrl('/v1/locks/ws'));
 
-	socket.addEventListener('open', () => {
-		if (closed || !socket) return;
-		opened = true;
-		send({
-			action: 'watch',
-			resource_type: options.resourceType,
-			resource_id: options.resourceId
+		socket.addEventListener('open', () => {
+			if (closed || !socket) return;
+			opened = true;
+			send({
+				action: 'watch',
+				resource_type: options.resourceType,
+				resource_id: options.resourceId
+			});
+			startPing();
 		});
-		startPing();
-	});
 
-	socket.addEventListener('message', (event) => {
-		let msg: LockWsMessage;
-		try {
-			msg = JSON.parse(event.data) as LockWsMessage;
-		} catch {
-			return;
-		}
-		if (msg.type === 'connected') return;
-		if (msg.type === 'status') {
-			handleStatus(msg.lock);
-			return;
-		}
-		awaitingAcquire = false;
-		options.onError?.({ error: msg.error, statusCode: msg.status_code });
-	});
+		socket.addEventListener('message', (event) => {
+			let msg: LockWsMessage;
+			try {
+				msg = JSON.parse(event.data) as LockWsMessage;
+			} catch {
+				return;
+			}
+			if (msg.type === 'connected') return;
+			if (msg.type === 'status') {
+				handleStatus(msg.lock);
+				return;
+			}
+			awaitingAcquire = false;
+			options.onError?.({ error: msg.error, statusCode: msg.status_code });
+		});
 
-	socket.addEventListener('close', () => {
-		opened = false;
-		clearTimer();
-		socket = null;
-	});
+		socket.addEventListener('close', () => {
+			clearTimer();
+			socket = null;
+			if (closed) {
+				opened = false;
+				return;
+			}
+			resetOwnership();
+			scheduleReconnect();
+		});
 
-	socket.addEventListener('error', () => {
-		opened = false;
-		clearTimer();
-		socket = null;
-	});
+		socket.addEventListener('error', () => {
+			clearTimer();
+			socket = null;
+			if (closed) {
+				opened = false;
+				return;
+			}
+			resetOwnership();
+			scheduleReconnect();
+		});
+	}
+
+	connect();
 
 	return {
 		acquire(ttlSeconds?: number) {

@@ -17,12 +17,14 @@ class EngineRunStatus(StrEnum):
     RUNNING = 'running'
     SUCCESS = 'success'
     FAILED = 'failed'
+    CANCELLED = 'cancelled'
 
 
 class EngineRunExecutionCategory(StrEnum):
     READ = 'read'
     STEP = 'step'
     PLAN = 'plan'
+    COMPUTE = 'compute'
     WRITE = 'write'
 
 

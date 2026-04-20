@@ -233,10 +233,46 @@ def _analysis_cache_key(pipeline: dict, tab_id: str | None) -> str:
         'analysis_id': pipeline.get('analysis_id'),
         'tab_id': tab_id,
         'tabs': pipeline.get('tabs', []),
-        'sources': pipeline.get('sources', {}),
     }
     data = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+
+def _resolve_pipeline_datasource(pipeline: dict, datasource: dict) -> dict:
+    datasource_id = datasource.get('id')
+    if not isinstance(datasource_id, str) or not datasource_id:
+        raise ValueError('Analysis tab missing datasource.id')
+    config = datasource.get('config')
+    if not isinstance(config, dict):
+        raise ValueError('Analysis tab datasource.config must be a dict')
+    branch = config.get('branch')
+    if not isinstance(branch, str) or not branch.strip():
+        raise ValueError('Analysis tab datasource.config.branch is required')
+    analysis_tab_id = datasource.get('analysis_tab_id')
+    if isinstance(analysis_tab_id, str) and analysis_tab_id:
+        return {
+            'source_type': 'analysis',
+            'analysis_id': str(pipeline.get('analysis_id') or ''),
+            'analysis_tab_id': analysis_tab_id,
+            **config,
+        }
+    source_type = datasource.get('source_type')
+    if not isinstance(source_type, str) or not source_type.strip():
+        raise ValueError(f'Analysis pipeline missing datasource metadata for {datasource_id}')
+    return {'source_type': source_type, **config}
+
+
+def _step_source_payload(step_config: dict, source_id: str) -> dict | None:
+    direct = step_config.get('right_source_datasource')
+    if isinstance(direct, dict) and direct.get('id') == source_id:
+        return direct
+    many = step_config.get('source_datasources')
+    if not isinstance(many, list):
+        return None
+    return next(
+        (item for item in many if isinstance(item, dict) and isinstance(item.get('id'), str) and item.get('id') == source_id),
+        None,
+    )
 
 
 def _get_analysis_cache(key: str) -> pl.LazyFrame | None:
@@ -312,7 +348,6 @@ def _resolve_tab_chain(tabs: list[dict], target_tab_id: str) -> list[dict]:
 
 def _build_tab_pipeline(
     tab: dict,
-    sources: dict,
     pipeline: dict,
     cache: dict[str, pl.LazyFrame],
 ) -> pl.LazyFrame:
@@ -326,18 +361,7 @@ def _build_tab_pipeline(
     if datasource_id in cache:
         base_frame = cache[datasource_id]
     else:
-        datasource_config = sources.get(str(datasource_id))
-        if not isinstance(datasource_config, dict):
-            raise ValueError(f'Analysis pipeline missing datasource config for {datasource_id}')
-
-        overrides = datasource.get('config')
-        if not isinstance(overrides, dict):
-            raise ValueError('Analysis tab datasource.config must be a dict')
-        branch = overrides.get('branch')
-        if not isinstance(branch, str) or not branch.strip():
-            raise ValueError('Analysis tab datasource.config.branch is required')
-
-        merged = {**datasource_config, **overrides}
+        merged = _resolve_pipeline_datasource(pipeline, datasource)
         analysis_id = pipeline.get('analysis_id')
         analysis_id = str(analysis_id) if analysis_id is not None else None
         if analysis_id and merged.get('source_type') == 'analysis' and str(merged.get('analysis_id')) == analysis_id:
@@ -352,7 +376,7 @@ def _build_tab_pipeline(
     from modules.compute.utils import apply_steps
 
     steps = apply_steps(steps)
-    additional = _collect_analysis_sources(steps, sources, pipeline, cache)
+    additional = _collect_analysis_sources(steps, pipeline, cache)
 
     from modules.compute.engine import PolarsComputeEngine
 
@@ -389,14 +413,10 @@ def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -
         raise ValueError('Analysis pipeline missing tab id')
 
     chain = _resolve_tab_chain(tabs, str(target_id))
-    sources = pipeline.get('sources', {})
-    if not isinstance(sources, dict) or not sources:
-        raise ValueError('Analysis pipeline missing datasource configs')
-
     cache: dict[str, pl.LazyFrame] = {}
     last_frame: pl.LazyFrame | None = None
     for tab in chain:
-        last_frame = _build_tab_pipeline(tab, sources, pipeline, cache)
+        last_frame = _build_tab_pipeline(tab, pipeline, cache)
 
     if last_frame is None:
         raise ValueError('Analysis pipeline did not produce a LazyFrame')
@@ -406,13 +426,21 @@ def _build_analysis_from_pipeline(pipeline: dict, analysis_tab_id: str | None) -
 
 def _collect_analysis_sources(
     steps: list[dict],
-    sources: dict,
     pipeline: dict,
     cache: dict[str, pl.LazyFrame],
 ) -> dict[str, pl.LazyFrame]:
     additional: dict[str, pl.LazyFrame] = {}
-    analysis_id = pipeline.get('analysis_id')
-    analysis_id = str(analysis_id) if analysis_id is not None else None
+    output_to_tab = {}
+    tabs = pipeline.get('tabs', [])
+    if isinstance(tabs, list):
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            tab_id = tab.get('id')
+            output = tab.get('output')
+            output_id = output.get('result_id') if isinstance(output, dict) else None
+            if isinstance(tab_id, str) and isinstance(output_id, str) and output_id:
+                output_to_tab[output_id] = tab_id
     for step in steps:
         config = step.get('config', {})
         if not isinstance(config, dict):
@@ -431,12 +459,20 @@ def _collect_analysis_sources(
             if str(source_id) in cache:
                 additional[str(source_id)] = cache[str(source_id)]
                 continue
-            raw = sources.get(str(source_id))
-            if not isinstance(raw, dict):
-                raise ValueError(f'Analysis pipeline missing datasource config for {source_id}')
-            next_config = raw
-            if analysis_id and next_config.get('source_type') == 'analysis' and str(next_config.get('analysis_id')) == analysis_id:
-                next_config = {**next_config, 'analysis_pipeline': pipeline}
+            if str(source_id) in output_to_tab:
+                next_config = {
+                    'source_type': 'analysis',
+                    'analysis_id': str(pipeline.get('analysis_id') or ''),
+                    'analysis_tab_id': output_to_tab[str(source_id)],
+                    'analysis_pipeline': pipeline,
+                }
+            else:
+                raw = _step_source_payload(config, str(source_id))
+                if not isinstance(raw, dict):
+                    raise ValueError(f'Analysis pipeline missing datasource config for {source_id}')
+                next_config = _resolve_pipeline_datasource(pipeline, raw)
+                if next_config.get('source_type') == 'analysis':
+                    next_config = {**next_config, 'analysis_pipeline': pipeline}
             additional[str(source_id)] = load_datasource(next_config)
 
     return additional

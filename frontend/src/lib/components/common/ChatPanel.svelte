@@ -30,7 +30,7 @@
 		Timer,
 		WifiOff
 	} from 'lucide-svelte';
-	import { css, cx, iconButton, button, input, label } from '$lib/styles/panda';
+	import { css, iconButton, button, input, label } from '$lib/styles/panda';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { chatStore } from '$lib/stores/chat.svelte';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
@@ -676,11 +676,11 @@
 			aria-orientation="horizontal"
 			tabindex="-1"
 			class={css({
+				position: 'relative',
 				height: '6px',
 				cursor: 'ns-resize',
 				flexShrink: '0',
 				borderTopRadius: 'lg',
-				position: 'relative',
 				touchAction: 'none',
 				_before: {
 					content: '""',
@@ -688,7 +688,7 @@
 					top: '-4px',
 					left: '12px',
 					right: '0',
-					bottom: '-4px'
+					bottom: '0'
 				},
 				_hover: { backgroundColor: 'border.primary' }
 			})}
@@ -778,7 +778,22 @@
 				</div>
 				<div class={css({ display: 'flex', gap: '0.5', flexShrink: '0' })}>
 					<button
-						class={cx(iconButton(), css({ color: toolsOpen ? 'fg.primary' : undefined }))}
+						class={[
+							css({
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color, border-color, opacity',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							}),
+							toolsOpen && css({ color: 'fg.primary' })
+						]}
 						onclick={() => togglePanel('tools')}
 						title="Tools"
 						aria-label="Tools"
@@ -786,7 +801,22 @@
 						<Wrench size={13} />
 					</button>
 					<button
-						class={cx(iconButton(), css({ color: sessionsOpen ? 'fg.primary' : undefined }))}
+						class={[
+							css({
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color, border-color, opacity',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							}),
+							sessionsOpen && css({ color: 'fg.primary' })
+						]}
 						onclick={() => togglePanel('sessions')}
 						title="Sessions"
 						aria-label="Sessions"
@@ -794,7 +824,22 @@
 						<History size={13} />
 					</button>
 					<button
-						class={cx(iconButton(), css({ color: configOpen ? 'fg.primary' : undefined }))}
+						class={[
+							css({
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color, border-color, opacity',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							}),
+							configOpen && css({ color: 'fg.primary' })
+						]}
 						onclick={openConfig}
 						title="Configure"
 						aria-label="Configure"
@@ -863,7 +908,30 @@
 					<div class={css({ display: 'flex', gap: '1' })}>
 						<input
 							id="chat-key"
-							class={cx(input(), css({ flex: '1' }))}
+							class={[
+								css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									backgroundColor: 'bg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								}),
+								css({ flex: '1' })
+							]}
 							type="password"
 							bind:value={apiKeyDraft}
 							placeholder="sk-or-… (uses global if empty)"
@@ -970,7 +1038,26 @@
 					<label class={label()} for="chat-system-prompt">System Prompt (override)</label>
 					<textarea
 						id="chat-system-prompt"
-						class={cx(input(), css({ resize: 'none', minHeight: '48px', maxHeight: '100px' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							resize: 'none',
+							minHeight: '48px',
+							maxHeight: '100px'
+						})}
 						bind:value={systemPromptDraft}
 						placeholder="Leave empty to use mode default ({chatStore.mode})"
 						rows={2}
@@ -1231,7 +1318,7 @@
 				>
 					{#each chatStore.sessions as session (session.id)}
 						<div
-							class={cx(
+							class={[
 								'group',
 								css({
 									display: 'flex',
@@ -1241,7 +1328,7 @@
 									overflow: 'hidden',
 									_hover: { backgroundColor: 'bg.hover' }
 								})
-							)}
+							]}
 						>
 							<button
 								class={css({
@@ -1420,7 +1507,7 @@
 								</div>
 								{#each chatStore.sessions.slice(0, 5) as session (session.id)}
 									<div
-										class={cx(
+										class={[
 											'group',
 											css({
 												display: 'flex',
@@ -1430,7 +1517,7 @@
 												overflow: 'hidden',
 												_hover: { backgroundColor: 'bg.hover' }
 											})
-										)}
+										]}
 									>
 										<button
 											class={css({
@@ -1593,7 +1680,7 @@
 						{:else}
 							<!-- User / Assistant message -->
 							<div
-								class={cx(
+								class={[
 									'chat-msg-enter',
 									css({
 										display: 'flex',
@@ -1601,7 +1688,7 @@
 										gap: '1.5',
 										marginTop: grouped ? '-0.5' : '0'
 									})
-								)}
+								]}
 							>
 								{#if msg.role === 'assistant'}
 									{#if !grouped}
@@ -1639,7 +1726,7 @@
 									})}
 								>
 									<div
-										class={cx(
+										class={[
 											css({
 												padding: '2',
 												borderRadius: 'md',
@@ -1652,7 +1739,7 @@
 												_hover: { '& .chat-copy-btn': { opacity: '1' } }
 											}),
 											msg.role === 'assistant' ? 'chat-markdown' : ''
-										)}
+										]}
 									>
 										{#if msg.role === 'assistant'}
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -- markdown from our own AI, not user-supplied HTML -->
@@ -1661,7 +1748,7 @@
 											<span class={css({ whiteSpace: 'pre-wrap' })}>{msg.content}</span>
 										{/if}
 										<button
-											class={cx(
+											class={[
 												'chat-copy-btn',
 												css({
 													position: 'absolute',
@@ -1675,7 +1762,7 @@
 													opacity: '0',
 													_hover: { color: 'fg.primary' }
 												})
-											)}
+											]}
 											onclick={() => copyToClipboard(msg.content, msg.id)}
 											title="Copy message"
 											type="button"
@@ -1688,14 +1775,14 @@
 										</button>
 									</div>
 									<span
-										class={cx(
+										class={[
 											'chat-ts',
 											css({
 												fontSize: '10px',
 												color: 'fg.muted',
 												paddingX: '1'
 											})
-										)}
+										]}
 									>
 										{timeAgo(msg.ts)}
 									</span>
@@ -2420,15 +2507,27 @@
 						})}
 					>
 						<input
-							class={cx(
-								input(),
-								css({
-									borderRadius: '0',
-									borderWidth: '0',
-									borderBottomWidth: '1',
-									fontSize: 'xs'
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								borderRadius: '0',
+								borderWidth: '0',
+								borderBottomWidth: '1',
+								fontSize: 'xs'
+							})}
 							type="text"
 							bind:value={modelPickerSearch}
 							placeholder="Search models\u2026"
@@ -2492,16 +2591,27 @@
 			<!-- Textarea + send button -->
 			<div class={css({ display: 'flex', gap: '2', alignItems: 'flex-end' })}>
 				<textarea
-					class={cx(
-						input(),
-						css({
-							flex: '1',
-							resize: 'none',
-							minHeight: '34px',
-							maxHeight: '120px',
-							fontSize: 'sm'
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						paddingX: '3.5',
+						paddingY: '2.25',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						flex: '1',
+						resize: 'none',
+						minHeight: '34px',
+						maxHeight: '120px',
+						fontSize: 'sm'
+					})}
 					bind:value={inputValue}
 					bind:this={inputEl}
 					onkeydown={handleKeydown}

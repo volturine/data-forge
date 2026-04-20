@@ -18,9 +18,9 @@
 		Settings,
 		CirclePause,
 		CirclePlay,
-		Braces
+		FileCode
 	} from 'lucide-svelte';
-	import { css, cx, tabButton, chip, callout, spinner } from '$lib/styles/panda';
+	import { css, tabButton, chip, spinner } from '$lib/styles/panda';
 	import { buildStepLabel } from '$lib/utils/build-step-label';
 
 	interface Props {
@@ -28,9 +28,20 @@
 		title?: string;
 		requestJson?: Record<string, unknown> | null;
 		resultJson?: Record<string, unknown> | null;
+		onCancel?: (() => void) | null;
+		canCancel?: boolean;
+		cancelPending?: boolean;
 	}
 
-	const { store, title = 'Build', requestJson = null, resultJson = null }: Props = $props();
+	const {
+		store,
+		title = 'Build',
+		requestJson = null,
+		resultJson = null,
+		onCancel = null,
+		canCancel = false,
+		cancelPending = false
+	}: Props = $props();
 
 	type PreviewTab = 'steps' | 'plan' | 'config' | 'resources' | 'logs' | 'results' | 'payload';
 	let activeTab = $state<PreviewTab>('steps');
@@ -41,7 +52,6 @@
 	let copied = $state(false);
 
 	const MEMORY_WARN_THRESHOLD = 80;
-	const rowClass = css({ display: 'flex', alignItems: 'center' });
 
 	const elapsedSec = $derived(store.elapsed > 0 ? (store.elapsed / 1000).toFixed(1) : '0.0');
 	const remainingSec = $derived(
@@ -71,14 +81,17 @@
 		if (store.status === 'running') return store.currentStep ?? 'Running';
 		if (store.status === 'completed') return 'Complete';
 		if (store.status === 'failed') return 'Failed';
+		if (store.status === 'cancelled') return 'Cancelled';
 		return 'Disconnected';
 	});
 
 	const statusTone = $derived.by(() => {
 		if (store.status === 'completed') return 'success' as const;
+		if (store.status === 'cancelled') return 'warning' as const;
 		if (store.status === 'failed' || store.status === 'disconnected') return 'error' as const;
 		return 'accent' as const;
 	});
+	const showCancel = $derived(!!onCancel && canCancel);
 
 	const memoryWarning = $derived(store.memoryPercent > MEMORY_WARN_THRESHOLD);
 
@@ -203,7 +216,7 @@
 			backgroundColor: 'bg.secondary'
 		})}
 	>
-		<div class={cx(rowClass, css({ gap: '2' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 			{#if store.status === 'connecting' || store.status === 'running'}
 				<Loader
 					size={14}
@@ -213,6 +226,8 @@
 				<CircleCheckBig size={14} class={css({ color: 'fg.success' })} />
 			{:else if store.status === 'failed'}
 				<CircleX size={14} class={css({ color: 'fg.error' })} />
+			{:else if store.status === 'cancelled'}
+				<CirclePause size={14} class={css({ color: 'fg.warning' })} />
 			{:else}
 				<TriangleAlert size={14} class={css({ color: 'fg.warning' })} />
 			{/if}
@@ -227,7 +242,34 @@
 				{/if}
 			</span>
 		</div>
-		<span class={chip({ tone: statusTone })}>{statusLabel}</span>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+			{#if showCancel}
+				<button
+					type="button"
+					class={css({
+						display: 'inline-flex',
+						alignItems: 'center',
+						gap: '1',
+						paddingX: '2',
+						paddingY: '1',
+						fontSize: 'xs',
+						cursor: cancelPending ? 'not-allowed' : 'pointer',
+						borderWidth: '1',
+						borderColor: 'border.warning',
+						backgroundColor: 'bg.warning',
+						color: 'fg.warning',
+						opacity: cancelPending ? 0.6 : 1
+					})}
+					onclick={() => onCancel?.()}
+					disabled={cancelPending}
+					data-testid="build-cancel-button"
+				>
+					<CirclePause size={12} />
+					{cancelPending ? 'Cancelling...' : 'Cancel'}
+				</button>
+			{/if}
+			<span class={chip({ tone: statusTone })}>{statusLabel}</span>
+		</div>
 	</div>
 
 	<div
@@ -237,7 +279,14 @@
 			borderBottomWidth: '1'
 		})}
 	>
-		<div class={cx(rowClass, css({ justifyContent: 'space-between', marginBottom: '2' }))}>
+		<div
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'space-between',
+				marginBottom: '2'
+			})}
+		>
 			<span class={css({ fontSize: 'xs', color: 'fg.secondary' })}>
 				{#if store.status === 'completed'}
 					Finished in {durationSec}s
@@ -249,17 +298,27 @@
 					Preparing...
 				{:else if store.status === 'failed'}
 					Build failed
+				{:else if store.status === 'cancelled'}
+					Build cancelled
 				{:else}
 					Disconnected
 				{/if}
 			</span>
-			<div class={cx(rowClass, css({ gap: '3', fontSize: 'xs', color: 'fg.muted' }))}>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
+			<div
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '3',
+					fontSize: 'xs',
+					color: 'fg.muted'
+				})}
+			>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Clock size={11} />
 					{elapsedSec}s
 				</span>
 				{#if remainingSec}
-					<span class={cx(rowClass, css({ gap: '1' }))}>
+					<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 						~{remainingSec}s left
 					</span>
 				{/if}
@@ -286,7 +345,12 @@
 					top: '0',
 					left: '0',
 					bottom: '0',
-					backgroundColor: store.status === 'failed' ? 'fg.error' : 'accent.primary',
+					backgroundColor:
+						store.status === 'failed'
+							? 'fg.error'
+							: store.status === 'cancelled'
+								? 'fg.warning'
+								: 'accent.primary',
 					transitionProperty: 'width',
 					transitionDuration: '300ms',
 					transitionTimingFunction: 'ease'
@@ -313,7 +377,7 @@
 			class={tabButton({ active: activeTab === 'steps' })}
 			onclick={() => (activeTab = 'steps')}
 		>
-			<span class={cx(rowClass, css({ gap: '1' }))}>
+			<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 				<ListOrdered size={12} />
 				Steps
 			</span>
@@ -326,7 +390,7 @@
 				class={tabButton({ active: activeTab === 'plan' })}
 				onclick={() => (activeTab = 'plan')}
 			>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<FileText size={12} />
 					Plan
 				</span>
@@ -340,7 +404,7 @@
 				class={tabButton({ active: activeTab === 'config' })}
 				onclick={() => (activeTab = 'config')}
 			>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Settings size={12} />
 					Config
 				</span>
@@ -354,7 +418,7 @@
 				class={tabButton({ active: activeTab === 'resources' })}
 				onclick={() => (activeTab = 'resources')}
 			>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Activity size={12} />
 					Resources
 					{#if memoryWarning}
@@ -371,7 +435,7 @@
 				class={tabButton({ active: activeTab === 'logs' })}
 				onclick={() => (activeTab = 'logs')}
 			>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<Terminal size={12} />
 					Logs
 					<span class={chip({ tone: 'neutral' })}>{store.logs.length}</span>
@@ -386,7 +450,7 @@
 				class={tabButton({ active: activeTab === 'results' })}
 				onclick={() => (activeTab = 'results')}
 			>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<FileText size={12} />
 					Results
 					<span class={chip({ tone: 'neutral' })}>{store.results.length}</span>
@@ -401,8 +465,8 @@
 				class={tabButton({ active: activeTab === 'payload' })}
 				onclick={() => (activeTab = 'payload')}
 			>
-				<span class={cx(rowClass, css({ gap: '1' }))}>
-					<Braces size={12} />
+				<span class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+					<FileCode size={12} />
 					Payload
 				</span>
 			</button>
@@ -421,16 +485,15 @@
 				{#if store.steps.length === 0}
 					{#if store.status === 'connecting'}
 						<div
-							class={cx(
-								rowClass,
-								css({
-									gap: '2',
-									justifyContent: 'center',
-									padding: '4',
-									color: 'fg.muted',
-									fontSize: 'sm'
-								})
-							)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '2',
+								justifyContent: 'center',
+								padding: '4',
+								color: 'fg.muted',
+								fontSize: 'sm'
+							})}
 						>
 							<div class={spinner({ size: 'sm' })}></div>
 							Waiting for build to start...
@@ -466,15 +529,16 @@
 								</div>
 							{/if}
 							<div
-								class={cx(
-									rowClass,
-									css({
+								class={css(
+									{
+										display: 'flex',
+										alignItems: 'center',
 										gap: '3',
 										paddingY: '1.5',
 										paddingX: '2',
 										fontSize: 'sm'
-									}),
-									step.state === 'running' && css({ backgroundColor: 'bg.accent' })
+									},
+									step.state === 'running' && { backgroundColor: 'bg.accent' }
 								)}
 								data-testid={`build-step-${step.buildStepIndex}`}
 								data-step-state={step.state}
@@ -563,7 +627,7 @@
 				class={css({ padding: '4' })}
 				data-testid="build-plan-panel"
 			>
-				<div class={cx(rowClass, css({ gap: '2', marginBottom: '3' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2', marginBottom: '3' })}>
 					<button
 						type="button"
 						class={tabButton({ active: planView === 'optimized' })}
@@ -688,7 +752,17 @@
 			>
 				{#if memoryWarning}
 					<div
-						class={cx(callout({ tone: 'warn' }), css({ marginBottom: '3' }))}
+						class={css({
+							paddingX: '3',
+							paddingY: '2.5',
+							borderLeftWidth: '2',
+							fontSize: 'xs',
+							lineHeight: '1.5',
+							color: 'fg.tertiary',
+							borderLeftColor: 'border.warning',
+							backgroundColor: 'bg.warning',
+							marginBottom: '3'
+						})}
 						data-testid="memory-warning"
 					>
 						<TriangleAlert size={12} />
@@ -715,7 +789,15 @@
 								gap: '2'
 							})}
 						>
-							<div class={cx(rowClass, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '2',
+									fontSize: 'xs',
+									color: 'fg.muted'
+								})}
+							>
 								<Cpu size={12} />
 								CPU
 							</div>
@@ -743,7 +825,15 @@
 								gap: '2'
 							})}
 						>
-							<div class={cx(rowClass, css({ gap: '2', fontSize: 'xs', color: 'fg.muted' }))}>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '2',
+									fontSize: 'xs',
+									color: 'fg.muted'
+								})}
+							>
 								<MemoryStick size={12} />
 								Memory
 							</div>
@@ -798,18 +888,20 @@
 				data-testid="build-logs-panel"
 			>
 				<div
-					class={cx(
-						rowClass,
-						css({
-							justifyContent: 'space-between',
-							paddingX: '3',
-							paddingY: '2',
-							borderBottomWidth: '1',
-							backgroundColor: 'bg.secondary'
-						})
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+						paddingX: '3',
+						paddingY: '2',
+						borderBottomWidth: '1',
+						backgroundColor: 'bg.secondary'
+					})}
 				>
-					<div class={cx(rowClass, css({ gap: '1' }))} data-testid="log-level-filter">
+					<div
+						class={css({ display: 'flex', alignItems: 'center', gap: '1' })}
+						data-testid="log-level-filter"
+					>
 						<button
 							type="button"
 							class={tabButton({ active: logLevel === 'all' })}
@@ -832,22 +924,21 @@
 							Errors ({errorLogCount})
 						</button>
 					</div>
-					<div class={cx(rowClass, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						{#if scrollPaused}
 							<button
 								type="button"
-								class={cx(
-									rowClass,
-									css({
-										gap: '1',
-										fontSize: 'xs',
-										color: 'fg.muted',
-										cursor: 'pointer',
-										border: 'none',
-										backgroundColor: 'transparent',
-										_hover: { color: 'fg.secondary' }
-									})
-								)}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '1',
+									fontSize: 'xs',
+									color: 'fg.muted',
+									cursor: 'pointer',
+									border: 'none',
+									backgroundColor: 'transparent',
+									_hover: { color: 'fg.secondary' }
+								})}
 								onclick={scrollToBottom}
 								title="Resume auto-scroll"
 								data-testid="log-resume-scroll"
@@ -857,7 +948,13 @@
 							</button>
 						{:else if store.status === 'running'}
 							<span
-								class={cx(rowClass, css({ gap: '1', fontSize: 'xs', color: 'fg.muted' }))}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '1',
+									fontSize: 'xs',
+									color: 'fg.muted'
+								})}
 								data-testid="log-auto-scroll"
 							>
 								<CirclePause size={12} />
@@ -866,18 +963,17 @@
 						{/if}
 						<button
 							type="button"
-							class={cx(
-								rowClass,
-								css({
-									gap: '1',
-									fontSize: 'xs',
-									color: 'fg.muted',
-									cursor: 'pointer',
-									border: 'none',
-									backgroundColor: 'transparent',
-									_hover: { color: 'fg.secondary' }
-								})
-							)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								gap: '1',
+								fontSize: 'xs',
+								color: 'fg.muted',
+								cursor: 'pointer',
+								border: 'none',
+								backgroundColor: 'transparent',
+								_hover: { color: 'fg.secondary' }
+							})}
 							onclick={copyLogs}
 							title="Copy logs to clipboard"
 							data-testid="log-copy"
@@ -933,7 +1029,7 @@
 					})}
 				>
 					{#each store.results as result (result.tab_id)}
-						<div class={cx(rowClass, css({ gap: '2', fontSize: 'sm' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2', fontSize: 'sm' })}>
 							{#if result.status === 'success'}
 								<CircleCheckBig size={12} class={css({ color: 'fg.success' })} />
 							{:else}
@@ -1023,7 +1119,18 @@
 
 	{#if store.error}
 		<div
-			class={cx(callout({ tone: 'error' }), css({ borderTopWidth: '1', margin: '0' }))}
+			class={css({
+				paddingX: '3',
+				paddingY: '2.5',
+				borderLeftWidth: '2',
+				fontSize: 'xs',
+				lineHeight: '1.5',
+				color: 'fg.error',
+				borderLeftColor: 'border.error',
+				backgroundColor: 'bg.error',
+				borderTopWidth: '1',
+				margin: '0'
+			})}
 			data-testid="build-error"
 		>
 			{store.error}

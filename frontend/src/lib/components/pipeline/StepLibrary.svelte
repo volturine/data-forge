@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
-	import { css, cx, input } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface StepType {
 		type: string;
@@ -269,14 +269,23 @@
 			type="text"
 			placeholder="Search operations..."
 			bind:value={search}
-			class={cx(
-				input(),
-				css({
-					width: '100%',
-					fontSize: 'xs',
-					backgroundColor: 'bg.secondary'
-				})
-			)}
+			class={css({
+				color: 'fg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				width: '100%',
+				fontSize: 'xs',
+				backgroundColor: 'bg.secondary'
+			})}
 		/>
 	</div>
 	<div

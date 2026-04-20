@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { css, cx, label, stepConfig, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, input } from '$lib/styles/panda';
 
 	interface TimeSeriesConfigData {
 		column: string;
@@ -117,15 +117,15 @@
 	</div>
 
 	<div
-		class={cx(
-			css({
+		class={css(
+			{
 				marginBottom: '0',
 				paddingBottom: '5',
 				backgroundColor: 'transparent',
 
 				border: 'none'
-			}),
-			css({ borderTopWidth: '1', paddingTop: '5' })
+			},
+			{ borderTopWidth: '1', paddingTop: '5' }
 		)}
 		role="group"
 		aria-labelledby="ts-operation-heading"
@@ -278,13 +278,38 @@
 				<div class={css({ flex: '1' })}>
 					<label
 						for="ts-input-value"
-						class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Value:</label
+						class={css({
+							display: 'block',
+							fontSize: 'sm',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '1'
+						})}>Value:</label
 					>
 					<input
 						id="ts-input-value"
 						data-testid="ts-value-input"
 						type="number"
-						class={cx(input(), css({ flex: '1' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							flex: '1',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 						bind:value={config.value}
 						min="0"
 						aria-label="Time period value"
@@ -293,12 +318,37 @@
 				<div class={css({ flex: '1' })}>
 					<label
 						for="ts-select-unit"
-						class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Unit:</label
+						class={css({
+							display: 'block',
+							fontSize: 'sm',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '1'
+						})}>Unit:</label
 					>
 					<select
 						id="ts-select-unit"
 						data-testid="ts-unit-select"
-						class={cx(input(), css({ flex: '1' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							flex: '1',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 						bind:value={config.unit}
 					>
 						{#each timeUnits as unit (unit)}
@@ -393,16 +443,15 @@
 	{/if}
 
 	<div
-		class={cx(
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				backgroundColor: 'transparent',
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
 
-				border: 'none'
-			}),
-			css({ borderTopWidth: '1', paddingTop: '5' })
-		)}
+			border: 'none',
+			borderTopWidth: '1',
+			paddingTop: '5'
+		})}
 		role="group"
 		aria-labelledby="ts-new-column-heading"
 	>

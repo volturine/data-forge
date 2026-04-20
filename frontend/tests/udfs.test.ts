@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { test, expect } from './fixtures.js';
-import { API_BASE, createUdf } from './utils/api.js';
+import { createUdf } from './utils/api.js';
 import { waitForLayoutReady, waitForUdfList, gotoUdfEditor } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { deleteUdfViaUI } from './utils/ui-cleanup.js';
@@ -238,22 +238,17 @@ test.describe('UDFs – export & import', () => {
 			await waitForUdfList(page);
 			await expect(page.locator(`[data-udf-card="${udf}"]`)).toHaveCount(0);
 
-			// Import it back via API (testing the API import, not the UI import)
-			const importPayload = JSON.parse(exportedJson) as {
-				udfs: Array<{ name: string; [key: string]: unknown }>;
-			};
-			const ourUdf = importPayload.udfs.find((u) => u.name === udf);
-			if (!ourUdf) throw new Error(`${udf} not found in export JSON`);
-
-			const importResp = await request.post(`${API_BASE}/udf/import`, {
-				data: { udfs: [ourUdf], overwrite: false }
+			// Import the exported UDF back via the UI import dialog
+			const importBtn = page.getByRole('button', { name: /Import/i });
+			await importBtn.click();
+			const importDialog = page.getByRole('dialog');
+			await expect(importDialog).toBeVisible();
+			await page.locator('#udf-import-json').fill(exportedJson);
+			await importDialog.getByRole('button', { name: /^Import$/i }).click();
+			await expect(importDialog.getByRole('heading', { name: /Import UDFs/i })).not.toBeVisible({
+				timeout: 10_000
 			});
-			if (!importResp.ok()) {
-				throw new Error(`Import failed: ${importResp.status()} ${await importResp.text()}`);
-			}
 
-			// Reload to pick up the freshly imported UDF
-			await page.reload();
 			await expect(page.locator(`[data-udf-card="${udf}"]`)).toBeVisible({ timeout: 10_000 });
 		} finally {
 			await deleteUdfViaUI(page, udf);

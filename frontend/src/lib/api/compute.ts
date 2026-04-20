@@ -215,6 +215,14 @@ export function getStepRowCount(
 	});
 }
 
+export interface CancelBuildResponse {
+	id: string;
+	status: 'cancelled';
+	duration_ms: number | null;
+	cancelled_at: string;
+	cancelled_by: string | null;
+}
+
 export interface BuildRequest {
 	analysis_pipeline: AnalysisPipelinePayload;
 	tab_id?: string | null;
@@ -248,5 +256,11 @@ export function connectEnginesStream(callbacks: EnginesStreamCallbacks): StreamH
 		isSnapshot: (msg) => msg.type === 'snapshot',
 		extractSnapshot: (msg) => (msg as EnginesSnapshotMessage).engines,
 		callbacks
+	});
+}
+
+export function cancelBuild(engineRunId: string): ResultAsync<CancelBuildResponse, ApiError> {
+	return apiRequest<CancelBuildResponse>(`/v1/compute/cancel/${engineRunId}`, {
+		method: 'POST'
 	});
 }

@@ -45,7 +45,9 @@ function makeTab(overrides: Partial<AnalysisTab> = {}): AnalysisTab {
 		output: {
 			result_id: '550e8400-e29b-41d4-a716-446655440000',
 			format: 'parquet',
-			filename: 'source_1'
+			filename: 'source_1',
+			build_mode: 'full',
+			iceberg: { namespace: 'outputs', table_name: 'source_1', branch: 'master' }
 		},
 		steps: [],
 		...overrides
@@ -444,7 +446,6 @@ describe('AnalysisStore.isDirty', () => {
 			name: 'Test',
 			description: null,
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -463,7 +464,6 @@ describe('AnalysisStore.isDirty', () => {
 			name: 'Test',
 			description: null,
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -481,7 +481,6 @@ describe('AnalysisStore.isDirty', () => {
 			name: 'Changed Name',
 			description: null,
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -499,7 +498,6 @@ describe('AnalysisStore.isDirty', () => {
 			name: 'Test',
 			description: 'new desc',
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -521,7 +519,6 @@ describe('AnalysisStore.reset', () => {
 			name: 'Test',
 			description: null,
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -551,7 +548,6 @@ describe('AnalysisStore.updateStepConfig', () => {
 			name: 'Test',
 			description: null,
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -710,18 +706,18 @@ describe('AnalysisStore.normalizeSteps', () => {
 			steps: [makeStep({ id: 'A', type: 'plot_scatter', config: { x_column: 'age' } })]
 		});
 		store.setTabs([tab]);
-		store.current = {
+		const analysis = {
 			id: 'a-1',
 			name: 'Test',
 			description: null,
 			pipeline_definition: { tabs: [tab] },
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
 			thumbnail: null
 		};
-		store.applyAnalysis(store.current);
+		store.current = analysis;
+		store.applyAnalysis(analysis);
 		expect(store.tabs[0].steps[0].type).toBe('chart');
 	});
 
@@ -730,18 +726,18 @@ describe('AnalysisStore.normalizeSteps', () => {
 			id: 'tab-1',
 			steps: [makeStep({ id: 'A', type: 'plot_bar', config: {} })]
 		});
-		store.current = {
+		const analysis = {
 			id: 'a-1',
 			name: 'Test',
 			description: null,
 			pipeline_definition: { tabs: [tab] },
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
 			thumbnail: null
 		};
-		store.applyAnalysis(store.current);
+		store.current = analysis;
+		store.applyAnalysis(analysis);
 		expect(store.tabs[0].steps[0].type).toBe('chart');
 		expect(store.tabs[0].steps[0].config).toHaveProperty('chart_type', 'bar');
 	});
@@ -751,22 +747,22 @@ describe('AnalysisStore.normalizeSteps', () => {
 			id: 'tab-1',
 			steps: [makeStep({ id: 'A', type: 'filter', config: {} })]
 		});
-		store.current = {
+		const analysis = {
 			id: 'a-1',
 			name: 'Test',
 			description: null,
 			pipeline_definition: { tabs: [tab] },
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
 			thumbnail: null
 		};
-		store.applyAnalysis(store.current);
+		store.current = analysis;
+		store.applyAnalysis(analysis);
 		expect(store.tabs[0].steps[0].type).toBe('filter');
 	});
 
-	test('infers depends_on when steps lack dependency metadata', () => {
+	test('rejects steps that lack dependency metadata', () => {
 		const stepA = makeStep({ id: 'A' });
 		delete stepA.depends_on;
 		const stepB = makeStep({ id: 'B' });
@@ -775,42 +771,39 @@ describe('AnalysisStore.normalizeSteps', () => {
 			id: 'tab-1',
 			steps: [stepA, stepB]
 		});
-		store.current = {
+		const analysis = {
 			id: 'a-1',
 			name: 'Test',
 			description: null,
 			pipeline_definition: { tabs: [tab] },
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
 			thumbnail: null
 		};
-		store.applyAnalysis(store.current);
-		expect(store.tabs[0].steps[0].depends_on).toEqual([]);
-		expect(store.tabs[0].steps[1].depends_on).toEqual(['A']);
+		store.current = analysis;
+		expect(() => store.applyAnalysis(analysis)).toThrow(/missing depends_on/);
 	});
 
-	test('defaults is_applied to true when absent', () => {
+	test('rejects steps that lack is_applied', () => {
 		const step = makeStep({ id: 'A' });
 		delete step.is_applied;
 		const tab = makeTab({
 			id: 'tab-1',
 			steps: [step]
 		});
-		store.current = {
+		const analysis = {
 			id: 'a-1',
 			name: 'Test',
 			description: null,
 			pipeline_definition: { tabs: [tab] },
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
 			thumbnail: null
 		};
-		store.applyAnalysis(store.current);
-		expect(store.tabs[0].steps[0].is_applied).toBe(true);
+		store.current = analysis;
+		expect(() => store.applyAnalysis(analysis)).toThrow(/missing is_applied/);
 	});
 });
 
@@ -827,7 +820,6 @@ describe('AnalysisStore.applyAnalysis', () => {
 			name: 'First',
 			description: null,
 			pipeline_definition: { tabs: [makeTab({ id: 'tab-1' })] },
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -841,7 +833,6 @@ describe('AnalysisStore.applyAnalysis', () => {
 			name: 'Second',
 			description: null,
 			pipeline_definition: { tabs: [makeTab({ id: 'tab-2' })] },
-			status: 'active' as const,
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -857,7 +848,6 @@ describe('AnalysisStore.applyAnalysis', () => {
 			name: 'First',
 			description: null,
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -874,7 +864,6 @@ describe('AnalysisStore.applyAnalysis', () => {
 			name: 'Second',
 			description: null,
 			pipeline_definition: {},
-			status: 'active' as const,
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -890,7 +879,6 @@ describe('AnalysisStore.applyAnalysis', () => {
 			name: 'Same',
 			description: null,
 			pipeline_definition: {},
-			status: 'active' as const,
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -911,7 +899,6 @@ describe('AnalysisStore.applyAnalysis', () => {
 			name: 'My Analysis',
 			description: 'A description',
 			pipeline_definition: {},
-			status: 'active' as const,
 			created_at: '',
 			updated_at: '',
 			result_path: null,
@@ -932,7 +919,6 @@ describe('AnalysisStore.update', () => {
 			name: 'Original',
 			description: 'Desc',
 			pipeline_definition: {},
-			status: 'active',
 			created_at: '',
 			updated_at: '',
 			result_path: null,

@@ -32,3 +32,4 @@ def test_build_event_type_enum_values_are_explicit() -> None:
     assert BuildEventType.LOG.value == 'log'
     assert BuildEventType.COMPLETE.value == 'complete'
     assert BuildEventType.FAILED.value == 'failed'
+    assert BuildEventType.CANCELLED.value == 'cancelled'

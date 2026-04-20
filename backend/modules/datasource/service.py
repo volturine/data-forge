@@ -673,7 +673,9 @@ def create_iceberg_datasource(
 
     datasource_id = str(uuid.uuid4())
     paths = namespace_paths()
-    branch_name = branch or 'master'
+    if not isinstance(branch, str) or not branch.strip():
+        raise DataSourceValidationError('Branch is required', details={'source_type': source_type})
+    branch_name = branch.strip()
     target_path = _prepare_clean_target(paths.clean_dir, datasource_id, branch_name)
     snapshot = _write_iceberg_table(lazy, target_path, build_mode='recreate')
     config = _build_iceberg_config(paths, target_path, branch=branch_name, source_config=source)
@@ -732,8 +734,13 @@ def refresh_external_datasource(session: Session, datasource_id: str) -> DataSou
             'Datasource source is not refreshable',
             details={'datasource_id': datasource_id, 'source_type': source_type},
         )
-    branch_raw = datasource.config.get('branch', source.get('branch', 'master'))
-    branch = branch_raw if isinstance(branch_raw, str) and branch_raw else 'master'
+    branch_raw = datasource.config.get('branch', source.get('branch'))
+    if not isinstance(branch_raw, str) or not branch_raw.strip():
+        raise DataSourceValidationError(
+            'Datasource branch is required',
+            details={'datasource_id': datasource_id},
+        )
+    branch = branch_raw.strip()
     if source_type == DataSourceType.DATABASE:
         connection_string = source.get('connection_string')
         query = source.get('query')
@@ -857,19 +864,22 @@ def _log_datasource_update(
     datasource_id: str,
     name: str,
     config: dict,
-    branch: str,
+    branch: str | None,
 ) -> None:
+    request_json: dict[str, object] = {
+        'name': name,
+        'source_type': DataSourceType.ICEBERG.value,
+        'config': config,
+    }
+    if branch is not None:
+        request_json['iceberg_options'] = {'branch': branch}
+
     payload = engine_run_service.create_engine_run_payload(
         analysis_id=None,
         datasource_id=datasource_id,
         kind='datasource_update',
         status='success',
-        request_json={
-            'name': name,
-            'source_type': DataSourceType.ICEBERG.value,
-            'config': config,
-            'iceberg_options': {'branch': branch},
-        },
+        request_json=request_json,
         result_json=_build_datasource_result_json(datasource_id, name, DataSourceType.ICEBERG, config),
     )
     engine_run_service.create_engine_run(session, payload)
@@ -1474,9 +1484,10 @@ def update_datasource(
     # Only log engine run for non-metadata updates (is_hidden toggle is metadata-only)
     has_config_or_name_update = update.name is not None or update.config is not None
     if has_config_or_name_update:
-        branch = datasource.config.get('branch', 'master') if isinstance(datasource.config, dict) else 'master'
         update_request = update.model_dump(exclude_none=True)
-        update_request['iceberg_options'] = {'branch': branch}
+        branch = datasource.config.get('branch') if isinstance(datasource.config, dict) else None
+        if isinstance(branch, str):
+            update_request['iceberg_options'] = {'branch': branch}
         source_type = DataSourceType(datasource.source_type)
         result_json = _build_datasource_result_json(datasource_id, datasource.name, source_type, datasource.config)
         run_payload = engine_run_service.create_engine_run_payload(

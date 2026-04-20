@@ -9,6 +9,8 @@ export class EngineRunsStore {
 
 	private abortController: AbortController | null = null;
 	private params: ListEngineRunsParams | undefined;
+	private inFlight = false;
+	private pendingRefresh = false;
 
 	load(params?: ListEngineRunsParams): void {
 		if (
@@ -19,6 +21,7 @@ export class EngineRunsStore {
 		}
 		this.abortController?.abort();
 		this.params = params;
+		this.pendingRefresh = false;
 		this.status = 'connecting';
 		this.error = null;
 		this.fetch();
@@ -26,7 +29,10 @@ export class EngineRunsStore {
 
 	refresh(): void {
 		if (this.params === undefined && this.status === 'disconnected') return;
-		this.abortController?.abort();
+		if (this.inFlight) {
+			this.pendingRefresh = true;
+			return;
+		}
 		this.status = 'connecting';
 		this.error = null;
 		this.fetch();
@@ -35,6 +41,8 @@ export class EngineRunsStore {
 	close(): void {
 		this.abortController?.abort();
 		this.abortController = null;
+		this.inFlight = false;
+		this.pendingRefresh = false;
 	}
 
 	reset(): void {
@@ -44,24 +52,44 @@ export class EngineRunsStore {
 		this.error = null;
 	}
 
+	replaceRun(next: EngineRun): void {
+		this.runs = this.runs.map((run) => (run.id === next.id ? next : run));
+	}
+
 	private fetch(): void {
 		this.abortController?.abort();
 		const controller = new AbortController();
 		this.abortController = controller;
+		this.inFlight = true;
 
-		listEngineRuns(this.params).match(
+		listEngineRuns(this.params, controller.signal).match(
 			(runs) => {
+				this.finishFetch(controller);
 				if (controller.signal.aborted) return;
 				this.runs = runs;
 				this.status = 'connected';
 				this.error = null;
+				if (this.pendingRefresh) {
+					this.pendingRefresh = false;
+					this.refresh();
+				}
 			},
 			(err) => {
+				this.finishFetch(controller);
 				if (controller.signal.aborted) return;
 				this.error = err.message;
 				this.status = 'error';
+				if (this.pendingRefresh) {
+					this.pendingRefresh = false;
+					this.refresh();
+				}
 			}
 		);
+	}
+
+	private finishFetch(controller: AbortController): void {
+		if (this.abortController === controller) this.abortController = null;
+		this.inFlight = false;
 	}
 }
 

@@ -3,7 +3,7 @@
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import { ArrowRight, X } from 'lucide-svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, cx, emptyText, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, emptyText, label, stepConfig } from '$lib/styles/panda';
 
 	interface RenameConfigData {
 		column_mapping: { [oldName: string]: string };
@@ -97,13 +97,23 @@
 			id="rename-input-new"
 			data-testid="rename-new-name-input"
 			type="text"
-			class={cx(
-				input(),
-				css({
-					backgroundColor: !formOldName ? 'bg.muted' : undefined,
-					color: !formOldName ? 'fg.muted' : undefined
-				})
-			)}
+			class={css({
+				width: 'full',
+				fontSize: 'sm2',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				backgroundColor: !formOldName ? 'bg.muted' : undefined,
+				color: !formOldName ? 'fg.muted' : undefined
+			})}
 			bind:value={formNewName}
 			placeholder={formOldName ? `New name for ${formOldName}` : 'Select a column first'}
 			aria-label="Enter new column name"
@@ -115,12 +125,9 @@
 			data-testid="rename-add-button"
 			type="button"
 			class={css({
-				backgroundColor: 'accent.primary',
-				color: 'fg.inverse',
 				borderWidth: '1',
 				paddingY: '2',
 				paddingX: '4',
-				cursor: 'pointer',
 				whiteSpace: 'nowrap',
 				fontWeight: 'semibold',
 				_hover: { opacity: '0.9' },
@@ -206,8 +213,6 @@
 							cursor: 'pointer',
 							fontSize: 'lg',
 							lineHeight: 'none',
-							backgroundColor: 'transparent',
-							color: 'fg.muted',
 							borderWidth: '1',
 							borderColor: 'border.transparent',
 							_hover: {

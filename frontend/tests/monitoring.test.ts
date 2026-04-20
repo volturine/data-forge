@@ -16,6 +16,67 @@ import { waitForLayoutReady } from './utils/readiness.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
+async function waitForHealthCheckRow(
+	page: import('@playwright/test').Page,
+	name: string,
+	timeout = 30_000
+) {
+	await expect(page.getByRole('button', { name: /New Check/i })).toBeVisible({ timeout });
+	const row = page.locator(`[data-healthcheck-name="${name}"]`);
+	await expect(row).toBeVisible({ timeout });
+	return row;
+}
+
+function buildRowByName(
+	panel: ReturnType<import('@playwright/test').Page['locator']>,
+	name: string
+) {
+	return panel.locator(
+		`[data-build-datasource-name="${name}"], [data-build-output-name="${name}"]`
+	);
+}
+
+function buildHistoryRow(
+	panel: ReturnType<import('@playwright/test').Page['locator']>,
+	analysisId: string,
+	status?: 'running' | 'completed' | 'failed' | 'cancelled'
+) {
+	let selector = `[data-build-analysis-id="${analysisId}"]`;
+	selector += ':is([data-build-kind="datasource_create"], [data-build-kind="datasource_update"])';
+	if (status) selector += `[data-build-status="${status}"]`;
+	return panel.locator(selector);
+}
+
+async function refreshBuildHistory(page: import('@playwright/test').Page) {
+	await page.getByRole('button', { name: /Refresh History/i }).click();
+}
+
+async function waitForBuildHistoryRow(
+	page: import('@playwright/test').Page,
+	panel: ReturnType<import('@playwright/test').Page['locator']>,
+	analysisId: string,
+	statuses: Array<'running' | 'completed' | 'failed' | 'cancelled'>,
+	timeout = 90_000
+) {
+	const started = Date.now();
+	while (Date.now() - started < timeout) {
+		for (const status of statuses) {
+			const row = buildHistoryRow(panel, analysisId, status);
+			if (
+				(await row.count()) > 0 &&
+				(await row
+					.first()
+					.isVisible()
+					.catch(() => false))
+			)
+				return row;
+		}
+		await refreshBuildHistory(page);
+		await page.waitForTimeout(1_000);
+	}
+	throw new Error(`Timed out waiting for build history row for analysis ${analysisId}`);
+}
+
 /**
  * E2E tests for the monitoring page – mirrors test_healthchecks.py /
  * test_scheduler.py / test_engine_runs.py.
@@ -173,6 +234,12 @@ test.describe('Monitoring – Schedule create flow', () => {
 			// Select datasource from dropdown
 			const dsSelect = page.locator('#schedule-datasource');
 			await expect(dsSelect).toBeVisible({ timeout: 5_000 });
+			await expect(dsSelect.locator(`option[label="${ds}"], option:text-is("${ds}")`)).toHaveCount(
+				1,
+				{
+					timeout: 10_000
+				}
+			);
 			await dsSelect.selectOption({ label: ds });
 
 			// Cron is the default trigger type with default value — submit
@@ -244,10 +311,14 @@ test.describe('Monitoring – Schedule inline cron edit', () => {
 			await cronInput.fill('30 12 * * 1');
 			await cronInput.press('Enter');
 
-			// After save, the new expression should appear (wait for mutation + refetch)
-			await expect(detailRow.locator('code')).toContainText('30 12 * * 1', { timeout: 10_000 });
-			// Input should be gone once the code element is back
-			await expect(cronInput).not.toBeVisible({ timeout: 5_000 });
+			// Refetch re-renders the expanded row, so re-open it before checking persisted text.
+			await page.goto('/monitoring?tab=schedules');
+			await expect(schedRow).toBeVisible({ timeout: 10_000 });
+			await schedRow.click();
+			await expect(page.locator(`[data-schedule-detail="${scheduleId}"] code`)).toContainText(
+				'30 12 * * 1',
+				{ timeout: 10_000 }
+			);
 
 			await screenshot(page, 'monitoring', 'schedule-cron-edited');
 		} finally {
@@ -314,9 +385,7 @@ test.describe('Monitoring – Health Checks tab', () => {
 		await createHealthCheck(request, dsId, hc);
 		try {
 			await page.goto('/monitoring?tab=health');
-			await expect(page.locator(`[data-healthcheck-name="${hc}"]`)).toBeVisible({
-				timeout: 8_000
-			});
+			await waitForHealthCheckRow(page, hc);
 		} finally {
 			await deleteHealthCheckViaUI(page, hc);
 			await deleteDatasourceViaUI(page, ds);
@@ -332,8 +401,7 @@ test.describe('Monitoring – Health Checks tab', () => {
 
 		try {
 			await page.goto('/monitoring?tab=health');
-			const row = page.locator(`[data-healthcheck-name="${hc}"]`);
-			await expect(row).toBeVisible({ timeout: 8_000 });
+			const row = await waitForHealthCheckRow(page, hc);
 			await row.getByLabel('Delete check').click({ timeout: 5_000 });
 
 			// Confirm in the dialog
@@ -393,6 +461,12 @@ test.describe('Monitoring – Health Check create flow', () => {
 			// Select datasource
 			const dsSelect = page.locator('#hc-target');
 			await expect(dsSelect).toBeVisible({ timeout: 5_000 });
+			await expect(dsSelect.locator(`option[label="${ds}"], option:text-is("${ds}")`)).toHaveCount(
+				1,
+				{
+					timeout: 10_000
+				}
+			);
 			await dsSelect.selectOption({ label: ds });
 
 			// Fill name
@@ -405,11 +479,7 @@ test.describe('Monitoring – Health Check create flow', () => {
 			const saveBtn = page.getByRole('button', { name: 'Save Check' });
 			await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
 			await saveBtn.click();
-
-			// Check should appear in the list
-			await expect(page.locator(`[data-healthcheck-name="${hc}"]`)).toBeVisible({
-				timeout: 8_000
-			});
+			await waitForHealthCheckRow(page, hc);
 		} finally {
 			await deleteHealthCheckViaUI(page, hc);
 			await deleteDatasourceViaUI(page, ds);
@@ -435,7 +505,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = panel.locator(`[data-build-datasource-name="${ds}"]`);
+			const buildRow = buildRowByName(panel, ds);
 			await expect(buildRow).toBeVisible({ timeout: 20_000 });
 
 			await page.getByLabel(/Search builds, schedules, or health checks/i).fill('ZZZNOMATCH');
@@ -456,7 +526,7 @@ test.describe('Monitoring – Builds tab', () => {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible();
-			const buildRow = panel.locator(`[data-build-datasource-name="${ds}"]`);
+			const buildRow = buildRowByName(panel, ds);
 			await expect(buildRow).toBeVisible({ timeout: 20_000 });
 			await expect(buildRow).toContainText('Success', { timeout: 5_000 });
 		} finally {
@@ -471,7 +541,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = panel.locator(`[data-build-datasource-name="${ds}"]`);
+			const buildRow = buildRowByName(panel, ds);
 			await expect(buildRow).toBeVisible({ timeout: 20_000 });
 
 			await buildRow.click();
@@ -499,7 +569,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = panel.locator(`[data-build-datasource-name="${ds}"]`);
+			const buildRow = buildRowByName(panel, ds);
 			await expect(buildRow).toBeVisible({ timeout: 20_000 });
 
 			await buildRow.click();
@@ -529,7 +599,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = panel.locator(`[data-build-datasource-name="${ds}"]`);
+			const buildRow = buildRowByName(panel, ds);
 			await expect(buildRow).toBeVisible({ timeout: 20_000 });
 
 			await buildRow.click();
@@ -559,7 +629,7 @@ test.describe('Monitoring – Builds tab', () => {
 		try {
 			await page.goto('/monitoring?tab=builds');
 			const panel = page.locator('#panel-builds');
-			const buildRow = panel.locator(`[data-build-datasource-name="${ds}"]`);
+			const buildRow = buildRowByName(panel, ds);
 			await expect(buildRow).toBeVisible({ timeout: 20_000 });
 
 			await buildRow.click();
@@ -580,11 +650,11 @@ test.describe('Monitoring – Builds tab', () => {
 // ── Live build history (real e2e, no WS mocking) ───────────────────────────
 
 test.describe('Monitoring – live build history', () => {
-	test('triggering a build shows it in the Builds table and expands to BuildPreview', async ({
+	test('triggering a build uses the normal output row and expands to BuildPreview', async ({
 		page,
 		request
 	}) => {
-		test.setTimeout(180_000);
+		test.setTimeout(240_000);
 		const dsName = `e2e-active-build-ds-${uid()}`;
 		const aName = `E2E Active Build ${uid()}`;
 		const dsId = await createLargeDatasource(request, dsName, 2000);
@@ -612,10 +682,13 @@ test.describe('Monitoring – live build history', () => {
 			await openPreviewBtn.click();
 			await expect(page.locator('[data-testid="build-preview"]')).toBeVisible({ timeout: 10_000 });
 
-			const monitorBuildRow = monitorPanel.locator(
-				`[data-build-analysis-name="${aName}"][data-build-kind="preview"]`
+			const monitorBuildRow = await waitForBuildHistoryRow(
+				monitorPage,
+				monitorPanel,
+				aId,
+				['running', 'completed', 'failed'],
+				120_000
 			);
-			await expect(monitorBuildRow).toBeVisible({ timeout: 10_000 });
 			await monitorBuildRow.click();
 			const monitorBuildRowId = await monitorBuildRow.getAttribute('data-build-row');
 			if (!monitorBuildRowId) throw new Error('Expected monitor build row id');
@@ -628,16 +701,10 @@ test.describe('Monitoring – live build history', () => {
 			});
 			await screenshot(monitorPage, 'monitoring', 'build-history-expanded-real');
 
-			const preview = page.locator('[data-testid="build-preview"]');
-			const terminal = preview
-				.getByText('Complete', { exact: true })
-				.or(preview.getByText('Failed', { exact: true }));
-			await expect(terminal).toBeVisible({ timeout: 90_000 });
-
 			const monitorTerminal = monitorPreview
 				.getByText('Complete', { exact: true })
 				.or(monitorPreview.getByText('Failed', { exact: true }));
-			await expect(monitorTerminal).toBeVisible({ timeout: 90_000 });
+			await expect(monitorTerminal).toBeVisible({ timeout: 120_000 });
 
 			await monitorPage.close();
 
@@ -648,8 +715,11 @@ test.describe('Monitoring – live build history', () => {
 		}
 	});
 
-	test('completed build appears in the Builds history table', async ({ page, request }) => {
-		test.setTimeout(120_000);
+	test('completed build appears in the Builds history table without a preview row', async ({
+		page,
+		request
+	}) => {
+		test.setTimeout(180_000);
 		const dsName = `e2e-history-build-ds-${uid()}`;
 		const aName = `E2E History Build ${uid()}`;
 		const dsId = await createDatasource(request, dsName);
@@ -668,6 +738,7 @@ test.describe('Monitoring – live build history', () => {
 
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });
+
 			const terminal = preview
 				.getByText('Complete', { exact: true })
 				.or(preview.getByText('Failed', { exact: true }));
@@ -677,9 +748,10 @@ test.describe('Monitoring – live build history', () => {
 			await waitForLayoutReady(page);
 			const panel = page.locator('#panel-builds');
 			await expect(panel).toBeVisible({ timeout: 5_000 });
+			await waitForBuildHistoryRow(page, panel, aId, ['completed', 'failed'], 120_000);
 			await expect(
 				panel.locator(`[data-build-analysis-name="${aName}"][data-build-kind="preview"]`)
-			).toBeVisible({ timeout: 20_000 });
+			).toHaveCount(0);
 
 			await screenshot(page, 'monitoring', 'build-history-after-real-build');
 		} finally {

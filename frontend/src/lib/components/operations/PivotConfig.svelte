@@ -2,7 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import type { PivotConfigData } from '$lib/types/operation-config';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { css, cx, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface Props {
 		schema: Schema;
@@ -91,10 +91,21 @@
 		>
 			{#each schema.columns as column (column.name)}
 				<label
-					class={cx(
-						label({ variant: 'checkbox' }),
-						css({ paddingX: '2', paddingY: '1', _hover: { backgroundColor: 'bg.hover' } })
-					)}
+					class={css({
+						display: 'flex',
+						cursor: 'pointer',
+						alignItems: 'center',
+						gap: '3',
+						fontSize: 'sm',
+						fontWeight: 'normal',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '0',
+						paddingX: '2',
+						paddingY: '1',
+						_hover: { backgroundColor: 'bg.hover' }
+					})}
 				>
 					<input
 						id={`pivot-checkbox-index-${column.name}`}

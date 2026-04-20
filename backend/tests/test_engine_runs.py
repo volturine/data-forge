@@ -76,8 +76,10 @@ def test_create_engine_run_persists_execution_entries(test_db_session):
 def test_list_engine_runs_filters(test_db_session):
     payload_a = _create_payload(EngineRunKind.PREVIEW, EngineRunStatus.SUCCESS, analysis_id='analysis-a', datasource_id='ds-a')
     payload_b = _create_payload(EngineRunKind.DOWNLOAD, EngineRunStatus.FAILED, analysis_id='analysis-b', datasource_id='ds-b')
+    payload_c = _create_payload(EngineRunKind.DOWNLOAD, EngineRunStatus.CANCELLED, analysis_id='analysis-c', datasource_id='ds-c')
     engine_run_service.create_engine_run(test_db_session, payload_a)
     engine_run_service.create_engine_run(test_db_session, payload_b)
+    engine_run_service.create_engine_run(test_db_session, payload_c)
 
     result = engine_run_service.list_engine_runs(test_db_session, analysis_id='analysis-a')
     assert len(result) == 1
@@ -86,6 +88,10 @@ def test_list_engine_runs_filters(test_db_session):
     result = engine_run_service.list_engine_runs(test_db_session, status=EngineRunStatus.FAILED)
     assert len(result) == 1
     assert result[0].status == EngineRunStatus.FAILED
+
+    result = engine_run_service.list_engine_runs(test_db_session, status=EngineRunStatus.CANCELLED)
+    assert len(result) == 1
+    assert result[0].status == EngineRunStatus.CANCELLED
 
 
 def test_list_engine_runs_pagination(test_db_session):

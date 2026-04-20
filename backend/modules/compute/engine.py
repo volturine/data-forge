@@ -3,6 +3,7 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+import threading
 import time
 import uuid
 from collections import deque
@@ -67,6 +68,7 @@ class PolarsComputeEngine:
         self.progress_queue: mp.Queue = self._mp_context.Queue()
         self.is_running = False
         self.current_job_id: str | None = None
+        self._command_lock = threading.Lock()
         self._pending_results: dict[str, EngineResult] = {}
         self._pending_progress: dict[str, deque[EngineProgressEvent]] = {}
 
@@ -115,6 +117,8 @@ class PolarsComputeEngine:
             # Clean up the dead process
             with contextlib.suppress(Exception):
                 self.process.join(timeout=1.0)
+            with contextlib.suppress(Exception):
+                self.process.close()
             self.process = None
         self._close_queues()
         self.command_queue = self._mp_context.Queue()
@@ -154,12 +158,13 @@ class PolarsComputeEngine:
 
     def _send_command(self, command: PreviewCommand | ExportCommand | SchemaCommand | RowCountCommand) -> str:
         """Ensure process is alive and enqueue a typed command."""
-        self.current_job_id = command.job_id
-        self.check_health()
-        if not self.is_running:
-            self.start()
-        self.command_queue.put(command)
-        return command.job_id
+        with self._command_lock:
+            self.current_job_id = command.job_id
+            self.check_health()
+            if not self.is_running:
+                self.start()
+            self.command_queue.put(command)
+            return command.job_id
 
     def preview(
         self,
@@ -292,6 +297,11 @@ class PolarsComputeEngine:
                 event = self.progress_queue.get(timeout=remaining)
             except Empty:
                 return None
+            except ValueError as e:
+                if 'is closed' in str(e):
+                    return None
+                logger.warning(f'Error getting progress event from queue: {e}', exc_info=True)
+                return None
             except Exception as e:
                 logger.warning(f'Error getting progress event from queue: {e}', exc_info=True)
                 return None
@@ -309,6 +319,7 @@ class PolarsComputeEngine:
     def shutdown(self) -> None:
         """Shutdown the compute subprocess."""
         if not self.is_running:
+            self._close_queues()
             return
 
         try:
@@ -324,6 +335,9 @@ class PolarsComputeEngine:
             if self.process.is_alive():
                 self.process.kill()
                 self.process.join(timeout=1)
+        if self.process:
+            with contextlib.suppress(Exception):
+                self.process.close()
 
         self._close_queues()
         self.is_running = False
@@ -374,127 +388,140 @@ class PolarsComputeEngine:
 
         logger.info(f'Polars compute subprocess started (PID: {os.getpid()})')
 
-        while True:
-            try:
+        try:
+            while True:
                 try:
-                    command = command_queue.get(timeout=1)
-                except Empty:
-                    continue
+                    try:
+                        command = command_queue.get(timeout=1)
+                    except Empty:
+                        continue
 
-                if isinstance(command, ShutdownCommand):
-                    break
-                if isinstance(command, dict):
-                    if command.get('type') == 'shutdown':
+                    if isinstance(command, ShutdownCommand):
                         break
-                    logger.warning('Ignoring unsupported dict command payload: %s', command.get('type'))
-                    continue
-                if not isinstance(command, (PreviewCommand, ExportCommand, SchemaCommand, RowCountCommand)):
-                    logger.warning('Ignoring unsupported command payload type: %s', type(command).__name__)
-                    continue
+                    if isinstance(command, dict):
+                        if command.get('type') == 'shutdown':
+                            break
+                        logger.warning('Ignoring unsupported dict command payload: %s', command.get('type'))
+                        continue
+                    if not isinstance(command, (PreviewCommand, ExportCommand, SchemaCommand, RowCountCommand)):
+                        logger.warning('Ignoring unsupported command payload type: %s', type(command).__name__)
+                        continue
 
-                job_id = command.job_id
-                datasource_config = command.datasource_config
-                steps = command.steps
-                additional_datasources = command.additional_datasources
+                    job_id = command.job_id
+                    datasource_config = command.datasource_config
+                    steps = command.steps
+                    additional_datasources = command.additional_datasources
 
-                logger.debug(f'Job {job_id}: Starting {command.type} operation')
+                    logger.debug(f'Job {job_id}: Starting {command.type} operation')
 
-                def progress_callback(event: dict[str, object], *, current_job_id: str = job_id) -> None:
-                    payload = {'emitted_at': datetime.now(UTC).isoformat(), **event}
-                    progress_queue.put(EngineProgressEvent(job_id=current_job_id, event=payload))
+                    def progress_callback(event: dict[str, object], *, current_job_id: str = job_id) -> None:
+                        payload = {'emitted_at': datetime.now(UTC).isoformat(), **event}
+                        progress_queue.put(EngineProgressEvent(job_id=current_job_id, event=payload))
 
-                try:
-                    step_timings: dict[str, float] = {}
-                    query_plan = None
-                    if isinstance(command, PreviewCommand):
-                        result_data = PolarsComputeEngine._execute_preview(
-                            datasource_config,
-                            steps,
-                            command.row_limit,
-                            command.offset,
-                            job_id,
-                            additional_datasources,
-                            progress_callback,
+                    try:
+                        step_timings: dict[str, float] = {}
+                        query_plan = None
+                        if isinstance(command, PreviewCommand):
+                            result_data = PolarsComputeEngine._execute_preview(
+                                datasource_config,
+                                steps,
+                                command.row_limit,
+                                command.offset,
+                                job_id,
+                                additional_datasources,
+                                progress_callback,
+                            )
+                        elif isinstance(command, ExportCommand):
+                            result_data = PolarsComputeEngine._execute_export(
+                                datasource_config,
+                                steps,
+                                command.output_path,
+                                command.export_format,
+                                job_id,
+                                additional_datasources,
+                                progress_callback,
+                            )
+                        elif isinstance(command, SchemaCommand):
+                            result_data = PolarsComputeEngine._execute_schema(
+                                datasource_config,
+                                steps,
+                                job_id,
+                                additional_datasources,
+                                progress_callback,
+                            )
+                        elif isinstance(command, RowCountCommand):
+                            result_data = PolarsComputeEngine._execute_row_count(
+                                datasource_config,
+                                steps,
+                                job_id,
+                                additional_datasources,
+                                progress_callback,
+                            )
+                        else:
+                            raise ValueError(f'Unknown command type: {type(command).__name__}')
+
+                        read_duration_ms: float | None = None
+                        write_duration_ms: float | None = None
+                        collect_duration_ms: float | None = None
+                        if isinstance(result_data, dict):
+                            step_timings = result_data.pop('step_timings', step_timings)
+                            query_plan = result_data.pop('query_plan', query_plan)
+                            raw_read = result_data.pop('read_duration_ms', None)
+                            raw_write = result_data.pop('write_duration_ms', None)
+                            raw_collect = result_data.pop('collect_duration_ms', None)
+                            read_duration_ms = float(raw_read) if isinstance(raw_read, (int, float)) else None
+                            write_duration_ms = float(raw_write) if isinstance(raw_write, (int, float)) else None
+                            collect_duration_ms = float(raw_collect) if isinstance(raw_collect, (int, float)) else None
+
+                        logger.debug(f'Job {job_id}: Completed successfully')
+                        result_queue.put(
+                            EngineResult(
+                                job_id=job_id,
+                                data=result_data,
+                                error=None,
+                                step_timings=step_timings,
+                                query_plan=query_plan,
+                                read_duration_ms=read_duration_ms,
+                                write_duration_ms=write_duration_ms,
+                                collect_duration_ms=collect_duration_ms,
+                            )
                         )
-                    elif isinstance(command, ExportCommand):
-                        result_data = PolarsComputeEngine._execute_export(
-                            datasource_config,
-                            steps,
-                            command.output_path,
-                            command.export_format,
-                            job_id,
-                            additional_datasources,
-                            progress_callback,
-                        )
-                    elif isinstance(command, SchemaCommand):
-                        result_data = PolarsComputeEngine._execute_schema(
-                            datasource_config,
-                            steps,
-                            job_id,
-                            additional_datasources,
-                            progress_callback,
-                        )
-                    elif isinstance(command, RowCountCommand):
-                        result_data = PolarsComputeEngine._execute_row_count(
-                            datasource_config,
-                            steps,
-                            job_id,
-                            additional_datasources,
-                            progress_callback,
-                        )
-                    else:
-                        raise ValueError(f'Unknown command type: {type(command).__name__}')
 
-                    read_duration_ms: float | None = None
-                    write_duration_ms: float | None = None
-                    if isinstance(result_data, dict):
-                        step_timings = result_data.pop('step_timings', step_timings)
-                        query_plan = result_data.pop('query_plan', query_plan)
-                        raw_read = result_data.pop('read_duration_ms', None)
-                        raw_write = result_data.pop('write_duration_ms', None)
-                        read_duration_ms = float(raw_read) if isinstance(raw_read, (int, float)) else None
-                        write_duration_ms = float(raw_write) if isinstance(raw_write, (int, float)) else None
-
-                    logger.debug(f'Job {job_id}: Completed successfully')
-                    result_queue.put(
-                        EngineResult(
-                            job_id=job_id,
-                            data=result_data,
-                            error=None,
-                            step_timings=step_timings,
-                            query_plan=query_plan,
-                            read_duration_ms=read_duration_ms,
-                            write_duration_ms=write_duration_ms,
+                    except Exception as e:
+                        error_kind, error_details = PolarsComputeEngine._classify_engine_error(e)
+                        if error_kind in {'pipeline_validation', 'datasource_metadata_missing', 'value_error'}:
+                            logger.info('Job %s failed (%s): %s', job_id, error_kind, e)
+                        else:
+                            logger.error(f'Job {job_id}: Failed with error: {e}', exc_info=True)
+                        result_queue.put(
+                            EngineResult(
+                                job_id=job_id,
+                                data=None,
+                                error=str(e),
+                                error_kind=error_kind,
+                                error_details=error_details,
+                            )
                         )
-                    )
 
                 except Exception as e:
-                    error_kind, error_details = PolarsComputeEngine._classify_engine_error(e)
-                    if error_kind in {'pipeline_validation', 'datasource_metadata_missing', 'value_error'}:
-                        logger.info('Job %s failed (%s): %s', job_id, error_kind, e)
-                    else:
-                        logger.error(f'Job {job_id}: Failed with error: {e}', exc_info=True)
+                    logger.error(f'Compute loop error: {e}', exc_info=True)
                     result_queue.put(
                         EngineResult(
-                            job_id=job_id,
+                            job_id=None,
                             data=None,
-                            error=str(e),
-                            error_kind=error_kind,
-                            error_details=error_details,
+                            error=f'Compute loop error: {e!s}',
+                            error_kind='compute_loop_error',
+                            error_details={},
                         )
                     )
-
-            except Exception as e:
-                logger.error(f'Compute loop error: {e}', exc_info=True)
-                result_queue.put(
-                    EngineResult(
-                        job_id=None,
-                        data=None,
-                        error=f'Compute loop error: {e!s}',
-                        error_kind='compute_loop_error',
-                        error_details={},
-                    )
-                )
+        finally:
+            for queue in (command_queue, result_queue, progress_queue):
+                with contextlib.suppress(Exception):
+                    queue.cancel_join_thread()
+                with contextlib.suppress(Exception):
+                    queue.close()
+                with contextlib.suppress(Exception):
+                    queue.join_thread()
 
     @staticmethod
     def build_pipeline(
@@ -817,7 +844,9 @@ class PolarsComputeEngine:
         preview_lf = normalize_timezones(preview_lf, schema_obj)
 
         # Collect only the rows we need for preview
+        collect_started = time.perf_counter()
         preview_df = preview_lf.slice(offset, row_limit).collect()
+        collect_duration_ms = (time.perf_counter() - collect_started) * 1000
 
         result: dict = {
             'schema': schema,
@@ -827,6 +856,7 @@ class PolarsComputeEngine:
             'query_plans': query_plans,
             'step_timings': step_timings,
             'read_duration_ms': read_duration_ms,
+            'collect_duration_ms': collect_duration_ms,
         }
 
         if metadata:
@@ -862,17 +892,18 @@ class PolarsComputeEngine:
                 }
             )
 
-        logger.debug(f'Job {job_id}: Writing export file')
-
-        # Collect full dataset and write to file
-        write_started = time.perf_counter()
-        df = lf.collect()
-        row_count = len(df)
-        schema = {col: str(dtype) for col, dtype in df.schema.items()}
-
         fmt = get_export_format(export_format)
-        fmt.writer(df, output_path)
+        schema = {col: str(dtype) for col, dtype in lf.collect_schema().items()}
+
+        if progress_callback is not None:
+            progress_callback({'type': 'compute_start'})
+
+        write_started = time.perf_counter()
+        row_count = fmt.write(lf, output_path)
         write_duration_ms = (time.perf_counter() - write_started) * 1000
+
+        if progress_callback is not None:
+            progress_callback({'type': 'compute_complete', 'duration_ms': write_duration_ms})
 
         return {
             'output_path': output_path,
@@ -953,7 +984,9 @@ class PolarsComputeEngine:
                 }
             )
 
+        collect_started = time.perf_counter()
         row_count = lf.select(pl.len()).collect().item()
+        collect_duration_ms = (time.perf_counter() - collect_started) * 1000
 
         return {
             'row_count': int(row_count),
@@ -961,6 +994,7 @@ class PolarsComputeEngine:
             'query_plan': query_plan,
             'query_plans': query_plans,
             'read_duration_ms': read_duration_ms,
+            'collect_duration_ms': collect_duration_ms,
         }
 
     @staticmethod

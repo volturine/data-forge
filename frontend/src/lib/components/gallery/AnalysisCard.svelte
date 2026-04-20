@@ -138,7 +138,6 @@
 					border: 'none',
 					backgroundColor: 'transparent',
 					padding: '1',
-					color: 'fg.muted',
 					cursor: 'pointer',
 					_hover: { color: 'fg.error' },
 					_focusVisible: {

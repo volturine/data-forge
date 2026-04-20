@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from core.error_handlers import handle_errors
 from core.namespace import get_namespace
@@ -37,14 +37,18 @@ HEARTBEAT_INTERVAL = 15
 class CreateSessionRequest(BaseModel):
     """Request body to create a chat session."""
 
-    provider: str = 'openrouter'
+    model_config = ConfigDict(extra='forbid')
+
+    provider: str
     model: str
-    api_key: str = ''
-    system_prompt: str = ''
+    api_key: str | None = None
+    system_prompt: str | None = None
 
 
 class UpdateSessionRequest(BaseModel):
     """Request body to update session settings."""
+
+    model_config = ConfigDict(extra='forbid')
 
     provider: str | None = None
     model: str | None = None
@@ -55,6 +59,8 @@ class UpdateSessionRequest(BaseModel):
 class MessageRequest(BaseModel):
     """Request body to send a message."""
 
+    model_config = ConfigDict(extra='forbid')
+
     session_id: str
     content: str
     tool_ids: list[str] = []
@@ -63,30 +69,12 @@ class MessageRequest(BaseModel):
 class ChatModelsRequest(BaseModel):
     """Request body to list chat models."""
 
-    provider: str = 'openrouter'
-    api_key: str = ''
+    model_config = ConfigDict(extra='forbid')
+
+    provider: str
+    api_key: str | None = None
     endpoint_url: str | None = None
     organization_id: str | None = None
-
-
-def _resolve_api_key(provider: str, session_key: str) -> str:
-    """Return session key if set, otherwise fall back to provider defaults."""
-    if session_key:
-        return session_key
-    normalized = provider.strip().lower()
-    if normalized == 'openrouter':
-        from modules.settings.service import get_resolved_openrouter_key
-
-        return get_resolved_openrouter_key()
-    if normalized == 'openai':
-        from modules.settings.service import get_resolved_openai_settings
-
-        return get_resolved_openai_settings()['api_key']
-    if normalized in {'huggingface', 'huggingface-api'}:
-        from modules.settings.service import get_resolved_huggingface_settings
-
-        return get_resolved_huggingface_settings()['api_token']
-    return ''
 
 
 def _infer_patch(tool_id: str, method: str, path: str, result: dict) -> dict | None:
@@ -288,7 +276,7 @@ async def _run_agent_turn(
     from modules.mcp.routes import get_registry
 
     provider_name = session.provider.strip().lower()
-    api_key = _resolve_api_key(provider_name, session.api_key)
+    api_key = session.api_key
     if provider_name in {'openrouter', 'huggingface', 'huggingface-api'} and not api_key:
         session.push_event({'type': 'error', 'content': 'No API key configured'})
         session.push_event({'type': 'done'})
@@ -496,7 +484,7 @@ def list_sessions(user: User = Depends(get_current_user)) -> list[dict]:
 def create_session(body: CreateSessionRequest, user: User = Depends(get_current_user)) -> dict:
     """Create a new chat session with the given provider/model/key."""
     del user
-    session = session_store.create(body.provider, body.model, body.api_key, body.system_prompt)
+    session = session_store.create(body.provider, body.model, body.api_key or '', body.system_prompt or '')
     return {'session_id': session.id, 'model': session.model, 'provider': session.provider}
 
 
@@ -651,14 +639,17 @@ def delete_session(session_id: str, user: User = Depends(get_current_user)) -> d
 async def get_models(body: ChatModelsRequest, user: User = Depends(get_current_user)) -> list[dict]:
     """List models available for a chat provider."""
     del user
-    key = _resolve_api_key(body.provider, body.api_key)
+    provider = body.provider.strip().lower()
+    key = body.api_key
     try:
-        if body.provider == 'openrouter':
+        if provider in {'openrouter', 'huggingface', 'huggingface-api'} and not key:
+            raise HTTPException(status_code=400, detail='API key is required')
+        if provider == 'openrouter':
             if not key:
-                raise HTTPException(status_code=400, detail='No API key configured')
+                raise HTTPException(status_code=400, detail='API key is required')
             return await list_models(key)
         client = get_ai_client(
-            body.provider,
+            provider,
             endpoint_url=body.endpoint_url,
             api_key=key or None,
             organization_id=body.organization_id,

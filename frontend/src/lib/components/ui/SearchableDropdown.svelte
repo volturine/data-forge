@@ -2,7 +2,7 @@
 	import { Debounced } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { ChevronDown } from 'lucide-svelte';
-	import { css, cx, emptyText, input } from '$lib/styles/panda';
+	import { css, emptyText, input } from '$lib/styles/panda';
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
@@ -258,7 +258,7 @@
 	{:else}
 		<button
 			type="button"
-			class={cx(
+			class={[
 				css({
 					display: 'flex',
 					alignItems: 'center',
@@ -276,7 +276,7 @@
 					}
 				}),
 				triggerClass
-			)}
+			]}
 			onclick={openMenu}
 			aria-expanded={menuOpen}
 			use:setTriggerRef={undefined}
@@ -332,7 +332,7 @@
 	{/if}
 	{#if menuOpen}
 		<div
-			class={cx(
+			class={[
 				css({
 					position: 'absolute',
 					zIndex: 'dropdown',
@@ -348,7 +348,7 @@
 					gap: '2'
 				}),
 				menuClass
-			)}
+			]}
 			role="listbox"
 			aria-multiselectable={mode === 'multi'}
 			aria-label={listAriaLabel}
@@ -385,11 +385,9 @@
 							flex: '1',
 							cursor: 'pointer',
 							borderWidth: '1',
-							backgroundColor: 'transparent',
 							paddingX: '2',
 							paddingY: '1',
 							fontSize: 'xs',
-							color: 'fg.secondary',
 							_hover: {
 								backgroundColor: 'bg.hover',
 								color: 'accent.secondary'
@@ -408,11 +406,9 @@
 							flex: '1',
 							cursor: 'pointer',
 							borderWidth: '1',
-							backgroundColor: 'transparent',
 							paddingX: '2',
 							paddingY: '1',
 							fontSize: 'xs',
-							color: 'fg.secondary',
 							_hover: {
 								backgroundColor: 'bg.hover',
 								color: 'accent.secondary'
@@ -483,23 +479,19 @@
 
 {#if showSelectedList && mode === 'multi' && Array.isArray(value) && value.length > 0}
 	<div
-		class={cx(
-			css({
-				maxWidth: '100%',
-				overflowWrap: 'anywhere',
-				wordBreak: 'break-word',
-				whiteSpace: 'normal'
-			}),
-			css({ fontFamily: 'mono' }),
-			css({
-				marginTop: '2',
-				maxHeight: 'labelSm',
-				overflowY: 'auto',
-				borderWidth: '1',
-				padding: '2',
-				fontSize: 'xs'
-			})
-		)}
+		class={css({
+			maxWidth: '100%',
+			overflowWrap: 'anywhere',
+			wordBreak: 'break-word',
+			whiteSpace: 'normal',
+			fontFamily: 'mono',
+			marginTop: '2',
+			maxHeight: 'labelSm',
+			overflowY: 'auto',
+			borderWidth: '1',
+			padding: '2',
+			fontSize: 'xs'
+		})}
 	>
 		{value.join(', ')}
 	</div>

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, Plus } from 'lucide-svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, cx, menuItem } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface BranchOption {
 		id: string;
@@ -218,17 +218,25 @@
 	{@const option = payload.option as BranchOption}
 	<button
 		type="button"
-		class={cx(
-			menuItem(),
-			css({
-				display: 'flex',
-				alignItems: 'center',
-				gap: '2',
-				fontSize: 'sm',
-				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
-				...(payload.selected ? { backgroundColor: 'bg.hover' } : {})
-			})
-		)}
+		class={css({
+			border: 'none',
+			background: 'transparent',
+			color: 'fg.primary',
+			width: 'full',
+			paddingX: '3',
+			paddingY: '2',
+			textAlign: 'left',
+			cursor: 'pointer',
+			borderBottomWidth: '1',
+			_last: { borderBottomWidth: '0' },
+			_hover: { backgroundColor: 'bg.hover' },
+			display: 'flex',
+			alignItems: 'center',
+			gap: '2',
+			fontSize: 'sm',
+			'& span': { minWidth: '0', overflowWrap: 'anywhere' },
+			...(payload.selected ? { backgroundColor: 'bg.hover' } : {})
+		})}
 		onclick={payload.onSelect}
 		role="option"
 		aria-selected={payload.selected}

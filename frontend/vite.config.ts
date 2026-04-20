@@ -1,11 +1,14 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import http from 'node:http';
 
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
 const apiPort = parseInt(process.env.PORT || '8000', 10);
 const apiHost = process.env.VITE_BACKEND_HOST || '127.0.0.1';
 
-const abortCodes = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND']);
+const abortCodes = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EADDRNOTAVAIL']);
+
+const agent = new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 16 });
 
 export default defineConfig({
 	define: {
@@ -34,6 +37,7 @@ export default defineConfig({
 			'/api': {
 				target: `http://${apiHost}:${apiPort}`,
 				ws: true,
+				agent,
 				configure: (proxy) => {
 					proxy.on('error', (err, _req, res) => {
 						if (abortCodes.has((err as NodeJS.ErrnoException).code ?? '')) return;

@@ -1,12 +1,12 @@
 import { test, expect } from './fixtures.js';
 import {
-	createAnalysis,
 	createDatasource,
-	shutdownEngine as shutdownEngineViaApi,
-	spawnEngine as spawnEngineViaApi
+	createAnalysis,
+	shutdownEngine as shutdownEngineViaApi
 } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
-import { waitForAppShell, waitForSettingsForm } from './utils/readiness.js';
+import { waitForAppShell } from './utils/readiness.js';
+import { gotoAnalysisEditor } from './utils/analysis.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 
@@ -90,77 +90,65 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 });
 
-test.describe('Navigation – settings popup', () => {
-	test('settings popup opens and shows SMTP, Telegram, Debug sections', async ({ page }) => {
+test.describe('Navigation – profile access', () => {
+	test('profile link navigates to profile page', async ({ page }) => {
 		await page.goto('/');
 		await waitForAppShell(page);
-		await page.getByRole('button', { name: 'Settings' }).click();
+		await page.getByRole('link', { name: 'Profile' }).click();
 
-		const dialog = page.getByRole('dialog');
-		await expect(dialog).toBeVisible({ timeout: 5_000 });
-		await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
-		await waitForSettingsForm(dialog);
+		await page.waitForURL(/\/profile/, { timeout: 10_000 });
+		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
+		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
 
-		// Sections are collapsed by default; assert toggles first, then expand SMTP
-		// before checking its contents.
-		await expect(dialog.getByText('SMTP', { exact: true })).toBeVisible();
-		await expect(dialog.getByText('Telegram', { exact: true })).toBeVisible();
-		await expect(dialog.getByText('Debug', { exact: true })).toBeVisible();
-
-		await dialog.getByRole('button', { name: 'SMTP' }).click();
-		await expect(dialog.locator('#smtp-host')).toBeVisible();
-		await expect(dialog.locator('#smtp-port')).toBeVisible();
-
-		await screenshot(page, 'navigation', 'settings-popup-open');
-	});
-
-	test('settings save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
-		await page.getByRole('button', { name: 'Settings' }).click();
-
-		const dialog = page.getByRole('dialog');
-		await waitForSettingsForm(dialog);
-
-		const saveBtn = dialog.getByRole('button', { name: 'Save' });
-		await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
-		await saveBtn.click();
-		await expect(dialog.getByText('Settings saved')).toBeVisible({ timeout: 5_000 });
-
-		await screenshot(page, 'navigation', 'settings-save-success');
+		await screenshot(page, 'navigation', 'profile-via-sidebar');
 	});
 });
 
 test.describe('Navigation – engines live monitor', () => {
 	test('sidebar badge and engines popup update in real time', async ({ page, request }) => {
-		test.setTimeout(60_000);
+		test.setTimeout(120_000);
 		const dsName = `e2e-engines-ds-${uid()}`;
 		const analysisName = `E2E Engines ${uid()}`;
 		const datasourceId = await createDatasource(request, dsName);
 		const analysisId = await createAnalysis(request, analysisName, datasourceId);
 
 		try {
-			await page.goto('/');
-			await waitForAppShell(page);
+			// Start a build from the analysis editor — this spawns a compute engine
+			await gotoAnalysisEditor(page, analysisId);
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await buildBtn.click();
+			await expect(page.locator('[data-testid="output-build-preview-trigger"]')).toBeVisible({
+				timeout: 30_000
+			});
 
-			const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
+			// Engine badge should appear in the sidebar
 			const engineBadge = page.getByTestId('engine-monitor-count');
+			await expect(engineBadge).toBeVisible({ timeout: 15_000 });
 
-			await spawnEngineViaApi(request, analysisId);
-			await expect(engineBadge).toBeVisible({ timeout: 10_000 });
-
+			// Open engine popup and verify the engine is listed
+			const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
 			await engineButton.click();
 			const dialog = page.getByRole('dialog', { name: 'Engines' });
 			await expect(dialog).toBeVisible({ timeout: 5_000 });
-			await expect(dialog.getByText(analysisId, { exact: true })).toBeVisible({ timeout: 10_000 });
+			await expect(dialog.getByText(analysisId, { exact: true })).toBeVisible({
+				timeout: 10_000
+			});
 
+			// Shut down engine and verify it disappears (no UI path for shutdown — Tier 3 cleanup)
 			await shutdownEngineViaApi(request, analysisId);
-
 			await expect(dialog.getByText(analysisId, { exact: true })).not.toBeVisible({
 				timeout: 10_000
 			});
 		} finally {
-			await shutdownEngineViaApi(request, analysisId);
+			try {
+				await shutdownEngineViaApi(request, analysisId);
+			} catch {
+				// Engine may already be stopped or build may have finished — ignore cleanup errors
+			}
 			await deleteAnalysisViaUI(page, analysisName);
 			await deleteDatasourceViaUI(page, dsName);
 		}

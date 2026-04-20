@@ -3,7 +3,7 @@
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
-	import { css, cx, button } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		show: boolean;
@@ -97,7 +97,13 @@
 
 	<PanelFooter>
 		<button
-			class={cx(button({ variant: 'secondary' }), css({ smDown: { width: 'full' } }))}
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'transparent',
+				color: 'fg.primary',
+				smDown: { width: 'full' },
+				'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' }
+			})}
 			onclick={onCancel}
 			type="button"
 		>
@@ -105,7 +111,14 @@
 		</button>
 		<button
 			bind:this={confirmRef}
-			class={cx(button({ variant: 'danger' }), css({ smDown: { width: 'full' } }))}
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'bg.error',
+				color: 'fg.error',
+				borderColor: 'border.error',
+				smDown: { width: 'full' },
+				'&:hover:not(:disabled)': { opacity: '0.85' }
+			})}
 			onclick={onConfirm}
 			type="button"
 		>

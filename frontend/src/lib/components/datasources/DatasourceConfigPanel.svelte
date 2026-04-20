@@ -41,7 +41,7 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { formatDateDisplay } from '$lib/utils/datetime';
 	import { resolveColumnType } from '$lib/utils/column-types';
-	import { css, cx, button, input, label, tabButton, chip, emptyText } from '$lib/styles/panda';
+	import { css, input, tabButton, chip, emptyText } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource;
@@ -681,7 +681,15 @@
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
 					<label
 						for="datasource-name-{datasource.id}"
-						class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}>Name</label
+						class={css({
+							display: 'block',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '1.5'
+						})}>Name</label
 					>
 					<input
 						id="datasource-name-{datasource.id}"
@@ -961,10 +969,15 @@
 					})}
 				>
 					<button
-						class={cx(
-							button({ variant: 'secondary' }),
-							css({ display: 'flex', alignItems: 'center', gap: '2' })
-						)}
+						class={css({
+							borderWidth: '1',
+							backgroundColor: 'transparent',
+							color: 'fg.primary',
+							'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.secondary' },
+							display: 'flex',
+							alignItems: 'center',
+							gap: '2'
+						})}
 						onclick={handleRefresh}
 						disabled={isRefreshing || updateMutation.isPending}
 					>
@@ -978,10 +991,15 @@
 					</button>
 					{#if hasChanges}
 						<button
-							class={cx(
-								button({ variant: 'primary' }),
-								css({ display: 'flex', alignItems: 'center', gap: '2' })
-							)}
+							class={css({
+								borderWidth: '1',
+								backgroundColor: 'accent.primary',
+								color: 'fg.inverse',
+								'&:hover:not(:disabled)': { opacity: '0.9' },
+								display: 'flex',
+								alignItems: 'center',
+								gap: '2'
+							})}
 							onclick={handleSave}
 							disabled={updateMutation.isPending}
 						>
@@ -1079,8 +1097,8 @@
 						{#each columns as column, index (index)}
 							<button
 								type="button"
-								class={cx(
-									css({
+								class={css(
+									{
 										display: 'grid',
 										gridTemplateColumns: '24px 1fr 140px',
 										alignItems: 'center',
@@ -1093,12 +1111,8 @@
 										backgroundColor: 'transparent',
 										width: '100%',
 										textAlign: 'left'
-									}),
-									index > 0
-										? css({
-												borderTopWidth: '1'
-											})
-										: ''
+									},
+									index > 0 && { borderTopWidth: '1' }
 								)}
 								data-schema-column={column.name}
 								onclick={() => {
@@ -1132,7 +1146,15 @@
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 						<label
 							for="csv-delimiter-{datasource.id}"
-							class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}>Delimiter</label
+							class={css({
+								display: 'block',
+								fontSize: 'xs',
+								fontWeight: 'medium',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '1.5'
+							})}>Delimiter</label
 						>
 						<select
 							id="csv-delimiter-{datasource.id}"
@@ -1151,7 +1173,15 @@
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 						<label
 							for="csv-quote-{datasource.id}"
-							class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}>Quote</label
+							class={css({
+								display: 'block',
+								fontSize: 'xs',
+								fontWeight: 'medium',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '1.5'
+							})}>Quote</label
 						>
 						<select
 							id="csv-quote-{datasource.id}"
@@ -1168,7 +1198,15 @@
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 						<label
 							for="csv-encoding-{datasource.id}"
-							class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}>Encoding</label
+							class={css({
+								display: 'block',
+								fontSize: 'xs',
+								fontWeight: 'medium',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '1.5'
+							})}>Encoding</label
 						>
 						<select
 							id="csv-encoding-{datasource.id}"
@@ -1186,7 +1224,15 @@
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1.5' })}>
 						<label
 							for="csv-skip-rows-{datasource.id}"
-							class={cx(label({ variant: 'field' }), css({ fontSize: 'xs' }))}>Skip Rows</label
+							class={css({
+								display: 'block',
+								fontSize: 'xs',
+								fontWeight: 'medium',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '1.5'
+							})}>Skip Rows</label
 						>
 						<input
 							id="csv-skip-rows-{datasource.id}"
@@ -1210,22 +1256,31 @@
 					/>
 					<label
 						for="csv-header-{datasource.id}"
-						class={cx(label({ variant: 'field' }), css({ margin: '0' }))}>First row is header</label
+						class={css({
+							display: 'block',
+							fontSize: 'sm',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							margin: '0'
+						})}>First row is header</label
 					>
 				</div>
 
 				{#if hasChanges}
 					<button
-						class={cx(
-							button({ variant: 'primary' }),
-							css({
-								display: 'flex',
-								alignItems: 'center',
-								width: '100%',
-								justifyContent: 'center',
-								gap: '2'
-							})
-						)}
+						class={css({
+							borderWidth: '1',
+							backgroundColor: 'accent.primary',
+							color: 'fg.inverse',
+							'&:hover:not(:disabled)': { opacity: '0.9' },
+							display: 'flex',
+							alignItems: 'center',
+							width: '100%',
+							justifyContent: 'center',
+							gap: '2'
+						})}
 						onclick={handleSave}
 						disabled={updateMutation.isPending}
 					>
@@ -1251,16 +1306,17 @@
 				/>
 				{#if hasChanges}
 					<button
-						class={cx(
-							button({ variant: 'primary' }),
-							css({
-								display: 'flex',
-								alignItems: 'center',
-								width: '100%',
-								justifyContent: 'center',
-								gap: '2'
-							})
-						)}
+						class={css({
+							borderWidth: '1',
+							backgroundColor: 'accent.primary',
+							color: 'fg.inverse',
+							'&:hover:not(:disabled)': { opacity: '0.9' },
+							display: 'flex',
+							alignItems: 'center',
+							width: '100%',
+							justifyContent: 'center',
+							gap: '2'
+						})}
 						onclick={handleSave}
 						disabled={updateMutation.isPending}
 					>
@@ -1282,14 +1338,17 @@
 		{:else if activeTab === 'runs'}
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
 				<button
-					class={cx(
-						button({ variant: 'ghost', size: 'sm' }),
-						css({
-							borderWidth: '1',
-							fontSize: 'xs',
-							width: 'fit-content'
-						})
-					)}
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'transparent',
+						color: 'fg.secondary',
+						borderColor: 'transparent',
+						fontSize: 'xs',
+						paddingX: '2',
+						paddingY: '1',
+						width: 'fit-content',
+						'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					})}
 					onclick={() => (showPreviews = !showPreviews)}
 					aria-pressed={showPreviews}
 				>
@@ -1366,20 +1425,16 @@
 						{#each filteredRuns as run, index (run.id)}
 							{@const dsTag = getDatasourceTag(run)}
 							<div
-								class={cx(
-									css({
+								class={css(
+									{
 										display: 'grid',
 										gridTemplateColumns: '1fr 80px 80px 100px',
 										alignItems: 'center',
 										columnGap: '2',
 										paddingX: '3',
 										paddingY: '2'
-									}),
-									index > 0
-										? css({
-												borderTopWidth: '1'
-											})
-										: ''
+									},
+									index > 0 && { borderTopWidth: '1' }
 								)}
 							>
 								<div

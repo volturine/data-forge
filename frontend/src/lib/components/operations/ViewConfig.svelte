@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { css, cx, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, input, stepConfig } from '$lib/styles/panda';
 
 	interface ViewConfigData {
 		rowLimit: number;
@@ -24,7 +24,20 @@
 			border: 'none'
 		})}
 	>
-		<label for="row-limit" class={cx(label({ variant: 'wrapper' }), css({ gap: '3' }))}>
+		<label
+			for="row-limit"
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				gap: '3',
+				fontSize: 'xs2',
+				fontWeight: 'semibold',
+				color: 'fg.muted',
+				marginBottom: '0',
+				textTransform: 'none',
+				letterSpacing: 'normal'
+			})}
+		>
 			Preview Rows
 			<input
 				id="row-limit"

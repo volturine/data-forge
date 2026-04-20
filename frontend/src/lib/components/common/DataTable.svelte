@@ -23,7 +23,7 @@
 	} from 'lucide-svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
-	import { css, cx, menuItem, input } from '$lib/styles/panda';
+	import { css, menuItem } from '$lib/styles/panda';
 	import type { TableCellValue } from '$lib/types/api-responses';
 	import { resolveColumnType } from '$lib/utils/column-types';
 	import { formatDateTimeDisplay, formatDateDisplay } from '$lib/utils/datetime';
@@ -478,9 +478,9 @@
 </script>
 
 <div
-	class={cx(
-		css({ position: 'relative', overflow: 'hidden', backgroundColor: 'bg.primary' }),
-		fillContainer && css({ height: '100%', display: 'flex', flexDirection: 'column' })
+	class={css(
+		{ position: 'relative', overflow: 'hidden', backgroundColor: 'bg.primary' },
+		fillContainer && { height: '100%', display: 'flex', flexDirection: 'column' }
 	)}
 >
 	{#if showHeader}
@@ -532,10 +532,24 @@
 			{/if}
 			<input
 				type="text"
-				class={cx(
-					input(),
-					css({ paddingX: '2', paddingY: '1', fontSize: 'xs', marginLeft: 'auto', width: 'list' })
-				)}
+				class={css({
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' },
+					paddingX: '2',
+					paddingY: '1',
+					fontSize: 'xs',
+					marginLeft: 'auto',
+					width: 'list'
+				})}
 				id="dt-col-search"
 				aria-label="Filter columns"
 				placeholder="Filter columns"
@@ -618,9 +632,9 @@
 		{/if}
 	{:else if headerGroups.length > 0}
 		<div
-			class={cx(
-				css({ overflowX: 'auto', overflowY: 'auto', backgroundColor: 'bg.primary' }),
-				fillContainer && css({ flex: '1' })
+			class={css(
+				{ overflowX: 'auto', overflowY: 'auto', backgroundColor: 'bg.primary' },
+				fillContainer && { flex: '1' }
 			)}
 			bind:this={scrollRef}
 		>
@@ -650,8 +664,8 @@
 										? header.column.columnDef.header
 										: header.id}
 								<th
-									class={cx(
-										css({
+									class={css(
+										{
 											position: 'relative',
 											borderRightWidth: '1',
 											_last: { borderRight: 'none' },
@@ -659,14 +673,13 @@
 											textAlign: 'left',
 											fontWeight: 'semibold',
 											borderBottomWidth: '1'
-										}),
-										dragOver === header.id &&
-											css({
-												outlineWidth: '2',
-												outlineStyle: 'dashed',
-												outlineColor: 'border.primary'
-											}),
-										dragColumn === header.id && css({ opacity: '0.6' })
+										},
+										dragOver === header.id && {
+											outlineWidth: '2',
+											outlineStyle: 'dashed',
+											outlineColor: 'border.primary'
+										},
+										dragColumn === header.id && { opacity: '0.6' }
 									)}
 									data-column-header
 									data-column-id={header.id}
@@ -803,8 +816,8 @@
 									</div>
 									{#if enableResize}
 										<button
-											class={cx(
-												css({
+											class={css(
+												{
 													position: 'absolute',
 													top: '0',
 													right: '-3px',
@@ -823,8 +836,8 @@
 														background: 'accent.primary'
 													},
 													_hover: { _after: { opacity: '1' } }
-												}),
-												header.column.getIsResizing() && css({ _after: { opacity: '1' } })
+												},
+												header.column.getIsResizing() && { _after: { opacity: '1' } }
 											)}
 											onmousedown={header.getResizeHandler()}
 											ontouchstart={header.getResizeHandler()}
@@ -907,7 +920,7 @@
 									})}
 								>
 									<div
-										class={cx(
+										class={[
 											'group',
 											css({
 												position: 'relative',
@@ -929,7 +942,7 @@
 													paddingBottom: '2'
 												}),
 											isListType(getColumnType(cell.column.id)) && css({ fontSize: 'xs' })
-										)}
+										]}
 										role="presentation"
 										onmouseenter={(event) => tipShow(event, cell.id, display)}
 										onmouseleave={() => tipHide(cell.id)}

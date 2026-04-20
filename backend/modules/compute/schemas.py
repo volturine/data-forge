@@ -70,6 +70,7 @@ class AnalysisPipelineDatasource(BaseModel):
 
     id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     analysis_tab_id: str | None
+    source_type: str | None = None
     config: AnalysisPipelineDatasourceConfig
 
 
@@ -104,7 +105,6 @@ class AnalysisPipelinePayload(BaseModel):
 
     analysis_id: str
     tabs: list[AnalysisPipelineTab]
-    sources: dict[str, dict]
 
     @field_validator('tabs')
     @classmethod
@@ -345,6 +345,7 @@ class ActiveBuildStatus(StrEnum):
     RUNNING = 'running'
     COMPLETED = 'completed'
     FAILED = 'failed'
+    CANCELLED = 'cancelled'
 
 
 class BuildStepState(StrEnum):
@@ -449,7 +450,10 @@ class ActiveBuildSummary(BaseModel):
     current_tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
+    current_engine_run_id: str | None = None
     total_tabs: int = 0
+    cancelled_at: datetime | None = None
+    cancelled_by: str | None = None
 
 
 class ActiveBuildDetail(ActiveBuildSummary):
@@ -463,6 +467,13 @@ class ActiveBuildDetail(ActiveBuildSummary):
     error: str | None = None
 
 
+class ActiveBuildListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    builds: list[ActiveBuildSummary]
+    total: int
+
+
 class BuildEventType(StrEnum):
     PLAN = 'plan'
     STEP_START = 'step_start'
@@ -473,6 +484,7 @@ class BuildEventType(StrEnum):
     LOG = 'log'
     COMPLETE = 'complete'
     FAILED = 'failed'
+    CANCELLED = 'cancelled'
 
 
 class BuildStreamEvent(BaseModel):
@@ -488,6 +500,7 @@ class BuildStreamEvent(BaseModel):
     tab_name: str | None = None
     current_output_id: str | None = None
     current_output_name: str | None = None
+    engine_run_id: str | None = None
 
 
 class BuildPlanEvent(BuildStreamEvent):
@@ -575,6 +588,26 @@ class BuildFailedEvent(BuildStreamEvent):
     results: list[BuildTabResult]
     duration_ms: int
     error: str | None = None
+
+
+class BuildCancelledEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.CANCELLED] = BuildEventType.CANCELLED
+    progress: float
+    elapsed_ms: int
+    total_steps: int
+    tabs_built: int
+    results: list[BuildTabResult]
+    duration_ms: int
+    cancelled_at: datetime
+    cancelled_by: str | None = None
+
+
+class CancelBuildResponse(BaseModel):
+    id: str
+    status: Literal['cancelled'] = 'cancelled'
+    duration_ms: int | None = None
+    cancelled_at: datetime
+    cancelled_by: str | None = None
 
 
 class BuildSnapshotMessage(BaseModel):

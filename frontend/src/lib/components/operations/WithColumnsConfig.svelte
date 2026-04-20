@@ -13,7 +13,7 @@
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import { Pencil, X } from 'lucide-svelte';
-	import { css, button, emptyText, input, label, stepConfig, cx } from '$lib/styles/panda';
+	import { css, button, emptyText, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface WithColumnsExpr {
 		name: string;
@@ -318,20 +318,44 @@
 					</div>
 					<textarea
 						id="wc-expr-code"
-						class={cx(
-							input(),
-							css({
-								resize: 'vertical',
-								minHeight: 'fieldSm',
-								fontSize: 'sm'
-							})
-						)}
+						class={css({
+							width: 'full',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							resize: 'vertical',
+							minHeight: 'fieldSm',
+							fontSize: 'sm'
+						})}
 						rows="5"
 						placeholder="def udf(*args):&#10;    return ..."
 						bind:value={exprCode}
 						oninput={() => (codeEdited = true)}
 					></textarea>
-					<label class={cx(label({ variant: 'inline' }), css({ marginTop: '2' }))}>
+					<label
+						class={css({
+							display: 'inline-flex',
+							alignItems: 'center',
+							gap: '2',
+							fontSize: 'sm',
+							fontWeight: 'normal',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '0',
+							marginTop: '2'
+						})}
+					>
 						<input id="wc-save-to-lib" type="checkbox" bind:checked={saveToLibrary} />
 						Save to UDF Library
 					</label>
@@ -485,13 +509,10 @@
 								display: 'inline-flex',
 								alignItems: 'center',
 								justifyContent: 'center',
-								backgroundColor: 'transparent',
 								cursor: 'pointer',
 								fontSize: 'md',
 								lineHeight: 'none',
-								color: 'fg.muted',
 								borderWidth: '1',
-								borderColor: 'border.transparent',
 								_hover: {
 									color: 'fg.error',
 									backgroundColor: 'bg.error',

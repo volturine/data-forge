@@ -7,7 +7,7 @@
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, menuItem, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface PickerOption {
 		id: string;
@@ -227,17 +227,25 @@
 	{@const option = payload.option as PickerOption}
 	<button
 		data-picker-option={option.label}
-		class={cx(
-			menuItem(),
-			css({
-				display: 'flex',
-				justifyContent: 'space-between',
-				fontFamily: 'mono',
-				fontSize: 'sm',
-				...(payload.selected ? { backgroundColor: 'bg.accent' } : {}),
-				...(option.id === highlightId ? { borderLeftWidth: '3', borderColor: 'border.accent' } : {})
-			})
-		)}
+		class={css({
+			border: 'none',
+			background: 'transparent',
+			color: 'fg.primary',
+			width: 'full',
+			paddingX: '3',
+			paddingY: '2',
+			textAlign: 'left',
+			cursor: 'pointer',
+			borderBottomWidth: '1',
+			_last: { borderBottomWidth: '0' },
+			_hover: { backgroundColor: 'bg.hover' },
+			display: 'flex',
+			justifyContent: 'space-between',
+			fontFamily: 'mono',
+			fontSize: 'sm',
+			...(payload.selected ? { backgroundColor: 'bg.accent' } : {}),
+			...(option.id === highlightId ? { borderLeftWidth: '3', borderColor: 'border.accent' } : {})
+		})}
 		onclick={payload.onSelect}
 		role="option"
 		aria-selected={payload.selected}

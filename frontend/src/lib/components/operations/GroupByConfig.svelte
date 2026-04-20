@@ -3,7 +3,7 @@
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, stepConfig, cx, label, input } from '$lib/styles/panda';
+	import { css, stepConfig, label } from '$lib/styles/panda';
 
 	const uid = $props.id();
 
@@ -132,7 +132,25 @@
 			<select
 				id="{uid}-agg-function"
 				data-testid="agg-function-select"
-				class={cx(input(), css({ flex: '1', minWidth: 'fieldMd' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm2',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3.5',
+					paddingY: '2.25',
+					flex: '1',
+					minWidth: 'fieldMd',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 				bind:value={newAggregation.function}
 			>
 				{#each aggregationFunctions as func (func)}
@@ -143,7 +161,25 @@
 			<input
 				id="{uid}-agg-alias"
 				type="text"
-				class={cx(input(), css({ flex: '2', minWidth: 'inputSm' }))}
+				class={css({
+					width: 'full',
+					fontSize: 'sm2',
+					color: 'fg.primary',
+					backgroundColor: 'bg.primary',
+					borderWidth: '1',
+					borderRadius: '0',
+					paddingX: '3.5',
+					paddingY: '2.25',
+					flex: '2',
+					minWidth: 'inputSm',
+					transitionProperty: 'border-color',
+					transitionDuration: '160ms',
+					transitionTimingFunction: 'ease',
+					_focus: { outline: 'none' },
+					_focusVisible: { borderColor: 'border.accent' },
+					_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+					_placeholder: { color: 'fg.muted' }
+				})}
 				bind:value={newAggregation.alias}
 				placeholder="Alias (optional)"
 			/>
@@ -153,12 +189,9 @@
 				data-testid="agg-add-button"
 				type="button"
 				class={css({
-					backgroundColor: 'accent.primary',
-					color: 'fg.inverse',
 					borderWidth: '1',
 					paddingX: '4',
 					paddingY: '2',
-					cursor: 'pointer',
 					_hover: { opacity: '0.9' },
 					_disabled: {
 						backgroundColor: 'bg.muted',

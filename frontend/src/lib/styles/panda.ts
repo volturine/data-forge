@@ -1,6 +1,6 @@
-import { css, cx } from '../../../styled-system/css';
+import { css } from '../../../styled-system/css';
 
-export { css, cx };
+export { css };
 export {
 	iconButton,
 	button,

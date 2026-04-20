@@ -7,12 +7,15 @@
 	} from '$lib/types/analysis';
 	import type { Subscriber } from '$lib/api/settings';
 	import { getSubscribers } from '$lib/api/settings';
+	import { cancelBuild } from '$lib/api/compute';
+	import { apiRequest } from '$lib/api/client';
 	import { listDatasources, updateDatasource } from '$lib/api/datasource';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
-	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
+	import type { BuildStreamStore } from '$lib/stores/build-stream.svelte';
+	import type { ActiveBuildDetail } from '$lib/types/build-stream';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import { isUuid } from '$lib/utils/analysis-tab';
 	import ScheduleManager from '$lib/components/common/ScheduleManager.svelte';
@@ -21,8 +24,9 @@
 	import { overlayStack } from '$lib/stores/overlay.svelte';
 	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import BuildPreview from '$lib/components/common/BuildPreview.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { css, cx, chip, input, label } from '$lib/styles/panda';
+	import { css, chip } from '$lib/styles/panda';
 	import {
 		Bell,
 		CalendarClock,
@@ -42,16 +46,22 @@
 	import { SvelteMap } from 'svelte/reactivity';
 
 	interface Props {
+		buildStore: BuildStreamStore;
 		analysisId?: string;
 		datasourceId?: string;
 		activeTab?: AnalysisTab | null;
 		readOnly?: boolean;
 	}
 
-	let { analysisId, datasourceId, activeTab = null, readOnly = false }: Props = $props();
+	let {
+		buildStore,
+		analysisId,
+		datasourceId,
+		activeTab = null,
+		readOnly = false
+	}: Props = $props();
 
 	const queryClient = useQueryClient();
-	const buildStore = new BuildStreamStore();
 	const analysisPipeline = $derived.by(() => {
 		if (!analysisId) return null;
 		return buildAnalysisPipelinePayload(
@@ -64,6 +74,9 @@
 	let buildStarting = $state(false);
 	let previewOpen = $state(false);
 	let error = $state<string | null>(null);
+	let cancelConfirmOpen = $state(false);
+	let cancelPending = $state(false);
+	let cancelToast = $state<string | null>(null);
 	let notifyOpen = $state(false);
 	let scheduleOpen = $state(false);
 	let healthOpen = $state(false);
@@ -73,33 +86,41 @@
 	let modeMenuOpen = $state(false);
 	let modeMenuRef = $state<HTMLElement>();
 	let modeTriggerRef = $state<HTMLButtonElement>();
+	let cancelToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const outputConfig = $derived.by(() => {
 		const tab = activeTab;
-		const output = tab?.output ?? null;
-		const icebergRaw = output?.iceberg;
-		const defaultName = tab?.name ? tab.name.trim() : 'export';
-		const tableName =
-			icebergRaw?.table_name || defaultName.replace(/\s+/g, '_').toLowerCase() || 'export';
-		const branch =
-			typeof icebergRaw?.branch === 'string'
-				? icebergRaw.branch
-				: (tab?.datasource?.config?.branch ?? '');
-		const namespace = icebergRaw?.namespace || 'outputs';
+		if (!tab) return null;
+		const output = tab.output;
+		const icebergRaw = output.iceberg;
+		if (!icebergRaw) return null;
+		if (
+			typeof output.filename !== 'string' ||
+			!output.filename ||
+			typeof output.build_mode !== 'string' ||
+			typeof icebergRaw.namespace !== 'string' ||
+			!icebergRaw.namespace ||
+			typeof icebergRaw.table_name !== 'string' ||
+			!icebergRaw.table_name ||
+			typeof icebergRaw.branch !== 'string' ||
+			!icebergRaw.branch
+		) {
+			return null;
+		}
 		return {
 			format: 'parquet',
-			filename: output?.filename || tableName,
-			build_mode: output?.build_mode || 'full',
+			filename: output.filename,
+			build_mode: output.build_mode,
 			iceberg: {
-				namespace,
-				table_name: tableName,
-				branch
+				namespace: icebergRaw.namespace,
+				table_name: icebergRaw.table_name,
+				branch: icebergRaw.branch
 			},
-			notification: output?.notification ?? null
+			notification: output.notification ?? null
 		};
 	});
 
-	const branchValue = $derived(outputConfig.iceberg.branch);
+	const branchValue = $derived(outputConfig?.iceberg.branch ?? '');
 	function extractBranches(config: Record<string, unknown> | null | undefined): string[] {
 		const raw = config?.branches;
 		if (!Array.isArray(raw)) return [];
@@ -116,28 +137,7 @@
 
 	const outputDatasourceId = $derived(activeTab?.output?.result_id ?? null);
 	const outputDefaults = $derived.by(() => {
-		const tab = activeTab;
-		if (!tab) return null;
-		const output = tab.output;
-		const icebergRaw = output?.iceberg;
-		const defaultName = tab.name ? tab.name.trim() : 'export';
-		const tableName =
-			icebergRaw?.table_name || defaultName.replace(/\s+/g, '_').toLowerCase() || 'export';
-		const namespace = icebergRaw?.namespace || 'outputs';
-		const branch =
-			typeof icebergRaw?.branch === 'string'
-				? icebergRaw.branch
-				: (tab.datasource.config.branch ?? '');
-		return {
-			format: 'parquet',
-			filename: output?.filename || tableName,
-			build_mode: output?.build_mode || 'full',
-			iceberg: {
-				namespace,
-				table_name: tableName,
-				branch
-			}
-		};
+		return outputConfig;
 	});
 	const canQueryOutput = $derived(isUuid(outputDatasourceId));
 	const shouldQueryOutputDatasource = $derived(
@@ -226,7 +226,7 @@
 	}));
 
 	const notifyConfig = $derived.by(() => {
-		const n = outputConfig.notification;
+		const n = outputConfig?.notification;
 		if (!n) {
 			return {
 				enabled: false,
@@ -254,12 +254,18 @@
 		buildBusy ||
 			buildStore.buildId !== null ||
 			buildStore.status === 'completed' ||
-			buildStore.status === 'failed'
+			buildStore.status === 'failed' ||
+			buildStore.status === 'cancelled'
+	);
+	const canCancelRunningBuild = $derived(
+		(buildStore.status === 'connecting' || buildStore.status === 'running') &&
+			!!buildStore.engineRunId
 	);
 	const buildSessionLabel = $derived.by(() => {
 		if (buildBusy) return 'Engine Run';
 		if (buildStore.status === 'completed') return 'Last Build';
 		if (buildStore.status === 'failed') return 'Last Build';
+		if (buildStore.status === 'cancelled') return 'Last Build';
 		return 'Build';
 	});
 	const buildSessionSummary = $derived.by(() => {
@@ -273,12 +279,28 @@
 		if (buildStore.status === 'failed') {
 			return buildStore.error ?? 'Build failed';
 		}
+		if (buildStore.status === 'cancelled') {
+			return buildStore.error ?? 'Build cancelled';
+		}
 		return 'No build data';
 	});
 
 	function openBuildPreview(): void {
 		if (!hasBuildSession) return;
 		previewOpen = true;
+		if (
+			(buildStore.status !== 'connecting' && buildStore.status !== 'running') ||
+			!buildStore.buildId
+		)
+			return;
+		void apiRequest<ActiveBuildDetail>(`/v1/compute/builds/active/${buildStore.buildId}`).match(
+			(build: ActiveBuildDetail) => {
+				buildStore.applySnapshot(build);
+			},
+			(err) => {
+				error = err.message;
+			}
+		);
 	}
 
 	function updateOutputConfig(patch: Partial<AnalysisTabOutput>) {
@@ -286,14 +308,7 @@
 		const tab = activeTab;
 		if (!tab) return;
 		const currentOutput = tab.output;
-		const fallback = outputDefaults ?? {
-			result_id: tab.output.result_id,
-			format: 'parquet',
-			filename: 'export',
-			build_mode: 'full',
-			iceberg: { namespace: 'outputs', table_name: 'export', branch: '' }
-		};
-		const nextOutput: AnalysisTabOutput = { ...fallback, ...currentOutput, ...patch };
+		const nextOutput: AnalysisTabOutput = { ...currentOutput, ...patch };
 		analysisStore.updateTab(tab.id, {
 			output: nextOutput
 		});
@@ -301,7 +316,8 @@
 
 	function updateIcebergConfig(patch: Partial<AnalysisTabIcebergConfig>) {
 		if (readOnly) return;
-		const current = outputConfig.iceberg ?? {};
+		if (!outputConfig) return;
+		const current = outputConfig.iceberg;
 		updateOutputConfig({ iceberg: { ...current, ...patch } });
 	}
 
@@ -320,6 +336,7 @@
 
 	function startNameEdit() {
 		if (readOnly) return;
+		if (!outputConfig) return;
 		draftName = outputConfig.iceberg.table_name;
 		editingName = true;
 	}
@@ -367,6 +384,7 @@
 
 	function updateNotification(patch: Partial<AnalysisTabNotificationConfig>) {
 		if (readOnly) return;
+		if (!outputConfig) return;
 		const current = outputConfig.notification ?? {};
 		updateOutputConfig({ notification: { ...current, ...patch } });
 	}
@@ -418,6 +436,12 @@
 			buildStarting = false;
 			return;
 		}
+		if (!outputConfig) {
+			error =
+				'Output configuration is incomplete. Fill in explicit output settings before building.';
+			buildStarting = false;
+			return;
+		}
 		buildStore.start({
 			analysis_pipeline: pipeline,
 			tab_id: activeTab?.id ?? null
@@ -429,6 +453,45 @@
 		previewOpen = false;
 	}
 
+	function openCancelConfirm(): void {
+		if (cancelPending || !canCancelRunningBuild) return;
+		cancelConfirmOpen = true;
+	}
+
+	function closeCancelConfirm(): void {
+		if (cancelPending) return;
+		cancelConfirmOpen = false;
+	}
+
+	function showCancelToast(message: string): void {
+		cancelToast = message;
+		if (cancelToastTimer !== null) {
+			clearTimeout(cancelToastTimer);
+		}
+		cancelToastTimer = setTimeout(() => {
+			cancelToast = null;
+			cancelToastTimer = null;
+		}, 4000);
+	}
+
+	async function confirmCancelBuild(): Promise<void> {
+		const runId = buildStore.engineRunId;
+		if (!runId || cancelPending) return;
+		cancelPending = true;
+		error = null;
+		const result = await cancelBuild(runId);
+		result.match(
+			() => {
+				cancelConfirmOpen = false;
+				showCancelToast('Build cancelled');
+			},
+			(err) => {
+				error = err.message;
+			}
+		);
+		cancelPending = false;
+	}
+
 	const modeMenuOverlayConfig = $derived<OverlayConfig>({
 		onEscape: () => (modeMenuOpen = false),
 		onOutsideClick: (target: Node) => {
@@ -438,10 +501,12 @@
 		}
 	});
 
-	// Lifecycle: keep the build stream alive across modal toggles and close it when the node unmounts.
 	$effect(() => {
 		return () => {
-			buildStore.close();
+			if (cancelToastTimer !== null) {
+				clearTimeout(cancelToastTimer);
+				cancelToastTimer = null;
+			}
 		};
 	});
 </script>
@@ -497,274 +562,286 @@
 				</span>
 			</div>
 			<span
-				class={cx(
-					chip({ tone: 'neutral' }),
-					css({
-						borderWidth: '1',
-						letterSpacing: 'widest',
-						color: 'fg.faint'
-					})
-				)}>sink</span
+				class={css({
+					display: 'inline-flex',
+					alignItems: 'center',
+					paddingX: '1.5',
+					paddingY: '0.5',
+					fontSize: '2xs',
+					fontWeight: 'medium',
+					textTransform: 'uppercase',
+					letterSpacing: 'widest',
+					backgroundColor: 'bg.tertiary',
+					borderWidth: '1',
+					color: 'fg.faint'
+				})}>sink</span
 			>
 		</div>
 
-		<!-- Export Name (same info-row pattern as DatasourceNode tab name) -->
-		<div
-			class={css({
-				marginX: '4',
-				marginTop: '4',
-				marginBottom: '3',
-				display: 'flex',
-				alignItems: 'center',
-				justifyContent: 'space-between',
-				borderWidth: '1',
-				backgroundColor: 'bg.secondary',
-				paddingY: '2',
-				paddingX: '3'
-			})}
-		>
+		{#if outputConfig}
+			<!-- Export Name (same info-row pattern as DatasourceNode tab name) -->
 			<div
 				class={css({
+					marginX: '4',
+					marginTop: '4',
+					marginBottom: '3',
 					display: 'flex',
 					alignItems: 'center',
-					gap: '2',
-					fontSize: '2xs',
-					textTransform: 'uppercase',
-					letterSpacing: 'widest',
-					color: 'fg.faint'
+					justifyContent: 'space-between',
+					borderWidth: '1',
+					backgroundColor: 'bg.secondary',
+					paddingY: '2',
+					paddingX: '3'
 				})}
 			>
-				<Pencil size={11} class={css({ opacity: '0.5' })} />
-				<span>Table name</span>
-			</div>
-			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
-				{#if editingName}
-					<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
-						<input
-							class={cx(
-								input(),
-								css({
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						fontSize: '2xs',
+						textTransform: 'uppercase',
+						letterSpacing: 'widest',
+						color: 'fg.faint'
+					})}
+				>
+					<Pencil size={11} class={css({ opacity: '0.5' })} />
+					<span>Table name</span>
+				</div>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+					{#if editingName}
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
+							<input
+								class={css({
+									width: 'full',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' },
 									minWidth: 'fieldSm',
 									paddingX: '2',
 									paddingY: '0.5',
 									fontSize: 'sm'
-								})
-							)}
-							id="output-node-name"
-							bind:value={draftName}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') commitNameEdit();
-								if (e.key === 'Escape') cancelNameEdit();
-							}}
-							aria-label="Edit export name"
-						/>
-						<button
-							class={css({
-								display: 'inline-flex',
-								height: 'iconMd',
-								width: 'iconMd',
-								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'center',
-								borderWidth: '1',
-								color: 'fg.success',
-								backgroundColor: 'bg.primary',
-								padding: '0',
-								lineHeight: '1',
-								_hover: { backgroundColor: 'bg.success', color: 'fg.primary' }
-							})}
-							onclick={commitNameEdit}
-							type="button"
-							aria-label="Save"
+								})}
+								id="output-node-name"
+								bind:value={draftName}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') commitNameEdit();
+									if (e.key === 'Escape') cancelNameEdit();
+								}}
+								aria-label="Edit export name"
+							/>
+							<button
+								class={css({
+									display: 'inline-flex',
+									height: 'iconMd',
+									width: 'iconMd',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									color: 'fg.success',
+									backgroundColor: 'bg.primary',
+									padding: '0',
+									lineHeight: '1',
+									_hover: { backgroundColor: 'bg.success', color: 'fg.primary' }
+								})}
+								onclick={commitNameEdit}
+								type="button"
+								aria-label="Save"
+							>
+								<Check size={12} class={css({ flexShrink: '0' })} />
+							</button>
+							<button
+								class={css({
+									display: 'inline-flex',
+									height: 'iconMd',
+									width: 'iconMd',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									borderColor: 'border.error',
+									color: 'fg.error',
+									backgroundColor: 'bg.primary',
+									padding: '0',
+									lineHeight: '1',
+									_hover: { backgroundColor: 'bg.error', color: 'fg.primary' }
+								})}
+								onclick={cancelNameEdit}
+								type="button"
+								aria-label="Cancel"
+							>
+								<X size={12} class={css({ flexShrink: '0' })} />
+							</button>
+						</div>
+					{:else}
+						<span
+							class={css({ fontSize: 'sm', fontWeight: 'medium' })}
+							data-testid="output-table-name-inline"
 						>
-							<Check size={12} class={css({ flexShrink: '0' })} />
-						</button>
-						<button
-							class={css({
-								display: 'inline-flex',
-								height: 'iconMd',
-								width: 'iconMd',
-								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'center',
-								borderWidth: '1',
-								borderColor: 'border.error',
-								color: 'fg.error',
-								backgroundColor: 'bg.primary',
-								padding: '0',
-								lineHeight: '1',
-								_hover: { backgroundColor: 'bg.error', color: 'fg.primary' }
-							})}
-							onclick={cancelNameEdit}
-							type="button"
-							aria-label="Cancel"
-						>
-							<X size={12} class={css({ flexShrink: '0' })} />
-						</button>
-					</div>
-				{:else}
-					<span
-						class={css({ fontSize: 'sm', fontWeight: 'medium' })}
-						data-testid="output-table-name-inline"
-					>
-						{outputConfig.iceberg.table_name}
-					</span>
-					{#if !readOnly}
-						<button
-							class={css({
-								display: 'inline-flex',
-								height: 'iconMd',
-								width: 'iconMd',
-								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'center',
-								borderWidth: '1',
-								color: 'fg.muted',
-								backgroundColor: 'bg.primary',
-								padding: '0',
-								opacity: '0.5',
-								lineHeight: '1',
-								_hover: {
-									backgroundColor: 'bg.tertiary',
-									opacity: '1'
-								}
-							})}
-							onclick={startNameEdit}
-							type="button"
-							aria-label="Edit export name"
-							data-testid="output-table-name-inline-edit"
-						>
-							<Pencil size={12} class={css({ flexShrink: '0' })} />
-						</button>
-					{/if}
-				{/if}
-			</div>
-		</div>
-
-		<!-- Output Details (mirrors DatasourceNode dataset card) -->
-		<div class={css({ marginX: '4', marginBottom: '3' })}>
-			<div
-				class={css({
-					marginBottom: '2',
-					display: 'flex',
-					alignItems: 'center',
-					gap: '2',
-					fontSize: 'xs',
-					textTransform: 'uppercase',
-					letterSpacing: 'wide',
-					color: 'fg.muted'
-				})}
-			>
-				<Database size={12} class={css({ opacity: '0.6' })} />
-				<span>Output</span>
-			</div>
-			<div
-				class={css({
-					display: 'flex',
-					flexDirection: 'column',
-					gap: '2',
-					borderWidth: '1',
-					backgroundColor: 'bg.tertiary',
-					padding: '3'
-				})}
-			>
-				<div
-					class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
-				>
-					<span
-						class={css({ fontSize: 'sm', fontWeight: 'semibold' })}
-						data-testid="output-table-name-card"
-					>
-						{outputConfig.iceberg.table_name}
-					</span>
-					<button
-						type="button"
-						class={css({
-							display: 'flex',
-							alignItems: 'center',
-							gap: '1',
-							borderWidth: '1',
-							backgroundColor: 'bg.secondary',
-							paddingX: '2',
-							paddingY: '0.5',
-							fontSize: '2xs',
-							color: hidden ? 'fg.muted' : 'fg.success',
-							_hover: { color: 'fg.primary' }
-						})}
-						onclick={toggleHidden}
-						disabled={readOnly || toggling || !hasOutputDatasource}
-						data-testid="output-visibility-toggle"
-						title={hidden
-							? 'Hidden from other analyses — click to make visible'
-							: 'Visible to other analyses — click to hide'}
-					>
-						{#if hidden}
-							<EyeOff size={10} />
-							<span>hidden</span>
-						{:else}
-							<Database size={10} />
-							<span>visible</span>
+							{outputConfig.iceberg.table_name}
+						</span>
+						{#if !readOnly}
+							<button
+								class={css({
+									display: 'inline-flex',
+									height: 'iconMd',
+									width: 'iconMd',
+									cursor: 'pointer',
+									alignItems: 'center',
+									justifyContent: 'center',
+									borderWidth: '1',
+									color: 'fg.muted',
+									padding: '0',
+									lineHeight: '1',
+									_hover: {
+										backgroundColor: 'bg.tertiary',
+										opacity: '1'
+									}
+								})}
+								onclick={startNameEdit}
+								type="button"
+								aria-label="Edit export name"
+								data-testid="output-table-name-inline-edit"
+							>
+								<Pencil size={12} class={css({ flexShrink: '0' })} />
+							</button>
 						{/if}
-					</button>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Output Details (mirrors DatasourceNode dataset card) -->
+			<div class={css({ marginX: '4', marginBottom: '3' })}>
+				<div
+					class={css({
+						marginBottom: '2',
+						display: 'flex',
+						alignItems: 'center',
+						gap: '2',
+						fontSize: 'xs',
+						textTransform: 'uppercase',
+						letterSpacing: 'wide',
+						color: 'fg.muted'
+					})}
+				>
+					<Database size={12} class={css({ opacity: '0.6' })} />
+					<span>Output</span>
 				</div>
 				<div
 					class={css({
-						display: 'grid',
-						gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+						display: 'flex',
+						flexDirection: 'column',
 						gap: '2',
-						borderTopWidth: '1',
-						paddingTop: '2'
+						borderWidth: '1',
+						backgroundColor: 'bg.tertiary',
+						padding: '3'
 					})}
 				>
-					{#if readOnly}
-						<div
+					<div
+						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+					>
+						<span
+							class={css({ fontSize: 'sm', fontWeight: 'semibold' })}
+							data-testid="output-table-name-card"
+						>
+							{outputConfig.iceberg.table_name}
+						</span>
+						<button
+							type="button"
 							class={css({
 								display: 'flex',
 								alignItems: 'center',
-								justifyContent: 'space-between',
+								gap: '1',
 								borderWidth: '1',
 								backgroundColor: 'bg.secondary',
-								paddingX: '3',
-								paddingY: '2',
-								fontSize: 'sm'
+								paddingX: '2',
+								paddingY: '0.5',
+								fontSize: '2xs',
+								color: hidden ? 'fg.muted' : 'fg.success',
+								_hover: { color: 'fg.primary' }
 							})}
+							onclick={toggleHidden}
+							disabled={readOnly || toggling || !hasOutputDatasource}
+							data-testid="output-visibility-toggle"
+							title={hidden
+								? 'Hidden from other analyses — click to make visible'
+								: 'Visible to other analyses — click to hide'}
 						>
-							<span class={css({ color: 'fg.muted' })}>Build mode</span>
-							<span>{outputConfig.build_mode}</span>
-						</div>
-						<div
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'space-between',
-								borderWidth: '1',
-								backgroundColor: 'bg.secondary',
-								paddingX: '3',
-								paddingY: '2',
-								fontSize: 'sm'
-							})}
-						>
-							<span class={css({ color: 'fg.muted' })}>Branch</span>
-							<span>{branchValue || 'master'}</span>
-						</div>
-					{:else}
-						<div
-							class={cx(
-								css({
-									position: 'relative',
+							{#if hidden}
+								<EyeOff size={10} />
+								<span>hidden</span>
+							{:else}
+								<Database size={10} />
+								<span>visible</span>
+							{/if}
+						</button>
+					</div>
+					<div
+						class={css({
+							display: 'grid',
+							gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+							gap: '2',
+							borderTopWidth: '1',
+							paddingTop: '2'
+						})}
+					>
+						{#if readOnly}
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '3',
+									paddingY: '2',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Build mode</span>
+								<span>{outputConfig.build_mode}</span>
+							</div>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									borderWidth: '1',
+									backgroundColor: 'bg.secondary',
+									paddingX: '3',
+									paddingY: '2',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Branch</span>
+								<span>{branchValue}</span>
+							</div>
+						{:else}
+							<div
+								class={css({
 									display: 'flex',
 									flexDirection: 'column',
 									gap: '2',
-									minWidth: 'inputSm'
-								}),
-								css({ position: 'relative' })
-							)}
-							bind:this={modeMenuRef}
-						>
-							<button
-								type="button"
-								class={cx(
-									css({
+									minWidth: 'inputSm',
+									position: 'relative'
+								})}
+								bind:this={modeMenuRef}
+							>
+								<button
+									type="button"
+									class={css({
 										display: 'flex',
 										alignItems: 'center',
 										gap: '2',
@@ -778,111 +855,128 @@
 										_focusVisible: {
 											outline: '2px solid {colors.accent.secondary}',
 											outlineOffset: '2px'
-										}
-									}),
-									css({ width: '100%' })
-								)}
-								onclick={() => (modeMenuOpen = !modeMenuOpen)}
-								aria-expanded={modeMenuOpen}
-								bind:this={modeTriggerRef}
-								data-testid="output-mode-trigger"
-							>
-								<span
-									class={css({
-										flex: '1',
-										textAlign: 'left',
-										minWidth: '0',
-										overflow: 'hidden',
-										textOverflow: 'ellipsis',
-										whiteSpace: 'nowrap'
-									})}>{outputConfig.build_mode}</span
-								>
-								<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
-							</button>
-							{#if modeMenuOpen}
-								<div
-									class={css({
-										position: 'absolute',
-										zIndex: 'dropdown',
-										top: 'calc(100% + 6px)',
-										left: '0',
-										minWidth: '100%',
-										width: '100%',
-										maxWidth: '100%',
-										backgroundColor: 'bg.primary',
-										borderWidth: '1',
-										padding: '2',
-										display: 'flex',
-										flexDirection: 'column',
-										gap: '2'
+										},
+										width: '100%'
 									})}
-									role="listbox"
-									data-testid="output-mode-listbox"
-									use:overlayStack.action={modeMenuOverlayConfig}
+									onclick={() => (modeMenuOpen = !modeMenuOpen)}
+									aria-expanded={modeMenuOpen}
+									bind:this={modeTriggerRef}
+									data-testid="output-mode-trigger"
 								>
+									<span
+										class={css({
+											flex: '1',
+											textAlign: 'left',
+											minWidth: '0',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap'
+										})}>{outputConfig.build_mode}</span
+									>
+									<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
+								</button>
+								{#if modeMenuOpen}
 									<div
 										class={css({
+											position: 'absolute',
+											zIndex: 'dropdown',
+											top: 'calc(100% + 6px)',
+											left: '0',
+											minWidth: '100%',
+											width: '100%',
+											maxWidth: '100%',
+											backgroundColor: 'bg.primary',
+											borderWidth: '1',
+											padding: '2',
 											display: 'flex',
 											flexDirection: 'column',
-											gap: '2',
-											maxHeight: 'dropdown',
-											overflowY: 'auto',
-											overflowX: 'hidden',
-											padding: '2',
-											scrollbarWidth: 'thin',
-											scrollbarColor: '{colors.border.primary} transparent'
+											gap: '2'
 										})}
+										role="listbox"
+										data-testid="output-mode-listbox"
+										use:overlayStack.action={modeMenuOverlayConfig}
 									>
-										{#each ['full', 'incremental', 'recreate'] as mode (mode)}
-											<button
-												type="button"
-												class={cx(
-													css({
-														minWidth: '0',
-														width: '100%',
-														paddingX: '3',
-														paddingY: '2',
-														borderWidth: '1',
-														borderColor: 'transparent',
-														background: 'transparent',
-														textAlign: 'left',
-														display: 'flex',
-														alignItems: 'center',
-														justifyContent: 'flex-start',
-														gap: '2',
-														cursor: 'pointer',
-														fontSize: 'sm',
-														'& span': { minWidth: '0', overflowWrap: 'anywhere' },
-														_hover: { backgroundColor: 'bg.hover' }
-													}),
-													outputConfig.build_mode === mode && css({ backgroundColor: 'bg.hover' })
-												)}
-												onclick={() => {
-													updateOutputConfig({ build_mode: mode });
-													modeMenuOpen = false;
-												}}
-												role="option"
-												aria-selected={outputConfig.build_mode === mode}
-												data-testid={`output-mode-option-${mode}`}
-											>
-												<span>{mode}</span>
-											</button>
-										{/each}
+										<div
+											class={css({
+												display: 'flex',
+												flexDirection: 'column',
+												gap: '2',
+												maxHeight: 'dropdown',
+												overflowY: 'auto',
+												overflowX: 'hidden',
+												padding: '2',
+												scrollbarWidth: 'thin',
+												scrollbarColor: '{colors.border.primary} transparent'
+											})}
+										>
+											{#each ['full', 'incremental', 'recreate'] as mode (mode)}
+												<button
+													type="button"
+													class={css(
+														{
+															minWidth: '0',
+															width: '100%',
+															paddingX: '3',
+															paddingY: '2',
+															borderWidth: '1',
+															borderColor: 'transparent',
+															background: 'transparent',
+															textAlign: 'left',
+															display: 'flex',
+															alignItems: 'center',
+															justifyContent: 'flex-start',
+															gap: '2',
+															cursor: 'pointer',
+															fontSize: 'sm',
+															'& span': { minWidth: '0', overflowWrap: 'anywhere' },
+															_hover: { backgroundColor: 'bg.hover' }
+														},
+														outputConfig.build_mode === mode && { backgroundColor: 'bg.hover' }
+													)}
+													onclick={() => {
+														updateOutputConfig({ build_mode: mode });
+														modeMenuOpen = false;
+													}}
+													role="option"
+													aria-selected={outputConfig.build_mode === mode}
+													data-testid={`output-mode-option-${mode}`}
+												>
+													<span>{mode}</span>
+												</button>
+											{/each}
+										</div>
 									</div>
-								</div>
-							{/if}
-						</div>
-						<BranchPicker
-							branches={branchOptions}
-							value={branchValue}
-							placeholder="Branch"
-							allowCreate={true}
-							onChange={applyGlobalBranchValue}
-						/>
-					{/if}
+								{/if}
+							</div>
+							<BranchPicker
+								branches={branchOptions}
+								value={branchValue}
+								placeholder="Branch"
+								allowCreate={true}
+								onChange={applyGlobalBranchValue}
+							/>
+						{/if}
+					</div>
 				</div>
 			</div>
-		</div>
+		{:else}
+			<div
+				class={css({
+					marginX: '4',
+					marginTop: '4',
+					marginBottom: '3',
+					borderWidth: '1',
+					borderStyle: 'dashed',
+					padding: '3',
+					fontSize: 'xs',
+					color: 'fg.tertiary'
+				})}
+				data-testid="output-config-required"
+			>
+				Output configuration is incomplete. Set explicit output filename, build mode, namespace,
+				table name, and branch before building.
+			</div>
+		{/if}
 
 		<!-- Build Action -->
 		<div class={css({ marginX: '4', marginBottom: '3' })}>
@@ -895,7 +989,6 @@
 					justifyContent: 'center',
 					gap: '2',
 					borderWidth: '1',
-					backgroundColor: 'bg.secondary',
 					paddingY: '2',
 					paddingX: '3',
 					fontSize: 'xs',
@@ -953,6 +1046,8 @@
 							/>
 						{:else if buildStore.status === 'completed'}
 							<Check size={14} class={css({ color: 'fg.success' })} />
+						{:else if buildStore.status === 'cancelled'}
+							<X size={14} class={css({ color: 'fg.warning' })} />
 						{:else}
 							<X size={14} class={css({ color: 'fg.error' })} />
 						{/if}
@@ -1063,7 +1158,20 @@
 						})}
 						data-testid="output-notify-panel"
 					>
-						<label class={cx(label({ variant: 'checkbox' }), css({ gap: '2', fontSize: 'xs' }))}>
+						<label
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								gap: '2',
+								fontSize: 'xs',
+								fontWeight: 'normal',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '0'
+							})}
+						>
 							<input
 								name="notify_enabled"
 								type="checkbox"
@@ -1187,21 +1295,40 @@
 
 								<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 									<label
-										class={cx(label(), css({ fontSize: '2xs' }))}
+										class={css({
+											display: 'block',
+											fontSize: '2xs',
+											fontWeight: 'semibold',
+											color: 'fg.muted',
+											marginBottom: '1.5',
+											textTransform: 'uppercase',
+											letterSpacing: 'wider'
+										})}
 										for={`${idPrefix}-notify-body`}
 									>
 										Message Template
 									</label>
 									<textarea
-										class={cx(
-											input(),
-											css({
-												backgroundColor: 'bg.secondary',
-												paddingY: '1',
-												paddingX: '2',
-												fontSize: 'xs'
-											})
-										)}
+										class={css({
+											width: 'full',
+											color: 'fg.primary',
+											borderWidth: '1',
+											borderRadius: '0',
+											transitionProperty: 'border-color',
+											transitionDuration: '160ms',
+											transitionTimingFunction: 'ease',
+											_focus: { outline: 'none' },
+											_focusVisible: { borderColor: 'border.accent' },
+											_disabled: {
+												opacity: '0.5',
+												cursor: 'not-allowed'
+											},
+											_placeholder: { color: 'fg.muted' },
+											backgroundColor: 'bg.secondary',
+											paddingY: '1',
+											paddingX: '2',
+											fontSize: 'xs'
+										})}
 										id={`${idPrefix}-notify-body`}
 										rows="3"
 										value={notifyConfig.body_template}
@@ -1254,14 +1381,15 @@
 					</span>
 					{#if healthCount > 0}
 						<span
-							class={cx(
-								css({ paddingX: '1.5', paddingY: '0.5', fontSize: '2xs' }),
-								healthPassed === true &&
-									css({ backgroundColor: 'bg.success', color: 'fg.success' }),
-								healthPassed === false && css({ backgroundColor: 'bg.error', color: 'fg.error' }),
+							class={css(
+								{ paddingX: '1.5', paddingY: '0.5', fontSize: '2xs' },
+								healthPassed === true && { backgroundColor: 'bg.success', color: 'fg.success' },
+								healthPassed === false && { backgroundColor: 'bg.error', color: 'fg.error' },
 								healthPassed !== true &&
-									healthPassed !== false &&
-									css({ backgroundColor: 'bg.accent', color: 'accent.primary' })
+									healthPassed !== false && {
+										backgroundColor: 'bg.accent',
+										color: 'accent.primary'
+									}
 							)}
 						>
 							{healthCount}
@@ -1464,6 +1592,43 @@
 				<X size={14} />
 			</button>
 		</div>
-		<BuildPreview store={buildStore} />
+		<BuildPreview
+			store={buildStore}
+			onCancel={openCancelConfirm}
+			canCancel={canCancelRunningBuild}
+			{cancelPending}
+		/>
 	{/snippet}
 </BaseModal>
+
+<ConfirmDialog
+	show={cancelConfirmOpen}
+	heading="Cancel this build?"
+	message="Cancel this build? Any partial results will be discarded."
+	confirmText={cancelPending ? 'Cancelling...' : 'Cancel Build'}
+	cancelText="Keep running"
+	onConfirm={confirmCancelBuild}
+	onCancel={closeCancelConfirm}
+/>
+
+{#if cancelToast}
+	<div
+		class={css({
+			position: 'fixed',
+			bottom: '4',
+			left: '50%',
+			transform: 'translateX(-50%)',
+			backgroundColor: 'bg.warning',
+			borderWidth: '1',
+			borderColor: 'border.warning',
+			color: 'fg.warning',
+			paddingX: '4',
+			paddingY: '2',
+			fontSize: 'sm',
+			zIndex: 'toast'
+		})}
+		data-testid="build-cancel-toast"
+	>
+		{cancelToast}
+	</div>
+{/if}
