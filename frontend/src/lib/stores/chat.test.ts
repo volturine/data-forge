@@ -312,7 +312,9 @@ describe('ChatStore — pure local logic', () => {
 
 	describe('_handleEvent via event processing', () => {
 		function handle(event: ChatEvent) {
-			(store as unknown as { _handleEvent: (e: ChatEvent) => void })._handleEvent(event);
+			const fn = Reflect.get(store, '_handleEvent') as ((event: ChatEvent) => void) | undefined;
+			expect(fn).toBeTypeOf('function');
+			fn?.call(store, event);
 		}
 
 		test('message event adds to messages and timeline', () => {

@@ -87,7 +87,7 @@
 							paddingX: '2',
 							paddingY: '1.5',
 							borderRadius: 'md',
-							backgroundColor: 'bg.subtle'
+							backgroundColor: 'bg.tertiary'
 						})}
 					>
 						<div

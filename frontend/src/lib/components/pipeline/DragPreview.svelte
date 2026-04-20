@@ -3,8 +3,8 @@
 	import { css } from '$lib/styles/panda';
 	import {
 		ArrowUpDown,
-		BarChart3,
-		BarChart4,
+		ChartColumn,
+		ChartColumnIncreasing,
 		Bomb,
 		Brush,
 		Calculator,
@@ -12,7 +12,7 @@
 		Dices,
 		Download,
 		Eye,
-		Filter,
+		Funnel,
 		Link,
 		Pencil,
 		Repeat,
@@ -28,10 +28,10 @@
 	} from 'lucide-svelte';
 
 	// Step type metadata with icons and labels
-	const stepTypeInfo: Record<string, { label: string; icon: typeof Filter }> = {
-		filter: { label: 'Filter', icon: Filter },
+	const stepTypeInfo: Record<string, { label: string; icon: typeof Funnel }> = {
+		filter: { label: 'Filter', icon: Funnel },
 		select: { label: 'Select', icon: ListChecks },
-		groupby: { label: 'Group By', icon: BarChart3 },
+		groupby: { label: 'Group By', icon: ChartColumn },
 		sort: { label: 'Sort', icon: ArrowUpDown },
 		rename: { label: 'Rename', icon: Pencil },
 		drop: { label: 'Drop', icon: Trash2 },
@@ -48,7 +48,7 @@
 		sample: { label: 'Sample', icon: Dices },
 		limit: { label: 'Limit', icon: Scissors },
 		topk: { label: 'Top K', icon: Trophy },
-		chart: { label: 'Chart', icon: BarChart4 },
+		chart: { label: 'Chart', icon: ChartColumnIncreasing },
 		notification: { label: 'Notify', icon: Bell },
 		ai: { label: 'AI', icon: Sparkles },
 		view: { label: 'View', icon: Eye },
@@ -59,7 +59,7 @@
 	const active = $derived(drag.active);
 	const type = $derived(drag.type);
 	const info = $derived(type ? stepTypeInfo[type] : null);
-	const Icon = $derived(info?.icon ?? Filter);
+	const Icon = $derived(info?.icon ?? Funnel);
 	const isReorder = $derived(drag.isReorder);
 
 	// Local reactive state for pointer position (drag store uses non-reactive getters)

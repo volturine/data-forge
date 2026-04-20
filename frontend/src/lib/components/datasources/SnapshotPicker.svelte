@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { apiRequest } from '$lib/api/client';
-	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import type { EngineRun } from '$lib/api/engine-runs';
+	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
 	import { Trash2, ChevronDown, Clock } from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner, row, muted } from '$lib/styles/panda';
+	import { css, spinner } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		datasourceId: string;
@@ -12,6 +15,7 @@
 		branch?: string | null;
 		label?: string;
 		persistOpen?: boolean;
+		disabled?: boolean;
 		onConfigChange?: (config: Record<string, unknown>) => void;
 		onUiChange?: (updates: { open?: boolean; month?: string; day?: string }) => void;
 		onSelect?: (snapshotId: string | null, timestampMs?: number) => void;
@@ -24,6 +28,7 @@
 		datasourceConfig,
 		label = 'Time Travel',
 		persistOpen = false,
+		disabled = false,
 		onConfigChange,
 		onUiChange,
 		onSelect,
@@ -51,7 +56,44 @@
 	let deleteConfirmId = $state<string | null>(null);
 	let deleteLoading = $state(false);
 	let deleteError = $state<string | null>(null);
-	let buildRuns = $state<EngineRun[]>([]);
+	const buildRunsStore = new EngineRunsStore();
+	let lastDatasourceId = $state<string | null>(null);
+	// Subscription: $derived can't reset snapshot state on datasource switch.
+	$effect(() => {
+		if (datasourceId === lastDatasourceId) return;
+		lastDatasourceId = datasourceId;
+		snapshotList = [];
+		snapshotsError = null;
+		snapshotsLoading = false;
+		selectedDay = '';
+		timeTravelId = null;
+		timeTravelLabel = null;
+		snapshotMonth = '';
+		snapshotsOpen = false;
+		hasOpened = false;
+		deleteConfirmId = null;
+		deleteLoading = false;
+		deleteError = null;
+		buildRunsStore.reset();
+	});
+	// Network: fetch build history on demand when snapshot build previews are enabled.
+	$effect(() => {
+		if (!showBuildPreviews || !datasourceId) return;
+		buildRunsStore.load({ datasource_id: datasourceId, limit: 50 });
+		return () => buildRunsStore.close();
+	});
+	const buildRuns = $derived.by(() => {
+		const branchValue = branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
+		return buildRunsStore.runs.filter((run: EngineRun) => {
+			if (!(run.kind === 'datasource_update' || run.kind === 'datasource_create')) return false;
+			if (run.status !== 'success') return false;
+			if (!branchValue) return true;
+			const payload = run.request_json as Record<string, unknown>;
+			const opts = payload.iceberg_options as Record<string, unknown> | undefined;
+			const runBranch = opts?.branch as string | undefined;
+			return runBranch === branchValue;
+		});
+	});
 	const runSnapshotMap = $derived(buildSnapshotMap(buildRuns, toSnapshotRefs(snapshotList)));
 	const filteredSnapshotList = $derived.by(() => {
 		if (!showBuildPreviews) return snapshotList;
@@ -80,6 +122,15 @@
 		return false;
 	});
 
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: closeSnapshots,
+		onOutsideClick: (target: Node) => {
+			if (popoverRef?.contains(target)) return;
+			if (triggerRef?.contains(target)) return;
+			closeSnapshots();
+		}
+	});
+
 	// Subscription: $derived can't sync state from config — config is external and may change at any time.
 	$effect(() => {
 		const ui = (datasourceConfig.time_travel_ui as Record<string, unknown>) ?? {};
@@ -100,26 +151,6 @@
 		}
 		const ts = datasourceConfig.time_travel_snapshot_timestamp_ms as number | null;
 		timeTravelLabel = timeTravelId && ts ? formatSnapshotLabel(ts) : null;
-	});
-
-	let lastDatasourceId = $state<string | null>(null);
-	// Subscription: $derived can't reset snapshot state on datasource switch.
-	$effect(() => {
-		if (datasourceId === lastDatasourceId) return;
-		lastDatasourceId = datasourceId;
-		snapshotList = [];
-		snapshotsError = null;
-		snapshotsLoading = false;
-		selectedDay = '';
-		timeTravelId = null;
-		timeTravelLabel = null;
-		snapshotMonth = '';
-		snapshotsOpen = false;
-		hasOpened = false;
-		deleteConfirmId = null;
-		deleteLoading = false;
-		deleteError = null;
-		buildRuns = [];
 	});
 
 	function formatSnapshotKey(timestampMs: number) {
@@ -267,31 +298,6 @@
 				snapshotList = [];
 			}
 		);
-		if (showBuildPreviews) {
-			loadBuildRuns();
-		}
-	}
-
-	function loadBuildRuns() {
-		if (!datasourceId) return;
-		listEngineRuns({ datasource_id: datasourceId, limit: 50 }).match(
-			(result) => {
-				const branchValue =
-					branch ?? (datasourceConfig.branch as string | null | undefined) ?? null;
-				buildRuns = result.filter((run) => {
-					if (!(run.kind === 'datasource_update' || run.kind === 'datasource_create')) return false;
-					if (run.status !== 'success') return false;
-					if (!branchValue) return true;
-					const payload = run.request_json as Record<string, unknown>;
-					const opts = payload.iceberg_options as Record<string, unknown> | undefined;
-					const runBranch = opts?.branch as string | undefined;
-					return runBranch === branchValue;
-				});
-			},
-			() => {
-				buildRuns = [];
-			}
-		);
 	}
 
 	function getIcebergSnapshots(nextId: string) {
@@ -365,6 +371,7 @@
 	}
 
 	function toggleSnapshots() {
+		if (disabled) return;
 		const next = !snapshotsOpen;
 		snapshotsOpen = next;
 		hasOpened = true;
@@ -375,9 +382,6 @@
 		updatePopoverPosition();
 		if (!snapshotsLoading) {
 			loadSnapshots();
-		}
-		if (showBuildPreviews && !buildRuns.length) {
-			loadBuildRuns();
 		}
 	}
 
@@ -393,20 +397,6 @@
 			}
 		};
 	}
-
-	// DOM: $derived can't handle outside click listener lifecycle.
-	$effect(() => {
-		if (!snapshotsOpen) return;
-		const handleOutside = (event: MouseEvent) => {
-			const target = event.target as Node | null;
-			if (!target) return;
-			if (popoverRef?.contains(target)) return;
-			if (triggerRef?.contains(target)) return;
-			closeSnapshots();
-		};
-		window.addEventListener('mousedown', handleOutside, true);
-		return () => window.removeEventListener('mousedown', handleOutside, true);
-	});
 
 	function shiftMonth(delta: number) {
 		const [yearStr, monthStr] = snapshotMonth.split('-');
@@ -447,22 +437,24 @@
 
 <div>
 	<button
-		class={cx(
+		class={[
 			'engine-header',
 			css({
 				display: 'flex',
 				width: '100%',
-				cursor: 'pointer',
+				cursor: disabled ? 'default' : 'pointer',
 				alignItems: 'center',
 				justifyContent: 'space-between',
 				borderWidth: '1',
 				backgroundColor: 'bg.secondary',
 				padding: '2',
 				paddingX: '3',
-				_hover: { backgroundColor: 'bg.tertiary' }
+				_hover: disabled ? {} : { backgroundColor: 'bg.tertiary' },
+				_disabled: { opacity: '0.7', cursor: 'default' }
 			})
-		)}
+		]}
 		onclick={toggleSnapshots}
+		{disabled}
 		type="button"
 		bind:this={triggerRef}
 	>
@@ -480,7 +472,7 @@
 			<Clock size={12} />
 			<span>{label}</span>
 		</div>
-		<div class={cx(row, css({ gap: '2' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 			{#if isLatest}
 				<span
 					class={css({
@@ -516,7 +508,13 @@
 					{timeTravelId}
 				</span>
 			{/if}
-			<span class={cx(muted, row, snapshotsOpen && css({ transform: 'rotate(180deg)' }))}>
+			<span
+				class={css(
+					{ color: 'fg.muted' },
+					{ display: 'flex', alignItems: 'center' },
+					snapshotsOpen && { transform: 'rotate(180deg)' }
+				)}
+			>
 				<ChevronDown size={12} />
 			</span>
 		</div>
@@ -540,6 +538,7 @@
 			})}
 			bind:this={popoverRef}
 			use:portal={popoverRect}
+			use:overlayStack.action={overlayConfig}
 		>
 			<div
 				class={css({
@@ -635,7 +634,7 @@
 			{:else}
 				<div class={css({ display: 'flex', gap: '2' })}>
 					<div class={css({ display: 'flex', flex: '1', flexDirection: 'column', gap: '2' })}>
-						<div class={cx(row, css({ gap: '2' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 							<button
 								class={css({
 									borderWidth: '1',
@@ -688,21 +687,21 @@
 							{#each calendarDays as day (day.key)}
 								{#if day.inMonth}
 									<button
-										class={cx(
-											css({
+										class={css(
+											{
 												position: 'relative',
 												height: 'rowXl',
 												borderWidth: '1',
 												backgroundColor: 'transparent',
 												fontSize: 'xs'
-											}),
+											},
 											day.count > 0
-												? css({
+												? {
 														backgroundColor: 'bg.muted',
 														_hover: { backgroundColor: 'bg.hover' }
-													})
-												: css({ cursor: 'default', opacity: '0.4' }),
-											selectedDay === day.key ? css({ backgroundColor: 'bg.tertiary' }) : ''
+													}
+												: { cursor: 'default', opacity: '0.4' },
+											selectedDay === day.key && { backgroundColor: 'bg.tertiary' }
 										)}
 										onclick={() => day.count > 0 && selectDay(day.key)}
 										type="button"
@@ -746,8 +745,8 @@
 						{#if selectedDay}
 							{#each filteredSnapshots as snap (snap.id)}
 								<div
-									class={cx(
-										css({
+									class={css(
+										{
 											display: 'flex',
 											width: '100%',
 											alignItems: 'center',
@@ -758,10 +757,10 @@
 											textAlign: 'left',
 											fontSize: 'xs',
 											_hover: { backgroundColor: 'bg.tertiary' }
-										}),
-										timeTravelId === snap.id || (!timeTravelId && snap.is_current)
-											? css({ backgroundColor: 'bg.tertiary' })
-											: ''
+										},
+										(timeTravelId === snap.id || (!timeTravelId && snap.is_current)) && {
+											backgroundColor: 'bg.tertiary'
+										}
 									)}
 								>
 									<button
@@ -779,11 +778,11 @@
 										type="button"
 									>
 										<span
-											class={cx(
-												css({ fontFamily: 'mono' }),
+											class={css(
+												{ fontFamily: 'mono' },
 												timeTravelId === snap.id
-													? css({ color: 'fg.primary' })
-													: css({ color: 'fg.secondary' })
+													? { color: 'fg.primary' }
+													: { color: 'fg.secondary' }
 											)}
 										>
 											{formatSnapshotTime(snap.timestamp)}

@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from core import http as http_client
-from modules.chat.tool_contract import format_output_hint
+from modules.mcp.tool_output import format_output_hint
 
 logger = logging.getLogger(__name__)
 

@@ -19,7 +19,8 @@ function makeRun(id: string, snapshotId?: unknown): EngineRun {
 		query_plan: null,
 		progress: 100,
 		current_step: null,
-		triggered_by: null
+		triggered_by: null,
+		execution_entries: []
 	};
 }
 

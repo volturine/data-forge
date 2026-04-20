@@ -6,20 +6,21 @@
 		ReferenceLineConfig
 	} from '$lib/types/operation-config';
 	import {
-		BarChart2,
-		LineChart,
-		AreaChart,
-		ScatterChart,
-		PieChart,
-		BarChart3,
+		ChartNoAxesColumn,
+		ChartLine,
+		ChartArea,
+		ChartScatter,
+		ChartPie,
+		ChartColumn,
 		LayoutGrid,
-		BoxSelect,
+		SquareDashed,
 		Plus,
 		X
 	} from 'lucide-svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
-	import { css, label, stepConfig, cx, divider, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, input } from '$lib/styles/panda';
+	import { normalizeConfig } from '$lib/utils/step-config-defaults';
 
 	type PlotConfigData = Omit<PlotConfigBase, 'aggregation' | 'chart_type' | 'stack_mode'> & {
 		chart_type:
@@ -73,7 +74,7 @@
 
 	interface Props {
 		schema: Schema;
-		config?: Record<string, unknown>;
+		config?: PlotConfigData;
 	}
 
 	const defaultConfig = {
@@ -113,26 +114,49 @@
 
 	const configDefaults = defaultConfig satisfies Record<string, unknown>;
 
+	function toPlotConfig(value: PlotConfigData | Record<string, unknown>): PlotConfigData {
+		const normalized = normalizeConfig('chart', value);
+		return { ...defaultConfig, ...normalized } as PlotConfigData;
+	}
+
 	let { schema, config = $bindable(configDefaults) }: Props = $props();
-	const plotConfig = $derived(config as unknown as PlotConfigData);
+	const initialConfig = toPlotConfig(config);
+	let plotConfig = $state(initialConfig);
+	let syncedConfig = $state(JSON.stringify(initialConfig));
+
+	// Bindable config must receive chart edits back from the local form state.
+	$effect(() => {
+		const next = toPlotConfig(config);
+		const nextJson = JSON.stringify(next);
+		if (nextJson === syncedConfig) return;
+		plotConfig = next;
+		syncedConfig = nextJson;
+	});
+
+	$effect(() => {
+		const nextJson = JSON.stringify(plotConfig);
+		if (nextJson === syncedConfig) return;
+		config = plotConfig;
+		syncedConfig = nextJson;
+	});
 
 	let activeTab = $state<'data' | 'look'>('data');
 
 	const chartTypeGrid: Array<{
 		value: PlotConfigData['chart_type'];
 		label: string;
-		icon: typeof BarChart2;
+		icon: typeof ChartNoAxesColumn;
 		rotate?: boolean;
 	}> = [
-		{ value: 'bar', label: 'Bar', icon: BarChart2 },
-		{ value: 'horizontal_bar', label: 'H. Bar', icon: BarChart2, rotate: true },
-		{ value: 'line', label: 'Line', icon: LineChart },
-		{ value: 'area', label: 'Area', icon: AreaChart },
-		{ value: 'scatter', label: 'Scatter', icon: ScatterChart },
-		{ value: 'pie', label: 'Pie', icon: PieChart },
-		{ value: 'histogram', label: 'Hist', icon: BarChart3 },
+		{ value: 'bar', label: 'Bar', icon: ChartNoAxesColumn },
+		{ value: 'horizontal_bar', label: 'H. Bar', icon: ChartNoAxesColumn, rotate: true },
+		{ value: 'line', label: 'Line', icon: ChartLine },
+		{ value: 'area', label: 'Area', icon: ChartArea },
+		{ value: 'scatter', label: 'Scatter', icon: ChartScatter },
+		{ value: 'pie', label: 'Pie', icon: ChartPie },
+		{ value: 'histogram', label: 'Hist', icon: ChartColumn },
 		{ value: 'heatgrid', label: 'Heat', icon: LayoutGrid },
-		{ value: 'boxplot', label: 'Box', icon: BoxSelect }
+		{ value: 'boxplot', label: 'Box', icon: SquareDashed }
 	];
 
 	const aggregations = [
@@ -646,7 +670,23 @@
 					<select
 						id={`${uid}-aggregation`}
 						bind:value={plotConfig.aggregation}
-						class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.secondary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 					>
 						{#each aggregations as agg (agg.value)}
 							<option value={agg.value}>{agg.label}</option>
@@ -671,7 +711,23 @@
 					<select
 						id={`${uid}-stack-mode`}
 						bind:value={plotConfig.stack_mode}
-						class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.secondary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 					>
 						<option value="grouped">Grouped</option>
 						<option value="stacked">Stacked</option>
@@ -722,7 +778,26 @@
 							<select
 								id={`${uid}-group-sort-by`}
 								bind:value={plotConfig.group_sort_by}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value={null}>Default</option>
 								<option value="name">Name</option>
@@ -735,7 +810,26 @@
 							<select
 								id={`${uid}-group-sort-order`}
 								bind:value={plotConfig.group_sort_order}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value="asc">Ascending</option>
 								<option value="desc">Descending</option>
@@ -777,7 +871,26 @@
 							<select
 								id={`${uid}-date-bucket`}
 								bind:value={plotConfig.date_bucket}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value={null}>None</option>
 								<option value="exact">Exact</option>
@@ -794,7 +907,26 @@
 							<select
 								id={`${uid}-date-ordinal`}
 								bind:value={plotConfig.date_ordinal}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value={null}>None</option>
 								<option value="day_of_week">Day of Week</option>
@@ -835,7 +967,26 @@
 							<select
 								id={`${uid}-sort-by`}
 								bind:value={plotConfig.sort_by}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value={null}>Default</option>
 								<option value="x">X value</option>
@@ -848,7 +999,26 @@
 							<select
 								id={`${uid}-sort-order`}
 								bind:value={plotConfig.sort_order}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value="asc">Ascending</option>
 								<option value="desc">Descending</option>
@@ -886,7 +1056,18 @@
 					<span id={`${uid}-plot-interactivity`}><SectionHeader>Interactivity</SectionHeader></span>
 					<div class={css({ display: 'grid', gap: '3' })}>
 						<label
-							class={cx(label({ variant: 'checkbox' }), css({ gap: '2' }))}
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								gap: '2',
+								fontSize: 'sm',
+								fontWeight: 'normal',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '0'
+							})}
 							for={`${uid}-plot-zoom`}
 						>
 							<input
@@ -897,7 +1078,18 @@
 							<span>Pan & Zoom</span>
 						</label>
 						<label
-							class={cx(label({ variant: 'checkbox' }), css({ gap: '2' }))}
+							class={css({
+								display: 'flex',
+								cursor: 'pointer',
+								alignItems: 'center',
+								gap: '2',
+								fontSize: 'sm',
+								fontWeight: 'normal',
+								color: 'fg.secondary',
+								textTransform: 'none',
+								letterSpacing: 'normal',
+								marginBottom: '0'
+							})}
 							for={`${uid}-plot-select`}
 						>
 							<input
@@ -909,7 +1101,18 @@
 						</label>
 						{#if showAreaSelection}
 							<label
-								class={cx(label({ variant: 'checkbox' }), css({ gap: '2' }))}
+								class={css({
+									display: 'flex',
+									cursor: 'pointer',
+									alignItems: 'center',
+									gap: '2',
+									fontSize: 'sm',
+									fontWeight: 'normal',
+									color: 'fg.secondary',
+									textTransform: 'none',
+									letterSpacing: 'normal',
+									marginBottom: '0'
+								})}
 								for={`${uid}-plot-area-select`}
 							>
 								<input
@@ -925,17 +1128,15 @@
 			{/if}
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginBottom: '0',
-						paddingBottom: '5',
-						paddingTop: '5',
-						backgroundColor: 'transparent',
+				class={css({
+					borderTopWidth: '1',
+					marginBottom: '0',
+					paddingBottom: '5',
+					paddingTop: '5',
+					backgroundColor: 'transparent',
 
-						border: 'none'
-					})
-				)}
+					border: 'none'
+				})}
 				role="group"
 				aria-labelledby={`${uid}-plot-overlays`}
 			>
@@ -955,7 +1156,26 @@
 						<select
 							id={`${uid}-overlay-type`}
 							bind:value={overlayType}
-							class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+							class={css({
+								width: 'full',
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							})}
 						>
 							<option value="line">Line</option>
 							<option value="area">Area</option>
@@ -968,7 +1188,26 @@
 						<select
 							id={`${uid}-overlay-axis`}
 							bind:value={overlayAxis}
-							class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+							class={css({
+								width: 'full',
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							})}
 						>
 							<option value="left">Left</option>
 							<option value="right">Right</option>
@@ -979,7 +1218,26 @@
 						<select
 							id={`${uid}-overlay-agg`}
 							bind:value={overlayAgg}
-							class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+							class={css({
+								width: 'full',
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							})}
 						>
 							{#each aggregations as agg (agg.value)}
 								<option value={agg.value}>{agg.label}</option>
@@ -995,10 +1253,7 @@
 							paddingY: '2',
 							paddingX: '4',
 							border: 'none',
-							cursor: 'pointer',
 							whiteSpace: 'nowrap',
-							backgroundColor: 'bg.accent',
-							color: 'accent.primary',
 							_disabled: {
 								backgroundColor: 'bg.muted',
 								cursor: 'not-allowed',
@@ -1039,7 +1294,26 @@
 								<select
 									id={`${uid}-overlay-${index}-type`}
 									aria-label="Overlay chart type"
-									class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'sm2',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingX: '3.5',
+										paddingY: '2.25',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 									bind:value={overlay.chart_type}
 									onchange={(e) =>
 										updateOverlay(index, {
@@ -1054,7 +1328,26 @@
 								<select
 									id={`${uid}-overlay-${index}-agg`}
 									aria-label="Overlay aggregation"
-									class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'sm2',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingX: '3.5',
+										paddingY: '2.25',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 									bind:value={overlay.aggregation}
 									onchange={(e) =>
 										updateOverlay(index, {
@@ -1068,7 +1361,26 @@
 								<select
 									id={`${uid}-overlay-${index}-yaxis`}
 									aria-label="Overlay Y axis position"
-									class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'sm2',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingX: '3.5',
+										paddingY: '2.25',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 									bind:value={overlay.y_axis_position}
 									onchange={(e) =>
 										updateOverlay(index, {
@@ -1087,11 +1399,8 @@
 										width: 'row',
 										height: 'row',
 										padding: '0',
-										backgroundColor: 'transparent',
 										cursor: 'pointer',
-										color: 'fg.secondary',
 										borderWidth: '1',
-										borderColor: 'transparent',
 										_hover: {
 											backgroundColor: 'bg.error',
 											color: 'fg.error',
@@ -1122,17 +1431,15 @@
 			</div>
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginBottom: '0',
-						paddingBottom: '5',
-						paddingTop: '5',
-						backgroundColor: 'transparent',
+				class={css({
+					borderTopWidth: '1',
+					marginBottom: '0',
+					paddingBottom: '5',
+					paddingTop: '5',
+					backgroundColor: 'transparent',
 
-						border: 'none'
-					})
-				)}
+					border: 'none'
+				})}
 				role="group"
 				aria-labelledby={`${uid}-plot-reference-lines`}
 			>
@@ -1145,7 +1452,26 @@
 						<select
 							id={`${uid}-ref-axis`}
 							bind:value={refAxis}
-							class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+							class={css({
+								width: 'full',
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							})}
 						>
 							<option value="y">Y</option>
 							<option value="x">X</option>
@@ -1193,10 +1519,7 @@
 							paddingY: '2',
 							paddingX: '4',
 							border: 'none',
-							cursor: 'pointer',
 							whiteSpace: 'nowrap',
-							backgroundColor: 'bg.accent',
-							color: 'accent.primary',
 							_disabled: {
 								backgroundColor: 'bg.muted',
 								cursor: 'not-allowed',
@@ -1229,7 +1552,26 @@
 								<select
 									id={`${uid}-ref-${index}-axis`}
 									aria-label="Reference line axis"
-									class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'sm2',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingX: '3.5',
+										paddingY: '2.25',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 									bind:value={line.axis}
 									onchange={(e) =>
 										updateReferenceLine(index, {
@@ -1284,11 +1626,8 @@
 										width: 'row',
 										height: 'row',
 										padding: '0',
-										backgroundColor: 'transparent',
 										cursor: 'pointer',
-										color: 'fg.secondary',
 										borderWidth: '1',
-										borderColor: 'transparent',
 										_hover: {
 											backgroundColor: 'bg.error',
 											color: 'fg.error',
@@ -1360,7 +1699,23 @@
 					<select
 						id={`${uid}-legend-position`}
 						bind:value={plotConfig.legend_position}
-						class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.secondary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
 					>
 						<option value="right">Right</option>
 						<option value="left">Left</option>
@@ -1413,7 +1768,26 @@
 								<select
 									id={`${uid}-axis-y-scale`}
 									bind:value={plotConfig.y_axis_scale}
-									class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'sm2',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingX: '3.5',
+										paddingY: '2.25',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 								>
 									<option value="linear">Linear</option>
 									<option value="log">Log</option>
@@ -1449,7 +1823,26 @@
 							<select
 								id={`${uid}-axis-units`}
 								bind:value={plotConfig.display_units}
-								class={cx(input(), css({ backgroundColor: 'bg.secondary' }))}
+								class={css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								})}
 							>
 								<option value="">None</option>
 								<option value="K">Thousands (K)</option>
@@ -1547,17 +1940,15 @@
 			{/if}
 
 			<div
-				class={cx(
-					divider,
-					css({
-						marginBottom: '0',
-						paddingBottom: '5',
-						paddingTop: '5',
-						backgroundColor: 'transparent',
+				class={css({
+					borderTopWidth: '1',
+					marginBottom: '0',
+					paddingBottom: '5',
+					paddingTop: '5',
+					backgroundColor: 'transparent',
 
-						border: 'none'
-					})
-				)}
+					border: 'none'
+				})}
 				role="group"
 				aria-labelledby={`${uid}-plot-height`}
 			>

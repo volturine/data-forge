@@ -20,7 +20,9 @@
 		SampleConfigData,
 		LimitConfigData,
 		TopKConfigData,
-		UnpivotConfigData
+		PlotConfigData,
+		UnpivotConfigData,
+		UnionByNameConfigData
 	} from '$lib/types/operation-config';
 	import { schemaStore } from '$lib/stores/schema.svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
@@ -64,7 +66,7 @@
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { Settings2, X } from 'lucide-svelte';
-	import { css, cx, spinner, button } from '$lib/styles/panda';
+	import { css, spinner, button } from '$lib/styles/panda';
 
 	type WithColumnsConfigShape = {
 		expressions: Array<{
@@ -76,6 +78,22 @@
 			code?: string | null;
 		}>;
 	};
+
+	type DownloadConfigData = {
+		format: string;
+		filename: string;
+	};
+
+	function bindDraftConfig<T extends object>() {
+		return {
+			get value(): T {
+				return draftConfig as T;
+			},
+			set value(value: T) {
+				draftConfig = value as Record<string, unknown>;
+			}
+		};
+	}
 
 	interface Props {
 		step?: PipelineStep | null;
@@ -114,6 +132,31 @@
 		telegramEnabled: configStore.telegramEnabled
 	});
 	const readOnlyConfigJson = $derived(JSON.stringify(draftConfig, null, 2));
+	const filterConfigBinding = bindDraftConfig<FilterConfigData>();
+	const selectConfigBinding = bindDraftConfig<SelectConfigData>();
+	const groupByConfigBinding = bindDraftConfig<GroupByConfigData>();
+	const sortConfigBinding = bindDraftConfig<SortConfigData>();
+	const renameConfigBinding = bindDraftConfig<RenameConfigData>();
+	const dropConfigBinding = bindDraftConfig<DropConfigData>();
+	const joinConfigBinding = bindDraftConfig<JoinConfigData>();
+	const expressionConfigBinding = bindDraftConfig<ExpressionConfigData>();
+	const withColumnsConfigBinding = bindDraftConfig<WithColumnsConfigShape>();
+	const deduplicateConfigBinding = bindDraftConfig<DeduplicateConfigData>();
+	const fillNullConfigBinding = bindDraftConfig<FillNullConfigData>();
+	const explodeConfigBinding = bindDraftConfig<ExplodeConfigData>();
+	const pivotConfigBinding = bindDraftConfig<PivotConfigData>();
+	const timeSeriesConfigBinding = bindDraftConfig<TimeSeriesConfigData>();
+	const stringMethodsConfigBinding = bindDraftConfig<StringMethodsConfigData>();
+	const viewConfigBinding = bindDraftConfig<ViewConfigData>();
+	const downloadConfigBinding = bindDraftConfig<DownloadConfigData>();
+	const sampleConfigBinding = bindDraftConfig<SampleConfigData>();
+	const limitConfigBinding = bindDraftConfig<LimitConfigData>();
+	const topKConfigBinding = bindDraftConfig<TopKConfigData>();
+	const plotConfigBinding = bindDraftConfig<PlotConfigData>();
+	const unpivotConfigBinding = bindDraftConfig<UnpivotConfigData>();
+	const unionByNameConfigBinding = bindDraftConfig<UnionByNameConfigData>();
+	const notificationConfigBinding = bindDraftConfig<NotificationConfigData>();
+	const aiConfigBinding = bindDraftConfig<AIConfigData>();
 
 	function cloneConfig(
 		config: Record<string, unknown> | null | undefined
@@ -241,7 +284,7 @@
 
 {#if step === null}
 	<div
-		class={cx(
+		class={[
 			'step-config',
 			css({
 				boxSizing: 'border-box',
@@ -256,7 +299,7 @@
 				backgroundColor: 'bg.primary',
 				color: 'fg.primary'
 			})
-		)}
+		]}
 	>
 		<div
 			class={css({
@@ -280,7 +323,7 @@
 	</div>
 {:else}
 	<div
-		class={cx(
+		class={[
 			'step-config',
 			css({
 				boxSizing: 'border-box',
@@ -293,7 +336,7 @@
 				backgroundColor: 'bg.primary',
 				color: 'fg.primary'
 			})
-		)}
+		]}
 		data-step-config={step.type}
 	>
 		<PanelHeader>
@@ -390,79 +433,44 @@
 {readOnlyConfigJson}</pre>
 				</div>
 			{:else if step.type === 'filter'}
-				<FilterConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as FilterConfigData}
-				/>
+				<FilterConfig schema={inputSchema} bind:config={filterConfigBinding.value} />
 			{:else if step.type === 'select'}
-				<SelectConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as SelectConfigData}
-				/>
+				<SelectConfig schema={inputSchema} bind:config={selectConfigBinding.value} />
 			{:else if step.type === 'groupby'}
-				<GroupByConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as GroupByConfigData}
-				/>
+				<GroupByConfig schema={inputSchema} bind:config={groupByConfigBinding.value} />
 			{:else if step.type === 'sort'}
-				<SortConfig schema={inputSchema} bind:config={draftConfig as unknown as SortConfigData} />
+				<SortConfig schema={inputSchema} bind:config={sortConfigBinding.value} />
 			{:else if step.type === 'rename'}
-				<RenameConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as RenameConfigData}
-				/>
+				<RenameConfig schema={inputSchema} bind:config={renameConfigBinding.value} />
 			{:else if step.type === 'drop'}
-				<DropConfig schema={inputSchema} bind:config={draftConfig as unknown as DropConfigData} />
+				<DropConfig schema={inputSchema} bind:config={dropConfigBinding.value} />
 			{:else if step.type === 'join'}
-				<JoinConfig schema={inputSchema} bind:config={draftConfig as unknown as JoinConfigData} />
+				<JoinConfig schema={inputSchema} bind:config={joinConfigBinding.value} />
 			{:else if step.type === 'expression'}
-				<ExpressionConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as ExpressionConfigData}
-				/>
+				<ExpressionConfig schema={inputSchema} bind:config={expressionConfigBinding.value} />
 			{:else if step.type === 'with_columns'}
-				<WithColumnsConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as WithColumnsConfigShape}
-				/>
+				<WithColumnsConfig schema={inputSchema} bind:config={withColumnsConfigBinding.value} />
 			{:else if step.type === 'deduplicate'}
-				<DeduplicateConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as DeduplicateConfigData}
-				/>
+				<DeduplicateConfig schema={inputSchema} bind:config={deduplicateConfigBinding.value} />
 			{:else if step.type === 'fill_null'}
-				<FillNullConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as FillNullConfigData}
-				/>
+				<FillNullConfig schema={inputSchema} bind:config={fillNullConfigBinding.value} />
 			{:else if step.type === 'explode'}
-				<ExplodeConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as ExplodeConfigData}
-				/>
+				<ExplodeConfig schema={inputSchema} bind:config={explodeConfigBinding.value} />
 			{:else if step.type === 'pivot'}
 				<PivotConfig
 					schema={inputSchema}
-					bind:config={draftConfig as unknown as PivotConfigData}
+					bind:config={pivotConfigBinding.value}
 					onRefreshSchema={handleRefreshPivotSchema}
 					isRefreshing={fetchingPivotSchema}
 				/>
 			{:else if step.type === 'timeseries'}
-				<TimeSeriesConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as TimeSeriesConfigData}
-				/>
+				<TimeSeriesConfig schema={inputSchema} bind:config={timeSeriesConfigBinding.value} />
 			{:else if step.type === 'string_transform'}
-				<StringMethodsConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as StringMethodsConfigData}
-				/>
+				<StringMethodsConfig schema={inputSchema} bind:config={stringMethodsConfigBinding.value} />
 			{:else if step.type === 'view'}
-				<ViewConfig schema={inputSchema} bind:config={draftConfig as unknown as ViewConfigData} />
+				<ViewConfig schema={inputSchema} bind:config={viewConfigBinding.value} />
 			{:else if step.type === 'download'}
-				<DownloadConfig
-					bind:config={draftConfig as unknown as { format: string; filename: string }}
-				/>
+				<DownloadConfig bind:config={downloadConfigBinding.value} />
 			{:else if step.type === 'datasource'}
 				<div class={css({ backgroundColor: 'bg.primary', padding: '10', textAlign: 'center' })}>
 					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
@@ -470,31 +478,25 @@
 					</p>
 				</div>
 			{:else if step.type === 'sample'}
-				<SampleConfig bind:config={draftConfig as unknown as SampleConfigData} />
+				<SampleConfig bind:config={sampleConfigBinding.value} />
 			{:else if step.type === 'limit'}
-				<LimitConfig bind:config={draftConfig as unknown as LimitConfigData} />
+				<LimitConfig bind:config={limitConfigBinding.value} />
 			{:else if step.type === 'topk'}
-				<TopKConfig schema={inputSchema} bind:config={draftConfig as unknown as TopKConfigData} />
+				<TopKConfig schema={inputSchema} bind:config={topKConfigBinding.value} />
 			{:else if step.type === 'unpivot'}
-				<UnpivotConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as UnpivotConfigData}
-				/>
+				<UnpivotConfig schema={inputSchema} bind:config={unpivotConfigBinding.value} />
 			{:else if step.type === 'union_by_name'}
-				<UnionByNameConfig
-					schema={inputSchema}
-					bind:config={draftConfig as unknown as { sources: string[]; allow_missing: boolean }}
-				/>
+				<UnionByNameConfig schema={inputSchema} bind:config={unionByNameConfigBinding.value} />
 			{:else if step.type === 'chart'}
-				<PlotConfig schema={inputSchema} bind:config={draftConfig} />
+				<PlotConfig schema={inputSchema} bind:config={plotConfigBinding.value} />
 			{:else if step.type === 'notification'}
 				<NotificationConfig
 					schema={inputSchema}
-					bind:config={draftConfig as unknown as NotificationConfigData}
+					bind:config={notificationConfigBinding.value}
 					{configFlags}
 				/>
 			{:else if step.type === 'ai'}
-				<AIConfig schema={inputSchema} bind:config={draftConfig as unknown as AIConfigData} />
+				<AIConfig schema={inputSchema} bind:config={aiConfigBinding.value} />
 			{:else}
 				<div class={css({ backgroundColor: 'bg.primary', padding: '10', textAlign: 'center' })}>
 					<p class={css({ margin: '0', marginBottom: '4', fontSize: 'xs', color: 'fg.muted' })}>

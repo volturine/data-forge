@@ -3,8 +3,10 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
 from modules.telegram.bot import TelegramBot
@@ -320,7 +322,7 @@ class TestTelegramBot:
         assert call_kwargs[1]['json']['chat_id'] == '123'
         assert call_kwargs[1]['json']['text'] == 'hello'
 
-    @patch('modules.telegram.bot.http_client.post', side_effect=Exception('network'))
+    @patch('modules.telegram.bot.http_client.post', side_effect=httpx.ConnectError('network'))
     def test_send_message_failure_no_raise(self, mock_post: MagicMock) -> None:
         bot = TelegramBot()
         bot._token = 'tok-test'
@@ -369,6 +371,25 @@ class TestTelegramBot:
         assert sub is not None
         assert sub.is_active is True
         assert sub.id == original_id
+
+    def test_handle_subscribe_db_error_sends_failure_message(self) -> None:
+        bot = TelegramBot()
+        bot._token = 'tok-error'
+
+        with (
+            patch('core.database.run_db', side_effect=SQLAlchemyError('db down')),
+            patch.object(bot, '_send_message') as mock_send,
+        ):
+            bot._handle_subscribe('51', 'Broken')
+
+        mock_send.assert_called_once_with('51', 'Failed to subscribe. Please try again.')
+
+    def test_handle_unsubscribe_db_error_does_not_reraise(self) -> None:
+        bot = TelegramBot()
+        bot._token = 'tok-error'
+
+        with patch('core.database.run_db', side_effect=SQLAlchemyError('db down')):
+            bot._handle_unsubscribe('52')
 
     def test_poll_lock_prevents_concurrent_get_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_do_get_updates returns None when lock is held by another caller."""
@@ -427,6 +448,7 @@ class TestTelegramBot:
 class TestSettingsRestartBot:
     @patch('modules.telegram.bot.telegram_bot')
     def test_start_on_token_set(self, mock_bot: MagicMock, client: TestClient) -> None:
+        mock_bot.running = False
         resp = client.put(
             '/api/v1/settings',
             json={
@@ -435,10 +457,12 @@ class TestSettingsRestartBot:
                 'smtp_user': '',
                 'smtp_password': '',
                 'telegram_bot_token': 'new-token',
+                'telegram_bot_enabled': True,
                 'public_idb_debug': False,
             },
         )
         assert resp.status_code == 200
+        mock_bot.start.assert_called_once_with('new-token')
 
     @patch('modules.telegram.bot.telegram_bot')
     def test_stop_on_token_clear(self, mock_bot: MagicMock, client: TestClient) -> None:
@@ -455,3 +479,25 @@ class TestSettingsRestartBot:
             },
         )
         assert resp.status_code == 200
+        mock_bot.stop.assert_called_once_with()
+
+    @patch('modules.telegram.bot.telegram_bot')
+    def test_write_settings_surfaces_runtime_failure(self, mock_bot: MagicMock, client: TestClient) -> None:
+        mock_bot.running = False
+        mock_bot.start.side_effect = RuntimeError('boom')
+
+        resp = client.put(
+            '/api/v1/settings',
+            json={
+                'smtp_host': '',
+                'smtp_port': 587,
+                'smtp_user': '',
+                'smtp_password': '',
+                'telegram_bot_token': 'broken-token',
+                'telegram_bot_enabled': True,
+                'public_idb_debug': False,
+            },
+        )
+
+        assert resp.status_code == 502
+        assert resp.json()['detail'] == 'Telegram bot runtime update failed: boom'

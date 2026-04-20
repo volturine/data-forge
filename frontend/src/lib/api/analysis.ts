@@ -92,6 +92,21 @@ export type AnalysisPreviewResponse = {
 	row_count?: number;
 };
 
+export type CodeExportFormat = 'polars' | 'sql';
+
+export type CodeExportRequest = {
+	format: CodeExportFormat;
+	tab_id?: string | null;
+};
+
+export type CodeExportResponse = {
+	code: string;
+	warnings: string[];
+	filename: string;
+	format: CodeExportFormat;
+	tab_id?: string | null;
+};
+
 export const previewAnalysis = (
 	analysisId: string,
 	pipeline: Record<string, unknown>
@@ -99,4 +114,13 @@ export const previewAnalysis = (
 	apiRequest<AnalysisPreviewResponse>(`/v1/analysis/${analysisId}/preview`, {
 		method: 'POST',
 		body: JSON.stringify({ pipeline })
+	});
+
+export const exportAnalysisCode = (
+	analysisId: string,
+	request: CodeExportRequest
+): ResultAsync<CodeExportResponse, ApiError> =>
+	apiRequest<CodeExportResponse>(`/v1/analysis/${analysisId}/export-code`, {
+		method: 'POST',
+		body: JSON.stringify(request)
 	});

@@ -264,18 +264,17 @@ class TestChatRoutes:
         assert data['model'] == 'gpt-4o-mini'
         assert data['provider'] == 'openrouter'
 
-    def test_create_session_defaults_provider(self, client: TestClient) -> None:
+    def test_create_session_requires_provider(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
             json={'model': 'gpt-4o-mini', 'api_key': 'test-key'},
         )
-        assert resp.status_code == 200
-        assert resp.json()['provider'] == 'openrouter'
+        assert resp.status_code == 422
 
     def test_create_session_without_api_key(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
-            json={'model': 'gpt-4o-mini'},
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini'},
         )
         assert resp.status_code == 200
         assert 'session_id' in resp.json()
@@ -283,7 +282,7 @@ class TestChatRoutes:
     def test_create_session_with_system_prompt(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
-            json={'model': 'gpt-4o-mini', 'api_key': 'key', 'system_prompt': 'Be brief.'},
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'key', 'system_prompt': 'Be brief.'},
         )
         assert resp.status_code == 200
         sid = resp.json()['session_id']
@@ -297,7 +296,7 @@ class TestChatRoutes:
     def test_update_session_model(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
-            json={'model': 'gpt-4o-mini', 'api_key': 'key'},
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'key'},
         )
         sid = resp.json()['session_id']
         patch_resp = client.patch(
@@ -315,7 +314,7 @@ class TestChatRoutes:
     def test_update_session_system_prompt(self, client: TestClient) -> None:
         resp = client.post(
             '/api/v1/ai/chat/sessions',
-            json={'model': 'gpt-4o-mini', 'api_key': 'key', 'system_prompt': 'Original.'},
+            json={'provider': 'openrouter', 'model': 'gpt-4o-mini', 'api_key': 'key', 'system_prompt': 'Original.'},
         )
         sid = resp.json()['session_id']
         client.patch(
@@ -524,42 +523,32 @@ class TestModelsRoute:
     def test_models_with_provided_key(self, client: TestClient) -> None:
         mock_models = [{'id': 'openai/gpt-4o', 'name': 'GPT-4o'}]
         with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)):
-            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
+            resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter', 'api_key': 'sk-test'})
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]['id'] == 'openai/gpt-4o'
         assert data[0]['name'] == 'GPT-4o'
 
-    def test_models_falls_back_to_global_key(self, client: TestClient) -> None:
-        mock_models = [{'id': 'anthropic/claude-3', 'name': 'Claude 3'}]
-        with (
-            patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list,
-            patch('modules.settings.service.get_resolved_openrouter_key', return_value='sk-global'),
-        ):
-            resp = client.post('/api/v1/ai/chat/models', json={})
-        assert resp.status_code == 200
-        mock_list.assert_awaited_once_with('sk-global')
+    def test_models_requires_provider(self, client: TestClient) -> None:
+        resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
+        assert resp.status_code == 422
 
     def test_models_returns_400_when_no_key(self, client: TestClient) -> None:
-        with patch('modules.settings.service.get_resolved_openrouter_key', return_value=''):
-            resp = client.post('/api/v1/ai/chat/models', json={})
+        resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter'})
         assert resp.status_code == 400
-        assert 'No API key' in resp.json()['detail']
+        assert 'API key is required' in resp.json()['detail']
 
     def test_models_returns_empty_list(self, client: TestClient) -> None:
         with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=[])):
-            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
+            resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter', 'api_key': 'sk-test'})
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_models_prefers_provided_key_over_global(self, client: TestClient) -> None:
+    def test_models_uses_provided_key(self, client: TestClient) -> None:
         mock_models = [{'id': 'model/a', 'name': 'A'}]
-        with (
-            patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list,
-            patch('modules.settings.service.get_resolved_openrouter_key', return_value='sk-global'),
-        ):
-            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-session'})
+        with patch('modules.chat.routes.list_models', new=AsyncMock(return_value=mock_models)) as mock_list:
+            resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter', 'api_key': 'sk-session'})
         assert resp.status_code == 200
         mock_list.assert_awaited_once_with('sk-session')
 
@@ -569,7 +558,7 @@ class TestModelsRoute:
 
         monkeypatch.setattr('core.config.settings.auth_required', True)
         app.dependency_overrides.pop(get_current_user, None)
-        resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
+        resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter', 'api_key': 'sk-test'})
         assert resp.status_code == 401
 
 
@@ -1105,7 +1094,7 @@ class TestProductionHardening:
         from modules.chat.openrouter import OpenRouterError
 
         with patch('modules.chat.routes.list_models', new=AsyncMock(side_effect=OpenRouterError('bad gateway'))):
-            resp = client.post('/api/v1/ai/chat/models', json={'api_key': 'sk-test'})
+            resp = client.post('/api/v1/ai/chat/models', json={'provider': 'openrouter', 'api_key': 'sk-test'})
         assert resp.status_code == 502
         assert 'bad gateway' in resp.json()['detail']
 

@@ -2,7 +2,9 @@
 	import { Debounced } from 'runed';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { ChevronDown } from 'lucide-svelte';
-	import { css, cx, emptyText, input, muted } from '$lib/styles/panda';
+	import { css, emptyText, input } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	import type { Snippet } from 'svelte';
 
@@ -53,7 +55,6 @@
 		showSelectedList?: boolean;
 		filter?: (option: OptionBase, query: string) => boolean;
 		menuClass?: string;
-		containerClass?: string;
 		triggerClass?: string;
 		inputClass?: string;
 		triggerType?: 'button' | 'input';
@@ -84,7 +85,6 @@
 		showSelectedList = false,
 		filter,
 		menuClass = '',
-		containerClass = '',
 		triggerClass = '',
 		inputClass = '',
 		triggerType = 'button',
@@ -215,36 +215,29 @@
 		triggerAction: setTriggerRef
 	});
 
-	// DOM: $derived can't detect outside clicks.
-	$effect(() => {
-		if (!menuOpen) return;
-		if (!closeOnOutside) return;
-		const handleOutside = (event: MouseEvent) => {
-			const target = event.target as Node | null;
-			if (!target) return;
-			if (menuRef?.contains(target)) return;
-			if (menuContainerRef?.contains(target)) return;
-			if (triggerRef?.contains(target)) return;
-			closeMenu();
-		};
-		window.addEventListener('mousedown', handleOutside, true);
-		return () => {
-			window.removeEventListener('mousedown', handleOutside, true);
-		};
-	});
+	const outsideClickOverlayConfig = $derived<OverlayConfig>(
+		closeOnOutside
+			? {
+					onEscape: closeMenu,
+					onOutsideClick: (target: Node) => {
+						if (menuRef?.contains(target)) return;
+						if (menuContainerRef?.contains(target)) return;
+						if (triggerRef?.contains(target)) return;
+						closeMenu();
+					}
+				}
+			: {}
+	);
 </script>
 
 <div
-	class={cx(
-		css({
-			position: 'relative',
-			display: 'flex',
-			flexDirection: 'column',
-			gap: '2',
-			minWidth: 'inputSm'
-		}),
-		containerClass
-	)}
+	class={css({
+		position: 'relative',
+		display: 'flex',
+		flexDirection: 'column',
+		gap: '2',
+		minWidth: 'inputSm'
+	})}
 	bind:this={menuRef}
 >
 	{#if triggerType === 'input'}
@@ -265,7 +258,7 @@
 	{:else}
 		<button
 			type="button"
-			class={cx(
+			class={[
 				css({
 					display: 'flex',
 					alignItems: 'center',
@@ -283,7 +276,7 @@
 					}
 				}),
 				triggerClass
-			)}
+			]}
 			onclick={openMenu}
 			aria-expanded={menuOpen}
 			use:setTriggerRef={undefined}
@@ -299,7 +292,7 @@
 							textOverflow: 'ellipsis',
 							whiteSpace: 'nowrap'
 						})
-					: muted}>{displayLabel}</span
+					: css({ color: 'fg.muted' })}>{displayLabel}</span
 			>
 			{#if clearable && selectedCount > 0}
 				<span
@@ -333,13 +326,13 @@
 					aria-label="Clear selection">✕</span
 				>
 			{:else}
-				<ChevronDown size={14} class={muted} />
+				<ChevronDown size={14} class={css({ color: 'fg.muted' })} />
 			{/if}
 		</button>
 	{/if}
 	{#if menuOpen}
 		<div
-			class={cx(
+			class={[
 				css({
 					position: 'absolute',
 					zIndex: 'dropdown',
@@ -355,11 +348,12 @@
 					gap: '2'
 				}),
 				menuClass
-			)}
+			]}
 			role="listbox"
 			aria-multiselectable={mode === 'multi'}
 			aria-label={listAriaLabel}
 			use:resolvedMenuAction={menuActionValue}
+			use:overlayStack.action={outsideClickOverlayConfig}
 			bind:this={menuContainerRef}
 		>
 			{#if triggerType === 'button'}
@@ -391,11 +385,9 @@
 							flex: '1',
 							cursor: 'pointer',
 							borderWidth: '1',
-							backgroundColor: 'transparent',
 							paddingX: '2',
 							paddingY: '1',
 							fontSize: 'xs',
-							color: 'fg.secondary',
 							_hover: {
 								backgroundColor: 'bg.hover',
 								color: 'accent.secondary'
@@ -414,11 +406,9 @@
 							flex: '1',
 							cursor: 'pointer',
 							borderWidth: '1',
-							backgroundColor: 'transparent',
 							paddingX: '2',
 							paddingY: '1',
 							fontSize: 'xs',
-							color: 'fg.secondary',
 							_hover: {
 								backgroundColor: 'bg.hover',
 								color: 'accent.secondary'
@@ -489,23 +479,19 @@
 
 {#if showSelectedList && mode === 'multi' && Array.isArray(value) && value.length > 0}
 	<div
-		class={cx(
-			css({
-				maxWidth: '100%',
-				overflowWrap: 'anywhere',
-				wordBreak: 'break-word',
-				whiteSpace: 'normal'
-			}),
-			css({ fontFamily: 'mono' }),
-			css({
-				marginTop: '2',
-				maxHeight: 'labelSm',
-				overflowY: 'auto',
-				borderWidth: '1',
-				padding: '2',
-				fontSize: 'xs'
-			})
-		)}
+		class={css({
+			maxWidth: '100%',
+			overflowWrap: 'anywhere',
+			wordBreak: 'break-word',
+			whiteSpace: 'normal',
+			fontFamily: 'mono',
+			marginTop: '2',
+			maxHeight: 'labelSm',
+			overflowY: 'auto',
+			borderWidth: '1',
+			padding: '2',
+			fontSize: 'xs'
+		})}
 	>
 		{value.join(', ')}
 	</div>

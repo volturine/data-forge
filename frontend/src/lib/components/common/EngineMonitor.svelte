@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { Cpu, X, ChevronDown, LoaderCircle } from 'lucide-svelte';
-	import { onClickOutside } from 'runed';
 	import { untrack } from 'svelte';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import { toEpochDisplay } from '$lib/utils/datetime';
-	import { css, emptyText, cx, row } from '$lib/styles/panda';
+	import { css, emptyText } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	let expanded = $state(false);
 	let killing = $state<string | null>(null);
 
-	// Subscription: $derived can't start/stop polling.
+	// Subscription: $derived can't start/stop the engines stream.
 	$effect(() => {
-		untrack(() => enginesStore.startPolling());
-		return () => enginesStore.stopPolling();
+		untrack(() => enginesStore.startStream());
+		return () => enginesStore.stopStream();
 	});
 
 	async function handleKill(analysisId: string) {
@@ -37,19 +38,21 @@
 
 	function toggleExpanded() {
 		expanded = !expanded;
-		if (expanded) {
-			enginesStore.fetch();
-		}
 	}
 
 	let dropdownRef = $state<HTMLElement>();
-	onClickOutside(
-		() => dropdownRef,
-		() => {
+	let popupRef = $state<HTMLElement>();
+
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: () => {
 			expanded = false;
 		},
-		{ immediate: true }
-	);
+		onOutsideClick: (target: Node) => {
+			if (popupRef?.contains(target)) return;
+			if (dropdownRef?.contains(target)) return;
+			expanded = false;
+		}
+	});
 
 	let trigger = $state<HTMLButtonElement>();
 	let pos = $state({ top: 0, right: 0 });
@@ -106,6 +109,7 @@
 
 	{#if expanded}
 		<div
+			bind:this={popupRef}
 			class={css({
 				position: 'fixed',
 				right: `${pos.right}px`,
@@ -116,17 +120,17 @@
 				borderWidth: '1',
 				backgroundColor: 'bg.primary'
 			})}
+			use:overlayStack.action={overlayConfig}
 		>
 			<div
-				class={cx(
-					row,
-					css({
-						justifyContent: 'space-between',
-						borderBottomWidth: '1',
-						padding: '3',
-						backgroundColor: 'bg.secondary'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'space-between',
+					borderBottomWidth: '1',
+					padding: '3',
+					backgroundColor: 'bg.secondary'
+				})}
 			>
 				<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> Active Engines </span>
 				<button
@@ -151,17 +155,16 @@
 				{#if enginesStore.count === 0}
 					{#if enginesStore.loading}
 						<div
-							class={cx(
-								row,
-								css({
-									justifyContent: 'center',
-									gap: '2',
-									padding: '6',
-									textAlign: 'center',
-									fontSize: 'sm',
-									color: 'fg.muted'
-								})
-							)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								gap: '2',
+								padding: '6',
+								textAlign: 'center',
+								fontSize: 'sm',
+								color: 'fg.muted'
+							})}
 						>
 							<LoaderCircle size={16} class={css({ animation: 'spin 1s linear infinite' })} />
 							<span>Loading...</span>
@@ -175,17 +178,16 @@
 					<ul class={css({ margin: '0', listStyle: 'none', padding: '0' })}>
 						{#each enginesStore.engines as engine (engine.analysis_id)}
 							<li
-								class={cx(
-									row,
-									css({
-										gap: '3',
-										borderBottomWidth: '1',
-										padding: '3'
-									})
-								)}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '3',
+									borderBottomWidth: '1',
+									padding: '3'
+								})}
 							>
 								<div class={css({ minWidth: '0', flex: '1' })}>
-									<div class={cx(row, css({ gap: '2' }))}>
+									<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 										<span
 											class={css({
 												fontFamily: 'mono',
@@ -209,7 +211,9 @@
 											{engine.status}
 										</span>
 									</div>
-									<div class={cx(row, css({ marginTop: '1', gap: '2' }))}>
+									<div
+										class={css({ display: 'flex', alignItems: 'center', marginTop: '1', gap: '2' })}
+									>
 										{#if engine.current_job_id}
 											<span
 												class={css({
@@ -234,8 +238,6 @@
 										justifyContent: 'center',
 										borderWidth: '1',
 										padding: '1',
-										backgroundColor: 'transparent',
-										color: 'fg.muted',
 										_hover: {
 											backgroundColor: 'bg.error',
 											borderColor: 'border.error',

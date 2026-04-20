@@ -2,8 +2,9 @@ import polars as pl
 import pytest
 
 from core.config import settings
+from core.namespace import namespace_paths
 from modules.compute.core.exports import get_export_format
-from modules.compute.operations.datasource import resolve_iceberg_metadata_path
+from modules.compute.operations.datasource import resolve_iceberg_branch_metadata_path, resolve_iceberg_metadata_path
 from modules.compute.operations.fill_null import cast_value, get_fill_strategy, get_polars_type
 from modules.compute.operations.filter import get_operator
 from modules.compute.operations.groupby import get_aggregation
@@ -81,3 +82,32 @@ def test_resolve_iceberg_metadata_path_allows_symlinked_data_root(tmp_path, monk
     metadata_file.write_text('{}', encoding='utf-8')
 
     assert resolve_iceberg_metadata_path(str(metadata_file)) == str(metadata_file)
+
+
+def test_resolve_iceberg_metadata_path_accepts_explicit_namespace(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'data_dir', tmp_path / 'data', raising=False)
+    metadata_file = namespace_paths('alpha').exports_dir / 'table' / 'metadata' / 'v1.metadata.json'
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
+    metadata_file.write_text('{}', encoding='utf-8')
+
+    assert resolve_iceberg_metadata_path(str(metadata_file), namespace_name='alpha') == str(metadata_file)
+
+
+def test_resolve_iceberg_metadata_path_rejects_wrong_namespace_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'data_dir', tmp_path / 'data', raising=False)
+    metadata_file = namespace_paths('alpha').exports_dir / 'table' / 'metadata' / 'v1.metadata.json'
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
+    metadata_file.write_text('{}', encoding='utf-8')
+
+    with pytest.raises(ValueError, match='Iceberg metadata_path must be inside data directory'):
+        resolve_iceberg_metadata_path(str(metadata_file), namespace_name='beta')
+
+
+def test_resolve_iceberg_branch_metadata_path_accepts_explicit_data_root(tmp_path):
+    data_root = tmp_path / 'custom-root'
+    metadata_dir = data_root / 'table' / 'metadata'
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    metadata_file = metadata_dir / 'v1.metadata.json'
+    metadata_file.write_text('{}', encoding='utf-8')
+
+    assert resolve_iceberg_branch_metadata_path(str(metadata_dir.parent), None, data_root=data_root) == str(metadata_file)

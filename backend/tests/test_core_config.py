@@ -29,7 +29,6 @@ class TestSettings:
                 'DEFAULT_NAMESPACE',
                 'UPLOAD_CHUNK_SIZE',
                 'ENGINE_IDLE_TIMEOUT',
-                'ENGINE_POOLING_INTERVAL',
                 'JOB_TIMEOUT',
                 'LOG_LEVEL',
                 'LOG_ICEBERG_PATH',
@@ -48,7 +47,6 @@ class TestSettings:
         assert settings.upload_chunk_size == 5 * 1024 * 1024
         assert settings.job_timeout == 300
         assert settings.engine_idle_timeout == 60
-        assert settings.engine_pooling_interval == 30
         assert settings.lock_ttl_seconds == 30
         assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
@@ -129,10 +127,6 @@ class TestSettings:
             Settings()
 
         monkeypatch.setenv('JOB_TIMEOUT', '300')
-        monkeypatch.setenv('ENGINE_POOLING_INTERVAL', '0')
-
-        with pytest.raises(ValidationError, match='engine_pooling_interval must be >= 1'):
-            Settings()
 
     def test_port_must_be_in_valid_range(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

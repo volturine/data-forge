@@ -2,29 +2,18 @@
 	import type { Schema } from '$lib/types/schema';
 	import type { Udf } from '$lib/types/udf';
 
-	import { onClickOutside } from 'runed';
 	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { listUdfs, createUdf } from '$lib/api/udf';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import UdfPickerModal from '$lib/components/common/UdfPickerModal.svelte';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import { Pencil, X } from 'lucide-svelte';
-	import {
-		css,
-		button,
-		emptyText,
-		input,
-		label,
-		stepConfig,
-		cx,
-		row,
-		rowBetween,
-		divider
-	} from '$lib/styles/panda';
+	import { css, button, emptyText, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface WithColumnsExpr {
 		name: string;
@@ -57,7 +46,6 @@
 	let useLibrary = $state(false);
 	let showEditor = $state(false);
 	let codeEdited = $state(false);
-	let modalRef = $state<HTMLElement>();
 	let editIndex = $state<number | null>(null);
 	const isEditing = $derived(editIndex !== null);
 	let pickerOpen = $state(false);
@@ -224,13 +212,6 @@
 		config.expressions = expressions.filter((_: WithColumnsExpr, idx: number) => idx !== index);
 		if (editIndex === index) resetForm();
 	}
-
-	onClickOutside(
-		() => modalRef,
-		() => {
-			if (showEditor) showEditor = false;
-		}
-	);
 </script>
 
 <div class={stepConfig()} role="region" aria-label="With columns configuration">
@@ -282,7 +263,7 @@
 			/>
 		{:else}
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-				<div class={cx(row, css({ gap: '3' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '3' })}>
 					<label class={label({ variant: 'inline' })}>
 						<input id="wc-use-lib-no" type="radio" bind:group={useLibrary} value={false} />
 						Inline UDF
@@ -294,7 +275,7 @@
 				</div>
 
 				{#if useLibrary}
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<button
 							type="button"
 							class={button({ variant: 'secondary', size: 'sm' })}
@@ -325,7 +306,9 @@
 						placeholder="Select input columns..."
 					/>
 
-					<div class={rowBetween}>
+					<div
+						class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}
+					>
 						<label for="wc-expr-code" class={label()}>Function</label>
 						<button
 							type="button"
@@ -335,35 +318,57 @@
 					</div>
 					<textarea
 						id="wc-expr-code"
-						class={cx(
-							input(),
-							css({
-								resize: 'vertical',
-								minHeight: 'fieldSm',
-								fontSize: 'sm'
-							})
-						)}
+						class={css({
+							width: 'full',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							resize: 'vertical',
+							minHeight: 'fieldSm',
+							fontSize: 'sm'
+						})}
 						rows="5"
 						placeholder="def udf(*args):&#10;    return ..."
 						bind:value={exprCode}
 						oninput={() => (codeEdited = true)}
 					></textarea>
-					<label class={cx(label({ variant: 'inline' }), css({ marginTop: '2' }))}>
+					<label
+						class={css({
+							display: 'inline-flex',
+							alignItems: 'center',
+							gap: '2',
+							fontSize: 'sm',
+							fontWeight: 'normal',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '0',
+							marginTop: '2'
+						})}
+					>
 						<input id="wc-save-to-lib" type="checkbox" bind:checked={saveToLibrary} />
 						Save to UDF Library
 					</label>
 					{#if saveToLibrary}
 						<div
-							class={cx(
-								divider,
-								css({
-									display: 'flex',
-									flexDirection: 'column',
-									gap: '3',
-									marginTop: '3',
-									paddingTop: '3'
-								})
-							)}
+							class={css({
+								borderTopWidth: '1',
+								display: 'flex',
+								flexDirection: 'column',
+								gap: '3',
+								marginTop: '3',
+								paddingTop: '3'
+							})}
 						>
 							<label class={label()} for="wc-save-name">Name</label>
 							<input
@@ -453,7 +458,7 @@
 							})}
 					role="listitem"
 				>
-					<div class={cx(row, css({ gap: '3', minWidth: '0' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '3', minWidth: '0' })}>
 						<span
 							class={css({
 								fontWeight: 'semibold',
@@ -504,13 +509,10 @@
 								display: 'inline-flex',
 								alignItems: 'center',
 								justifyContent: 'center',
-								backgroundColor: 'transparent',
 								cursor: 'pointer',
 								fontSize: 'md',
 								lineHeight: 'none',
-								color: 'fg.muted',
 								borderWidth: '1',
-								borderColor: 'border.transparent',
 								_hover: {
 									color: 'fg.error',
 									backgroundColor: 'bg.error',
@@ -531,76 +533,73 @@
 	{/if}
 </div>
 
-{#if showEditor}
-	<div
-		class={css({ position: 'fixed', inset: '0', background: 'bg.overlay', zIndex: 'modal' })}
-		aria-hidden="true"
-	></div>
+<BaseModal
+	open={showEditor}
+	onClose={() => (showEditor = false)}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	panelClass={css({
+		width: 'min(720px, 92vw)',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		display: 'flex',
+		flexDirection: 'column',
+		_focus: { outline: 'none' }
+	})}
+	ariaLabelledby="wc-editor-title"
+	{content}
+/>
+
+{#snippet content()}
+	<PanelHeader>
+		{#snippet title()}
+			<span id="wc-editor-title">UDF Editor</span>
+		{/snippet}
+		{#snippet actions()}
+			<button
+				class={css({
+					background: 'transparent',
+					border: 'none',
+					color: 'fg.muted',
+					cursor: 'pointer',
+					fontSize: 'xl',
+					padding: '1',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					transition: 'color 160ms ease, background-color 160ms ease',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+				})}
+				onclick={() => (showEditor = false)}
+				aria-label="Close"
+				type="button"
+			>
+				<X size={16} />
+			</button>
+		{/snippet}
+	</PanelHeader>
 	<div
 		class={css({
-			position: 'fixed',
-			left: '50%',
-			top: '50%',
-			transform: 'translate(-50%, -50%)',
-			width: 'min(720px, 92vw)',
-			backgroundColor: 'bg.primary',
-			borderWidth: '1',
-			zIndex: '1001',
+			padding: '4',
+			overflowY: 'auto',
 			display: 'flex',
 			flexDirection: 'column',
-			_focus: { outline: 'none' }
+			gap: '3'
 		})}
-		role="dialog"
-		aria-modal="true"
-		bind:this={modalRef}
 	>
-		<PanelHeader>
-			{#snippet title()}UDF Editor{/snippet}
-			{#snippet actions()}
-				<button
-					class={css({
-						background: 'transparent',
-						border: 'none',
-						color: 'fg.muted',
-						cursor: 'pointer',
-						fontSize: 'xl',
-						padding: '1',
-						display: 'flex',
-						alignItems: 'center',
-						justifyContent: 'center',
-						transition: 'color 160ms ease, background-color 160ms ease',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
-					})}
-					onclick={() => (showEditor = false)}
-					aria-label="Close"
-				>
-					<X size={16} />
-				</button>
-			{/snippet}
-		</PanelHeader>
-		<div
-			class={css({
-				padding: '4',
-				overflowY: 'auto',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '3'
-			})}
-		>
-			<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
-			<p class={css({ fontSize: 'sm', margin: '0', color: 'fg.muted' })}>
-				Define a function named <code>udf</code> that returns a value per row.
-			</p>
-		</div>
-		<PanelFooter>
-			<button
-				class={button({ variant: 'secondary' })}
-				onclick={() => (showEditor = false)}
-				type="button">Done</button
-			>
-		</PanelFooter>
+		<CodeEditor bind:value={exprCode} height="400px" onEdit={() => (codeEdited = true)} />
+		<p class={css({ fontSize: 'sm', margin: '0', color: 'fg.muted' })}>
+			Define a function named <code>udf</code> that returns a value per row.
+		</p>
 	</div>
-{/if}
+	<PanelFooter>
+		<button
+			class={button({ variant: 'secondary' })}
+			onclick={() => (showEditor = false)}
+			type="button">Done</button
+		>
+	</PanelFooter>
+{/snippet}
 
 <UdfPickerModal
 	show={pickerOpen}

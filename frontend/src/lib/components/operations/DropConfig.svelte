@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
-	import { AlertTriangle } from 'lucide-svelte';
+	import { TriangleAlert } from 'lucide-svelte';
 	import MultiSelectColumnDropdown from '$lib/components/common/MultiSelectColumnDropdown.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, stepConfig } from '$lib/styles/panda';
@@ -67,7 +67,7 @@
 	{#if safeColumns.length > 0}
 		<Callout tone="warn">
 			<strong class={css({ display: 'inline-flex', alignItems: 'center', gap: '2' })}>
-				<AlertTriangle size={14} />
+				<TriangleAlert size={14} />
 				Columns to Drop ({safeColumns.length}):
 			</strong>
 			<p>These columns will be removed from the dataset.</p>

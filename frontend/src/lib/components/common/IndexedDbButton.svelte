@@ -1,18 +1,31 @@
 <script lang="ts">
 	import { Check, Copy, Database, LoaderCircle, X } from 'lucide-svelte';
-	import { onClickOutside } from 'runed';
 	import { configStore } from '$lib/stores/config.svelte';
 	import { idbEntries, idbDelete, idbClear } from '$lib/utils/indexeddb';
-	import { css, emptyText, cx, row } from '$lib/styles/panda';
+	import { css, emptyText } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	let open = $state(false);
 	let entries = $state<Array<{ key: string; value: unknown }>>([]);
 	let loading = $state(false);
 	let dropdownRef = $state<HTMLElement>();
+	let popupRef = $state<HTMLElement>();
 	let expandedKey = $state<string | null>(null);
 	let copiedKey = $state<string | null>(null);
 	let copyTimer = $state<number | null>(null);
 	const truncateLimit = 120;
+
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: () => {
+			open = false;
+		},
+		onOutsideClick: (target: Node) => {
+			if (popupRef?.contains(target)) return;
+			if (dropdownRef?.contains(target)) return;
+			open = false;
+		}
+	});
 
 	function formatValue(value: unknown): string {
 		if (typeof value === 'string') return value;
@@ -76,14 +89,6 @@
 			expandedKey = null;
 		}
 	}
-
-	onClickOutside(
-		() => dropdownRef,
-		() => {
-			open = false;
-		},
-		{ immediate: true }
-	);
 </script>
 
 {#if configStore.publicIdbDebug}
@@ -112,6 +117,7 @@
 
 		{#if open}
 			<div
+				bind:this={popupRef}
 				class={css({
 					position: 'absolute',
 					right: '0',
@@ -123,6 +129,7 @@
 					borderWidth: '1',
 					backgroundColor: 'bg.primary'
 				})}
+				use:overlayStack.action={overlayConfig}
 			>
 				<div
 					class={css({
@@ -135,7 +142,7 @@
 					})}
 				>
 					<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}> IndexedDB </span>
-					<div class={cx(row, css({ gap: '2' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 						<button
 							class={css({
 								display: 'flex',

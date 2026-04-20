@@ -11,7 +11,6 @@ const { ConfigStore } = await import('./config.svelte');
 
 function makeConfig(overrides: Partial<FrontendConfig> = {}): FrontendConfig {
 	return {
-		engine_pooling_interval: 3000,
 		engine_idle_timeout: 600,
 		job_timeout: 120,
 		timezone: 'Europe/Berlin',
@@ -71,10 +70,6 @@ describe('ConfigStore', () => {
 	});
 
 	describe('getter defaults before fetch', () => {
-		test('enginePoolingInterval returns 5000', () => {
-			expect(store.enginePoolingInterval).toBe(5000);
-		});
-
 		test('engineIdleTimeout returns 300', () => {
 			expect(store.engineIdleTimeout).toBe(300);
 		});
@@ -143,7 +138,6 @@ describe('ConfigStore', () => {
 		test('getters return fetched values', async () => {
 			mockSuccess(
 				makeConfig({
-					engine_pooling_interval: 7000,
 					timezone: 'America/New_York',
 					smtp_enabled: true,
 					auth_required: false
@@ -152,7 +146,6 @@ describe('ConfigStore', () => {
 
 			await store.fetch();
 
-			expect(store.enginePoolingInterval).toBe(7000);
 			expect(store.timezone).toBe('America/New_York');
 			expect(store.smtpEnabled).toBe(true);
 			expect(store.authRequired).toBe(false);
@@ -173,7 +166,6 @@ describe('ConfigStore', () => {
 		test('getters still return defaults after error', async () => {
 			mockError('boom');
 			await store.fetch();
-			expect(store.enginePoolingInterval).toBe(5000);
 			expect(store.timezone).toBe('UTC');
 		});
 	});

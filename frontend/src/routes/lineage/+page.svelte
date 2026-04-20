@@ -14,7 +14,7 @@
 		Loader,
 		X,
 		Database,
-		BarChart3,
+		ChartColumn,
 		ArrowRight,
 		ArrowDown,
 		LayoutGrid,
@@ -24,17 +24,7 @@
 		Layers,
 		GitBranch
 	} from 'lucide-svelte';
-	import {
-		css,
-		cx,
-		button,
-		input,
-		row,
-		divider,
-		muted,
-		toggleButton,
-		chip
-	} from '$lib/styles/panda';
+	import { css, button, toggleButton, chip } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 	type LineageGraphApi = {
@@ -175,30 +165,38 @@
 		})}
 	>
 		<div
-			class={cx(
-				row,
-				css({
-					gridColumn: '1 / -1',
-					gridRow: '1',
-					gap: '1',
-					paddingX: '3',
-					paddingY: '1.5',
-					borderBottomWidth: '1',
-					background: 'bg.primary',
-					flexWrap: 'wrap'
-				})
-			)}
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				gridColumn: '1 / -1',
+				gridRow: '1',
+				gap: '1',
+				paddingX: '3',
+				paddingY: '1.5',
+				borderBottomWidth: '1',
+				background: 'bg.primary',
+				flexWrap: 'wrap'
+			})}
 		>
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<select
-					class={cx(
-						input(),
-						css({
-							fontSize: 'xs',
-							paddingX: '2',
-							paddingY: '1'
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						fontSize: 'xs',
+						paddingX: '2',
+						paddingY: '1'
+					})}
 					id="lineage-ds"
 					aria-label="Output datasource"
 					value={selectedDatasourceId}
@@ -210,14 +208,23 @@
 					{/each}
 				</select>
 				<select
-					class={cx(
-						input(),
-						css({
-							fontSize: 'xs',
-							paddingX: '2',
-							paddingY: '1'
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						fontSize: 'xs',
+						paddingX: '2',
+						paddingY: '1'
+					})}
 					id="lineage-branch"
 					aria-label="Branch"
 					value={selectedBranch}
@@ -243,7 +250,7 @@
 				})}
 			></div>
 
-			<div class={cx(row, css({ gap: '0' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '0' })}>
 				{#each modeOptions as opt, i (opt.value)}
 					<button
 						class={toggleButton({
@@ -355,22 +362,21 @@
 			})}
 		>
 			<div
-				class={cx(
-					row,
-					css({
-						gap: '3',
-						borderBottomWidth: '1',
-						paddingX: '4',
-						paddingY: '3'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '3',
+					borderBottomWidth: '1',
+					paddingX: '4',
+					paddingY: '3'
+				})}
 			>
 				{#if selectedNode}
-					<div class={cx(row, css({ gap: '2', color: 'fg.muted' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2', color: 'fg.muted' })}>
 						{#if selectedType === 'datasource'}
 							<Database size={16} />
 						{:else}
-							<BarChart3 size={16} />
+							<ChartColumn size={16} />
 						{/if}
 					</div>
 				{/if}
@@ -399,7 +405,15 @@
 				</div>
 				{#if selectedNode}
 					<button
-						class={cx(button({ variant: 'ghost', size: 'sm' }), css({ padding: '1' }))}
+						class={css({
+							borderWidth: '1',
+							backgroundColor: 'transparent',
+							color: 'fg.secondary',
+							borderColor: 'transparent',
+							fontSize: 'xs',
+							padding: '1',
+							'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' }
+						})}
 						onclick={closePanel}
 						title="Close panel"
 						aria-label="Close panel"
@@ -414,8 +428,15 @@
 					<div
 						class={css({ marginBottom: '4', display: 'flex', flexDirection: 'column', gap: '2' })}
 					>
-						<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
-							<span class={muted}>Kind</span>
+						<div
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								fontSize: 'sm'
+							})}
+						>
+							<span class={css({ color: 'fg.muted' })}>Kind</span>
 							<span
 								class={chip({ tone: selectedNode.node_kind === 'internal' ? 'neutral' : 'accent' })}
 							>
@@ -423,28 +444,56 @@
 							</span>
 						</div>
 						{#if selectedNode.source_type}
-							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
-								<span class={muted}>Source</span>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Source</span>
 								<span>{selectedNode.source_type}</span>
 							</div>
 						{/if}
 						{#if selectedNode.status}
-							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
-								<span class={muted}>Status</span>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Status</span>
 								<span>{selectedNode.status}</span>
 							</div>
 						{/if}
 						{#if selectedNode.branch}
-							<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
-								<span class={muted}>Branch</span>
-								<div class={cx(row, css({ gap: '1' }))}>
+							<div
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									justifyContent: 'space-between',
+									fontSize: 'sm'
+								})}
+							>
+								<span class={css({ color: 'fg.muted' })}>Branch</span>
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 									<GitBranch size={12} />
 									<span>{selectedNode.branch}</span>
 								</div>
 							</div>
 						{/if}
-						<div class={cx(row, css({ justifyContent: 'space-between', fontSize: 'sm' }))}>
-							<span class={muted}>ID</span>
+						<div
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								fontSize: 'sm'
+							})}
+						>
+							<span class={css({ color: 'fg.muted' })}>ID</span>
 							<span
 								class={css({
 									textOverflow: 'ellipsis',
@@ -461,14 +510,7 @@
 					</div>
 
 					{#if selectedType === 'datasource' && selectedRawId}
-						<div
-							class={cx(
-								divider,
-								css({
-									paddingTop: '4'
-								})
-							)}
-						>
+						<div class={css({ borderTopWidth: '1', paddingTop: '4' })}>
 							<h3
 								class={css({
 									marginBottom: '3',
@@ -501,10 +543,14 @@
 		>
 			{#if query.isLoading}
 				<div
-					class={cx(
-						row,
-						css({ height: '100%', justifyContent: 'center', gap: '2', color: 'fg.tertiary' })
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						height: '100%',
+						justifyContent: 'center',
+						gap: '2',
+						color: 'fg.tertiary'
+					})}
 				>
 					<Loader size={16} class={css({ animation: 'spin 1s linear infinite' })} />
 					Loading lineage...
@@ -512,7 +558,12 @@
 			{:else if query.isError}
 				<div
 					data-testid="lineage-load-error"
-					class={cx(row, css({ height: '100%', justifyContent: 'center' }))}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						height: '100%',
+						justifyContent: 'center'
+					})}
 				>
 					<p class={css({ fontSize: 'sm', color: 'fg.error' })}>Failed to load lineage.</p>
 				</div>
@@ -546,7 +597,7 @@
 						zIndex: '5'
 					})}
 				>
-					<div class={cx(row, css({ gap: '1.5' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
 						<div
 							class={css({
 								width: '3',
@@ -557,7 +608,7 @@
 						></div>
 						<span>Source</span>
 					</div>
-					<div class={cx(row, css({ gap: '1.5' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
 						<div
 							class={css({
 								width: '3',
@@ -568,7 +619,7 @@
 						></div>
 						<span>Output</span>
 					</div>
-					<div class={cx(row, css({ gap: '1.5' }))}>
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
 						<div
 							class={css({
 								width: '3',
@@ -580,7 +631,7 @@
 						<span>Analysis</span>
 					</div>
 					{#if internals}
-						<div class={cx(row, css({ gap: '1.5' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '1.5' })}>
 							<div
 								class={css({
 									width: '3',

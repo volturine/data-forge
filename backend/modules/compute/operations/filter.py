@@ -13,21 +13,19 @@ from modules.compute.operations._validation import validate_regex_pattern
 
 
 def _parse_datetime_string(s: str) -> datetime:
-    """Parse a datetime string, supporting ISO 8601 and common fallback formats."""
+    """Parse a datetime string in ISO 8601 format."""
     if s.endswith('Z'):
         s = s[:-1] + '+00:00'
+    if ' ' in s and 'T' not in s:
+        raise ValueError(
+            f"Cannot parse datetime string '{s}'. Accepted format: ISO 8601 (for example 2024-06-15T12:30:00)",
+        )
     try:
         return datetime.fromisoformat(s)
     except ValueError:
-        pass
-    for fmt in ('%Y-%m-%d %H:%M:%S', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y', '%d/%m/%Y'):
-        try:
-            return datetime.strptime(s, fmt)
-        except ValueError:
-            continue
-    raise ValueError(
-        f"Cannot parse datetime string '{s}'. Accepted formats: ISO 8601 (YYYY-MM-DDTHH:MM:SS), YYYY-MM-DD HH:MM:SS, MM/DD/YYYY",
-    )
+        raise ValueError(
+            f"Cannot parse datetime string '{s}'. Accepted format: ISO 8601 (for example 2024-06-15T12:30:00)",
+        ) from None
 
 
 class FilterValueType(StrEnum):

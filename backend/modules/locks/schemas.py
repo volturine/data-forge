@@ -41,6 +41,8 @@ class LockReleaseResponse(BaseModel):
 
 class LockWebsocketAction(StrEnum):
     WATCH = 'watch'
+    ACQUIRE = 'acquire'
+    RELEASE = 'release'
     PING = 'ping'
 
 

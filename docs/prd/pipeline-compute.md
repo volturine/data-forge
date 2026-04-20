@@ -39,7 +39,7 @@ An analysis contains a `pipeline_definition` with the following structure:
                     'depends_on': []
                 },
                 {
-                    'id': 'step-2', 
+                    'id': 'step-2',
                     'type': 'select',
                     'config': {'columns': ['id', 'name', 'created_at']},
                     'depends_on': ['step-1']
@@ -214,19 +214,19 @@ def _build_pipeline(
 ) -> tuple[pl.LazyFrame, dict[str, float], list[pl.LazyFrame]]:
     # 1. Load source datasource
     lf = load_datasource(datasource_config)
-    
+
     # 2. Load additional datasources (for joins)
     right_sources: dict[str, pl.LazyFrame] = {}
     for ds_id, ds_config in additional_datasources.items():
         right_sources[ds_id] = load_datasource(ds_config)
-    
+
     # 3. Topological sort steps
     ordered_steps = _topological_sort(pipeline_steps)
-    
+
     # 4. Apply each step sequentially
     for step in ordered_steps:
         lf = _apply_step(lf, step, right_sources)
-    
+
     return lf, step_timings, plan_frames
 ```
 
@@ -244,7 +244,7 @@ Each step type has a corresponding handler that implements the transformation:
 class OperationHandler(Protocol):
     @property
     def name(self) -> str: ...
-    
+
     def __call__(
         self,
         lf: pl.LazyFrame,
@@ -344,13 +344,13 @@ This function transforms an analysis definition into a payload suitable for exec
 
 ```python
 def build_analysis_pipeline_payload(
-    session: Session, 
-    analysis: Analysis, 
+    session: Session,
+    analysis: Analysis,
     datasource_id: str | None = None
 ) -> dict:
     # 1. Extract tabs
     tabs = pipeline.get('tabs', [])
-    
+
     # 2. Build source map (output.result_id → source_config)
     sources: dict[str, dict] = {}
     for tab in tabs:
@@ -366,7 +366,7 @@ def build_analysis_pipeline_payload(
                 'analysis_id': analysis.id,
                 'analysis_tab_id': tab['id'],
             }
-    
+
     # 3. Resolve input datasources
     for tab in tabs:
         datasource = tab.get('datasource')
@@ -381,7 +381,7 @@ def build_analysis_pipeline_payload(
                 'source_type': datasource_model.source_type,
                 **datasource_model.config,
             }
-    
+
     return {
         'analysis_id': analysis.id,
         'tabs': tabs,
@@ -427,7 +427,7 @@ result_queue.put({
 
 ### Cleanup
 
-- **Idle timeout**: Default 30 seconds (`engine_pooling_interval`)
+- **Idle timeout**: Engines are cleaned up after `engine_idle_timeout` seconds of inactivity
 - **Manual shutdown**: On app shutdown, all engines are terminated
 - **Unexpected death**: Health check detects dead process, resets state
 
@@ -448,10 +448,10 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
     if build_mode == 'recreate' and catalog.table_exists(identifier):
         catalog.drop_table(identifier)
         return catalog.create_table(identifier, lazy)
-    
+
     if build_mode == 'incremental':
         return catalog.load_table(identifier).append(lazy)
-    
+
     # full (default)
     return catalog.create_table(identifier, lazy)
 ```
@@ -484,8 +484,8 @@ def _write_iceberg_table(lazy: pl.LazyFrame, table_path: Path, build_mode: str) 
 Key settings in `backend/core/config.py`:
 
 ```python
-# Engine pooling
-engine_pooling_interval: int = Field(default=30)  # seconds
+# Engine lifecycle
+engine_idle_timeout: int = Field(default=60)  # seconds
 max_concurrent_engines: int = Field(default=10)
 
 # Resource limits

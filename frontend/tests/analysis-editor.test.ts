@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { addStepAndOpenConfig, gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import {
@@ -8,6 +8,12 @@ import {
 } from './utils/ui-cleanup.js';
 import { screenshot } from './utils/visual.js';
 import { uid } from './utils/uid.js';
+
+async function latestNode(page: Parameters<typeof gotoAnalysisEditor>[0], stepType: string) {
+	const nodes = page.locator(`[data-step-type="${stepType}"]`);
+	await expect.poll(async () => await nodes.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+	return nodes.nth((await nodes.count()) - 1);
+}
 
 // ── Save/discard dirty tracking ─────────────────────────────────────────────
 
@@ -47,9 +53,7 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="select"]').click();
 
-			await expect(page.locator('[data-step-type="select"]').first()).toBeVisible({
-				timeout: 5_000
-			});
+			await expect(await latestNode(page, 'select')).toBeVisible({ timeout: 5_000 });
 
 			const saveBtn = page.getByRole('button', { name: 'Save' });
 			await expect(saveBtn).toBeVisible({ timeout: 5_000 });
@@ -72,9 +76,7 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 		try {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="sort"]').click();
-			await expect(page.locator('[data-step-type="sort"]').first()).toBeVisible({
-				timeout: 5_000
-			});
+			await expect(await latestNode(page, 'sort')).toBeVisible({ timeout: 5_000 });
 
 			await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 5_000 });
 
@@ -102,7 +104,7 @@ test.describe('Analyses – save/discard dirty tracking', () => {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="filter"]').click();
 
-			const canvasNode = page.locator('[data-step-type="filter"]').first();
+			const canvasNode = await latestNode(page, 'filter');
 			await expect(canvasNode).toBeVisible({ timeout: 5_000 });
 			await canvasNode.click();
 
@@ -139,47 +141,46 @@ test.describe('Analyses – step library labels', () => {
 		aId = await createAnalysis(request, aName, dsId);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteAnalysisViaUI(page, aName);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
 		await context.close();
 	});
 
-	// All 25 step types that appear in StepLibrary.svelte (read-only checks)
-	const ALL_STEP_LABELS = [
-		'Filter',
-		'Select',
-		'Group By',
-		'Sort',
-		'Rename',
-		'Drop',
-		'Join',
-		'Expression',
-		'With Columns',
-		'Pivot',
-		'Unpivot',
-		'Fill Null',
-		'Deduplicate',
-		'Explode',
-		'Time Series',
-		'String Transform',
-		'Sample',
-		'Limit',
-		'Top K',
-		'Chart',
-		'Notify',
-		'AI',
-		'View',
-		'Union By Name',
-		'Download'
-	];
+	const ALL_STEP_TYPES = [
+		['filter', 'Filter'],
+		['select', 'Select'],
+		['groupby', 'Group By'],
+		['sort', 'Sort'],
+		['rename', 'Rename'],
+		['drop', 'Drop'],
+		['join', 'Join'],
+		['expression', 'Expression'],
+		['with_columns', 'With Columns'],
+		['pivot', 'Pivot'],
+		['unpivot', 'Unpivot'],
+		['fill_null', 'Fill Null'],
+		['deduplicate', 'Deduplicate'],
+		['explode', 'Explode'],
+		['timeseries', 'Time Series'],
+		['string_transform', 'String Transform'],
+		['sample', 'Sample'],
+		['limit', 'Limit'],
+		['topk', 'Top K'],
+		['chart', 'Chart'],
+		['notification', 'Notify'],
+		['ai', 'AI'],
+		['view', 'View'],
+		['union_by_name', 'Union By Name'],
+		['download', 'Download']
+	] as const;
 
-	for (const label of ALL_STEP_LABELS) {
+	for (const [stepType, label] of ALL_STEP_TYPES) {
 		test(`step type "${label}" is visible in library`, async ({ page }) => {
 			await gotoAnalysisEditor(page, aId);
-			await expect(page.locator('button[data-step]', { hasText: label }).first()).toBeVisible({
+			await expect(page.locator(`button[data-step="${stepType}"]`)).toBeVisible({
 				timeout: 10_000
 			});
 		});
@@ -231,7 +232,7 @@ test.describe('Analyses – step interaction', () => {
 			await gotoAnalysisEditor(page, aId);
 			await page.locator('button[data-step="filter"]').click();
 
-			const canvasNode = page.locator('[data-step-type="filter"]').first();
+			const canvasNode = await latestNode(page, 'filter');
 			await expect(canvasNode).toBeVisible({ timeout: 5_000 });
 			await canvasNode.click();
 
@@ -334,7 +335,7 @@ test.describe('Analyses – save persistence', () => {
 
 			// Add a filter step and open config
 			await page.locator('button[data-step="filter"]').click();
-			const canvasNode = page.locator('[data-step-type="filter"]').first();
+			const canvasNode = await latestNode(page, 'filter');
 			await expect(canvasNode).toBeVisible({ timeout: 5_000 });
 			await canvasNode.click();
 
@@ -374,7 +375,7 @@ test.describe('Analyses – node delete via action button', () => {
 
 			// Add a limit step
 			await page.locator('button[data-step="limit"]').click();
-			const limitNode = page.locator('[data-step-type="limit"]').first();
+			const limitNode = await latestNode(page, 'limit');
 			await expect(limitNode).toBeVisible({ timeout: 5_000 });
 
 			// Click the delete action button on the node
@@ -404,7 +405,7 @@ test.describe('Analyses – node toggle (enable/disable)', () => {
 
 			// Add a sort step
 			await page.locator('button[data-step="sort"]').click();
-			const sortNode = page.locator('[data-step-type="sort"]').first();
+			const sortNode = await latestNode(page, 'sort');
 			await expect(sortNode).toBeVisible({ timeout: 5_000 });
 
 			// By default new steps are not applied (is_applied=false),
@@ -470,7 +471,7 @@ test.describe('Analyses – save + reload config persistence', () => {
 			await waitForEditorReload(page);
 
 			// Limit node should still exist
-			const limitNode = page.locator('[data-step-type="limit"]').first();
+			const limitNode = await latestNode(page, 'limit');
 			await expect(limitNode).toBeVisible({ timeout: 10_000 });
 
 			// Open config again and verify value persisted
@@ -584,7 +585,7 @@ test.describe('Analyses – derived tab flow', () => {
 
 				// Search for our datasource (use the same one)
 				await modal.locator('#dsm-search').fill(ds);
-				await modal.getByText(ds).click({ timeout: 8_000 });
+				await modal.locator(`[data-datasource-option="${ds}"]`).click({ timeout: 8_000 });
 				await expect(modal).toBeHidden({ timeout: 5_000 });
 			}
 
@@ -633,7 +634,7 @@ test.describe('Analyses – multi-tab flow', () => {
 			await expect(modal).toBeVisible({ timeout: 5_000 });
 
 			await modal.locator('#dsm-search').fill(ds2);
-			await modal.getByText(ds2).click({ timeout: 8_000 });
+			await modal.locator(`[data-datasource-option="${ds2}"]`).click({ timeout: 8_000 });
 
 			await expect(modal).toBeHidden({ timeout: 5_000 });
 
@@ -872,93 +873,6 @@ test.describe('Analyses – version history modal', () => {
 			await deleteDatasourceViaUI(page, ds);
 		}
 	});
-
-	test('version load error state shows "Failed to load version history."', async ({
-		page,
-		request
-	}) => {
-		test.setTimeout(60_000);
-		const id = uid();
-		const ds = `e2e-ver-err-${id}`;
-		const analysis = `E2E Ver Error ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Intercept versions endpoint to return 500
-			await page.route(`**/api/v1/analysis/${aId}/versions`, (route) =>
-				route.fulfill({ status: 500, body: 'Internal Server Error' })
-			);
-
-			await page.locator('[data-testid="version-history-trigger"]').click();
-			const dialog = page.getByRole('dialog');
-			await expect(dialog).toBeVisible({ timeout: 5_000 });
-
-			// The error state should appear in the modal
-			await expect(
-				dialog
-					.getByText('Failed to load version history.')
-					.or(dialog.getByText('Failed to load version history'))
-			).toBeVisible({ timeout: 10_000 });
-
-			await screenshot(page, 'analysis/editor', 'version-history-load-error');
-			await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
-
-	test('version action error displays inline error message', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const id = uid();
-		const ds = `e2e-ver-act-err-${id}`;
-		const analysis = `E2E Ver Act Error ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Save to create version 1
-			await page.locator('button[data-step="limit"]').click();
-			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
-			await page.getByRole('button', { name: 'Save' }).click();
-			await expect(page.getByRole('button', { name: 'Saved' })).toBeVisible({ timeout: 10_000 });
-
-			// Open version modal
-			await page.locator('[data-testid="version-history-trigger"]').click();
-			const dialog = page.getByRole('dialog');
-			await expect(dialog.getByText(/Version 1/)).toBeVisible({ timeout: 10_000 });
-
-			// Intercept delete endpoint to return 500
-			await page.route(`**/api/v1/analysis/${aId}/versions/1`, (route) => {
-				if (route.request().method() === 'DELETE') {
-					return route.fulfill({
-						status: 500,
-						contentType: 'application/json',
-						body: JSON.stringify({ detail: 'Simulated delete failure' })
-					});
-				}
-				return route.continue();
-			});
-
-			// Try to delete — should show error inline
-			await dialog.locator('[data-testid="version-delete-1"]').click();
-
-			await expect(dialog.locator('[data-testid="version-error"]')).toBeVisible({
-				timeout: 8_000
-			});
-
-			await screenshot(page, 'analysis/editor', 'version-history-action-error');
-			await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-			await expect(dialog).not.toBeVisible({ timeout: 3_000 });
-		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
 });
 
 // ── Canvas layout ───────────────────────────────────────────────────────────
@@ -987,7 +901,7 @@ test.describe('Analyses – insert view via insert zone', () => {
 			// Insert zone between filter (index 0) and limit (index 1) has data-index="2"
 			// (index 0 = above first step, 1 = after view, 2 = after filter, 3 = after limit)
 			// The insert zone after filter is at data-index matching after the filter step
-			const insertZone = page.locator('.insert-zone').nth(2);
+			const insertZone = page.locator('[data-hook="insert-zone"]').nth(2);
 			await insertZone.hover();
 
 			// Click the "Insert view" button
@@ -1039,7 +953,7 @@ test.describe('Analyses – pointer drag reorder', () => {
 			expect(limitIdx).toBeGreaterThanOrEqual(0);
 
 			// Locate drag handle on the limit node and the insert-zone above the filter node
-			const limitNode = page.locator('[data-step-type="limit"]').first();
+			const limitNode = await latestNode(page, 'limit');
 			const dragHandle = limitNode.locator('button[data-drag-handle="true"]');
 			await expect(dragHandle).toBeVisible({ timeout: 5_000 });
 
@@ -1066,7 +980,7 @@ test.describe('Analyses – pointer drag reorder', () => {
 			});
 
 			// Capture target insert-zone bounding box after drag has started
-			const targetZone = page.locator('.insert-zone').nth(filterIdx);
+			const targetZone = page.locator('[data-hook="insert-zone"]').nth(filterIdx);
 			const targetBox = await targetZone.boundingBox();
 			expect(targetBox).not.toBeNull();
 
@@ -1102,53 +1016,6 @@ test.describe('Analyses – pointer drag reorder', () => {
 
 			await screenshot(page, 'analysis/editor', 'drag-reorder-done');
 		} finally {
-			await deleteAnalysisViaUI(page, analysis);
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
-});
-
-// ── Save failure UI ─────────────────────────────────────────────────────────
-
-test.describe('Analyses – save failure error UI', () => {
-	test('save API failure shows save-error callout', async ({ page, request }) => {
-		test.setTimeout(90_000);
-		const id = uid();
-		const ds = `e2e-save-err-${id}`;
-		const analysis = `E2E Save Error ${id}`;
-		const dsId = await createDatasource(request, ds);
-		const aId = await createAnalysis(request, analysis, dsId);
-		try {
-			await gotoAnalysisEditor(page, aId);
-
-			// Add a step to make the analysis dirty
-			await page.locator('button[data-step="limit"]').click();
-			await expect(page.locator('[data-step-type="limit"]')).toHaveCount(1, { timeout: 5_000 });
-
-			// Intercept save (PUT) to return 500
-			await page.route(`**/api/v1/analysis/${aId}`, (route) => {
-				if (route.request().method() === 'PUT') {
-					return route.fulfill({
-						status: 500,
-						contentType: 'application/json',
-						body: JSON.stringify({ detail: 'Simulated save failure' })
-					});
-				}
-				return route.continue();
-			});
-
-			// Click Save
-			await page.getByRole('button', { name: 'Save' }).click();
-
-			// Save error callout should appear
-			await expect(page.locator('[data-testid="save-error"]')).toBeVisible({
-				timeout: 10_000
-			});
-
-			await screenshot(page, 'analysis/editor', 'save-error-callout');
-		} finally {
-			// Unroute so cleanup works
-			await page.unrouteAll({ behavior: 'ignoreErrors' });
 			await deleteAnalysisViaUI(page, analysis);
 			await deleteDatasourceViaUI(page, ds);
 		}

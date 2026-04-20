@@ -139,6 +139,24 @@ def clear_lock_watchers():
     asyncio.run(registry.clear())
 
 
+@pytest.fixture(autouse=True, scope='function')
+def clear_active_build_registry():
+    from modules.compute.live import registry
+
+    asyncio.run(registry.clear())
+    yield
+    asyncio.run(registry.clear())
+
+
+@pytest.fixture(autouse=True, scope='function')
+def clear_engine_registry():
+    from modules.compute.engine_live import registry
+
+    asyncio.run(registry.clear())
+    yield
+    asyncio.run(registry.clear())
+
+
 @pytest.fixture(scope='function')
 def temp_upload_dir(tmp_path: Path) -> Path:
     upload_dir = tmp_path / 'uploads'

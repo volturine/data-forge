@@ -1,48 +1,13 @@
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
-import { getNamespace } from '$lib/stores/namespace.svelte';
-import { errAsync, okAsync, ResultAsync } from 'neverthrow';
-import { BASE_URL, type ApiError } from './client';
-
-type WebsocketMessage<T> =
-	| {
-			type: 'started';
-	  }
-	| {
-			type: 'result';
-			data: T;
-	  }
-	| {
-			type: 'error';
-			error: string;
-			status_code?: number;
-	  };
-
-const DEV_BACKEND_PORT = '8000';
-const DEV_FRONTEND_PORT = '3000';
-const DEV_CONNECT_TIMEOUT_MS = 500;
-
-function resolveDevBackendHost(): string {
-	const explicitHost = import.meta.env.VITE_BACKEND_HOST;
-	if (typeof explicitHost === 'string' && explicitHost.trim().length > 0) {
-		return explicitHost.trim();
-	}
-	return window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
-}
-
-function resolveWebsocketOrigin(): string {
-	if (!import.meta.env.DEV) return window.location.origin;
-	if (window.location.port !== DEV_FRONTEND_PORT) return window.location.origin;
-	return `${window.location.protocol}//${resolveDevBackendHost()}:${DEV_BACKEND_PORT}`;
-}
+import { requireNamespace } from '$lib/stores/namespace.svelte';
+import { BASE_URL } from './client';
 
 export function buildWebsocketUrl(endpoint: string): string {
-	const url = new URL(`${BASE_URL}${endpoint}`, resolveWebsocketOrigin());
+	const url = new URL(`${BASE_URL}${endpoint}`, window.location.origin);
 	url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const identity = getClientIdentity();
-	const namespace = getNamespace();
-	if (namespace) {
-		url.searchParams.set('namespace', namespace);
-	}
+	const namespace = requireNamespace();
+	url.searchParams.set('namespace', namespace);
 	if (identity.clientId) {
 		url.searchParams.set('client_id', identity.clientId);
 	}
@@ -61,121 +26,71 @@ export function preferHttp(): boolean {
 	}
 }
 
-type WsResult<T> =
-	| { ok: true; data: T }
-	| { ok: false; error: ApiError }
-	| { ok: false; fallback: true };
-
-function attemptWebsocket<T, Payload>(
-	endpoint: string,
-	action: string,
-	payload: Payload
-): Promise<WsResult<T>> {
-	return new Promise<WsResult<T>>((resolve) => {
-		const socket = new WebSocket(buildWebsocketUrl(endpoint));
-		let settled = false;
-		let opened = false;
-		let connectTimer: number | null = null;
-
-		const settle = (result: WsResult<T>) => {
-			if (settled) return;
-			settled = true;
-			if (connectTimer !== null) {
-				window.clearTimeout(connectTimer);
-				connectTimer = null;
-			}
-			resolve(result);
-		};
-
-		connectTimer = window.setTimeout(() => {
-			if (opened || settled) return;
-			settle({ ok: false, fallback: true });
-			socket.close();
-		}, DEV_CONNECT_TIMEOUT_MS);
-
-		socket.addEventListener('open', () => {
-			opened = true;
-			socket.send(JSON.stringify({ action, payload }));
-		});
-
-		socket.addEventListener('message', (event) => {
-			let message: WebsocketMessage<T>;
-			try {
-				message = JSON.parse(event.data) as WebsocketMessage<T>;
-			} catch {
-				const preview =
-					typeof event.data === 'string' ? event.data.slice(0, 100) : '[non-text payload]';
-				settle({
-					ok: false,
-					error: { type: 'parse', message: `Failed to parse websocket response: ${preview}` }
-				});
-				socket.close();
-				return;
-			}
-
-			if (message.type === 'started') {
-				return;
-			}
-
-			if (message.type === 'error') {
-				settle({
-					ok: false,
-					error: {
-						type: 'http',
-						message: message.error,
-						status: message.status_code,
-						statusText: 'WebSocket request failed'
-					}
-				});
-				socket.close();
-				return;
-			}
-
-			settle({ ok: true, data: message.data });
-			socket.close();
-		});
-
-		socket.addEventListener('error', () => {
-			if (!opened) {
-				settle({ ok: false, fallback: true });
-				return;
-			}
-			settle({ ok: false, error: { type: 'network', message: 'WebSocket request failed' } });
-		});
-
-		socket.addEventListener('close', (event) => {
-			if (settled) return;
-			if (!opened) {
-				settle({ ok: false, fallback: true });
-				return;
-			}
-			settle({
-				ok: false,
-				error: {
-					type: 'network',
-					message:
-						event.reason || `WebSocket closed before a result was received (code ${event.code})`
-				}
-			});
-		});
-	});
+export interface StreamCallbacks<TSnapshot, TEvent = never> {
+	onSnapshot: (snapshot: TSnapshot) => void;
+	onEvent?: (event: TEvent) => void;
+	onError: (error: string) => void;
+	onClose: () => void;
 }
 
-export function websocketRequest<T, Payload>(
+export interface StreamHandle {
+	close: () => void;
+}
+
+function isErrorMessage(msg: { type: string }): msg is { type: 'error'; error: string } {
+	if (msg.type !== 'error') return false;
+	const value = msg as Record<string, unknown>;
+	return typeof value.error === 'string';
+}
+
+export function createStream<
+	TSnapshot,
+	TEvent = never,
+	TMessage extends { type: string } = { type: string }
+>(
 	endpoint: string,
-	action: string,
-	payload: Payload,
-	fallback: () => ResultAsync<T, ApiError>
-): ResultAsync<T, ApiError> {
-	if (typeof window === 'undefined' || typeof WebSocket === 'undefined' || preferHttp()) {
-		return fallback();
+	options: {
+		parse: (data: string) => TMessage | null;
+		isSnapshot: (msg: TMessage) => boolean;
+		extractSnapshot: (msg: TMessage) => TSnapshot;
+		extractEvent?: (msg: TMessage) => TEvent;
+		callbacks: StreamCallbacks<TSnapshot, TEvent>;
 	}
-	return ResultAsync.fromPromise(
-		attemptWebsocket<T, Payload>(endpoint, action, payload),
-		(): ApiError => ({ type: 'network', message: 'Unexpected error in WebSocket transport' })
-	).andThen((result) => {
-		if (result.ok) return okAsync<T, ApiError>(result.data);
-		if ('fallback' in result) return fallback();
-		return errAsync<T, ApiError>(result.error);
+): StreamHandle {
+	const socket = new WebSocket(buildWebsocketUrl(endpoint));
+
+	socket.addEventListener('message', (event) => {
+		const msg = options.parse(event.data as string);
+		if (!msg) return;
+		if (options.isSnapshot(msg)) {
+			options.callbacks.onSnapshot(options.extractSnapshot(msg));
+			return;
+		}
+		if (isErrorMessage(msg)) {
+			options.callbacks.onError(msg.error);
+			return;
+		}
+		if (options.extractEvent && options.callbacks.onEvent) {
+			options.callbacks.onEvent(options.extractEvent(msg));
+		}
 	});
+
+	socket.addEventListener('error', () => {
+		options.callbacks.onError('WebSocket connection failed');
+	});
+
+	socket.addEventListener('close', (event) => {
+		if (event.code !== 1000 && event.code !== 1005) {
+			options.callbacks.onError(event.reason || `Connection closed (code ${event.code})`);
+		}
+		options.callbacks.onClose();
+	});
+
+	return {
+		close() {
+			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+				socket.close(1000);
+			}
+		}
+	};
 }

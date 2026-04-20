@@ -19,7 +19,7 @@
 		Trash2,
 		Check,
 		X,
-		AlertTriangle,
+		TriangleAlert,
 		HeartPulse,
 		Plus,
 		ChevronDown,
@@ -30,7 +30,7 @@
 	} from 'lucide-svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import { css, cx, emptyText, input, label, row, rowBetween, muted } from '$lib/styles/panda';
+	import { css, emptyText, input, label } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId?: string;
@@ -47,10 +47,9 @@
 		queryKey: ['datasources-lookup', 'include-hidden'],
 		queryFn: async () => {
 			const result = await listDatasources(true);
-			if (result.isErr()) return [] as DataSource[];
+			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		},
-		staleTime: 60_000
+		}
 	}));
 
 	const datasourceMap = $derived.by(() => {
@@ -80,12 +79,13 @@
 					critical: !!(check as { critical?: boolean }).critical
 				}));
 			}
+			if (datasourcesQuery.error instanceof Error) throw datasourcesQuery.error;
 			const sources = datasourcesQuery.data ?? [];
 			if (sources.length === 0) return [];
 			const all = await Promise.all(
 				sources.map(async (ds) => {
 					const result = await listHealthChecks(ds.id);
-					if (result.isErr()) return [];
+					if (result.isErr()) throw new Error(result.error.message);
 					return result.value;
 				})
 			);
@@ -105,12 +105,13 @@
 				if (result.isErr()) throw new Error(result.error.message);
 				return result.value;
 			}
+			if (datasourcesQuery.error instanceof Error) throw datasourcesQuery.error;
 			const sources = datasourcesQuery.data ?? [];
 			if (sources.length === 0) return [];
 			const all = await Promise.all(
 				sources.map(async (ds) => {
 					const result = await listHealthCheckResults(ds.id, 20);
-					if (result.isErr()) return [];
+					if (result.isErr()) throw new Error(result.error.message);
 					return result.value;
 				})
 			);
@@ -136,7 +137,12 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		onSuccess: () => {
+		onSuccess: (created) => {
+			const listKey = ['healthchecks', datasourceId ?? 'all'];
+			queryClient.setQueryData<HealthCheckItem[]>(listKey, (current) => {
+				const next = current ?? [];
+				return [...next, { ...created, critical: !!(created as { critical?: boolean }).critical }];
+			});
 			queryClient.invalidateQueries({ queryKey: ['healthchecks'] });
 			queryClient.invalidateQueries({ queryKey: ['healthcheck-results'] });
 			creating = false;
@@ -361,16 +367,24 @@
 				<label for="hc-target" class={label({ variant: 'compact' })}>Datasource</label>
 				<select
 					id="hc-target"
-					class={cx(
-						input(),
-						css({
-							appearance: 'none',
-							paddingX: '2',
-							paddingY: '1.5',
-							fontSize: 'xs',
-							_focus: { borderColor: 'border.accent' }
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						appearance: 'none',
+						paddingX: '2',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						_focus: { borderColor: 'border.accent' }
+					})}
 					bind:value={targetDatasourceId}
 				>
 					<option value="">Select datasource...</option>
@@ -382,11 +396,11 @@
 		{/if}
 
 		<div
-			class={cx(
-				css({ gap: '3' }),
+			class={css(
+				{ gap: '3' },
 				compact
-					? css({ display: 'flex', flexDirection: 'column' })
-					: css({ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' })
+					? { display: 'flex', flexDirection: 'column' }
+					: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }
 			)}
 		>
 			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
@@ -394,15 +408,23 @@
 				<input
 					id="hc-name"
 					type="text"
-					class={cx(
-						input(),
-						css({
-							paddingX: '2',
-							paddingY: '1.5',
-							fontSize: 'xs',
-							_focus: { borderColor: 'border.accent' }
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						paddingX: '2',
+						paddingY: '1.5',
+						fontSize: 'xs',
+						_focus: { borderColor: 'border.accent' }
+					})}
 					bind:value={name}
 					placeholder="e.g. Row count guard"
 				/>
@@ -413,16 +435,24 @@
 				<div class={css({ position: 'relative' })}>
 					<select
 						id="hc-type"
-						class={cx(
-							input(),
-							css({
-								appearance: 'none',
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})
-						)}
+						class={css({
+							width: 'full',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							appearance: 'none',
+							paddingX: '2',
+							paddingY: '1.5',
+							fontSize: 'xs',
+							_focus: { borderColor: 'border.accent' }
+						})}
 						bind:value={checkType}
 						onchange={() => {
 							config = {};
@@ -456,31 +486,40 @@
 
 			{#if checkType === 'row_count'}
 				<div
-					class={cx(
-						compact
-							? css({ display: 'flex', flexDirection: 'column', gap: '3' })
-							: css({
-									gridColumn: 'span 2 / span 2',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-									gap: '3'
-								})
-					)}
+					class={compact
+						? { display: 'flex', flexDirection: 'column', gap: '3' }
+						: {
+								gridColumn: 'span 2 / span 2',
+								display: 'grid',
+								gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+								gap: '3'
+							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<label for="hc-min-rows" class={label({ variant: 'compact' })}>Min Rows</label>
 						<input
 							id="hc-min-rows"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('min_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -489,46 +528,66 @@
 						<input
 							id="hc-max-rows"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('max_rows', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
 				</div>
 			{:else if checkType === 'column_count'}
 				<div
-					class={cx(
-						compact
-							? css({ display: 'flex', flexDirection: 'column', gap: '3' })
-							: css({
-									gridColumn: 'span 2 / span 2',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-									gap: '3'
-								})
-					)}
+					class={compact
+						? { display: 'flex', flexDirection: 'column', gap: '3' }
+						: {
+								gridColumn: 'span 2 / span 2',
+								display: 'grid',
+								gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+								gap: '3'
+							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<label for="hc-min-cols" class={label({ variant: 'compact' })}>Min Columns</label>
 						<input
 							id="hc-min-cols"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('min_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -537,15 +596,26 @@
 						<input
 							id="hc-max-cols"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('max_columns', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -563,30 +633,36 @@
 					<input
 						id="hc-null-threshold"
 						type="number"
-						class={cx(
-							input(),
-							css({
-								paddingX: '2',
-								paddingY: '1.5',
-								fontSize: 'xs',
-								_focus: { borderColor: 'border.accent' }
-							})
-						)}
+						class={css({
+							width: 'full',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							paddingX: '2',
+							paddingY: '1.5',
+							fontSize: 'xs',
+							_focus: { borderColor: 'border.accent' }
+						})}
 						oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 					/>
 				</div>
 			{:else if checkType === 'duplicate_percentage'}
 				<div
-					class={cx(
-						compact
-							? css({ display: 'flex', flexDirection: 'column', gap: '3' })
-							: css({
-									gridColumn: 'span 2 / span 2',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-									gap: '3'
-								})
-					)}
+					class={compact
+						? { display: 'flex', flexDirection: 'column', gap: '3' }
+						: {
+								gridColumn: 'span 2 / span 2',
+								display: 'grid',
+								gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+								gap: '3'
+							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<label for="hc-dup-threshold" class={label({ variant: 'compact' })}>Threshold (%)</label
@@ -594,15 +670,26 @@
 						<input
 							id="hc-dup-threshold"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -613,15 +700,26 @@
 						<input
 							id="hc-dup-cols"
 							type="text"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							value={duplicateColumns}
 							placeholder="col_a, col_b"
 							oninput={(e) => updateDuplicateColumns(e.currentTarget.value)}
@@ -630,31 +728,40 @@
 				</div>
 			{:else if checkType === 'column_null'}
 				<div
-					class={cx(
-						compact
-							? css({ display: 'flex', flexDirection: 'column', gap: '3' })
-							: css({
-									gridColumn: 'span 2 / span 2',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-									gap: '3'
-								})
-					)}
+					class={compact
+						? { display: 'flex', flexDirection: 'column', gap: '3' }
+						: {
+								gridColumn: 'span 2 / span 2',
+								display: 'grid',
+								gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+								gap: '3'
+							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<label for="hc-column" class={label({ variant: 'compact' })}>Column Name</label>
 						<input
 							id="hc-column"
 							type="text"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -663,46 +770,66 @@
 						<input
 							id="hc-threshold"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('threshold', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
 				</div>
 			{:else if checkType === 'column_unique'}
 				<div
-					class={cx(
-						compact
-							? css({ display: 'flex', flexDirection: 'column', gap: '3' })
-							: css({
-									gridColumn: 'span 2 / span 2',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-									gap: '3'
-								})
-					)}
+					class={compact
+						? { display: 'flex', flexDirection: 'column', gap: '3' }
+						: {
+								gridColumn: 'span 2 / span 2',
+								display: 'grid',
+								gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+								gap: '3'
+							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<label for="hc-unique-column" class={label({ variant: 'compact' })}>Column Name</label>
 						<input
 							id="hc-unique-column"
 							type="text"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -713,46 +840,66 @@
 						<input
 							id="hc-expected"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('expected_unique', parseInt(e.currentTarget.value) || 0)}
 						/>
 					</div>
 				</div>
 			{:else if checkType === 'column_range'}
 				<div
-					class={cx(
-						compact
-							? css({ display: 'flex', flexDirection: 'column', gap: '3' })
-							: css({
-									gridColumn: 'span 2 / span 2',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-									gap: '3'
-								})
-					)}
+					class={compact
+						? { display: 'flex', flexDirection: 'column', gap: '3' }
+						: {
+								gridColumn: 'span 2 / span 2',
+								display: 'grid',
+								gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+								gap: '3'
+							}}
 				>
 					<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
 						<label for="hc-range-column" class={label({ variant: 'compact' })}>Column Name</label>
 						<input
 							id="hc-range-column"
 							type="text"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('column', e.currentTarget.value)}
 						/>
 					</div>
@@ -761,15 +908,26 @@
 						<input
 							id="hc-min"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('min', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -778,15 +936,26 @@
 						<input
 							id="hc-max"
 							type="number"
-							class={cx(
-								input(),
-								css({
-									paddingX: '2',
-									paddingY: '1.5',
-									fontSize: 'xs',
-									_focus: { borderColor: 'border.accent' }
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								paddingX: '2',
+								paddingY: '1.5',
+								fontSize: 'xs',
+								_focus: { borderColor: 'border.accent' }
+							})}
 							oninput={(e) => updateConfig('max', parseFloat(e.currentTarget.value) || 0)}
 						/>
 					</div>
@@ -805,10 +974,19 @@
 			})}
 		>
 			<label
-				class={cx(
-					label({ variant: 'checkbox' }),
-					css({ gap: '2', fontSize: 'xs', userSelect: 'none' })
-				)}
+				class={css({
+					display: 'flex',
+					cursor: 'pointer',
+					alignItems: 'center',
+					fontWeight: 'normal',
+					color: 'fg.secondary',
+					textTransform: 'none',
+					letterSpacing: 'normal',
+					marginBottom: '0',
+					gap: '2',
+					fontSize: 'xs',
+					userSelect: 'none'
+				})}
 			>
 				<input
 					type="checkbox"
@@ -820,7 +998,7 @@
 				<span class={css({ fontWeight: 'medium' })}>Critical Check (fails pipeline)</span>
 			</label>
 
-			<div class={cx(row, css({ gap: '2' }))}>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 				<button
 					class={css({
 						borderWidth: '1',
@@ -859,7 +1037,7 @@
 					onclick={addHealthCheck}
 				>
 					{#if createCheckMutation.isPending}
-						<div class={cx(row, css({ gap: '1' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 							<Loader size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 							<span>Saving...</span>
 						</div>
@@ -890,7 +1068,7 @@
 				paddingBottom: '5'
 			})}
 		>
-			<div class={rowBetween}>
+			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<div>
 					<h1 class={css({ margin: '0', marginBottom: '2', fontSize: '2xl' })}>Health Checks</h1>
 					<p class={css({ margin: '0', color: 'fg.tertiary' })}>
@@ -967,8 +1145,8 @@
 				justifyContent: 'space-between'
 			})}
 		>
-			<div class={cx(row, css({ gap: '2' }))}>
-				<HeartPulse size={14} class={muted} />
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<HeartPulse size={14} class={css({ color: 'fg.muted' })} />
 				<span
 					class={css({
 						fontSize: 'xs',
@@ -1039,7 +1217,7 @@
 		>
 			<Loader size={20} class={css({ animation: 'spin 1s linear infinite' })} />
 		</div>
-	{:else if listQuery.isError}
+	{:else if datasourcesQuery.isError || listQuery.isError || resultsQuery.isError}
 		<div
 			class={css({
 				borderWidth: '1',
@@ -1051,23 +1229,27 @@
 				color: 'fg.error'
 			})}
 		>
-			Failed to load health checks.
+			{datasourcesQuery.error instanceof Error
+				? datasourcesQuery.error.message
+				: listQuery.error instanceof Error
+					? listQuery.error.message
+					: resultsQuery.error instanceof Error
+						? resultsQuery.error.message
+						: 'Failed to load health checks.'}
 		</div>
 	{:else if checks.length === 0 && !creating}
 		<div
-			class={cx(
-				css({
-					display: 'flex',
-					flexDirection: 'column',
-					alignItems: 'center',
-					justifyContent: 'center',
-					borderWidth: '1',
-					borderStyle: 'dashed',
-					backgroundColor: 'bg.secondary/50',
-					paddingY: compact ? '4' : '8',
-					textAlign: 'center'
-				})
-			)}
+			class={css({
+				display: 'flex',
+				flexDirection: 'column',
+				alignItems: 'center',
+				justifyContent: 'center',
+				borderWidth: '1',
+				borderStyle: 'dashed',
+				backgroundColor: 'bg.secondary/50',
+				paddingY: compact ? '4' : '8',
+				textAlign: 'center'
+			})}
 		>
 			<HeartPulse class={css({ marginBottom: '2', color: 'fg.muted' })} size={compact ? 16 : 24} />
 			<p class={emptyText({ size: 'compact' })}>No health checks configured.</p>
@@ -1185,9 +1367,12 @@
 						{#each visibleChecks as check (check.id)}
 							{@const latest = latestResults.get(check.id)}
 							<tr
-								class={cx(
-									css({ cursor: 'pointer', _hover: { backgroundColor: 'bg.hover' } }),
-									expandedId === check.id ? css({ backgroundColor: 'bg.secondary' }) : ''
+								data-healthcheck-row={check.id}
+								data-healthcheck-name={check.name}
+								data-datasource-id={check.datasource_id}
+								class={css(
+									{ cursor: 'pointer', _hover: { backgroundColor: 'bg.hover' } },
+									expandedId === check.id && { backgroundColor: 'bg.secondary' }
 								)}
 								onclick={() => toggleExpand(check.id)}
 							>
@@ -1252,7 +1437,7 @@
 												backgroundColor: 'bg.tertiary'
 											})}
 										>
-											<AlertTriangle size={12} class={muted} />
+											<TriangleAlert size={12} class={css({ color: 'fg.muted' })} />
 										</div>
 									{/if}
 								</td>
@@ -1282,7 +1467,7 @@
 											})}
 											title={check.datasource_id}
 										>
-											<Database size={10} class={muted} />
+											<Database size={10} class={css({ color: 'fg.muted' })} />
 											{resolveDatasource(check.datasource_id)}
 										</span>
 									</td>
@@ -1353,8 +1538,8 @@
 											<Power size={12} class={css({ color: 'fg.success' })} />
 											<span class={css({ color: 'fg.success' })}>On</span>
 										{:else}
-											<PowerOff size={12} class={muted} />
-											<span class={muted}>Off</span>
+											<PowerOff size={12} class={css({ color: 'fg.muted' })} />
+											<span class={css({ color: 'fg.muted' })}>Off</span>
 										{/if}
 									</button>
 								</td>
@@ -1373,7 +1558,6 @@
 											borderWidth: '0',
 											backgroundColor: 'transparent',
 											padding: '0.5',
-											color: 'fg.muted',
 											_hover: { color: 'fg.error' },
 											_focusVisible: {
 												color: 'fg.error',
@@ -1441,7 +1625,7 @@
 													<span class={css({ fontSize: '2xs', color: 'fg.muted' })}
 														>Latest Result</span
 													>
-													<div class={cx(row, css({ gap: '1' }))}>
+													<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 														{#if latest.passed}
 															<Check size={10} class={css({ color: 'fg.success' })} />
 															<span class={css({ fontSize: '2xs', color: 'fg.success' })}
@@ -1598,7 +1782,6 @@
 							<button
 								class={css({
 									backgroundColor: 'bg.primary',
-									color: 'fg.tertiary',
 									_hover: { color: 'fg.error' },
 									_focusVisible: {
 										color: 'fg.error',

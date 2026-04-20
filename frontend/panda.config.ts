@@ -108,16 +108,56 @@ export default defineConfig({
 	staticCss: {
 		recipes: {
 			callout: [{ tone: ['info', 'warn', 'error'] }],
-			chip: [{ tone: ['accent', 'neutral', 'warning', 'success', 'error'] }],
-			button: [{ variant: ['primary', 'secondary', 'ghost', 'danger'], size: ['default', 'sm'] }],
+			chip: [
+				{ tone: ['accent', 'neutral', 'warning', 'success', 'error'], size: ['default', 'compact'] }
+			],
+			button: [
+				{
+					variant: ['primary', 'secondary', 'ghost', 'ghostOutline', 'danger'],
+					size: ['default', 'sm']
+				}
+			],
 			spinner: [{ size: ['default', 'sm', 'md'] }],
 			badge: [{ tone: ['type', 'file'], size: ['sm', 'md', 'lg'] }],
 			tabButton: [{ active: ['true', 'false'], size: ['default', 'lg'] }],
 			emptyText: [{ size: ['compact', 'panel', 'inline'] }],
 			toggleButton: [{ active: ['true', 'false'], radius: ['left', 'right'] }],
-			input: [{ variant: ['default', 'compact', 'search', 'searchCompact', 'menu', 'searchWide'] }],
+			input: [
+				{
+					variant: [
+						'default',
+						'compact',
+						'compactForm',
+						'plotSelect',
+						'panelForm',
+						'timeField',
+						'dateSelect',
+						'search',
+						'searchTight',
+						'searchCompact',
+						'searchSmall',
+						'menu',
+						'searchWide'
+					]
+				}
+			],
 			label: [
-				{ variant: ['default', 'field', 'compact', 'checkbox', 'inline', 'wrapper', 'hidden'] }
+				{
+					variant: [
+						'default',
+						'field',
+						'fieldSmall',
+						'fieldTight',
+						'fieldFlush',
+						'compact',
+						'checkbox',
+						'checkboxCompact',
+						'inline',
+						'wrapper',
+						'wrapperWide',
+						'hidden'
+					]
+				}
 			]
 		}
 	},
@@ -290,6 +330,7 @@ export default defineConfig({
 					indicator: { value: { base: '#71717a', _dark: '#737373' } },
 					warning: { value: { base: '#fef3c7', _dark: '#713f12' } },
 					error: { value: { base: '#fee2e2', _dark: '#7f1d1d' } },
+					errorSubtle: { value: { base: '#fef2f2', _dark: '#450a0a' } },
 					success: { value: { base: '#dcfce7', _dark: '#14532d' } },
 					accent: { value: { base: '#f4f4f5', _dark: '#1f1f1f' } }
 				},
@@ -310,6 +351,7 @@ export default defineConfig({
 				},
 				border: {
 					primary: { value: { base: '#e0e0e0', _dark: '#2b2b2b' } },
+					subtle: { value: { base: '#ebebeb', _dark: '#222222' } },
 					error: { value: { base: '#dc2626', _dark: '#991b1b' } },
 					accent: { value: { base: '#09090b', _dark: '#fafafa' } },
 					success: { value: { base: '#16a34a', _dark: '#86efac' } },

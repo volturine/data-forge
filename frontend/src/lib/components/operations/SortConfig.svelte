@@ -204,11 +204,8 @@
 								width: 'row',
 								height: 'row',
 								padding: '0',
-								backgroundColor: 'transparent',
 								cursor: 'pointer',
-								color: 'fg.secondary',
 								borderWidth: '1',
-								borderColor: 'border.transparent',
 								_hover: {
 									backgroundColor: 'bg.error!',
 									color: 'fg.error!',

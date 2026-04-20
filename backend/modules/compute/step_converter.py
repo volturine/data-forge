@@ -21,7 +21,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
-from modules.analysis.step_types import ChartType, chart_type_for_step, normalize_step_type
+from modules.analysis.step_types import ChartType, chart_type_for_step, get_step_type_label, normalize_step_type
 from modules.compute.operations.filter import normalize_filter_conditions
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,14 @@ class BackendStep:
     params: dict[str, object]
 
 
+def step_display_name(step_type: str, config: Mapping[str, object]) -> str:
+    if step_type == 'chart':
+        chart_type = config.get('chart_type')
+        if isinstance(chart_type, str) and chart_type:
+            return get_step_type_label(f'plot_{chart_type}')
+    return get_step_type_label(step_type)
+
+
 def get_chart_type_for_step(step_type: str) -> ChartType | None:
     return chart_type_for_step(step_type)
 
@@ -81,7 +89,7 @@ def convert_step_format(frontend_step: Mapping[str, object] | FrontendStep) -> B
     normalized_type = normalize_step_type(step_type)
 
     return BackendStep(
-        name=parsed.id or 'Unknown Step',
+        name=step_display_name(step_type, config),
         operation=normalized_type,
         params=convert_config_to_params(normalized_type, config),
     )
@@ -110,11 +118,11 @@ def convert_groupby_config(config: dict) -> dict:
     Backend: {group_by: [...], aggregations: [{column, function, alias}]}
     """
     return {
-        'group_by': config.get('group_by') or config.get('groupBy', []),
+        'group_by': config.get('group_by', []),
         'aggregations': [
             {
                 'column': agg.get('column'),
-                'function': agg.get('function') or agg.get('agg'),
+                'function': agg.get('function'),
                 'alias': agg.get('alias'),
             }
             for agg in config.get('aggregations', [])
@@ -132,10 +140,8 @@ def convert_join_config(config: dict) -> dict:
     right_columns = config.get('right_columns', [])
 
     how = config.get('how', 'inner')
-    if how == 'outer':
-        how = 'full'
     return {
-        'right_source': config.get('right_source') or config.get('rightDataSource'),
+        'right_source': config.get('right_source'),
         'join_columns': join_columns,
         'right_columns': right_columns,
         'how': how,
@@ -152,8 +158,6 @@ def convert_fillnull_config(config: dict) -> dict:
     Normalizes frontend strategy "value" to backend strategy "literal".
     """
     strategy = config.get('strategy', 'literal')
-    if strategy == 'value':
-        strategy = 'literal'
     return {
         'strategy': strategy,
         'value': config.get('value'),
@@ -172,8 +176,7 @@ def convert_pivot_config(config: dict) -> dict:
         'index': config.get('index'),
         'columns': config.get('columns'),
         'values': config.get('values'),
-        # Support both camelCase and snake_case
-        'aggregate_function': config.get('aggregate_function') or config.get('aggregateFunction', 'first'),
+        'aggregate_function': config.get('aggregate_function', 'first'),
     }
 
 
@@ -226,8 +229,8 @@ def convert_timeseries_config(config: dict) -> dict:
     """
     return {
         'column': config.get('column'),
-        'operation_type': config.get('operationType') or config.get('operation_type'),
-        'new_column': config.get('newColumn') or config.get('new_column'),
+        'operation_type': config.get('operation_type'),
+        'new_column': config.get('new_column'),
         'component': config.get('component'),
         'value': config.get('value'),
         'unit': config.get('unit'),
@@ -244,14 +247,14 @@ def convert_string_transform_config(config: dict) -> dict:
     return {
         'column': config.get('column'),
         'method': config.get('method'),
-        'new_column': config.get('newColumn') or config.get('new_column') or config.get('column'),
+        'new_column': config.get('new_column') or config.get('column'),
         'pattern': config.get('pattern'),
         'replacement': config.get('replacement'),
         'start': config.get('start'),
         'end': config.get('end'),
         'delimiter': config.get('delimiter'),
         'index': config.get('index'),
-        'group_index': config.get('groupIndex') or config.get('group_index'),
+        'group_index': config.get('group_index'),
     }
 
 
@@ -262,9 +265,9 @@ def convert_export_config(config: dict) -> dict:
     Backend: {format, filename, destination, iceberg_options}
     """
     return {
-        'format': config.get('format', 'csv'),
-        'filename': config.get('filename', 'export'),
-        'destination': config.get('destination', 'download'),
+        'format': config.get('format'),
+        'filename': config.get('filename'),
+        'destination': config.get('destination'),
         'iceberg_options': config.get('iceberg_options'),
     }
 
@@ -277,18 +280,18 @@ def convert_union_by_name_config(config: dict) -> dict:
     """
     return {
         'sources': config.get('sources', []),
-        'allow_missing': config.get('allow_missing', config.get('allowMissing', True)),
+        'allow_missing': config.get('allow_missing', True),
     }
 
 
 def convert_plot_config(config: dict) -> dict:
     return {
-        'chart_type': config.get('chart_type') or config.get('chartType') or 'bar',
-        'x_column': config.get('x_column') or config.get('xColumn') or '',
-        'y_column': config.get('y_column') or config.get('yColumn'),
+        'chart_type': config.get('chart_type', 'bar'),
+        'x_column': config.get('x_column', ''),
+        'y_column': config.get('y_column'),
         'bins': config.get('bins', 10),
         'aggregation': config.get('aggregation', 'sum'),
-        'group_column': config.get('group_column') or config.get('groupColumn'),
+        'group_column': config.get('group_column'),
         'group_sort_by': config.get('group_sort_by'),
         'group_sort_order': config.get('group_sort_order', 'asc'),
         'group_sort_column': config.get('group_sort_column'),
@@ -318,30 +321,27 @@ def convert_plot_config(config: dict) -> dict:
 
 
 def convert_ai_config(config: dict) -> dict:
-    raw_options = config.get('request_options') or config.get('requestOptions')
+    raw_options = config.get('request_options')
     # Parse string JSON to dict if needed (frontend sends textarea value as string)
     if isinstance(raw_options, str):
         raw_options = raw_options.strip() or None
 
-    # Support both legacy input_column (singular) and input_columns (plural)
-    input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
-    if (legacy_col := config.get('input_column') or config.get('inputColumn')) and legacy_col not in input_columns:
-        input_columns = [legacy_col, *input_columns]
+    input_columns: list[str] = config.get('input_columns') or []
 
     result: dict[str, object] = {
         'provider': config.get('provider', 'ollama'),
         'model': config.get('model', 'llama2'),
         'input_columns': input_columns,
-        'output_column': config.get('output_column') or config.get('outputColumn') or 'ai_result',
-        'error_column': config.get('error_column') or config.get('errorColumn') or 'ai_error',
-        'prompt_template': config.get('prompt_template') or config.get('promptTemplate') or 'Classify this text: {{text}}',
+        'output_column': config.get('output_column', 'ai_result'),
+        'error_column': config.get('error_column', 'ai_error'),
+        'prompt_template': config.get('prompt_template', 'Classify this text: {{text}}'),
         'batch_size': config.get('batch_size', 10),
-        'max_retries': config.get('max_retries', config.get('maxRetries', 3)),
-        'rate_limit_rpm': config.get('rate_limit_rpm', config.get('rateLimitRpm')),
-        'endpoint_url': config.get('endpoint_url') or config.get('endpointUrl'),
-        'api_key': config.get('api_key') or config.get('apiKey'),
+        'max_retries': config.get('max_retries', 3),
+        'rate_limit_rpm': config.get('rate_limit_rpm'),
+        'endpoint_url': config.get('endpoint_url'),
+        'api_key': config.get('api_key'),
         'temperature': config.get('temperature', 0.7),
-        'max_tokens': config.get('max_tokens', config.get('maxTokens')),
+        'max_tokens': config.get('max_tokens'),
         'request_options': raw_options,
     }
     return result
@@ -349,7 +349,7 @@ def convert_ai_config(config: dict) -> dict:
 
 def convert_notification_config(config: dict) -> dict:
     """Convert notification config — per-row UDF with column inputs."""
-    input_columns: list[str] = config.get('input_columns') or config.get('inputColumns') or []
+    input_columns: list[str] = config.get('input_columns') or []
 
     selected = config.get('subscriber_ids')
     recipients = config.get('recipient', '') or (','.join(str(cid) for cid in selected) if isinstance(selected, list) else '')
@@ -359,11 +359,11 @@ def convert_notification_config(config: dict) -> dict:
         'recipient': recipients,
         'bot_token': config.get('bot_token', ''),
         'subscriber_ids': config.get('subscriber_ids') or [],
-        'recipient_column': config.get('recipient_column') or config.get('recipientColumn') or '',
+        'recipient_column': config.get('recipient_column', ''),
         'input_columns': input_columns,
-        'output_column': config.get('output_column') or config.get('outputColumn') or 'notification_status',
-        'message_template': config.get('message_template') or config.get('messageTemplate') or '{{message}}',
-        'subject_template': config.get('subject_template') or config.get('subjectTemplate') or 'Notification',
+        'output_column': config.get('output_column', 'notification_status'),
+        'message_template': config.get('message_template', '{{message}}'),
+        'subject_template': config.get('subject_template', 'Notification'),
         'batch_size': config.get('batch_size', 10),
         'timeout_seconds': config.get('timeout_seconds', 20),
     }

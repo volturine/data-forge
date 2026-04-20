@@ -5,12 +5,17 @@ from typing import TypeAlias, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from modules.analysis.step_types import ChartType, StepType, is_plot_alias_step_type, is_step_type
+from modules.analysis.step_types import (
+    STEP_TYPES,
+    ChartType,
+    is_step_type,
+    iter_step_types,
+)
 from modules.compute.operations.strings import StringTransformMethod
 from modules.compute.operations.timeseries import DurationUnit, TimeComponent, TimeDirection, TimeseriesOperationType
 from modules.compute.operations.with_columns import WithColumnsExprType
 
-__all__ = ['StepType', 'get_config_model', 'get_step_catalog', 'validate_step']
+__all__ = ['get_config_model', 'get_step_catalog', 'validate_step']
 
 
 class StepCategory(StrEnum):
@@ -700,13 +705,13 @@ STEP_CATALOG: dict[str, StepCatalogEntry] = {
 def get_step_catalog() -> list[StepCatalogItem]:
     """Return the step type catalog for AI discovery."""
     result: list[StepCatalogItem] = []
-    for typ, info in STEP_CATALOG.items():
-        if is_plot_alias_step_type(typ):
-            continue
+    for typ in iter_step_types(include_plot_aliases=False):
+        info = STEP_CATALOG[typ]
         config_model = cast(type[BaseModel], info['config'])
         result.append(
             {
                 'type': typ,
+                'label': STEP_TYPES.label(typ),
                 'description': cast(str, info['description']),
                 'category': cast(str, info['category']),
                 'config_schema': cast(dict[str, object], config_model.model_json_schema()),

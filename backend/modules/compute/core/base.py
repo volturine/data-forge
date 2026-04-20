@@ -19,7 +19,8 @@ class OperationHandler(Protocol):
         *,
         right_lf: pl.LazyFrame | None = None,
         right_sources: dict[str, pl.LazyFrame] | None = None,
-    ) -> pl.LazyFrame: ...
+    ) -> pl.LazyFrame:
+        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +90,15 @@ class EngineResult:
     error_details: dict[str, Any] | None = None
     step_timings: dict[str, float] = field(default_factory=dict)
     query_plan: str | None = None
+    read_duration_ms: float | None = None
+    write_duration_ms: float | None = None
+    collect_duration_ms: float | None = None
+
+
+@dataclass(slots=True)
+class EngineProgressEvent:
+    job_id: str
+    event: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -123,13 +133,17 @@ class ComputeEngine(Protocol):
     current_job_id: str | None
 
     @property
-    def process_id(self) -> int | None: ...
+    def process_id(self) -> int | None:
+        raise NotImplementedError
 
-    def start(self) -> None: ...
+    def start(self) -> None:
+        raise NotImplementedError
 
-    def is_process_alive(self) -> bool: ...
+    def is_process_alive(self) -> bool:
+        raise NotImplementedError
 
-    def check_health(self) -> bool: ...
+    def check_health(self) -> bool:
+        raise NotImplementedError
 
     def preview(
         self,
@@ -138,7 +152,8 @@ class ComputeEngine(Protocol):
         row_limit: int = 1000,
         offset: int = 0,
         additional_datasources: dict[str, dict[str, Any]] | None = None,
-    ) -> str: ...
+    ) -> str:
+        raise NotImplementedError
 
     def export(
         self,
@@ -147,22 +162,30 @@ class ComputeEngine(Protocol):
         output_path: str,
         export_format: str = 'csv',
         additional_datasources: dict[str, dict[str, Any]] | None = None,
-    ) -> str: ...
+    ) -> str:
+        raise NotImplementedError
 
     def get_schema(
         self,
         datasource_config: dict[str, Any],
         steps: list[dict[str, Any]],
         additional_datasources: dict[str, dict[str, Any]] | None = None,
-    ) -> str: ...
+    ) -> str:
+        raise NotImplementedError
 
     def get_row_count(
         self,
         datasource_config: dict[str, Any],
         steps: list[dict[str, Any]],
         additional_datasources: dict[str, dict[str, Any]] | None = None,
-    ) -> str: ...
+    ) -> str:
+        raise NotImplementedError
 
-    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None: ...
+    def get_result(self, timeout: float = 1.0, job_id: str | None = None) -> EngineResult | None:
+        raise NotImplementedError
 
-    def shutdown(self) -> None: ...
+    def get_progress_event(self, timeout: float = 1.0, job_id: str | None = None) -> EngineProgressEvent | None:
+        raise NotImplementedError
+
+    def shutdown(self) -> None:
+        raise NotImplementedError

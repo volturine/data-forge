@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { BarChart3, X } from 'lucide-svelte';
+	import { ChartColumn, X } from 'lucide-svelte';
 	import { getColumnStats } from '$lib/api/datasource';
 	import type { HistogramBin } from '$lib/api/datasource';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, row, muted } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		datasourceId: string;
@@ -17,8 +18,10 @@
 
 	let { datasourceId, columnName, open, datasourceConfig = null, onClose }: Props = $props();
 
+	const ns = useNamespace();
+
 	const query = createQuery(() => ({
-		queryKey: ['column-stats', datasourceId, columnName, datasourceConfig ?? null],
+		queryKey: ['column-stats', ns.value, datasourceId, columnName, datasourceConfig ?? null],
 		queryFn: async () => {
 			if (!columnName) {
 				throw new Error('Column name required');
@@ -30,7 +33,7 @@
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: open && !!columnName && !!datasourceId,
+		enabled: open && !!columnName && !!datasourceId && !ns.switching,
 		staleTime: 30000
 	}));
 
@@ -72,8 +75,8 @@
 		>
 			<PanelHeader>
 				{#snippet title()}
-					<div class={cx(row, css({ gap: '2' }))}>
-						<BarChart3 size={16} />
+					<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+						<ChartColumn size={16} />
 						<h3 class={css({ margin: '0', fontSize: 'xs', fontWeight: 'semibold' })}>
 							Column Stats
 						</h3>
@@ -457,7 +460,9 @@
 										<span class={css({ color: 'accent.primary' })}
 											>True: {stats.true_count.toLocaleString()}</span
 										>
-										<span class={muted}>False: {(stats.false_count ?? 0).toLocaleString()}</span>
+										<span class={css({ color: 'fg.muted' })}
+											>False: {(stats.false_count ?? 0).toLocaleString()}</span
+										>
 									</div>
 								</div>
 							{/if}

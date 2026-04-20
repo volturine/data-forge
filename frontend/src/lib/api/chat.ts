@@ -151,11 +151,10 @@ export interface ChatSessionInfo {
 export function createSession(
 	provider: string,
 	model: string,
-	apiKey?: string,
+	apiKey: string,
 	systemPrompt?: string
 ): ResultAsync<ChatSession, ApiError> {
-	const payload: CreateSessionPayload = { provider, model };
-	if (apiKey) payload.api_key = apiKey;
+	const payload: CreateSessionPayload = { provider, model, api_key: apiKey };
 	if (systemPrompt) payload.system_prompt = systemPrompt;
 	return apiRequest<ChatSession>('/v1/ai/chat/sessions', {
 		method: 'POST',
@@ -214,12 +213,11 @@ export function closeSession(sessionId: string): ResultAsync<SessionActionRespon
 
 export function listModels(
 	provider: string,
-	apiKey?: string,
+	apiKey: string,
 	endpointUrl?: string,
 	organizationId?: string
 ): ResultAsync<ChatModel[], ApiError> {
-	const body: Record<string, string> = { provider };
-	if (apiKey) body.api_key = apiKey;
+	const body: Record<string, string> = { provider, api_key: apiKey };
 	if (endpointUrl) body.endpoint_url = endpointUrl;
 	if (organizationId) body.organization_id = organizationId;
 	return apiRequest<ChatModel[]>('/v1/ai/chat/models', {

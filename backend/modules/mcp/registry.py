@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
 from modules.mcp.router import get_mcp_route_meta
+from modules.mcp.tool_output import format_output_hint, top_level_output_fields
 from modules.mcp.validation import check_schema_supported
 
 SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
@@ -121,7 +122,15 @@ def _output_schema(op: dict[str, Any], meta: dict[str, Any], components: dict) -
         schema = _openapi_to_json_schema(content[mime].get('schema'), components)
         if schema is None:
             continue
-        return {'status_code': code, 'content_type': mime, 'schema': schema, 'response_model': meta.get('response_model')}
+        output = {
+            'status_code': code,
+            'content_type': mime,
+            'schema': schema,
+            'response_model': meta.get('response_model'),
+            'fields': top_level_output_fields(schema),
+        }
+        output['hint'] = format_output_hint(output)
+        return output
     return None
 
 

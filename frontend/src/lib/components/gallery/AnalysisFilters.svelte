@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Search, X, Trash2 } from 'lucide-svelte';
-	import { css, input, cx, row, label } from '$lib/styles/panda';
+	import { css, input } from '$lib/styles/panda';
 
 	export type SortOption = 'newest' | 'oldest' | 'name-asc' | 'name-desc';
 
@@ -68,21 +68,20 @@
 		/>
 		{#if searchQuery}
 			<button
-				class={cx(
-					row,
-					css({
-						position: 'absolute',
-						right: '2',
-						top: '50%',
-						transform: 'translateY(-50%)',
-						cursor: 'pointer',
-						justifyContent: 'center',
-						borderWidth: '0',
-						backgroundColor: 'transparent',
-						padding: '1',
-						color: 'fg.muted'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					position: 'absolute',
+					right: '2',
+					top: '50%',
+					transform: 'translateY(-50%)',
+					cursor: 'pointer',
+					justifyContent: 'center',
+					borderWidth: '0',
+					backgroundColor: 'transparent',
+					padding: '1',
+					color: 'fg.muted'
+				})}
 				onclick={() => onSearch('')}
 				aria-label="Clear search"
 			>
@@ -101,7 +100,16 @@
 	>
 		<label
 			for="sort-select"
-			class={cx(label(), css({ whiteSpace: 'nowrap', fontWeight: 'medium' }))}
+			class={css({
+				display: 'block',
+				fontSize: 'xs2',
+				fontWeight: 'medium',
+				color: 'fg.muted',
+				marginBottom: '1.5',
+				textTransform: 'uppercase',
+				letterSpacing: 'wider',
+				whiteSpace: 'nowrap'
+			})}
 		>
 			Sort:
 		</label>
@@ -109,15 +117,27 @@
 			id="sort-select"
 			value={sortOption}
 			onchange={(e) => onSort((e.target as HTMLSelectElement).value as SortOption)}
-			class={cx(
-				input(),
-				css({
-					cursor: 'pointer',
-					appearance: 'none',
-					paddingRight: '8',
-					smDown: { flex: '1' }
-				})
-			)}
+			class={css({
+				width: 'full',
+				fontSize: 'sm2',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				cursor: 'pointer',
+				appearance: 'none',
+				paddingRight: '8',
+				smDown: { flex: '1' }
+			})}
 		>
 			<option value="newest">Newest</option>
 			<option value="oldest">Oldest</option>
@@ -127,55 +147,52 @@
 	</div>
 
 	{#if selectionCount > 0}
-		<div class={cx(row, css({ marginLeft: 'auto', gap: '2' }))}>
+		<div class={css({ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: '2' })}>
 			<button
-				class={cx(
-					row,
-					css({
-						gap: '1',
-						borderWidth: '1',
-						borderColor: 'transparent',
-						backgroundColor: 'transparent',
-						paddingX: '3',
-						paddingY: '2',
-						fontSize: 'sm'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					borderWidth: '1',
+					borderColor: 'transparent',
+					backgroundColor: 'transparent',
+					paddingX: '3',
+					paddingY: '2',
+					fontSize: 'sm'
+				})}
 				onclick={onSelectAll}
 			>
 				Select All
 			</button>
 			<button
-				class={cx(
-					row,
-					css({
-						gap: '1',
-						borderWidth: '1',
-						borderColor: 'transparent',
-						backgroundColor: 'transparent',
-						paddingX: '3',
-						paddingY: '2',
-						fontSize: 'sm'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					borderWidth: '1',
+					borderColor: 'transparent',
+					backgroundColor: 'transparent',
+					paddingX: '3',
+					paddingY: '2',
+					fontSize: 'sm'
+				})}
 				onclick={onClearSelection}
 			>
 				<X size={14} />
 				Clear
 			</button>
 			<button
-				class={cx(
-					row,
-					css({
-						gap: '1',
-						backgroundColor: 'bg.error',
-						color: 'fg.error',
-						borderWidth: '1',
-						borderColor: 'border.error',
-						paddingX: '3',
-						paddingY: '2'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					backgroundColor: 'bg.error',
+					color: 'fg.error',
+					borderWidth: '1',
+					borderColor: 'border.error',
+					paddingX: '3',
+					paddingY: '2'
+				})}
 				onclick={onBulkDelete}
 			>
 				<Trash2 size={14} />

@@ -1,6 +1,6 @@
 import { err, okAsync, ResultAsync } from 'neverthrow';
 import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
-import { getNamespace } from '$lib/stores/namespace.svelte';
+import { requireNamespace, isNamespaceReady } from '$lib/stores/namespace.svelte';
 import { track } from '$lib/utils/audit-log';
 
 // Always use relative paths - works in both dev (via proxy) and prod
@@ -44,7 +44,7 @@ function createApiError(
 function buildHeaders(options?: RequestInit): Headers {
 	const headers = new Headers(options?.headers);
 	const identity = getClientIdentity();
-	const namespace = getNamespace();
+	const namespace = isNamespaceReady() ? requireNamespace() : undefined;
 	if (identity.clientId && !headers.has('X-Client-Id'))
 		headers.set('X-Client-Id', identity.clientId);
 	if (identity.clientSignature && !headers.has('X-Client-Signature'))
@@ -94,8 +94,9 @@ function apiFetch<T>(
 	parse: (response: Response) => ResultAsync<T, ApiError>
 ): ResultAsync<T, ApiError> {
 	const headers = buildHeaders(options);
+	const request = { ...options, headers } satisfies RequestInit;
 	return ResultAsync.fromPromise(
-		fetch(`${BASE_URL}${endpoint}`, { ...options, headers }),
+		fetch(`${BASE_URL}${endpoint}`, request),
 		(error): ApiError =>
 			createApiError('network', error instanceof Error ? error.message : 'Network error')
 	).andThen((response) => {

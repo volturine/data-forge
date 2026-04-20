@@ -1,9 +1,12 @@
 <script lang="ts">
-	import { X, Power, Loader2 } from 'lucide-svelte';
+	import { X, Power, LoaderCircle } from 'lucide-svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { enginesStore } from '$lib/stores/engines.svelte';
 	import type { EngineStatus } from '$lib/types/compute';
 	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
-	import { css, cx, row } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		open: boolean;
@@ -12,9 +15,10 @@
 
 	let { open = $bindable(), anchor = null }: Props = $props();
 
-	let shuttingDown = $state<Set<string>>(new Set());
+	const shuttingDown = new SvelteSet<string>();
 	let popoverRect = $state({ left: 0, bottom: 0, width: 320 });
 	let lastAnchor = $state<HTMLElement | null>(null);
+	let popupRef = $state<HTMLElement | null>(null);
 
 	function statusColor(status: EngineStatus): string {
 		if (status === 'healthy') return 'fg.success';
@@ -27,11 +31,11 @@
 	}
 
 	async function handleShutdown(analysisId: string) {
-		shuttingDown = new Set([...shuttingDown, analysisId]);
+		shuttingDown.add(analysisId);
 		try {
 			await enginesStore.shutdownEngine(analysisId);
 		} finally {
-			shuttingDown = new Set([...shuttingDown].filter((id) => id !== analysisId));
+			shuttingDown.delete(analysisId);
 		}
 	}
 
@@ -39,17 +43,14 @@
 		open = false;
 	}
 
-	function handleKeydown(event: KeyboardEvent) {
-		if (!open) return;
-		if (event.key === 'Escape') handleClose();
-	}
-
-	function handleBackdropKeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: handleClose,
+		onOutsideClick: (target: Node) => {
+			if (popupRef?.contains(target)) return;
+			if (lastAnchor?.contains(target)) return;
 			handleClose();
 		}
-	}
+	});
 
 	function updatePopoverPosition() {
 		const node = lastAnchor;
@@ -100,31 +101,11 @@
 			window.removeEventListener('scroll', handleResize, true);
 		};
 	});
-
-	// Network: fetch engines when popup opens; $derived cannot trigger side effects.
-	$effect(() => {
-		if (!open) return;
-		enginesStore.fetch();
-	});
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 {#if open}
 	<div
-		class={css({
-			position: 'fixed',
-			inset: '0',
-			zIndex: 'popover',
-			backgroundColor: 'transparent'
-		})}
-		onclick={handleClose}
-		onkeydown={handleBackdropKeydown}
-		role="button"
-		tabindex="0"
-		aria-label="Close engines"
-	></div>
-	<div
+		bind:this={popupRef}
 		class={css({
 			position: 'fixed',
 			zIndex: 'overlay',
@@ -142,8 +123,7 @@
 		aria-labelledby="engines-title"
 		tabindex="-1"
 		use:portal={popoverRect}
-		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
+		use:overlayStack.action={overlayConfig}
 	>
 		<PanelHeader>
 			{#snippet title()}
@@ -185,7 +165,7 @@
 					color: 'fg.muted'
 				})}
 			>
-				<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
+				<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 				Loading engines...
 			</div>
 		{:else if enginesStore.engines.length === 0}
@@ -215,7 +195,7 @@
 							fontSize: 'xs'
 						})}
 					>
-						<div class={cx(row, css({ gap: '2', minWidth: '0' }))}>
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2', minWidth: '0' })}>
 							<span
 								class={css({
 									display: 'inline-block',
@@ -261,7 +241,7 @@
 							title="Shutdown engine"
 						>
 							{#if shuttingDown.has(engine.analysis_id)}
-								<Loader2 size={14} class={css({ animation: 'spin 1s linear infinite' })} />
+								<LoaderCircle size={14} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Power size={14} />
 							{/if}

@@ -3,8 +3,9 @@
 	import { listDataFiles } from '$lib/api/datasource';
 	import type { FileListItem, FileListResponse } from '$lib/api/datasource';
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import { ArrowUp } from 'lucide-svelte';
-	import { css, emptyText, cx, row, divider } from '$lib/styles/panda';
+	import { css, emptyText } from '$lib/styles/panda';
 
 	let {
 		initialPath = '',
@@ -79,17 +80,6 @@
 		load(next);
 	}
 
-	function handleBackdropKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
-			event.preventDefault();
-			oncancel();
-		}
-	}
-
-	function stopPickerEvent(event: Event) {
-		event.stopPropagation();
-	}
-
 	// Network: $derived can't load file list on mount.
 	$effect(() => {
 		if (!root) {
@@ -98,193 +88,171 @@
 	});
 </script>
 
-<div
-	class={cx(
-		row,
-		css({
-			position: 'fixed',
-			inset: '0',
-			zIndex: 'modal',
-			justifyContent: 'center',
-			padding: '4',
-			backgroundColor: 'bg.overlaySoft'
-		})
-	)}
-	role="presentation"
-	onclick={oncancel}
-	onkeydown={handleBackdropKeydown}
->
+<BaseModal
+	open={true}
+	onClose={oncancel}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	overlayClass={css({
+		display: 'flex',
+		alignItems: 'center',
+		position: 'fixed',
+		inset: '0',
+		zIndex: 'modal',
+		justifyContent: 'center',
+		padding: '4',
+		backgroundColor: 'bg.overlaySoft'
+	})}
+	panelClass={css({
+		display: 'flex',
+		width: '100%',
+		maxWidth: 'modal',
+		maxHeight: '70vh',
+		flexDirection: 'column',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary'
+	})}
+	{content}
+/>
+
+{#snippet content()}
 	<div
 		class={css({
-			display: 'flex',
-			width: '100%',
-			maxWidth: 'modal',
-			maxHeight: '70vh',
-			flexDirection: 'column',
-			borderWidth: '1',
-			backgroundColor: 'bg.primary'
+			display: 'grid',
+			gridTemplateColumns: '1fr auto',
+			gap: '2',
+			borderBottomWidth: '1',
+			padding: '4'
 		})}
-		role="dialog"
-		aria-modal="true"
-		tabindex="-1"
-		onclick={stopPickerEvent}
-		onkeydown={stopPickerEvent}
 	>
-		<div
-			class={css({
-				display: 'grid',
-				gridTemplateColumns: '1fr auto',
-				gap: '2',
-				borderBottomWidth: '1',
-				padding: '4'
-			})}
-		>
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
-				<h4 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>Data directory</h4>
-				<div
-					class={cx(row, css({ flexWrap: 'wrap', gap: '1' }))}
-					role="navigation"
-					aria-label="Path breadcrumb"
-				>
-					{#each crumbs as crumb, index (crumb.path)}
-						<button
-							type="button"
-							class={css({
-								cursor: 'pointer',
-								border: 'none',
-								backgroundColor: 'transparent',
-								padding: '0',
-								fontSize: 'xs',
-								color: 'fg.secondary',
-								_hover: { color: 'fg.primary', textDecoration: 'underline' },
-								_disabled: { color: 'fg.muted', cursor: 'default', textDecoration: 'none' }
-							})}
-							onclick={() => load(crumb.path)}
-							disabled={loading}
-						>
-							{crumb.label}
-						</button>
-						{#if index < crumbs.length - 1}
-							<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>/</span>
-						{/if}
-					{/each}
-				</div>
-				<span class={css({ wordBreak: 'break-all', fontSize: 'xs', color: 'fg.muted' })}
-					>{path}</span
-				>
-				<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-					Select files or choose a folder for parquet datasets.
-				</span>
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+			<h4 class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>Data directory</h4>
+			<div
+				class={css({ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '1' })}
+				role="navigation"
+				aria-label="Path breadcrumb"
+			>
+				{#each crumbs as crumb, index (crumb.path)}
+					<button
+						type="button"
+						class={css({
+							cursor: 'pointer',
+							border: 'none',
+							backgroundColor: 'transparent',
+							padding: '0',
+							fontSize: 'xs',
+							color: 'fg.secondary',
+							_hover: { color: 'fg.primary', textDecoration: 'underline' },
+							_disabled: { color: 'fg.muted', cursor: 'default', textDecoration: 'none' }
+						})}
+						onclick={() => load(crumb.path)}
+						disabled={loading}
+					>
+						{crumb.label}
+					</button>
+					{#if index < crumbs.length - 1}
+						<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>/</span>
+					{/if}
+				{/each}
 			</div>
-			<div class={cx(row, css({ justifyContent: 'flex-end', gap: '2' }))}>
-				<button
-					class={css({
-						cursor: 'pointer',
-						border: 'none',
-						backgroundColor: 'transparent',
-						padding: '0',
-						fontSize: 'xs',
-						color: 'accent.primary'
-					})}
-					onclick={oncancel}
-				>
-					Close
-				</button>
-			</div>
+			<span class={css({ wordBreak: 'break-all', fontSize: 'xs', color: 'fg.muted' })}>{path}</span>
+			<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+				Select files or choose a folder for parquet datasets.
+			</span>
 		</div>
-
-		<div class={css({ flex: '1', overflow: 'auto', padding: '3' })}>
-			{#if loading}
-				<div class={emptyText({ size: 'panel' })}>Loading...</div>
-			{:else if error}
-				<div class={emptyText({ size: 'panel' })}>
-					{error}
-				</div>
-			{:else if entries.length === 0}
-				<div class={emptyText({ size: 'panel' })}>No files found</div>
-			{:else}
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-					{#each entries as entry (entry.path)}
-						<button
-							type="button"
-							class={css({
-								display: 'flex',
-								width: '100%',
-								cursor: 'pointer',
-								alignItems: 'center',
-								justifyContent: 'space-between',
-								gap: '2',
-								borderWidth: '1',
-								padding: '2',
-								paddingX: '3',
-								textAlign: 'left',
-								backgroundColor: 'bg.primary',
-								_hover: { backgroundColor: 'bg.hover' }
-							})}
-							onclick={() => (entry.is_dir ? load(entry.path) : onselect(entry.path, false))}
-							disabled={loading}
-						>
-							<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
-								<span class={css({ fontSize: 'sm' })}>{entry.name}</span>
-								<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>{entryType(entry)}</span>
-							</div>
-							<FileTypeBadge path={entry.name} isFolder={entry.is_dir} size="sm" />
-						</button>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
 		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					justifyContent: 'space-between',
-					gap: '2',
-					padding: '3'
-				})
-			)}
+			class={css({ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '2' })}
 		>
-			<div class={cx(row, css({ gap: '2' }))}>
-				<button
-					class={css({
-						display: 'inline-flex',
-						height: 'rowLg',
-						width: 'rowLg',
-						cursor: 'pointer',
-						alignItems: 'center',
-						justifyContent: 'center',
-						borderWidth: '1',
-						backgroundColor: 'bg.primary',
-						color: 'fg.secondary',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
-						_disabled: { cursor: 'not-allowed', opacity: 0.5 }
-					})}
-					onclick={up}
-					disabled={!canUp}
-					aria-label="Go up"
-				>
-					<ArrowUp size={14} />
-				</button>
-				<button
-					class={css({
-						cursor: 'pointer',
-						borderWidth: '1',
-						paddingX: '4',
-						paddingY: '2',
-						fontSize: 'sm',
-						fontWeight: 'medium',
-						backgroundColor: 'bg.secondary',
-						_hover: { backgroundColor: 'bg.hover' },
-						_disabled: { cursor: 'not-allowed', opacity: 0.5 }
-					})}
-					onclick={() => onselect(path, true)}
-					disabled={loading || !path}
-				>
-					Use folder
-				</button>
+			<button
+				class={css({
+					cursor: 'pointer',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0',
+					fontSize: 'xs',
+					color: 'accent.primary'
+				})}
+				onclick={oncancel}
+				type="button"
+			>
+				Close
+			</button>
+		</div>
+	</div>
+
+	<div class={css({ flex: '1', overflow: 'auto', padding: '3' })}>
+		{#if loading}
+			<div class={emptyText({ size: 'panel' })}>Loading...</div>
+		{:else if error}
+			<div class={emptyText({ size: 'panel' })}>
+				{error}
 			</div>
+		{:else if entries.length === 0}
+			<div class={emptyText({ size: 'panel' })}>No files found</div>
+		{:else}
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+				{#each entries as entry (entry.path)}
+					<button
+						type="button"
+						class={css({
+							display: 'flex',
+							width: '100%',
+							cursor: 'pointer',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							gap: '2',
+							borderWidth: '1',
+							padding: '2',
+							paddingX: '3',
+							textAlign: 'left',
+							backgroundColor: 'bg.primary',
+							_hover: { backgroundColor: 'bg.hover' }
+						})}
+						onclick={() => (entry.is_dir ? load(entry.path) : onselect(entry.path, false))}
+						disabled={loading}
+					>
+						<div class={css({ display: 'flex', flexDirection: 'column', gap: '0.5' })}>
+							<span class={css({ fontSize: 'sm' })}>{entry.name}</span>
+							<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>{entryType(entry)}</span>
+						</div>
+						<FileTypeBadge path={entry.name} isFolder={entry.is_dir} size="sm" />
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<div
+		class={css({
+			borderTopWidth: '1',
+			display: 'flex',
+			justifyContent: 'space-between',
+			gap: '2',
+			padding: '3'
+		})}
+	>
+		<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+			<button
+				class={css({
+					display: 'inline-flex',
+					height: 'rowLg',
+					width: 'rowLg',
+					cursor: 'pointer',
+					alignItems: 'center',
+					justifyContent: 'center',
+					borderWidth: '1',
+					backgroundColor: 'bg.primary',
+					color: 'fg.secondary',
+					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
+					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+				})}
+				onclick={up}
+				disabled={!canUp}
+				aria-label="Go up"
+				type="button"
+			>
+				<ArrowUp size={14} />
+			</button>
 			<button
 				class={css({
 					cursor: 'pointer',
@@ -297,11 +265,30 @@
 					_hover: { backgroundColor: 'bg.hover' },
 					_disabled: { cursor: 'not-allowed', opacity: 0.5 }
 				})}
-				onclick={() => load(path)}
-				disabled={loading}
+				onclick={() => onselect(path, true)}
+				disabled={loading || !path}
+				type="button"
 			>
-				Refresh
+				Use folder
 			</button>
 		</div>
+		<button
+			class={css({
+				cursor: 'pointer',
+				borderWidth: '1',
+				paddingX: '4',
+				paddingY: '2',
+				fontSize: 'sm',
+				fontWeight: 'medium',
+				backgroundColor: 'bg.secondary',
+				_hover: { backgroundColor: 'bg.hover' },
+				_disabled: { cursor: 'not-allowed', opacity: 0.5 }
+			})}
+			onclick={() => load(path)}
+			disabled={loading}
+			type="button"
+		>
+			Refresh
+		</button>
 	</div>
-</div>
+{/snippet}

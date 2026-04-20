@@ -1,27 +1,12 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { EngineStatusResponse, EngineListResponse } from '$lib/types/compute';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { EngineStatusResponse } from '$lib/types/compute';
 
-const mockListEngines = vi.fn();
+const mockConnectEnginesStream = vi.fn();
 const mockShutdownEngine = vi.fn();
-const mockConfigFetch = vi.fn();
-
-let mockConfig: { engine_pooling_interval: number } | null = null;
 
 vi.mock('$lib/api/compute', () => ({
-	listEngines: (...args: unknown[]) => mockListEngines(...args),
+	connectEnginesStream: (...args: unknown[]) => mockConnectEnginesStream(...args),
 	shutdownEngine: (...args: unknown[]) => mockShutdownEngine(...args)
-}));
-
-vi.mock('./config.svelte', () => ({
-	configStore: {
-		get config() {
-			return mockConfig;
-		},
-		fetch: (...args: unknown[]) => mockConfigFetch(...args),
-		get enginePoolingInterval() {
-			return mockConfig?.engine_pooling_interval ?? 5000;
-		}
-	}
 }));
 
 const { EnginesStore } = await import('./engines.svelte');
@@ -40,23 +25,37 @@ function makeEngine(overrides: Partial<EngineStatusResponse> = {}): EngineStatus
 	};
 }
 
-function mockListSuccess(engines: EngineStatusResponse[]) {
-	const response: EngineListResponse = { engines };
-	mockListEngines.mockReturnValue({
-		match: (onOk: (r: EngineListResponse) => void) => {
-			onOk(response);
-			return Promise.resolve();
-		}
-	});
-}
+function mockStreamConnection() {
+	const callbacks: {
+		onSnapshot: (engines: EngineStatusResponse[]) => void;
+		onError: (error: string) => void;
+		onClose: () => void;
+	}[] = [];
+	const close = vi.fn();
 
-function mockListError(message: string) {
-	mockListEngines.mockReturnValue({
-		match: (_onOk: unknown, onErr: (e: { message: string }) => void) => {
-			onErr({ message });
-			return Promise.resolve();
-		}
+	mockConnectEnginesStream.mockImplementation((nextCallbacks) => {
+		callbacks.push(
+			nextCallbacks as {
+				onSnapshot: (engines: EngineStatusResponse[]) => void;
+				onError: (error: string) => void;
+				onClose: () => void;
+			}
+		);
+		return { close };
 	});
+
+	return {
+		close,
+		emitSnapshot(engines: EngineStatusResponse[]) {
+			callbacks.at(-1)?.onSnapshot(engines);
+		},
+		emitError(message: string) {
+			callbacks.at(-1)?.onError(message);
+		},
+		emitClose() {
+			callbacks.at(-1)?.onClose();
+		}
+	};
 }
 
 function mockShutdownSuccess() {
@@ -83,216 +82,145 @@ describe('EnginesStore', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.clearAllMocks();
-		mockConfig = null;
-		mockConfigFetch.mockResolvedValue(undefined);
 		store = new EnginesStore();
 	});
 
 	afterEach(() => {
-		store.stopPolling();
+		store.stopStream();
 		vi.useRealTimers();
 	});
 
-	describe('initial state', () => {
-		test('engines is empty array', () => {
-			expect(store.engines).toEqual([]);
-		});
-
-		test('loading is false', () => {
-			expect(store.loading).toBe(false);
-		});
-
-		test('error is null', () => {
-			expect(store.error).toBeNull();
-		});
-
-		test('count is 0', () => {
-			expect(store.count).toBe(0);
-		});
-
-		test('isPolling is false', () => {
-			expect(store.isPolling).toBe(false);
-		});
+	test('starts in a disconnected empty state', () => {
+		expect(store.engines).toEqual([]);
+		expect(store.loading).toBe(false);
+		expect(store.error).toBeNull();
+		expect(store.status).toBe('disconnected');
+		expect(store.count).toBe(0);
+		expect(store.isStreaming).toBe(false);
 	});
 
-	describe('fetch success', () => {
-		test('populates engines and clears loading', async () => {
-			const eng = [makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })];
-			mockListSuccess(eng);
+	test('startStream opens a single websocket connection', () => {
+		mockStreamConnection();
 
-			await store.fetch();
+		store.startStream();
+		store.startStream();
 
-			expect(store.engines).toHaveLength(2);
-			expect(store.engines[0].analysis_id).toBe('a-1');
-			expect(store.loading).toBe(false);
-			expect(store.error).toBeNull();
-		});
-
-		test('count reflects engine list length', async () => {
-			mockListSuccess([makeEngine(), makeEngine(), makeEngine()]);
-			await store.fetch();
-			expect(store.count).toBe(3);
-		});
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+		expect(store.isStreaming).toBe(true);
+		expect(store.loading).toBe(true);
+		expect(store.status).toBe('connecting');
 	});
 
-	describe('fetch error', () => {
-		test('sets error and clears loading', async () => {
-			mockListError('Connection refused');
+	test('snapshot updates engines and connection state', () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })];
 
-			await store.fetch();
+		store.startStream();
+		stream.emitSnapshot(engines);
 
-			expect(store.error).toBe('Connection refused');
-			expect(store.loading).toBe(false);
-			expect(store.engines).toEqual([]);
-		});
+		expect(store.engines).toEqual(engines);
+		expect(store.count).toBe(2);
+		expect(store.loading).toBe(false);
+		expect(store.error).toBeNull();
+		expect(store.status).toBe('connected');
 	});
 
-	describe('shutdownEngine success', () => {
-		test('removes engine from list', async () => {
-			mockListSuccess([makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })]);
-			await store.fetch();
-			expect(store.engines).toHaveLength(2);
+	test('errors set error state without clearing existing engines', () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1' })];
 
-			mockShutdownSuccess();
-			await store.shutdownEngine('a-1');
+		store.startStream();
+		stream.emitSnapshot(engines);
+		stream.emitError('socket failed');
 
-			expect(store.engines).toHaveLength(1);
-			expect(store.engines[0].analysis_id).toBe('a-2');
-		});
+		expect(store.engines).toEqual(engines);
+		expect(store.error).toBe('socket failed');
+		expect(store.status).toBe('error');
 	});
 
-	describe('shutdownEngine error', () => {
-		test('sets error and throws', async () => {
-			mockListSuccess([makeEngine({ analysis_id: 'a-1' })]);
-			await store.fetch();
+	test('unexpected close schedules reconnect', () => {
+		const first = mockStreamConnection();
 
-			mockShutdownError('Permission denied');
+		store.startStream();
+		first.emitClose();
 
-			await expect(store.shutdownEngine('a-1')).rejects.toThrow('Permission denied');
-			expect(store.error).toBe('Permission denied');
-			expect(store.engines).toHaveLength(1);
-		});
+		expect(store.status).toBe('connecting');
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+
+		vi.advanceTimersByTime(1_000);
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(2);
+		expect(store.status).toBe('connecting');
 	});
 
-	describe('startPolling', () => {
-		test('sets isPolling to true', async () => {
-			mockListSuccess([]);
-			await store.startPolling();
-			expect(store.isPolling).toBe(true);
-		});
+	test('stopStream closes the socket and cancels reconnects', () => {
+		const stream = mockStreamConnection();
 
-		test('fetches config if not loaded', async () => {
-			mockListSuccess([]);
-			mockConfig = null;
+		store.startStream();
+		store.stopStream();
+		vi.advanceTimersByTime(1_000);
 
-			await store.startPolling();
-
-			expect(mockConfigFetch).toHaveBeenCalledTimes(1);
-		});
-
-		test('skips config fetch if already loaded', async () => {
-			mockListSuccess([]);
-			mockConfig = { engine_pooling_interval: 3000 };
-
-			await store.startPolling();
-
-			expect(mockConfigFetch).not.toHaveBeenCalled();
-		});
-
-		test('calls fetch immediately', async () => {
-			mockListSuccess([]);
-			await store.startPolling();
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
-		});
-
-		test('second startPolling is a no-op', async () => {
-			mockListSuccess([]);
-			await store.startPolling();
-			await store.startPolling();
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
-		});
-
-		test('uses config interval for polling', async () => {
-			mockConfig = { engine_pooling_interval: 2000 };
-			mockListSuccess([]);
-
-			await store.startPolling();
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
-
-			vi.advanceTimersByTime(2000);
-			expect(mockListEngines).toHaveBeenCalledTimes(2);
-
-			vi.advanceTimersByTime(2000);
-			expect(mockListEngines).toHaveBeenCalledTimes(3);
-		});
-
-		test('uses default interval when config not available', async () => {
-			mockConfig = null;
-			mockListSuccess([]);
-
-			await store.startPolling();
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
-
-			vi.advanceTimersByTime(5000);
-			expect(mockListEngines).toHaveBeenCalledTimes(2);
-		});
+		expect(stream.close).toHaveBeenCalledTimes(1);
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+		expect(store.status).toBe('disconnected');
+		expect(store.isStreaming).toBe(false);
 	});
 
-	describe('stopPolling', () => {
-		test('sets isPolling to false', async () => {
-			mockListSuccess([]);
-			await store.startPolling();
-			expect(store.isPolling).toBe(true);
+	test('shutdownEngine removes the engine from the local snapshot', async () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1' }), makeEngine({ analysis_id: 'a-2' })];
+		mockShutdownSuccess();
 
-			store.stopPolling();
-			expect(store.isPolling).toBe(false);
-		});
+		store.startStream();
+		stream.emitSnapshot(engines);
+		await store.shutdownEngine('a-1');
 
-		test('stops interval ticks', async () => {
-			mockConfig = { engine_pooling_interval: 1000 };
-			mockListSuccess([]);
-
-			await store.startPolling();
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
-
-			store.stopPolling();
-			vi.advanceTimersByTime(5000);
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
-		});
-
-		test('noop when not polling', () => {
-			expect(() => store.stopPolling()).not.toThrow();
-			expect(store.isPolling).toBe(false);
-		});
-
-		test('can restart polling after stop', async () => {
-			mockConfig = { engine_pooling_interval: 1000 };
-			mockListSuccess([]);
-
-			await store.startPolling();
-			store.stopPolling();
-
-			await store.startPolling();
-			expect(store.isPolling).toBe(true);
-			expect(mockListEngines).toHaveBeenCalledTimes(2);
-		});
+		expect(store.engines).toHaveLength(1);
+		expect(store.engines[0]?.analysis_id).toBe('a-2');
 	});
 
-	describe('stale interval behavior', () => {
-		test('interval is captured once at start — config change after start does not affect tick rate', async () => {
-			mockConfig = { engine_pooling_interval: 1000 };
-			mockListSuccess([]);
+	test('shutdownEngine surfaces API failures', async () => {
+		const stream = mockStreamConnection();
+		const engines = [makeEngine({ analysis_id: 'a-1' })];
+		mockShutdownError('Permission denied');
 
-			await store.startPolling();
-			expect(mockListEngines).toHaveBeenCalledTimes(1);
+		store.startStream();
+		stream.emitSnapshot(engines);
 
-			mockConfig = { engine_pooling_interval: 9999 };
+		await expect(store.shutdownEngine('a-1')).rejects.toThrow('Permission denied');
+		expect(store.engines).toEqual(engines);
+		expect(store.error).toBe('Permission denied');
+	});
 
-			vi.advanceTimersByTime(1000);
-			expect(mockListEngines).toHaveBeenCalledTimes(2);
+	test('multiple subscribers keep the stream alive until all unsubscribe', () => {
+		const stream = mockStreamConnection();
 
-			vi.advanceTimersByTime(1000);
-			expect(mockListEngines).toHaveBeenCalledTimes(3);
-		});
+		store.startStream();
+		store.startStream();
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(1);
+
+		store.stopStream();
+		expect(stream.close).not.toHaveBeenCalled();
+		expect(store.status).toBe('connecting');
+		expect(store.isStreaming).toBe(true);
+
+		store.stopStream();
+		expect(stream.close).toHaveBeenCalledTimes(1);
+		expect(store.status).toBe('disconnected');
+		expect(store.isStreaming).toBe(false);
+	});
+
+	test('subscriber count does not go below zero', () => {
+		const stream = mockStreamConnection();
+
+		store.startStream();
+		store.stopStream();
+		store.stopStream();
+
+		expect(stream.close).toHaveBeenCalledTimes(1);
+		expect(store.status).toBe('disconnected');
+
+		store.startStream();
+		expect(mockConnectEnginesStream).toHaveBeenCalledTimes(2);
+		expect(store.isStreaming).toBe(true);
 	});
 });

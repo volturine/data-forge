@@ -6,7 +6,7 @@
 	import DatasourcePicker from '$lib/components/common/DatasourcePicker.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, stepConfig, label, divider, muted } from '$lib/styles/panda';
+	import { css, stepConfig, label } from '$lib/styles/panda';
 
 	interface UnionByNameConfigData {
 		sources: string[];
@@ -106,26 +106,21 @@
 					>{schema.columns.length} columns</span
 				>
 			{:else}
-				<span class={muted}>No active datasource selected</span>
+				<span class={css({ color: 'fg.muted' })}>No active datasource selected</span>
 			{/if}
 		</div>
 	</div>
 
 	<div
-		class={cx(
-			css({
+		class={css(
+			{
 				marginBottom: '0',
 				paddingBottom: '5',
 				backgroundColor: 'transparent',
 
 				border: 'none'
-			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			},
+			{ borderTopWidth: '1', paddingTop: '5' }
 		)}
 	>
 		<div
@@ -161,21 +156,15 @@
 	</div>
 
 	<div
-		class={cx(
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				backgroundColor: 'transparent',
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
 
-				border: 'none'
-			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
-		)}
+			border: 'none',
+			borderTopWidth: '1',
+			paddingTop: '5'
+		})}
 	>
 		<SectionHeader>Column Matching</SectionHeader>
 		<label class={label({ variant: 'checkbox' })}>

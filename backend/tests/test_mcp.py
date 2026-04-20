@@ -541,6 +541,8 @@ class TestOpenAPIToJsonSchema:
             'required': ['ok'],
         }
         assert output['response_model'] == 'TestResponse'
+        assert output['fields'] == ['ok']
+        assert output['hint'] == 'Expected output: status 200; application/json; model TestResponse; fields: ok'
 
     def test_build_tool_output_schema_is_none_when_success_schema_missing(self) -> None:
         op = {

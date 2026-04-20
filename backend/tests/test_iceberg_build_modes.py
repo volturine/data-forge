@@ -7,6 +7,7 @@ from pyiceberg.types import NestedField, StringType
 from sqlmodel import Session
 
 from core.namespace import namespace_paths
+from modules.compute.core.base import EngineResult
 from modules.compute.service import _sync_iceberg_schema, export_data
 from modules.datasource.models import DataSource
 
@@ -127,23 +128,17 @@ class TestBuildModeWiring:
                     'steps': [],
                 },
             ],
-            'sources': {
-                datasource.id: {
-                    'source_type': datasource.source_type,
-                    **datasource.config,
-                },
-            },
         }
 
     def _make_engine_mock(self) -> MagicMock:
         engine = MagicMock()
         engine.is_process_alive.return_value = True
         engine.export.return_value = 'job-1'
-        engine.get_result.return_value = {
-            'data': {'row_count': 1},
-            'error': None,
-            'step_timings': {},
-        }
+        engine.get_result.return_value = EngineResult(
+            job_id='job-1',
+            data={'row_count': 1},
+            error=None,
+        )
         return engine
 
     def _make_manager_mock(self) -> MagicMock:
@@ -181,6 +176,7 @@ class TestBuildModeWiring:
                 manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
+                request_json={'analysis_pipeline': pipeline, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,
@@ -208,6 +204,7 @@ class TestBuildModeWiring:
                 manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
+                request_json={'analysis_pipeline': pipeline, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,
@@ -234,6 +231,7 @@ class TestBuildModeWiring:
                 manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
+                request_json={'analysis_pipeline': pipeline, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,
@@ -260,6 +258,7 @@ class TestBuildModeWiring:
                 manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
+                request_json={'analysis_pipeline': pipeline, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,
@@ -287,6 +286,7 @@ class TestBuildModeWiring:
                 manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
+                request_json={'analysis_pipeline': pipeline, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,
@@ -319,6 +319,7 @@ class TestBuildModeWiring:
                 manager=self._make_manager_mock(),
                 target_step_id='source',
                 analysis_pipeline=pipeline,
+                request_json={'analysis_pipeline': pipeline, 'target_step_id': 'source'},
                 filename='test_out',
                 iceberg_options={'namespace': 'ns', 'table_name': 'tbl', 'branch': 'master'},
                 result_id=output_ds_id,

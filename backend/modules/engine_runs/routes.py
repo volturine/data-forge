@@ -1,11 +1,10 @@
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
 from core.database import get_db
 from core.error_handlers import handle_errors
 from core.validation import EngineRunId, parse_analysis_id, parse_datasource_id, parse_engine_run_id
 from modules.engine_runs import schemas, service
-from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import EngineRunKind, EngineRunStatus
 from modules.mcp.router import MCPRouter
 
@@ -14,7 +13,7 @@ router = MCPRouter(prefix='/engine-runs', tags=['engine-runs'])
 
 @router.get('/compare', response_model=schemas.BuildComparisonResponse, mcp=True)
 @handle_errors(operation='compare engine runs')
-def compare_runs(
+async def compare_runs(
     run_a: str,
     run_b: str,
     datasource_id: str | None = None,
@@ -35,7 +34,7 @@ def compare_runs(
 
 @router.get('', response_model=list[schemas.EngineRunResponseSchema], mcp=True)
 @handle_errors(operation='list engine runs')
-def list_runs(
+async def list_runs(
     analysis_id: str | None = None,
     datasource_id: str | None = None,
     kind: EngineRunKind | None = None,
@@ -62,11 +61,9 @@ def list_runs(
 
 @router.get('/{run_id}', response_model=schemas.EngineRunResponseSchema, mcp=True)
 @handle_errors(operation='get engine run')
-def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
+async def get_run(run_id: EngineRunId, session: Session = Depends(get_db)):
     """Get a single engine run by ID with full request/result JSON and step timings."""
-    run = session.get(EngineRun, parse_engine_run_id(run_id))
+    run = service.get_engine_run(session, parse_engine_run_id(run_id))
     if not run:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail='Engine run not found')
-    return schemas.EngineRunResponseSchema.model_validate(run)
+    return run

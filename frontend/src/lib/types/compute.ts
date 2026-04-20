@@ -22,10 +22,6 @@ export interface EngineStatusResponse {
 	defaults: EngineDefaults | null; // Default values from env vars
 }
 
-export interface EngineListResponse {
-	engines: EngineStatusResponse[];
-}
-
 export interface SpawnEngineRequest {
 	resource_config?: EngineResourceConfig | null;
 }

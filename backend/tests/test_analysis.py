@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from main import app
-from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
+from modules.analysis.models import Analysis, AnalysisDataSource
 from modules.analysis.schemas import AnalysisResponseSchema
 from modules.auth.dependencies import get_optional_user
 from modules.datasource.models import DataSource
@@ -31,9 +31,9 @@ def _schema_enum_values(schema: dict, field_name: str) -> list[str]:
     return []
 
 
-def test_analysis_response_schema_uses_analysis_status_enum() -> None:
+def test_analysis_response_schema_omits_status() -> None:
     schema = AnalysisResponseSchema.model_json_schema()
-    assert _schema_enum_values(schema, 'status') == [item.value for item in AnalysisStatus]
+    assert 'status' not in schema.get('properties', {})
 
 
 class TestAnalysisCreate:
@@ -76,7 +76,6 @@ class TestAnalysisCreate:
 
         assert result['name'] == 'New Analysis'
         assert result['description'] == 'Test analysis description'
-        assert result['status'] == 'draft'
         assert 'id' in result
         assert 'created_at' in result
         assert 'updated_at' in result
@@ -427,7 +426,6 @@ class TestAnalysisGet:
         assert result['id'] == sample_analysis.id
         assert result['name'] == sample_analysis.name
         assert result['description'] == sample_analysis.description
-        assert result['status'] == sample_analysis.status
 
     def test_get_analysis_not_found(self, client):
         missing_id = str(uuid.uuid4())
@@ -601,7 +599,7 @@ class TestAnalysisUpdate:
         assert result['pipeline_definition']['tabs'][0]['steps'][0]['type'] == 'groupby'
         assert result['pipeline_definition']['tabs']
 
-    def test_update_analysis_status(self, client, sample_analysis: Analysis):
+    def test_update_analysis_rejects_status(self, client, sample_analysis: Analysis):
         payload = {
             'status': 'completed',
             'tabs': sample_analysis.pipeline_definition['tabs'],
@@ -609,16 +607,12 @@ class TestAnalysisUpdate:
 
         response = client.put(f'/api/v1/analysis/{sample_analysis.id}', json=payload)
 
-        assert response.status_code == 200
-        result = response.json()
-
-        assert result['status'] == 'completed'
+        assert response.status_code == 422
 
     def test_update_analysis_multiple_fields(self, client, sample_analysis: Analysis):
         payload: dict[str, object] = {
             'name': 'Updated Name',
             'description': 'Updated Description',
-            'status': 'running',
             'tabs': sample_analysis.pipeline_definition['tabs'],
         }
 
@@ -629,7 +623,6 @@ class TestAnalysisUpdate:
 
         assert result['name'] == 'Updated Name'
         assert result['description'] == 'Updated Description'
-        assert result['status'] == 'running'
 
     def test_update_analysis_not_found(self, client, sample_analysis: Analysis):
         payload = {

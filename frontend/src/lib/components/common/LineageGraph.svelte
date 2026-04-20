@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { LineageNode, LineageResponse, NodeKind, EdgeType } from '$lib/api/lineage';
 	import { ArrowRight, ArrowDown, LayoutGrid, RotateCcw, ZoomIn, ZoomOut } from 'lucide-svelte';
-	import { css, cx, button } from '$lib/styles/panda';
+	import { css, button } from '$lib/styles/panda';
 
 	type LayoutMode = 'horizontal' | 'vertical' | 'grid';
 
@@ -46,6 +46,7 @@
 	let scale = $state(1);
 	let panning = $state(false);
 	let panStart: { x: number; y: number; px: number; py: number } | null = null;
+	let panPointerId = $state<number | null>(null);
 
 	const layoutNodes = $derived.by(() => {
 		const next = [] as Array<{
@@ -195,10 +196,13 @@
 		const usableWidth = Math.max(1, viewWidth - panelOffset);
 		const sx = usableWidth / contentWidth;
 		const sy = viewHeight / contentHeight;
-		scale = clamp(Math.min(sx, sy, 1), 0.2, 3);
+		const nextScale = clamp(Math.min(sx, sy, 1), 0.2, 3);
+		const scaledWidth = contentWidth * nextScale;
+		const scaledHeight = contentHeight * nextScale;
+		scale = nextScale;
 		pan = {
-			x: padding - bounds.minX + panelOffset + (usableWidth - contentWidth) / 2,
-			y: padding - bounds.minY + (viewHeight - contentHeight) / 2
+			x: panelOffset + (usableWidth - scaledWidth) / 2 - (bounds.minX - padding) * nextScale,
+			y: (viewHeight - scaledHeight) / 2 - (bounds.minY - padding) * nextScale
 		};
 	}
 
@@ -292,6 +296,8 @@
 		event.preventDefault();
 		panning = true;
 		panStart = { x: event.clientX, y: event.clientY, px: pan.x, py: pan.y };
+		panPointerId = event.pointerId;
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 	}
 
 	function movePan(event: PointerEvent) {
@@ -302,9 +308,16 @@
 		};
 	}
 
-	function stopPan() {
+	function stopPan(event?: PointerEvent) {
+		if (panPointerId !== null && event?.currentTarget instanceof HTMLElement) {
+			const canvas = event.currentTarget;
+			if (canvas.hasPointerCapture(panPointerId)) {
+				canvas.releasePointerCapture(panPointerId);
+			}
+		}
 		panning = false;
 		panStart = null;
+		panPointerId = null;
 	}
 
 	function handleWheel(event: WheelEvent) {
@@ -488,146 +501,157 @@
 				overflow: 'hidden',
 				backgroundColor: 'bg.secondary'
 			})}
+			data-testid="lineage-canvas"
 			bind:clientWidth={viewWidth}
 			bind:clientHeight={viewHeight}
 			onpointerdown={startPan}
 			onpointermove={movePan}
-			onpointerup={stopPan}
-			onpointercancel={stopPan}
+			onpointerup={(event) => stopPan(event)}
+			onpointercancel={(event) => stopPan(event)}
 			onwheel={handleWheel}
 			oncontextmenu={(e) => e.preventDefault()}
 		>
-			<!-- Transformed layer -->
-			<svg
-				class={css({ pointerEvents: 'none', position: 'absolute', inset: '0' })}
-				width={canvasWidth}
-				height={canvasHeight}
+			<div
+				class={css({
+					position: 'absolute',
+					inset: '0',
+					transformOrigin: 'top left',
+					willChange: 'transform'
+				})}
+				style:transform={_transform}
 			>
-				<defs>
-					<marker
-						id="lineage-arrow"
-						markerWidth="10"
-						markerHeight="10"
-						refX="8"
-						refY="5"
-						orient="auto"
-					>
-						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-primary)" />
-					</marker>
-					<marker
-						id="lineage-arrow-success"
-						markerWidth="10"
-						markerHeight="10"
-						refX="8"
-						refY="5"
-						orient="auto"
-					>
-						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-success)" />
-					</marker>
-					<marker
-						id="lineage-arrow-faint"
-						markerWidth="10"
-						markerHeight="10"
-						refX="8"
-						refY="5"
-						orient="auto"
-					>
-						<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-faint)" />
-					</marker>
-				</defs>
-				{#each edges as edge (edge.from + edge.to)}
-					{@const from = positionSnapshot[edge.from]}
-					{@const to = positionSnapshot[edge.to]}
-					{@const stroke = edgeStroke[edge.type] ?? edgeStroke.uses}
-					{@const marker =
-						edge.type === 'produces'
-							? 'url(#lineage-arrow-success)'
-							: edge.type === 'chains' || edge.type === 'consumes_internal'
-								? 'url(#lineage-arrow-faint)'
-								: 'url(#lineage-arrow)'}
-					{#if from && to}
-						<path
-							d={`M ${from.x + nodeWidth} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth + 60} ${from.y + nodeHeight / 2} ${to.x - 60} ${to.y + nodeHeight / 2} ${to.x} ${to.y + nodeHeight / 2}`}
-							fill="none"
-							stroke={stroke.color}
-							stroke-width="1.5"
-							stroke-dasharray={stroke.dash}
-							marker-end={marker}
-						/>
+				<!-- Transformed layer -->
+				<svg
+					class={css({ pointerEvents: 'none', position: 'absolute', inset: '0' })}
+					width={canvasWidth}
+					height={canvasHeight}
+				>
+					<defs>
+						<marker
+							id="lineage-arrow"
+							markerWidth="10"
+							markerHeight="10"
+							refX="8"
+							refY="5"
+							orient="auto"
+						>
+							<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-primary)" />
+						</marker>
+						<marker
+							id="lineage-arrow-success"
+							markerWidth="10"
+							markerHeight="10"
+							refX="8"
+							refY="5"
+							orient="auto"
+						>
+							<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-success)" />
+						</marker>
+						<marker
+							id="lineage-arrow-faint"
+							markerWidth="10"
+							markerHeight="10"
+							refX="8"
+							refY="5"
+							orient="auto"
+						>
+							<path d="M0,0 L10,5 L0,10 Z" fill="var(--colors-fg-faint)" />
+						</marker>
+					</defs>
+					{#each edges as edge (edge.from + edge.to)}
+						{@const from = positionSnapshot[edge.from]}
+						{@const to = positionSnapshot[edge.to]}
+						{@const stroke = edgeStroke[edge.type] ?? edgeStroke.uses}
+						{@const marker =
+							edge.type === 'produces'
+								? 'url(#lineage-arrow-success)'
+								: edge.type === 'chains' || edge.type === 'consumes_internal'
+									? 'url(#lineage-arrow-faint)'
+									: 'url(#lineage-arrow)'}
+						{#if from && to}
+							<path
+								d={`M ${from.x + nodeWidth} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth + 60} ${from.y + nodeHeight / 2} ${to.x - 60} ${to.y + nodeHeight / 2} ${to.x} ${to.y + nodeHeight / 2}`}
+								fill="none"
+								stroke={stroke.color}
+								stroke-width="1.5"
+								stroke-dasharray={stroke.dash}
+								marker-end={marker}
+							/>
+						{/if}
+					{/each}
+				</svg>
+
+				{#each layoutNodes as node (node.id)}
+					{@const pos = positionSnapshot[node.id]}
+					{@const isInternal = node.kind === 'internal'}
+					{#if pos}
+						<div
+							class={[
+								'lineage-node',
+								css({
+									width: '240px',
+									background: 'canvas.lineageNode',
+									transition: 'box-shadow 160ms ease, transform 160ms ease',
+									_active: {
+										cursor: 'grabbing'
+									},
+									position: 'absolute',
+									display: 'flex',
+									flexDirection: 'column',
+									gap: '1',
+									borderWidth: '1',
+									paddingX: '4',
+									paddingY: '3',
+									boxShadow: 'sm',
+									borderLeftWidth: isInternal ? '1' : '3'
+								})
+							]}
+							style:border-left-color={kindBorderColor[node.kind]}
+							style:border-style={isInternal ? 'dashed' : 'solid'}
+							use:setPosition={pos}
+							onpointerdown={(event) => {
+								if (event.button === 0) startDrag(event, node.id);
+							}}
+							onpointermove={moveDrag}
+							onpointerup={stopDrag}
+							onpointercancel={stopDrag}
+							role="button"
+							tabindex="0"
+							aria-label={`${node.kind} ${node.label}`}
+						>
+							<div
+								class={css({
+									fontSize: 'xs',
+									textTransform: 'uppercase',
+									letterSpacing: 'wide',
+									color: isInternal ? 'fg.faint' : 'fg.muted'
+								})}
+							>
+								{kindLabel[node.kind]}
+							</div>
+							<div
+								class={css({
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+									fontSize: 'sm',
+									fontWeight: 'semibold',
+									color: isInternal ? 'fg.tertiary' : 'fg.primary'
+								})}
+							>
+								{node.label}
+							</div>
+							{#if node.meta}
+								<div
+									class={css({ fontSize: 'xs', color: isInternal ? 'fg.faint' : 'fg.tertiary' })}
+								>
+									{node.meta}
+								</div>
+							{/if}
+						</div>
 					{/if}
 				{/each}
-			</svg>
-
-			{#each layoutNodes as node (node.id)}
-				{@const pos = positionSnapshot[node.id]}
-				{@const isInternal = node.kind === 'internal'}
-				{#if pos}
-					<div
-						class={cx(
-							'lineage-node',
-							css({
-								width: '240px',
-								background: 'canvas.lineageNode',
-								cursor: 'grab',
-								transition: 'box-shadow 160ms ease, transform 160ms ease',
-								_active: {
-									cursor: 'grabbing',
-									boxShadow: 'panel'
-								},
-								position: 'absolute',
-								display: 'flex',
-								flexDirection: 'column',
-								gap: '1',
-								borderWidth: '1',
-								paddingX: '4',
-								paddingY: '3',
-								boxShadow: 'sm',
-								borderLeftWidth: isInternal ? '1' : '3'
-							})
-						)}
-						style:border-left-color={kindBorderColor[node.kind]}
-						style:border-style={isInternal ? 'dashed' : 'solid'}
-						use:setPosition={pos}
-						onpointerdown={(event) => {
-							if (event.button === 0) startDrag(event, node.id);
-						}}
-						onpointermove={moveDrag}
-						onpointerup={stopDrag}
-						onpointercancel={stopDrag}
-						role="button"
-						tabindex="0"
-						aria-label={`${node.kind} ${node.label}`}
-					>
-						<div
-							class={css({
-								fontSize: 'xs',
-								textTransform: 'uppercase',
-								letterSpacing: 'wide',
-								color: isInternal ? 'fg.faint' : 'fg.muted'
-							})}
-						>
-							{kindLabel[node.kind]}
-						</div>
-						<div
-							class={css({
-								overflow: 'hidden',
-								textOverflow: 'ellipsis',
-								whiteSpace: 'nowrap',
-								fontSize: 'sm',
-								fontWeight: 'semibold',
-								color: isInternal ? 'fg.tertiary' : 'fg.primary'
-							})}
-						>
-							{node.label}
-						</div>
-						{#if node.meta}
-							<div class={css({ fontSize: 'xs', color: isInternal ? 'fg.faint' : 'fg.tertiary' })}>
-								{node.meta}
-							</div>
-						{/if}
-					</div>
-				{/if}
-			{/each}
+			</div>
 		</div>
 	</div>
 {/if}

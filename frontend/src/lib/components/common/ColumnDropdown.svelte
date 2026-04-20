@@ -2,7 +2,7 @@
 	import type { Schema } from '$lib/types/schema';
 	import ColumnTypeBadge from '$lib/components/common/ColumnTypeBadge.svelte';
 	import SearchableDropdown from '$lib/components/ui/SearchableDropdown.svelte';
-	import { css, cx } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface ColumnOption {
 		id: string;
@@ -17,7 +17,6 @@
 		placeholder?: string;
 		filter?: (column: { name: string; dtype: string }) => boolean;
 		clearable?: boolean;
-		containerClass?: string;
 		triggerClass?: string;
 		menuClass?: string;
 	}
@@ -29,7 +28,6 @@
 		placeholder = 'Select column...',
 		filter,
 		clearable = false,
-		containerClass = '',
 		triggerClass = '',
 		menuClass = ''
 	}: Props = $props();
@@ -51,7 +49,6 @@
 	{placeholder}
 	{clearable}
 	searchPlaceholder="Search columns..."
-	{containerClass}
 	{triggerClass}
 	{menuClass}
 	{renderOption}
@@ -67,8 +64,9 @@
 	{@const onPick = payload.onSelect}
 	<button
 		type="button"
-		class={cx(
-			css({
+		data-column-option={item.label}
+		class={css(
+			{
 				minWidth: '0',
 				width: '100%',
 				paddingX: '3',
@@ -85,8 +83,8 @@
 				fontSize: 'sm',
 				'& span': { minWidth: '0', overflowWrap: 'anywhere' },
 				_hover: { backgroundColor: 'bg.hover' }
-			}),
-			isSelected && css({ backgroundColor: 'bg.hover' })
+			},
+			isSelected && { backgroundColor: 'bg.hover' }
 		)}
 		onclick={onPick}
 		role="option"

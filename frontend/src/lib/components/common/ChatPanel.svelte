@@ -9,9 +9,9 @@
 		Trash2,
 		Settings2,
 		Search,
-		Loader2,
+		LoaderCircle,
 		Wrench,
-		AlertCircle,
+		CircleAlert,
 		Copy,
 		ClipboardCheck,
 		ArrowDown,
@@ -20,8 +20,8 @@
 		Minimize2,
 		Eye,
 		Play,
-		CheckCircle2,
-		XCircle,
+		CircleCheck,
+		CircleX,
 		History,
 		RefreshCw,
 		ShieldAlert,
@@ -30,9 +30,11 @@
 		Timer,
 		WifiOff
 	} from 'lucide-svelte';
-	import { css, cx, iconButton, button, input, label } from '$lib/styles/panda';
+	import { css, iconButton, button, input, label } from '$lib/styles/panda';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { chatStore } from '$lib/stores/chat.svelte';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 	import type { MCPTool } from '$lib/api/mcp';
 	import type { ChatUiPatchEvent } from '$lib/api/chat';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -142,31 +144,9 @@
 		return chatStore.tools.find((t) => t.id === toolId);
 	}
 
-	function outputFields(schema: Record<string, unknown> | boolean | null): string[] {
-		if (!schema || typeof schema !== 'object') return [];
-		if (schema.type === 'object') {
-			const props = schema.properties;
-			if (!props || typeof props !== 'object') return [];
-			return Object.keys(props as Record<string, unknown>);
-		}
-		if (schema.type === 'array') {
-			const items = schema.items;
-			if (!items || typeof items !== 'object') return [];
-			const itemSchema = items as Record<string, unknown>;
-			const props = itemSchema.properties;
-			if (!props || typeof props !== 'object') return [];
-			return Object.keys(props as Record<string, unknown>);
-		}
-		return [];
-	}
-
 	function outputHint(tool: MCPTool | undefined): string | null {
 		if (!tool?.output_schema) return null;
-		const out = tool.output_schema;
-		const parts: string[] = [];
-		if (out.response_model) parts.push(out.response_model);
-		if (out.status_code && out.status_code !== '200') parts.push(out.status_code);
-		return parts.length > 0 ? parts.join(' · ') : null;
+		return tool.output_schema.hint ?? null;
 	}
 
 	const EXAMPLE_PROMPTS = [
@@ -229,23 +209,17 @@
 		return () => window.removeEventListener('chat:ui_patch', onPatch);
 	});
 
-	// keyboard event listener — imperative DOM subscription
-	$effect(() => {
-		if (!chatStore.open) return;
-		if (typeof window === 'undefined') return;
-		function onKey(e: KeyboardEvent) {
-			if (e.key === 'Escape') {
-				if (configOpen || toolsOpen || sessionsOpen) {
-					configOpen = false;
-					toolsOpen = false;
-					sessionsOpen = false;
-					return;
-				}
-				chatStore.close();
+	// Overlay config for the panel — two-level escape: close sub-panels first, then close panel.
+	const chatOverlayConfig = $derived<OverlayConfig>({
+		onEscape: () => {
+			if (configOpen || toolsOpen || sessionsOpen) {
+				configOpen = false;
+				toolsOpen = false;
+				sessionsOpen = false;
+				return;
 			}
+			chatStore.close();
 		}
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
 	});
 
 	// DOM focus after state change — $derived cannot call focus()
@@ -555,9 +529,6 @@
 			e.preventDefault();
 			void handleSend();
 		}
-		if (e.key === 'Escape') {
-			chatStore.close();
-		}
 	}
 
 	function handlePaste() {
@@ -597,7 +568,7 @@
 	function methodColor(method: string): string {
 		if (method === 'GET') return 'fg.success';
 		if (method === 'DELETE') return 'fg.error';
-		if (method === 'POST') return 'fg.accent';
+		if (method === 'POST') return 'fg.primary';
 		return 'fg.warning';
 	}
 
@@ -660,6 +631,7 @@
 		})}
 		style:width="{panelWidth}px"
 		style:height="{activeHeight}px"
+		use:overlayStack.action={chatOverlayConfig}
 	>
 		<!-- Corner resize handle (top-left) -->
 		<div
@@ -693,7 +665,7 @@
 				cursor: 'ew-resize',
 				zIndex: '1',
 				touchAction: 'none',
-				_hover: { backgroundColor: 'border.default' }
+				_hover: { backgroundColor: 'border.primary' }
 			})}
 			onpointerdown={startResizeWidth}
 		></div>
@@ -704,11 +676,11 @@
 			aria-orientation="horizontal"
 			tabindex="-1"
 			class={css({
+				position: 'relative',
 				height: '6px',
 				cursor: 'ns-resize',
 				flexShrink: '0',
 				borderTopRadius: 'lg',
-				position: 'relative',
 				touchAction: 'none',
 				_before: {
 					content: '""',
@@ -716,9 +688,9 @@
 					top: '-4px',
 					left: '12px',
 					right: '0',
-					bottom: '-4px'
+					bottom: '0'
 				},
-				_hover: { backgroundColor: 'border.default' }
+				_hover: { backgroundColor: 'border.primary' }
 			})}
 			onpointerdown={startResize}
 		></div>
@@ -763,8 +735,8 @@
 								border: 'none',
 								cursor: 'pointer',
 								backgroundColor: chatStore.mode === 'plan' ? 'bg.accent' : 'transparent',
-								color: chatStore.mode === 'plan' ? 'fg.onAccent' : 'fg.muted',
-								_hover: chatStore.mode === 'plan' ? {} : { backgroundColor: 'bg.subtle' }
+								color: chatStore.mode === 'plan' ? 'fg.primary' : 'fg.muted',
+								_hover: chatStore.mode === 'plan' ? {} : { backgroundColor: 'bg.tertiary' }
 							})}
 							onclick={() => chatStore.setMode('plan')}
 							type="button"
@@ -785,9 +757,9 @@
 								border: 'none',
 								borderLeftWidth: '1',
 								cursor: 'pointer',
-								backgroundColor: chatStore.mode === 'execute' ? 'fg.default' : 'transparent',
+								backgroundColor: chatStore.mode === 'execute' ? 'fg.primary' : 'transparent',
 								color: chatStore.mode === 'execute' ? 'bg.panel' : 'fg.muted',
-								_hover: chatStore.mode === 'execute' ? {} : { backgroundColor: 'bg.subtle' }
+								_hover: chatStore.mode === 'execute' ? {} : { backgroundColor: 'bg.tertiary' }
 							})}
 							onclick={() => chatStore.setMode('execute')}
 							type="button"
@@ -798,7 +770,7 @@
 						</button>
 					</div>
 					{#if chatStore.loading}
-						<Loader2
+						<LoaderCircle
 							size={10}
 							class={css({ animation: 'spin 1s linear infinite', flexShrink: '0' })}
 						/>
@@ -806,7 +778,22 @@
 				</div>
 				<div class={css({ display: 'flex', gap: '0.5', flexShrink: '0' })}>
 					<button
-						class={cx(iconButton(), css({ color: toolsOpen ? 'fg.default' : undefined }))}
+						class={[
+							css({
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color, border-color, opacity',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							}),
+							toolsOpen && css({ color: 'fg.primary' })
+						]}
 						onclick={() => togglePanel('tools')}
 						title="Tools"
 						aria-label="Tools"
@@ -814,7 +801,22 @@
 						<Wrench size={13} />
 					</button>
 					<button
-						class={cx(iconButton(), css({ color: sessionsOpen ? 'fg.default' : undefined }))}
+						class={[
+							css({
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color, border-color, opacity',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							}),
+							sessionsOpen && css({ color: 'fg.primary' })
+						]}
 						onclick={() => togglePanel('sessions')}
 						title="Sessions"
 						aria-label="Sessions"
@@ -822,7 +824,22 @@
 						<History size={13} />
 					</button>
 					<button
-						class={cx(iconButton(), css({ color: configOpen ? 'fg.default' : undefined }))}
+						class={[
+							css({
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								borderWidth: '1',
+								backgroundColor: 'bg.primary',
+								padding: '2',
+								color: 'fg.secondary',
+								transitionProperty: 'color, background-color, border-color, opacity',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+							}),
+							configOpen && css({ color: 'fg.primary' })
+						]}
 						onclick={openConfig}
 						title="Configure"
 						aria-label="Configure"
@@ -891,7 +908,30 @@
 					<div class={css({ display: 'flex', gap: '1' })}>
 						<input
 							id="chat-key"
-							class={cx(input(), css({ flex: '1' }))}
+							class={[
+								css({
+									width: 'full',
+									fontSize: 'sm2',
+									color: 'fg.primary',
+									backgroundColor: 'bg.primary',
+									borderWidth: '1',
+									borderRadius: '0',
+									paddingX: '3.5',
+									paddingY: '2.25',
+									transitionProperty: 'border-color',
+									transitionDuration: '160ms',
+									transitionTimingFunction: 'ease',
+									_focus: { outline: 'none' },
+									_focusVisible: { borderColor: 'border.accent' },
+									_disabled: {
+										opacity: '0.5',
+										cursor: 'not-allowed',
+										backgroundColor: 'bg.tertiary'
+									},
+									_placeholder: { color: 'fg.muted' }
+								}),
+								css({ flex: '1' })
+							]}
 							type="password"
 							bind:value={apiKeyDraft}
 							placeholder="sk-or-… (uses global if empty)"
@@ -905,7 +945,7 @@
 							type="button"
 						>
 							{#if chatStore.modelsLoading}
-								<Loader2 size={12} class={css({ animation: 'spin 1s linear infinite' })} />
+								<LoaderCircle size={12} class={css({ animation: 'spin 1s linear infinite' })} />
 							{:else}
 								<Search size={12} />
 							{/if}
@@ -952,7 +992,7 @@
 												fontSize: 'xs',
 												border: 'none',
 												backgroundColor: m.id === modelDraft ? 'bg.accent' : 'transparent',
-												color: m.id === modelDraft ? 'fg.onAccent' : 'fg.default',
+												color: m.id === modelDraft ? 'fg.primary' : 'fg.primary',
 												cursor: 'pointer',
 												_hover: { backgroundColor: 'bg.hover' }
 											})}
@@ -998,7 +1038,26 @@
 					<label class={label()} for="chat-system-prompt">System Prompt (override)</label>
 					<textarea
 						id="chat-system-prompt"
-						class={cx(input(), css({ resize: 'none', minHeight: '48px', maxHeight: '100px' }))}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' },
+							resize: 'none',
+							minHeight: '48px',
+							maxHeight: '100px'
+						})}
 						bind:value={systemPromptDraft}
 						placeholder="Leave empty to use mode default ({chatStore.mode})"
 						rows={2}
@@ -1126,7 +1185,7 @@
 											paddingY: '1',
 											fontSize: '11px',
 											textAlign: 'left',
-											color: enabled ? 'fg.default' : 'fg.muted',
+											color: enabled ? 'fg.primary' : 'fg.muted',
 											_hover: { backgroundColor: 'bg.hover' }
 										})}
 										onclick={() => chatStore.toggleTool(tool.id)}
@@ -1158,7 +1217,7 @@
 												paddingX: '1',
 												paddingY: '0.5',
 												borderRadius: 'xs',
-												backgroundColor: 'bg.subtle',
+												backgroundColor: 'bg.tertiary',
 												color: methodColor(tool.method),
 												flexShrink: '0'
 											})}
@@ -1259,7 +1318,7 @@
 				>
 					{#each chatStore.sessions as session (session.id)}
 						<div
-							class={cx(
+							class={[
 								'group',
 								css({
 									display: 'flex',
@@ -1269,7 +1328,7 @@
 									overflow: 'hidden',
 									_hover: { backgroundColor: 'bg.hover' }
 								})
-							)}
+							]}
 						>
 							<button
 								class={css({
@@ -1297,7 +1356,7 @@
 										overflow: 'hidden',
 										textOverflow: 'ellipsis',
 										whiteSpace: 'nowrap',
-										color: session.preview ? 'fg.default' : 'fg.muted'
+										color: session.preview ? 'fg.primary' : 'fg.muted'
 									})}
 								>
 									{session.preview || 'Empty session'}
@@ -1410,7 +1469,7 @@
 											backgroundColor: 'transparent',
 											color: 'fg.secondary',
 											cursor: 'pointer',
-											_hover: { backgroundColor: 'bg.subtle' }
+											_hover: { backgroundColor: 'bg.tertiary' }
 										})}
 										onclick={() => void handleSendPrompt(prompt)}
 										type="button"
@@ -1448,7 +1507,7 @@
 								</div>
 								{#each chatStore.sessions.slice(0, 5) as session (session.id)}
 									<div
-										class={cx(
+										class={[
 											'group',
 											css({
 												display: 'flex',
@@ -1458,7 +1517,7 @@
 												overflow: 'hidden',
 												_hover: { backgroundColor: 'bg.hover' }
 											})
-										)}
+										]}
 									>
 										<button
 											class={css({
@@ -1486,7 +1545,7 @@
 													overflow: 'hidden',
 													textOverflow: 'ellipsis',
 													whiteSpace: 'nowrap',
-													color: session.preview ? 'fg.default' : 'fg.muted'
+													color: session.preview ? 'fg.primary' : 'fg.muted'
 												})}
 											>
 												{session.preview || 'Empty session'}
@@ -1549,7 +1608,7 @@
 								color: 'fg.muted',
 								fontSize: '10px',
 								fontFamily: 'mono',
-								_hover: { color: 'fg.default' }
+								_hover: { color: 'fg.primary' }
 							})}
 							onclick={() => {
 								const anyExpanded = chatStore.toolCalls.some((tc) => tc.expanded);
@@ -1608,7 +1667,7 @@
 									color: 'fg.error'
 								})}
 							>
-								<AlertCircle size={10} class={css({ flexShrink: '0', marginTop: '1px' })} />
+								<CircleAlert size={10} class={css({ flexShrink: '0', marginTop: '1px' })} />
 								<pre
 									class={css({
 										margin: '0',
@@ -1621,7 +1680,7 @@
 						{:else}
 							<!-- User / Assistant message -->
 							<div
-								class={cx(
+								class={[
 									'chat-msg-enter',
 									css({
 										display: 'flex',
@@ -1629,7 +1688,7 @@
 										gap: '1.5',
 										marginTop: grouped ? '-0.5' : '0'
 									})
-								)}
+								]}
 							>
 								{#if msg.role === 'assistant'}
 									{#if !grouped}
@@ -1639,7 +1698,7 @@
 												height: '22px',
 												borderRadius: 'full',
 												backgroundColor:
-													chatStore.mode === 'execute' ? 'accent.primary' : 'bg.subtle',
+													chatStore.mode === 'execute' ? 'accent.primary' : 'bg.tertiary',
 												display: 'flex',
 												alignItems: 'center',
 												justifyContent: 'center',
@@ -1667,20 +1726,20 @@
 									})}
 								>
 									<div
-										class={cx(
+										class={[
 											css({
 												padding: '2',
 												borderRadius: 'md',
 												fontSize: 'sm',
-												backgroundColor: msg.role === 'user' ? 'bg.accent' : 'bg.subtle',
-												color: msg.role === 'user' ? 'fg.onAccent' : 'fg.default',
+												backgroundColor: msg.role === 'user' ? 'bg.accent' : 'bg.tertiary',
+												color: msg.role === 'user' ? 'fg.primary' : 'fg.primary',
 												wordBreak: 'break-word',
 												position: 'relative',
 												lineHeight: '1.5',
 												_hover: { '& .chat-copy-btn': { opacity: '1' } }
 											}),
 											msg.role === 'assistant' ? 'chat-markdown' : ''
-										)}
+										]}
 									>
 										{#if msg.role === 'assistant'}
 											<!-- eslint-disable-next-line svelte/no-at-html-tags -- markdown from our own AI, not user-supplied HTML -->
@@ -1689,7 +1748,7 @@
 											<span class={css({ whiteSpace: 'pre-wrap' })}>{msg.content}</span>
 										{/if}
 										<button
-											class={cx(
+											class={[
 												'chat-copy-btn',
 												css({
 													position: 'absolute',
@@ -1703,7 +1762,7 @@
 													opacity: '0',
 													_hover: { color: 'fg.primary' }
 												})
-											)}
+											]}
 											onclick={() => copyToClipboard(msg.content, msg.id)}
 											title="Copy message"
 											type="button"
@@ -1716,14 +1775,14 @@
 										</button>
 									</div>
 									<span
-										class={cx(
+										class={[
 											'chat-ts',
 											css({
 												fontSize: '10px',
 												color: 'fg.muted',
 												paddingX: '1'
 											})
-										)}
+										]}
 									>
 										{timeAgo(msg.ts)}
 									</span>
@@ -1746,7 +1805,7 @@
 								maxWidth: 'calc(100% - 30px)',
 								minWidth: '0',
 								flexShrink: '0',
-								backgroundColor: 'bg.canvas',
+								backgroundColor: 'bg.secondary',
 								borderWidth: '1',
 								borderColor:
 									tc.status === 'error'
@@ -1755,7 +1814,7 @@
 											? 'fg.warning'
 											: tc.status === 'done'
 												? 'border.subtle'
-												: 'border.default'
+												: 'border.primary'
 							})}
 						>
 							<button
@@ -1771,13 +1830,13 @@
 									backgroundColor: 'transparent',
 									cursor: 'pointer',
 									textAlign: 'left',
-									color: 'fg.default'
+									color: 'fg.primary'
 								})}
 								onclick={() => (tc.expanded = !tc.expanded)}
 								type="button"
 							>
 								{#if tc.status === 'running'}
-									<Loader2
+									<LoaderCircle
 										size={11}
 										class={css({
 											animation: 'spin 1s linear infinite',
@@ -1788,9 +1847,9 @@
 								{:else if tc.status === 'confirming'}
 									<ShieldAlert size={11} class={css({ flexShrink: '0', color: 'fg.warning' })} />
 								{:else if tc.status === 'done'}
-									<CheckCircle2 size={11} class={css({ flexShrink: '0', color: 'fg.success' })} />
+									<CircleCheck size={11} class={css({ flexShrink: '0', color: 'fg.success' })} />
 								{:else}
-									<XCircle size={11} class={css({ flexShrink: '0', color: 'fg.error' })} />
+									<CircleX size={11} class={css({ flexShrink: '0', color: 'fg.error' })} />
 								{/if}
 								<Wrench size={9} class={css({ flexShrink: '0', color: 'fg.muted' })} />
 								<span
@@ -1854,7 +1913,7 @@
 										padding: '2',
 										borderTopWidth: '1',
 										borderColor: 'border.warning',
-										backgroundColor: 'bg.subtle'
+										backgroundColor: 'bg.tertiary'
 									})}
 								>
 									<ShieldAlert size={12} class={css({ flexShrink: '0', color: 'fg.warning' })} />
@@ -1862,7 +1921,7 @@
 										class={css({
 											flex: '1',
 											fontSize: '11px',
-											color: 'fg.default'
+											color: 'fg.primary'
 										})}
 									>
 										This action will modify data. Allow?
@@ -1920,7 +1979,7 @@
 										overflow: 'auto',
 										maxHeight: '200px',
 										borderTopWidth: '1',
-										backgroundColor: 'bg.subtle',
+										backgroundColor: 'bg.tertiary',
 										wordBreak: 'break-word'
 									})}
 								>
@@ -1935,7 +1994,7 @@
 									</div>
 									{#if toolDef?.output_schema}
 										{@const out = toolDef.output_schema}
-										{@const fields = outputFields(out.schema)}
+										{@const fields = out.fields ?? []}
 										<div
 											class={css({
 												display: 'flex',
@@ -1953,7 +2012,7 @@
 														paddingX: '1',
 														paddingY: '0.5',
 														borderRadius: 'xs',
-														backgroundColor: 'bg.canvas',
+														backgroundColor: 'bg.secondary',
 														fontWeight: 'medium',
 														color: 'fg.secondary'
 													})}
@@ -1993,7 +2052,7 @@
 													padding: '0',
 													cursor: 'pointer',
 													color: 'fg.muted',
-													_hover: { color: 'fg.default' }
+													_hover: { color: 'fg.primary' }
 												})}
 												onclick={() =>
 													void copyToClipboard(
@@ -2045,7 +2104,7 @@
 													padding: '0',
 													cursor: 'pointer',
 													color: 'fg.muted',
-													_hover: { color: 'fg.default' }
+													_hover: { color: 'fg.primary' }
 												})}
 												onclick={() =>
 													void copyToClipboard(
@@ -2084,7 +2143,7 @@
 								padding: '1.5',
 								paddingX: '3',
 								borderRadius: 'md',
-								backgroundColor: 'bg.subtle',
+								backgroundColor: 'bg.tertiary',
 								display: 'flex',
 								alignItems: 'center',
 								gap: '1'
@@ -2120,7 +2179,7 @@
 								fontSize: '11px',
 								fontWeight: 'medium',
 								cursor: 'pointer',
-								_hover: { backgroundColor: 'bg.accent', color: 'fg.onAccent' }
+								_hover: { backgroundColor: 'bg.accent', color: 'fg.primary' }
 							})}
 							onclick={() => void handleSendPrompt('Go ahead, execute the plan.')}
 							type="button"
@@ -2137,7 +2196,7 @@
 								color: 'fg.muted',
 								fontSize: '11px',
 								cursor: 'pointer',
-								_hover: { backgroundColor: 'bg.subtle' }
+								_hover: { backgroundColor: 'bg.tertiary' }
 							})}
 							onclick={() => inputEl?.focus()}
 							type="button"
@@ -2170,7 +2229,7 @@
 							cursor: 'pointer',
 							boxShadow: 'md',
 							zIndex: '1',
-							_hover: { backgroundColor: 'bg.subtle' }
+							_hover: { backgroundColor: 'bg.tertiary' }
 						})}
 						onclick={scrollToBottom}
 						type="button"
@@ -2196,7 +2255,7 @@
 						flexShrink: '0'
 					})}
 				>
-					<AlertCircle size={11} class={css({ color: 'fg.error', flexShrink: '0' })} />
+					<CircleAlert size={11} class={css({ color: 'fg.error', flexShrink: '0' })} />
 					<span
 						class={css({
 							flex: '1',
@@ -2224,7 +2283,7 @@
 								fontWeight: 'medium',
 								cursor: 'pointer',
 								flexShrink: '0',
-								_hover: { backgroundColor: 'bg.subtle' }
+								_hover: { backgroundColor: 'bg.tertiary' }
 							})}
 							onclick={() => void chatStore.retry()}
 							type="button"
@@ -2323,7 +2382,7 @@
 						fontSize: '10px',
 						fontFamily: 'mono',
 						flexShrink: '0',
-						_hover: { color: 'fg.default' }
+						_hover: { color: 'fg.primary' }
 					})}
 					onclick={toggleModelPicker}
 					type="button"
@@ -2358,7 +2417,7 @@
 								fontSize: '10px',
 								fontFamily: 'mono',
 								flexShrink: '0',
-								_hover: { color: 'fg.default' }
+								_hover: { color: 'fg.primary' }
 							})}
 							onclick={() => chatStore.reconnectNow()}
 							type="button"
@@ -2405,7 +2464,7 @@
 								flex: '1',
 								minWidth: '20px',
 								height: '3px',
-								backgroundColor: 'bg.canvas',
+								backgroundColor: 'bg.secondary',
 								borderRadius: 'full',
 								overflow: 'hidden'
 							})}
@@ -2448,15 +2507,27 @@
 						})}
 					>
 						<input
-							class={cx(
-								input(),
-								css({
-									borderRadius: '0',
-									borderWidth: '0',
-									borderBottomWidth: '1',
-									fontSize: 'xs'
-								})
-							)}
+							class={css({
+								width: 'full',
+								color: 'fg.primary',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' },
+								borderRadius: '0',
+								borderWidth: '0',
+								borderBottomWidth: '1',
+								fontSize: 'xs'
+							})}
 							type="text"
 							bind:value={modelPickerSearch}
 							placeholder="Search models\u2026"
@@ -2470,7 +2541,7 @@
 									color: 'fg.muted'
 								})}
 							>
-								<Loader2
+								<LoaderCircle
 									size={12}
 									class={css({ animation: 'spin 1s linear infinite', display: 'inline' })}
 								/> Loading\u2026
@@ -2492,7 +2563,7 @@
 										paddingX: '2',
 										border: 'none',
 										backgroundColor: m.id === chatStore.model ? 'bg.accent' : 'transparent',
-										color: m.id === chatStore.model ? 'fg.onAccent' : 'fg.default',
+										color: m.id === chatStore.model ? 'fg.primary' : 'fg.primary',
 										cursor: 'pointer',
 										_hover: { backgroundColor: 'bg.hover' }
 									})}
@@ -2503,7 +2574,7 @@
 									<span
 										class={css({
 											fontSize: '9px',
-											color: m.id === chatStore.model ? 'fg.onAccent' : 'fg.muted',
+											color: m.id === chatStore.model ? 'fg.primary' : 'fg.muted',
 											fontFamily: 'mono'
 										})}
 									>
@@ -2520,16 +2591,27 @@
 			<!-- Textarea + send button -->
 			<div class={css({ display: 'flex', gap: '2', alignItems: 'flex-end' })}>
 				<textarea
-					class={cx(
-						input(),
-						css({
-							flex: '1',
-							resize: 'none',
-							minHeight: '34px',
-							maxHeight: '120px',
-							fontSize: 'sm'
-						})
-					)}
+					class={css({
+						width: 'full',
+						color: 'fg.primary',
+						backgroundColor: 'bg.primary',
+						borderWidth: '1',
+						borderRadius: '0',
+						paddingX: '3.5',
+						paddingY: '2.25',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' },
+						flex: '1',
+						resize: 'none',
+						minHeight: '34px',
+						maxHeight: '120px',
+						fontSize: 'sm'
+					})}
 					bind:value={inputValue}
 					bind:this={inputEl}
 					onkeydown={handleKeydown}

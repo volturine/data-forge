@@ -12,7 +12,6 @@ _NUMERIC_CONSTRAINTS: list[tuple[str, int | None, int | None]] = [
     ('port', 1, 65535),
     ('engine_idle_timeout', 1, None),
     ('job_timeout', 1, None),
-    ('engine_pooling_interval', 1, None),
     ('scheduler_check_interval', 1, None),
     ('lock_ttl_seconds', 1, None),
     ('lock_heartbeat_interval_seconds', 1, None),
@@ -105,10 +104,6 @@ class Settings(BaseSettings):
     # Engine idle timeout in seconds (default 60s)
     # Engines will be terminated after this duration of inactivity (reset on save)
     engine_idle_timeout: int = Field(default=60, alias='ENGINE_IDLE_TIMEOUT')
-
-    # Engine pooling interval in seconds (default 5 seconds)
-    # How often to check engine states and cleanup idle engines
-    engine_pooling_interval: int = Field(default=30, alias='ENGINE_POOLING_INTERVAL')
 
     # Scheduler check interval in seconds (default 60 seconds)
     # How often to check for schedules that need to run

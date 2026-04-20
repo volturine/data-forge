@@ -9,7 +9,7 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import ToggleButton from '$lib/components/ui/ToggleButton.svelte';
 	import { Search } from 'lucide-svelte';
-	import { css, cx, input, label, stepConfig } from '$lib/styles/panda';
+	import { css, input, label, stepConfig } from '$lib/styles/panda';
 
 	interface Props {
 		config?: NotificationConfigData;
@@ -233,10 +233,10 @@
 						<input
 							id="notif-search"
 							aria-label="Search subscribers"
-							class={cx(
+							class={[
 								input({ variant: 'searchCompact' }),
 								css({ paddingLeft: '7', paddingRight: '2' })
-							)}
+							]}
 							placeholder="Search subscribers..."
 							value={search}
 							oninput={(e) => (search = e.currentTarget.value)}
@@ -297,16 +297,23 @@
 						{:else}
 							{#each filtered as sub (sub.id)}
 								<label
-									class={cx(
-										label({ variant: 'checkbox' }),
-										css({
-											borderBottomWidth: '1',
-											paddingX: '2',
-											paddingY: '1.5',
-											_hover: { backgroundColor: 'bg.tertiary' },
-											_last: { borderBottomWidth: '0' }
-										})
-									)}
+									class={css({
+										display: 'flex',
+										cursor: 'pointer',
+										alignItems: 'center',
+										gap: '3',
+										fontSize: 'sm',
+										fontWeight: 'normal',
+										color: 'fg.secondary',
+										textTransform: 'none',
+										letterSpacing: 'normal',
+										marginBottom: '0',
+										borderBottomWidth: '1',
+										paddingX: '2',
+										paddingY: '1.5',
+										_hover: { backgroundColor: 'bg.tertiary' },
+										_last: { borderBottomWidth: '0' }
+									})}
 								>
 									<input
 										id={`sub-${sub.id}`}

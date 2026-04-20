@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import polars as pl
 
+from core.exceptions import DataSourceValidationError
 from core.namespace import namespace_paths
 from main import app
 from modules.auth.dependencies import get_optional_user
@@ -98,6 +99,28 @@ class TestDataSourceUpload:
         created = test_db_session.get(DataSource, datasource_id)
         assert created is not None
         assert created.owner_id == test_user.id
+
+    @patch('modules.datasource.routes.run_db')
+    def test_upload_preserves_datasource_validation_error(self, mock_run_db, client, mock_file_upload: dict):
+        mock_run_db.side_effect = DataSourceValidationError('CSV schema is invalid')
+        files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
+        data = {'name': 'Validation Failure'}
+
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'CSV schema is invalid'
+
+    @patch('modules.datasource.routes.run_db')
+    def test_upload_preserves_value_error(self, mock_run_db, client, mock_file_upload: dict):
+        mock_run_db.side_effect = ValueError('Bad upload path')
+        files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
+        data = {'name': 'Value Failure'}
+
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'Bad upload path'
 
 
 class TestDataSourceConnect:

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { UdfInput } from '$lib/types/udf';
 	import ColumnTypeDropdown from '$lib/components/common/ColumnTypeDropdown.svelte';
-	import { css, cx, button, emptyText, input, label, rowBetween } from '$lib/styles/panda';
+	import { css, button, emptyText, input } from '$lib/styles/panda';
 
 	interface Props {
 		inputs: UdfInput[];
@@ -32,7 +32,7 @@
 </script>
 
 <div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-	<div class={rowBetween}>
+	<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 		<h4 class={css({ margin: '0', fontSize: 'sm', color: 'fg.secondary' })}>Inputs</h4>
 		<button type="button" class={button({ variant: 'secondary', size: 'sm' })} onclick={addInput}
 			>Add input</button
@@ -53,7 +53,17 @@
 					})}
 				>
 					<label
-						class={cx(label(), css({ textAlign: 'left', md: { textAlign: 'center' } }))}
+						class={css({
+							display: 'block',
+							fontSize: 'xs2',
+							fontWeight: 'semibold',
+							color: 'fg.muted',
+							marginBottom: '1.5',
+							textTransform: 'uppercase',
+							letterSpacing: 'wider',
+							textAlign: 'left',
+							md: { textAlign: 'center' }
+						})}
 						for="udf-input-{index}-label">{index + 1}</label
 					>
 					<input

@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { drag, type DropTarget } from '$lib/stores/drag.svelte';
-	import { css, cx, input } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface StepType {
 		type: string;
 		label: string;
-		icon: typeof Filter;
+		icon: typeof Funnel;
 		description: string;
 	}
 
@@ -109,14 +109,14 @@
 
 	import {
 		ArrowUpDown,
-		BarChart3,
+		ChartColumn,
 		Bomb,
 		Brush,
 		Calculator,
 		Calendar,
 		Dices,
 		Eye,
-		Filter,
+		Funnel,
 		LayoutGrid,
 		Link,
 		Pencil,
@@ -128,19 +128,19 @@
 		Wrench,
 		ListChecks,
 		Trash2,
-		BarChart4,
+		ChartColumnIncreasing,
 		Bell,
 		Sparkles,
 		Download
 	} from 'lucide-svelte';
 
 	const stepTypes: StepType[] = [
-		{ type: 'filter', label: 'Filter', icon: Filter, description: 'Filter rows by conditions' },
+		{ type: 'filter', label: 'Filter', icon: Funnel, description: 'Filter rows by conditions' },
 		{ type: 'select', label: 'Select', icon: ListChecks, description: 'Select specific columns' },
 		{
 			type: 'groupby',
 			label: 'Group By',
-			icon: BarChart3,
+			icon: ChartColumn,
 			description: 'Group and aggregate data'
 		},
 		{ type: 'sort', label: 'Sort', icon: ArrowUpDown, description: 'Sort rows by columns' },
@@ -187,7 +187,7 @@
 		{
 			type: 'chart',
 			label: 'Chart',
-			icon: BarChart4,
+			icon: ChartColumnIncreasing,
 			description: 'Visualize data inline'
 		},
 		{
@@ -269,14 +269,23 @@
 			type="text"
 			placeholder="Search operations..."
 			bind:value={search}
-			class={cx(
-				input(),
-				css({
-					width: '100%',
-					fontSize: 'xs',
-					backgroundColor: 'bg.secondary'
-				})
-			)}
+			class={css({
+				color: 'fg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				paddingX: '3.5',
+				paddingY: '2.25',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focus: { outline: 'none' },
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				width: '100%',
+				fontSize: 'xs',
+				backgroundColor: 'bg.secondary'
+			})}
 		/>
 	</div>
 	<div

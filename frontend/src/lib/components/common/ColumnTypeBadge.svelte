@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getColumnTypeConfig } from '$lib/utils/column-types';
-	import { css, cx, badge } from '$lib/styles/panda';
+	import { css, badge } from '$lib/styles/panda';
 
 	interface Props {
 		columnType: string;
@@ -36,7 +36,7 @@
 </script>
 
 <span
-	class={cx(
+	class={[
 		badge({ tone: 'type' }),
 		css({
 			fontWeight: 'semibold',
@@ -48,7 +48,7 @@
 			...sizes[size],
 			...variants[variant]
 		})
-	)}
+	]}
 	title={config.description}
 >
 	{#if showIcon}

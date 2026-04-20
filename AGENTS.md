@@ -8,9 +8,12 @@
 just verify          # REQUIRED before declaring any task done (format + check)
 just format          # ruff format + prettier
 just test            # backend pytest
+just test-e2e        # e2e tests with Playwright
 just check           # ruff + mypy + svelte-check + eslint
 just dev             # start both servers
 ```
+
+- E2E must be run only via `just test-e2e`. Do not run Playwright e2e commands directly.
 
 ## Package Managers
 
@@ -21,6 +24,7 @@ just dev             # start both servers
 
 - Run `just verify` before declaring any task done or asking for review
 - If `just verify` fails, fix the underlying issues immediately
+- After `just verify` passes, run tests (`just test` and/or `just test-e2e`) to confirm functionality
 - Do not ignore or suppress warnings, even if they seem unrelated
 - Write backend Python tests for new/changed functionality
 - Pre-existing warnings are tech debt — fix them, do not ignore them
@@ -49,6 +53,11 @@ just dev             # start both servers
 - **Fix warnings, not just errors.** Treat warnings as bugs
 - **Autonomous completion.** Continue until every requirement is implemented, tested, and verified
 - **No legacy support.** New features/redesigns must not preserve legacy paths or backward compatibility
+- **No polling.** Do not add polling/interval refresh logic.
+- **No fallback logic.** Do not add permissive fallback/defaulting behavior unless the user explicitly asks for it.
+- **Build start is HTTP-only.** Never redesign build start around websockets.
+- **Monitoring history is explicit.** Monitoring engine-run rows are history data and should only gain new rows on explicit refresh.
+- **Live build websockets are scoped.** Websocket use for builds is limited to engine status in the left panel and live build preview/detail views, including the expanded Monitoring row for a running build.
 
 ## Frontend Development
 
@@ -72,6 +81,7 @@ just dev             # start both servers
 - **Panda CSS** for all styling — custom inline styles only when Panda cannot express it
 - Never use `transition-all` — use specific properties (see Transitions below)
 - Use semantic color tokens from the design system, never raw hex/rgb values
+- In Svelte files, do not hide styling behind helpers or intermediate style constants. Avoid `const foo = css(...)`, `const fooStyle = { ... }`, `css(fooStyle, ...)`, or wrapper functions that return `css(...)`; prefer direct `class={css({...})}` at the use site.
 
 ### Transitions
 
@@ -82,12 +92,6 @@ just dev             # start both servers
 - `transition-[color,background-color,border-color,opacity]` for combined
 - Add `transform` to the list only when transform changes
 
-## Backend Development
-
-- FastAPI async patterns throughout — no blocking calls in route handlers
-- Pydantic V2 models for all request/response schemas
-- SQLAlchemy 2.0 async sessions — no sync DB calls
-- Polars for all data computation — avoid pandas
 
 ## Code Style
 
@@ -116,3 +120,16 @@ See [`STYLE_GUIDE.md`](STYLE_GUIDE.md)
 - When normalizing config objects, avoid duplicate-key object literals (for example `{ branch, ...normalized }`) because they hide overwrite order; build a single explicit normalized object first.
 - After broad enum/dataclass refactors, rerun focused schema-contract tests immediately; JSON schema often moves enum values under `$defs`/`$ref`, so tests that assert inline enums should resolve refs explicitly instead of assuming inlined `enum`.
 - In Svelte store modules, avoid native mutable collections like `Map`/`Set` in reactive code paths; prefer `SvelteMap`/`SvelteSet` (or plain objects/arrays) to satisfy `svelte/prefer-svelte-reactivity` and keep lint clean.
+- Playwright `page.routeWebSocket()` must be registered BEFORE `page.goto()` to reliably intercept WebSocket connections opened later by user actions (e.g., button clicks). Registering after navigation silently fails to intercept through Vite's dev proxy. This applies even when the WS isn't opened until well after page load.
+- When using `getByText()` in Playwright tests, beware that test resource names (datasource/analysis names) can contain the status words being asserted (e.g., "Complete", "Failed"). Scope assertions to a parent container (`preview.getByText(...)`) or use `{ exact: true }` to avoid strict mode violations.
+- Before claiming Playwright e2e coverage matches real user behavior, audit the suite for `tests/utils/api.ts` setup helpers; API seeding is not user-driven interaction and must be called out or redesigned explicitly.
+- Monitoring e2e assertions must track the current Builds UI: live build details are exposed through expandable history rows and `BuildPreview` tabs (`Steps`, `Logs`, `Payload`), not a separate `Active Builds` panel.
+- Engine-run websocket handlers should treat close-race `RuntimeError`s like `Cannot call "receive" once a disconnect message has been received` and `Cannot call "send" once a close message has been sent` as normal disconnects to avoid false backend error logs during Playwright teardown.
+- From the repo root, backend tool entrypoints should be run via `just` or from `backend/`; direct root-level `uv run pytest` / `uv run ruff` invocations can miss the backend environment and fail to resolve installed commands.
+- When tightening frontend request/store typings, replace placeholder test payloads with a shared minimal valid fixture right away; Vitest mocks can hide bad `{}` inputs that `svelte-check` will still reject.
+- Svelte 5 `$effect` blocks run in declaration order. When a "reset" effect (e.g., datasource switch) calls `.reset()` / `.close()` on a store, and a "start" effect calls `.start()` on that same store, the reset effect MUST be declared before the start effect. Otherwise the start effect fires first, begins an async fetch, and the reset effect fires second and aborts the in-flight request — leaving the store permanently empty.
+- When using pinned icon libraries (for example `lucide-svelte`), verify the icon export exists in the installed version before wiring it into status/cancel UI; missing exports can crash Svelte render paths in e2e flows.
+- Build cancellation must be terminal-state authoritative: before writing success state, re-check persisted run status and preserve `cancelled` if another request set it mid-flight, otherwise cancellation can be overwritten by late success finalization.
+- Do not run frontend e2e specs directly with Playwright/Bun commands; use `just test-e2e` only so the intended environment and orchestration stay consistent.
+- Monitoring builds architecture is strict: no polling, no separate live-preview row, no build-list websocket auto-refresh for history rows. Start builds via HTTP, show new history rows only after explicit refresh, and use websocket only for live preview/detail on the running build itself.
+- Do not run `just verify` and `just test-e2e` in parallel. `just verify` rewrites/generated frontend artifacts and can trigger Vite reloads during Playwright, causing false `net::ERR_ABORTED`, missing shell/navigation elements, and flaky option/list assertions. Run them sequentially.

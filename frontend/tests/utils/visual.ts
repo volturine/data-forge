@@ -46,7 +46,6 @@ async function waitForStableUI(page: Page, timeout = 10_000): Promise<void> {
 		if (remaining <= 0) break;
 		await page
 			.locator(selector)
-			.first()
 			.waitFor({ state: 'hidden', timeout: Math.min(remaining, 500) })
 			.catch(() => {
 				// Indicator was never present or already hidden

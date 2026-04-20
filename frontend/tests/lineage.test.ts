@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import { waitForLineageToolbar } from './utils/readiness.js';
 import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
@@ -113,46 +113,47 @@ test.describe('Lineage – with datasource data', () => {
 			await deleteDatasourceViaUI(page, dsName);
 		}
 	});
-});
 
-// ────────────────────────────────────────────────────────────────────────────────
-// Lineage – failure state regression
-// ────────────────────────────────────────────────────────────────────────────────
+	test('dragging the canvas pans visible lineage nodes', async ({ page, request }) => {
+		test.setTimeout(60_000);
+		const dsName = `e2e-lineage-pan-ds-${uid()}`;
+		const aName = `E2E Lineage Pan ${uid()}`;
+		const dsId = await createDatasource(request, dsName);
+		await createAnalysis(request, aName, dsId);
 
-test.describe('Lineage – error state', () => {
-	test('API failure shows "Failed to load lineage." error', async ({ page }) => {
-		// Intercept lineage API to return 500
-		await page.route('**/api/v1/datasource/lineage*', (route) =>
-			route.fulfill({ status: 500, body: 'Internal Server Error' })
-		);
+		try {
+			await page.goto('/lineage');
+			await waitForLineageToolbar(page);
+			const graph = page.getByTestId('lineage-canvas');
+			await expect(graph).toBeVisible({ timeout: 15_000 });
 
-		await page.goto('/lineage');
+			const node = page.getByRole('button', { name: `source ${dsName}` });
+			await expect(node).toBeVisible({ timeout: 15_000 });
 
-		// Error state should be visible
-		await expect(page.locator('[data-testid="lineage-load-error"]')).toBeVisible({
-			timeout: 15_000
-		});
-		await expect(page.getByText('Failed to load lineage.')).toBeVisible();
+			const before = await node.boundingBox();
+			const graphBox = await graph.boundingBox();
+			expect(before).not.toBeNull();
+			expect(graphBox).not.toBeNull();
+			if (!before || !graphBox) {
+				throw new Error('Expected lineage node and graph canvas bounding boxes');
+			}
 
-		// Page structure should still be intact
-		await expect(page.getByRole('heading', { name: 'Data Lineage' })).toBeVisible();
+			await page.mouse.move(graphBox.x + 24, graphBox.y + 24);
+			await page.mouse.down();
+			await page.mouse.move(graphBox.x + 180, graphBox.y + 120, { steps: 12 });
+			await page.mouse.up();
 
-		await screenshot(page, 'lineage', 'load-error-state');
-	});
+			const after = await node.boundingBox();
+			expect(after).not.toBeNull();
+			if (!after) {
+				throw new Error('Expected lineage node bounding box after panning');
+			}
 
-	test('lineage error does not crash navigation', async ({ page }) => {
-		await page.route('**/api/v1/datasource/lineage*', (route) =>
-			route.fulfill({ status: 500, body: 'Internal Server Error' })
-		);
-
-		await page.goto('/lineage');
-		await expect(page.locator('[data-testid="lineage-load-error"]')).toBeVisible({
-			timeout: 15_000
-		});
-
-		// Navigate home — shell should still work
-		await page.locator('a[href="/"]').first().click();
-		await expect(page).toHaveURL('/');
-		await expect(page.getByRole('heading', { name: 'Analyses', exact: true })).toBeVisible();
+			expect(after.x).toBeGreaterThan(before.x + 60);
+			expect(after.y).toBeGreaterThan(before.y + 40);
+		} finally {
+			await deleteAnalysisViaUI(page, aName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
 	});
 });

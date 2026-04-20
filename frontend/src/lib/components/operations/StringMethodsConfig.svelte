@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Schema } from '$lib/types/schema';
 	import ColumnDropdown from '$lib/components/common/ColumnDropdown.svelte';
-	import { css, cx, label, stepConfig, divider, input } from '$lib/styles/panda';
+	import { css, label, stepConfig, input } from '$lib/styles/panda';
 
 	interface StringMethodsConfigData {
 		column: string;
@@ -129,20 +129,15 @@
 	</div>
 
 	<div
-		class={cx(
-			css({
+		class={css(
+			{
 				marginBottom: '0',
 				paddingBottom: '5',
 				backgroundColor: 'transparent',
 
 				border: 'none'
-			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
+			},
+			{ borderTopWidth: '1', paddingTop: '5' }
 		)}
 		role="group"
 		aria-labelledby="str-method-heading"
@@ -204,7 +199,15 @@
 				<div class={css({ flex: '1' })}>
 					<label
 						for="str-input-start"
-						class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Start Index:</label
+						class={css({
+							display: 'block',
+							fontSize: 'sm',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '1'
+						})}>Start Index:</label
 					>
 					<input
 						id="str-input-start"
@@ -232,8 +235,15 @@
 				<div class={css({ flex: '1' })}>
 					<label
 						for="str-input-end"
-						class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}
-						>End Index (optional):</label
+						class={css({
+							display: 'block',
+							fontSize: 'sm',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '1'
+						})}>End Index (optional):</label
 					>
 					<input
 						id="str-input-end"
@@ -292,8 +302,15 @@
 			<div>
 				<label
 					for="str-input-pattern"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}
-					>Pattern to find:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Pattern to find:</label
 				>
 				<input
 					id="str-input-pattern"
@@ -322,7 +339,15 @@
 			<div>
 				<label
 					for="str-input-replacement"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Replacement:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Replacement:</label
 				>
 				<input
 					id="str-input-replacement"
@@ -380,7 +405,15 @@
 			<div>
 				<label
 					for="str-input-extract-pattern"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Regex Pattern:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Regex Pattern:</label
 				>
 				<input
 					id="str-input-extract-pattern"
@@ -409,7 +442,15 @@
 			<div>
 				<label
 					for="str-input-group-index"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Group Index:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Group Index:</label
 				>
 				<input
 					id="str-input-group-index"
@@ -467,7 +508,15 @@
 			<div>
 				<label
 					for="str-input-delimiter-only"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Delimiter:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Delimiter:</label
 				>
 				<input
 					id="str-input-delimiter-only"
@@ -525,7 +574,15 @@
 			<div>
 				<label
 					for="str-input-delimiter"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Delimiter:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Delimiter:</label
 				>
 				<input
 					id="str-input-delimiter"
@@ -554,7 +611,15 @@
 			<div>
 				<label
 					for="str-input-part-index"
-					class={cx(label({ variant: 'field' }), css({ marginBottom: '1' }))}>Part Index:</label
+					class={css({
+						display: 'block',
+						fontSize: 'sm',
+						fontWeight: 'medium',
+						color: 'fg.secondary',
+						textTransform: 'none',
+						letterSpacing: 'normal',
+						marginBottom: '1'
+					})}>Part Index:</label
 				>
 				<input
 					id="str-input-part-index"
@@ -584,21 +649,15 @@
 	{/if}
 
 	<div
-		class={cx(
-			css({
-				marginBottom: '0',
-				paddingBottom: '5',
-				backgroundColor: 'transparent',
+		class={css({
+			marginBottom: '0',
+			paddingBottom: '5',
+			backgroundColor: 'transparent',
 
-				border: 'none'
-			}),
-			cx(
-				divider,
-				css({
-					paddingTop: '5'
-				})
-			)
-		)}
+			border: 'none',
+			borderTopWidth: '1',
+			paddingTop: '5'
+		})}
 		role="group"
 		aria-labelledby="new-column-heading"
 	>

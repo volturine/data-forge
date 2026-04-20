@@ -12,7 +12,7 @@
 	} from '$lib/api/compute';
 	import { applySteps } from '$lib/utils/pipeline';
 	import { hashPipeline } from '$lib/utils/hash';
-	import { GripVertical, Hash, RefreshCw, Copy } from 'lucide-svelte';
+	import { GripVertical, Hash, RefreshCw, Copy, Trash2 } from 'lucide-svelte';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
 	import { getStepTypeConfig, isChartStep } from '$lib/components/pipeline/utils';
@@ -21,7 +21,7 @@
 		buildDatasourceConfig
 	} from '$lib/utils/analysis-pipeline';
 	import { SvelteMap } from 'svelte/reactivity';
-	import { css, cx, spinner, button, divider } from '$lib/styles/panda';
+	import { css, spinner } from '$lib/styles/panda';
 
 	interface Props {
 		step: PipelineStep;
@@ -315,7 +315,7 @@
 </script>
 
 <div
-	class={cx(
+	class={[
 		'step-node',
 		nodeWidthClass,
 		isDragging &&
@@ -329,12 +329,12 @@
 			containIntrinsicSize: isChart || step.type === 'view' ? 'auto 600px' : 'auto 200px',
 			...(step.type === 'view' || isChart ? { width: '85%', minWidth: 'listLg' } : {})
 		})
-	)}
+	]}
 	data-step-id={step.id}
 	data-step-type={step.type}
 >
 	<div
-		class={cx(
+		class={[
 			'step-content',
 			css({
 				borderWidth: '1',
@@ -346,7 +346,7 @@
 					opacity: '0.7',
 					transform: 'scale(0.98)'
 				})
-		)}
+		]}
 		role="listitem"
 	>
 		<div
@@ -360,7 +360,7 @@
 			})}
 		>
 			<button
-				class={cx(
+				class={[
 					'drag-handle',
 					css({
 						display: 'flex',
@@ -384,7 +384,7 @@
 								}
 							: {})
 					})
-				)}
+				]}
 				title="Drag to reorder"
 				type="button"
 				onpointerdown={startDrag}
@@ -429,18 +429,38 @@
 			>
 				<Copy size={11} />
 			</button>
+			<button
+				class={css({
+					flexShrink: '0',
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'center',
+					cursor: 'pointer',
+					border: 'none',
+					backgroundColor: 'transparent',
+					padding: '0.5',
+					color: 'fg.faint',
+					_hover: { color: 'fg.error', backgroundColor: 'bg.hover' },
+					_disabled: { opacity: '0.4', cursor: 'not-allowed' }
+				})}
+				onclick={() => onDelete(step.id)}
+				type="button"
+				title="Delete step"
+				data-action="delete"
+				disabled={readOnly}
+			>
+				<Trash2 size={11} />
+			</button>
 		</div>
 
 		<div class={css({ paddingX: '4', paddingY: '3' })}>
 			<div
-				class={cx(
+				class={[
 					'step-summary',
 					css({
 						paddingX: '3',
 						paddingY: '2',
 						fontSize: 'xs2',
-						backgroundColor: 'bg.secondary',
-						color: 'fg.tertiary',
 						lineHeight: 'relaxed',
 						...(!isApplied
 							? {
@@ -450,40 +470,28 @@
 								}
 							: {})
 					})
-				)}
+				]}
 			>
 				{summary}
 			</div>
 		</div>
 
-		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					gap: '0'
-				})
-			)}
-		>
+		<div class={css({ borderTopWidth: '1', display: 'flex', gap: '0' })}>
 			<button
-				class={cx(
+				class={[
 					'action-btn',
 					css({
 						flex: '1',
 						cursor: 'pointer',
 						border: 'none',
-						backgroundColor: 'transparent',
 						paddingY: '2.5',
 						fontWeight: 'medium',
 						textTransform: 'uppercase',
 						letterSpacing: 'widest',
 						fontSize: '3xs',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
 						...(!isApplied
 							? {
 									borderStyle: 'dashed',
-									color: 'fg.muted',
 									_hover: {
 										backgroundColor: 'bg.tertiary',
 										color: 'fg.secondary'
@@ -491,7 +499,7 @@
 								}
 							: {})
 					})
-				)}
+				]}
 				onclick={() => onToggleApply(step.id)}
 				type="button"
 				title={isApplied ? 'Disable step' : 'Enable step'}
@@ -502,7 +510,7 @@
 			</button>
 			<div class={css({ width: 'px', backgroundColor: 'bg.muted', flexShrink: '0' })}></div>
 			<button
-				class={cx(
+				class={[
 					'action-btn',
 					css({
 						flex: '1',
@@ -517,7 +525,7 @@
 						color: 'fg.muted',
 						_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
 					})
-				)}
+				]}
 				onclick={() => onEdit(step.id)}
 				type="button"
 				data-action="edit"
@@ -525,35 +533,10 @@
 			>
 				edit
 			</button>
-			<div class={css({ width: 'px', backgroundColor: 'bg.muted', flexShrink: '0' })}></div>
-			<button
-				class={cx(
-					'action-btn',
-					css({
-						flex: '1',
-						cursor: 'pointer',
-						border: 'none',
-						backgroundColor: 'transparent',
-						paddingY: '2.5',
-						fontSize: '3xs',
-						fontWeight: 'medium',
-						textTransform: 'uppercase',
-						letterSpacing: 'widest',
-						color: 'fg.muted',
-						_hover: { backgroundColor: 'bg.error', color: 'fg.error' }
-					})
-				)}
-				onclick={() => onDelete(step.id)}
-				type="button"
-				data-action="delete"
-				disabled={readOnly}
-			>
-				delete
-			</button>
 		</div>
 
 		{#if step.type === 'view' && datasourceId && analysisId}
-			<div class={divider}>
+			<div class={css({ borderTopWidth: '1' })}>
 				<InlineDataTable
 					{analysisId}
 					{datasourceId}
@@ -565,18 +548,17 @@
 		{/if}
 
 		{#if step.type === 'download' && datasourceId && analysisId}
-			<div
-				class={cx(
-					divider,
-					css({
-						padding: '3'
-					})
-				)}
-			>
+			<div class={css({ borderTopWidth: '1', padding: '3' })}>
 				<button
-					class={cx(button({ variant: 'primary' }), css({ width: '100%' }))}
+					class={css({
+						borderWidth: '1',
+						backgroundColor: 'accent.primary',
+						color: 'fg.inverse',
+						width: '100%',
+						'&:hover:not(:disabled)': { opacity: '0.9' }
+					})}
 					onclick={() => handleDownload()}
-					disabled={!isApplied}
+					disabled={!isApplied || !analysisPipeline}
 				>
 					Download File
 				</button>
@@ -584,7 +566,7 @@
 		{/if}
 
 		{#if isChart && datasourceId && analysisId}
-			<div class={divider}>
+			<div class={css({ borderTopWidth: '1' })}>
 				{#if !isApplied}
 					<div
 						class={css({
@@ -655,15 +637,13 @@
 		{/if}
 
 		<div
-			class={cx(
-				divider,
-				css({
-					display: 'flex',
-					alignItems: 'center',
-					paddingX: '4',
-					paddingY: '2.5'
-				})
-			)}
+			class={css({
+				borderTopWidth: '1',
+				display: 'flex',
+				alignItems: 'center',
+				paddingX: '4',
+				paddingY: '2.5'
+			})}
 		>
 			{#if rowCount !== null}
 				{#key `${rowCountKey}:${rowCount}`}
@@ -698,7 +678,7 @@
 						_disabled: { cursor: 'not-allowed', opacity: '0.7' }
 					})}
 					onclick={calculateRowCount}
-					disabled={isLoadingRowCount}
+					disabled={isLoadingRowCount || !analysisPipeline}
 					type="button"
 					aria-label="Calculate row count"
 					data-action="count-rows"

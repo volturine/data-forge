@@ -231,7 +231,7 @@ describe('groupbyTransform', () => {
 	test('handles record-format with array agg spec', () => {
 		const result = groupbyTransform(BASE, {
 			group_by: [],
-			aggregations: { age: [{ column: 'age', agg: 'sum' }] as unknown as string }
+			aggregations: { age: [{ column: 'age', agg: 'sum' }] }
 		});
 		expect(result.columns[0].name).toBe('age_sum');
 	});

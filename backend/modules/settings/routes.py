@@ -4,6 +4,7 @@ import logging
 from email.message import EmailMessage
 
 from fastapi import Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session
 
 from core import http as http_client
@@ -36,6 +37,14 @@ logger = logging.getLogger(__name__)
 router = MCPRouter(prefix='/settings', tags=['settings'])
 
 
+def _apply_telegram_bot_runtime(enabled: bool, token: str, telegram_bot) -> None:  # type: ignore[no-untyped-def]
+    if enabled and token:
+        telegram_bot.start(token)
+        return
+    if telegram_bot.running:
+        telegram_bot.stop()
+
+
 @router.get('', response_model=SettingsResponse, mcp=True)
 @handle_errors(operation='get settings')
 def read_settings(
@@ -62,19 +71,17 @@ def write_settings(
     token = get_resolved_telegram_settings().get('token', '')
 
     try:
-        if result.telegram_bot_enabled and token:
-            telegram_bot.start(str(token))
-        elif telegram_bot.running:
-            telegram_bot.stop()
-    except Exception:
-        logger.warning('Failed to start/stop Telegram bot after settings save', exc_info=True)
+        _apply_telegram_bot_runtime(result.telegram_bot_enabled, str(token), telegram_bot)
+    except Exception as exc:
+        logger.error('Failed to apply Telegram bot runtime after settings save', exc_info=True)
+        raise HTTPException(status_code=502, detail=f'Telegram bot runtime update failed: {exc}') from exc
 
     return result
 
 
 @router.post('/test-smtp', response_model=TestResult, mcp=True)
 @handle_errors(operation='test smtp')
-def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
+async def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test email via SMTP to verify email notification settings. Requires 'to' address in body."""
     smtp = get_resolved_smtp()
     host = str(smtp.get('host', ''))
@@ -92,7 +99,7 @@ def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> 
     msg.set_content('This is a test email from your application.')
 
     try:
-        send_smtp_message(host, port, smtp_user, password, msg)
+        await run_in_threadpool(send_smtp_message, host, port, smtp_user, password, msg)
         return TestResult(success=True, message=f'Test email sent to {body.to}')
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -100,7 +107,7 @@ def test_smtp(body: TestSmtpRequest, user: User = Depends(get_current_user)) -> 
 
 @router.post('/test-telegram', response_model=TestResult, mcp=True)
 @handle_errors(operation='test telegram')
-def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_user)) -> TestResult:
+async def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_user)) -> TestResult:
     """Send a test message to a Telegram chat to verify bot settings. Requires chat_id in body."""
     resolved = get_resolved_telegram_settings()
     token = str(resolved.get('token', ''))
@@ -108,7 +115,8 @@ def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_us
         return TestResult(success=False, message='Telegram bot token not configured')
 
     try:
-        resp = http_client.post(
+        resp = await run_in_threadpool(
+            http_client.post,
             f'https://api.telegram.org/bot{token}/sendMessage',
             json={
                 'chat_id': body.chat_id,
@@ -127,7 +135,7 @@ def test_telegram(body: TestTelegramRequest, user: User = Depends(get_current_us
 
 @router.post('/detect-telegram-chat', response_model=DetectTelegramResponse, mcp=True)
 @handle_errors(operation='detect telegram chat')
-def detect_telegram_chat(user: User = Depends(get_current_user)) -> DetectTelegramResponse:
+async def detect_telegram_chat(user: User = Depends(get_current_user)) -> DetectTelegramResponse:
     """Detect Telegram chats that have messaged the configured bot.
 
     Send a message to your bot first, then call this to discover the chat_id.
@@ -142,67 +150,14 @@ def detect_telegram_chat(user: User = Depends(get_current_user)) -> DetectTelegr
 
     was_running = telegram_bot.running
     if was_running:
-        telegram_bot.pause()
+        await run_in_threadpool(telegram_bot.pause)
     try:
         offset = telegram_bot.get_offset(token)
-        resp = telegram_bot.get_updates(token, params={'limit': 10, 'timeout': 0, 'offset': offset}, timeout=10)
-        if resp.status_code != 200:
-            return DetectTelegramResponse(success=False, message=f'Telegram API error: {resp.text}')
-
-        data = resp.json()
-        updates: list[dict[str, object]] = data.get('result', [])
-        seen: dict[str, str] = {}
-
-        for update in updates:
-            chat: dict[str, object] | None = None
-            if 'message' in update:
-                msg = update['message']
-                if isinstance(msg, dict):
-                    chat = msg.get('chat')  # type: ignore[assignment]
-            elif 'channel_post' in update:
-                post = update['channel_post']
-                if isinstance(post, dict):
-                    chat = post.get('chat')  # type: ignore[assignment]
-            if not chat:
-                continue
-            cid = str(chat['id'])
-            if cid not in seen:
-                title = str(chat.get('first_name') or chat.get('title') or chat.get('username') or cid)
-                seen[cid] = title
-
-        chats = [TelegramChat(chat_id=cid, title=title) for cid, title in seen.items()]
-        return DetectTelegramResponse(success=True, message=f'Found {len(chats)} chat(s)', chats=chats)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    finally:
-        if was_running:
-            telegram_bot.resume()
-
-
-@router.post('/detect-chat-custom', response_model=DetectTelegramResponse, mcp=True)
-@handle_errors(operation='detect custom telegram chat')
-def detect_custom_bot_chat(
-    body: DetectCustomBotRequest,
-    user: User = Depends(get_current_user),
-) -> DetectTelegramResponse:
-    """Detect chats for a custom Telegram bot token (not the one saved in settings).
-
-    Use this to test a new bot token before saving it. Requires bot_token in body.
-    """
-    from modules.telegram.bot import telegram_bot
-
-    if not body.bot_token:
-        return DetectTelegramResponse(success=False, message='Bot token is required')
-
-    was_running = telegram_bot.running and telegram_bot.token == body.bot_token
-    if was_running:
-        telegram_bot.pause()
-    try:
-        offset = telegram_bot.get_offset(body.bot_token)
-        resp = telegram_bot.get_updates(
-            body.bot_token,
-            params={'limit': 10, 'timeout': 0, 'offset': offset},
-            timeout=10,
+        resp = await run_in_threadpool(
+            telegram_bot.get_updates,
+            token,
+            {'limit': 10, 'timeout': 0, 'offset': offset},
+            10,
         )
         if resp.status_code != 200:
             return DetectTelegramResponse(success=False, message=f'Telegram API error: {resp.text}')
@@ -234,4 +189,63 @@ def detect_custom_bot_chat(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
         if was_running:
-            telegram_bot.resume()
+            await run_in_threadpool(telegram_bot.resume)
+
+
+@router.post('/detect-chat-custom', response_model=DetectTelegramResponse, mcp=True)
+@handle_errors(operation='detect custom telegram chat')
+async def detect_custom_bot_chat(
+    body: DetectCustomBotRequest,
+    user: User = Depends(get_current_user),
+) -> DetectTelegramResponse:
+    """Detect chats for a custom Telegram bot token (not the one saved in settings).
+
+    Use this to test a new bot token before saving it. Requires bot_token in body.
+    """
+    from modules.telegram.bot import telegram_bot
+
+    if not body.bot_token:
+        return DetectTelegramResponse(success=False, message='Bot token is required')
+
+    was_running = telegram_bot.running and telegram_bot.token == body.bot_token
+    if was_running:
+        await run_in_threadpool(telegram_bot.pause)
+    try:
+        offset = telegram_bot.get_offset(body.bot_token)
+        resp = await run_in_threadpool(
+            telegram_bot.get_updates,
+            body.bot_token,
+            {'limit': 10, 'timeout': 0, 'offset': offset},
+            10,
+        )
+        if resp.status_code != 200:
+            return DetectTelegramResponse(success=False, message=f'Telegram API error: {resp.text}')
+
+        data = resp.json()
+        updates: list[dict[str, object]] = data.get('result', [])
+        seen: dict[str, str] = {}
+
+        for update in updates:
+            chat: dict[str, object] | None = None
+            if 'message' in update:
+                msg = update['message']
+                if isinstance(msg, dict):
+                    chat = msg.get('chat')  # type: ignore[assignment]
+            elif 'channel_post' in update:
+                post = update['channel_post']
+                if isinstance(post, dict):
+                    chat = post.get('chat')  # type: ignore[assignment]
+            if not chat:
+                continue
+            cid = str(chat['id'])
+            if cid not in seen:
+                title = str(chat.get('first_name') or chat.get('title') or chat.get('username') or cid)
+                seen[cid] = title
+
+        chats = [TelegramChat(chat_id=cid, title=title) for cid, title in seen.items()]
+        return DetectTelegramResponse(success=True, message=f'Found {len(chats)} chat(s)', chats=chats)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        if was_running:
+            await run_in_threadpool(telegram_bot.resume)

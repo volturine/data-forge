@@ -5,7 +5,7 @@
 	import FileTypeBadge from '$lib/components/common/FileTypeBadge.svelte';
 	import type { SourceType } from '$lib/utils/file-types';
 	import BaseModal from '$lib/components/ui/BaseModal.svelte';
-	import { css, cx, row, input } from '$lib/styles/panda';
+	import { css } from '$lib/styles/panda';
 
 	interface Props {
 		show: boolean;
@@ -84,31 +84,28 @@
 	onClose={handleClose}
 	closeOnEscape={true}
 	closeOnBackdrop={true}
-	panelClass={cx(
-		css({
-			display: 'flex',
-			maxHeight: '80vh',
-			width: '100%',
-			maxWidth: 'modalSm',
-			flexDirection: 'column',
-			borderWidth: '1',
-			backgroundColor: 'bg.primary',
-			outline: 'none'
-		})
-	)}
+	panelClass={css({
+		display: 'flex',
+		maxHeight: '80vh',
+		width: '100%',
+		maxWidth: 'modalSm',
+		flexDirection: 'column',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary',
+		outline: 'none'
+	})}
 	ariaLabelledby="modal-title"
 	{content}
 />
 
 {#snippet content()}
 	<div
-		class={cx(
-			row,
-			css({
-				justifyContent: 'space-between',
-				padding: '4'
-			})
-		)}
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: 'space-between',
+			padding: '4'
+		})}
 	>
 		<h2 id="modal-title" class={css({ margin: '0', fontSize: 'sm', fontWeight: 'semibold' })}>
 			{mode === 'change' ? 'Change Datasource' : 'Add Datasource'}
@@ -143,15 +140,14 @@
 	>
 		{#if allowAnalysis}
 			<div
-				class={cx(
-					row,
-					css({
-						gap: '1',
-						borderWidth: '1',
-						backgroundColor: 'bg.tertiary',
-						padding: '1'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					gap: '1',
+					borderWidth: '1',
+					backgroundColor: 'bg.tertiary',
+					padding: '1'
+				})}
 			>
 				<button
 					class={css({
@@ -192,15 +188,23 @@
 			</div>
 		{/if}
 		<input
-			class={cx(
-				input(),
-				css({
-					paddingX: '3',
-					paddingY: '3',
-					fontSize: 'sm',
-					_focus: { borderColor: 'border.accent' }
-				})
-			)}
+			class={css({
+				width: 'full',
+				color: 'fg.primary',
+				backgroundColor: 'bg.primary',
+				borderWidth: '1',
+				borderRadius: '0',
+				transitionProperty: 'border-color',
+				transitionDuration: '160ms',
+				transitionTimingFunction: 'ease',
+				_focusVisible: { borderColor: 'border.accent' },
+				_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+				_placeholder: { color: 'fg.muted' },
+				paddingX: '3',
+				paddingY: '3',
+				fontSize: 'sm',
+				_focus: { borderColor: 'border.accent' }
+			})}
 			type="text"
 			bind:this={searchInput}
 			id="dsm-search"
@@ -219,34 +223,47 @@
 		>
 			{#if isLoading}
 				<div
-					class={cx(
-						row,
-						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						padding: '8',
+						fontSize: 'sm',
+						color: 'fg.muted'
+					})}
 				>
 					Loading...
 				</div>
 			{:else if activeSource === 'analysis' && allowAnalysis && filteredTabs.length === 0}
 				<div
-					class={cx(
-						row,
-						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						padding: '8',
+						fontSize: 'sm',
+						color: 'fg.muted'
+					})}
 				>
 					{searchQuery ? 'No matching analysis tabs' : 'No analysis tabs available'}
 				</div>
 			{:else if activeSource === 'datasource' && filteredDatasources.length === 0}
 				<div
-					class={cx(
-						row,
-						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						padding: '8',
+						fontSize: 'sm',
+						color: 'fg.muted'
+					})}
 				>
 					{searchQuery ? 'No matching datasources' : 'No datasources available'}
 				</div>
 			{:else if activeSource === 'analysis' && allowAnalysis}
 				{#each filteredTabs as entry (entry.id)}
 					<button
+						data-analysis-tab-option={entry.name}
 						class={css({
 							display: 'flex',
 							cursor: 'pointer',
@@ -271,6 +288,7 @@
 			{:else}
 				{#each filteredDatasources as ds (ds.id)}
 					<button
+						data-datasource-option={ds.name}
 						class={css({
 							display: 'flex',
 							cursor: 'pointer',
@@ -289,7 +307,9 @@
 						<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>
 							{ds.name}
 						</span>
-						<span class={cx(row, css({ gap: '1', color: 'fg.muted' }))}>
+						<span
+							class={css({ display: 'flex', alignItems: 'center', gap: '1', color: 'fg.muted' })}
+						>
 							{#if ds.source_type === 'file'}
 								<FileTypeBadge path={ds.config.file_path as string} size="sm" showIcon={true} />
 							{:else}

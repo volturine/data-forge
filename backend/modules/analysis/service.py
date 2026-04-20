@@ -2,14 +2,15 @@ import re
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col
 
-from core.exceptions import AnalysisNotFoundError, DataSourceNotFoundError
+from core.exceptions import AnalysisCycleError, AnalysisNotFoundError, AnalysisValidationError, DataSourceNotFoundError
 from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
 from modules.analysis.pipeline_types import PipelineDefinition, PipelineStep, PipelineTab, TabDatasource, TabOutput
 from modules.analysis.schemas import (
@@ -19,13 +20,31 @@ from modules.analysis.schemas import (
     AnalysisUpdateSchema,
 )
 from modules.analysis.step_schemas import validate_step
-from modules.analysis.step_types import StepType
 from modules.analysis_versions import service as version_service
 from modules.datasource.models import DataSource
 
 
 def _to_response(analysis: Analysis) -> AnalysisResponseSchema:
     return AnalysisResponseSchema.model_validate(analysis)
+
+
+def validate_stored_pipeline_definition(
+    session: Session,  # type: ignore[type-arg]
+    pipeline_definition: dict[str, Any],
+    analysis_id: str,
+) -> None:
+    if not isinstance(pipeline_definition, dict):
+        raise AnalysisValidationError('Analysis pipeline_definition must be a dict', details={'analysis_id': analysis_id})
+
+    tabs = pipeline_definition.get('tabs')
+    if not isinstance(tabs, list) or not tabs:
+        raise AnalysisValidationError('Analysis requires at least one tab', details={'analysis_id': analysis_id})
+
+    try:
+        payload = AnalysisUpdateSchema(tabs=tabs)
+    except ValidationError as exc:
+        raise AnalysisValidationError(str(exc), details={'analysis_id': analysis_id}) from exc
+    _validate_analysis_payload(session, payload, analysis_id)
 
 
 def _validate_analysis_payload(
@@ -217,9 +236,6 @@ def update_analysis(
                 ),
             )
 
-    if data.status is not None:
-        analysis.status = data.status
-
     analysis.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     session.commit()
@@ -266,9 +282,9 @@ def _get_analysis_source_id(datasource: DataSource) -> str:
 
 def _ensure_no_cycle(session: Session, analysis_id: str, source_analysis_id: str) -> None:
     if analysis_id == source_analysis_id:
-        raise ValueError('Analysis cannot use itself as a datasource')
+        raise AnalysisCycleError('Analysis cannot use itself as a datasource')
     if _detect_cycle(session, analysis_id, source_analysis_id):
-        raise ValueError('Analysis datasource introduces a cycle')
+        raise AnalysisCycleError('Analysis datasource introduces a cycle')
 
 
 def _detect_cycle(session: Session, analysis_id: str, source_analysis_id: str) -> bool:
@@ -346,7 +362,7 @@ def add_step(
 
     step = PipelineStep(
         id=str(uuid.uuid4()),
-        type=cast(StepType, step_type),
+        type=step_type,
         config=config,
         depends_on=depends_on or [],
         is_applied=True,
@@ -406,7 +422,7 @@ def update_step(
         raise ValueError(f'Step {step_id} not found')
 
     if step_type is not None:
-        step.type = cast(StepType, step_type)
+        step.type = step_type
     if config is not None:
         step.config = config
 
@@ -471,7 +487,7 @@ def derive_tab(
 
     derived_step = PipelineStep(
         id=str(uuid.uuid4()),
-        type=cast(StepType, 'view'),
+        type='view',
         config={'rowLimit': 100},
         depends_on=[],
         is_applied=True,

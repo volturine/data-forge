@@ -15,6 +15,8 @@ export interface MCPTool {
 		content_type: string | null;
 		schema: Record<string, unknown> | boolean | null;
 		response_model: string | null;
+		fields?: string[];
+		hint?: string;
 	} | null;
 	tags: string[];
 }

@@ -1,16 +1,21 @@
+import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from fastapi import HTTPException as FastAPIHTTPException
 from sqlalchemy import desc, select
 from sqlmodel import Session
 
+from modules.analysis.step_types import get_step_type_label
 from modules.engine_runs.models import EngineRun
 from modules.engine_runs.schemas import (
     BuildComparisonResponse,
     ColumnDiff,
+    EngineRunExecutionCategory,
+    EngineRunExecutionEntry,
     EngineRunKind,
     EngineRunResponseSchema,
     EngineRunResultSummary,
@@ -20,6 +25,10 @@ from modules.engine_runs.schemas import (
     TimingDiff,
 )
 from modules.engine_runs.utils import normalize_step_timings
+
+logger = logging.getLogger(__name__)
+
+_TERMINAL_STATUSES = frozenset({EngineRunStatus.SUCCESS, EngineRunStatus.FAILED, EngineRunStatus.CANCELLED})
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +48,156 @@ class EngineRunPayload:
     progress: float = 0.0
     current_step: str | None = None
     triggered_by: str | None = None
+    execution_entries: list[dict[str, Any]] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+
+_TIMING_SUFFIX_RE = re.compile(r'^(?P<base>.+?)_(?P<index>\d+)$')
+
+
+class _UnsetType:
+    __slots__ = ()
+
+
+_UNSET: Final = _UnsetType()
+
+
+def _step_label_for_timing_key(key: str) -> tuple[str, str]:
+    match = _TIMING_SUFFIX_RE.match(key)
+    base_key = match.group('base') if match else key
+    suffix = int(match.group('index')) if match else None
+    label = get_step_type_label(base_key)
+    if suffix is not None:
+        label = f'{label} {suffix}'
+    return base_key, label
+
+
+def build_execution_entries(
+    *,
+    step_timings: dict[str, float] | None = None,
+    query_plans: dict[str, Any] | None = None,
+    query_plan: str | None = None,
+    read_duration_ms: float | None = None,
+    collect_duration_ms: float | None = None,
+    write_duration_ms: float | None = None,
+    total_duration_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    normalized_timings = normalize_step_timings(step_timings)
+    timed_total = sum(normalized_timings.values())
+    if isinstance(read_duration_ms, (int, float)):
+        timed_total += float(read_duration_ms)
+    if isinstance(collect_duration_ms, (int, float)):
+        timed_total += float(collect_duration_ms)
+    if isinstance(write_duration_ms, (int, float)):
+        timed_total += float(write_duration_ms)
+    denominator = float(total_duration_ms) if total_duration_ms and total_duration_ms > 0 else timed_total
+
+    entries: list[dict[str, Any]] = []
+
+    def append_entry(
+        *,
+        key: str,
+        label: str,
+        category: EngineRunExecutionCategory,
+        duration_ms: float | None = None,
+        optimized_plan: str | None = None,
+        unoptimized_plan: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        share_pct = round((duration_ms / denominator) * 100, 1) if duration_ms is not None and denominator > 0 else None
+        entries.append(
+            {
+                'key': key,
+                'label': label,
+                'category': category,
+                'order': len(entries),
+                'duration_ms': round(duration_ms, 2) if duration_ms is not None else None,
+                'share_pct': share_pct,
+                'optimized_plan': optimized_plan,
+                'unoptimized_plan': unoptimized_plan,
+                'metadata': metadata,
+            }
+        )
+
+    if isinstance(read_duration_ms, (int, float)):
+        append_entry(
+            key='initial_read',
+            label='Initial Read',
+            category=EngineRunExecutionCategory.READ,
+            duration_ms=float(read_duration_ms),
+        )
+
+    optimized_plan = (
+        query_plans.get('optimized') if isinstance(query_plans, dict) and isinstance(query_plans.get('optimized'), str) else None
+    )
+    unoptimized_plan = (
+        query_plans.get('unoptimized') if isinstance(query_plans, dict) and isinstance(query_plans.get('unoptimized'), str) else None
+    )
+    if optimized_plan or unoptimized_plan or query_plan:
+        append_entry(
+            key='query_plan',
+            label='Query Plan',
+            category=EngineRunExecutionCategory.PLAN,
+            duration_ms=None,
+            optimized_plan=optimized_plan or query_plan,
+            unoptimized_plan=unoptimized_plan or query_plan,
+        )
+
+    for timing_key, duration_ms in normalized_timings.items():
+        base_key, label = _step_label_for_timing_key(timing_key)
+        append_entry(
+            key=timing_key,
+            label=label,
+            category=EngineRunExecutionCategory.STEP,
+            duration_ms=duration_ms,
+            metadata={'step_type': base_key},
+        )
+
+    if isinstance(collect_duration_ms, (int, float)):
+        append_entry(
+            key='compute',
+            label='Compute',
+            category=EngineRunExecutionCategory.COMPUTE,
+            duration_ms=float(collect_duration_ms),
+        )
+
+    if isinstance(write_duration_ms, (int, float)):
+        append_entry(
+            key='write_output',
+            label='Write Output',
+            category=EngineRunExecutionCategory.WRITE,
+            duration_ms=float(write_duration_ms),
+        )
+
+    return entries
+
+
+def _copy_result_json(value: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _serialize_run(run: EngineRun) -> EngineRunResponseSchema:
+    result_json = run.result_json if isinstance(run.result_json, dict) else {}
+    execution_entries_raw = result_json.get('execution_entries')
+    execution_entries = (
+        [EngineRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in execution_entries_raw]
+        if isinstance(execution_entries_raw, list)
+        else []
+    )
+    return EngineRunResponseSchema.model_validate(
+        {
+            **run.model_dump(),
+            'step_timings': normalize_step_timings(run.step_timings),
+            'execution_entries': execution_entries,
+        }
+    )
+
+
+def get_engine_run(session: Session, run_id: str) -> EngineRunResponseSchema | None:
+    run = session.get(EngineRun, run_id)
+    if run is None:
+        return None
+    return _serialize_run(run)
 
 
 def _coerce_kind(kind: EngineRunKind | str) -> EngineRunKind:
@@ -54,6 +212,13 @@ def create_engine_run(
     session: Session,
     payload: EngineRunPayload,
 ) -> EngineRunResponseSchema:
+    result_json = payload.result_json.copy() if isinstance(payload.result_json, dict) else None
+    if payload.execution_entries:
+        result_json = result_json or {}
+        result_json['execution_entries'] = [
+            EngineRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in payload.execution_entries
+        ]
+
     run = EngineRun(
         id=payload.id,
         analysis_id=payload.analysis_id,
@@ -61,7 +226,7 @@ def create_engine_run(
         kind=payload.kind,
         status=payload.status,
         request_json=payload.request_json,
-        result_json=payload.result_json,
+        result_json=result_json,
         error_message=payload.error_message,
         created_at=payload.created_at,
         completed_at=payload.completed_at,
@@ -75,7 +240,86 @@ def create_engine_run(
     session.add(run)
     session.commit()
     session.refresh(run)
-    return EngineRunResponseSchema.model_validate(run)
+    return _serialize_run(run)
+
+
+def update_engine_run(
+    session: Session,
+    run_id: str,
+    *,
+    analysis_id: str | None | _UnsetType = _UNSET,
+    datasource_id: str | _UnsetType = _UNSET,
+    kind: EngineRunKind | str | _UnsetType = _UNSET,
+    status: EngineRunStatus | str | _UnsetType = _UNSET,
+    request_json: dict[str, Any] | _UnsetType = _UNSET,
+    result_json: dict[str, Any] | None | _UnsetType = _UNSET,
+    merge_result_json: bool = True,
+    error_message: str | None | _UnsetType = _UNSET,
+    completed_at: datetime | None | _UnsetType = _UNSET,
+    duration_ms: int | None | _UnsetType = _UNSET,
+    step_timings: dict[str, float] | None | _UnsetType = _UNSET,
+    query_plan: str | None | _UnsetType = _UNSET,
+    execution_entries: list[dict[str, Any]] | None | _UnsetType = _UNSET,
+    progress: float | _UnsetType = _UNSET,
+    current_step: str | None | _UnsetType = _UNSET,
+    triggered_by: str | None | _UnsetType = _UNSET,
+) -> EngineRunResponseSchema:
+    run = session.get(EngineRun, run_id)
+    if run is None:
+        raise FastAPIHTTPException(status_code=404, detail=f'Engine run {run_id} not found')
+    session.refresh(run)
+
+    if not isinstance(analysis_id, _UnsetType):
+        run.analysis_id = analysis_id if analysis_id is None or isinstance(analysis_id, str) else run.analysis_id
+    if not isinstance(datasource_id, _UnsetType) and isinstance(datasource_id, str):
+        run.datasource_id = datasource_id
+    if not isinstance(kind, _UnsetType):
+        run.kind = _coerce_kind(kind) if isinstance(kind, (EngineRunKind, str)) else run.kind
+    if not isinstance(status, _UnsetType):
+        new_status = _coerce_status(status) if isinstance(status, (EngineRunStatus, str)) else None
+        if new_status is not None and run.status in _TERMINAL_STATUSES and new_status != run.status:
+            logger.warning(f'Ignoring status transition from {run.status} to {new_status} for run {run_id}')
+        elif new_status is not None:
+            run.status = new_status
+    if not isinstance(request_json, _UnsetType) and isinstance(request_json, dict):
+        run.request_json = request_json
+    if not isinstance(result_json, _UnsetType):
+        if result_json is None:
+            run.result_json = None
+        elif isinstance(result_json, dict):
+            base = _copy_result_json(run.result_json) if merge_result_json else {}
+            base.update(result_json)
+            run.result_json = base
+    if not isinstance(error_message, _UnsetType):
+        run.error_message = error_message if error_message is None or isinstance(error_message, str) else run.error_message
+    if not isinstance(completed_at, _UnsetType):
+        run.completed_at = completed_at if completed_at is None or isinstance(completed_at, datetime) else run.completed_at
+    if not isinstance(duration_ms, _UnsetType):
+        run.duration_ms = duration_ms if duration_ms is None or isinstance(duration_ms, int) else run.duration_ms
+    if not isinstance(step_timings, _UnsetType):
+        run.step_timings = normalize_step_timings(step_timings if isinstance(step_timings, dict) else None)
+    if not isinstance(query_plan, _UnsetType):
+        run.query_plan = query_plan if query_plan is None or isinstance(query_plan, str) else run.query_plan
+    if not isinstance(progress, _UnsetType) and isinstance(progress, (int, float)):
+        run.progress = float(progress)
+    if not isinstance(current_step, _UnsetType):
+        run.current_step = current_step if current_step is None or isinstance(current_step, str) else run.current_step
+    if not isinstance(triggered_by, _UnsetType):
+        run.triggered_by = triggered_by if triggered_by is None or isinstance(triggered_by, str) else run.triggered_by
+    if not isinstance(execution_entries, _UnsetType):
+        next_result_json = _copy_result_json(run.result_json)
+        if execution_entries is None:
+            next_result_json.pop('execution_entries', None)
+        elif isinstance(execution_entries, list):
+            next_result_json['execution_entries'] = [
+                EngineRunExecutionEntry.model_validate(entry).model_dump(mode='json') for entry in execution_entries
+            ]
+        run.result_json = next_result_json
+
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    return _serialize_run(run)
 
 
 def create_engine_run_payload(
@@ -91,6 +335,7 @@ def create_engine_run_payload(
     duration_ms: int | None = None,
     step_timings: dict[str, float] | None = None,
     query_plan: str | None = None,
+    execution_entries: list[dict[str, Any]] | None = None,
     progress: float = 0.0,
     current_step: str | None = None,
     triggered_by: str | None = None,
@@ -108,6 +353,7 @@ def create_engine_run_payload(
         duration_ms=duration_ms,
         step_timings=normalize_step_timings(step_timings),
         query_plan=query_plan,
+        execution_entries=execution_entries or [],
         progress=progress,
         current_step=current_step,
         triggered_by=triggered_by,
@@ -136,10 +382,7 @@ def list_engine_runs(
 
     stmt = stmt.order_by(desc(EngineRun.created_at)).limit(limit).offset(offset)  # type: ignore[arg-type]
     runs = session.execute(stmt).scalars().all()
-    return [
-        EngineRunResponseSchema.model_validate({**run.model_dump(), 'step_timings': normalize_step_timings(run.step_timings)})
-        for run in runs
-    ]
+    return [_serialize_run(run) for run in runs]
 
 
 def compare_engine_runs(

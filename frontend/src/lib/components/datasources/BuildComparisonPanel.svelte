@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createQuery } from '@tanstack/svelte-query';
-	import { listEngineRuns, type EngineRun } from '$lib/api/engine-runs';
+	import type { EngineRun } from '$lib/api/engine-runs';
 	import { compareDatasourceSnapshots, listIcebergSnapshots } from '$lib/api/datasource';
 	import type { SnapshotCompareResponse } from '$lib/api/datasource';
 	import type { DataSource } from '$lib/types/datasource';
@@ -8,7 +8,8 @@
 	import { GitCompareArrows, RefreshCw, X, Plus, Minus, Search } from 'lucide-svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { buildSnapshotMap } from '$lib/utils/build-snapshot-map';
-	import { css, cx, button, input, row, muted } from '$lib/styles/panda';
+	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
+	import { css, button } from '$lib/styles/panda';
 
 	interface Props {
 		datasource: DataSource;
@@ -23,14 +24,12 @@
 	let runSearch = $state('');
 	let rowLimit = $state(100);
 
-	const runsQuery = createQuery(() => ({
-		queryKey: ['engine-runs', datasource.id],
-		queryFn: async () => {
-			const result = await listEngineRuns({ datasource_id: datasource.id, limit: 50 });
-			if (result.isErr()) throw new Error(result.error.message);
-			return result.value;
-		}
-	}));
+	const engineRunsStore = new EngineRunsStore();
+	// Network: fetch datasource build history when the datasource changes.
+	$effect(() => {
+		engineRunsStore.load({ datasource_id: datasource.id, limit: 50 });
+		return () => engineRunsStore.close();
+	});
 
 	const snapshotsQuery = createQuery(() => ({
 		queryKey: ['iceberg-snapshots', datasource.id],
@@ -43,7 +42,7 @@
 	}));
 
 	const runs = $derived(
-		(runsQuery.data ?? []).filter(
+		engineRunsStore.runs.filter(
 			(run) =>
 				(run.kind === 'datasource_update' || run.kind === 'datasource_create') &&
 				run.status === 'success'
@@ -127,17 +126,17 @@
 	}
 
 	function rowDeltaClass(val: number): string {
-		if (val === 0) return muted;
+		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
 
 	function nullDeltaClass(val: number): string {
-		if (val === 0) return muted;
+		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.error' }) : css({ color: 'fg.success' });
 	}
 
 	function uniqueDeltaClass(val: number): string {
-		if (val === 0) return muted;
+		if (val === 0) return css({ color: 'fg.muted' });
 		return val > 0 ? css({ color: 'fg.success' }) : css({ color: 'fg.error' });
 	}
 
@@ -244,7 +243,7 @@
 		</div>
 	{:else}
 		<div
-			class={cx(
+			class={[
 				css({
 					flex: '1',
 					minHeight: '0',
@@ -256,7 +255,7 @@
 					contain: 'content'
 				}),
 				'datasource-comparison-scroll'
-			)}
+			]}
 		>
 			<div
 				class={css({
@@ -281,11 +280,11 @@
 					>
 						Select builds
 					</div>
-					{#if runsQuery.isLoading}
+					{#if engineRunsStore.status === 'connecting'}
 						<div class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>Loading runs...</div>
-					{:else if runsQuery.isError}
+					{:else if engineRunsStore.status === 'error'}
 						<div class={css({ fontSize: 'sm', color: 'fg.error' })}>
-							{runsQuery.error instanceof Error ? runsQuery.error.message : 'Failed to load runs'}
+							{engineRunsStore.error ?? 'Failed to load runs'}
 						</div>
 					{:else if runs.length === 0}
 						<p class={css({ fontSize: 'sm', color: 'fg.tertiary' })}>
@@ -309,7 +308,27 @@
 									id="bcp-search"
 									aria-label="Search builds"
 									placeholder="Search builds by ID or date..."
-									class={cx(input({ variant: 'search' }), css({ fontSize: 'xs' }))}
+									class={css({
+										width: 'full',
+										fontSize: 'xs',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										paddingLeft: '8',
+										paddingRight: '2',
+										paddingY: '1.5',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed',
+											backgroundColor: 'bg.tertiary'
+										},
+										_placeholder: { color: 'fg.muted' }
+									})}
 									bind:value={runSearch}
 								/>
 							</div>
@@ -319,7 +338,7 @@
 								</p>
 							{:else}
 								<div
-									class={cx(
+									class={[
 										css({
 											maxHeight: 'previewXl',
 											display: 'flex',
@@ -329,12 +348,12 @@
 											contain: 'content'
 										}),
 										'datasource-comparison-scroll'
-									)}
+									]}
 								>
 									{#each visibleRuns as run (run.id)}
 										<button
-											class={cx(
-												css({
+											class={css(
+												{
 													display: 'flex',
 													width: '100%',
 													alignItems: 'flex-start',
@@ -346,15 +365,16 @@
 													textAlign: 'left',
 													fontSize: 'sm',
 													_hover: { backgroundColor: 'bg.hover' }
-												}),
-												selected.has(run.id)
-													? css({ backgroundColor: 'bg.accent', color: 'accent.primary' })
-													: ''
+												},
+												selected.has(run.id) && {
+													backgroundColor: 'bg.accent',
+													color: 'accent.primary'
+												}
 											)}
 											onclick={() => toggleSelect(run.id)}
 										>
 											<div class={css({ minWidth: '0' })}>
-												<div class={cx(row, css({ gap: '2' }))}>
+												<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 													<span class={css({ fontFamily: 'mono', fontSize: 'xs' })}
 														>{run.id.slice(0, 8)}...</span
 													>
@@ -400,8 +420,8 @@
 							fontSize: 'sm'
 						})}
 					>
-						<div class={cx(row, css({ gap: '2' }))}>
-							<GitCompareArrows size={14} class={muted} />
+						<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+							<GitCompareArrows size={14} class={css({ color: 'fg.muted' })} />
 							<span>{selected.size}/2 builds selected</span>
 						</div>
 						{#if selectedRuns.length === 0}
@@ -423,7 +443,7 @@
 											fontSize: 'xs'
 										})}
 									>
-										<div class={cx(row, css({ gap: '2' }))}>
+										<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 											<span class={css({ fontFamily: 'mono' })}>{run.id.slice(0, 8)}...</span>
 											<span class={css({ color: 'fg.tertiary' })}>{run.kind}</span>
 										</div>
@@ -514,10 +534,10 @@
 						>
 							<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>Row Count Delta</div>
 							<div
-								class={cx(
+								class={[
 									css({ marginTop: '1', fontFamily: 'mono', fontSize: 'lg' }),
 									rowDeltaClass(comparison.row_count_delta)
-								)}
+								]}
 							>
 								{formatDelta(comparison.row_count_delta)}
 							</div>
@@ -700,10 +720,10 @@
 							})}
 						>
 							<div
-								class={cx(
+								class={[
 									css({ maxHeight: 'listTall', overflow: 'auto', contain: 'content' }),
 									'datasource-comparison-scroll'
-								)}
+								]}
 							>
 								<table class={css({ width: '100%', borderCollapse: 'collapse', fontSize: 'sm' })}>
 									<thead
@@ -808,15 +828,15 @@
 													})}
 												>
 													<div class={css({ display: 'flex', alignItems: 'baseline', gap: '2' })}>
-														<span class={muted}>{stat.null_a}</span>
+														<span class={css({ color: 'fg.muted' })}>{stat.null_a}</span>
 														<span class={css({ color: 'fg.tertiary' })}>→</span>
 														<span>{stat.null_b}</span>
 														{#if stat.null_delta !== null}
 															<span
-																class={cx(
+																class={[
 																	css({ marginLeft: '1', fontSize: '2xs' }),
 																	nullDeltaClass(stat.null_delta)
-																)}
+																]}
 															>
 																({formatDelta(stat.null_delta)})
 															</span>
@@ -833,15 +853,15 @@
 													})}
 												>
 													<div class={css({ display: 'flex', alignItems: 'baseline', gap: '2' })}>
-														<span class={muted}>{stat.unique_a}</span>
+														<span class={css({ color: 'fg.muted' })}>{stat.unique_a}</span>
 														<span class={css({ color: 'fg.tertiary' })}>→</span>
 														<span>{stat.unique_b}</span>
 														{#if stat.unique_delta !== null}
 															<span
-																class={cx(
+																class={[
 																	css({ marginLeft: '1', fontSize: '2xs' }),
 																	uniqueDeltaClass(stat.unique_delta)
-																)}
+																]}
 															>
 																({formatDelta(stat.unique_delta)})
 															</span>
@@ -918,10 +938,10 @@
 								Snapshot A preview
 							</div>
 							<div
-								class={cx(
+								class={[
 									css({ height: 'listLg', contain: 'content' }),
 									'datasource-comparison-scroll'
-								)}
+								]}
 							>
 								<DataTable
 									columns={previewColumns(comparison.preview_a)}
@@ -951,10 +971,10 @@
 								Snapshot B preview
 							</div>
 							<div
-								class={cx(
+								class={[
 									css({ height: 'listLg', contain: 'content' }),
 									'datasource-comparison-scroll'
-								)}
+								]}
 							>
 								<DataTable
 									columns={previewColumns(comparison.preview_b)}

@@ -1,6 +1,5 @@
 import type {
 	EngineDefaults,
-	EngineListResponse,
 	EngineResourceConfig,
 	EngineStatusResponse
 } from '$lib/types/compute';
@@ -8,7 +7,8 @@ import type { AnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 import { apiBlobRequest, apiRequest } from './client';
 import { okAsync, ResultAsync } from 'neverthrow';
 import type { ApiError } from './client';
-import { websocketRequest } from './websocket';
+import { createStream, type StreamHandle } from './websocket';
+import { track } from '$lib/utils/audit-log';
 
 export interface StepPreviewRequest {
 	analysis_id?: string;
@@ -36,12 +36,10 @@ export interface StepPreviewResponse {
 export function previewStepData(
 	request: StepPreviewRequest
 ): ResultAsync<StepPreviewResponse, ApiError> {
-	return websocketRequest('/v1/compute/ws', 'preview', request, () =>
-		apiRequest<StepPreviewResponse>('/v1/compute/preview', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
-	);
+	return apiRequest<StepPreviewResponse>('/v1/compute/preview', {
+		method: 'POST',
+		body: JSON.stringify(request)
+	});
 }
 
 // Engine lifecycle functions
@@ -73,18 +71,25 @@ export function sendKeepalive(analysisId: string): ResultAsync<EngineStatusRespo
 	});
 }
 
-export function getEngineStatus(analysisId: string): ResultAsync<EngineStatusResponse, ApiError> {
-	return apiRequest<EngineStatusResponse>(`/v1/compute/engine/status/${analysisId}`);
-}
-
 export function shutdownEngine(analysisId: string): ResultAsync<void, ApiError> {
 	return apiRequest<void>(`/v1/compute/engine/${analysisId}`, {
 		method: 'DELETE'
 	});
 }
 
-export function listEngines(): ResultAsync<EngineListResponse, ApiError> {
-	return apiRequest<EngineListResponse>('/v1/compute/engines');
+export function shutdownEngineBestEffort(analysisId: string): void {
+	shutdownEngine(analysisId).match(
+		() => {},
+		(error) => {
+			if (error.status === 404 || error.status === 409) return;
+			track({
+				event: 'engine_error',
+				action: 'teardown',
+				target: analysisId,
+				meta: { message: error.message, status: error.status }
+			});
+		}
+	);
 }
 
 export function getEngineDefaults(): ResultAsync<EngineDefaults, ApiError> {
@@ -188,12 +193,10 @@ export interface StepSchemaResponse {
 export function getStepSchema(
 	request: StepSchemaRequest
 ): ResultAsync<StepSchemaResponse, ApiError> {
-	return websocketRequest('/v1/compute/ws', 'schema', request, () =>
-		apiRequest<StepSchemaResponse>('/v1/compute/schema', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
-	);
+	return apiRequest<StepSchemaResponse>('/v1/compute/schema', {
+		method: 'POST',
+		body: JSON.stringify(request)
+	});
 }
 
 export type StepRowCountRequest = StepSchemaRequest;
@@ -206,25 +209,18 @@ export interface StepRowCountResponse {
 export function getStepRowCount(
 	request: StepRowCountRequest
 ): ResultAsync<StepRowCountResponse, ApiError> {
-	return websocketRequest('/v1/compute/ws', 'row_count', request, () =>
-		apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
-	);
+	return apiRequest<StepRowCountResponse>('/v1/compute/row-count', {
+		method: 'POST',
+		body: JSON.stringify(request)
+	});
 }
 
-export interface BuildTabResult {
-	tab_id: string;
-	tab_name: string;
-	status: string;
-	error?: string | null;
-}
-
-export interface BuildResponse {
-	analysis_id: string;
-	tabs_built: number;
-	results: BuildTabResult[];
+export interface CancelBuildResponse {
+	id: string;
+	status: 'cancelled';
+	duration_ms: number | null;
+	cancelled_at: string;
+	cancelled_by: string | null;
 }
 
 export interface BuildRequest {
@@ -232,13 +228,39 @@ export interface BuildRequest {
 	tab_id?: string | null;
 }
 
-export function buildAnalysisWithPayload(
-	request: BuildRequest
-): ResultAsync<BuildResponse, ApiError> {
-	return websocketRequest('/v1/compute/ws', 'build', request, () =>
-		apiRequest<BuildResponse>('/v1/compute/build', {
-			method: 'POST',
-			body: JSON.stringify(request)
-		})
-	);
+export type EnginesSnapshotMessage = {
+	type: 'snapshot';
+	engines: EngineStatusResponse[];
+	total: number;
+};
+export type EnginesErrorMessage = { type: 'error'; error: string; status_code?: number };
+export type EnginesStreamMessage = EnginesSnapshotMessage | EnginesErrorMessage;
+
+export interface EnginesStreamCallbacks {
+	onSnapshot: (engines: EngineStatusResponse[]) => void;
+	onError: (error: string) => void;
+	onClose: () => void;
+}
+
+function parseEnginesStreamMessage(data: string): EnginesStreamMessage | null {
+	try {
+		return JSON.parse(data) as EnginesStreamMessage;
+	} catch {
+		return null;
+	}
+}
+
+export function connectEnginesStream(callbacks: EnginesStreamCallbacks): StreamHandle {
+	return createStream<EngineStatusResponse[]>('/v1/compute/ws/engines', {
+		parse: parseEnginesStreamMessage,
+		isSnapshot: (msg) => msg.type === 'snapshot',
+		extractSnapshot: (msg) => (msg as EnginesSnapshotMessage).engines,
+		callbacks
+	});
+}
+
+export function cancelBuild(engineRunId: string): ResultAsync<CancelBuildResponse, ApiError> {
+	return apiRequest<CancelBuildResponse>(`/v1/compute/cancel/${engineRunId}`, {
+		method: 'POST'
+	});
 }

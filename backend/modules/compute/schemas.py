@@ -1,5 +1,6 @@
+from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
@@ -69,6 +70,7 @@ class AnalysisPipelineDatasource(BaseModel):
 
     id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
     analysis_tab_id: str | None
+    source_type: str | None = None
     config: AnalysisPipelineDatasourceConfig
 
 
@@ -103,7 +105,6 @@ class AnalysisPipelinePayload(BaseModel):
 
     analysis_id: str
     tabs: list[AnalysisPipelineTab]
-    sources: dict[str, dict]
 
     @field_validator('tabs')
     @classmethod
@@ -126,11 +127,20 @@ class EngineStatusSchema(BaseModel):
     defaults: EngineDefaults | None = None  # Default values from env vars
 
 
-class EngineListSchema(BaseModel):
+class EngineListSnapshotMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    type: Literal['snapshot'] = 'snapshot'
     engines: list[EngineStatusSchema]
     total: int
+
+
+class EngineWebsocketErrorMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['error'] = 'error'
+    error: str
+    status_code: int = 500
 
 
 class SpawnEngineRequest(BaseModel):
@@ -319,15 +329,9 @@ class BuildTabResult(BaseModel):
     tab_id: str
     tab_name: str
     status: BuildTabStatus
+    output_id: str | None = None
+    output_name: str | None = None
     error: str | None = None
-
-
-class BuildResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    analysis_id: str
-    tabs_built: int
-    results: list[BuildTabResult]
 
 
 class BuildRequest(BaseModel):
@@ -337,45 +341,292 @@ class BuildRequest(BaseModel):
     tab_id: str | None = None
 
 
-class ComputeWebsocketAction(StrEnum):
-    PREVIEW = 'preview'
-    SCHEMA = 'schema'
-    ROW_COUNT = 'row_count'
-    BUILD = 'build'
+class ActiveBuildStatus(StrEnum):
+    RUNNING = 'running'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    CANCELLED = 'cancelled'
 
 
-class ComputeWebsocketRequest(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class BuildStepState(StrEnum):
+    PENDING = 'pending'
+    RUNNING = 'running'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    SKIPPED = 'skipped'
 
-    action: ComputeWebsocketAction
-    payload: dict = Field(default_factory=dict)
 
-
-class ComputeWebsocketMessageType(StrEnum):
-    STARTED = 'started'
-    RESULT = 'result'
+class BuildLogLevel(StrEnum):
+    INFO = 'info'
+    WARNING = 'warning'
     ERROR = 'error'
 
 
-class ComputeWebsocketStartedMessage(BaseModel):
+class BuildStarter(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.STARTED
-    action: ComputeWebsocketAction
+    user_id: str | None = None
+    display_name: str | None = None
+    email: str | None = None
+    triggered_by: str | None = None
 
 
-class ComputeWebsocketResultMessage(BaseModel):
+class BuildResourceConfigSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.RESULT
-    action: ComputeWebsocketAction
-    data: dict
+    max_threads: int | None = None
+    max_memory_mb: int | None = None
+    streaming_chunk_size: int | None = None
 
 
-class ComputeWebsocketErrorMessage(BaseModel):
+class BuildStepSnapshot(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    type: ComputeWebsocketMessageType = ComputeWebsocketMessageType.ERROR
-    action: ComputeWebsocketAction | None = None
+    build_step_index: int
+    step_index: int
+    step_id: str
+    step_name: str
+    step_type: str
+    tab_id: str | None = None
+    tab_name: str | None = None
+    state: BuildStepState = BuildStepState.PENDING
+    duration_ms: int | None = None
+    row_count: int | None = None
+    error: str | None = None
+
+
+class BuildQueryPlanSnapshot(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tab_id: str | None = None
+    tab_name: str | None = None
+    optimized_plan: str
+    unoptimized_plan: str
+
+
+class BuildResourceSnapshot(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sampled_at: datetime
+    cpu_percent: float
+    memory_mb: float
+    memory_limit_mb: float | None = None
+    active_threads: int
+    max_threads: int | None = None
+
+
+class BuildLogEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    timestamp: datetime
+    level: BuildLogLevel
+    message: str
+    step_name: str | None = None
+    step_id: str | None = None
+    tab_id: str | None = None
+    tab_name: str | None = None
+
+
+class ActiveBuildSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    build_id: str
+    analysis_id: str
+    analysis_name: str
+    namespace: str
+    status: ActiveBuildStatus
+    started_at: datetime
+    starter: BuildStarter
+    resource_config: BuildResourceConfigSummary | None = None
+    progress: float = 0.0
+    elapsed_ms: int = 0
+    estimated_remaining_ms: int | None = None
+    current_step: str | None = None
+    current_step_index: int | None = None
+    total_steps: int = 0
+    current_kind: str | None = None
+    current_datasource_id: str | None = None
+    current_tab_id: str | None = None
+    current_tab_name: str | None = None
+    current_output_id: str | None = None
+    current_output_name: str | None = None
+    current_engine_run_id: str | None = None
+    total_tabs: int = 0
+    cancelled_at: datetime | None = None
+    cancelled_by: str | None = None
+
+
+class ActiveBuildDetail(ActiveBuildSummary):
+    steps: list[BuildStepSnapshot] = Field(default_factory=list)
+    query_plans: list[BuildQueryPlanSnapshot] = Field(default_factory=list)
+    latest_resources: BuildResourceSnapshot | None = None
+    resources: list[BuildResourceSnapshot] = Field(default_factory=list)
+    logs: list[BuildLogEntry] = Field(default_factory=list)
+    results: list[BuildTabResult] = Field(default_factory=list)
+    duration_ms: int | None = None
+    error: str | None = None
+
+
+class ActiveBuildListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    builds: list[ActiveBuildSummary]
+    total: int
+
+
+class BuildEventType(StrEnum):
+    PLAN = 'plan'
+    STEP_START = 'step_start'
+    STEP_COMPLETE = 'step_complete'
+    STEP_FAILED = 'step_failed'
+    PROGRESS = 'progress'
+    RESOURCES = 'resources'
+    LOG = 'log'
+    COMPLETE = 'complete'
+    FAILED = 'failed'
+    CANCELLED = 'cancelled'
+
+
+class BuildStreamEvent(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: BuildEventType
+    build_id: str
+    analysis_id: str
+    emitted_at: datetime
+    current_kind: str | None = None
+    current_datasource_id: str | None = None
+    tab_id: str | None = None
+    tab_name: str | None = None
+    current_output_id: str | None = None
+    current_output_name: str | None = None
+    engine_run_id: str | None = None
+
+
+class BuildPlanEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.PLAN] = BuildEventType.PLAN
+    optimized_plan: str
+    unoptimized_plan: str
+
+
+class BuildStepStartEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.STEP_START] = BuildEventType.STEP_START
+    build_step_index: int
+    step_index: int
+    step_id: str
+    step_name: str
+    step_type: str
+    total_steps: int
+
+
+class BuildStepCompleteEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.STEP_COMPLETE] = BuildEventType.STEP_COMPLETE
+    build_step_index: int
+    step_index: int
+    step_id: str
+    step_name: str
+    step_type: str
+    duration_ms: int
+    row_count: int | None = None
+    total_steps: int
+
+
+class BuildStepFailedEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.STEP_FAILED] = BuildEventType.STEP_FAILED
+    build_step_index: int
+    step_index: int
+    step_id: str
+    step_name: str
+    step_type: str
+    error: str
+    total_steps: int
+
+
+class BuildProgressEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.PROGRESS] = BuildEventType.PROGRESS
+    progress: float
+    elapsed_ms: int
+    estimated_remaining_ms: int | None = None
+    current_step: str | None = None
+    current_step_index: int | None = None
+    total_steps: int
+
+
+class BuildResourceEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.RESOURCES] = BuildEventType.RESOURCES
+    cpu_percent: float
+    memory_mb: float
+    memory_limit_mb: float | None = None
+    active_threads: int
+    max_threads: int | None = None
+
+
+class BuildLogEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.LOG] = BuildEventType.LOG
+    level: BuildLogLevel
+    message: str
+    step_name: str | None = None
+    step_id: str | None = None
+
+
+class BuildCompleteEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.COMPLETE] = BuildEventType.COMPLETE
+    progress: float = 1.0
+    elapsed_ms: int
+    total_steps: int
+    tabs_built: int
+    results: list[BuildTabResult]
+    duration_ms: int
+
+
+class BuildFailedEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.FAILED] = BuildEventType.FAILED
+    progress: float
+    elapsed_ms: int
+    total_steps: int
+    tabs_built: int
+    results: list[BuildTabResult]
+    duration_ms: int
+    error: str | None = None
+
+
+class BuildCancelledEvent(BuildStreamEvent):
+    type: Literal[BuildEventType.CANCELLED] = BuildEventType.CANCELLED
+    progress: float
+    elapsed_ms: int
+    total_steps: int
+    tabs_built: int
+    results: list[BuildTabResult]
+    duration_ms: int
+    cancelled_at: datetime
+    cancelled_by: str | None = None
+
+
+class CancelBuildResponse(BaseModel):
+    id: str
+    status: Literal['cancelled'] = 'cancelled'
+    duration_ms: int | None = None
+    cancelled_at: datetime
+    cancelled_by: str | None = None
+
+
+class BuildSnapshotMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['snapshot'] = 'snapshot'
+    build: ActiveBuildDetail
+
+
+class BuildListSnapshotMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['snapshot'] = 'snapshot'
+    builds: list[ActiveBuildSummary]
+
+
+class BuildWebsocketErrorMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: Literal['error'] = 'error'
     error: str
     status_code: int = 500

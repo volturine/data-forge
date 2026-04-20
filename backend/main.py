@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from core.exceptions import AppError
 from core.http import close_clients
 from core.logging import RequestLoggingMiddleware, configure_logging
 from core.namespace import list_namespaces, namespace_paths, reset_namespace, set_namespace_context
+from modules.compute.engine_live import create_snapshot_notifier
 from modules.compute.manager import ProcessManager
 from modules.scheduler import service as scheduler_service
 from modules.udf.seed import ensure_udf_seeds
@@ -44,6 +46,21 @@ else:
     frontend_build_dir = Path(__file__).parent.parent / 'frontend' / 'build'
 
 
+def _resolve_uvicorn_workers() -> int:
+    if settings.debug:
+        return 1
+    if settings.workers > 0:
+        return settings.workers
+    cores = os.cpu_count() or 1
+    return max(1, (2 * cores) + 1)
+
+
+def _resolve_uvicorn_limit_concurrency() -> int | None:
+    if settings.worker_connections > 0:
+        return settings.worker_connections
+    return None
+
+
 async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
     """Periodically sweep expired chat sessions."""
     from modules.chat.sessions import session_store
@@ -61,9 +78,11 @@ async def chat_sweep_loop(stop_event: asyncio.Event) -> None:
 
 async def engine_cleanup_loop(stop_event: asyncio.Event, manager: ProcessManager) -> None:
     """Periodically check and clean up idle engines."""
+    idle_timeout = settings.engine_idle_timeout
     while not stop_event.is_set():
+        timeout = max(1.0, manager.next_idle_deadline_seconds(idle_timeout))
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stop_event.wait(), timeout=settings.engine_pooling_interval)
+            await asyncio.wait_for(stop_event.wait(), timeout=timeout)
         if stop_event.is_set():
             break
         try:
@@ -171,7 +190,7 @@ def _topo_sort_schedules(
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info('Starting application...')
-    app.state.manager = ProcessManager()
+    app.state.manager = ProcessManager(on_snapshot=create_snapshot_notifier(asyncio.get_running_loop()))
     await init_db()
     await asyncio.to_thread(run_db, ensure_udf_seeds)
 
@@ -380,6 +399,8 @@ if __name__ == '__main__':
         host='0.0.0.0',
         port=settings.port,
         reload=False if _NUITKA_COMPILED else settings.debug,
+        workers=_resolve_uvicorn_workers(),
+        limit_concurrency=_resolve_uvicorn_limit_concurrency(),
         log_level=settings.log_level,
         access_log=settings.uvicorn_access_log,
     )

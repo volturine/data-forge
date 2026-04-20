@@ -458,7 +458,7 @@ def test_restore_version_cycle_detection(test_db_session, client, sample_datasou
 def test_restore_version_requires_datasource(test_db_session, client):
     analysis_id = str(uuid.uuid4())
     missing_ds_id = str(uuid.uuid4())
-    pipeline_definition = {
+    pipeline_definition: dict[str, object] = {
         'steps': [],
         'tabs': [
             {
@@ -506,6 +506,57 @@ def test_restore_version_requires_datasource(test_db_session, client):
 
     assert response.status_code == 404
     assert 'datasource' in response.json()['detail'].lower()
+
+
+def test_restore_version_rejects_missing_branch(test_db_session, client, sample_datasource: DataSource):
+    analysis_id = str(uuid.uuid4())
+    pipeline_definition: dict[str, object] = {
+        'tabs': [
+            {
+                'id': 'tab-1',
+                'name': 'Source',
+                'parent_id': None,
+                'datasource': {
+                    'id': sample_datasource.id,
+                    'analysis_tab_id': None,
+                    'config': {},
+                },
+                'output': {
+                    'result_id': str(uuid.uuid4()),
+                    'datasource_type': 'iceberg',
+                    'format': 'parquet',
+                    'filename': 'version_output',
+                },
+                'steps': [],
+            },
+        ],
+    }
+    analysis = Analysis(
+        id=analysis_id,
+        name='Missing Branch',
+        description=None,
+        pipeline_definition=pipeline_definition,
+        status=AnalysisStatus.DRAFT,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    version = AnalysisVersion(
+        id='version-missing-branch',
+        analysis_id=analysis_id,
+        version=1,
+        name='Missing Branch',
+        description=None,
+        pipeline_definition=pipeline_definition,
+        created_at=datetime.now(UTC),
+    )
+    test_db_session.add(analysis)
+    test_db_session.add(version)
+    test_db_session.commit()
+
+    response = client.post(f'/api/v1/analysis/{analysis_id}/versions/1/restore')
+
+    assert response.status_code == 400
+    assert 'tabs.0.datasource.config.branch' in response.json()['detail'].lower()
 
 
 def test_restore_version_relinks_analysis_datasource(test_db_session, client):

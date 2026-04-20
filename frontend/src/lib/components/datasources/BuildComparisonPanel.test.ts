@@ -5,13 +5,29 @@ import type { DataSource } from '$lib/types/datasource';
 import type { EngineRun } from '$lib/api/engine-runs';
 import type { SnapshotCompareResponse } from '$lib/api/datasource';
 
-const mockListEngineRuns = vi.fn();
+let mockStoreRuns: EngineRun[] = [];
+let mockStoreStatus: string = 'disconnected';
+let mockStoreError: string | null = null;
+
+vi.mock('$lib/stores/engine-runs.svelte', () => ({
+	EngineRunsStore: class {
+		get runs() {
+			return mockStoreRuns;
+		}
+		get status() {
+			return mockStoreStatus;
+		}
+		get error() {
+			return mockStoreError;
+		}
+		load() {}
+		close() {}
+		reset() {}
+	}
+}));
+
 const mockListIcebergSnapshots = vi.fn();
 const mockCompareDatasourceSnapshots = vi.fn();
-
-vi.mock('$lib/api/engine-runs', () => ({
-	listEngineRuns: (...args: unknown[]) => mockListEngineRuns(...args)
-}));
 
 vi.mock('$lib/api/datasource', () => ({
 	listIcebergSnapshots: (...args: unknown[]) => mockListIcebergSnapshots(...args),
@@ -30,14 +46,12 @@ function makeQueryResult(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-let runsQueryState = makeQueryResult();
 let snapshotsQueryState = makeQueryResult();
 
 vi.mock('@tanstack/svelte-query', () => ({
 	createQuery: (optsFn: () => Record<string, unknown>) => {
 		const opts = optsFn();
 		const key = (opts.queryKey as string[])[0];
-		if (key === 'engine-runs') return runsQueryState;
 		if (key === 'iceberg-snapshots') return snapshotsQueryState;
 		return makeQueryResult();
 	},
@@ -82,6 +96,7 @@ function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
 		progress: 100,
 		current_step: null,
 		triggered_by: null,
+		execution_entries: [],
 		...overrides
 	};
 }
@@ -96,7 +111,9 @@ function renderPanel(props: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-	runsQueryState = makeQueryResult();
+	mockStoreRuns = [];
+	mockStoreStatus = 'disconnected';
+	mockStoreError = null;
 	snapshotsQueryState = makeQueryResult();
 });
 
@@ -124,18 +141,16 @@ describe('BuildComparisonPanel', () => {
 
 	describe('loading state', () => {
 		test('shows loading indicator while runs load', () => {
-			runsQueryState = makeQueryResult({ isLoading: true });
+			mockStoreStatus = 'connecting';
 			renderPanel();
 			expect(screen.getByText('Loading runs...')).toBeInTheDocument();
 		});
 	});
 
 	describe('error state', () => {
-		test('shows error when runs query fails', () => {
-			runsQueryState = makeQueryResult({
-				isError: true,
-				error: new Error('Connection refused')
-			});
+		test('shows error when runs store has error', () => {
+			mockStoreStatus = 'error';
+			mockStoreError = 'Connection refused';
 			renderPanel();
 			expect(screen.getByText('Connection refused')).toBeInTheDocument();
 		});
@@ -143,7 +158,8 @@ describe('BuildComparisonPanel', () => {
 
 	describe('empty state', () => {
 		test('shows empty message when no runs found', () => {
-			runsQueryState = makeQueryResult({ isSuccess: true, data: [] });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = [];
 			renderPanel();
 			expect(screen.getByText('No successful datasource builds recorded.')).toBeInTheDocument();
 		});
@@ -155,7 +171,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 			expect(screen.getByText('run-aaa-...')).toBeInTheDocument();
@@ -163,21 +180,24 @@ describe('BuildComparisonPanel', () => {
 		});
 
 		test('shows selected builds counter at 0/2 initially', () => {
-			runsQueryState = makeQueryResult({ isSuccess: true, data: [makeRun()] });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = [makeRun()];
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 			expect(screen.getByText('0/2 builds selected')).toBeInTheDocument();
 		});
 
 		test('shows prompt to select two builds', () => {
-			runsQueryState = makeQueryResult({ isSuccess: true, data: [makeRun()] });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = [makeRun()];
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 			expect(screen.getByText('Select two builds to compare.')).toBeInTheDocument();
 		});
 
 		test('search input is visible', () => {
-			runsQueryState = makeQueryResult({ isSuccess: true, data: [makeRun()] });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = [makeRun()];
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 			expect(screen.getByLabelText('Search builds')).toBeInTheDocument();
@@ -188,7 +208,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -203,7 +224,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -218,7 +240,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' }),
 				makeRun({ id: 'run-ccc-3333', created_at: '2024-06-17T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -235,7 +258,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -256,7 +280,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -275,7 +300,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -291,7 +317,8 @@ describe('BuildComparisonPanel', () => {
 
 		test('search shows "No builds match" when nothing matches', async () => {
 			const runs = [makeRun({ id: 'run-aaa-1111' })];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -305,7 +332,8 @@ describe('BuildComparisonPanel', () => {
 	describe('compare button', () => {
 		test('shows selected builds section when runs available', () => {
 			const runs = [makeRun({ id: 'run-aaa-1111' }), makeRun({ id: 'run-bbb-2222' })];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 			expect(screen.getByText('Selected builds')).toBeInTheDocument();
@@ -313,7 +341,8 @@ describe('BuildComparisonPanel', () => {
 
 		test('shows prompt to select two builds when none selected', () => {
 			const runs = [makeRun({ id: 'run-aaa-1111' }), makeRun({ id: 'run-bbb-2222' })];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 			expect(screen.getByText('Select two builds to compare.')).toBeInTheDocument();
@@ -324,7 +353,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -337,7 +367,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -351,7 +382,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -370,7 +402,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -383,7 +416,8 @@ describe('BuildComparisonPanel', () => {
 				makeRun({ id: 'run-aaa-1111' }),
 				makeRun({ id: 'run-bbb-2222', created_at: '2024-06-16T12:00:00Z' })
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: [] });
 			renderPanel();
 
@@ -411,7 +445,8 @@ describe('BuildComparisonPanel', () => {
 				{ snapshot_id: 'snap-100', timestamp_ms: 1718450000000 },
 				{ snapshot_id: 'snap-200', timestamp_ms: 1718536000000 }
 			];
-			runsQueryState = makeQueryResult({ isSuccess: true, data: runs });
+			mockStoreStatus = 'connected';
+			mockStoreRuns = runs;
 			snapshotsQueryState = makeQueryResult({ data: snapshots });
 
 			return {

@@ -10,6 +10,7 @@ import pytest
 from openpyxl import Workbook
 from sqlmodel import select
 
+from core.exceptions import DataSourceValidationError
 from modules.analysis.models import Analysis
 from modules.datasource.models import DataSource
 from modules.datasource.service import _compute_histogram, create_analysis_datasource
@@ -429,6 +430,34 @@ class TestDataSourceValidation:
         assert config['source']['start_col'] == 0
         assert config['source']['end_col'] == 1
         assert config['source']['end_row'] == 2
+
+    @patch('modules.datasource.routes.run_db')
+    def test_confirm_excel_preserves_validation_error(self, mock_run_db, client, temp_upload_dir: Path):
+        excel_path = temp_upload_dir / 'confirm-invalid.xlsx'
+        workbook = Workbook()
+        sheet = workbook.active
+        if sheet is None:
+            pytest.skip('Excel support not available')
+        sheet.title = 'Sheet1'
+        sheet.append(['id', 'name'])
+        sheet.append([1, 'A'])
+        workbook.save(excel_path)
+
+        with open(excel_path, 'rb') as f:
+            files = {'file': ('confirm-invalid.xlsx', f.read(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+
+        preflight = client.post('/api/v1/datasource/preflight', files=files)
+        assert preflight.status_code == 200
+        preflight_id = preflight.json()['preflight_id']
+
+        mock_run_db.side_effect = DataSourceValidationError('Excel selection is invalid')
+        confirm = client.post(
+            '/api/v1/datasource/confirm',
+            data={'preflight_id': preflight_id, 'name': 'Broken Excel', 'sheet_name': 'Sheet1', 'has_header': 'true'},
+        )
+
+        assert confirm.status_code == 400
+        assert confirm.json()['detail'] == 'Excel selection is invalid'
 
 
 class TestDataSourceSchema:

@@ -1,31 +1,52 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+async function waitForAnyVisible(locator: Locator, timeout: number): Promise<void> {
+	await expect
+		.poll(
+			async () => {
+				const count = await locator.count();
+				for (let index = 0; index < count; index += 1) {
+					if (
+						await locator
+							.nth(index)
+							.isVisible()
+							.catch(() => false)
+					) {
+						return true;
+					}
+				}
+				return false;
+			},
+			{ timeout }
+		)
+		.toBe(true);
+}
+
 /**
- * Wait for the app shell to finish hydrating by confirming the Settings
- * button in the sidebar is visible and enabled. The sidebar only renders
- * once the layout `ready` flag is true (configStore loaded, auth resolved),
- * so a visible actionable button is a stronger readiness signal than the
- * container element alone.
+ * Wait for the app shell to finish hydrating by confirming the main
+ * navigation sidebar is visible. The sidebar only renders once the layout
+ * `ready` flag is true (configStore loaded, auth resolved), so the labeled
+ * navigation container is the stable shell readiness signal.
  *
- * Call before any interaction with shell-level UI (Settings, theme toggle,
+ * Call before any interaction with shell-level UI (profile, theme toggle,
  * nav links) that lives outside page-specific content.
  */
 export async function waitForAppShell(page: Page, timeout = 15_000): Promise<void> {
-	await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout });
+	await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout });
 }
 
 /**
  * Shared layout readiness gate. Confirms:
- *  1. The sidebar Settings button is visible (app shell hydrated).
+ *  1. The main navigation sidebar is visible (app shell hydrated).
  *  2. The `<main>` content area has mounted (page slot rendered).
  *
  * Use as the first await after `page.goto(...)` before any page-specific
  * assertions. This guarantees the layout `ready` flag resolved, auth
  * completed, and the Svelte page component has started rendering.
  */
-export async function waitForLayoutReady(page: Page, timeout = 15_000): Promise<void> {
-	await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout });
-	await expect(page.getByRole('main').first()).toBeVisible({ timeout });
+export async function waitForLayoutReady(page: Page, timeout = 30_000): Promise<void> {
+	await expect(page.getByLabel('Main navigation')).toBeVisible({ timeout });
+	await waitForAnyVisible(page.locator('main'), timeout);
 }
 
 /**
@@ -45,7 +66,7 @@ export async function waitForDatasourceList(page: Page, timeout = 15_000): Promi
 	const terminal = page.locator(
 		'[data-ds-row], :text("No data sources yet"), :text("No datasources match"), [aria-live="polite"]'
 	);
-	await expect(terminal.first()).toBeVisible({ timeout });
+	await waitForAnyVisible(terminal, timeout);
 }
 
 /**
@@ -70,11 +91,11 @@ export async function gotoAnalysesGallery(page: Page, timeout = 15_000): Promise
 	const anyContent = page.locator(
 		'[data-analysis-card], :text("No analyses match"), :text("No analyses yet")'
 	);
-	await expect(anyContent.first()).toBeVisible({ timeout });
+	await waitForAnyVisible(anyContent, timeout);
 
 	// Wait for the search input to exist (only renders when analyses exist),
 	// then let IndexedDB hydration settle by polling until the value stabilizes.
-	const searchBox = page.getByRole('textbox').first();
+	const searchBox = page.getByRole('textbox', { name: 'Search analyses' });
 	const visible = await searchBox.isVisible().catch(() => false);
 	if (visible) {
 		// Poll until the search value stabilizes (IndexedDB hydration is async).
@@ -96,9 +117,10 @@ export async function gotoAnalysesGallery(page: Page, timeout = 15_000): Promise
 		if (value) {
 			await searchBox.fill('');
 			// After clearing, wait for gallery content to re-render
-			await expect(
-				page.locator('[data-analysis-card], :text("No analyses yet")').first()
-			).toBeVisible({ timeout });
+			await waitForAnyVisible(
+				page.locator('[data-analysis-card], :text("No analyses yet")'),
+				timeout
+			);
 		}
 	}
 }
@@ -152,7 +174,7 @@ export async function waitForUdfList(page: Page, timeout = 15_000): Promise<void
 	await expect(page.getByRole('heading', { name: 'UDF Library' })).toBeVisible({ timeout });
 
 	const terminal = page.locator('[data-udf-card], :text("No UDFs yet"), [aria-live="polite"]');
-	await expect(terminal.first()).toBeVisible({ timeout });
+	await waitForAnyVisible(terminal, timeout);
 }
 
 /**
@@ -184,12 +206,13 @@ export async function openSchemaTabAndWait(page: Page, timeout = 15_000): Promis
 	const schemaReady = config.locator(
 		'[data-schema-column], :text("No schema information available"), :text("Loading schema")'
 	);
-	await expect(schemaReady.first()).toBeVisible({ timeout });
+	await waitForAnyVisible(schemaReady, timeout);
 
 	// If schema is still loading, wait for it to finish
-	await expect(
-		config.locator('[data-schema-column], :text("No schema information available")').first()
-	).toBeVisible({ timeout });
+	await waitForAnyVisible(
+		config.locator('[data-schema-column], :text("No schema information available")'),
+		timeout
+	);
 }
 
 /**
@@ -200,7 +223,44 @@ export async function openSchemaTabAndWait(page: Page, timeout = 15_000): Promis
  * completes — success or failure. The Save button is the strongest
  * readiness signal: it sits at the bottom of the form branch and proves
  * the entire settings form tree has rendered.
+ *
+ * @deprecated Settings now live under the profile page tabs. Use
+ * {@link waitForProfileTab} instead.
  */
 export async function waitForSettingsForm(dialog: Locator, timeout = 10_000): Promise<void> {
 	await expect(dialog.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
+}
+
+/**
+ * Wait for the profile page tabbed interface to be ready.
+ *
+ * Readiness signal: the tab list renders and at least one tab is selected.
+ * Call after `page.goto('/profile')` or navigating to a specific hash tab.
+ */
+export async function waitForProfileTabs(page: Page, timeout = 15_000): Promise<void> {
+	await expect(page.getByRole('tablist', { name: 'Profile sections' })).toBeVisible({ timeout });
+	await expect(page.getByRole('tab', { selected: true })).toBeVisible({ timeout });
+}
+
+/**
+ * Navigate to a specific profile tab and wait for it to load.
+ *
+ * Clicks the tab button and waits for the corresponding panel to be visible
+ * and for any loading spinners to clear. For settings tabs (notifications,
+ * ai-providers, system) the Save button is the readiness signal.
+ */
+export async function waitForProfileTab(
+	page: Page,
+	tabName: string,
+	timeout = 15_000
+): Promise<void> {
+	const tab = page.getByRole('tab', { name: tabName });
+	await expect(tab).toBeVisible({ timeout });
+	await tab.click();
+	await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout });
+
+	// For settings tabs, wait for Save button (proves data loaded)
+	if (['Notifications', 'AI Providers', 'System'].includes(tabName)) {
+		await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout });
+	}
 }

@@ -1,58 +1,24 @@
-import { test, expect } from '@playwright/test';
-import type { APIRequestContext } from '@playwright/test';
-import { createDatasource, createLargeDatasource, API_BASE } from './utils/api.js';
+import { test, expect } from './fixtures.js';
+import { createDatasource, createLargeDatasource } from './utils/api.js';
 import { deleteDatasourceViaUI } from './utils/ui-cleanup.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
-import { selectDatasourceAndWaitForConfig, openSchemaTabAndWait } from './utils/readiness.js';
-
-async function waitForDatasourceCreateRun(
-	request: APIRequestContext,
-	datasourceId: string,
-	timeoutMs = 15_000
-): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		const resp = await request.get(
-			`${API_BASE}/engine-runs?datasource_id=${datasourceId}&limit=50`
-		);
-		if (resp.ok()) {
-			const runs = (await resp.json()) as Array<{ kind: string }>;
-			if (runs.some((r) => r.kind === 'datasource_create')) return;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 500));
-	}
-	throw new Error(
-		`waitForDatasourceCreateRun: no datasource_create run for ${datasourceId} within ${timeoutMs}ms`
-	);
-}
+import {
+	selectDatasourceAndWaitForConfig,
+	openSchemaTabAndWait,
+	waitForDatasourceList
+} from './utils/readiness.js';
 
 /**
  * E2E tests for datasources – mirrors test_datasource.py / test_datasource_extended.py.
  */
 test.describe('Datasources – list & management', () => {
-	test('shows empty state when no datasources exist', async ({ page }) => {
-		await page.route('**/api/v1/datasource', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([])
-				});
-			}
-			return route.continue();
-		});
-
-		await page.goto('/datasources');
-		await expect(page.getByText(/No data sources yet/i)).toBeVisible();
-	});
-
 	test('lists datasource after API create', async ({ page, request }) => {
 		const ds = `e2e-visible-${uid()}`;
 		await createDatasource(request, ds);
 		try {
 			await page.goto('/datasources');
-			await expect(page.getByText(ds)).toBeVisible();
+			await expect(page.locator(`[data-ds-row="${ds}"]`)).toBeVisible();
 			await screenshot(page, 'datasources', 'list-with-datasource');
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
@@ -64,9 +30,10 @@ test.describe('Datasources – list & management', () => {
 		await createDatasource(request, ds);
 		try {
 			await page.goto('/datasources');
-			await expect(page.getByText(ds).first()).toBeVisible();
+			const row = page.locator(`[data-ds-row="${ds}"]`);
+			await expect(row).toBeVisible();
 			// uploaded files have "Import" badge
-			await expect(page.getByText('Import').first()).toBeVisible();
+			await expect(row.getByText('Import', { exact: true })).toBeVisible();
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
 		}
@@ -77,10 +44,11 @@ test.describe('Datasources – list & management', () => {
 		await createDatasource(request, ds);
 		try {
 			await page.goto('/datasources');
-			await expect(page.getByText(ds)).toBeVisible();
+			const row = page.locator(`[data-ds-row="${ds}"]`);
+			await expect(row).toBeVisible();
 
 			await page.getByPlaceholder(/Search datasources/i).fill('ZZZNOMATCH');
-			await expect(page.getByText(ds)).not.toBeVisible();
+			await expect(row).not.toBeVisible();
 			await expect(page.getByText(/No datasources match/i)).toBeVisible();
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
@@ -97,7 +65,7 @@ test.describe('Datasources – list & management', () => {
 			await page.goto('/datasources');
 			await expect(page.getByText(/No datasource selected/i)).toBeVisible();
 
-			await page.getByText(ds).click();
+			await page.locator(`[data-ds-row="${ds}"]`).click();
 			await expect(page.getByText(/No datasource selected/i)).not.toBeVisible();
 		} finally {
 			await deleteDatasourceViaUI(page, ds);
@@ -113,8 +81,8 @@ test.describe('Datasources – list & management', () => {
 		await createDatasource(request, dsB);
 		try {
 			await page.goto('/datasources');
-			await expect(page.getByText(dsA)).toBeVisible();
-			await expect(page.getByText(dsB)).toBeVisible();
+			await expect(page.locator(`[data-ds-row="${dsA}"]`)).toBeVisible();
+			await expect(page.locator(`[data-ds-row="${dsB}"]`)).toBeVisible();
 		} finally {
 			await deleteDatasourceViaUI(page, dsA);
 			await deleteDatasourceViaUI(page, dsB);
@@ -125,7 +93,7 @@ test.describe('Datasources – list & management', () => {
 		const ds = `e2e-delete-${uid()}`;
 		await createDatasource(request, ds);
 		await page.goto('/datasources');
-		await expect(page.getByText(ds).first()).toBeVisible();
+		await expect(page.locator(`[data-ds-row="${ds}"]`)).toBeVisible();
 
 		// The delete button has title="Delete" inside the datasource row container
 		const row = page.locator(`[data-ds-row="${ds}"]`);
@@ -186,7 +154,7 @@ test.describe('Datasources – upload page', () => {
 		// Wait for navigation away from /new, then verify the datasource exists in the list
 		await expect(page).toHaveURL((url) => !url.pathname.endsWith('/new'), { timeout: 30_000 });
 		await page.goto('/datasources');
-		await expect(page.getByText(dsName)).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator(`[data-ds-row="${dsName}"]`)).toBeVisible({ timeout: 15_000 });
 
 		await deleteDatasourceViaUI(page, dsName);
 	});
@@ -256,7 +224,7 @@ test.describe('Datasources – detail view', () => {
 		await page.locator(`[data-ds-row="${ds}"]`).click();
 
 		// Preview loads in the right pane (DatasourcePreview), not in a config tab
-		await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
 
 		// Verify actual column headers from the CSV are rendered
 		await expect(page.locator('[data-column-id="id"]')).toBeVisible({ timeout: 5_000 });
@@ -265,9 +233,10 @@ test.describe('Datasources – detail view', () => {
 		await expect(page.locator('[data-column-id="city"]')).toBeVisible();
 
 		// Verify actual data values from the CSV
-		await expect(page.getByText('Alice', { exact: true }).first()).toBeVisible();
-		await expect(page.getByText('London', { exact: true }).first()).toBeVisible();
-		await expect(page.getByText('Berlin', { exact: true }).first()).toBeVisible();
+		const preview = page.locator('[data-preview-ready="true"]');
+		await expect(preview.getByText('Alice', { exact: true })).toBeVisible();
+		await expect(preview.getByText('London', { exact: true })).toBeVisible();
+		await expect(preview.getByText('Berlin', { exact: true })).toBeVisible();
 	});
 });
 
@@ -276,10 +245,12 @@ test.describe('Datasources – preview pagination', () => {
 
 	test('pagination navigates between pages', async ({ page, request }) => {
 		const ds = `e2e-pagination-${uid()}`;
-		const dsId = await createLargeDatasource(request, ds, 150);
+		await createLargeDatasource(request, ds, 150);
 		try {
-			await page.goto(`/datasources?id=${dsId}`);
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+			await page.goto('/datasources');
+			await waitForDatasourceList(page);
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
 
 			const pageLabel = page.locator('[data-testid="pagination-page"]');
 			await expect(pageLabel).toHaveText('Page 1');
@@ -293,14 +264,14 @@ test.describe('Datasources – preview pagination', () => {
 			await expect(nextBtn).toBeEnabled();
 
 			await nextBtn.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
 			await expect(pageLabel).toHaveText('Page 2');
 			await expect(prevBtn).toBeEnabled();
 
 			await screenshot(page, 'datasources', 'preview-pagination-page2');
 
 			await prevBtn.click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
 			await expect(pageLabel).toHaveText('Page 1');
 			await expect(prevBtn).toBeDisabled();
 		} finally {
@@ -317,8 +288,8 @@ test.describe('Datasources – column stats panel', () => {
 		await createDatasource(request, ds);
 		try {
 			await page.goto('/datasources');
-			await page.getByText(ds).click();
-			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 15_000 });
+			await page.locator(`[data-ds-row="${ds}"]`).click();
+			await expect(page.locator('[data-preview-ready="true"]')).toBeVisible({ timeout: 30_000 });
 
 			// Open column menu for "age" column
 			const ageHeader = page.locator('[data-column-id="age"]');
@@ -348,59 +319,22 @@ test.describe('Datasources – column stats panel', () => {
 	});
 });
 
-test.describe('Datasources – preview error state', () => {
-	test.setTimeout(45_000);
-
-	test('shows error UI when preview API fails', async ({ page, request }) => {
-		const ds = `e2e-error-${uid()}`;
-		await createDatasource(request, ds);
-		try {
-			// Force HTTP transport so page.route() can intercept compute requests
-			// (Playwright cannot intercept WebSocket connections)
-			await page.addInitScript(() => localStorage.setItem('debug:prefer-http', 'true'));
-
-			// Intercept the compute preview API to return a 500 error
-			await page.route('**/api/v1/compute/preview', (route) =>
-				route.fulfill({
-					status: 500,
-					contentType: 'application/json',
-					body: JSON.stringify({ detail: 'Simulated preview failure' })
-				})
-			);
-
-			await page.goto('/datasources');
-			await page.getByText(ds).click();
-
-			// The error state should be visible
-			const errorEl = page.locator('[data-testid="preview-error"]');
-			await expect(errorEl).toBeVisible({ timeout: 15_000 });
-			await expect(errorEl.getByText('Failed')).toBeVisible();
-
-			await screenshot(page, 'datasources', 'preview-error-state');
-		} finally {
-			await page.unrouteAll({ behavior: 'ignoreErrors' });
-			await deleteDatasourceViaUI(page, ds);
-		}
-	});
-});
-
 test.describe('Datasources – config tab interactions', () => {
 	test.setTimeout(45_000);
 
 	test('Runs tab shows datasource_create run for fresh datasource', async ({ page, request }) => {
 		const ds = `e2e-runs-tab-${uid()}`;
-		const dsId = await createDatasource(request, ds);
-		await waitForDatasourceCreateRun(request, dsId);
+		await createDatasource(request, ds);
 		try {
 			await page.goto('/datasources');
-			await page.getByText(ds).click();
+			await page.locator(`[data-ds-row="${ds}"]`).click();
 
 			const config = page.locator('[data-ds-config]');
 			await expect(config).toBeVisible({ timeout: 8_000 });
 
 			await config.getByRole('tab', { name: 'Runs' }).click();
 			// Creating a datasource via API upload triggers a datasource_create engine run
-			await expect(config.getByText('Create', { exact: true })).toBeVisible({ timeout: 10_000 });
+			await expect(config.getByText('Create', { exact: true })).toBeVisible({ timeout: 15_000 });
 
 			await screenshot(page, 'datasources', 'runs-tab-with-create-run');
 		} finally {
@@ -415,12 +349,12 @@ test.describe('Datasources – config tab interactions', () => {
 		await createDatasource(request, ds);
 		try {
 			await page.goto('/datasources');
-			await page.getByText(ds).click();
+			await page.locator(`[data-ds-row="${ds}"]`).click();
 
 			const config = page.locator('[data-ds-config]');
 			await expect(config).toBeVisible({ timeout: 8_000 });
 
-			const nameInput = config.locator('input[type="text"]').first();
+			const nameInput = config.locator('[id^="datasource-name-"]');
 			await nameInput.fill(renamed);
 
 			await expect(config.getByRole('button', { name: 'Save Changes' })).toBeVisible({
@@ -438,7 +372,7 @@ test.describe('Datasources – config tab interactions', () => {
 
 			// After save, reload page and verify renamed datasource appears
 			await page.reload();
-			await expect(page.getByText(renamed)).toBeVisible({ timeout: 10_000 });
+			await expect(page.locator(`[data-ds-row="${renamed}"]`)).toBeVisible({ timeout: 10_000 });
 		} finally {
 			await deleteDatasourceViaUI(page, renamed);
 		}

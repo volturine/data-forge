@@ -1,35 +1,45 @@
 import type { EngineStatusResponse } from '$lib/types/compute';
-import { listEngines, shutdownEngine as shutdownEngineApi } from '$lib/api/compute';
-import { configStore } from './config.svelte';
+import { connectEnginesStream, shutdownEngine as shutdownEngineApi } from '$lib/api/compute';
+
+const RECONNECT_DELAY_MS = 1_000;
+
+export type EnginesConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export class EnginesStore {
 	engines = $state<EngineStatusResponse[]>([]);
 	loading = $state(false);
 	error = $state<string | null>(null);
+	status = $state<EnginesConnectionStatus>('disconnected');
 
-	private interval: ReturnType<typeof setInterval> | null = null;
+	private connection: { close: () => void } | null = null;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private shouldReconnect = false;
+	private subscribers = 0;
 
 	count = $derived(this.engines.length);
 
-	async fetch(): Promise<void> {
-		this.loading = true;
-		this.error = null;
+	startStream(): void {
+		this.subscribers++;
+		if (this.shouldReconnect) return;
+		this.shouldReconnect = true;
+		this.openConnection(true);
+	}
 
-		await listEngines().match(
-			(response) => {
-				this.engines = response.engines;
-			},
-			(err) => {
-				this.error = err.message;
-			}
-		);
+	stopStream(): void {
+		this.subscribers = Math.max(0, this.subscribers - 1);
+		if (this.subscribers > 0) return;
+		this.shouldReconnect = false;
+		this.clearReconnectTimer();
+		this.connection?.close();
+		this.connection = null;
 		this.loading = false;
+		this.status = 'disconnected';
 	}
 
 	async shutdownEngine(analysisId: string): Promise<void> {
 		await shutdownEngineApi(analysisId).match(
 			() => {
-				this.engines = this.engines.filter((e) => e.analysis_id !== analysisId);
+				this.engines = this.engines.filter((engine) => engine.analysis_id !== analysisId);
 			},
 			(err) => {
 				this.error = err.message;
@@ -38,30 +48,69 @@ export class EnginesStore {
 		);
 	}
 
-	async startPolling(): Promise<void> {
-		if (this.interval !== null) return;
+	reset(): void {
+		this.shouldReconnect = false;
+		this.subscribers = 0;
+		this.clearReconnectTimer();
+		this.connection?.close();
+		this.connection = null;
+		this.engines = [];
+		this.loading = false;
+		this.error = null;
+		this.status = 'disconnected';
+	}
 
-		// Try to load config but don't block polling if it fails
-		if (!configStore.config) {
-			await configStore.fetch();
+	get isStreaming(): boolean {
+		return this.shouldReconnect;
+	}
+
+	private openConnection(isInitial: boolean): void {
+		if (this.connection) return;
+
+		this.clearReconnectTimer();
+		this.error = null;
+		this.status = 'connecting';
+		if (isInitial && this.engines.length === 0) {
+			this.loading = true;
 		}
 
-		this.fetch();
-
-		this.interval = setInterval(() => {
-			this.fetch();
-		}, configStore.enginePoolingInterval);
+		this.connection = connectEnginesStream({
+			onSnapshot: (engines) => {
+				this.engines = engines;
+				this.loading = false;
+				this.error = null;
+				this.status = 'connected';
+			},
+			onError: (message) => {
+				this.loading = false;
+				this.error = message;
+				this.status = 'error';
+			},
+			onClose: () => {
+				this.connection = null;
+				if (!this.shouldReconnect) {
+					this.loading = false;
+					this.status = 'disconnected';
+					return;
+				}
+				this.scheduleReconnect();
+			}
+		});
 	}
 
-	stopPolling(): void {
-		if (this.interval === null) return;
-
-		clearInterval(this.interval);
-		this.interval = null;
+	private scheduleReconnect(): void {
+		if (this.reconnectTimer !== null) return;
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			if (!this.shouldReconnect) return;
+			this.openConnection(false);
+		}, RECONNECT_DELAY_MS);
 	}
 
-	get isPolling(): boolean {
-		return this.interval !== null;
+	private clearReconnectTimer(): void {
+		if (this.reconnectTimer === null) return;
+		clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = null;
 	}
 }
 

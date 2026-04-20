@@ -9,6 +9,8 @@
 
 	import type { Snippet } from 'svelte';
 	import { css } from '$lib/styles/panda';
+	import { overlayStack } from '$lib/stores/overlay.svelte';
+	import type { OverlayConfig } from '$lib/stores/overlay.svelte';
 
 	interface Props {
 		open: boolean;
@@ -66,13 +68,10 @@
 		onClose?.();
 	}
 
-	function handleKeydown(event: KeyboardEvent) {
-		if (!open) return;
-		if (!closeOnEscape) return;
-		if (event.key !== 'Escape') return;
-		event.preventDefault();
-		handleClose();
-	}
+	const overlayConfig = $derived<OverlayConfig>({
+		onEscape: closeOnEscape ? handleClose : undefined,
+		modal: true
+	});
 
 	function handleBackdropMousedown(event: MouseEvent) {
 		if (!closeOnBackdrop) return;
@@ -96,10 +95,13 @@
 	});
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
 {#if open}
-	<div class={overlayClass} onmousedown={handleBackdropMousedown} role="presentation">
+	<div
+		class={overlayClass}
+		onmousedown={handleBackdropMousedown}
+		role="presentation"
+		use:overlayStack.action={overlayConfig}
+	>
 		<div
 			bind:this={panelRef}
 			class={panelClass}

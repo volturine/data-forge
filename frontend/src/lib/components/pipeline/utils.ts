@@ -1,7 +1,7 @@
 import {
 	ArrowUpDown,
-	BarChart3,
-	BarChart4,
+	ChartColumn,
+	ChartColumnIncreasing,
 	Bomb,
 	Brush,
 	Calculator,
@@ -9,7 +9,7 @@ import {
 	Dices,
 	Download,
 	Eye,
-	Filter,
+	Funnel,
 	LayoutGrid,
 	Link,
 	Pencil,
@@ -42,7 +42,7 @@ function truncate(items: string[], max = 3, len = 20): string {
 
 type StepTypeConfig = {
 	label: string;
-	icon: typeof Filter;
+	icon: typeof Funnel;
 	typeLabel: string;
 	summary: (c: Record<string, unknown>) => string;
 };
@@ -50,7 +50,7 @@ type StepTypeConfig = {
 const stepTypes = {
 	filter: {
 		label: 'Filter',
-		icon: Filter,
+		icon: Funnel,
 		typeLabel: 'filter',
 		summary: (c) => {
 			const conds = c.conditions as Array<{ column: string; operator: string; value: string }>;
@@ -73,7 +73,7 @@ const stepTypes = {
 	},
 	groupby: {
 		label: 'Group By',
-		icon: BarChart3,
+		icon: ChartColumn,
 		typeLabel: 'group_by',
 		summary: (c) => {
 			const keys = c.group_by as string[];
@@ -296,7 +296,7 @@ const stepTypes = {
 
 	chart: {
 		label: 'Chart',
-		icon: BarChart4,
+		icon: ChartColumnIncreasing,
 		typeLabel: 'chart',
 		summary: (c) => {
 			const chartType = (c.chart_type as string) || 'chart';

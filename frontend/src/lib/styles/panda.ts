@@ -1,6 +1,6 @@
-import { css, cx } from '../../../styled-system/css';
+import { css } from '../../../styled-system/css';
 
-export { css, cx };
+export { css };
 export {
 	iconButton,
 	button,
@@ -19,14 +19,3 @@ export {
 	label,
 	stepConfig
 } from '../../../styled-system/recipes';
-
-export const muted = css({ color: 'fg.muted' });
-export const row = css({ display: 'flex', alignItems: 'center' });
-export const rowBetween = css({
-	display: 'flex',
-	alignItems: 'center',
-	justifyContent: 'space-between'
-});
-export const divider = css({
-	borderTopWidth: '1'
-});

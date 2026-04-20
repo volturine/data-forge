@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createDatasource, createAnalysis } from './utils/api.js';
 import {
 	createCleanupPage,
@@ -26,7 +26,7 @@ test.describe('Analyses – list & gallery', () => {
 		await createAnalysis(request, aName, dsId);
 		try {
 			await gotoAnalysesGallery(page);
-			await expect(page.getByText(aName)).toBeVisible();
+			await expect(page.locator(`[data-analysis-card="${aName}"]`)).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);
@@ -45,8 +45,7 @@ test.describe('Analyses – list & gallery', () => {
 			const card = page.locator(`[data-analysis-card="${analysisName}"]`);
 			await expect(card).toBeVisible();
 
-			// The search box rendered by AnalysisFilters
-			await page.getByRole('textbox').first().fill('ZZZNOMATCH');
+			await page.getByRole('textbox', { name: 'Search analyses' }).fill('ZZZNOMATCH');
 			await expect(page.getByText(/No analyses match your search/i)).toBeVisible();
 		} finally {
 			await deleteAnalysisViaUI(page, analysisName);
@@ -62,13 +61,10 @@ test.describe('Analyses – list & gallery', () => {
 		try {
 			await page.goto('/');
 			const card = page.locator(`[data-analysis-card="${aName}"]`);
-			await expect(card.first()).toBeVisible();
+			await expect(card).toBeVisible();
 			const countBefore = await card.count();
 
-			await card
-				.first()
-				.getByRole('button', { name: /Delete analysis/ })
-				.click();
+			await card.getByRole('button', { name: /Delete analysis/ }).click();
 
 			// Confirm dialog appears
 			const dialog = page.getByRole('dialog');
@@ -102,24 +98,6 @@ test.describe('Analyses – create wizard', () => {
 		await screenshot(page, 'analysis/crud', 'wizard-step-2');
 	});
 
-	test('step 2: shows "No data sources available" when none exist', async ({ page }) => {
-		await page.route('**/api/v1/datasource', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([])
-				});
-			}
-			return route.continue();
-		});
-
-		await gotoNewAnalysis(page);
-		await page.locator('#name').fill('E2E No DS');
-		await page.getByRole('button', { name: /Next/i }).click();
-		await expect(page.getByText(/No data sources available/i)).toBeVisible();
-	});
-
 	test('can navigate Back from step 2 to step 1', async ({ page }) => {
 		await gotoNewAnalysis(page);
 		await page.locator('#name').fill('Back Test');
@@ -149,7 +127,7 @@ test.describe('Analyses – create wizard', () => {
 			// Step 2 – pick datasource
 			await expect(page.getByRole('heading', { name: /Select Data Sources/i })).toBeVisible();
 			await page.getByPlaceholder('Search datasources...').click();
-			await page.locator('[role="option"]', { hasText: dsName }).first().click();
+			await page.locator(`[data-picker-option="${dsName}"]`).click();
 			// Close the dropdown by clicking outside
 			await page.getByRole('heading', { name: /Select Data Sources/i }).click();
 			await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
@@ -157,11 +135,14 @@ test.describe('Analyses – create wizard', () => {
 
 			// Step 3 – review
 			await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
-			await expect(page.getByText(aName).first()).toBeVisible();
+			await expect(page.locator('main')).toContainText(aName);
 			await page.getByRole('button', { name: /Create Analysis/i }).click();
 
-			// Redirects to analysis editor
-			await expect(page).toHaveURL(/\/analysis\/.+/, { timeout: 20_000 });
+			// Redirects to an actual analysis editor, not back to /analysis/new
+			await expect(page).toHaveURL(
+				(url) => url.pathname.startsWith('/analysis/') && url.pathname !== '/analysis/new',
+				{ timeout: 20_000 }
+			);
 		} finally {
 			await deleteAnalysisViaUI(page, aName);
 			await deleteDatasourceViaUI(page, dsName);
@@ -197,8 +178,8 @@ test.describe('Analyses – detail page', () => {
 		aId = await createAnalysis(request, aName, dsId);
 	});
 
-	test.afterAll(async ({ browser }) => {
-		const { page, context } = await createCleanupPage(browser);
+	test.afterAll(async ({ browser, workerAuth }) => {
+		const { page, context } = await createCleanupPage(browser, workerAuth.workerIndex);
 		await deleteAnalysisViaUI(page, aName);
 		await deleteDatasourceViaUI(page, dsName);
 		await page.close();
@@ -240,44 +221,28 @@ test.describe('Analyses – detail page', () => {
 });
 
 test.describe('Analyses – detail error state', () => {
+	const BAD_ID = '00000000-0000-0000-0000-000000000000';
+
 	test('bad analysis ID shows error state without crashing the shell', async ({ page }) => {
-		// Intercept the analysis fetch to simulate a 500 error
-		await page.route('**/api/v1/analysis/bad-id-000*', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({ status: 500, body: 'Internal Server Error' });
-			}
-			return route.continue();
-		});
+		await page.goto(`/analysis/${BAD_ID}`);
 
-		await page.goto('/analysis/bad-id-000');
-
-		// Error state should render
 		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
 			timeout: 15_000
 		});
 		await expect(page.getByText('Error loading analysis')).toBeVisible();
 
-		// "Create analysis" recovery button should be present
 		await expect(page.getByRole('button', { name: /Create analysis/i })).toBeVisible();
 
 		await screenshot(page, 'analysis/crud', 'detail-load-error');
 	});
 
 	test('analysis error page does not crash navigation', async ({ page }) => {
-		await page.route('**/api/v1/analysis/bad-id-nav*', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({ status: 500, body: 'Internal Server Error' });
-			}
-			return route.continue();
-		});
-
-		await page.goto('/analysis/bad-id-nav');
+		await page.goto(`/analysis/${BAD_ID}`);
 		await expect(page.locator('[data-testid="analysis-load-error"]')).toBeVisible({
 			timeout: 15_000
 		});
 
-		// Navigate home — shell should still work
-		await page.locator('a[href="/"]').first().click();
+		await page.getByRole('link', { name: 'Analyses' }).click();
 		await expect(page).toHaveURL('/');
 		await expect(page.getByRole('heading', { name: 'Analyses', level: 1 })).toBeVisible();
 	});

@@ -646,7 +646,7 @@
 				<div
 					class={css({
 						borderWidth: '1',
-						borderColor: err ? 'border.error' : 'border.default',
+						borderColor: err ? 'border.error' : 'border.primary',
 						borderRadius: 'sm',
 						overflow: 'hidden'
 					})}
@@ -668,8 +668,8 @@
 									padding: '1',
 									borderWidth: '1',
 									borderRadius: 'sm',
-									backgroundColor: 'bg.canvas',
-									color: 'fg.default'
+									backgroundColor: 'bg.secondary',
+									color: 'fg.primary'
 								})}
 								type="text"
 								value={rowKey}
@@ -697,8 +697,8 @@
 										padding: '1',
 										borderWidth: '1',
 										borderRadius: 'sm',
-										backgroundColor: 'bg.canvas',
-										color: 'fg.default'
+										backgroundColor: 'bg.secondary',
+										color: 'fg.primary'
 									})}
 									type="text"
 									value={rowVal}
@@ -749,7 +749,7 @@
 				<div
 					class={css({
 						borderWidth: '1',
-						borderColor: err ? 'border.error' : 'border.default',
+						borderColor: err ? 'border.error' : 'border.primary',
 						borderRadius: 'sm',
 						overflow: 'hidden'
 					})}
@@ -760,7 +760,7 @@
 								padding: '2',
 								borderBottomWidth: '1',
 
-								backgroundColor: 'bg.subtle'
+								backgroundColor: 'bg.tertiary'
 							})}
 						>
 							<div
@@ -809,7 +809,7 @@
 				<div
 					class={css({
 						borderWidth: '1',
-						borderColor: err ? 'border.error' : 'border.default',
+						borderColor: err ? 'border.error' : 'border.primary',
 						borderRadius: 'sm',
 						overflow: 'hidden'
 					})}
@@ -856,7 +856,7 @@
 				<div
 					class={css({
 						borderWidth: '1',
-						borderColor: err ? 'border.error' : 'border.default',
+						borderColor: err ? 'border.error' : 'border.primary',
 						borderRadius: 'sm',
 						overflow: 'hidden'
 					})}
@@ -881,8 +881,8 @@
 									padding: '1',
 									borderWidth: '1',
 									borderRadius: 'sm',
-									backgroundColor: 'bg.canvas',
-									color: 'fg.default'
+									backgroundColor: 'bg.secondary',
+									color: 'fg.primary'
 								})}
 								type="text"
 								value={subraw}
@@ -965,8 +965,8 @@
 											padding: '1',
 											borderWidth: '1',
 											borderRadius: 'sm',
-											backgroundColor: 'bg.canvas',
-											color: 'fg.default'
+											backgroundColor: 'bg.secondary',
+											color: 'fg.primary'
 										})}
 										type="text"
 										value={rk}
@@ -994,8 +994,8 @@
 												padding: '1',
 												borderWidth: '1',
 												borderRadius: 'sm',
-												backgroundColor: 'bg.canvas',
-												color: 'fg.default'
+												backgroundColor: 'bg.secondary',
+												color: 'fg.primary'
 											})}
 											type="text"
 											value={String(rv ?? '')}
@@ -1034,7 +1034,7 @@
 				<div
 					class={css({
 						borderWidth: '1',
-						borderColor: err ? 'border.error' : 'border.default',
+						borderColor: err ? 'border.error' : 'border.primary',
 						borderRadius: 'sm',
 						overflow: 'hidden'
 					})}
@@ -1056,8 +1056,8 @@
 									padding: '1',
 									borderWidth: '1',
 									borderRadius: 'sm',
-									backgroundColor: 'bg.canvas',
-									color: 'fg.default'
+									backgroundColor: 'bg.secondary',
+									color: 'fg.primary'
 								})}
 								type="text"
 								value={rk}
@@ -1085,8 +1085,8 @@
 										padding: '1',
 										borderWidth: '1',
 										borderRadius: 'sm',
-										backgroundColor: 'bg.canvas',
-										color: 'fg.default'
+										backgroundColor: 'bg.secondary',
+										color: 'fg.primary'
 									})}
 									type="text"
 									value={String(rv ?? '')}

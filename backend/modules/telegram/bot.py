@@ -1,8 +1,8 @@
 import logging
 import threading
-import time
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from core import http as http_client
 
@@ -85,7 +85,8 @@ class TelegramBot:
                 )
                 if resp is None:
                     # Lock not acquired — another caller is using it
-                    time.sleep(1)
+                    if self._wait_for_retry(1):
+                        break
                     continue
                 if resp.status_code == 401:
                     logger.error('Telegram bot token is invalid (401 Unauthorized) — stopping bot')
@@ -101,7 +102,8 @@ class TelegramBot:
                     if consecutive_errors >= max_consecutive_errors:
                         logger.error('Telegram bot hit %d consecutive errors — stopping', max_consecutive_errors)
                         break
-                    time.sleep(5)
+                    if self._wait_for_retry(5):
+                        break
                     continue
                 if resp.status_code != 200:
                     consecutive_errors += 1
@@ -114,23 +116,40 @@ class TelegramBot:
                     if consecutive_errors >= max_consecutive_errors:
                         logger.error('Telegram bot hit %d consecutive errors — stopping', max_consecutive_errors)
                         break
-                    time.sleep(5)
+                    if self._wait_for_retry(5):
+                        break
                     continue
                 consecutive_errors = 0
                 data = resp.json()
-                for update in data.get('result', []):
-                    offset = update['update_id'] + 1
+                if not isinstance(data, dict):
+                    raise ValueError('Telegram getUpdates returned a non-object payload')
+                result = data.get('result', [])
+                if not isinstance(result, list):
+                    raise ValueError('Telegram getUpdates result payload must be a list')
+                for update in result:
+                    if not isinstance(update, dict):
+                        logger.warning('Skipping malformed Telegram update payload: %r', update)
+                        continue
+                    update_id = update.get('update_id')
+                    if not isinstance(update_id, int):
+                        logger.warning('Skipping Telegram update without integer update_id: %r', update)
+                        continue
+                    offset = update_id + 1
                     self._set_offset(self._token, offset)
                     self._handle_update(update)
             except httpx.TimeoutException:
                 continue
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 consecutive_errors += 1
                 logger.exception('Telegram bot error (%d/%d): %s', consecutive_errors, max_consecutive_errors, exc)
                 if consecutive_errors >= max_consecutive_errors:
                     logger.error('Telegram bot hit %d consecutive errors — stopping', max_consecutive_errors)
                     break
-                time.sleep(5)
+                if self._wait_for_retry(5):
+                    break
+
+    def _wait_for_retry(self, seconds: float) -> bool:
+        return self._stop_event.wait(timeout=seconds)
 
     def _do_get_updates(
         self,
@@ -168,7 +187,7 @@ class TelegramBot:
                 json={'drop_pending_updates': False},
                 timeout=10,
             )
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             logger.warning('Failed to clear Telegram webhook for token: %s', exc)
 
     def _get_offset(self, token: str) -> int:
@@ -207,7 +226,7 @@ class TelegramBot:
             run_db(_add)
             self._send_message(chat_id, 'Subscribed! You will receive build notifications.')
             logger.info('Telegram subscriber added: %s (%s)', chat_id, title)
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             logger.exception('Failed to add subscriber %s: %s', chat_id, exc)
             self._send_message(chat_id, 'Failed to subscribe. Please try again.')
 
@@ -226,7 +245,7 @@ class TelegramBot:
             run_db(_remove)
             self._send_message(chat_id, 'Unsubscribed. You will no longer receive notifications.')
             logger.info('Telegram subscriber deactivated: %s', chat_id)
-        except Exception as exc:
+        except SQLAlchemyError as exc:
             logger.exception('Failed to unsubscribe %s: %s', chat_id, exc)
 
     def _send_message(self, chat_id: str, text: str) -> None:
@@ -236,7 +255,7 @@ class TelegramBot:
                 json={'chat_id': chat_id, 'text': text},
                 timeout=10,
             )
-        except Exception as exc:
+        except httpx.HTTPError as exc:
             logger.warning('Failed to send message to %s: %s', chat_id, exc)
 
 

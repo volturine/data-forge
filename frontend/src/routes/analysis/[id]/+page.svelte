@@ -6,6 +6,7 @@
 	import { MediaQuery } from 'svelte/reactivity';
 	import { analysisStore } from '$lib/stores/analysis.svelte';
 	import { datasourceStore } from '$lib/stores/datasource.svelte';
+	import { BuildStreamStore } from '$lib/stores/build-stream.svelte';
 	import { buildAnalysisPipelinePayload } from '$lib/utils/analysis-pipeline';
 	import {
 		buildOutputConfig,
@@ -16,23 +17,31 @@
 		validatePipelineTabs
 	} from '$lib/utils/analysis-tab';
 	import {
+		exportAnalysisCode,
 		getAnalysisWithHeaders,
 		listAnalysisVersions,
 		restoreAnalysisVersion,
 		renameAnalysisVersion,
-		deleteAnalysisVersion
+		deleteAnalysisVersion,
+		type CodeExportFormat,
+		type CodeExportResponse
 	} from '$lib/api/analysis';
 	import { getDatasourceSchema, listDatasources } from '$lib/api/datasource';
-	import { getStepSchema, spawnEngine } from '$lib/api/compute';
-	import { acquireLock, releaseLock, watchLock, type LockWatcher } from '$lib/api/locks';
-	import { authStore } from '$lib/stores/auth.svelte';
+	import { downloadBlob, getEngineDefaults, getStepSchema } from '$lib/api/compute';
+	import { openLockSession, type LockSessionError } from '$lib/api/locks';
 	import type { PipelineStep, AnalysisTab } from '$lib/types/analysis';
 	import { getDefaultConfig } from '$lib/utils/step-config-defaults';
+	import {
+		getEditorAccessState,
+		isEditorReadOnly,
+		type EditorLockMode
+	} from '$lib/utils/analysis-lock-state';
 	import { isChartStep } from '$lib/components/pipeline/utils';
 	import { idbGet, idbSet, idbDelete } from '$lib/utils/indexeddb';
 	import { track } from '$lib/utils/audit-log';
 	import { hashPipeline } from '$lib/utils/hash';
 	import { applySteps } from '$lib/utils/pipeline';
+	import { createAsyncGate } from '$lib/utils/async-gate';
 	import type { EngineResourceConfig, EngineDefaults } from '$lib/types/compute';
 	import type { DropTarget } from '$lib/stores/drag.svelte';
 	import StepLibrary from '$lib/components/pipeline/StepLibrary.svelte';
@@ -42,14 +51,20 @@
 	import StepConfig from '$lib/components/pipeline/StepConfig.svelte';
 	import DragPreview from '$lib/components/pipeline/DragPreview.svelte';
 	import DatasourceSelectorModal from '$lib/components/common/DatasourceSelectorModal.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { schemaStore } from '$lib/stores/schema.svelte';
-	import { css, cx, spinner, button, input, row } from '$lib/styles/panda';
+	import { css, spinner, button } from '$lib/styles/panda';
 	import {
+		Lock,
+		LockOpen,
+		Clock,
 		ChevronDown,
 		ChevronLeft,
 		ChevronRight,
 		ChevronUp,
+		Copy,
+		Download,
 		PanelRight,
 		PanelBottom,
 		Pencil,
@@ -63,6 +78,7 @@
 	let lastAnalysisId = $state<string | null>(null);
 
 	let selectedStepId = $state<string | null>(null);
+	const buildStore = new BuildStreamStore();
 	const selectedStepState = $derived.by(() => {
 		if (!selectedStepId) return null;
 		return analysisStore.pipeline.find((step) => step.id === selectedStepId) || null;
@@ -85,6 +101,7 @@
 	$effect(() => {
 		return () => {
 			if (tabErrorTimer !== null) window.clearTimeout(tabErrorTimer);
+			buildStore.close();
 		};
 	});
 
@@ -93,71 +110,89 @@
 	let draftTimer: number | null = null;
 	let lastLoadedVersion = $state<string | null>(null);
 	let hydratedGates = $state(new Set<string>());
+	const draftLoadGate = createAsyncGate();
+	const inferredSchemaGate = createAsyncGate();
+	const sourceSchemaGate = createAsyncGate();
 
-	let lockMode = $state<'pending' | 'owned' | 'other'>('pending');
-	let lockOwner = $state<string | null>(null);
-	const userId = $derived(authStore.user?.id ?? null);
-	let lockedByOther = $derived(
-		lockMode === 'other' && lockOwner !== null && (userId === null || lockOwner !== userId)
+	let lockMode = $state<EditorLockMode>('pending');
+	let lockIntent = $state<'editing' | 'released'>('editing');
+	const editorAccessState = $derived(
+		lockIntent === 'released' ? getEditorAccessState('released') : getEditorAccessState(lockMode)
 	);
-	const editorReadOnly = $derived(lockMode !== 'owned');
+	const lockedByOther = $derived(lockMode === 'other');
+	const editorReadOnly = $derived(lockIntent === 'released' || isEditorReadOnly(lockMode));
+	const saveButtonState = $derived.by(() => {
+		if (editorAccessState === 'pending') return 'pending';
+		if (editorAccessState === 'locked') return 'locked';
+		if (editorAccessState === 'unavailable') return 'readonly';
+		if (editorAccessState === 'released') return 'released';
+		if (isSaving) return 'saving';
+		if (isDirty) return 'dirty';
+		return 'clean';
+	});
+	const saveButtonLabel = $derived.by(() => {
+		if (editorAccessState === 'pending') return 'Connecting...';
+		if (editorAccessState === 'locked') return 'Locked';
+		if (editorAccessState === 'unavailable') return 'Read only';
+		if (editorAccessState === 'released') return 'Read only';
+		if (isSaving) return 'Saving...';
+		if (isDirty) return 'Save';
+		return 'Saved';
+	});
+	const lockButtonLabel = $derived.by(() => {
+		if (editorAccessState === 'editable') return 'Unlock';
+		if (editorAccessState === 'released') return 'Lock';
+		if (editorAccessState === 'locked') return 'Locked';
+		if (editorAccessState === 'pending') return 'Locking...';
+		return 'Retry lock';
+	});
+	const lockButtonDisabled = $derived(
+		editorAccessState === 'pending' || editorAccessState === 'locked'
+	);
 
-	function releaseCurrentLock(id: string, token: string): void {
-		releaseLock('analysis', id, token).match(
-			() => {},
-			() => {}
-		);
-	}
-
-	function startWatcher(id: string, token: string | null): LockWatcher {
-		return watchLock({
-			resourceType: 'analysis',
-			resourceId: id,
-			token,
-			onStatus: (lock) => {
-				lockOwner = lock?.owner_id ?? null;
-			}
-		});
+	function handleLockToggle(): void {
+		if (editorAccessState === 'pending' || editorAccessState === 'locked') return;
+		lockIntent = lockIntent === 'released' ? 'editing' : 'released';
 	}
 
 	// Websocket: $derived can't manage lock acquire + websocket watcher lifecycle.
 	$effect(() => {
-		const id = validAnalysisId;
-		if (!id) return;
+		const nextId = validAnalysisId;
+		if (!nextId) return;
+		const id = nextId;
+		if (lockIntent === 'released') {
+			lockMode = 'released';
+			return;
+		}
 
 		lockMode = 'pending';
-		lockOwner = null;
-
-		let token: string | null = null;
-		let watcher: LockWatcher | null = null;
 		let alive = true;
-
-		acquireLock('analysis', id).match(
-			(status) => {
-				if (!alive) {
-					releaseCurrentLock(id, status.lock_token);
+		const session = openLockSession({
+			resourceType: 'analysis',
+			resourceId: id,
+			onStatus(lock, ownsLock) {
+				if (!alive) return;
+				if (lock === null) {
+					lockMode = 'pending';
+					session.acquire();
 					return;
 				}
-				token = status.lock_token;
-				lockMode = 'owned';
-				lockOwner = status.owner_id;
-				watcher = startWatcher(id, token);
+				lockMode = ownsLock ? 'owned' : 'other';
 			},
-			(error) => {
+			onError(error: LockSessionError) {
 				if (!alive) return;
-				if (error.status === 409) {
+				if (error.statusCode === 409) {
 					lockMode = 'other';
-					watcher = startWatcher(id, null);
+					return;
 				}
+				lockMode = 'error';
 			}
-		);
+		});
 
 		return () => {
 			alive = false;
-			watcher?.close();
-			if (token) releaseCurrentLock(id, token);
-			lockMode = 'pending';
-			lockOwner = null;
+			session.close();
+			lockMode = lockIntent === 'released' ? 'released' : 'pending';
 		};
 	});
 
@@ -180,6 +215,8 @@
 	$effect(() => {
 		if (!storageKey || draftLoaded || editorReadOnly) return;
 		if (!analysisStore.tabs.length) return;
+		const currentStorageKey = storageKey;
+		const currentAnalysisId = analysisId;
 		const serverVersion = lastLoadedVersion ?? analysisStore.current?.version ?? null;
 		if (!serverVersion) {
 			draftLoaded = true;
@@ -192,7 +229,10 @@
 			return;
 		}
 
-		void idbGet<string>(storageKey).then((raw) => {
+		const token = draftLoadGate.issue();
+		void idbGet<string>(currentStorageKey).then((raw) => {
+			if (!draftLoadGate.isCurrent(token)) return;
+			if (storageKey !== currentStorageKey || analysisId !== currentAnalysisId) return;
 			if (!raw) {
 				draftLoaded = true;
 				return;
@@ -210,12 +250,12 @@
 				configPosition?: 'right' | 'bottom';
 				bottomPaneHeight?: number;
 			};
-			if (parsed.analysisId !== analysisId) {
+			if (parsed.analysisId !== currentAnalysisId) {
 				draftLoaded = true;
 				return;
 			}
 			if ((parsed.version ?? null) !== serverVersion) {
-				void idbDelete(storageKey);
+				void idbDelete(currentStorageKey);
 				draftLoaded = true;
 				return;
 			}
@@ -232,6 +272,10 @@
 			isDirty = true;
 			draftLoaded = true;
 		});
+
+		return () => {
+			draftLoadGate.invalidate();
+		};
 	});
 
 	// Timer: $derived can't debounce draft persistence.
@@ -278,6 +322,20 @@
 	let versionError = $state<string | null>(null);
 	let editingVersionId = $state<string | null>(null);
 	let editingVersionName = $state('');
+	let showExportModal = $state(false);
+	let exportScopeTabId = $state<string | null>(null);
+	let exportFormat = $state<CodeExportFormat>('polars');
+	let exportCopied = $state(false);
+	let exportError = $state<string | null>(null);
+	let tabContextMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
+	let exportByFormat = $state<Record<CodeExportFormat, CodeExportResponse | null>>({
+		polars: null,
+		sql: null
+	});
+	let exportLoadingByFormat = $state<Record<CodeExportFormat, boolean>>({
+		polars: false,
+		sql: false
+	});
 
 	// Responsive: auto-collapse panes on narrow screens
 	const isNarrowScreen = new MediaQuery('max-width: 900px');
@@ -360,6 +418,30 @@
 		}
 	}));
 
+	// DOM: context menu dismissal is event-driven and cannot be expressed as derived state.
+	$effect(() => {
+		if (!tabContextMenu) return;
+		const onPointerDown = (event: PointerEvent) => {
+			const target = event.target as Node | null;
+			const menu = document.querySelector('[data-testid="analysis-tab-context-menu"]');
+			if (menu && target && menu.contains(target)) {
+				return;
+			}
+			tabContextMenu = null;
+		};
+		window.addEventListener('pointerdown', onPointerDown);
+		return () => window.removeEventListener('pointerdown', onPointerDown);
+	});
+
+	// Timer: copied state is transient UI feedback.
+	$effect(() => {
+		if (!exportCopied) return;
+		const timer = window.setTimeout(() => {
+			exportCopied = false;
+		}, 1200);
+		return () => window.clearTimeout(timer);
+	});
+
 	const analysisTabs = $derived.by(() => {
 		const title = analysisStore.current?.name ?? analysisQuery.data?.name ?? 'Analysis';
 		return analysisStore.tabs.map((tab) => ({
@@ -390,16 +472,14 @@
 	// Network: $derived can't fetch engine defaults.
 	$effect(() => {
 		if (!validAnalysisId || analysisStore.engineDefaults) return;
-		spawnEngine(validAnalysisId).match(
-			(status) => {
-				if (status.defaults) {
-					analysisStore.setEngineDefaults(status.defaults);
-				}
+		getEngineDefaults().match(
+			(defaults) => {
+				analysisStore.setEngineDefaults(defaults);
 			},
 			(err) => {
 				track({
 					event: 'engine_error',
-					action: 'spawn',
+					action: 'defaults',
 					target: validAnalysisId,
 					meta: { message: err.message }
 				});
@@ -424,6 +504,7 @@
 		const gate = `${validAnalysisId}:${tab.id}:${pipelineHash}`;
 		if (hydratedGates.has(gate)) return;
 		hydratedGates = new Set([...hydratedGates, gate]);
+		const requestToken = inferredSchemaGate.issue();
 
 		const targets = pipeline.filter(
 			(step) =>
@@ -436,8 +517,14 @@
 				tab_id: tab.id,
 				target_step_id: step.id
 			}).match(
-				(res) => schemaStore.syncPreviewSchema(step.id, res, pipelineHash),
+				(res) => {
+					if (!inferredSchemaGate.isCurrent(requestToken)) return;
+					if (analysisStore.activeTab?.id !== tab.id) return;
+					schemaStore.syncPreviewSchema(step.id, res, pipelineHash);
+				},
 				(err) => {
+					if (!inferredSchemaGate.isCurrent(requestToken)) return;
+					if (analysisStore.activeTab?.id !== tab.id) return;
 					track({
 						event: 'schema_error',
 						action: 'hydrate',
@@ -447,6 +534,10 @@
 				}
 			);
 		}
+
+		return () => {
+			inferredSchemaGate.invalidate();
+		};
 	});
 
 	const activeTab = $derived(analysisStore.activeTab);
@@ -474,6 +565,7 @@
 		const datasourceIdValue = datasourceId;
 		const schemaId = schemaKey;
 		if (!schemaId) return;
+		const activeTabId = activeTab?.id ?? null;
 
 		const existingSchema = analysisStore.sourceSchemas.get(schemaId);
 		if (existingSchema) return;
@@ -490,6 +582,7 @@
 		if (analysisTabId) {
 			if (!analysisPayload) return;
 			isLoadingSchema = true;
+			const requestToken = sourceSchemaGate.issue();
 			const targetTabId = analysisTabId ?? activeTab?.id ?? null;
 			getStepSchema({
 				analysis_id: validAnalysisId ?? undefined,
@@ -498,6 +591,8 @@
 				target_step_id: 'source'
 			}).match(
 				(payload) => {
+					if (!sourceSchemaGate.isCurrent(requestToken)) return;
+					if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 					const columns = payload.columns.map((name) => ({
 						name,
 						dtype: payload.column_types[name] ?? 'unknown',
@@ -510,6 +605,8 @@
 					isLoadingSchema = false;
 				},
 				(error) => {
+					if (!sourceSchemaGate.isCurrent(requestToken)) return;
+					if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 					track({
 						event: 'schema_error',
 						action: 'analysis_source_schema',
@@ -519,7 +616,9 @@
 					isLoadingSchema = false;
 				}
 			);
-			return;
+			return () => {
+				sourceSchemaGate.invalidate();
+			};
 		}
 
 		if (!datasourcesQuery.data || !datasourceIdValue) return;
@@ -527,12 +626,17 @@
 		const ds = datasourcesQuery.data.find((d) => d.id === datasourceIdValue);
 		if (ds?.source_type === 'analysis') return;
 		isLoadingSchema = true;
+		const requestToken = sourceSchemaGate.issue();
 		getDatasourceSchema(datasourceIdValue).match(
 			(schema) => {
+				if (!sourceSchemaGate.isCurrent(requestToken)) return;
+				if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 				analysisStore.setSourceSchema(schemaId, schema);
 				isLoadingSchema = false;
 			},
 			(err) => {
+				if (!sourceSchemaGate.isCurrent(requestToken)) return;
+				if (schemaKey !== schemaId || activeTab?.id !== activeTabId) return;
 				track({
 					event: 'schema_error',
 					action: 'load',
@@ -542,6 +646,9 @@
 				isLoadingSchema = false;
 			}
 		);
+		return () => {
+			sourceSchemaGate.invalidate();
+		};
 	});
 
 	const currentDatasource = $derived.by(() => {
@@ -551,6 +658,16 @@
 		return data.find((ds) => ds.id === datasourceId) ?? null;
 	});
 	const datasourceLabel = $derived(analysisTabName ?? currentDatasource?.name ?? null);
+	const exportResponse = $derived(exportByFormat[exportFormat]);
+	const exportWarnings = $derived(exportResponse?.warnings ?? []);
+	const exportCode = $derived(exportResponse?.code ?? '');
+	const exportFilename = $derived(exportResponse?.filename ?? '');
+	const exportLoading = $derived(exportLoadingByFormat[exportFormat]);
+	const exportScopeTabName = $derived.by(() => {
+		if (!exportScopeTabId) return null;
+		const tab = analysisStore.tabs.find((item) => item.id === exportScopeTabId);
+		return tab?.name ?? null;
+	});
 
 	function buildStep(type: string): PipelineStep {
 		const base: PipelineStep = {
@@ -910,12 +1027,6 @@
 		versionError = null;
 	}
 
-	function handleVersionKeydown(event: KeyboardEvent) {
-		if (!showVersionModal) return;
-		if (event.key !== 'Escape') return;
-		closeVersionModal();
-	}
-
 	function formatVersionDate(value: string | null | undefined): string {
 		if (!value) return 'Unknown';
 		const parsed = new Date(value);
@@ -973,48 +1084,119 @@
 		}
 		versionsQuery.refetch();
 	}
+
+	function resetExportState() {
+		exportByFormat = { polars: null, sql: null };
+		exportLoadingByFormat = { polars: false, sql: false };
+		exportError = null;
+		exportCopied = false;
+	}
+
+	async function loadExportCode(format: CodeExportFormat) {
+		if (!validAnalysisId) return;
+		if (exportLoadingByFormat[format]) return;
+		exportLoadingByFormat = { ...exportLoadingByFormat, [format]: true };
+		exportError = null;
+		const result = await exportAnalysisCode(validAnalysisId, {
+			format,
+			tab_id: exportScopeTabId
+		});
+		if (result.isErr()) {
+			exportError = result.error.message;
+			exportLoadingByFormat = { ...exportLoadingByFormat, [format]: false };
+			return;
+		}
+		exportByFormat = { ...exportByFormat, [format]: result.value };
+		exportLoadingByFormat = { ...exportLoadingByFormat, [format]: false };
+	}
+
+	function openExportModal(tabId: string | null = null) {
+		exportScopeTabId = tabId;
+		showExportModal = true;
+		exportFormat = 'polars';
+		tabContextMenu = null;
+		resetExportState();
+		void loadExportCode('polars');
+	}
+
+	function closeExportModal() {
+		showExportModal = false;
+		exportScopeTabId = null;
+		exportError = null;
+		exportCopied = false;
+	}
+
+	function selectExportFormat(format: CodeExportFormat) {
+		exportFormat = format;
+		exportError = null;
+		if (!exportByFormat[format]) {
+			void loadExportCode(format);
+		}
+	}
+
+	async function copyExportCode() {
+		if (!exportCode) return;
+		try {
+			await navigator.clipboard.writeText(exportCode);
+			exportCopied = true;
+		} catch {
+			exportError = 'Clipboard write failed. Copy manually from the code block.';
+		}
+	}
+
+	function downloadExportCodeFile() {
+		if (!exportCode || !exportFilename) return;
+		const type = exportFormat === 'sql' ? 'text/sql;charset=utf-8' : 'text/x-python;charset=utf-8';
+		downloadBlob(new Blob([exportCode], { type }), exportFilename);
+	}
+
+	function handleTabContextMenu(event: MouseEvent, tabId: string) {
+		event.preventDefault();
+		event.stopPropagation();
+		tabContextMenu = { tabId, x: event.clientX, y: event.clientY };
+	}
 </script>
 
 {#if analysisQuery.isLoading}
-	<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+	<div
+		class={css({ display: 'flex', alignItems: 'center', height: '100%', justifyContent: 'center' })}
+	>
 		<div class={spinner()}></div>
 	</div>
 {:else if analysisQuery.isError}
 	<div
 		data-testid="analysis-load-error"
-		class={cx(
-			row,
-			css({
-				paddingX: '2.5',
-				paddingY: '3',
-				border: 'none',
-				borderLeftWidth: '2',
+		class={css({
+			display: 'flex',
+			alignItems: 'center',
+			paddingX: '2.5',
+			paddingY: '3',
+			border: 'none',
+			borderLeftWidth: '2',
 
-				fontSize: 'xs',
-				lineHeight: '1.5',
-				backgroundColor: 'transparent',
-				borderLeftColor: 'border.error',
-				color: 'fg.error',
-				height: '100%',
-				flexDirection: 'column',
-				justifyContent: 'center',
-				textAlign: 'center',
-				gap: '4'
-			})
-		)}
+			fontSize: 'xs',
+			lineHeight: '1.5',
+			backgroundColor: 'transparent',
+			borderLeftColor: 'border.error',
+			color: 'fg.error',
+			height: '100%',
+			flexDirection: 'column',
+			justifyContent: 'center',
+			textAlign: 'center',
+			gap: '4'
+		})}
 	>
 		<div
-			class={cx(
-				row,
-				css({
-					justifyContent: 'center',
-					fontSize: 'xl',
-					fontWeight: 'bold',
-					width: 'logoLg',
-					height: 'logoLg',
-					borderWidth: '1'
-				})
-			)}
+			class={css({
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				fontSize: 'xl',
+				fontWeight: 'bold',
+				width: 'logoLg',
+				height: 'logoLg',
+				borderWidth: '1'
+			})}
 		>
 			!
 		</div>
@@ -1023,7 +1205,13 @@
 			{analysisQuery.error instanceof Error ? analysisQuery.error.message : 'Unknown error'}
 		</p>
 		<button
-			class={cx(button({ variant: 'primary' }), css({ marginTop: '4' }))}
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'accent.primary',
+				color: 'fg.inverse',
+				marginTop: '4',
+				'&:hover:not(:disabled)': { opacity: '0.9' }
+			})}
 			onclick={() => goto(resolve('/analysis/new'))}
 			type="button"
 		>
@@ -1052,17 +1240,16 @@
 			})}
 		>
 			<div
-				class={cx(
-					row,
-					css({
-						height: '100%',
-						boxSizing: 'border-box',
-						borderRightWidth: '1',
-						width: 'operationsPanel',
-						transitionProperty: 'width, visibility',
-						transitionDuration: 'normal'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					height: '100%',
+					boxSizing: 'border-box',
+					borderRightWidth: '1',
+					width: 'operationsPanel',
+					transitionProperty: 'width, visibility',
+					transitionDuration: 'normal'
+				})}
 			>
 				<div
 					class={css({
@@ -1125,10 +1312,15 @@
 				</div>
 			</div>
 			<div
-				class={cx(
-					row,
-					css({ flex: '1', minWidth: '0', overflow: 'hidden', justifyContent: 'center', gap: '0' })
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					flex: '1',
+					minWidth: '0',
+					overflow: 'hidden',
+					justifyContent: 'center',
+					gap: '0'
+				})}
 			>
 				<button
 					class={css({
@@ -1157,8 +1349,8 @@
 						<ChevronLeft size={12} />
 					{/if}
 				</button>
-				<div class={cx(row, css({ flex: '1', overflow: 'hidden' }))}>
-					<div class={cx(row, css({ overflowX: 'auto', gap: '0' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', flex: '1', overflow: 'hidden' })}>
+					<div class={css({ display: 'flex', alignItems: 'center', overflowX: 'auto', gap: '0' })}>
 						{#each analysisStore.tabs as tab (tab.id)}
 							<div
 								class={css({
@@ -1186,6 +1378,7 @@
 										cursor: 'pointer'
 									})}
 									onclick={() => handleSelectTab(tab.id)}
+									oncontextmenu={(event) => handleTabContextMenu(event, tab.id)}
 									type="button"
 									data-testid={`tab-button-${tab.id}`}
 									data-tab-name={tab.name}
@@ -1221,7 +1414,7 @@
 								{/if}
 							</div>
 						{/each}
-						<div class={row}>
+						<div class={css({ display: 'flex', alignItems: 'center' })}>
 							<button
 								class={css({
 									display: 'inline-flex',
@@ -1299,32 +1492,84 @@
 				{/if}
 			</button>
 			<div
-				class={cx(
-					row,
-					css({
-						justifyContent: 'flex-end',
-						height: '100%',
-						boxSizing: 'border-box',
-						borderLeftWidth: '1',
-						width: 'operationsPanel',
-						transitionProperty: 'width, visibility',
-						transitionDuration: 'normal'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'flex-end',
+					height: '100%',
+					boxSizing: 'border-box',
+					borderLeftWidth: '1',
+					width: 'operationsPanel',
+					transitionProperty: 'width, visibility',
+					transitionDuration: 'normal'
+				})}
 			>
 				<div class={css({ display: 'flex', height: '100%', flex: '1', padding: '1', gap: '1' })}>
 					<button
 						class={css({
-							flex: '1',
+							display: 'flex',
+							flexShrink: '0',
+							alignItems: 'center',
+							justifyContent: 'center',
+							width: '8',
+							height: '100%',
+							padding: '0',
+							backgroundColor: 'transparent',
+							border: 'none',
+							cursor: 'pointer',
+							color: editorAccessState === 'editable' ? 'fg.warning' : 'fg.muted',
+							_hover: { color: 'fg.primary', backgroundColor: 'bg.hover' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+						})}
+						onclick={handleLockToggle}
+						disabled={lockButtonDisabled}
+						type="button"
+						aria-label={lockButtonLabel}
+						title={lockButtonLabel}
+						data-testid="lock-toggle-button"
+					>
+						{#if editorAccessState === 'editable'}
+							<LockOpen size={14} />
+						{:else}
+							<Lock size={14} />
+						{/if}
+					</button>
+					<button
+						class={css({
+							flex: '1 1 0',
+							minWidth: '0',
 							height: '100%',
 							backgroundColor: 'bg.tertiary',
 							border: 'none',
 							fontSize: 'xs',
 							fontWeight: 'medium',
 							cursor: 'pointer',
-							color: 'fg.muted',
+							color: 'fg.faint',
+							borderRadius: 'xs',
+							paddingX: '2.5',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+						})}
+						onclick={() => openExportModal(null)}
+						type="button"
+						title="Export pipeline as code"
+						data-testid="analysis-export-toolbar-button"
+					>
+						Export
+					</button>
+					<button
+						class={css({
+							flex: '1 1 0',
+							minWidth: '0',
+							height: '100%',
+							backgroundColor: 'bg.tertiary',
+							border: 'none',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							cursor: 'pointer',
+							color: isDirty ? 'fg.primary' : 'fg.muted',
+							borderRadius: 'xs',
 							_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' },
-							_disabled: { opacity: '0.5', cursor: 'not-allowed' }
+							_disabled: { opacity: '1', color: 'fg.muted', cursor: 'not-allowed' }
 						})}
 						onclick={discardChanges}
 						disabled={!isDirty || isSaving || analysisStore.loading || editorReadOnly}
@@ -1332,63 +1577,50 @@
 					>
 						Discard
 					</button>
-					<div
+					<button
+						class={css({
+							flex: '1 1 0',
+							minWidth: '0',
+							height: '100%',
+							border: 'none',
+							borderRadius: 'xs',
+							backgroundColor: 'bg.tertiary',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							cursor: 'pointer',
+							color: 'fg.success',
+							_disabled: { opacity: '1', color: 'fg.success', cursor: 'not-allowed' }
+						})}
+						onclick={handleSave}
+						disabled={isSaving || analysisStore.loading || editorReadOnly}
+						type="button"
+						data-save-state={saveButtonState}
+					>
+						{saveButtonLabel}
+					</button>
+					<button
 						class={css({
 							display: 'flex',
-							flex: '1',
+							flexShrink: '0',
+							alignItems: 'center',
+							justifyContent: 'center',
+							width: '8',
+							height: '100%',
+							backgroundColor: 'transparent',
+							border: 'none',
 							borderRadius: 'xs',
-							overflow: 'hidden',
-							...(isDirty ? { backgroundColor: 'bg.warning' } : { backgroundColor: 'bg.tertiary' })
+							cursor: 'pointer',
+							padding: '0',
+							color: 'fg.warning',
+							_hover: { backgroundColor: 'bg.hover', color: 'fg.warning' }
 						})}
+						onclick={openVersionModal}
+						type="button"
+						title="Version history"
+						data-testid="version-history-trigger"
 					>
-						<button
-							class={css({
-								flex: '1',
-								height: '100%',
-								border: 'none',
-								backgroundColor: 'transparent',
-								fontSize: 'xs',
-								fontWeight: 'medium',
-								cursor: 'pointer',
-								_disabled: { opacity: '0.5', cursor: 'not-allowed' },
-								...(isDirty ? { color: 'fg.warning' } : { color: 'fg.success' })
-							})}
-							onclick={handleSave}
-							disabled={isSaving || analysisStore.loading || editorReadOnly}
-							type="button"
-							data-save-state={editorReadOnly
-								? 'locked'
-								: isSaving
-									? 'saving'
-									: isDirty
-										? 'dirty'
-										: 'clean'}
-						>
-							{editorReadOnly ? 'Locked' : isSaving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
-						</button>
-						<button
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								height: '100%',
-								backgroundColor: 'transparent',
-								border: 'none',
-								borderLeftWidth: '1',
-								borderLeftColor: isDirty ? 'border.warning' : 'border.primary',
-								cursor: 'pointer',
-								paddingX: '1.5',
-								color: isDirty ? 'fg.warning' : 'fg.faint',
-								opacity: '0.6',
-								_hover: { opacity: '1' }
-							})}
-							onclick={openVersionModal}
-							type="button"
-							title="Rollback to previous version"
-							data-testid="version-history-trigger"
-						>
-							<ChevronDown size={12} />
-						</button>
-					</div>
+						<Clock size={14} />
+					</button>
 				</div>
 			</div>
 		</header>
@@ -1396,15 +1628,6 @@
 		{#if saveError}
 			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="save-error">
 				<Callout tone="error">{saveError}</Callout>
-			</div>
-		{/if}
-
-		{#if lockedByOther}
-			<div class={css({ paddingX: '4', paddingY: '2' })} data-testid="lock-banner">
-				<Callout tone="warn"
-					>This analysis is being edited by another user. Saving is disabled until the lock is
-					released.</Callout
-				>
 			</div>
 		{/if}
 
@@ -1417,6 +1640,7 @@
 				backgroundColor: 'bg.secondary'
 			})}
 			role="application"
+			data-editor-access-state={editorAccessState}
 		>
 			<div
 				class={css({
@@ -1463,6 +1687,7 @@
 					})}
 				>
 					<PipelineCanvas
+						{buildStore}
 						steps={analysisStore.pipeline}
 						analysisId={analysisId || undefined}
 						datasourceId={previewDatasourceId || undefined}
@@ -1562,7 +1787,6 @@
 {/if}
 
 <svelte:window
-	onkeydown={handleVersionKeydown}
 	onbeforeunload={(e) => {
 		if (!isDirty) return;
 		e.preventDefault();
@@ -1597,262 +1821,488 @@
 	onClose={closeDatasourceModal}
 />
 
-{#if showVersionModal}
-	<div
-		class={css({ position: 'fixed', inset: '0', background: 'bg.overlay', zIndex: 'modal' })}
-		aria-hidden="true"
-	></div>
+{#if tabContextMenu}
 	<div
 		class={css({
 			position: 'fixed',
-			left: '50%',
-			top: '50%',
-			transform: 'translate(-50%, -50%)',
-			width: 'min(720px, 92vw)',
-			maxHeight: '80vh',
-			backgroundColor: 'bg.primary',
-			borderWidth: '1',
-			zIndex: '1001',
+			top: '0',
+			left: '0',
+			zIndex: '1003'
+		})}
+		style:transform={`translate(${tabContextMenu.x}px, ${tabContextMenu.y}px)`}
+		data-testid="analysis-tab-context-menu"
+	>
+		<button
+			class={css({
+				display: 'block',
+				borderWidth: '1',
+				backgroundColor: 'bg.primary',
+				paddingX: '3',
+				paddingY: '2',
+				fontSize: 'xs',
+				color: 'fg.primary',
+				textAlign: 'left',
+				cursor: 'pointer',
+				whiteSpace: 'nowrap',
+				_hover: { backgroundColor: 'bg.hover' }
+			})}
+			type="button"
+			onclick={() => openExportModal(tabContextMenu?.tabId ?? null)}
+			data-testid="analysis-tab-context-export"
+		>
+			Export as Code
+		</button>
+	</div>
+{/if}
+
+{#snippet exportModalContent()}
+	<div
+		class={css({
+			display: 'flex',
+			justifyContent: 'space-between',
+			alignItems: 'center',
+			paddingX: '4',
+			paddingY: '3',
+			borderBottomWidth: '1',
+			'& h2': { margin: '0', fontSize: 'md', color: 'fg.primary' }
+		})}
+	>
+		<div class={css({ display: 'flex', flexDirection: 'column', gap: '1' })}>
+			<h2 id="analysis-export-title">Export Code</h2>
+			<span class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+				{exportScopeTabName ? `Tab: ${exportScopeTabName}` : 'Scope: Full pipeline'}
+			</span>
+		</div>
+		<button
+			class={css({
+				background: 'transparent',
+				border: 'none',
+				color: 'fg.muted',
+				cursor: 'pointer',
+				fontSize: 'xl',
+				padding: '1',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				transitionProperty: 'color, background-color',
+				transitionDuration: 'normal',
+				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+			})}
+			onclick={closeExportModal}
+			aria-label="Close export modal"
+		>
+			<X size={16} />
+		</button>
+	</div>
+	<div
+		class={css({
 			display: 'flex',
 			flexDirection: 'column',
-			_focus: { outline: 'none' }
+			gap: '3',
+			padding: '4',
+			minHeight: '0',
+			overflow: 'auto'
 		})}
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="analysis-version-title"
 	>
 		<div
 			class={css({
 				display: 'flex',
-				justifyContent: 'space-between',
 				alignItems: 'center',
-				paddingX: '4',
-				paddingY: '3',
-				borderBottomWidth: '1',
-				'& h2': { margin: '0', fontSize: 'md', color: 'fg.primary' }
+				justifyContent: 'space-between',
+				gap: '2',
+				flexWrap: 'wrap'
 			})}
 		>
-			<h2 id="analysis-version-title">Version history</h2>
-			<button
+			<div role="tablist" aria-label="Export format" class={css({ display: 'flex', gap: '1' })}>
+				<button
+					class={button({
+						variant: exportFormat === 'polars' ? 'primary' : 'secondary',
+						size: 'sm'
+					})}
+					type="button"
+					role="tab"
+					aria-selected={exportFormat === 'polars'}
+					onclick={() => selectExportFormat('polars')}
+					data-testid="analysis-export-format-polars"
+				>
+					Polars (Python)
+				</button>
+				<button
+					class={button({ variant: exportFormat === 'sql' ? 'primary' : 'secondary', size: 'sm' })}
+					type="button"
+					role="tab"
+					aria-selected={exportFormat === 'sql'}
+					onclick={() => selectExportFormat('sql')}
+					data-testid="analysis-export-format-sql"
+				>
+					SQL
+				</button>
+			</div>
+			<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+				<button
+					class={button({ variant: 'secondary', size: 'sm' })}
+					type="button"
+					onclick={copyExportCode}
+					disabled={!exportCode || exportLoading}
+					data-testid="analysis-export-copy"
+				>
+					<Copy size={13} />
+					{exportCopied ? 'Copied' : 'Copy to Clipboard'}
+				</button>
+				<button
+					class={button({ variant: 'secondary', size: 'sm' })}
+					type="button"
+					onclick={downloadExportCodeFile}
+					disabled={!exportCode || exportLoading}
+					data-testid="analysis-export-download"
+				>
+					<Download size={13} />
+					Download
+				</button>
+			</div>
+		</div>
+
+		{#if exportFilename}
+			<div
+				class={css({ fontSize: 'xs', color: 'fg.muted' })}
+				data-testid="analysis-export-filename"
+			>
+				{exportFilename}
+			</div>
+		{/if}
+
+		{#if exportError}
+			<div data-testid="analysis-export-error">
+				<Callout tone="error">{exportError}</Callout>
+			</div>
+		{/if}
+
+		{#if exportWarnings.length > 0}
+			<div data-testid="analysis-export-warnings">
+				<Callout tone="warn">
+					{#each exportWarnings as warning, idx (idx)}
+						<div>{warning}</div>
+					{/each}
+				</Callout>
+			</div>
+		{/if}
+
+		{#if exportLoading}
+			<div class={css({ display: 'flex', justifyContent: 'center', paddingY: '8' })}>
+				<div class={spinner()}></div>
+			</div>
+		{:else}
+			<pre
 				class={css({
-					background: 'transparent',
+					fontFamily: 'mono',
+					fontSize: 'xs',
+					lineHeight: '1.45',
+					backgroundColor: 'bg.secondary',
+					borderWidth: '1',
+					padding: '3',
+					overflowX: 'auto',
+					whiteSpace: 'pre'
+				})}
+				data-testid="analysis-export-code"
+				data-language={exportFormat}><code>{exportCode}</code></pre>
+		{/if}
+	</div>
+	<div
+		class={css({
+			paddingX: '4',
+			paddingY: '3',
+			borderTopWidth: '1',
+			display: 'flex',
+			justifyContent: 'flex-end'
+		})}
+	>
+		<button class={button({ variant: 'secondary' })} onclick={closeExportModal} type="button"
+			>Close</button
+		>
+	</div>
+{/snippet}
+
+{#snippet versionModalContent()}
+	<div
+		class={css({
+			display: 'flex',
+			justifyContent: 'space-between',
+			alignItems: 'center',
+			paddingX: '4',
+			paddingY: '3',
+			borderBottomWidth: '1',
+			'& h2': { margin: '0', fontSize: 'md', color: 'fg.primary' }
+		})}
+	>
+		<h2 id="analysis-version-title">Version history</h2>
+		<button
+			class={css({
+				background: 'transparent',
+				border: 'none',
+				color: 'fg.muted',
+				cursor: 'pointer',
+				fontSize: 'xl',
+				padding: '1',
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				transitionProperty: 'color, background-color',
+				transitionDuration: 'normal',
+				_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+			})}
+			onclick={closeVersionModal}
+			aria-label="Close version history"
+		>
+			<X size={16} />
+		</button>
+	</div>
+	<div
+		class={css({
+			padding: '4',
+			overflowY: 'auto',
+			display: 'flex',
+			flexDirection: 'column',
+			gap: '3'
+		})}
+	>
+		{#if versionError}
+			<div
+				data-testid="version-error"
+				class={css({
+					paddingX: '2.5',
+					paddingY: '3',
 					border: 'none',
-					color: 'fg.muted',
-					cursor: 'pointer',
-					fontSize: 'xl',
-					padding: '1',
+					borderLeftWidth: '2',
+
+					marginTop: '3',
+					marginBottom: '0',
+					fontSize: 'xs',
+					lineHeight: '1.5',
+					backgroundColor: 'transparent',
+					borderLeftColor: 'border.error',
+					color: 'fg.error',
+					margin: '0'
+				})}
+			>
+				{versionError}
+			</div>
+		{/if}
+		{#if versionsQuery.isLoading}
+			<div
+				class={css({
 					display: 'flex',
 					alignItems: 'center',
 					justifyContent: 'center',
-					transitionProperty: 'color, background-color',
-					transitionDuration: 'normal',
-					_hover: { backgroundColor: 'bg.hover', color: 'fg.primary' }
+					padding: '8',
+					fontSize: 'sm',
+					color: 'fg.muted'
 				})}
-				onclick={closeVersionModal}
-				aria-label="Close version history"
 			>
-				<X size={16} />
-			</button>
-		</div>
-		<div
-			class={css({
-				padding: '4',
-				overflowY: 'auto',
-				display: 'flex',
-				flexDirection: 'column',
-				gap: '3'
-			})}
-		>
-			{#if versionError}
-				<div
-					data-testid="version-error"
-					class={css({
-						paddingX: '2.5',
-						paddingY: '3',
-						border: 'none',
-						borderLeftWidth: '2',
+				Loading...
+			</div>
+		{:else if versionsQuery.isError}
+			<div
+				data-testid="version-load-error"
+				class={css({
+					paddingX: '2.5',
+					paddingY: '3',
+					border: 'none',
+					borderLeftWidth: '2',
 
-						marginTop: '3',
-						marginBottom: '0',
-						fontSize: 'xs',
-						lineHeight: '1.5',
-						backgroundColor: 'transparent',
-						borderLeftColor: 'border.error',
-						color: 'fg.error',
-						margin: '0'
-					})}
-				>
-					{versionError}
-				</div>
-			{/if}
-			{#if versionsQuery.isLoading}
-				<div
-					class={cx(
-						row,
-						css({ justifyContent: 'center', padding: '8', fontSize: 'sm', color: 'fg.muted' })
-					)}
-				>
-					Loading...
-				</div>
-			{:else if versionsQuery.isError}
-				<div
-					data-testid="version-load-error"
-					class={css({
-						paddingX: '2.5',
-						paddingY: '3',
-						border: 'none',
-						borderLeftWidth: '2',
-
-						marginTop: '3',
-						marginBottom: '0',
-						fontSize: 'xs',
-						lineHeight: '1.5',
-						backgroundColor: 'transparent',
-						borderLeftColor: 'border.error',
-						color: 'fg.error',
-						margin: '0'
-					})}
-				>
-					Failed to load version history.
-				</div>
-			{:else if !versionsQuery.data?.length}
-				<p
-					class={css({
-						color: 'fg.muted',
-						fontStyle: 'italic',
-						textAlign: 'center',
-						padding: '4',
-						margin: '0'
-					})}
-				>
-					No versions available.
-				</p>
-			{:else}
-				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
-					{#each versionsQuery.data as version (version.id)}
-						<div
-							data-testid="version-row-{version.version}"
-							class={css({
-								display: 'flex',
-								alignItems: 'center',
-								justifyContent: 'space-between',
-								gap: '4',
-								borderWidth: '1',
-								backgroundColor: 'bg.tertiary',
-								padding: '3'
-							})}
-						>
-							<div class={css({ display: 'flex', minWidth: '0', flexDirection: 'column' })}>
-								<div
-									class={css({
-										fontSize: '2xs2',
-										textTransform: 'uppercase',
-										letterSpacing: 'widest',
-										color: 'fg.muted'
-									})}
-								>
-									Version {version.version} · {formatVersionDate(version.created_at)}
-								</div>
-								{#if editingVersionId === version.id}
-									<input
-										type="text"
-										class={cx(
-											input(),
-											css({
-												fontSize: 'sm',
-												fontWeight: 'semibold',
-												backgroundColor: 'transparent',
-												paddingX: '1',
-												paddingY: '0.5'
-											})
-										)}
-										id="version-name-{version.id}"
-										aria-label="Version name"
-										bind:value={editingVersionName}
-										disabled={editorReadOnly}
-										onblur={() => commitRenameVersion(version.version)}
-										onkeydown={(e) => {
-											if (e.key === 'Enter') commitRenameVersion(version.version);
-											else if (e.key === 'Escape') editingVersionId = null;
-										}}
-									/>
-								{:else}
-									<div class={cx(row, css({ gap: '2' }))}>
-										<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
-											{version.name}
-										</span>
-										<button
-											class={css({
-												padding: '0.5',
-												backgroundColor: 'transparent',
-												borderColor: 'transparent',
-												color: 'fg.muted',
-												_hover: { color: 'fg.primary' }
-											})}
-											title="Rename version"
-											data-testid="version-rename-{version.version}"
-											onclick={() => startRenameVersion(version.id, version.name)}
-											disabled={editorReadOnly}
-										>
-											<Pencil size={12} />
-										</button>
-									</div>
-								{/if}
-								{#if version.description}
-									<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-										{version.description}
-									</div>
-								{/if}
-							</div>
+					marginTop: '3',
+					marginBottom: '0',
+					fontSize: 'xs',
+					lineHeight: '1.5',
+					backgroundColor: 'transparent',
+					borderLeftColor: 'border.error',
+					color: 'fg.error',
+					margin: '0'
+				})}
+			>
+				Failed to load version history.
+			</div>
+		{:else if !versionsQuery.data?.length}
+			<p
+				class={css({
+					color: 'fg.muted',
+					fontStyle: 'italic',
+					textAlign: 'center',
+					padding: '4',
+					margin: '0'
+				})}
+			>
+				No versions available.
+			</p>
+		{:else}
+			<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+				{#each versionsQuery.data as version (version.id)}
+					<div
+						data-testid="version-row-{version.version}"
+						class={css({
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'space-between',
+							gap: '4',
+							borderWidth: '1',
+							backgroundColor: 'bg.tertiary',
+							padding: '3'
+						})}
+					>
+						<div class={css({ display: 'flex', minWidth: '0', flexDirection: 'column' })}>
 							<div
-								class={css({ display: 'flex', gap: '1', flexShrink: '0', alignItems: 'center' })}
+								class={css({
+									fontSize: '2xs2',
+									textTransform: 'uppercase',
+									letterSpacing: 'widest',
+									color: 'fg.muted'
+								})}
 							>
-								<button
-									class={css({
-										padding: '0.5',
-										backgroundColor: 'transparent',
-										border: 'none',
-										color: 'fg.muted',
-										cursor: 'pointer',
-										_hover: { color: 'fg.error' }
-									})}
-									title="Delete version"
-									data-testid="version-delete-{version.version}"
-									onclick={() => handleDeleteVersion(version.version)}
-									disabled={editorReadOnly}
-								>
-									<Trash2 size={14} />
-								</button>
-								<button
-									class={cx(button({ variant: 'secondary', size: 'sm' }))}
-									data-testid="version-restore-{version.version}"
-									onclick={() => handleRestoreVersion(version.version)}
-									type="button"
-									disabled={editorReadOnly}
-								>
-									Restore
-								</button>
+								Version {version.version} · {formatVersionDate(version.created_at)}
 							</div>
+							{#if editingVersionId === version.id}
+								<input
+									type="text"
+									class={css({
+										width: 'full',
+										color: 'fg.primary',
+										borderWidth: '1',
+										borderRadius: '0',
+										transitionProperty: 'border-color',
+										transitionDuration: '160ms',
+										transitionTimingFunction: 'ease',
+										_focus: { outline: 'none' },
+										_focusVisible: { borderColor: 'border.accent' },
+										_disabled: {
+											opacity: '0.5',
+											cursor: 'not-allowed'
+										},
+										_placeholder: { color: 'fg.muted' },
+										fontSize: 'sm',
+										fontWeight: 'semibold',
+										backgroundColor: 'transparent',
+										paddingX: '1',
+										paddingY: '0.5'
+									})}
+									id="version-name-{version.id}"
+									aria-label="Version name"
+									bind:value={editingVersionName}
+									disabled={editorReadOnly}
+									onblur={() => commitRenameVersion(version.version)}
+									onkeydown={(e) => {
+										if (e.key === 'Enter') commitRenameVersion(version.version);
+										else if (e.key === 'Escape') editingVersionId = null;
+									}}
+								/>
+							{:else}
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+									<span class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>
+										{version.name}
+									</span>
+									<button
+										class={css({
+											padding: '0.5',
+											backgroundColor: 'transparent',
+											borderColor: 'transparent',
+											color: 'fg.muted',
+											_hover: { color: 'fg.primary' }
+										})}
+										title="Rename version"
+										data-testid="version-rename-{version.version}"
+										onclick={() => startRenameVersion(version.id, version.name)}
+										disabled={editorReadOnly}
+									>
+										<Pencil size={12} />
+									</button>
+								</div>
+							{/if}
+							{#if version.description}
+								<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>
+									{version.description}
+								</div>
+							{/if}
 						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-		<div
-			class={css({
-				paddingX: '4',
-				paddingY: '3',
-				borderTopWidth: '1',
-				display: 'flex',
-				justifyContent: 'flex-end',
-				gap: '2'
-			})}
-		>
-			<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button"
-				>Close</button
-			>
-		</div>
+						<div class={css({ display: 'flex', gap: '1', flexShrink: '0', alignItems: 'center' })}>
+							<button
+								class={css({
+									padding: '0.5',
+									backgroundColor: 'transparent',
+									border: 'none',
+									color: 'fg.muted',
+									cursor: 'pointer',
+									_hover: { color: 'fg.error' }
+								})}
+								title="Delete version"
+								data-testid="version-delete-{version.version}"
+								onclick={() => handleDeleteVersion(version.version)}
+								disabled={editorReadOnly}
+							>
+								<Trash2 size={14} />
+							</button>
+							<button
+								class={button({ variant: 'secondary', size: 'sm' })}
+								data-testid="version-restore-{version.version}"
+								onclick={() => handleRestoreVersion(version.version)}
+								type="button"
+								disabled={editorReadOnly}
+							>
+								Restore
+							</button>
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</div>
-{/if}
+	<div
+		class={css({
+			paddingX: '4',
+			paddingY: '3',
+			borderTopWidth: '1',
+			display: 'flex',
+			justifyContent: 'flex-end',
+			gap: '2'
+		})}
+	>
+		<button class={button({ variant: 'secondary' })} onclick={closeVersionModal} type="button"
+			>Close</button
+		>
+	</div>
+{/snippet}
+
+<BaseModal
+	open={showVersionModal}
+	onClose={closeVersionModal}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	panelClass={css({
+		width: 'min(720px, 92vw)',
+		maxHeight: '80vh',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		display: 'flex',
+		flexDirection: 'column',
+		_focus: { outline: 'none' }
+	})}
+	ariaLabelledby="analysis-version-title"
+	content={versionModalContent}
+/>
+
+<BaseModal
+	open={showExportModal}
+	onClose={closeExportModal}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	panelClass={css({
+		width: 'min(960px, 96vw)',
+		maxHeight: '86vh',
+		backgroundColor: 'bg.primary',
+		borderWidth: '1',
+		display: 'flex',
+		flexDirection: 'column',
+		_focus: { outline: 'none' }
+	})}
+	ariaLabelledby="analysis-export-title"
+	content={exportModalContent}
+/>
 
 <DragPreview />

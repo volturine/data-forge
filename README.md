@@ -1,155 +1,294 @@
 # Data-Forge Analysis Platform
 
-A local-first, no-code data analysis tool for building data pipelines visually.
+> A local-first, no-code data analysis platform for building visual data pipelines — powered by Polars, FastAPI, and SvelteKit.
 
-## Mission
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/volturine/polars-fastapi-svelte/actions/workflows/ci.yml/badge.svg)](https://github.com/volturine/polars-fastapi-svelte/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Bun](https://img.shields.io/badge/runtime-Bun-black.svg)](https://bun.sh)
 
-Make data transformation and analysis accessible to people who aren't comfortable writing code, while still leveraging powerful tools like Polars under the hood. Runs entirely on your machine — no cloud, no subscriptions, no data leaving your computer.
+Data-Forge is a **local-first**, **no-code** data transformation tool. Build multi-step data pipelines visually, preview results instantly, schedule automated builds, and keep everything on your own machine — no cloud, no subscriptions, no data leaving your computer.
 
-## What This Is
+---
 
-- A visual pipeline builder for data transformations
-- Support for CSV, Parquet, Excel, JSON, databases, and APIs
-- Isolated compute environments (one analysis per process)
-- Client-side schema calculation for instant feedback
-- Built on Polars for performance
+## Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Project Structure](#project-structure)
+- [Architecture](#architecture)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+
+---
+
+## Features
+
+- **Visual Pipeline Builder** — Add, configure, and reorder transformation steps with immediate data preview
+- **Multi-tab Analyses** — Organize related pipelines into tabs; tabs share a single compute engine run
+- **Polars Performance** — All transformations execute as Polars LazyFrames, compiled to efficient query plans
+- **Multiple Data Sources** — CSV, Excel, Parquet, JSON, DuckDB, external databases, and Apache Iceberg tables
+- **Iceberg Storage** — Outputs materialized as Iceberg tables with time-travel snapshot support
+- **Scheduling System** — Dataset-centric schedules: cron, dependency-based, and event-triggered rebuilds
+- **Lineage Graph** — Visual graph showing datasource and analysis dependency relationships
+- **Build Observability** — Full run history with request/response payloads, query plans, step timings, and run comparison
+- **Namespace & Branch Architecture** — Isolated namespaces with per-datasource branch selection
+- **MCP Tool Integration** — API routes exposed as Model Context Protocol tools for AI agent workflows
+- **Notifications** — SMTP email and Telegram bot notifications on build events
+- **Local-First** — Runs entirely on your machine; no cloud dependencies
+
+---
 
 ## Tech Stack
 
-**Backend**: FastAPI + Python 3.13 + Polars + SQLAlchemy 2.0 (async) + SQLite + Pydantic V2
+| Layer | Technology |
+|-------|-----------|
+| **Backend Runtime** | Python 3.11+ with [uv](https://github.com/astral-sh/uv) |
+| **API Framework** | FastAPI (async) |
+| **Data Engine** | [Polars](https://pola.rs) + DuckDB |
+| **Storage** | Apache Iceberg via [PyIceberg](https://py.iceberg.apache.org) |
+| **Database** | SQLite with SQLAlchemy 2.0 async + Alembic migrations |
+| **Schema Validation** | Pydantic V2 |
+| **Frontend Runtime** | [Bun](https://bun.sh) |
+| **UI Framework** | [SvelteKit 2](https://kit.svelte.dev) + [Svelte 5](https://svelte.dev) (runes mode) |
+| **Type System** | TypeScript |
+| **Styling** | [Panda CSS](https://panda-css.com) |
+| **Data Fetching** | [TanStack Query](https://tanstack.com/query) |
+| **Container** | Docker + Docker Compose |
 
-**Frontend**: SvelteKit 2 + Svelte 5 (runes) + TypeScript + TanStack Query
+---
 
 ## Quick Start
 
-### Option 1: Docker (Recommended for Production)
+### Option 1: Docker (Recommended)
 
 ```bash
 # Copy and configure environment
 cp .env.example .env
 
-# Deploy with Docker Compose
-./scripts/deploy.sh
+# Start with Docker Compose
+docker compose up
 
-# Access the application
+# Open the application
 open http://localhost:8000
 ```
 
 ### Option 2: Local Development
 
+**Prerequisites:** Python 3.11+, [uv](https://github.com/astral-sh/uv), [Bun](https://bun.sh), [just](https://github.com/casey/just)
+
 ```bash
-# Install backend
-cd backend
-uv sync --extra dev
+# Install all dependencies
+just install
 
-# Install frontend
-cd ../frontend
-npm install
+# Copy environment file
+cp backend/.env.example backend/.env
 
-# Run both
+# Start both servers with hot-reload
 just dev
 ```
 
-Frontend: http://localhost:5173
+- Frontend: http://localhost:3000 (Vite dev server, proxies `/api` to backend)
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
 
-Backend: http://localhost:8000
+### Install Prerequisites (Ubuntu/Debian)
+
+```bash
+./prerequisites.sh
+```
+
+---
 
 ## Configuration
 
-The backend can be configured using environment variables. Copy `.env.example` to `.env` and customize as needed:
+The app supports two deployment topologies:
+
+### Production (single port)
+
+FastAPI serves both the API and the pre-built frontend on port 8000.
 
 ```bash
-cd backend
-cp .env.example .env
+cp backend/.prod.env.example backend/.prod.env
+# Edit .prod.env with your settings
+cd frontend && bun run build
+just prod
 ```
 
-### Key Configuration Options
+### Development (two servers)
 
-| Variable                  | Default   | Description                                                |
-| ------------------------- | --------- | ---------------------------------------------------------- |
-| `DEBUG`                   | `false`   | Enable debug logging and SQL echo                          |
-| `ENGINE_IDLE_TIMEOUT`     | `300`     | Seconds before idle engines are cleaned up (reset on save) |
-| `ENGINE_POOLING_INTERVAL` | `5`       | Seconds between engine state checks                        |
-| `JOB_TIMEOUT`             | `300`     | Maximum job execution time in seconds                      |
-| `UPLOAD_CHUNK_SIZE`       | `5242880` | Upload chunk size in bytes (5MB)                           |
+Vite dev server on port 3000 proxies `/api` to FastAPI on port 8000.
 
-See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for complete reference of all environment variables.
+```bash
+just dev
+```
+
+### Key Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEBUG` | `false` | Enable debug logging and SQL echo |
+| `PROD_MODE_ENABLED` | `false` | Serve static frontend from `frontend/build` |
+| `ENGINE_IDLE_TIMEOUT` | `60` | Seconds before idle engines are cleaned up |
+| `JOB_TIMEOUT` | `300` | Max job execution time in seconds |
+| `AUTH_REQUIRED` | `false` | Require login before accessing routes |
+| `DATA_DIR` | — | Base directory for all data storage |
+| `DEFAULT_NAMESPACE` | `default` | Default data namespace |
+
+See **[ENV_VARIABLES.md](ENV_VARIABLES.md)** for the complete reference.
+
+---
+
+## Development
+
+### Prerequisites
+
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) — Python package manager
+- [Bun](https://bun.sh) — JavaScript runtime and package manager
+- [just](https://github.com/casey/just) — Command runner
+
+### Commands
+
+```bash
+just install        # Install all dependencies
+just dev            # Start both servers with hot-reload
+just format         # Format all code (ruff + prettier)
+just check          # Run all linters and type checks
+just test           # Run backend pytest + frontend Vitest
+just test-e2e       # Run Playwright end-to-end tests
+just verify         # Full gate: format + check (required before every PR)
+just prod           # Build frontend and start production server
+```
+
+### Running Tests
+
+```bash
+# Backend unit tests
+cd backend && uv run pytest
+
+# Frontend unit tests
+cd frontend && bun run test:unit
+
+# End-to-end tests (starts servers automatically)
+just test-e2e
+```
+
+### Code Style
+
+- **Python**: Ruff (format + lint) + mypy — see `backend/pyproject.toml`
+- **TypeScript/Svelte**: ESLint + Prettier + svelte-check
+- **Conventions**: See [STYLE_GUIDE.md](STYLE_GUIDE.md)
+
+> **Important:** Always run `just verify` before opening a PR. It must pass with zero errors and zero warnings.
+
+---
+
+## Project Structure
+
+```
+polars-fastapi-svelte/
+├── backend/                  # FastAPI Python backend
+│   ├── api/                  # API route registration
+│   ├── core/                 # Settings, database, lifespan
+│   ├── modules/              # Feature modules (compute, datasources, analyses, ...)
+│   │   ├── compute/          # Polars compute engine + process manager
+│   │   ├── datasources/      # Data source CRUD and schema extraction
+│   │   ├── analyses/         # Analysis and pipeline definition management
+│   │   ├── scheduling/       # Dataset-centric scheduler
+│   │   ├── lineage/          # Dependency graph computation
+│   │   └── mcp/              # MCP tool registry and router
+│   ├── tests/                # Backend pytest tests
+│   └── main.py               # Application entry point
+├── frontend/                 # SvelteKit frontend
+│   ├── src/
+│   │   ├── lib/              # Shared components, utils, stores
+│   │   │   ├── components/   # Reusable UI components
+│   │   │   ├── api/          # TanStack Query hooks
+│   │   │   └── utils/        # Utility functions
+│   │   └── routes/           # SvelteKit page routes
+│   └── tests/                # Playwright e2e tests
+├── docs/                     # Product and architecture docs
+├── docker-compose.yml        # Docker Compose configuration
+├── Dockerfile                # Production container image
+├── Justfile                  # Task runner commands
+└── ENV_VARIABLES.md          # Complete environment variable reference
+```
+
+---
 
 ## Architecture
 
-### Backend Components
+### Compute Engine
 
-- **Compute Engine**: Isolated multiprocess execution for each analysis
-- **Process Manager**: Thread-safe singleton managing engine lifecycle
-- **Job Tracking**: TTL-based cleanup with configurable size limits
-- **Error Handling**: Custom exception hierarchy with structured error responses
-- **Configuration**: Pydantic-based settings with validation
+Each analysis runs in an **isolated subprocess** (the "compute engine"). The main FastAPI process communicates with engines via multiprocessing queues. This provides:
 
-### Key Features
+- Memory isolation between analyses
+- Configurable resource limits per engine
+- Automatic cleanup of idle engines after a timeout
+- WebSocket streaming of real-time compute status
 
-- **Thread-safe operations**: All shared state uses proper locking
-- **Automatic cleanup**: Idle engines and old jobs are cleaned up automatically
-- **Timeout protection**: All polling loops have configurable timeouts
-- **Structured logging**: Comprehensive logging at INFO, DEBUG, and ERROR levels
-- **Graceful shutdown**: Proper cleanup of all resources on application exit
+### Pipeline Execution
 
-## Docker Deployment
+A pipeline is a list of steps operating on a Polars LazyFrame. All tabs in an analysis are resolved in a **single engine run** — tab B can reference tab A's output as a LazyFrame without an intermediate disk write (intra-analysis dependency). Cross-analysis dependencies use materialized Iceberg snapshots.
 
-The application is fully dockerized and can be deployed as a single container containing both frontend and backend.
+### Scheduling
 
-### Production Deployment
+Schedules target **output datasets**, not analyses. At execution time the scheduler resolves:
+`dataset → created_by_analysis_id → latest analysis version → tab → build`
 
-```bash
-# 1. Configure environment
-cp .env.example .env
-# Edit .env with your settings
+This means schedule logic automatically picks up the latest analysis recipe without any version lock-in.
 
-# 2. Deploy
-./scripts/deploy.sh
+### Storage Layout
 
-# 3. Check health
-./scripts/health-check.sh
+```
+DATA_DIR/
+├── app.db                          # Global settings database
+└── namespaces/
+    └── {namespace}/
+        ├── namespace.db            # Per-namespace database
+        ├── uploads/                # Raw uploaded files
+        ├── clean/{uuid}/{branch}/  # Iceberg tables
+        └── exports/                # Analysis output tables
 ```
 
-### Development with Docker
+---
 
-```bash
-# Start with hot-reload
-./scripts/dev.sh
-```
+## Roadmap
 
-### Resource Configuration
+- [ ] Chart interactivity — tooltips, filter interactions, zoom
+- [ ] Additional external database connectors
+- [ ] Collaborative multi-user support
+- [ ] Plugin/extension system for custom step types
+- [ ] CLI for headless pipeline execution
+- [ ] Export pipelines as standalone Python scripts
 
-Configure resource limits in `.env`:
+---
 
-```bash
-# CPU and memory per analysis engine
-POLARS_MAX_THREADS=4
-POLARS_MAX_MEMORY_MB=2048
+## Contributing
 
-# Maximum concurrent analyses
-MAX_CONCURRENT_ENGINES=5
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR.
 
-# API server workers
-WORKERS=2
-```
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes and run `just verify`
+4. Open a pull request
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on code style, testing, and the review process.
 
-- Resource planning
-- Scaling strategies
-- Monitoring and health checks
-- Troubleshooting
-- Production best practices
+---
 
-## Documentation
+## Security
 
-### Deployment & Configuration
+If you discover a security vulnerability, please report it responsibly. See [SECURITY.md](SECURITY.md) for details.
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** — Complete deployment guide with Docker
-- **[ENV_VARIABLES.md](ENV_VARIABLES.md)** — Complete environment variable reference (26 variables)
-- **[DOCKERIZATION_SUMMARY.md](DOCKERIZATION_SUMMARY.md)** — Dockerization implementation details
-- **[DOCKERIZATION_PLAN.md](DOCKERIZATION_PLAN.md)** — Technical architecture plan
+**Do not open public issues for security vulnerabilities.**
 
 ### Development
 
@@ -158,3 +297,25 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for complete deployment guide including:
 - [AGENTS.md](AGENTS.md) — Developer guidelines
 - [STYLE_GUIDE.md](STYLE_GUIDE.md) — Code style
 - [MCP Tool Contract](docs/mcp-tool-contract.md) — How API routes are exposed as MCP tools
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+## Acknowledgements
+
+This project is built on top of excellent open-source software:
+
+- [Polars](https://pola.rs) — Fast DataFrame library for Rust and Python
+- [FastAPI](https://fastapi.tiangolo.com) — Modern, fast web framework for Python
+- [SvelteKit](https://kit.svelte.dev) — Full-stack Svelte framework
+- [Apache Iceberg](https://iceberg.apache.org) — Open table format for large datasets
+- [PyIceberg](https://py.iceberg.apache.org) — Python implementation of Apache Iceberg
+- [DuckDB](https://duckdb.org) — In-process analytical database
+- [Panda CSS](https://panda-css.com) — CSS-in-JS with build-time generated styles
+- [TanStack Query](https://tanstack.com/query) — Async state management for TypeScript
+- [uv](https://github.com/astral-sh/uv) — Extremely fast Python package manager
+- [Bun](https://bun.sh) — Fast all-in-one JavaScript runtime

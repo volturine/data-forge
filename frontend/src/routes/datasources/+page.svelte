@@ -21,9 +21,11 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Callout from '$lib/components/ui/Callout.svelte';
-	import { css, cx, spinner, button, chip, input, row, rowBetween } from '$lib/styles/panda';
+	import { css, spinner } from '$lib/styles/panda';
+	import { useNamespace } from '$lib/stores/namespace.svelte';
 
 	const queryClient = useQueryClient();
+	const ns = useNamespace();
 
 	let showHidden = $state(false);
 
@@ -33,28 +35,61 @@
 	let mutatingId = $state<string | null>(null);
 	let searchQuery = $state('');
 	let showComparison = $state(false);
+	let snapshotConfig = $state<Record<string, unknown> | null>(null);
+	let selectedBranch = $state<string | null>(null);
+
+	const urlId = $derived(page.url.searchParams.get('id'));
+	let lastNs = ns.value;
+
+	// Namespace switch: clear stale selection immediately when namespace changes.
+	$effect(() => {
+		const current = ns.value;
+		if (current === lastNs) return;
+		lastNs = current;
+		selectDatasource(null);
+	});
+
+	// Navigation: layout may strip ?id= on namespace switch; sync state from URL.
+	$effect(() => {
+		if (urlId === selectedId) return;
+		selectedId = urlId;
+		showConfig = urlId;
+		showComparison = false;
+		if (!urlId) {
+			snapshotConfig = null;
+			selectedBranch = null;
+		}
+	});
 
 	const query = createQuery(() => ({
-		queryKey: ['datasources', showHidden],
+		queryKey: ['datasources', ns.value, showHidden],
 		queryFn: async () => {
 			const result = await listDatasources(showHidden);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
-		}
+		},
+		enabled: !ns.switching
 	}));
 
-	let snapshotConfig = $state<Record<string, unknown> | null>(null);
-	let selectedBranch = $state<string | null>(null);
+	const selectionValid = $derived(
+		!selectedId || !query.data || query.data.some((d) => d.id === selectedId)
+	);
+
+	// Navigation: clear stale selection when datasource list loads without the selected ID.
+	$effect(() => {
+		if (selectionValid) return;
+		selectDatasource(null);
+	});
 
 	const selectedDatasourceQuery = createQuery(() => ({
-		queryKey: ['datasource', selectedId, selectedBranch ?? ''],
+		queryKey: ['datasource', ns.value, selectedId, selectedBranch ?? ''],
 		queryFn: async () => {
 			if (!selectedId) return null;
 			const result = await getDatasource(selectedId);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
 		},
-		enabled: !!selectedId
+		enabled: !!selectedId && selectionValid && !ns.switching
 	}));
 
 	const deleteMutation = createMutation(() => ({
@@ -84,12 +119,12 @@
 	function selectDatasource(id: string | null) {
 		selectedId = id;
 		showConfig = id;
-		selectedBranch = id ? 'master' : null;
+		selectedBranch = null;
 		showComparison = false;
 		if (id) {
 			const ds = datasources.find((d) => d.id === id);
 			const config = (ds?.config ?? {}) as Record<string, unknown>;
-			snapshotConfig = { ...config, branch: 'master' };
+			snapshotConfig = Object.keys(config).length > 0 ? { ...config } : null;
 		} else {
 			snapshotConfig = null;
 		}
@@ -102,18 +137,12 @@
 		const selected = selectedDatasource;
 		if (!selectedId) return;
 		if (!selected) return;
-		if (snapshotConfig?.branch) return;
+		if (snapshotConfig) return;
 		const nextConfig = (selected.config ?? {}) as Record<string, unknown>;
-		const nextBranch = selectedBranch ?? 'master';
-		const travelId = snapshotConfig?.time_travel_snapshot_id as string | undefined;
-		const travelTs = snapshotConfig?.time_travel_snapshot_timestamp_ms as number | undefined;
-		const travelUi = snapshotConfig?.time_travel_ui as Record<string, unknown> | undefined;
-		const merged = { ...nextConfig, branch: nextBranch } as Record<string, unknown>;
-		if (travelId) merged.time_travel_snapshot_id = travelId;
-		if (travelTs) merged.time_travel_snapshot_timestamp_ms = travelTs;
-		if (travelUi) merged.time_travel_ui = travelUi;
+		if (Object.keys(nextConfig).length === 0) return;
+		const merged = { ...nextConfig } as Record<string, unknown>;
 		snapshotConfig = merged;
-		selectedBranch = nextBranch;
+		selectedBranch = typeof merged.branch === 'string' ? merged.branch : null;
 	});
 
 	function handleDelete(id: string) {
@@ -190,9 +219,9 @@
 				boxSizing: 'border-box'
 			})}
 		>
-			<div class={rowBetween}>
+			<div class={css({ display: 'flex', alignItems: 'center', justifyContent: 'space-between' })}>
 				<h1 class={css({ fontSize: 'sm', fontWeight: 'semibold' })}>Data Sources</h1>
-				<div class={cx(row, css({ gap: '1' }))}>
+				<div class={css({ display: 'flex', alignItems: 'center', gap: '1' })}>
 					<button
 						class={css({
 							display: 'inline-flex',
@@ -256,7 +285,24 @@
 					id="ds-search"
 					aria-label="Search datasources"
 					placeholder="Search datasources..."
-					class={cx(input({ variant: 'search' }), css({ paddingY: '1' }))}
+					class={css({
+						width: 'full',
+						fontSize: 'sm',
+						color: 'fg.primary',
+						backgroundColor: 'transparent',
+						borderWidth: '1',
+						borderRadius: '0',
+						paddingLeft: '8',
+						paddingRight: '2',
+						paddingY: '1',
+						transitionProperty: 'border-color',
+						transitionDuration: '160ms',
+						transitionTimingFunction: 'ease',
+						_focus: { outline: 'none' },
+						_focusVisible: { borderColor: 'border.accent' },
+						_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+						_placeholder: { color: 'fg.muted' }
+					})}
 					bind:value={searchQuery}
 				/>
 			</div>
@@ -265,7 +311,14 @@
 		<!-- Datasource List -->
 		<div class={css({ flex: '1', overflowY: 'auto' })}>
 			{#if query.isLoading}
-				<div class={cx(row, css({ height: '100%', justifyContent: 'center' }))}>
+				<div
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						height: '100%',
+						justifyContent: 'center'
+					})}
+				>
 					<div class={spinner()}></div>
 				</div>
 			{:else if query.isError}
@@ -317,24 +370,26 @@
 					>
 						<!-- Row -->
 						<div
-							class={cx(
-								row,
-								css({ justifyContent: 'space-between', paddingX: '3', paddingY: '2.5' })
-							)}
+							class={css({
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'space-between',
+								paddingX: '3',
+								paddingY: '2.5'
+							})}
 						>
 							<button
-								class={cx(
-									row,
-									css({
-										gap: '2',
-										minWidth: '0',
-										flex: '1',
-										textAlign: 'left',
-										backgroundColor: 'transparent',
-										padding: '0',
-										borderColor: 'transparent'
-									})
-								)}
+								class={css({
+									display: 'flex',
+									alignItems: 'center',
+									gap: '2',
+									minWidth: '0',
+									flex: '1',
+									textAlign: 'left',
+									backgroundColor: 'transparent',
+									padding: '0',
+									borderColor: 'transparent'
+								})}
 								onclick={() => selectDatasource(datasource.id)}
 							>
 								<span
@@ -351,7 +406,20 @@
 								</span>
 								{#if datasource.created_by === 'analysis'}
 									<span
-										class={cx(chip({ tone: 'accent' }), css({ gap: '0.5', flexShrink: '0' }))}
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											paddingX: '1.5',
+											paddingY: '0.5',
+											fontSize: '2xs',
+											fontWeight: 'medium',
+											textTransform: 'uppercase',
+											letterSpacing: 'wider',
+											backgroundColor: 'bg.accent',
+											color: 'accent.primary',
+											gap: '0.5',
+											flexShrink: '0'
+										})}
 										title="Created by analysis"
 									>
 										<GitBranch size={10} />
@@ -359,7 +427,20 @@
 									</span>
 								{:else}
 									<span
-										class={cx(chip({ tone: 'neutral' }), css({ gap: '0.5', flexShrink: '0' }))}
+										class={css({
+											display: 'inline-flex',
+											alignItems: 'center',
+											paddingX: '1.5',
+											paddingY: '0.5',
+											fontSize: '2xs',
+											fontWeight: 'medium',
+											textTransform: 'uppercase',
+											letterSpacing: 'wider',
+											backgroundColor: 'bg.tertiary',
+											color: 'fg.muted',
+											gap: '0.5',
+											flexShrink: '0'
+										})}
 										title="Imported datasource"
 									>
 										<Upload size={10} />
@@ -367,7 +448,7 @@
 									</span>
 								{/if}
 							</button>
-							<div class={cx(row, css({ flexShrink: '0' }))}>
+							<div class={css({ display: 'flex', alignItems: 'center', flexShrink: '0' })}>
 								<button
 									class={css({
 										padding: '1.5',
@@ -407,20 +488,19 @@
 		{#if selectedDatasource}
 			<div class={css({ height: '100%', display: 'flex', flexDirection: 'column' })}>
 				<div
-					class={cx(
-						row,
-						css({
-							borderBottomWidth: '1',
-							backgroundColor: 'bg.secondary',
-							padding: '3',
-							justifyContent: 'space-between',
-							gap: '3'
-						})
-					)}
+					class={css({
+						display: 'flex',
+						alignItems: 'center',
+						borderBottomWidth: '1',
+						backgroundColor: 'bg.secondary',
+						padding: '3',
+						justifyContent: 'space-between',
+						gap: '3'
+					})}
 				>
 					<div class={css({ flex: '1', minWidth: '0' })}>
 						{#if selectedDatasource.source_type === 'iceberg'}
-							<div class={cx(row, css({ gap: '2' }))}>
+							<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 								<div class={css({ flex: '1', minWidth: '0' })}>
 									<SnapshotPicker
 										datasourceId={selectedDatasource.id}
@@ -432,7 +512,7 @@
 										onConfigChange={handleSnapshotConfigChange}
 									/>
 								</div>
-								<div class={cx(row, css({ gap: '2' }))}>
+								<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
 									<GitBranch size={14} class={css({ color: 'fg.tertiary' })} />
 									<BranchPicker
 										branches={branchOptions}
@@ -448,13 +528,16 @@
 									/>
 								</div>
 								<button
-									class={cx(
-										button({ variant: 'ghost', size: 'sm' }),
-										css({
-											borderWidth: '1',
-											fontSize: 'xs'
-										})
-									)}
+									class={css({
+										backgroundColor: 'transparent',
+										color: 'fg.secondary',
+										borderColor: 'transparent',
+										paddingX: '2',
+										paddingY: '1',
+										'&:hover:not(:disabled)': { backgroundColor: 'bg.hover', color: 'fg.primary' },
+										borderWidth: '1',
+										fontSize: 'xs'
+									})}
 									onclick={() => (showComparison = !showComparison)}
 									aria-pressed={showComparison}
 								>
@@ -486,15 +569,14 @@
 			</div>
 		{:else}
 			<div
-				class={cx(
-					row,
-					css({
-						height: '100%',
-						justifyContent: 'center',
-						color: 'fg.muted',
-						backgroundColor: 'bg.secondary'
-					})
-				)}
+				class={css({
+					display: 'flex',
+					alignItems: 'center',
+					height: '100%',
+					justifyContent: 'center',
+					color: 'fg.muted',
+					backgroundColor: 'bg.secondary'
+				})}
 			>
 				<div class={css({ textAlign: 'center' })}>
 					<p class={css({ fontSize: 'lg', fontWeight: 'medium', marginBottom: '2' })}>

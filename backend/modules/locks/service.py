@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from core.config import settings
@@ -72,9 +73,17 @@ def acquire_lock(
             last_heartbeat=now,
         )
         session.add(lock)
-        session.commit()
-        session.refresh(lock)
-        return _status(lock, now)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            lock = get_lock(session, resource_type, resource_id)
+            now = _utcnow()
+            if lock is None:
+                raise ValueError(f'{resource_type} {resource_id} lock could not be acquired') from None
+        else:
+            session.refresh(lock)
+            return _status(lock, now)
     if lock.owner_id == owner_id or lock.expires_at <= now:
         lock.owner_id = owner_id
         lock.lock_token = uuid.uuid4().hex

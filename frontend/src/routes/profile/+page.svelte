@@ -1,131 +1,62 @@
 <script lang="ts">
-	import { css, cx, button, input, label, spinner, row } from '$lib/styles/panda';
-	import { authStore } from '$lib/stores/auth.svelte';
-	import { configStore } from '$lib/stores/config.svelte';
-	import { updateProfile, changePassword, unlinkProvider, getMe } from '$lib/api/auth';
-	import { GitBranch } from 'lucide-svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { css, tabButton } from '$lib/styles/panda';
+	import AccountTab from './AccountTab.svelte';
+	import NotificationsTab from './NotificationsTab.svelte';
+	import AiProvidersTab from './AiProvidersTab.svelte';
+	import SystemTab from './SystemTab.svelte';
 
-	const editable = $derived(configStore.authRequired);
+	const tabs = [
+		{ key: 'account', label: 'Account' },
+		{ key: 'notifications', label: 'Notifications' },
+		{ key: 'ai-providers', label: 'AI Providers' },
+		{ key: 'system', label: 'System' }
+	] as const;
 
-	let name = $state(authStore.user?.display_name ?? '');
-	let saving = $state(false);
-	let message = $state<{ text: string; kind: 'success' | 'error' } | null>(null);
+	type TabKey = (typeof tabs)[number]['key'];
 
-	let current = $state('');
-	let fresh = $state('');
-	let confirm = $state('');
-	let changing = $state(false);
-	let pwMessage = $state<{ text: string; kind: 'success' | 'error' } | null>(null);
+	const validKeys = new Set<string>(tabs.map((t) => t.key));
 
-	let unlinking = $state<string | null>(null);
-	let linkMessage = $state<{ text: string; kind: 'success' | 'error' } | null>(null);
-
-	const providers = $derived(authStore.user?.providers ?? []);
-
-	function connected(p: string): boolean {
-		return providers.includes(p);
+	function resolveTab(hash: string): TabKey {
+		const key = hash.replace('#', '');
+		if (validKeys.has(key)) return key as TabKey;
+		return 'account';
 	}
 
-	async function saveProfile(e: SubmitEvent) {
-		e.preventDefault();
-		saving = true;
-		message = null;
-		const result = await updateProfile({ display_name: name });
-		result.match(
-			(user) => {
-				authStore.user = user;
-				message = { text: 'Profile updated', kind: 'success' };
-			},
-			(err) => {
-				message = { text: err.message, kind: 'error' };
-			}
-		);
-		saving = false;
-	}
+	const activeTab = $derived(resolveTab(page.url.hash));
 
-	async function savePassword(e: SubmitEvent) {
-		e.preventDefault();
-		pwMessage = null;
-
-		if (fresh.length < 8) {
-			pwMessage = { text: 'Password must be at least 8 characters', kind: 'error' };
-			return;
-		}
-		if (fresh !== confirm) {
-			pwMessage = { text: 'Passwords do not match', kind: 'error' };
-			return;
-		}
-
-		changing = true;
-		const result = await changePassword({ current_password: current, new_password: fresh });
-		result.match(
-			() => {
-				pwMessage = { text: 'Password changed', kind: 'success' };
-				current = '';
-				fresh = '';
-				confirm = '';
-			},
-			(err) => {
-				pwMessage = { text: err.message, kind: 'error' };
-			}
-		);
-		changing = false;
-	}
-
-	function oauth(provider: string) {
-		window.location.href = `/api/v1/auth/${provider}`;
-	}
-
-	async function disconnect(provider: string) {
-		unlinking = provider;
-		linkMessage = null;
-		const result = await unlinkProvider(provider);
-		result.match(
-			() => {
-				linkMessage = { text: `${provider} disconnected`, kind: 'success' };
-			},
-			(err) => {
-				linkMessage = { text: err.message, kind: 'error' };
-			}
-		);
-		const refresh = await getMe();
-		refresh.match(
-			(user) => {
-				authStore.user = user;
-			},
-			() => {}
-		);
-		unlinking = null;
-	}
-
-	const card = css({
-		backgroundColor: 'bg.panel',
-		borderWidth: '1',
-		padding: '6',
-		display: 'flex',
-		flexDirection: 'column',
-		gap: '5'
-	});
-
-	const heading = css({
-		fontSize: 'md',
-		fontWeight: 'semibold',
-		color: 'fg.primary',
-		paddingBottom: '3',
-		borderBottomWidth: '1',
-		borderColor: 'border.primary'
-	});
-
-	const alert = (kind: 'success' | 'error') =>
-		css({
-			backgroundColor: kind === 'success' ? 'bg.success' : 'bg.error',
-			borderWidth: '1',
-			borderColor: kind === 'success' ? 'border.success' : 'border.error',
-			color: kind === 'success' ? 'fg.success' : 'fg.error',
-			paddingX: '3',
-			paddingY: '2',
-			fontSize: 'sm'
+	function selectTab(key: TabKey) {
+		goto(resolve(`/profile#${key}` as '/'), {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
 		});
+	}
+
+	function handleTabKeydown(event: KeyboardEvent, index: number) {
+		const count = tabs.length;
+		let next = -1;
+		if (event.key === 'ArrowRight') next = (index + 1) % count;
+		if (event.key === 'ArrowLeft') next = (index - 1 + count) % count;
+		if (event.key === 'Home') next = 0;
+		if (event.key === 'End') next = count - 1;
+		if (next < 0) return;
+		event.preventDefault();
+		selectTab(tabs[next].key);
+		const target = document.getElementById(`tab-${tabs[next].key}`);
+		target?.focus();
+	}
+
+	// Track which tabs have been activated for lazy loading
+	let activated = $state(new Set<TabKey>(['account']));
+
+	$effect(() => {
+		if (!activated.has(activeTab)) {
+			activated = new Set([...activated, activeTab]);
+		}
+	});
 </script>
 
 <div
@@ -143,226 +74,72 @@
 	<div>
 		<h1 class={css({ fontSize: 'xl', fontWeight: 'semibold', color: 'fg.primary' })}>Profile</h1>
 		<p class={css({ fontSize: 'sm', color: 'fg.muted', marginTop: '1' })}>
-			Manage your account settings
+			Manage your account and application settings
 		</p>
 	</div>
 
-	<div class={card}>
-		<h2 class={heading}>Profile</h2>
-
-		{#if message}
-			<div class={alert(message.kind)}>{message.text}</div>
-		{/if}
-
-		<form
-			onsubmit={saveProfile}
-			class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}
-		>
-			<div>
-				<label for="email" class={label({ variant: 'field' })}>Email</label>
-				<input
-					id="email"
-					type="email"
-					class={cx(input(), css({ opacity: '0.6', cursor: 'not-allowed' }))}
-					value={authStore.user?.email ?? ''}
-					disabled
-				/>
-			</div>
-
-			<div>
-				<label for="name" class={label({ variant: 'field' })}>Display name</label>
-				<input
-					id="name"
-					type="text"
-					class={input()}
-					placeholder="Your name"
-					bind:value={name}
-					required
-					disabled={!editable}
-				/>
-			</div>
-
-			{#if editable}
-				<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>
-					<button type="submit" class={button({ variant: 'primary' })} disabled={saving}>
-						{#if saving}
-							<div class={spinner({ size: 'sm' })}></div>
-						{/if}
-						Save
-					</button>
-				</div>
-			{/if}
-		</form>
+	<div
+		class={css({
+			display: 'flex',
+			gap: '0',
+			borderBottomWidth: '1'
+		})}
+		role="tablist"
+		aria-label="Profile sections"
+	>
+		{#each tabs as tab, i (tab.key)}
+			<button
+				id={`tab-${tab.key}`}
+				class={tabButton({ active: activeTab === tab.key, size: 'lg' })}
+				onclick={() => selectTab(tab.key)}
+				onkeydown={(e) => handleTabKeydown(e, i)}
+				role="tab"
+				aria-selected={activeTab === tab.key}
+				aria-controls={`panel-${tab.key}`}
+				tabindex={activeTab === tab.key ? 0 : -1}
+				type="button"
+			>
+				{tab.label}
+			</button>
+		{/each}
 	</div>
 
-	{#if editable}
-		<div class={card}>
-			<h2 class={heading}>Password</h2>
-
-			{#if pwMessage}
-				<div class={alert(pwMessage.kind)}>{pwMessage.text}</div>
-			{/if}
-
-			<form
-				onsubmit={savePassword}
-				class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}
-			>
-				<div>
-					<label for="current" class={label({ variant: 'field' })}>Current password</label>
-					<input
-						id="current"
-						type="password"
-						class={input()}
-						placeholder="Enter current password"
-						bind:value={current}
-						required
-						autocomplete="current-password"
-					/>
-				</div>
-
-				<div>
-					<label for="fresh" class={label({ variant: 'field' })}>New password</label>
-					<input
-						id="fresh"
-						type="password"
-						class={input()}
-						placeholder="At least 8 characters"
-						bind:value={fresh}
-						required
-						minlength={8}
-						autocomplete="new-password"
-					/>
-				</div>
-
-				<div>
-					<label for="confirm" class={label({ variant: 'field' })}>Confirm password</label>
-					<input
-						id="confirm"
-						type="password"
-						class={input()}
-						placeholder="Repeat new password"
-						bind:value={confirm}
-						required
-						minlength={8}
-						autocomplete="new-password"
-					/>
-				</div>
-
-				<div class={css({ display: 'flex', justifyContent: 'flex-end' })}>
-					<button type="submit" class={button({ variant: 'primary' })} disabled={changing}>
-						{#if changing}
-							<div class={spinner({ size: 'sm' })}></div>
-						{/if}
-						Change password
-					</button>
-				</div>
-			</form>
+	{#if activeTab === 'account'}
+		<div id="panel-account" role="tabpanel" aria-labelledby="tab-account">
+			<AccountTab />
 		</div>
+	{/if}
 
-		<div class={card}>
-			<h2 class={heading}>Connected accounts</h2>
-
-			{#if linkMessage}
-				<div class={alert(linkMessage.kind)}>{linkMessage.text}</div>
-			{/if}
-
-			<div class={css({ display: 'flex', flexDirection: 'column', gap: '3' })}>
-				<div class={cx(row, css({ justifyContent: 'space-between', paddingY: '2' }))}>
-					<div class={cx(row, css({ gap: '3' }))}>
-						<span class={css({ color: 'fg.primary', fontSize: 'sm' })}>Google</span>
-						{#if connected('google')}
-							<span
-								class={css({
-									fontSize: 'xs',
-									color: 'fg.success',
-									backgroundColor: 'bg.success',
-									paddingX: '2',
-									paddingY: '0.5',
-									borderRadius: 'sm'
-								})}
-							>
-								Connected
-							</span>
-						{/if}
-					</div>
-					{#if connected('google')}
-						<button
-							type="button"
-							class={button({ variant: 'ghost', size: 'sm' })}
-							disabled={unlinking === 'google'}
-							onclick={() => disconnect('google')}
-						>
-							{#if unlinking === 'google'}
-								<div class={spinner({ size: 'sm' })}></div>
-							{/if}
-							Disconnect
-						</button>
-					{:else}
-						<button type="button" class={button({ size: 'sm' })} onclick={() => oauth('google')}>
-							Connect
-						</button>
-					{/if}
-				</div>
-
-				<div class={css({ borderTopWidth: '1', borderColor: 'border.primary' })}></div>
-
-				<div class={cx(row, css({ justifyContent: 'space-between', paddingY: '2' }))}>
-					<div class={cx(row, css({ gap: '3' }))}>
-						<GitBranch size={16} />
-						<span class={css({ color: 'fg.primary', fontSize: 'sm' })}>GitHub</span>
-						{#if connected('github')}
-							<span
-								class={css({
-									fontSize: 'xs',
-									color: 'fg.success',
-									backgroundColor: 'bg.success',
-									paddingX: '2',
-									paddingY: '0.5',
-									borderRadius: 'sm'
-								})}
-							>
-								Connected
-							</span>
-						{/if}
-					</div>
-					{#if connected('github')}
-						<button
-							type="button"
-							class={button({ variant: 'ghost', size: 'sm' })}
-							disabled={unlinking === 'github'}
-							onclick={() => disconnect('github')}
-						>
-							{#if unlinking === 'github'}
-								<div class={spinner({ size: 'sm' })}></div>
-							{/if}
-							Disconnect
-						</button>
-					{:else}
-						<button type="button" class={button({ size: 'sm' })} onclick={() => oauth('github')}>
-							<GitBranch size={14} />
-							Connect
-						</button>
-					{/if}
-				</div>
-			</div>
+	{#if activeTab === 'notifications' || activated.has('notifications')}
+		<div
+			id="panel-notifications"
+			role="tabpanel"
+			aria-labelledby="tab-notifications"
+			hidden={activeTab !== 'notifications'}
+		>
+			<NotificationsTab />
 		</div>
+	{/if}
 
-		<div class={card}>
-			<h2 class={cx(heading, css({ color: 'fg.error', borderColor: 'border.error' }))}>
-				Danger zone
-			</h2>
+	{#if activeTab === 'ai-providers' || activated.has('ai-providers')}
+		<div
+			id="panel-ai-providers"
+			role="tabpanel"
+			aria-labelledby="tab-ai-providers"
+			hidden={activeTab !== 'ai-providers'}
+		>
+			<AiProvidersTab />
+		</div>
+	{/if}
 
-			<div class={cx(row, css({ justifyContent: 'space-between' }))}>
-				<div>
-					<p class={css({ fontSize: 'sm', color: 'fg.primary' })}>Delete account</p>
-					<p class={css({ fontSize: 'xs', color: 'fg.muted' })}>
-						Permanently remove your account and all data
-					</p>
-				</div>
-				<button type="button" class={button({ variant: 'danger', size: 'sm' })} disabled>
-					Coming soon
-				</button>
-			</div>
+	{#if activeTab === 'system' || activated.has('system')}
+		<div
+			id="panel-system"
+			role="tabpanel"
+			aria-labelledby="tab-system"
+			hidden={activeTab !== 'system'}
+		>
+			<SystemTab />
 		</div>
 	{/if}
 </div>

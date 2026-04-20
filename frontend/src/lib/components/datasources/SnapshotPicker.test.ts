@@ -1,18 +1,37 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { okAsync } from 'neverthrow';
 import SnapshotPicker from './SnapshotPicker.svelte';
+import type { EngineRun } from '$lib/api/engine-runs';
+
+vi.mock('$lib/stores/clientIdentity.svelte', () => ({
+	getClientIdentity: () => ({ clientId: 'client-1', clientSignature: 'signature-1' })
+}));
+
+vi.mock('$lib/stores/namespace.svelte', () => ({
+	requireNamespace: () => 'default',
+	isNamespaceReady: () => true
+}));
 
 const mockApiRequest = vi.fn();
 vi.mock('$lib/api/client', () => ({
-	apiRequest: (...args: unknown[]) => mockApiRequest(...args)
+	apiRequest: (...args: unknown[]) => mockApiRequest(...args),
+	BASE_URL: '/api'
 }));
 
 const mockListEngineRuns = vi.fn();
-vi.mock('$lib/api/engine-runs', () => ({
-	listEngineRuns: (...args: unknown[]) => mockListEngineRuns(...args)
-}));
+vi.mock('$lib/api/engine-runs', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/api/engine-runs')>();
+	return {
+		...original,
+		listEngineRuns: (...args: unknown[]) => mockListEngineRuns(...args)
+	};
+});
+
+function mockOkRuns(runs: EngineRun[]) {
+	return { match: (onOk: (v: EngineRun[]) => void, _onErr: (e: unknown) => void) => onOk(runs) };
+}
 
 function renderPicker(props: Record<string, unknown> = {}) {
 	return render(SnapshotPicker, {
@@ -46,9 +65,38 @@ function makeSnapshots(
 	};
 }
 
+function makeRun(overrides: Partial<EngineRun> = {}): EngineRun {
+	return {
+		id: 'run-1',
+		analysis_id: null,
+		datasource_id: 'ds-1',
+		kind: 'datasource_update',
+		status: 'success',
+		request_json: {},
+		result_json: null,
+		error_message: null,
+		created_at: '2024-06-15T12:00:00Z',
+		completed_at: '2024-06-15T12:01:00Z',
+		duration_ms: 60000,
+		step_timings: {},
+		query_plan: null,
+		progress: 100,
+		current_step: null,
+		triggered_by: null,
+		execution_entries: [],
+		...overrides
+	};
+}
+
 beforeEach(() => {
+	vi.useFakeTimers();
 	mockApiRequest.mockReset();
 	mockListEngineRuns.mockReset();
+	mockListEngineRuns.mockReturnValue(mockOkRuns([]));
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 describe('SnapshotPicker', () => {
@@ -590,28 +638,6 @@ describe('SnapshotPicker', () => {
 	});
 
 	describe('showBuildPreviews fallback', () => {
-		function makeRun(overrides: Record<string, unknown> = {}) {
-			return {
-				id: 'run-1',
-				analysis_id: null,
-				datasource_id: 'ds-1',
-				kind: 'datasource_update',
-				status: 'success',
-				request_json: {},
-				result_json: null,
-				error_message: null,
-				created_at: '2024-06-15T12:00:00Z',
-				completed_at: '2024-06-15T12:01:00Z',
-				duration_ms: 60000,
-				step_timings: {},
-				query_plan: null,
-				progress: 100,
-				current_step: null,
-				triggered_by: null,
-				...overrides
-			};
-		}
-
 		test('shows all snapshots when build runs exist but map is empty', async () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(
@@ -621,12 +647,9 @@ describe('SnapshotPicker', () => {
 					])
 				)
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: null })]);
-				}
-			});
+			mockListEngineRuns.mockReturnValue(mockOkRuns([makeRun({ id: 'run-1', result_json: null })]));
 			renderPicker({ showBuildPreviews: true });
+			await tick();
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -644,12 +667,9 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([]);
-				}
-			});
+			mockListEngineRuns.mockReturnValue(mockOkRuns([]));
 			renderPicker({ showBuildPreviews: true });
+			await tick();
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -659,6 +679,8 @@ describe('SnapshotPicker', () => {
 		});
 
 		test('filters to matched snapshots when map has entries', async () => {
+			const runs = [makeRun({ id: 'run-1', result_json: { snapshot_id: 'snap-a' } })];
+			mockListEngineRuns.mockReturnValue(okAsync(runs));
 			mockApiRequest.mockReturnValue(
 				okAsync(
 					makeSnapshots([
@@ -668,18 +690,19 @@ describe('SnapshotPicker', () => {
 					])
 				)
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: { snapshot_id: 'snap-a' } })]);
-				}
-			});
+			vi.useRealTimers();
 			renderPicker({ showBuildPreviews: true });
+			await tick();
+			await tick();
 			await fireEvent.click(screen.getByRole('button'));
+			await tick();
 			await tick();
 
 			const dayButton = screen.getByText('15').closest('button');
 			expect(dayButton).toBeTruthy();
 			await fireEvent.click(dayButton!);
+			await tick();
+			await tick();
 
 			const buttons = screen.getAllByRole('button');
 			const timeButtons = buttons.filter((btn) => btn.textContent?.match(/\d{2}:\d{2}:\d{2}/));
@@ -690,13 +713,10 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN20, current: true }]))
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: {} })]);
-				}
-			});
+			mockListEngineRuns.mockReturnValue(mockOkRuns([makeRun({ id: 'run-1', result_json: {} })]));
 			const onUiChange = vi.fn();
 			renderPicker({ showBuildPreviews: true, onUiChange });
+			await tick();
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 
@@ -714,13 +734,10 @@ describe('SnapshotPicker', () => {
 			mockApiRequest.mockReturnValue(
 				okAsync(makeSnapshots([{ id: 'snap-a', ts: JUN15, current: true }]))
 			);
-			mockListEngineRuns.mockReturnValue({
-				match: (onOk: (v: unknown) => void) => {
-					onOk([makeRun({ id: 'run-1', result_json: null })]);
-				}
-			});
+			mockListEngineRuns.mockReturnValue(mockOkRuns([makeRun({ id: 'run-1', result_json: null })]));
 			const onUiChange = vi.fn();
 			renderPicker({ showBuildPreviews: true, onUiChange });
+			await tick();
 			await fireEvent.click(screen.getByRole('button'));
 			await tick();
 

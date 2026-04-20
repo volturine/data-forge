@@ -285,33 +285,49 @@ export class ChatStore {
 				this.settings = s;
 				this._applyProviderDefaults();
 			},
-			() => {}
+			(e) => {
+				this.error = e.message;
+			}
 		);
 		toolsResult.match(
 			(t) => {
 				this.tools = t;
 			},
-			() => {}
+			(e) => {
+				this.error = e.message;
+			}
 		);
 	}
 
 	async loadModels(): Promise<void> {
 		this.modelsLoading = true;
+		if (
+			(this.provider === 'openrouter' || this.provider === 'huggingface') &&
+			this.apiKey.length === 0
+		) {
+			this.models = [];
+			this.modelsLoading = false;
+			this.error = 'API key is required';
+			return;
+		}
 		const result = await listModels(
 			this.provider,
-			this.apiKey || undefined,
+			this.apiKey,
 			this.endpointUrl || undefined,
 			this.organizationId || undefined
 		);
 		result.match(
 			(m) => {
+				this.error = null;
 				this.models = m.map((item) => ({
 					id: item.id || item.name,
 					name: item.name || item.id,
 					context_length: Number(item.context_length ?? 0)
 				}));
 			},
-			() => {}
+			(e) => {
+				this.error = e.message;
+			}
 		);
 		this.modelsLoading = false;
 	}
@@ -322,7 +338,9 @@ export class ChatStore {
 			(s) => {
 				this.sessions = s;
 			},
-			() => {}
+			(e) => {
+				this.error = e.message;
+			}
 		);
 	}
 
@@ -405,7 +423,7 @@ export class ChatStore {
 		const result = await createSession(
 			this.provider,
 			this.model,
-			this.apiKey || undefined,
+			this.apiKey,
 			this.effectiveSystemPrompt
 		);
 		result.match(
@@ -440,11 +458,11 @@ export class ChatStore {
 				this._connectStream(sessionId);
 				return true;
 			},
-			() => {
+			(e) => {
 				if (typeof window !== 'undefined') {
 					localStorage.removeItem(SESSION_KEY);
 				}
-				this.error = null;
+				this.error = e.message;
 				return false;
 			}
 		);

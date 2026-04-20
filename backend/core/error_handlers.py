@@ -113,7 +113,10 @@ def _log_app_error(exc: AppError, status: int) -> None:
     extra = {'error_code': exc.error_code, 'details': exc.details}
     if status >= 500:
         logger.error(msg, extra=extra, exc_info=True)
-    elif isinstance(exc, (InvalidIdError, DataSourceSnapshotError, PipelineValidationError)):
+    elif status == 404 or isinstance(
+        exc,
+        (InvalidIdError, DataSourceSnapshotError, PipelineValidationError, EngineNotFoundError, InvalidCredentialsError),
+    ):
         logger.info(msg, extra=extra)
     else:
         logger.warning(msg, extra=extra)
@@ -123,7 +126,6 @@ def _raise_http(exc: Exception, operation: str, value_error_status: int | None) 
     if isinstance(exc, HTTPException):
         raise exc
     if isinstance(exc, AppError):
-        _log_app_error(exc, _status_for(exc))
         raise exc
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=value_error_status or 400, detail=str(exc)) from exc

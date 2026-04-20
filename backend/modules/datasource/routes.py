@@ -14,6 +14,7 @@ from core.config import settings
 from core.database import get_db, run_db
 from core.dependencies import get_manager
 from core.error_handlers import handle_errors
+from core.exceptions import AppError
 from core.namespace import namespace_paths
 from core.validation import DataSourceId, PreflightId, parse_datasource_id, parse_preflight_id
 from modules.auth.dependencies import get_optional_user
@@ -151,6 +152,10 @@ async def upload_file(
             csv_options=csv_options,
             owner_id=owner_id,
         )
+    except (AppError, ValueError):
+        if file_path.exists():
+            file_path.unlink()
+        raise
     except Exception as e:
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if file_path.exists():
@@ -239,6 +244,14 @@ async def upload_bulk(
                 owner_id=owner_id,
             )
             results.append(schemas.BulkUploadResult(name=file.filename, success=True, datasource=datasource))
+        except AppError as exc:
+            if file_path.exists():
+                file_path.unlink()
+            results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=exc.message))
+        except ValueError as exc:
+            if file_path.exists():
+                file_path.unlink()
+            results.append(schemas.BulkUploadResult(name=file.filename, success=False, error=str(exc)))
         except Exception as e:
             if file_path.exists():
                 file_path.unlink()
@@ -478,6 +491,11 @@ async def confirm_excel(
             cell_range=resolved_cell_range,
             owner_id=user.id if user else None,
         )
+    except AppError:
+        if target_path.exists():
+            target_path.unlink()
+        await clear_preflight(parse_preflight_id(preflight_id))
+        raise
     except Exception as e:
         logger.error('Failed to create datasource: %s', type(e).__name__, exc_info=True)
         if target_path.exists():

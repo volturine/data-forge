@@ -32,11 +32,6 @@ export class ConfigStore {
 		return this.pending;
 	}
 
-	// Getters with fallback defaults (in case config not loaded yet)
-	get enginePoolingInterval(): number {
-		return this.config?.engine_pooling_interval ?? 5000; // 5s default
-	}
-
 	get engineIdleTimeout(): number {
 		return this.config?.engine_idle_timeout ?? 300; // 5min default
 	}

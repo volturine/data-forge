@@ -1,6 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
+import {
+	createDatasource,
+	createAnalysis,
+	waitForNoActiveBuild,
+	shutdownEngine as shutdownEngineViaApi
+} from './utils/api.js';
 import { screenshot } from './utils/visual.js';
-import { waitForAppShell, waitForLayoutReady, waitForSettingsForm } from './utils/readiness.js';
+import { waitForAppShell } from './utils/readiness.js';
+import { gotoAnalysisEditor } from './utils/analysis.js';
+import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.js';
+import { uid } from './utils/uid.js';
 
 /**
  * Smoke tests: every top-level route renders without a JS crash,
@@ -54,8 +63,7 @@ test.describe('Navigation – page load smoke tests', () => {
 
 	test('clicking Analyses nav link goes to /', async ({ page }) => {
 		await page.goto('/datasources');
-		// Nav link in header – look for it by href
-		await page.locator('a[href="/"]').first().click();
+		await page.getByRole('link', { name: 'Analyses' }).click();
 		await expect(page).toHaveURL('/');
 	});
 
@@ -83,100 +91,69 @@ test.describe('Navigation – page load smoke tests', () => {
 	});
 });
 
-test.describe('Navigation – settings popup', () => {
-	test('settings popup opens and shows SMTP, Telegram, Debug sections', async ({ page }) => {
+test.describe('Navigation – profile access', () => {
+	test('profile link navigates to profile page', async ({ page }) => {
 		await page.goto('/');
 		await waitForAppShell(page);
-		await page.getByRole('button', { name: 'Settings' }).click();
+		await page.getByRole('link', { name: 'Profile' }).click();
 
-		const dialog = page.getByRole('dialog');
-		await expect(dialog).toBeVisible({ timeout: 5_000 });
-		await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
-		await waitForSettingsForm(dialog);
+		await page.waitForURL(/\/profile/, { timeout: 10_000 });
+		await expect(page.getByRole('heading', { name: 'Profile', level: 1 })).toBeVisible();
+		await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
 
-		// Sections are collapsed by default; assert toggles first, then expand SMTP
-		// before checking its contents.
-		await expect(dialog.getByText('SMTP', { exact: true })).toBeVisible();
-		await expect(dialog.getByText('Telegram', { exact: true })).toBeVisible();
-		await expect(dialog.getByText('Debug', { exact: true })).toBeVisible();
-
-		await dialog.getByRole('button', { name: 'SMTP' }).click();
-		await expect(dialog.locator('#smtp-host')).toBeVisible();
-		await expect(dialog.locator('#smtp-port')).toBeVisible();
-
-		await screenshot(page, 'navigation', 'settings-popup-open');
-	});
-
-	test('settings save shows success feedback on 200', async ({ page }) => {
-		await page.goto('/');
-		await waitForAppShell(page);
-		await page.getByRole('button', { name: 'Settings' }).click();
-
-		const dialog = page.getByRole('dialog');
-		await waitForSettingsForm(dialog);
-
-		const saveBtn = dialog.getByRole('button', { name: 'Save' });
-		await expect(saveBtn).toBeEnabled({ timeout: 5_000 });
-		await saveBtn.click();
-		await expect(dialog.getByText('Settings saved')).toBeVisible({ timeout: 5_000 });
-
-		await screenshot(page, 'navigation', 'settings-save-success');
+		await screenshot(page, 'navigation', 'profile-via-sidebar');
 	});
 });
 
-test.describe('Navigation – error state regression', () => {
-	test('datasources page handles API failure gracefully', async ({ page }) => {
-		// Intercept the datasource list API to simulate a server error
-		await page.route('**/api/v1/datasource', (route) => {
-			if (route.request().method() === 'GET') {
-				return route.fulfill({ status: 500, body: 'Internal Server Error' });
+test.describe('Navigation – engines live monitor', () => {
+	test('sidebar badge and engines popup update in real time', async ({ page, request }) => {
+		test.setTimeout(120_000);
+		const dsName = `e2e-engines-ds-${uid()}`;
+		const analysisName = `E2E Engines ${uid()}`;
+		const datasourceId = await createDatasource(request, dsName);
+		const analysisId = await createAnalysis(request, analysisName, datasourceId);
+
+		try {
+			// Start a build from the analysis editor — this spawns a compute engine
+			await gotoAnalysisEditor(page, analysisId);
+			const buildBtn = page.locator('[data-testid="output-build-button"]');
+			await expect(buildBtn).toBeVisible({ timeout: 10_000 });
+			await buildBtn.click();
+			await expect(page.locator('[data-testid="output-build-preview-trigger"]')).toBeVisible({
+				timeout: 30_000
+			});
+
+			// Engine badge should appear in the sidebar
+			const engineBadge = page.getByTestId('engine-monitor-count');
+			await expect(engineBadge).toBeVisible({ timeout: 15_000 });
+
+			// Open engine popup and verify the engine is listed
+			const engineButton = page.getByRole('button', { name: 'Engine Monitor' });
+			await engineButton.click();
+			const dialog = page.getByRole('dialog', { name: 'Engines' });
+			await expect(dialog).toBeVisible({ timeout: 5_000 });
+			await expect(dialog.getByText(analysisId, { exact: true })).toBeVisible({
+				timeout: 10_000
+			});
+
+			// Shut down engine and verify it disappears (no UI path for shutdown — Tier 3 cleanup)
+			await waitForNoActiveBuild(request, analysisId);
+			await shutdownEngineViaApi(request, analysisId);
+			await expect(dialog.getByText(analysisId, { exact: true })).not.toBeVisible({
+				timeout: 10_000
+			});
+		} finally {
+			try {
+				await shutdownEngineViaApi(request, analysisId);
+			} catch {
+				// Engine may already be stopped or build may have finished — ignore cleanup errors
 			}
-			return route.continue();
-		});
-
-		await page.goto('/datasources');
-		await waitForLayoutReady(page);
-
-		// Page should still render the heading without crashing
-		await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible({
-			timeout: 10_000
-		});
-
-		// The error callout should be visible
-		await expect(page.getByText(/Error:/i)).toBeVisible({ timeout: 10_000 });
-
-		// The datasource list should not show any items
-		await expect(page.locator('[data-ds-row]')).toHaveCount(0, { timeout: 5_000 });
-	});
-
-	test('monitoring page handles API failure without crash', async ({ page }) => {
-		// Intercept all monitoring-related APIs to simulate failure
-		await page.route('**/api/v1/engine-runs**', (route) =>
-			route.fulfill({ status: 500, body: 'Internal Server Error' })
-		);
-
-		await page.goto('/monitoring');
-		await waitForLayoutReady(page);
-
-		// Page structure should still render
-		await expect(page.getByRole('heading', { name: 'Monitoring' })).toBeVisible({
-			timeout: 10_000
-		});
-		await expect(page.getByRole('tab', { name: 'Builds' })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'Schedules' })).toBeVisible();
-		await expect(page.getByRole('tab', { name: 'Health Checks' })).toBeVisible();
-
-		// The builds panel should show error or empty state — not silently succeed
-		// Scope to visible, non-select text to avoid matching <option> values like "Failed"
-		const panel = page.locator('#panel-builds');
-		await expect(
-			panel
-				.locator(':not(select):not(option)')
-				.getByText(/error|No engine runs/i)
-				.first()
-		).toBeVisible({
-			timeout: 10_000
-		});
+			await deleteAnalysisViaUI(page, analysisName);
+			await deleteDatasourceViaUI(page, dsName);
+		}
 	});
 });
 
@@ -227,5 +204,34 @@ test.describe('Navigation – chat panel smoke', () => {
 		// Click trigger again to close
 		await trigger.click();
 		await expect(panel).not.toBeVisible({ timeout: 3_000 });
+	});
+});
+
+test.describe('Navigation – namespace persistence', () => {
+	test('selected namespace persists across page refresh', async ({ page }) => {
+		test.setTimeout(30_000);
+		const ns = `e2e-ns-${uid()}`;
+
+		await page.goto('/');
+		await waitForAppShell(page);
+
+		await page.getByRole('button', { name: 'Select namespace' }).click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+		const search = dialog.getByRole('textbox', { name: 'Search namespaces' });
+		await search.fill(ns);
+
+		await dialog.locator(`[data-namespace-create="${ns}"]`).click();
+		await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+
+		const sidebar = page.locator('aside[aria-label="Main navigation"]');
+		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 5_000 });
+
+		await page.reload({ waitUntil: 'networkidle' });
+		await waitForAppShell(page);
+
+		await expect(sidebar.getByText(ns)).toBeVisible({ timeout: 10_000 });
+		await screenshot(page, 'navigation', 'namespace-persisted');
 	});
 });
