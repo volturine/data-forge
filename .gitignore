@@ -9,3 +9,9 @@
 # Playwright artifacts (safety net for stray outputs)
 test-results/
 playwright-report/
+
+# Node/tool caches
+node_modules/
+.vite/
+.opencode/node_modules/
+.opencode/package-lock.json

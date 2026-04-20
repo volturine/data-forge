@@ -21,10 +21,10 @@ async def scheduler_loop(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         # Wait for scheduler_check_interval (default 60 seconds)
         await asyncio.wait_for(stop_event.wait(), timeout=settings.scheduler_check_interval)
-        
+
         # For each namespace, check for due schedules
         due = scheduler_service.get_due_schedules(session)
-        
+
         # Execute due schedules with dependency ordering
 ```
 
@@ -102,8 +102,8 @@ def should_run(cron_expr: str, last_run: datetime | None) -> bool:
 4. **Execution**: For each due schedule:
    ```python
    result = scheduler_service.run_analysis_build(
-       session, 
-       analysis_id, 
+       session,
+       analysis_id,
        datasource_id=target_datasource_id
    )
    ```

@@ -48,6 +48,12 @@ logger = logging.getLogger(__name__)
 BuildEmitter = Callable[[dict[str, object]], Awaitable[None]]
 
 
+def _secure_temp_path(suffix: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return path
+
+
 class _UnsetType:
     __slots__ = ()
 
@@ -1971,7 +1977,7 @@ def export_data(
     additional_datasources = _get_additional_datasources(session, export_steps, analysis_pipeline)
     source_datasource_name = _datasource_name(session, datasource_id)
 
-    tmp_output = tempfile.mktemp(suffix='.parquet')
+    tmp_output = _secure_temp_path(suffix='.parquet')
     step_timings: dict = {}
     query_plan: str | None = None
     result_data: dict | None = None
@@ -2425,7 +2431,7 @@ def download_step(
     ext = export_fmt.extension
     content_type = export_fmt.content_type
 
-    tmp_output = tempfile.mktemp(suffix=ext)
+    tmp_output = _secure_temp_path(suffix=ext)
     run_response = engine_run_service.create_engine_run(
         session,
         engine_run_service.create_engine_run_payload(

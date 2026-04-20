@@ -2,6 +2,7 @@ import { test, expect } from './fixtures.js';
 import {
 	createDatasource,
 	createAnalysis,
+	waitForNoActiveBuild,
 	shutdownEngine as shutdownEngineViaApi
 } from './utils/api.js';
 import { screenshot } from './utils/visual.js';
@@ -139,6 +140,7 @@ test.describe('Navigation – engines live monitor', () => {
 			});
 
 			// Shut down engine and verify it disappears (no UI path for shutdown — Tier 3 cleanup)
+			await waitForNoActiveBuild(request, analysisId);
 			await shutdownEngineViaApi(request, analysisId);
 			await expect(dialog.getByText(analysisId, { exact: true })).not.toBeVisible({
 				timeout: 10_000

@@ -5,7 +5,7 @@ import type { APIRequestContext } from '@playwright/test';
 // Hybrid Playwright seed helpers.
 // These bypass the UI and should be treated as explicit state setup, not user-driven coverage.
 
-const apiPort = process.env.PORT || '8000';
+const apiPort = process.env.BACKEND_PORT || process.env.PORT || '8000';
 export const API_BASE = `http://localhost:${apiPort}/api/v1`;
 
 export const AUTH_DIR = path.resolve('tests/.auth');
@@ -337,6 +337,44 @@ export async function spawnEngine(
 	if (!response.ok()) {
 		throw new Error(`spawnEngine failed: ${response.status()} ${await response.text()}`);
 	}
+}
+
+interface ActiveBuildListResponse {
+	builds: Array<{
+		analysis_id: string;
+		status: 'running' | 'completed' | 'failed' | 'cancelled';
+	}>;
+	total: number;
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function waitForNoActiveBuild(
+	request: APIRequestContext,
+	analysisId: string,
+	timeoutMs = 60_000
+): Promise<void> {
+	const startedAt = Date.now();
+	let lastError = '';
+
+	while (Date.now() - startedAt < timeoutMs) {
+		const response = await request.get(`${API_BASE}/compute/builds/active`);
+		if (response.ok()) {
+			const payload = (await response.json()) as ActiveBuildListResponse;
+			const active = payload.builds.some(
+				(build) => build.analysis_id === analysisId && build.status === 'running'
+			);
+			if (!active) return;
+			lastError = `active build still running for analysis ${analysisId}`;
+		} else {
+			lastError = `list active builds failed: ${response.status()} ${await response.text()}`;
+		}
+		await delay(500);
+	}
+
+	throw new Error(`Timed out waiting for active build to finish: ${lastError}`);
 }
 
 export async function shutdownEngine(

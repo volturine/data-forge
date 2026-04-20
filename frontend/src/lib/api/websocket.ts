@@ -2,14 +2,8 @@ import { getClientIdentity } from '$lib/stores/clientIdentity.svelte';
 import { requireNamespace } from '$lib/stores/namespace.svelte';
 import { BASE_URL } from './client';
 
-declare const __BACKEND_PORT__: string | undefined;
-
 export function buildWebsocketUrl(endpoint: string): string {
 	const url = new URL(`${BASE_URL}${endpoint}`, window.location.origin);
-	const backendPort = typeof __BACKEND_PORT__ === 'undefined' ? '' : __BACKEND_PORT__;
-	if (import.meta.env.DEV && backendPort) {
-		url.host = `${window.location.hostname}:${backendPort}`;
-	}
 	url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	const identity = getClientIdentity();
 	const namespace = requireNamespace();

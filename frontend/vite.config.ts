@@ -3,17 +3,14 @@ import { defineConfig } from 'vite';
 import http from 'node:http';
 
 const port = parseInt(process.env.FRONTEND_PORT || '3000', 10);
-const apiPort = parseInt(process.env.PORT || '8000', 10);
-const apiHost = process.env.VITE_BACKEND_HOST || '127.0.0.1';
+const apiPort = parseInt(process.env.BACKEND_PORT || process.env.PORT || '8000', 10);
+const apiHost = process.env.BACKEND_HOST || '127.0.0.1';
 
 const abortCodes = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EADDRNOTAVAIL']);
 
 const agent = new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 16 });
 
 export default defineConfig({
-	define: {
-		__BACKEND_PORT__: JSON.stringify(String(apiPort))
-	},
 	resolve: {
 		dedupe: [
 			'@codemirror/state',
