@@ -3,6 +3,13 @@ from fastapi import Request
 from core.config import settings
 
 
+def request_scheme(request: Request) -> str:
+    forwarded = request.headers.get('x-forwarded-proto')
+    if forwarded and settings.trusted_proxy_hops > 0:
+        return forwarded.split(',')[0].strip().lower()
+    return request.url.scheme.lower()
+
+
 def client_ip(request: Request) -> str | None:
     forwarded = request.headers.get('x-forwarded-for')
     if forwarded and settings.trusted_proxy_hops > 0:

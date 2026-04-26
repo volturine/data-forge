@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -760,7 +761,41 @@ class TestAuthRoutes:
         assert body['email'] == 'register@example.com'
         assert body['display_name'] == 'Register User'
         assert 'password' in body['providers']
+        assert body['email_verified'] is False
         assert 'session_token' in response.cookies
+
+    def test_register_skips_verification_when_disabled(
+        self,
+        auth_client: TestClient,
+        auth_db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.verify_email_address', False)
+        send = AsyncMock(return_value=True)
+        monkeypatch.setattr('modules.auth.routes.send_verification_email', send)
+
+        response = auth_client.post(
+            '/api/v1/auth/register',
+            json={
+                'email': 'no-verify@example.com',
+                'password': 'Password123',
+                'display_name': 'No Verify User',
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()['email_verified'] is True
+        send.assert_not_awaited()
+        user = get_user_by_email(auth_db_session, 'no-verify@example.com')
+        assert user is not None
+        assert user.email_verified is True
+        tokens = auth_db_session.exec(
+            select(VerificationToken).where(
+                VerificationToken.user_id == user.id,
+                VerificationToken.token_type == VerificationTokenType.EMAIL_VERIFY,
+            )
+        ).all()
+        assert tokens == []
 
     def test_register_duplicate_email(self, auth_client: TestClient) -> None:
         payload = {
@@ -1134,6 +1169,7 @@ class TestAuthRoutes:
         assert 'oauth_state_google=' in set_cookie
         assert 'HttpOnly' in set_cookie
         assert 'SameSite=lax' in set_cookie
+        assert 'Secure' not in set_cookie
 
     def test_github_oauth_start_sets_state_cookie(self, auth_client: TestClient) -> None:
         response = auth_client.get('/api/v1/auth/github', follow_redirects=False)
@@ -1150,6 +1186,22 @@ class TestAuthRoutes:
         assert 'oauth_state_github=' in set_cookie
         assert 'HttpOnly' in set_cookie
         assert 'SameSite=lax' in set_cookie
+        assert 'Secure' not in set_cookie
+
+    def test_google_oauth_start_sets_secure_state_cookie_for_https(
+        self,
+        auth_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.trusted_proxy_hops', 1)
+        response = auth_client.get(
+            '/api/v1/auth/google',
+            headers={'x-forwarded-proto': 'https'},
+            follow_redirects=False,
+        )
+
+        assert response.status_code in {302, 307}
+        assert 'Secure' in response.headers.get('set-cookie', '')
 
     def test_google_oauth_callback_requires_matching_state(self, auth_client: TestClient) -> None:
         start = auth_client.get('/api/v1/auth/google', follow_redirects=False)
@@ -1164,16 +1216,114 @@ class TestAuthRoutes:
 
         assert mismatch.status_code == 400
 
+    def test_google_oauth_callback_redirects_to_frontend_callback(
+        self,
+        auth_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        start = auth_client.get('/api/v1/auth/google', follow_redirects=False)
+        state = parse_qs(urlparse(start.headers['location']).query)['state'][0]
+
+        class MockResponse:
+            def __init__(self, status_code: int, data: dict[str, object]):
+                self.status_code = status_code
+                self._data = data
+
+            def json(self) -> dict[str, object]:
+                return self._data
+
+        client = AsyncMock()
+        client.post = AsyncMock(return_value=MockResponse(200, {'access_token': 'google-token'}))
+        client.get = AsyncMock(
+            return_value=MockResponse(
+                200,
+                {
+                    'id': 'google-user-1',
+                    'email': 'google@example.com',
+                    'name': 'Google User',
+                    'picture': 'https://example.com/avatar.png',
+                },
+            )
+        )
+        monkeypatch.setattr('modules.auth.routes.http_client.get_async_client', lambda: client)
+        monkeypatch.setattr('core.config.settings.auth_frontend_url', 'https://app.example.com')
+
+        response = auth_client.get(
+            f'/api/v1/auth/google/callback?code=test-code&state={state}',
+            follow_redirects=False,
+        )
+
+        assert response.status_code in {302, 307}
+        assert response.headers['location'] == 'https://app.example.com/callback'
+        assert auth_client.cookies.get('session_token') is not None
+
     def test_github_oauth_callback_requires_state(self, auth_client: TestClient) -> None:
         missing = auth_client.get('/api/v1/auth/github/callback?code=test-code', follow_redirects=False)
 
         assert missing.status_code == 400
 
-    def test_session_cookie_secure_flag_follows_debug(self, auth_client: TestClient, monkeypatch) -> None:
-        monkeypatch.setattr('core.config.settings.debug', False)
+    def test_github_oauth_callback_redirects_to_frontend_callback(
+        self,
+        auth_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        start = auth_client.get('/api/v1/auth/github', follow_redirects=False)
+        state = parse_qs(urlparse(start.headers['location']).query)['state'][0]
+
+        class MockResponse:
+            def __init__(self, status_code: int, data: object):
+                self.status_code = status_code
+                self._data = data
+
+            def json(self) -> object:
+                return self._data
+
+        client = AsyncMock()
+        client.post = AsyncMock(return_value=MockResponse(200, {'access_token': 'github-token'}))
+        client.get = AsyncMock(
+            side_effect=[
+                MockResponse(200, {'id': 42, 'login': 'octocat', 'name': 'Octo Cat', 'avatar_url': 'https://example.com/octo.png'}),
+                MockResponse(200, [{'email': 'github@example.com', 'primary': True, 'verified': True}]),
+            ]
+        )
+        monkeypatch.setattr('modules.auth.routes.http_client.get_async_client', lambda: client)
+        monkeypatch.setattr('core.config.settings.auth_frontend_url', 'https://app.example.com')
+
+        response = auth_client.get(
+            f'/api/v1/auth/github/callback?code=test-code&state={state}',
+            follow_redirects=False,
+        )
+
+        assert response.status_code in {302, 307}
+        assert response.headers['location'] == 'https://app.example.com/callback'
+        assert auth_client.cookies.get('session_token') is not None
+
+    def test_session_cookie_not_secure_for_http_request(self, auth_client: TestClient) -> None:
+        response = auth_client.post(
+            '/api/v1/auth/register',
+            json={
+                'email': 'secure-cookie@example.com',
+                'password': 'Password123',
+                'display_name': 'Secure Cookie User',
+            },
+        )
+
+        assert response.status_code == 200
+        set_cookie = response.headers.get('set-cookie', '')
+        assert 'session_token=' in set_cookie
+        assert 'Secure' not in set_cookie
+        assert 'SameSite=lax' in set_cookie
+
+    def test_session_cookie_secure_for_https_request(
+        self,
+        auth_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr('core.config.settings.trusted_proxy_hops', 1)
 
         response = auth_client.post(
             '/api/v1/auth/register',
+            headers={'x-forwarded-proto': 'https'},
             json={
                 'email': 'secure-cookie@example.com',
                 'password': 'Password123',

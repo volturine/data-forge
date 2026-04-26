@@ -719,6 +719,47 @@ describe('BuildStreamStore', () => {
 		expect(store.succeeded).toBe(false);
 	});
 
+	test('markCancelled keeps preview cancelled after late socket events', () => {
+		const store = new BuildStreamStore();
+		store.start(MINIMAL_BUILD_REQUEST);
+
+		const socket = MockWebSocket.instances[0];
+		socket.emit('open');
+
+		msg(socket, {
+			type: 'progress',
+			progress: 0.4,
+			elapsed_ms: 2100,
+			estimated_remaining_ms: 1000,
+			current_step: 'Loading data',
+			current_step_index: 1,
+			total_steps: 4
+		});
+
+		store.markCancelled({
+			id: 'run-1',
+			status: 'cancelled',
+			cancelled_at: '2026-04-10T11:00:00Z',
+			cancelled_by: 'test@example.com',
+			duration_ms: 2100
+		});
+
+		msg(socket, {
+			type: 'progress',
+			progress: 0.8,
+			elapsed_ms: 5000,
+			estimated_remaining_ms: 100,
+			current_step: 'Still running',
+			current_step_index: 3,
+			total_steps: 4
+		});
+
+		expect(store.status).toBe('cancelled');
+		expect(store.elapsed).toBe(2100);
+		expect(store.error).toBe('Cancelled by test@example.com');
+		expect(store.done).toBe(true);
+	});
+
 	test('reset clears all state', () => {
 		const store = new BuildStreamStore();
 		store.start(MINIMAL_BUILD_REQUEST);

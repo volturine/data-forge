@@ -143,6 +143,11 @@ export class BuildStreamStore {
 	}
 
 	markCancelled(cancelled: CancelBuildResponse): void {
+		this.generation += 1;
+		this.shouldReconnect = false;
+		this.clearReconnectTimer();
+		this.connection?.close();
+		this.connection = null;
 		this.status = 'cancelled';
 		this.duration = cancelled.duration_ms;
 		if (cancelled.duration_ms !== null) {

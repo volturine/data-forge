@@ -12,7 +12,7 @@ from core.config import settings
 from core.database import get_settings_db, run_settings_db
 from core.error_handlers import handle_errors
 from core.exceptions import AccountDisabledError, InvalidCredentialsError, OAuthError
-from core.proxy import client_ip
+from core.proxy import client_ip, request_scheme
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import AuthProvider, AuthProviderName, User, UserStatus, VerificationTokenType
 from modules.auth.schemas import (
@@ -79,12 +79,12 @@ def invalidate_me_cache(token: str | None = None) -> None:
 _OAUTH_STATE_MAX_AGE_SECONDS = 600
 
 
-def _set_session_cookie(response: Response, session_token: str) -> None:
+def _set_session_cookie(response: Response, session_token: str, *, secure: bool) -> None:
     response.set_cookie(
         key='session_token',
         value=session_token,
         httponly=True,
-        secure=not settings.debug,
+        secure=secure,
         samesite='lax',
         max_age=30 * 24 * 3600,
         path='/',
@@ -99,12 +99,12 @@ def _oauth_state_cookie_key(provider: str) -> str:
     return f'oauth_state_{provider}'
 
 
-def _set_oauth_state_cookie(response: Response, provider: str, state: str) -> None:
+def _set_oauth_state_cookie(response: Response, provider: str, state: str, *, secure: bool) -> None:
     response.set_cookie(
         key=_oauth_state_cookie_key(provider),
         value=state,
         httponly=True,
-        secure=not settings.debug,
+        secure=secure,
         samesite='lax',
         max_age=_OAUTH_STATE_MAX_AGE_SECONDS,
         path='/',
@@ -153,16 +153,18 @@ def _request_ip_address(request: Request) -> str | None:
 @router.post('/register', response_model=UserPublic)
 @handle_errors(operation='register')
 async def register(body: RegisterRequest, request: Request, response: Response, session: Session = Depends(get_settings_db)) -> UserPublic:
-    user = create_user(session, body.email, body.password, body.display_name)
-    token = create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
-    await send_verification_email(user.email, token)
+    needs_verification = settings.verify_email_address
+    user = create_user(session, body.email, body.password, body.display_name, email_verified=not needs_verification)
+    if needs_verification:
+        token = create_verification_token(session, user_id=user.id, token_type=VerificationTokenType.EMAIL_VERIFY)
+        await send_verification_email(user.email, token)
     created_session = create_session(
         session,
         user_id=user.id,
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id)
+    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
     return _build_user_public(session, user)
 
 
@@ -194,7 +196,7 @@ async def login(body: LoginRequest, request: Request, response: Response, sessio
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id)
+    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
     return _build_user_public(session, user)
 
 
@@ -346,7 +348,7 @@ async def revoke_all_sessions_route(
 
 @router.get('/google')
 @handle_errors(operation='google oauth start')
-async def google_oauth_start() -> RedirectResponse:
+async def google_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': settings.google_client_id,
@@ -359,7 +361,12 @@ async def google_oauth_start() -> RedirectResponse:
     }
     url = f'https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(response, provider=AuthProviderName.GOOGLE.value, state=state)
+    _set_oauth_state_cookie(
+        response,
+        provider=AuthProviderName.GOOGLE.value,
+        state=state,
+        secure=request_scheme(request) == 'https',
+    )
     return response
 
 
@@ -370,7 +377,7 @@ async def google_oauth_callback(
     params: OAuthCallbackParams = Depends(),
     session: Session = Depends(get_settings_db),
 ) -> RedirectResponse:
-    redirect_url = f'{settings.auth_frontend_url}/#/auth/callback'
+    redirect_url = f'{settings.auth_frontend_url}/callback'
     response = RedirectResponse(url=redirect_url)
     _validate_oauth_state(request, response, provider=AuthProviderName.GOOGLE.value, state=params.state)
     token_payload = {
@@ -414,13 +421,13 @@ async def google_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id)
+    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
     return response
 
 
 @router.get('/github')
 @handle_errors(operation='github oauth start')
-async def github_oauth_start() -> RedirectResponse:
+async def github_oauth_start(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     params = {
         'client_id': settings.github_client_id,
@@ -430,7 +437,12 @@ async def github_oauth_start() -> RedirectResponse:
     }
     url = f'https://github.com/login/oauth/authorize?{urlencode(params)}'
     response = RedirectResponse(url=url)
-    _set_oauth_state_cookie(response, provider=AuthProviderName.GITHUB.value, state=state)
+    _set_oauth_state_cookie(
+        response,
+        provider=AuthProviderName.GITHUB.value,
+        state=state,
+        secure=request_scheme(request) == 'https',
+    )
     return response
 
 
@@ -441,7 +453,7 @@ async def github_oauth_callback(
     params: OAuthCallbackParams = Depends(),
     session: Session = Depends(get_settings_db),
 ) -> RedirectResponse:
-    redirect_url = f'{settings.auth_frontend_url}/#/auth/callback'
+    redirect_url = f'{settings.auth_frontend_url}/callback'
     response = RedirectResponse(url=redirect_url)
     _validate_oauth_state(request, response, provider=AuthProviderName.GITHUB.value, state=params.state)
     payload = {
@@ -490,7 +502,7 @@ async def github_oauth_callback(
         device_info=_request_device_info(request),
         ip_address=_request_ip_address(request),
     )
-    _set_session_cookie(response, created_session.id)
+    _set_session_cookie(response, created_session.id, secure=request_scheme(request) == 'https')
     return response
 
 

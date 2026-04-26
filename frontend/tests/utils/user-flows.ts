@@ -16,7 +16,7 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	await page.getByRole('button', { name: 'Create account' }).click();
 	await expect(
 		page.getByText(
-			'Account created. Check your email for a verification link to activate your account.'
+			/Account created\.( Check your email for a verification link to activate your account\.| You can sign in right away\.)/
 		)
 	).toBeVisible({
 		timeout: 15_000

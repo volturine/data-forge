@@ -229,6 +229,7 @@ class Settings(BaseSettings):
 
     # Auth / OAuth
     auth_required: bool = Field(default=False, alias='AUTH_REQUIRED')
+    verify_email_address: bool = Field(default=True, alias='VERIFY_EMAIL_ADDRESS')
     default_user_email: str = Field(default='default@example.com', alias='DEFAULT_USER_EMAIL')
     default_user_password: str = Field(default='ChangeMe123', alias='DEFAULT_USER_PASSWORD')
     default_user_name: str = Field(default='Default User', alias='DEFAULT_USER_NAME')

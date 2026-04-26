@@ -51,6 +51,7 @@ class TestSettings:
         assert settings.lock_heartbeat_interval_seconds == 10
         assert settings.public_idb_debug is False
         assert settings.auth_required is False
+        assert settings.verify_email_address is True
         assert settings.prod_mode_enabled is False
 
     def test_custom_settings_from_env(self, monkeypatch, tmp_path):
@@ -75,6 +76,14 @@ class TestSettings:
         assert settings.upload_chunk_size == 2000000
         assert settings.job_timeout == 3600
         assert settings.public_idb_debug is True
+
+    def test_verify_email_address_from_env(self, monkeypatch, tmp_path):
+        _set_isolated_settings_env(monkeypatch, tmp_path)
+        monkeypatch.setenv('VERIFY_EMAIL_ADDRESS', 'false')
+
+        settings = Settings()
+
+        assert settings.verify_email_address is False
 
     def test_polars_settings(self, monkeypatch, tmp_path):
         _set_isolated_settings_env(monkeypatch, tmp_path)

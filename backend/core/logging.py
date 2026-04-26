@@ -471,15 +471,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                         )
                         logged = True
 
-            headers = dict(response.headers)
-            headers.pop('content-length', None)
-            return StreamingResponse(
+            streamed = StreamingResponse(
                 stream_wrapper(),
                 status_code=response.status_code,
-                headers=headers,
                 media_type=response.media_type,
                 background=response.background,
             )
+            streamed.raw_headers = [item for item in response.raw_headers if item[0].lower() != b'content-length']
+            return streamed
         response_data = getattr(response, 'body', None)
         if response_data is None:
             self._log_request(request, response, duration_ms, request_id, request_body, None, chunk_index=0)

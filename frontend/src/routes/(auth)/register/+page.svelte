@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { css, button, input, label, spinner } from '$lib/styles/panda';
+	import { configStore } from '$lib/stores/config.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { GitBranch } from 'lucide-svelte';
 
@@ -37,6 +38,7 @@
 	}
 
 	const displayed = $derived(validation ?? authStore.error);
+	const verifyEmailAddress = $derived(configStore.verifyEmailAddress);
 </script>
 
 <div
@@ -86,12 +88,20 @@
 				fontSize: 'sm'
 			})}
 		>
-			Account created. Check your email for a verification link to activate your account.
+			{#if verifyEmailAddress}
+				Account created. Check your email for a verification link to activate your account.
+			{:else}
+				Account created. You can sign in right away.
+			{/if}
 		</div>
 
-		<a href={resolve('/verify')} class={button({ variant: 'primary' })}>
-			Check verification status
-		</a>
+		{#if verifyEmailAddress}
+			<a href={resolve('/verify')} class={button({ variant: 'primary' })}>
+				Check verification status
+			</a>
+		{:else}
+			<a href={resolve('/')} class={button({ variant: 'primary' })}> Continue </a>
+		{/if}
 	{:else}
 		<form onsubmit={submit} class={css({ display: 'flex', flexDirection: 'column', gap: '4' })}>
 			<div>

@@ -33,6 +33,7 @@ class FrontendConfig(BaseModel):
     telegram_enabled: bool
     default_namespace: str
     auth_required: bool
+    verify_email_address: bool
 
 
 class UuidResponse(BaseModel):
@@ -91,6 +92,7 @@ def get_config() -> FrontendConfig:
         smtp_enabled=bool(db_settings.smtp_host and db_settings.smtp_user),
         telegram_enabled=bool(db_settings.telegram_bot_enabled and db_settings.telegram_bot_token),
         default_namespace=settings.default_namespace,
+        verify_email_address=settings.verify_email_address,
     )
     _config_cache = config
     _config_cache_time = now
