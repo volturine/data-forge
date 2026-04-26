@@ -13,6 +13,20 @@ import {
  * E2E tests for datasources – mirrors test_datasource.py / test_datasource_extended.py.
  */
 test.describe('Datasources – list & management', () => {
+	test('list shows datasource description preview', async ({ page, request }) => {
+		const ds = `e2e-description-list-${uid()}`;
+		const description = 'Primary customer dataset for retention analysis and reporting.';
+		await createDatasource(request, ds, undefined, description);
+		try {
+			await page.goto('/datasources');
+			const row = page.locator(`[data-ds-row="${ds}"]`);
+			await expect(row).toBeVisible();
+			await expect(row.getByText(description)).toBeVisible();
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
 	test('lists datasource after API create', async ({ page, request }) => {
 		const ds = `e2e-visible-${uid()}`;
 		await createDatasource(request, ds);
@@ -116,6 +130,13 @@ test.describe('Datasources – list & management', () => {
 });
 
 test.describe('Datasources – upload page', () => {
+	test('upload page shows description fields for file and database flows', async ({ page }) => {
+		await page.goto('/datasources/new');
+		await expect(page.locator('#file-description')).toBeVisible();
+		await page.getByRole('button', { name: 'External DB' }).click();
+		await expect(page.locator('#db-description')).toBeVisible();
+	});
+
 	test('upload page has "File Upload" and "External DB" tabs', async ({ page }) => {
 		await page.goto('/datasources/new');
 		await expect(page.getByRole('button', { name: 'File Upload' })).toBeVisible();
@@ -187,6 +208,27 @@ test.describe('Datasources – detail view', () => {
 		await expect(config.getByText('Datasource ID')).toBeVisible();
 
 		await screenshot(page, 'datasources', 'detail-config-panel');
+	});
+
+	test('general tab allows editing and clearing the datasource description', async ({ page }) => {
+		await page.goto('/datasources');
+		await selectDatasourceAndWaitForConfig(page, ds);
+
+		const config = page.locator('[data-ds-config]');
+		const descriptionField = config.locator('textarea[id^="datasource-description-"]');
+		await expect(config.getByText('No description added yet.')).toBeVisible();
+
+		await descriptionField.fill('Initial dataset guidance for weekly commercial reporting.');
+		await config.getByRole('button', { name: /Save Changes/i }).click();
+		await expect(config.getByText('Changes saved successfully!')).toBeVisible();
+		await expect(descriptionField).toHaveValue(
+			'Initial dataset guidance for weekly commercial reporting.'
+		);
+
+		await descriptionField.fill('');
+		await config.getByRole('button', { name: /Save Changes/i }).click();
+		await expect(config.getByText('Changes saved successfully!')).toBeVisible();
+		await expect(config.getByText('No description added yet.')).toBeVisible();
 	});
 
 	test('Schema tab shows actual column names from CSV', async ({ page }) => {

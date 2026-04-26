@@ -742,6 +742,7 @@ class TestIsHidden:
         result = create_analysis_datasource(
             test_db_session,
             name='Hidden Analysis DS',
+            description=None,
             analysis_id=sample_analysis.id,
             is_hidden=True,
         )
@@ -752,6 +753,7 @@ class TestIsHidden:
         result = create_analysis_datasource(
             test_db_session,
             name='Visible Analysis DS',
+            description=None,
             analysis_id=sample_analysis.id,
         )
         assert result.is_hidden is False

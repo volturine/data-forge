@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from core.config import settings
 
 _PUBLIC_REVISION = '0001_runtime_public'
-_TENANT_REVISION = '0002_runtime_tenant'
+_TENANT_REVISION = '0003_tenant_ds_desc'
 
 
 def _alembic_config(*, scope: str, schema: str) -> Config:

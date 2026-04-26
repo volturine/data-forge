@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from sqlalchemy import create_engine, text
+
+from core.database import _ensure_namespace_runtime_columns
 from core.migrations import _alembic_config, migrate_runtime
 
 
@@ -43,3 +46,35 @@ def test_migrate_runtime_runs_public_then_each_tenant(monkeypatch) -> None:
         ('tenant', 'alpha'),
         ('bootstrap_tenant', 'beta'),
     ]
+
+
+def test_sqlite_runtime_bootstrap_adds_datasource_description_column(tmp_path: Path) -> None:
+    db_path = tmp_path / 'namespace.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    'CREATE TABLE datasources ('
+                    'id VARCHAR PRIMARY KEY, '
+                    'name VARCHAR NOT NULL, '
+                    'source_type VARCHAR NOT NULL, '
+                    'config JSON NOT NULL, '
+                    'schema_cache JSON, '
+                    'created_by_analysis_id VARCHAR, '
+                    "created_by VARCHAR NOT NULL DEFAULT 'import', "
+                    'is_hidden BOOLEAN NOT NULL DEFAULT 0, '
+                    'owner_id VARCHAR, '
+                    'created_at DATETIME NOT NULL'
+                    ')'
+                )
+            )
+
+        _ensure_namespace_runtime_columns(engine)
+
+        with engine.begin() as connection:
+            columns = connection.execute(text("PRAGMA table_info('datasources')")).all()
+        column_names = {str(row[1]) for row in columns}
+        assert 'description' in column_names
+    finally:
+        engine.dispose()

@@ -102,7 +102,11 @@
 	}));
 
 	const updateMutation = createMutation(() => ({
-		mutationFn: async (update: { name: string; config?: Record<string, unknown> }) => {
+		mutationFn: async (update: {
+			name: string;
+			description: string | null;
+			config?: Record<string, unknown>;
+		}) => {
 			const result = await updateDatasource(datasource.id, update);
 			if (result.isErr()) throw new Error(result.error.message);
 			return result.value;
@@ -116,6 +120,7 @@
 	}));
 
 	let name = $state('');
+	let description = $state('');
 	let columns = $state<ColumnSchema[]>([]);
 	let hasChanges = $state(false);
 	let configDirty = $state(false);
@@ -138,6 +143,7 @@
 
 		// Reset all state for new datasource
 		name = ds.name;
+		description = ds.description ?? '';
 		columns = [];
 		hasChanges = false;
 		configDirty = false;
@@ -279,6 +285,11 @@
 		hasChanges = true;
 	}
 
+	function handleDescriptionChange(newDescription: string) {
+		description = newDescription;
+		hasChanges = true;
+	}
+
 	function handleCsvConfigChange<K extends keyof typeof csvConfig>(
 		key: K,
 		value: (typeof csvConfig)[K]
@@ -330,7 +341,10 @@
 	async function handleSave() {
 		if (!datasourceQuery.data) return;
 
-		const update: { name: string; config?: Record<string, unknown> } = { name };
+		const update: { name: string; description: string | null; config?: Record<string, unknown> } = {
+			name,
+			description
+		};
 
 		if (configDirty) {
 			if (isCsv(datasourceQuery.data)) {
@@ -699,6 +713,50 @@
 						placeholder="Data source name"
 						class={input()}
 					/>
+				</div>
+
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+					<label
+						for="datasource-description-{datasource.id}"
+						class={css({
+							display: 'block',
+							fontSize: 'xs',
+							fontWeight: 'medium',
+							color: 'fg.secondary',
+							textTransform: 'none',
+							letterSpacing: 'normal',
+							marginBottom: '1.5'
+						})}>Description</label
+					>
+					<textarea
+						id="datasource-description-{datasource.id}"
+						value={description}
+						oninput={(e) => handleDescriptionChange(e.currentTarget.value)}
+						placeholder="Add context about what this dataset represents, when to use it, and any caveats."
+						rows="5"
+						maxlength="4000"
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							resize: 'vertical',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
+					></textarea>
+					{#if description.trim().length === 0}
+						<p class={emptyText({ size: 'inline' })}>No description added yet.</p>
+					{/if}
 				</div>
 
 				<div class={css({ paddingTop: '4' })}>

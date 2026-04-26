@@ -38,6 +38,7 @@ from modules.datasource.schemas import (
     SchemaInfo,
     SnapshotCompareResponse,
     SnapshotPreview,
+    normalize_datasource_description,
 )
 from modules.datasource.source_types import FILE_BASED_CATEGORIES, SOURCE_TYPE_CATEGORY, DataSourceType
 from modules.engine_runs import service as engine_run_service
@@ -121,6 +122,7 @@ def _set_snapshot_metadata(config: dict[str, Any], snapshot: Any | None) -> None
 def create_file_datasource(
     session: Session,
     name: str,
+    description: str | None,
     file_path: str,
     file_type: str,
     options: dict | None = None,
@@ -181,6 +183,7 @@ def create_file_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
         owner_id=owner_id,
@@ -257,6 +260,7 @@ def create_placeholder_output_datasource(
 def create_analysis_datasource(
     session: Session,
     name: str,
+    description: str | None,
     analysis_id: str,
     analysis_tab_id: str | None = None,
     is_hidden: bool = False,
@@ -275,6 +279,7 @@ def create_analysis_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=source_type,
         config=config,
         created_by_analysis_id=analysis_id,
@@ -565,6 +570,7 @@ def _collect_preview_rows(
 def create_database_datasource(
     session: Session,
     name: str,
+    description: str | None,
     connection_string: str,
     query: str,
     branch: str = 'master',
@@ -590,6 +596,7 @@ def create_database_datasource(
             datasource = DataSource(
                 id=datasource_id,
                 name=name,
+                description=normalize_datasource_description(description),
                 source_type=DataSourceType.DATABASE,
                 config=source_config,
                 owner_id=owner_id,
@@ -614,6 +621,7 @@ def create_database_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
         owner_id=owner_id,
@@ -631,6 +639,7 @@ def create_database_datasource(
 def create_iceberg_datasource(
     session: Session,
     name: str,
+    description: str | None,
     source: dict,
     branch: str = 'master',
     owner_id: str | None = None,
@@ -685,6 +694,7 @@ def create_iceberg_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=DataSourceType.ICEBERG,
         config=config,
         owner_id=owner_id,
@@ -1353,6 +1363,9 @@ def update_datasource(
     # Update name if provided
     if update.name is not None:
         datasource.name = update.name
+
+    if 'description' in update.model_fields_set:
+        datasource.description = normalize_datasource_description(update.description)
 
     # Update is_hidden if provided
     if update.is_hidden is not None:

@@ -85,11 +85,13 @@ export function previewExcel(
 export function confirmExcel(
 	preflightId: string,
 	name: string,
+	description: string,
 	params: ExcelParams
 ): ResultAsync<DataSource, ApiError> {
 	const body = new FormData();
 	body.append('preflight_id', preflightId);
 	body.append('name', name);
+	body.append('description', description);
 	appendExcelParams(body, params);
 	return apiRequest<DataSource>('/v1/datasource/confirm', {
 		method: 'POST',

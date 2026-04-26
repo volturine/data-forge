@@ -101,6 +101,13 @@ def _ensure_namespace_runtime_columns(engine: Engine) -> None:
     with engine.begin() as connection:
         table_rows = connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all()
         tables = {str(row[0]) for row in table_rows}
+        if 'datasources' in tables:
+            _ensure_sqlite_column(
+                connection,
+                'datasources',
+                'description',
+                'ALTER TABLE datasources ADD COLUMN description VARCHAR(4000)',
+            )
         if 'schedules' in tables:
             additions = {
                 'lease_owner': 'ALTER TABLE schedules ADD COLUMN lease_owner VARCHAR',

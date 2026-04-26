@@ -275,20 +275,25 @@ export async function createDatasourceWithDates(
 export async function createDatasource(
 	request: APIRequestContext,
 	name: string,
-	namespace?: string
+	namespace?: string,
+	description?: string
 ): Promise<string> {
 	const headers: Record<string, string> = {};
 	if (namespace) headers['X-Namespace'] = namespace;
+	const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {
+		file: {
+			name: `${name}.csv`,
+			mimeType: 'text/csv',
+			buffer: Buffer.from(SAMPLE_CSV)
+		},
+		name
+	};
+	if (description !== undefined) {
+		multipart.description = description;
+	}
 	const response = await request.post(`${API_BASE}/datasource/upload`, {
 		headers,
-		multipart: {
-			file: {
-				name: `${name}.csv`,
-				mimeType: 'text/csv',
-				buffer: Buffer.from(SAMPLE_CSV)
-			},
-			name
-		}
+		multipart
 	});
 	if (!response.ok()) {
 		throw new Error(`createDatasource failed: ${response.status()} ${await response.text()}`);

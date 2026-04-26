@@ -37,6 +37,7 @@
 
 	// External database state
 	let dbName = $state('');
+	let dbDescription = $state('');
 	let connectionString = $state('');
 	let query = $state('');
 
@@ -51,6 +52,7 @@
 	let csvEncoding = $state('utf8');
 	let csvSkipRows = $state(0);
 	let csvHasHeader = $state(true);
+	let fileDescription = $state('');
 
 	function resetExcelState() {
 		preflightId = null;
@@ -71,6 +73,7 @@
 		selectedFiles = files;
 		showBulkResults = false;
 		bulkResults = [];
+		fileDescription = '';
 		resetExcelState();
 		batchType = null;
 		if (files.length === 0) {
@@ -164,6 +167,7 @@
 		showBulkResults = false;
 		file = null;
 		fileName = '';
+		fileDescription = '';
 		batchType = null;
 		resetExcelState();
 	}
@@ -178,6 +182,7 @@
 			showBulkResults = false;
 			file = null;
 			fileName = '';
+			fileDescription = '';
 			batchType = null;
 			resetExcelState();
 		}
@@ -210,7 +215,7 @@
 					cell_range: excelConfig.cell_range || undefined,
 					end_row: excelConfig.end_row ?? undefined
 				};
-				const result = await confirmExcel(preflightId, fileName, params);
+				const result = await confirmExcel(preflightId, fileName, fileDescription, params);
 				if (result.isErr()) {
 					error = result.error.message || 'Upload failed';
 					loading = false;
@@ -221,7 +226,7 @@
 				goto(resolve('/datasources'), { invalidateAll: true });
 				return;
 			}
-			await uploadFile(file, fileName, {
+			await uploadFile(file, fileName, fileDescription, {
 				delimiter: csvDelimiter,
 				quote_char: csvQuoteChar,
 				has_header: csvHasHeader,
@@ -248,7 +253,7 @@
 		error = null;
 
 		try {
-			await connectDatabase(dbName, connectionString, query);
+			await connectDatabase(dbName, dbDescription, connectionString, query);
 			queryClient.invalidateQueries({ queryKey: ['datasources'] });
 			queryClient.invalidateQueries({ queryKey: ['datasources-lookup'] });
 			goto(resolve('/datasources'), { invalidateAll: true });
@@ -467,6 +472,43 @@
 								Selected: {file.name}
 							</p>
 						{/if}
+					</div>
+
+					<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+						<label for="file-description" class={label({ variant: 'field' })}> Description </label>
+						<textarea
+							id="file-description"
+							bind:value={fileDescription}
+							placeholder="What this dataset represents, how it should be used, and any caveats."
+							rows="4"
+							maxlength="4000"
+							disabled={loading}
+							class={css({
+								width: 'full',
+								fontSize: 'sm2',
+								color: 'fg.primary',
+								backgroundColor: 'bg.primary',
+								borderWidth: '1',
+								borderRadius: '0',
+								paddingX: '3.5',
+								paddingY: '2.25',
+								resize: 'vertical',
+								transitionProperty: 'border-color',
+								transitionDuration: '160ms',
+								transitionTimingFunction: 'ease',
+								_focus: { outline: 'none' },
+								_focusVisible: { borderColor: 'border.accent' },
+								_disabled: {
+									opacity: '0.5',
+									cursor: 'not-allowed',
+									backgroundColor: 'bg.tertiary'
+								},
+								_placeholder: { color: 'fg.muted' }
+							})}
+						></textarea>
+						<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
+							Optional. Plain text only, up to 4,000 characters.
+						</p>
 					</div>
 				{/if}
 
@@ -721,6 +763,39 @@
 						disabled={loading}
 						class={input()}
 					/>
+				</div>
+
+				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+					<label for="db-description" class={label({ variant: 'field' })}> Description </label>
+					<textarea
+						id="db-description"
+						bind:value={dbDescription}
+						placeholder="What this dataset represents, when to use it, and any caveats."
+						rows="4"
+						maxlength="4000"
+						disabled={loading}
+						class={css({
+							width: 'full',
+							fontSize: 'sm2',
+							color: 'fg.primary',
+							backgroundColor: 'bg.primary',
+							borderWidth: '1',
+							borderRadius: '0',
+							paddingX: '3.5',
+							paddingY: '2.25',
+							resize: 'vertical',
+							transitionProperty: 'border-color',
+							transitionDuration: '160ms',
+							transitionTimingFunction: 'ease',
+							_focus: { outline: 'none' },
+							_focusVisible: { borderColor: 'border.accent' },
+							_disabled: { opacity: '0.5', cursor: 'not-allowed', backgroundColor: 'bg.tertiary' },
+							_placeholder: { color: 'fg.muted' }
+						})}
+					></textarea>
+					<p class={css({ margin: '0', fontSize: 'xs', color: 'fg.muted' })}>
+						Optional. Plain text only, up to 4,000 characters.
+					</p>
 				</div>
 
 				<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
