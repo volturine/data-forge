@@ -79,6 +79,7 @@ export type DataSourceConfig =
 interface DataSourceBase {
 	id: string;
 	name: string;
+	description: string | null;
 	schema_cache?: Record<string, unknown> | null;
 	created_by_analysis_id?: string | null;
 	created_by: string;
@@ -115,6 +116,7 @@ export type DataSource =
 
 export interface DataSourceCreate {
 	name: string;
+	description?: string | null;
 	source_type: SourceType;
 	config: DataSourceConfig;
 }

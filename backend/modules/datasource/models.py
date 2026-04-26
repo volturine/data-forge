@@ -9,6 +9,7 @@ class DataSource(SQLModel, table=True):  # type: ignore[call-arg]
 
     id: str = Field(sa_column=Column(String, primary_key=True))
     name: str = Field(sa_column=Column(String, nullable=False))
+    description: str | None = Field(default=None, sa_column=Column(String(4000), nullable=True))
     source_type: str = Field(sa_column=Column(String, nullable=False))
     config: dict = Field(sa_column=Column(JSON, nullable=False))
     schema_cache: dict | None = Field(default=None, sa_column=Column(JSON, nullable=True))

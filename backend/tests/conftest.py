@@ -323,6 +323,7 @@ def sample_datasource(test_db_session: Session, sample_csv_file: Path) -> DataSo
     datasource = DataSource(
         id=datasource_id,
         name='Test DataSource',
+        description='Fixture datasource description',
         source_type='file',
         config=config,
         created_at=datetime.now(UTC),
@@ -357,6 +358,7 @@ def sample_datasources(test_db_session: Session, sample_csv_file: Path, sample_p
         datasource = DataSource(
             id=datasource_id,
             name=name,
+            description=f'{name} description',
             source_type='file',
             config=config,
             created_at=datetime.now(UTC),

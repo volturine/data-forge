@@ -30,6 +30,16 @@ class TestDataSourceUpload:
         assert result['config']['branch'] == 'master'
         assert result['config']['metadata_path'].startswith(str(namespace_paths().clean_dir))
 
+    def test_upload_csv_file_with_description_success(self, client, temp_upload_dir: Path, mock_file_upload: dict):
+        files = {'file': (mock_file_upload['filename'], mock_file_upload['content'], mock_file_upload['content_type'])}
+        data = {'name': 'Described CSV Upload', 'description': 'Source of truth for customer lifecycle analysis.'}
+
+        response = client.post('/api/v1/datasource/upload', files=files, data=data)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result['description'] == 'Source of truth for customer lifecycle analysis.'
+
     def test_upload_parquet_file_success(self, client, temp_upload_dir: Path, sample_parquet_file: Path):
         with open(sample_parquet_file, 'rb') as f:
             files = {'file': ('test.parquet', f, 'application/octet-stream')}
@@ -142,9 +152,27 @@ class TestDataSourceConnect:
         result = response.json()
 
         assert result['name'] == 'Test Database Connection'
+        assert result['description'] is None
         assert result['source_type'] == 'database'
         assert result['config']['connection_string'] == 'postgresql://user:pass@localhost/db'
         assert result['config']['query'] == 'SELECT * FROM users'
+
+    def test_connect_database_datasource_with_description(self, client):
+        payload = {
+            'name': 'Described Database Connection',
+            'description': 'Read-only reporting extract for finance reconciliation.',
+            'source_type': 'database',
+            'config': {
+                'connection_string': 'postgresql://user:pass@localhost/db',
+                'query': 'SELECT * FROM users',
+            },
+        }
+
+        response = client.post('/api/v1/datasource/connect', json=payload)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result['description'] == 'Read-only reporting extract for finance reconciliation.'
 
     def test_connect_sets_owner_id_when_optional_user_present(self, client, test_db_session, test_user, monkeypatch):
         monkeypatch.setitem(app.dependency_overrides, get_optional_user, lambda: test_user)
@@ -244,7 +272,9 @@ class TestDataSourceList:
         assert len(result) == 2
 
         assert result[0]['name'] == 'CSV DataSource'
+        assert result[0]['description'] == 'CSV DataSource description'
         assert result[1]['name'] == 'Parquet DataSource'
+        assert result[1]['description'] == 'Parquet DataSource description'
 
 
 class TestDataSourceGet:
@@ -256,6 +286,7 @@ class TestDataSourceGet:
 
         assert result['id'] == sample_datasource.id
         assert result['name'] == sample_datasource.name
+        assert result['description'] == sample_datasource.description
         assert result['source_type'] == sample_datasource.source_type
 
     def test_get_datasource_not_found(self, client):
@@ -264,6 +295,38 @@ class TestDataSourceGet:
 
         assert response.status_code == 404
         assert 'not found' in response.json()['detail']
+
+
+class TestDataSourceUpdate:
+    def test_update_description_success(self, client, sample_datasource: DataSource, test_db_session):
+        payload = {
+            'name': sample_datasource.name,
+            'description': 'Canonical customer export used for weekly KPI reporting.',
+        }
+
+        response = client.put(f'/api/v1/datasource/{sample_datasource.id}', json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['description'] == 'Canonical customer export used for weekly KPI reporting.'
+
+        test_db_session.refresh(sample_datasource)
+        assert sample_datasource.description == 'Canonical customer export used for weekly KPI reporting.'
+
+    def test_update_description_empty_string_clears_value(self, client, sample_datasource: DataSource, test_db_session):
+        payload = {
+            'name': sample_datasource.name,
+            'description': '',
+        }
+
+        response = client.put(f'/api/v1/datasource/{sample_datasource.id}', json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['description'] is None
+
+        test_db_session.refresh(sample_datasource)
+        assert sample_datasource.description is None
 
 
 class TestDataSourceSchema:

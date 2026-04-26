@@ -19,11 +19,15 @@ function appendCsvOptions(formData: FormData, csvOptions: CSVOptions): void {
 export function uploadFile(
 	file: File,
 	name: string,
+	description?: string,
 	csvOptions?: CSVOptions
 ): ResultAsync<DataSource, ApiError> {
 	const formData = new FormData();
 	formData.append('file', file);
 	formData.append('name', name);
+	if (description !== undefined) {
+		formData.append('description', description);
+	}
 
 	if (csvOptions) appendCsvOptions(formData, csvOptions);
 
@@ -96,6 +100,7 @@ export function listDataFiles(path?: string): ResultAsync<FileListResponse, ApiE
 
 export function connectDatabase(
 	name: string,
+	description: string,
 	connectionString: string,
 	query: string
 ): ResultAsync<DataSource, ApiError> {
@@ -103,6 +108,7 @@ export function connectDatabase(
 		method: 'POST',
 		body: JSON.stringify({
 			name,
+			description,
 			source_type: 'database',
 			config: { connection_string: connectionString, query }
 		})
@@ -313,6 +319,7 @@ export function deleteDatasource(id: string): ResultAsync<void, ApiError> {
 
 export interface DataSourceUpdate {
 	name?: string;
+	description?: string | null;
 	config?: Record<string, unknown>;
 	is_hidden?: boolean;
 }
