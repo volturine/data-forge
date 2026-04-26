@@ -40,26 +40,41 @@ describe('isUuid', () => {
 
 describe('buildOutputConfig', () => {
 	test('builds config with required explicit values', () => {
-		const config = buildOutputConfig({ outputId: 'abc-123', name: 'Export', branch: 'main' });
+		const config = buildOutputConfig({
+			outputId: 'abc-123',
+			name: 'Export',
+			branch: 'main',
+			namespace: 'warehouse'
+		});
 		expect(config.result_id).toBe('abc-123');
 		expect(config.format).toBe('parquet');
 		expect(config.filename).toBe('export');
 		expect(config.build_mode).toBe('full');
 		expect(config.iceberg).toEqual({
-			namespace: 'outputs',
+			namespace: 'warehouse',
 			table_name: 'export',
 			branch: 'main'
 		});
 	});
 
 	test('slugifies name for filename and table_name', () => {
-		const config = buildOutputConfig({ outputId: 'x', name: 'My Report', branch: 'main' });
+		const config = buildOutputConfig({
+			outputId: 'x',
+			name: 'My Report',
+			branch: 'main',
+			namespace: 'warehouse'
+		});
 		expect(config.filename).toBe('my_report');
 		expect((config.iceberg as Record<string, unknown>).table_name).toBe('my_report');
 	});
 
 	test('uses custom branch', () => {
-		const config = buildOutputConfig({ outputId: 'x', name: 'Export', branch: 'dev' });
+		const config = buildOutputConfig({
+			outputId: 'x',
+			name: 'Export',
+			branch: 'dev',
+			namespace: 'warehouse'
+		});
 		expect((config.iceberg as Record<string, unknown>).branch).toBe('dev');
 	});
 

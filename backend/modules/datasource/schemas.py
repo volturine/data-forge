@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from modules.datasource.source_types import DataSourceType
 
@@ -13,6 +13,7 @@ class ColumnSchema(BaseModel):
     dtype: str
     nullable: bool
     sample_value: str | None = None
+    description: str | None = None
 
 
 class SchemaInfo(BaseModel):
@@ -21,6 +22,15 @@ class SchemaInfo(BaseModel):
     columns: list[ColumnSchema]
     row_count: int | None = None
     sheet_names: list[str] | None = None
+
+
+class ColumnDescriptionPatch(BaseModel):
+    column_name: str
+    description: str | None = None
+
+
+class BatchColumnDescriptionUpdate(BaseModel):
+    columns: list[ColumnDescriptionPatch]
 
 
 class SnapshotCompareRequest(BaseModel):
@@ -188,10 +198,24 @@ class IcebergDataSourceConfig(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def normalize_datasource_description(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value.strip() == '':
+        return None
+    return value
+
+
 class DataSourceCreate(BaseModel):
     name: str
+    description: str | None = Field(default=None, max_length=4000)
     source_type: DataSourceType
     config: dict
+
+    @field_validator('description')
+    @classmethod
+    def _normalize_description(cls, value: str | None) -> str | None:
+        return normalize_datasource_description(value)
 
 
 class DataSourceResponse(BaseModel):
@@ -199,6 +223,7 @@ class DataSourceResponse(BaseModel):
 
     id: str
     name: str
+    description: str | None
     source_type: DataSourceType
     config: dict
     schema_cache: dict | None
@@ -216,6 +241,7 @@ class DataSourceListItem(BaseModel):
 
     id: str
     name: str
+    description: str | None
     source_type: DataSourceType
     config: dict
     created_by_analysis_id: str | None = None
@@ -229,8 +255,14 @@ class DataSourceUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str | None = None
+    description: str | None = Field(default=None, max_length=4000)
     config: dict | None = None
     is_hidden: bool | None = None
+
+    @field_validator('description')
+    @classmethod
+    def _normalize_description(cls, value: str | None) -> str | None:
+        return normalize_datasource_description(value)
 
 
 class FileListItem(BaseModel):

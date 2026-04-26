@@ -8,6 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import polars as pl
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -120,6 +121,15 @@ def test_classify_engine_error_marks_missing_metadata_files_as_snapshot_unavaila
     )
     kind, details = PolarsComputeEngine._classify_engine_error(exc)
     assert kind == 'datasource_metadata_missing'
+    assert details == {}
+
+
+def test_classify_engine_error_treats_empty_groupby_compute_error_as_value_error() -> None:
+    exc = pl.exceptions.ComputeError('at least one key is required in a group_by operation')
+
+    kind, details = PolarsComputeEngine._classify_engine_error(exc)
+
+    assert kind == 'value_error'
     assert details == {}
 
 

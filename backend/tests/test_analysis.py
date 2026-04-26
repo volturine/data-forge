@@ -520,6 +520,44 @@ class TestAnalysisList:
         assert item['name'] == sample_analysis.name
 
 
+class TestAnalysisImport:
+    def test_import_analysis_applies_datasource_remap_before_missing_check(self, client, sample_datasource: DataSource):
+        legacy_source_id = 'legacy-source-id'
+        payload = {
+            'name': 'Imported Analysis',
+            'description': 'Imported with datasource remap',
+            'datasource_remap': {legacy_source_id: sample_datasource.id},
+            'pipeline': {
+                'tabs': [
+                    {
+                        'id': 'tab-legacy',
+                        'name': 'Legacy Source',
+                        'parent_id': None,
+                        'datasource': {
+                            'id': legacy_source_id,
+                            'analysis_tab_id': None,
+                            'config': {'branch': 'master'},
+                        },
+                        'output': {
+                            'result_id': str(uuid.uuid4()),
+                            'datasource_type': 'iceberg',
+                            'format': 'parquet',
+                            'filename': 'legacy_source',
+                        },
+                        'steps': [],
+                    },
+                ],
+            },
+        }
+
+        response = client.post('/api/v1/analysis/import', json=payload)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body['name'] == 'Imported Analysis'
+        assert body['pipeline_definition']['tabs'][0]['datasource']['id'] == sample_datasource.id
+
+
 class TestAnalysisUpdate:
     def test_update_analysis_sets_version_headers(self, client, sample_analysis: Analysis):
         current = client.get(f'/api/v1/analysis/{sample_analysis.id}')

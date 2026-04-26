@@ -374,7 +374,7 @@ async def test_run_build_manager_process_tracks_manager_and_spawns_workers(monke
     monkeypatch.setattr(runtime_process, '_heartbeat_manager', lambda worker_id, active_jobs=0: calls.append(('heartbeat', active_jobs)))
     monkeypatch.setattr(runtime_process, 'manager_id', lambda: 'manager-1')
     monkeypatch.setattr(runtime_process, 'queued_job_count', lambda: 1)
-    monkeypatch.setattr(runtime_process.multiprocessing, 'Process', FakeProcess)
+    monkeypatch.setattr(runtime_process._SPAWN, 'Process', FakeProcess)
     monkeypatch.setattr(runtime_process.settings, 'build_worker_min_processes', 0, raising=False)
     monkeypatch.setattr(runtime_process.settings, 'build_worker_max_processes', 2, raising=False)
 

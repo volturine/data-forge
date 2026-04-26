@@ -22,6 +22,14 @@ interface WorkerAuth {
 	workerIndex: number;
 }
 
+async function ensureAuthFileReady(workerAuth: WorkerAuth): Promise<void> {
+	if (fs.existsSync(workerAuth.authFile)) return;
+	const meta = readMeta();
+	const token = meta.authRequired ? await registerWorker(workerAuth.workerIndex) : undefined;
+	fs.mkdirSync(AUTH_DIR, { recursive: true });
+	fs.writeFileSync(workerAuth.authFile, JSON.stringify(buildStorageState(token), null, 2));
+}
+
 export const test = base.extend<
 	{ page: Page; request: APIRequestContext },
 	{ workerAuth: WorkerAuth }
@@ -58,6 +66,7 @@ export const test = base.extend<
 	],
 
 	page: async ({ browser, workerAuth }, use) => {
+		await ensureAuthFileReady(workerAuth);
 		const context = await browser.newContext({
 			baseURL,
 			storageState: workerAuth.authFile
@@ -69,6 +78,7 @@ export const test = base.extend<
 	},
 
 	request: async ({ playwright, workerAuth }, use) => {
+		await ensureAuthFileReady(workerAuth);
 		const token = readStoredSessionToken(workerAuth.authFile);
 		const ctx = await playwright.request.newContext({
 			baseURL,

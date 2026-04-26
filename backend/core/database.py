@@ -1,3 +1,4 @@
+import fcntl
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Generator
@@ -7,7 +8,6 @@ from typing import Concatenate, ParamSpec, TypeVar
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, create_engine
 
 from core.config import settings
@@ -28,6 +28,7 @@ _TENANT_TABLES = frozenset(
         'build_jobs',
         'build_runs',
         'datasources',
+        'datasource_column_metadata',
         'engine_runs',
         'healthcheck_results',
         'healthchecks',
@@ -61,73 +62,6 @@ def _enable_sqlite_pragmas(engine: Engine) -> None:
         cursor.execute('PRAGMA journal_mode=WAL')
         cursor.execute('PRAGMA busy_timeout=5000')
         cursor.close()
-
-
-def _sqlite_columns(connection: Connection, table: str) -> set[str]:
-    rows = connection.execute(text(f"PRAGMA table_info('{table}')")).all()
-    return {str(row[1]) for row in rows}
-
-
-def _sqlite_indexes(connection: Connection, table: str) -> set[str]:
-    rows = connection.execute(text(f"PRAGMA index_list('{table}')")).all()
-    return {str(row[1]) for row in rows}
-
-
-def _ensure_sqlite_column(connection: Connection, table: str, column: str, statement: str) -> None:
-    if column in _sqlite_columns(connection, table):
-        return
-    try:
-        connection.execute(text(statement))
-    except OperationalError:
-        if column in _sqlite_columns(connection, table):
-            return
-        raise
-
-
-def _ensure_sqlite_index(connection: Connection, table: str, index: str, statement: str) -> None:
-    if index in _sqlite_indexes(connection, table):
-        return
-    try:
-        connection.execute(text(statement))
-    except OperationalError:
-        if index in _sqlite_indexes(connection, table):
-            return
-        raise
-
-
-def _ensure_namespace_runtime_columns(engine: Engine) -> None:
-    if engine.dialect.name != 'sqlite':
-        return
-    with engine.begin() as connection:
-        table_rows = connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all()
-        tables = {str(row[0]) for row in table_rows}
-        if 'schedules' in tables:
-            additions = {
-                'lease_owner': 'ALTER TABLE schedules ADD COLUMN lease_owner VARCHAR',
-                'lease_expires_at': 'ALTER TABLE schedules ADD COLUMN lease_expires_at DATETIME',
-                'last_claimed_at': 'ALTER TABLE schedules ADD COLUMN last_claimed_at DATETIME',
-                'last_triggered_at': 'ALTER TABLE schedules ADD COLUMN last_triggered_at DATETIME',
-                'last_success_at': 'ALTER TABLE schedules ADD COLUMN last_success_at DATETIME',
-                'last_failure_at': 'ALTER TABLE schedules ADD COLUMN last_failure_at DATETIME',
-                'last_successful_build_id': 'ALTER TABLE schedules ADD COLUMN last_successful_build_id VARCHAR',
-            }
-            for column, statement in additions.items():
-                _ensure_sqlite_column(connection, 'schedules', column, statement)
-            _ensure_sqlite_index(
-                connection,
-                'schedules',
-                'ix_schedules_lease_owner',
-                'CREATE INDEX ix_schedules_lease_owner ON schedules (lease_owner)',
-            )
-        if 'build_runs' not in tables:
-            return
-        _ensure_sqlite_column(connection, 'build_runs', 'schedule_id', 'ALTER TABLE build_runs ADD COLUMN schedule_id VARCHAR')
-        _ensure_sqlite_index(
-            connection,
-            'build_runs',
-            'ix_build_runs_schedule_id',
-            'CREATE INDEX ix_build_runs_schedule_id ON build_runs (schedule_id)',
-        )
 
 
 def _create_engine(url: str) -> Engine:
@@ -300,7 +234,7 @@ def _tenant_tables():
     from modules.analysis_versions.models import AnalysisVersion
     from modules.build_jobs.models import BuildJob
     from modules.build_runs.models import BuildEvent, BuildRun
-    from modules.datasource.models import DataSource
+    from modules.datasource.models import DataSource, DataSourceColumnMetadata
     from modules.engine_runs.models import EngineRun
     from modules.healthcheck.models import HealthCheck, HealthCheckResult
     from modules.locks.models import ResourceLock
@@ -316,6 +250,7 @@ def _tenant_tables():
         BuildJob.__tablename__,
         BuildRun.__tablename__,
         DataSource.__tablename__,
+        DataSourceColumnMetadata.__tablename__,
         EngineRun.__tablename__,
         HealthCheck.__tablename__,
         HealthCheckResult.__tablename__,
@@ -356,7 +291,6 @@ def _create_tenant_tables_sqlite(namespace: str) -> None:
     if metadata is None:
         return
     metadata.create_all(namespace_engine, tables=_tenant_tables())
-    _ensure_namespace_runtime_columns(namespace_engine)
 
 
 def _ensure_postgres_schema(connection: Connection, schema: str) -> None:
@@ -401,11 +335,23 @@ def _run_postgres_init_locked(func) -> None:
             connection.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _POSTGRES_INIT_LOCK_KEY})
 
 
+@contextmanager
+def _sqlite_lock(path) -> Generator[None]:
+    with open(path, 'w') as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _init_settings_db() -> None:
     if settings.is_postgres:
         return
-    _create_shared_tables_sqlite()
-    _seed_shared_state()
+    lock_path = namespace_paths(settings.default_namespace).base_dir / '.settings.init.lock'
+    with _sqlite_lock(lock_path):
+        _create_shared_tables_sqlite()
+        _seed_shared_state()
 
 
 def _init_namespace_db(namespace: str) -> None:
@@ -417,7 +363,9 @@ def _init_namespace_db_unlocked(namespace: str) -> None:
     if settings.is_postgres:
         _init_postgres_namespace(namespace)
         return
-    _create_tenant_tables_sqlite(namespace)
+    lock_path = namespace_paths(namespace).base_dir / '.init.lock'
+    with _sqlite_lock(lock_path):
+        _create_tenant_tables_sqlite(namespace)
 
 
 def _bootstrap_sqlite() -> None:

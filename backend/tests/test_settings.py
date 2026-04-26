@@ -430,6 +430,7 @@ class TestConfigEndpointWithDbSettings:
         assert resp.status_code == 200
         data = resp.json()
         assert data['auth_required'] is True
+        assert data['verify_email_address'] is True
         assert data['smtp_enabled'] is True
         assert data['telegram_enabled'] is False
         assert data['public_idb_debug'] is True
@@ -437,6 +438,7 @@ class TestConfigEndpointWithDbSettings:
     def test_config_reflects_empty_settings(self, client: TestClient, monkeypatch) -> None:
         monkeypatch.setenv('SETTINGS_ENCRYPTION_KEY', 'test-key')
         monkeypatch.setattr('core.config.settings.auth_required', False)
+        monkeypatch.setattr('core.config.settings.verify_email_address', False)
         client.put(
             '/api/v1/settings',
             json={
@@ -454,6 +456,7 @@ class TestConfigEndpointWithDbSettings:
         assert resp.status_code == 200
         data = resp.json()
         assert data['auth_required'] is False
+        assert data['verify_email_address'] is False
         assert data['smtp_enabled'] is False
         assert data['telegram_enabled'] is False
         assert data['public_idb_debug'] is False

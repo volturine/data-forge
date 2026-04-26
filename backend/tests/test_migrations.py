@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from core.migrations import _alembic_config, migrate_runtime
 
 
@@ -17,29 +19,34 @@ def test_migrate_runtime_runs_public_then_each_tenant(monkeypatch) -> None:
     calls: list[tuple[str, str]] = []
 
     def fake_current_revision(schema: str) -> str | None:
-        if schema == 'alpha':
-            return 'old-tenant-revision'
-        return None
-
-    def fake_has_version_table(schema: str) -> bool:
-        return schema == 'alpha'
+        return '0001_runtime_public' if schema == 'public' else None
 
     monkeypatch.setattr('core.migrations._current_revision', fake_current_revision)
-    monkeypatch.setattr('core.migrations._has_version_table', fake_has_version_table)
     monkeypatch.setattr('core.migrations._bootstrap_public_schema', lambda: calls.append(('bootstrap_public', 'public')))
     monkeypatch.setattr('core.migrations._bootstrap_tenant_schema', lambda schema: calls.append(('bootstrap_tenant', schema)))
-
-    def fake_upgrade(config, target: str) -> None:
-        calls.append((str(config.attributes['runtime_scope']), str(config.attributes['target_schema'])))
-        assert target == 'head'
-
-    monkeypatch.setattr('core.migrations.command.upgrade', fake_upgrade)
     monkeypatch.setattr('core.migrations.settings.database_url', 'postgresql+psycopg://user:pass@host:5432/db')
 
     migrate_runtime(['alpha', 'beta'])
 
     assert calls == [
-        ('bootstrap_public', 'public'),
-        ('tenant', 'alpha'),
+        ('bootstrap_tenant', 'alpha'),
         ('bootstrap_tenant', 'beta'),
     ]
+
+
+def test_migrate_runtime_rejects_existing_public_revision(monkeypatch, tmp_path: Path) -> None:
+    del tmp_path
+    monkeypatch.setattr('core.migrations._current_revision', lambda schema: 'legacy-public' if schema == 'public' else None)
+
+    with pytest.raises(RuntimeError, match='Unsupported existing public schema revision'):
+        migrate_runtime(['default'])
+
+
+def test_migrate_runtime_rejects_existing_tenant_revision(monkeypatch, tmp_path: Path) -> None:
+    del tmp_path
+    monkeypatch.setattr(
+        'core.migrations._current_revision', lambda schema: '0001_runtime_public' if schema == 'public' else 'legacy-tenant'
+    )
+
+    with pytest.raises(RuntimeError, match='Unsupported existing tenant schema revision'):
+        migrate_runtime(['default'])

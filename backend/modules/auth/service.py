@@ -284,7 +284,7 @@ def ensure_default_user(session: Session) -> User:
     return user
 
 
-def create_user(session: Session, email: str, password: str, display_name: str) -> User:
+def create_user(session: Session, email: str, password: str, display_name: str, *, email_verified: bool = False) -> User:
     normalized_email = email.strip().lower()
     if get_user_by_email(session, normalized_email):
         raise EmailAlreadyExistsError()
@@ -295,7 +295,7 @@ def create_user(session: Session, email: str, password: str, display_name: str) 
         email=normalized_email,
         display_name=display_name,
         status=UserStatus.ACTIVE,
-        email_verified=False,
+        email_verified=email_verified,
         has_password=True,
         preferences={},
         created_at=now,

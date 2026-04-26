@@ -4,6 +4,11 @@ import { deleteAnalysisViaUI, deleteDatasourceViaUI } from './utils/ui-cleanup.j
 import { gotoAnalysisEditor, waitForEditorReload } from './utils/analysis.js';
 import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
+import type { Locator } from '@playwright/test';
+
+function terminalStatus(preview: Locator) {
+	return preview.getByText(/^(complete|failed)$/i);
+}
 
 // ── Output visibility toggle ────────────────────────────────────────────────
 
@@ -365,9 +370,7 @@ test.describe('Analyses – output build flow', () => {
 			const progressBar = page.locator('[data-testid="build-progress-bar"]');
 			await expect(progressBar).toBeVisible();
 
-			const terminal = preview
-				.getByText('Complete', { exact: true })
-				.or(preview.getByText('Failed', { exact: true }));
+			const terminal = terminalStatus(preview);
 			await expect(terminal).toBeVisible({ timeout: 60_000 });
 
 			await screenshot(page, 'analysis/output', 'output-build-success');
@@ -398,9 +401,7 @@ test.describe('Analyses – output build flow', () => {
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });
 
-			const terminal = preview
-				.getByText('Complete', { exact: true })
-				.or(preview.getByText('Failed', { exact: true }));
+			const terminal = terminalStatus(preview);
 			await expect(terminal).toBeVisible({ timeout: 60_000 });
 
 			const stepsPanel = page.locator('[data-testid="build-steps-panel"]');

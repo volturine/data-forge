@@ -24,6 +24,8 @@ def _load_env() -> dict[str, str]:
             continue
         key, value = line.split('=', 1)
         env[key] = value.strip().strip('"')
+    env.pop('NO_COLOR', None)
+    env.setdefault('PLAYWRIGHT_DISABLE_WEB_SERVER', 'true')
     return env
 
 
@@ -62,6 +64,24 @@ def _kill_tree(proc: subprocess.Popen[str] | None) -> None:
         proc.wait(timeout=5)
 
 
+def _kill_port_listeners(ports: list[int]) -> None:
+    for port in ports:
+        result = subprocess.run(
+            ['lsof', '-ti', f'tcp:{port}'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode not in (0, 1):
+            continue
+        for raw_pid in result.stdout.splitlines():
+            pid = raw_pid.strip()
+            if not pid:
+                continue
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid), signal.SIGTERM)
+
+
 def _wait_for_port(port: int, *, timeout: float) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -86,8 +106,18 @@ def _run_playwright(env: dict[str, str]) -> int:
     return subprocess.run(['npx', 'playwright', 'test'], cwd=FRONTEND, env=env, text=True, check=False).returncode
 
 
+def _env_port(env: dict[str, str], key: str, default: int) -> int:
+    value = env.get(key)
+    if value is None:
+        return default
+    return int(value)
+
+
 def main() -> int:
     env = _load_env()
+    backend_port = _env_port(env, 'PORT', 8001)
+    frontend_port = _env_port(env, 'FRONTEND_PORT', 3001)
+    _kill_port_listeners([backend_port, frontend_port])
     backend_proc: subprocess.Popen[str] | None = None
     worker_proc: subprocess.Popen[str] | None = None
     scheduler_proc: subprocess.Popen[str] | None = None
@@ -132,7 +162,7 @@ def main() -> int:
                 thread = threading.Thread(target=_pipe_stream, args=(stream, target, chunks), daemon=True)
                 thread.start()
                 threads.append(thread)
-        if not _wait_for_port(8001, timeout=90) or not _wait_for_port(3001, timeout=90):
+        if not _wait_for_port(backend_port, timeout=90) or not _wait_for_port(frontend_port, timeout=90):
             print('Timed out waiting for backend/frontend to start for e2e tests', file=sys.stderr)
             return 1
         return _run_playwright(env)

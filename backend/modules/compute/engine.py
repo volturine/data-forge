@@ -55,6 +55,8 @@ class PolarsComputeEngine:
             return 'datasource_metadata_missing', {}
         if isinstance(exc, ValueError):
             return 'value_error', {}
+        if isinstance(exc, pl.exceptions.ComputeError) and str(exc) == 'at least one key is required in a group_by operation':
+            return 'value_error', {}
         return 'execution_error', {}
 
     def __init__(self, analysis_id: str, resource_config: dict | None = None):

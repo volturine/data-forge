@@ -275,20 +275,25 @@ export async function createDatasourceWithDates(
 export async function createDatasource(
 	request: APIRequestContext,
 	name: string,
-	namespace?: string
+	namespace?: string,
+	description?: string
 ): Promise<string> {
 	const headers: Record<string, string> = {};
 	if (namespace) headers['X-Namespace'] = namespace;
+	const multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }> = {
+		file: {
+			name: `${name}.csv`,
+			mimeType: 'text/csv',
+			buffer: Buffer.from(SAMPLE_CSV)
+		},
+		name
+	};
+	if (description !== undefined) {
+		multipart.description = description;
+	}
 	const response = await request.post(`${API_BASE}/datasource/upload`, {
 		headers,
-		multipart: {
-			file: {
-				name: `${name}.csv`,
-				mimeType: 'text/csv',
-				buffer: Buffer.from(SAMPLE_CSV)
-			},
-			name
-		}
+		multipart
 	});
 	if (!response.ok()) {
 		throw new Error(`createDatasource failed: ${response.status()} ${await response.text()}`);
@@ -706,7 +711,14 @@ export async function createLongRunningAnalysis(
 				expressions: [
 					{
 						name: 'city_name',
-						expression: 'pl.col("city") + "-" + pl.col("name")'
+						type: 'udf',
+						args: ['city', 'name'],
+						code:
+							'def udf(column_city, column_name):\n' +
+							'    total = 0\n' +
+							'    for i in range(50):\n' +
+							'        total += i\n' +
+							'    return column_city + "-" + column_name + str(total)\n'
 					}
 				]
 			},
@@ -741,12 +753,10 @@ export async function createLongRunningAnalysis(
 		},
 		{
 			id: pivotId,
-			type: 'pivot',
+			type: 'sort',
 			config: {
-				pivot_column: 'city',
-				value_column: 'avg_age',
-				index_columns: [],
-				aggregation: 'first'
+				columns: ['avg_age'],
+				descending: [true]
 			},
 			depends_on: [groupById],
 			is_applied: true

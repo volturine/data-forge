@@ -284,7 +284,7 @@ describe('createStream', () => {
 		const { socket } = connect({ onError });
 		window.dispatchEvent(new Event('pagehide'));
 		expect(socket.readyState).toBe(3);
-		expect(socket.closeCalls).toEqual([{ code: 1001, reason: 'Page unloading' }]);
+		expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'Page unloading' }]);
 		socket.emit('close', { code: 1001, reason: 'Page unloading' });
 		expect(onError).not.toHaveBeenCalled();
 	});
@@ -294,7 +294,7 @@ describe('createStream', () => {
 		socket.readyState = MockWebSocket.CONNECTING;
 		window.dispatchEvent(new Event('beforeunload'));
 		expect(socket.readyState).toBe(3);
-		expect(socket.closeCalls).toEqual([{ code: 1001, reason: 'Page unloading' }]);
+		expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'Page unloading' }]);
 	});
 
 	test('pagehide closes owned event sources', () => {

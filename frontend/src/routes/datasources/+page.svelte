@@ -109,7 +109,13 @@
 	const datasources = $derived(query.data ?? []);
 	const filteredDatasources = $derived(
 		searchQuery
-			? datasources.filter((d) => d.name.toLowerCase().includes(searchQuery.toLowerCase()))
+			? datasources.filter((d) => {
+					const query = searchQuery.toLowerCase();
+					return (
+						d.name.toLowerCase().includes(query) ||
+						(d.description ?? '').toLowerCase().includes(query)
+					);
+				})
 			: datasources
 	);
 	const selectedDatasource = $derived(
@@ -372,7 +378,7 @@
 						<div
 							class={css({
 								display: 'flex',
-								alignItems: 'center',
+								alignItems: 'flex-start',
 								justifyContent: 'space-between',
 								paddingX: '3',
 								paddingY: '2.5'
@@ -381,7 +387,7 @@
 							<button
 								class={css({
 									display: 'flex',
-									alignItems: 'center',
+									alignItems: 'flex-start',
 									gap: '2',
 									minWidth: '0',
 									flex: '1',
@@ -392,61 +398,102 @@
 								})}
 								onclick={() => selectDatasource(datasource.id)}
 							>
-								<span
+								<div
 									class={css({
-										fontWeight: 'medium',
-										textOverflow: 'ellipsis',
-										overflow: 'hidden',
-										whiteSpace: 'nowrap',
-										fontSize: 'sm',
-										color: selectedId === datasource.id ? 'accent.primary' : undefined
+										display: 'flex',
+										minWidth: '0',
+										flex: '1',
+										flexDirection: 'column',
+										gap: '1'
 									})}
 								>
-									{datasource.name}
-								</span>
-								{#if datasource.created_by === 'analysis'}
-									<span
-										class={css({
-											display: 'inline-flex',
-											alignItems: 'center',
-											paddingX: '1.5',
-											paddingY: '0.5',
-											fontSize: '2xs',
-											fontWeight: 'medium',
-											textTransform: 'uppercase',
-											letterSpacing: 'wider',
-											backgroundColor: 'bg.accent',
-											color: 'accent.primary',
-											gap: '0.5',
-											flexShrink: '0'
-										})}
-										title="Created by analysis"
+									<div
+										class={css({ display: 'flex', minWidth: '0', alignItems: 'center', gap: '2' })}
 									>
-										<GitBranch size={10} />
-										Analysis
-									</span>
-								{:else}
-									<span
-										class={css({
-											display: 'inline-flex',
-											alignItems: 'center',
-											paddingX: '1.5',
-											paddingY: '0.5',
-											fontSize: '2xs',
-											fontWeight: 'medium',
-											textTransform: 'uppercase',
-											letterSpacing: 'wider',
-											backgroundColor: 'bg.tertiary',
-											color: 'fg.muted',
-											gap: '0.5',
-											flexShrink: '0'
-										})}
-										title="Imported datasource"
-									>
-										<Upload size={10} />
-										Import
-									</span>
-								{/if}
+										<span
+											class={css({
+												fontWeight: 'medium',
+												textOverflow: 'ellipsis',
+												overflow: 'hidden',
+												whiteSpace: 'nowrap',
+												fontSize: 'sm',
+												color: selectedId === datasource.id ? 'accent.primary' : undefined
+											})}
+										>
+											{datasource.name}
+										</span>
+										{#if datasource.created_by === 'analysis'}
+											<span
+												class={css({
+													display: 'inline-flex',
+													alignItems: 'center',
+													paddingX: '1.5',
+													paddingY: '0.5',
+													fontSize: '2xs',
+													fontWeight: 'medium',
+													textTransform: 'uppercase',
+													letterSpacing: 'wider',
+													backgroundColor: 'bg.accent',
+													color: 'accent.primary',
+													gap: '0.5',
+													flexShrink: '0'
+												})}
+												title="Created by analysis"
+											>
+												<GitBranch size={10} />
+												Analysis
+											</span>
+										{:else}
+											<span
+												class={css({
+													display: 'inline-flex',
+													alignItems: 'center',
+													paddingX: '1.5',
+													paddingY: '0.5',
+													fontSize: '2xs',
+													fontWeight: 'medium',
+													textTransform: 'uppercase',
+													letterSpacing: 'wider',
+													backgroundColor: 'bg.tertiary',
+													color: 'fg.muted',
+													gap: '0.5',
+													flexShrink: '0'
+												})}
+												title="Imported datasource"
+											>
+												<Upload size={10} />
+												Import
+											</span>
+										{/if}
+									</div>
+									{#if datasource.description}
+										<p
+											class={css({
+												margin: '0',
+												fontSize: 'xs',
+												overflow: 'hidden',
+												color: 'fg.muted',
+												lineHeight: '1.4',
+												maxHeight: '2.8em',
+												whiteSpace: 'pre-wrap'
+											})}
+											title={datasource.description}
+										>
+											{datasource.description}
+										</p>
+									{:else}
+										<p
+											class={css({
+												margin: '0',
+												fontSize: 'xs',
+												color: 'fg.subtle',
+												fontStyle: 'italic'
+											})}
+										>
+											No description
+										</p>
+									{/if}
+								</div>
 							</button>
 							<div class={css({ display: 'flex', alignItems: 'center', flexShrink: '0' })}>
 								<button

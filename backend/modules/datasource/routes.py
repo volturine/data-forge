@@ -96,6 +96,7 @@ def _matches_magic_number(file_extension: str, upload: UploadFile) -> bool:
 async def upload_file(
     file: UploadFile,
     name: str = Form(...),
+    description: str | None = Form(None, max_length=4000),
     delimiter: str = Form(','),
     quote_char: str = Form('"'),
     has_header: bool = Form(True),
@@ -147,6 +148,7 @@ async def upload_file(
             run_db,
             service.create_file_datasource,
             name=name,
+            description=description,
             file_path=str(file_path),
             file_type=file_type,
             csv_options=csv_options,
@@ -238,6 +240,7 @@ async def upload_bulk(
                 run_db,
                 service.create_file_datasource,
                 name=name,
+                description=None,
                 file_path=str(file_path),
                 file_type=file_type,
                 csv_options=file_csv_options,
@@ -427,6 +430,7 @@ async def preflight_preview(
 async def confirm_excel(
     preflight_id: str = Form(...),
     name: str = Form(...),
+    description: str | None = Form(None, max_length=4000),
     sheet_name: str | None = Form(None),
     start_row: int = Form(0),
     start_col: int = Form(0),
@@ -478,6 +482,7 @@ async def confirm_excel(
             run_db,
             service.create_file_datasource,
             name=name,
+            description=description,
             file_path=str(target_path),
             file_type='excel',
             sheet_name=resolved_sheet,
@@ -556,6 +561,7 @@ def _connect_database(datasource: schemas.DataSourceCreate, session: Session, ow
     return service.create_database_datasource(
         session=session,
         name=datasource.name,
+        description=datasource.description,
         connection_string=db_config.connection_string,
         query=db_config.query,
         branch=db_config.branch,
@@ -568,6 +574,7 @@ def _connect_iceberg(datasource: schemas.DataSourceCreate, session: Session, own
     return service.create_iceberg_datasource(
         session=session,
         name=datasource.name,
+        description=datasource.description,
         source=iceberg_config.source,
         branch=iceberg_config.branch,
         owner_id=owner_id,
@@ -657,6 +664,17 @@ def get_datasource_schema(
     Set refresh=true to re-read the schema from the source file.
     """
     return service.get_datasource_schema(session, parse_datasource_id(datasource_id), sheet_name=sheet_name, refresh=refresh)
+
+
+@router.patch('/{datasource_id}/column-metadata', response_model=schemas.SchemaInfo, mcp=True)
+@handle_errors(operation='update datasource column metadata', value_error_status=400)
+def update_datasource_column_metadata(
+    datasource_id: DataSourceId,
+    payload: schemas.BatchColumnDescriptionUpdate,
+    session: Session = Depends(get_db),
+):
+    """Update one or more datasource column descriptions and return the active schema."""
+    return service.update_column_descriptions(session, parse_datasource_id(datasource_id), payload)
 
 
 @router.post('/{datasource_id}/compare-snapshots', response_model=schemas.SnapshotCompareResponse, mcp=True)

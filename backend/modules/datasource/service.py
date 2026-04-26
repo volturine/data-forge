@@ -19,11 +19,17 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import defer
 from sqlmodel import Session, col
 
-from core.exceptions import DataSourceConnectionError, DataSourceNotFoundError, DataSourceValidationError, FileError
+from core.exceptions import (
+    DataSourceConnectionError,
+    DataSourceNotFoundError,
+    DataSourceValidationError,
+    FileError,
+)
 from core.namespace import get_namespace, namespace_paths
 from modules.compute.operations.datasource import load_datasource
-from modules.datasource.models import DataSource
+from modules.datasource.models import DataSource, DataSourceColumnMetadata
 from modules.datasource.schemas import (
+    BatchColumnDescriptionUpdate,
     ColumnSchema,
     ColumnStats,
     ColumnStatsResponse,
@@ -38,6 +44,7 @@ from modules.datasource.schemas import (
     SchemaInfo,
     SnapshotCompareResponse,
     SnapshotPreview,
+    normalize_datasource_description,
 )
 from modules.datasource.source_types import FILE_BASED_CATEGORIES, SOURCE_TYPE_CATEGORY, DataSourceType
 from modules.engine_runs import service as engine_run_service
@@ -121,6 +128,7 @@ def _set_snapshot_metadata(config: dict[str, Any], snapshot: Any | None) -> None
 def create_file_datasource(
     session: Session,
     name: str,
+    description: str | None,
     file_path: str,
     file_type: str,
     options: dict | None = None,
@@ -181,6 +189,7 @@ def create_file_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
         owner_id=owner_id,
@@ -195,7 +204,7 @@ def create_file_datasource(
 
     try:
         schema_info = _extract_schema(datasource)
-        datasource.schema_cache = schema_info.model_dump()
+        datasource.schema_cache = _schema_cache_payload(schema_info)
         session.commit()
         session.refresh(datasource)
         logger.info(f'Cached schema for datasource {datasource_id}: {len(schema_info.columns)} columns, {schema_info.row_count} rows')
@@ -257,6 +266,7 @@ def create_placeholder_output_datasource(
 def create_analysis_datasource(
     session: Session,
     name: str,
+    description: str | None,
     analysis_id: str,
     analysis_tab_id: str | None = None,
     is_hidden: bool = False,
@@ -275,6 +285,7 @@ def create_analysis_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=source_type,
         config=config,
         created_by_analysis_id=analysis_id,
@@ -565,6 +576,7 @@ def _collect_preview_rows(
 def create_database_datasource(
     session: Session,
     name: str,
+    description: str | None,
     connection_string: str,
     query: str,
     branch: str = 'master',
@@ -590,6 +602,7 @@ def create_database_datasource(
             datasource = DataSource(
                 id=datasource_id,
                 name=name,
+                description=normalize_datasource_description(description),
                 source_type=DataSourceType.DATABASE,
                 config=source_config,
                 owner_id=owner_id,
@@ -614,6 +627,7 @@ def create_database_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=DataSourceType.ICEBERG,
         config=iceberg_config,
         owner_id=owner_id,
@@ -631,6 +645,7 @@ def create_database_datasource(
 def create_iceberg_datasource(
     session: Session,
     name: str,
+    description: str | None,
     source: dict,
     branch: str = 'master',
     owner_id: str | None = None,
@@ -685,6 +700,7 @@ def create_iceberg_datasource(
     datasource = DataSource(
         id=datasource_id,
         name=name,
+        description=normalize_datasource_description(description),
         source_type=DataSourceType.ICEBERG,
         config=config,
         owner_id=owner_id,
@@ -699,7 +715,7 @@ def create_iceberg_datasource(
 
     try:
         schema_info = _extract_schema(datasource)
-        datasource.schema_cache = schema_info.model_dump()
+        datasource.schema_cache = _schema_cache_payload(schema_info)
         session.commit()
         session.refresh(datasource)
     except Exception as e:
@@ -817,7 +833,7 @@ def refresh_datasource_for_schedule(session: Session, datasource_id: str) -> Dat
     }
 
     datasource.config = next_config
-    datasource.schema_cache = schema.model_dump()
+    datasource.schema_cache = _schema_cache_payload(schema)
     session.add(datasource)
     session.commit()
     session.refresh(datasource)
@@ -933,6 +949,41 @@ def _build_datasource_result_json(
     return result
 
 
+def _normalize_column_description(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 2000:
+        raise DataSourceValidationError(
+            'Column descriptions must be 2,000 characters or fewer',
+        )
+    return cleaned
+
+
+def _get_column_metadata_map(session: Session, datasource_id: str) -> dict[str, str | None]:
+    rows = session.execute(
+        select(DataSourceColumnMetadata).where(DataSourceColumnMetadata.datasource_id == datasource_id),  # type: ignore[arg-type]
+    ).scalars()
+    return {row.column_name: row.description for row in rows}
+
+
+def _attach_column_descriptions(
+    session: Session,
+    datasource_id: str,
+    schema_info: SchemaInfo,
+) -> SchemaInfo:
+    descriptions = _get_column_metadata_map(session, datasource_id)
+    columns = [col.model_copy(update={'description': descriptions.get(col.name)}) for col in schema_info.columns]
+    return schema_info.model_copy(update={'columns': columns})
+
+
+def _schema_cache_payload(schema_info: SchemaInfo) -> dict[str, Any]:
+    columns = [col.model_dump(exclude={'description'}) for col in schema_info.columns]
+    return schema_info.model_dump(exclude={'columns'}) | {'columns': columns}
+
+
 def get_datasource_schema(
     session: Session,
     datasource_id: str,
@@ -955,7 +1006,7 @@ def get_datasource_schema(
             has_samples = cached.columns and any(c.sample_value is not None for c in cached.columns)
             if cached.row_count is not None and has_samples:
                 logger.debug(f'Using cached schema for datasource {datasource_id}')
-                return cached
+                return _attach_column_descriptions(session, datasource_id, cached)
 
     logger.info(f'Extracting schema for datasource {datasource_id}')
     if refresh and datasource.source_type == DataSourceType.ICEBERG:
@@ -970,7 +1021,7 @@ def get_datasource_schema(
     schema_info = _extract_schema(datasource, sheet_name=sheet_name)
 
     if sheet_name is None:
-        schema_cache = schema_info.model_dump()
+        schema_cache = _schema_cache_payload(schema_info)
         session.execute(
             update(DataSource)
             .where(DataSource.id == datasource_id)  # type: ignore[arg-type]
@@ -980,7 +1031,59 @@ def get_datasource_schema(
         datasource.schema_cache = schema_cache
 
     logger.info(f'Schema extracted and cached for datasource {datasource_id}: {len(schema_info.columns)} columns')
-    return schema_info
+    return _attach_column_descriptions(session, datasource_id, schema_info)
+
+
+def update_column_descriptions(
+    session: Session,
+    datasource_id: str,
+    payload: BatchColumnDescriptionUpdate,
+) -> SchemaInfo:
+    datasource = session.get(DataSource, datasource_id)
+    if not datasource:
+        raise DataSourceNotFoundError(datasource_id)
+
+    schema_info = get_datasource_schema(session, datasource_id)
+    active_columns = {column.name for column in schema_info.columns}
+
+    for patch in payload.columns:
+        if patch.column_name not in active_columns:
+            raise DataSourceValidationError(
+                f'Column not found in active schema: {patch.column_name}',
+                details={'datasource_id': datasource_id, 'column_name': patch.column_name},
+            )
+
+    existing = session.execute(
+        select(DataSourceColumnMetadata).where(DataSourceColumnMetadata.datasource_id == datasource_id),  # type: ignore[arg-type]
+    ).scalars()
+    existing_by_name = {row.column_name: row for row in existing}
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    for patch in payload.columns:
+        description = _normalize_column_description(patch.description)
+        row = existing_by_name.get(patch.column_name)
+        if description is None:
+            if row is not None:
+                session.delete(row)
+            continue
+        if row is None:
+            session.add(
+                DataSourceColumnMetadata(
+                    id=str(uuid.uuid4()),
+                    datasource_id=datasource_id,
+                    column_name=patch.column_name,
+                    description=description,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            )
+            continue
+        row.description = description
+        row.updated_at = now
+        session.add(row)
+
+    session.commit()
+    return get_datasource_schema(session, datasource_id)
 
 
 def _get_first_non_null_samples(lazy: pl.LazyFrame, max_rows: int = 1000) -> dict[str, str | None]:
@@ -1353,6 +1456,9 @@ def update_datasource(
     # Update name if provided
     if update.name is not None:
         datasource.name = update.name
+
+    if 'description' in update.model_fields_set:
+        datasource.description = normalize_datasource_description(update.description)
 
     # Update is_hidden if provided
     if update.is_hidden is not None:

@@ -16,7 +16,7 @@ export async function registerViaUi(page: Page, email: string, name: string): Pr
 	await page.getByRole('button', { name: 'Create account' }).click();
 	await expect(
 		page.getByText(
-			'Account created. Check your email for a verification link to activate your account.'
+			/Account created\.( Check your email for a verification link to activate your account\.| You can sign in right away\.)/
 		)
 	).toBeVisible({
 		timeout: 15_000
@@ -51,6 +51,10 @@ export async function createAnalysisViaUi(
 	await page.getByPlaceholder('Search datasources...').click();
 	await page.locator(`[data-picker-option="${datasourceName}"]`).click();
 	await page.getByRole('heading', { name: /Select Data Sources/i }).click();
+	await page.getByRole('button', { name: /Next/i }).click();
+	await expect(page.getByRole('heading', { name: /Choose Template/i })).toBeVisible();
+	await page.getByRole('button', { name: /Next/i }).click();
+	await expect(page.getByRole('heading', { name: /Configure Outputs/i })).toBeVisible();
 	await page.getByRole('button', { name: /Next/i }).click();
 	await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
 	await page.getByRole('button', { name: /Create Analysis/i }).click();

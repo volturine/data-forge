@@ -1,15 +1,20 @@
 <script lang="ts">
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+	import { goto } from '$app/navigation';
 	import { idbGet, idbSet } from '$lib/utils/indexeddb';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
-	import { listAnalyses, deleteAnalysis } from '$lib/api/analysis';
+	import { deleteAnalysis, duplicateAnalysis, listAnalyses } from '$lib/api/analysis';
 	import GalleryGrid from '$lib/components/gallery/GalleryGrid.svelte';
 	import EmptyState from '$lib/components/gallery/EmptyState.svelte';
 	import AnalysisFilters from '$lib/components/gallery/AnalysisFilters.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import BaseModal from '$lib/components/ui/BaseModal.svelte';
+	import PanelHeader from '$lib/components/ui/PanelHeader.svelte';
+	import PanelFooter from '$lib/components/ui/PanelFooter.svelte';
 	import { Plus } from 'lucide-svelte';
 	import type { SortOption } from '$lib/components/gallery/AnalysisFilters.svelte';
+	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { toEpochDisplay } from '$lib/utils/datetime';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import { css, spinner } from '$lib/styles/panda';
@@ -47,6 +52,11 @@
 	const selectedIds = new SvelteSet<string>();
 	let deleteConfirmId = $state<string | null>(null);
 	let bulkDeleteConfirm = $state(false);
+	let duplicateSource = $state<AnalysisGalleryItem | null>(null);
+	let duplicateName = $state('');
+	let duplicateDescription = $state('');
+	let duplicateError = $state('');
+	let duplicating = $state(false);
 
 	const filteredAndSortedAnalyses = $derived.by(() => {
 		if (!query.data) return [];
@@ -113,6 +123,14 @@
 		deleteConfirmId = id;
 	}
 
+	function requestDuplicate(analysis: AnalysisGalleryItem) {
+		duplicateSource = analysis;
+		duplicateName = `Copy of ${analysis.name}`;
+		duplicateDescription = '';
+		duplicateError = '';
+		duplicating = false;
+	}
+
 	async function confirmDelete() {
 		if (!deleteConfirmId) return;
 		deleteError = '';
@@ -158,6 +176,34 @@
 
 	function cancelBulkDelete() {
 		bulkDeleteConfirm = false;
+	}
+
+	async function confirmDuplicate() {
+		if (!duplicateSource || !duplicateName.trim()) return;
+		duplicating = true;
+		duplicateError = '';
+		const result = await duplicateAnalysis(duplicateSource.id, {
+			name: duplicateName.trim(),
+			description: duplicateDescription.trim() || null
+		});
+		result.match(
+			(analysis) => {
+				duplicateSource = null;
+				void goto(resolve(`/analysis/${analysis.id}`), { invalidateAll: true });
+			},
+			(err) => {
+				duplicateError = err.message;
+				duplicating = false;
+			}
+		);
+	}
+
+	function closeDuplicate() {
+		duplicateSource = null;
+		duplicateName = '';
+		duplicateDescription = '';
+		duplicateError = '';
+		duplicating = false;
 	}
 
 	const deleteConfirmName = $derived.by(() => {
@@ -319,6 +365,7 @@
 						analyses={filteredAndSortedAnalyses}
 						{selectedIds}
 						onDelete={requestDelete}
+						onDuplicate={requestDuplicate}
 						onToggleSelect={toggleSelect}
 					/>
 				{/if}
@@ -348,3 +395,101 @@
 	onConfirm={confirmBulkDelete}
 	onCancel={cancelBulkDelete}
 />
+
+<BaseModal
+	open={duplicateSource !== null}
+	onClose={closeDuplicate}
+	closeOnEscape={true}
+	closeOnBackdrop={true}
+	panelClass={css({
+		width: 'full',
+		maxWidth: 'panel',
+		overflow: 'hidden',
+		borderWidth: '1',
+		backgroundColor: 'bg.primary'
+	})}
+	ariaLabelledby="duplicate-analysis-title"
+	ariaDescribedby="duplicate-analysis-description"
+	{content}
+/>
+
+{#snippet content()}
+	<PanelHeader>
+		{#snippet title()}
+			<h2
+				id="duplicate-analysis-title"
+				class={css({ margin: '0', fontSize: 'md', fontWeight: 'semibold' })}
+			>
+				Duplicate Analysis
+			</h2>
+		{/snippet}
+	</PanelHeader>
+
+	<div class={css({ display: 'grid', gap: '4', padding: '6' })}>
+		<p
+			id="duplicate-analysis-description"
+			class={css({ margin: '0', fontSize: 'sm', color: 'fg.tertiary' })}
+		>
+			Create an independent copy of {duplicateSource?.name ?? 'this analysis'}. Output identities
+			will be regenerated.
+		</p>
+		{#if duplicateError}
+			<Callout tone="error">{duplicateError}</Callout>
+		{/if}
+		<label class={css({ display: 'grid', gap: '1' })}>
+			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Name</span>
+			<input
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'bg.primary',
+					paddingX: '3',
+					paddingY: '2'
+				})}
+				bind:value={duplicateName}
+			/>
+		</label>
+		<label class={css({ display: 'grid', gap: '1' })}>
+			<span class={css({ fontSize: 'sm', fontWeight: 'medium' })}>Description</span>
+			<textarea
+				rows="4"
+				class={css({
+					borderWidth: '1',
+					backgroundColor: 'bg.primary',
+					paddingX: '3',
+					paddingY: '2'
+				})}
+				bind:value={duplicateDescription}
+				placeholder="Optional override. Leave empty to reuse the source description."
+			></textarea>
+		</label>
+	</div>
+
+	<PanelFooter>
+		<button
+			type="button"
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'transparent',
+				paddingX: '4',
+				paddingY: '2'
+			})}
+			onclick={closeDuplicate}
+		>
+			Cancel
+		</button>
+		<button
+			type="button"
+			class={css({
+				borderWidth: '1',
+				backgroundColor: 'accent.primary',
+				color: 'fg.inverse',
+				paddingX: '4',
+				paddingY: '2'
+			})}
+			disabled={duplicating || !duplicateName.trim()}
+			onclick={confirmDuplicate}
+		>
+			{duplicating ? 'Duplicating...' : 'Duplicate'}
+		</button>
+	</PanelFooter>
+{/snippet}

@@ -67,6 +67,12 @@ services:
       UVICORN_ACCESS_LOG: "false"
       AUTH_FRONTEND_URL: ${DF_E2E_FRONTEND_ORIGIN}
       CORS_ORIGINS: ${DF_E2E_FRONTEND_ORIGIN}
+      GOOGLE_CLIENT_ID: ${DF_GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${DF_GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${DF_GOOGLE_REDIRECT_URI}
+      GITHUB_CLIENT_ID: ${DF_GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${DF_GITHUB_CLIENT_SECRET}
+      GITHUB_REDIRECT_URI: ${DF_GITHUB_REDIRECT_URI}
     volumes:
       - backend-test-data:/app/data
     healthcheck:
@@ -86,6 +92,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        condition: service_started
     environment:
       <<: *app-env
       WORKERS: "1"
@@ -103,6 +111,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        condition: service_started
     environment:
       <<: *app-env
       WORKERS: "1"

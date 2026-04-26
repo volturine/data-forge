@@ -8,7 +8,7 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DF_POSTGRES_USER} -d ${DF_POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DF_POSTGRES_USER} -d ${DF_POSTGRES_DB}" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -48,17 +48,30 @@ services:
       LOG_LEVEL: ${DF_LOG_LEVEL}
       TRUSTED_PROXY_HOPS: ${DF_TRUSTED_PROXY_HOPS}
       AUTH_REQUIRED: ${DF_AUTH_REQUIRED}
+      VERIFY_EMAIL_ADDRESS: ${DF_VERIFY_EMAIL_ADDRESS}
       DEFAULT_USER_EMAIL: ${DF_DEFAULT_USER_EMAIL}
       DEFAULT_USER_PASSWORD: ${DF_DEFAULT_USER_PASSWORD}
       DEFAULT_USER_NAME: ${DF_DEFAULT_USER_NAME}
       SETTINGS_ENCRYPTION_KEY: ${DF_SETTINGS_ENCRYPTION_KEY}
       AUTH_FRONTEND_URL: ${DF_AUTH_FRONTEND_URL}
+      GOOGLE_CLIENT_ID: ${DF_GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${DF_GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${DF_GOOGLE_REDIRECT_URI}
+      GITHUB_CLIENT_ID: ${DF_GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${DF_GITHUB_CLIENT_SECRET}
+      GITHUB_REDIRECT_URI: ${DF_GITHUB_REDIRECT_URI}
     ports:
       - "${DF_API_PORT}:8000"
     volumes:
       - data:/app/data
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready').status==200 else 1)\""]
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys,urllib.request; sys.exit(0 if
+            urllib.request.urlopen('http://localhost:8000/health/ready').status\
+            ==200 else 1)\"",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -69,6 +82,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        condition: service_started
     environment:
       <<: *app-env
       WORKERS: "1"
@@ -81,6 +96,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        condition: service_started
     environment:
       <<: *app-env
       WORKERS: "1"

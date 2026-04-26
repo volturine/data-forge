@@ -5,7 +5,7 @@ from typing import Any, cast
 from fastapi import Request
 from starlette.types import Scope
 
-from core.proxy import client_ip
+from core.proxy import client_ip, request_scheme
 
 
 def _request(scope_overrides: dict[str, Any] | None = None) -> Request:
@@ -53,3 +53,17 @@ def test_client_ip_falls_back_to_first_forwarded_value_when_chain_short(monkeypa
     request = _request({'headers': [(b'x-forwarded-for', b'198.51.100.1')]})
 
     assert client_ip(request) == '198.51.100.1'
+
+
+def test_request_scheme_uses_socket_scheme_without_trusted_proxy(monkeypatch) -> None:
+    monkeypatch.setattr('core.config.settings.trusted_proxy_hops', 0)
+    request = _request({'headers': [(b'x-forwarded-proto', b'https')], 'scheme': 'http'})
+
+    assert request_scheme(request) == 'http'
+
+
+def test_request_scheme_uses_forwarded_proto_with_trusted_proxy(monkeypatch) -> None:
+    monkeypatch.setattr('core.config.settings.trusted_proxy_hops', 1)
+    request = _request({'headers': [(b'x-forwarded-proto', b'https,http')], 'scheme': 'http'})
+
+    assert request_scheme(request) == 'https'

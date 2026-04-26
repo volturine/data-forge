@@ -1,13 +1,12 @@
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 from core.config import settings
 
 _PUBLIC_REVISION = '0001_runtime_public'
-_TENANT_REVISION = '0002_runtime_tenant'
+_TENANT_REVISION = '0003_runtime_tenant_initial'
 
 
 def _alembic_config(*, scope: str, schema: str) -> Config:
@@ -106,16 +105,21 @@ def _bootstrap_tenant_schema(schema: str) -> None:
 
 
 def migrate_runtime(namespaces: list[str]) -> None:
-    if _current_revision('public') == _PUBLIC_REVISION:
-        pass
-    elif _has_version_table('public'):
-        command.upgrade(_alembic_config(scope='public', schema='public'), 'head')
-    else:
+    public_revision = _current_revision('public')
+    if public_revision is None:
         _bootstrap_public_schema()
+    elif public_revision != _PUBLIC_REVISION:
+        raise RuntimeError(
+            f'Unsupported existing public schema revision: {public_revision}. Expected initialization revision {_PUBLIC_REVISION}.'
+        )
     for namespace in namespaces:
-        if _current_revision(namespace) == _TENANT_REVISION:
+        revision = _current_revision(namespace)
+        if revision is None:
+            _bootstrap_tenant_schema(namespace)
             continue
-        if _has_version_table(namespace):
-            command.upgrade(_alembic_config(scope='tenant', schema=namespace), 'head')
-            continue
-        _bootstrap_tenant_schema(namespace)
+        if revision != _TENANT_REVISION:
+            raise RuntimeError(
+                'Unsupported existing tenant schema revision '
+                f'for namespace {namespace}: {revision}. '
+                f'Expected initialization revision {_TENANT_REVISION}.'
+            )

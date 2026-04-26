@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import type { Locator } from '@playwright/test';
 import {
 	createDatasource,
 	createAnalysis,
@@ -12,6 +13,10 @@ import { uid } from './utils/uid.js';
 import { screenshot } from './utils/visual.js';
 
 // ── Real e2e build preview tests (no WS mocking) ───────────────────────────
+
+function terminalStatus(preview: Locator) {
+	return preview.getByText(/^(complete|failed)$/i);
+}
 
 test.describe('Build Preview – real build lifecycle', () => {
 	test('clicking Build queues the run and the preview opens only from the engine status control', async ({
@@ -47,9 +52,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const progressBar = page.locator('[data-testid="build-progress-bar"]');
 			await expect(progressBar).toBeVisible();
 
-			const terminal = preview
-				.getByText('Complete', { exact: true })
-				.or(preview.getByText('Failed', { exact: true }));
+			const terminal = terminalStatus(preview);
 			await expect(terminal).toBeVisible({ timeout: 60_000 });
 
 			await screenshot(page, 'build-preview', 'real-build-terminal');
@@ -82,9 +85,7 @@ test.describe('Build Preview – real build lifecycle', () => {
 			const preview = page.locator('[data-testid="build-preview"]');
 			await expect(preview).toBeVisible({ timeout: 10_000 });
 
-			const terminal = preview
-				.getByText('Complete', { exact: true })
-				.or(preview.getByText('Failed', { exact: true }));
+			const terminal = terminalStatus(preview);
 			await expect(terminal).toBeVisible({ timeout: 60_000 });
 
 			await screenshot(page, 'build-preview', 'real-build-complete-with-steps');

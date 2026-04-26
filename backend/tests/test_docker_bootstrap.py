@@ -66,7 +66,7 @@ def _wait_for_build_detail(client: httpx.Client, build_id: str, *, timeout: floa
 def _wait_for_runtime_workers() -> tuple[int, int]:
     deadline = time.time() + 120
     while time.time() < deadline:
-        worker_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'build_worker' AND stopped_at IS NULL"))
+        worker_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'build_manager' AND stopped_at IS NULL"))
         scheduler_count = int(_psql_value("SELECT count(*) FROM public.runtime_workers WHERE kind = 'scheduler' AND stopped_at IS NULL"))
         if worker_count >= 1 and scheduler_count >= 1:
             return worker_count, scheduler_count
@@ -204,9 +204,10 @@ def test_postgres_runtime_bootstraps_public_and_tenant_schemas() -> None:
     assert _psql_value('SELECT count(*) FROM public.app_settings') == '1'
     assert _psql_value('SELECT count(*) FROM public.users') == '1'
     assert _psql_value('SELECT version_num FROM public.alembic_version') == '0001_runtime_public'
-    assert _psql_value('SELECT version_num FROM "default".alembic_version') == '0002_runtime_tenant'
+    assert _psql_value('SELECT version_num FROM "default".alembic_version') == '0003_runtime_tenant_initial'
 
 
+@pytest.mark.timeout(180)
 def test_postgres_runtime_coordinates_api_worker_and_scheduler() -> None:
     _wait_for_runtime_workers()
     api_workers = _wait_for_api_workers()

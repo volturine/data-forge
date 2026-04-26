@@ -2,7 +2,7 @@
 	import type { AnalysisGalleryItem } from '$lib/types/analysis';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { ChartBar, Trash2 } from 'lucide-svelte';
+	import { ChartBar, Copy, Trash2 } from 'lucide-svelte';
 	import { formatDateDisplay, getYearDisplay } from '$lib/utils/datetime';
 	import { css } from '$lib/styles/panda';
 
@@ -10,10 +10,11 @@
 		analysis: AnalysisGalleryItem;
 		selected: boolean;
 		onDelete: (id: string) => void;
+		onDuplicate?: (analysis: AnalysisGalleryItem) => void;
 		onToggleSelect: (id: string) => void;
 	}
 
-	let { analysis, selected, onDelete, onToggleSelect }: Props = $props();
+	let { analysis, selected, onDelete, onDuplicate, onToggleSelect }: Props = $props();
 
 	function handleClick(e: MouseEvent) {
 		const target = e.target as HTMLElement;
@@ -128,34 +129,66 @@
 			>
 				{analysis.name}
 			</h3>
-			<button
-				type="button"
-				class={css({
-					display: 'inline-flex',
-					flexShrink: '0',
-					alignItems: 'center',
-					justifyContent: 'center',
-					border: 'none',
-					backgroundColor: 'transparent',
-					padding: '1',
-					cursor: 'pointer',
-					_hover: { color: 'fg.error' },
-					_focusVisible: {
-						color: 'fg.error',
-						outline: '2px solid',
-						outlineColor: 'accent.primary',
-						outlineOffset: '1px'
-					}
-				})}
-				onclick={(e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					onDelete(analysis.id);
-				}}
-				aria-label="Delete analysis"
-			>
-				<Trash2 size={16} />
-			</button>
+			<div class={css({ display: 'inline-flex', alignItems: 'center', gap: '1' })}>
+				{#if onDuplicate}
+					<button
+						type="button"
+						class={css({
+							display: 'inline-flex',
+							flexShrink: '0',
+							alignItems: 'center',
+							justifyContent: 'center',
+							border: 'none',
+							backgroundColor: 'transparent',
+							padding: '1',
+							cursor: 'pointer',
+							_hover: { color: 'accent.primary' },
+							_focusVisible: {
+								color: 'accent.primary',
+								outline: '2px solid',
+								outlineColor: 'accent.primary',
+								outlineOffset: '1px'
+							}
+						})}
+						onclick={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							onDuplicate(analysis);
+						}}
+						aria-label="Duplicate analysis"
+					>
+						<Copy size={16} />
+					</button>
+				{/if}
+				<button
+					type="button"
+					class={css({
+						display: 'inline-flex',
+						flexShrink: '0',
+						alignItems: 'center',
+						justifyContent: 'center',
+						border: 'none',
+						backgroundColor: 'transparent',
+						padding: '1',
+						cursor: 'pointer',
+						_hover: { color: 'fg.error' },
+						_focusVisible: {
+							color: 'fg.error',
+							outline: '2px solid',
+							outlineColor: 'accent.primary',
+							outlineOffset: '1px'
+						}
+					})}
+					onclick={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						onDelete(analysis.id);
+					}}
+					aria-label="Delete analysis"
+				>
+					<Trash2 size={16} />
+				</button>
+			</div>
 		</div>
 
 		<div class={css({ fontSize: 'xs', color: 'fg.muted' })}>

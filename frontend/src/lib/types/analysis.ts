@@ -97,3 +97,59 @@ export interface AnalysisGalleryItem {
 	created_at: string;
 	updated_at: string;
 }
+
+export interface AnalysisTemplateSummary {
+	id: string;
+	name: string;
+	description: string;
+	icon: string;
+	step_count: number;
+}
+
+export interface AnalysisTemplateDetail extends AnalysisTemplateSummary {
+	required_input_columns: string[];
+	steps: Array<{
+		type: PipelineStepType;
+		config: Record<string, unknown>;
+	}>;
+}
+
+export interface AnalysisGenerationDatasource {
+	id: string;
+	branch: string;
+	snapshot_id?: string | null;
+	snapshot_timestamp_ms?: number | null;
+}
+
+export interface GenerateAnalysisRequest {
+	name: string;
+	description: string;
+	datasources: AnalysisGenerationDatasource[];
+	provider?: string | null;
+	model?: string | null;
+}
+
+export interface GeneratedAnalysisResponse {
+	pipeline: AnalysisCreate;
+	validation: {
+		valid: boolean;
+		payload: {
+			tabs: AnalysisTab[];
+		};
+	};
+	explanation: string;
+	provider: string;
+	model: string;
+}
+
+export interface DuplicateAnalysisRequest {
+	name: string;
+	description?: string | null;
+}
+
+export interface ImportAnalysisRequest {
+	name: string;
+	description?: string | null;
+	pipeline: Record<string, unknown>;
+	datasource_remap?: Record<string, string>;
+}

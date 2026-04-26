@@ -83,6 +83,10 @@ export class ConfigStore {
 	get authRequired(): boolean {
 		return this.config?.auth_required ?? true;
 	}
+
+	get verifyEmailAddress(): boolean {
+		return this.config?.verify_email_address ?? true;
+	}
 }
 
 export const configStore = new ConfigStore();

@@ -1,3 +1,4 @@
+import json
 import re
 import uuid
 from copy import deepcopy
@@ -10,22 +11,338 @@ from sqlalchemy.orm import defer
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col
 
-from core.exceptions import AnalysisCycleError, AnalysisNotFoundError, AnalysisValidationError, DataSourceNotFoundError
+from core.exceptions import (
+    AnalysisCycleError,
+    AnalysisNotFoundError,
+    AnalysisValidationError,
+    DataSourceNotFoundError,
+)
+from modules.ai.service import AIError, get_ai_client
 from modules.analysis.models import Analysis, AnalysisDataSource, AnalysisStatus
 from modules.analysis.pipeline_types import PipelineDefinition, PipelineStep, PipelineTab, TabDatasource, TabOutput
 from modules.analysis.schemas import (
     AnalysisCreateSchema,
     AnalysisGalleryItemSchema,
+    AnalysisGenerationDatasourceSchema,
     AnalysisResponseSchema,
     AnalysisUpdateSchema,
+    DuplicateAnalysisSchema,
+    GenerateAnalysisSchema,
+    ImportAnalysisSchema,
+    TabSchema,
 )
 from modules.analysis.step_schemas import validate_step
+from modules.analysis.templates import AnalysisTemplate, get_template, list_templates
 from modules.analysis_versions import service as version_service
 from modules.datasource.models import DataSource
+from modules.settings.service import (
+    get_resolved_huggingface_settings,
+    get_resolved_ollama_settings,
+    get_resolved_openai_settings,
+    get_resolved_openrouter_key,
+)
 
 
 def _to_response(analysis: Analysis) -> AnalysisResponseSchema:
     return AnalysisResponseSchema.model_validate(analysis)
+
+
+def _slugify(value: str) -> str:
+    normalized = re.sub(r'[^a-zA-Z0-9]+', '_', value.strip().lower()).strip('_')
+    return normalized or 'analysis'
+
+
+def _default_output_name(analysis_name: str, tab_name: str, index: int) -> str:
+    return _slugify(f'{analysis_name}_{tab_name or f"tab_{index + 1}"}')
+
+
+def _build_output_config(analysis_name: str, tab_name: str, branch: str, index: int) -> dict[str, Any]:
+    output_name = _default_output_name(analysis_name, tab_name, index)
+    return {
+        'result_id': str(uuid.uuid4()),
+        'format': 'parquet',
+        'filename': output_name,
+        'build_mode': 'full',
+        'iceberg': {
+            'namespace': 'outputs',
+            'table_name': output_name,
+            'branch': branch,
+        },
+    }
+
+
+def _clone_step_config(config: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(config)
+
+
+def _build_template_steps(template: AnalysisTemplate) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for raw in template.steps:
+        steps.append(
+            {
+                'id': str(uuid.uuid4()),
+                'type': str(raw['type']),
+                'config': _clone_step_config(raw.get('config', {})),
+                'depends_on': [],
+                'is_applied': True,
+            },
+        )
+    return steps
+
+
+def _datasource_config_from_request(item: AnalysisGenerationDatasourceSchema) -> dict[str, Any]:
+    config: dict[str, Any] = {'branch': item.branch}
+    if item.snapshot_id is not None:
+        config['snapshot_id'] = item.snapshot_id
+    if item.snapshot_timestamp_ms is not None:
+        config['snapshot_timestamp_ms'] = item.snapshot_timestamp_ms
+    return config
+
+
+def _build_tabs_from_template(
+    analysis_name: str,
+    datasources: list[AnalysisGenerationDatasourceSchema],
+    template: AnalysisTemplate,
+) -> list[dict[str, Any]]:
+    if not datasources:
+        raise ValueError('At least one datasource is required')
+
+    tabs: list[dict[str, Any]] = []
+    first_output_id: str | None = None
+    first_tab_id: str | None = None
+    for index, datasource in enumerate(datasources):
+        tab_id = str(uuid.uuid4())
+        branch = datasource.branch.strip()
+        tab_name = f'Source {index + 1}'
+        steps = _build_template_steps(template)
+        if template.id == 'join_and_enrich' and index > 0:
+            steps = []
+        if template.id == 'join_and_enrich' and index == 0 and len(datasources) > 1:
+            for step in steps:
+                if step['type'] == 'join':
+                    step['config']['right_source'] = datasources[1].id
+        output = _build_output_config(analysis_name, tab_name, branch, index)
+        tabs.append(
+            {
+                'id': tab_id,
+                'name': tab_name,
+                'parent_id': None,
+                'datasource': {
+                    'id': datasource.id,
+                    'analysis_tab_id': None,
+                    'config': _datasource_config_from_request(datasource),
+                },
+                'output': output,
+                'steps': steps,
+            },
+        )
+        if first_output_id is None:
+            first_output_id = output['result_id']
+            first_tab_id = tab_id
+
+    if template.id == 'join_and_enrich' and len(tabs) > 1 and first_output_id and first_tab_id:
+        for index, tab in enumerate(tabs[1:], start=1):
+            tab['datasource'] = {
+                'id': first_output_id,
+                'analysis_tab_id': first_tab_id,
+                'config': dict(tab['datasource']['config']),
+            }
+            tab['steps'] = []
+            tab['parent_id'] = first_tab_id
+            tab['name'] = f'Joined Output {index + 1}'
+    return tabs
+
+
+def _extract_json_object(content: str) -> dict[str, Any]:
+    fenced = re.search(r'```(?:json)?\s*(\{.*\})\s*```', content, re.DOTALL)
+    candidate = fenced.group(1) if fenced else content.strip()
+    decoder = json.JSONDecoder()
+    try:
+        obj, _ = decoder.raw_decode(candidate)
+    except json.JSONDecodeError as exc:
+        brace_index = candidate.find('{')
+        if brace_index < 0:
+            raise ValueError('AI response did not contain JSON') from exc
+        obj, _ = decoder.raw_decode(candidate[brace_index:])
+    if not isinstance(obj, dict):
+        raise ValueError('AI response must be a JSON object')
+    return obj
+
+
+def _rewrite_import_payload(
+    pipeline: dict[str, Any],
+    datasource_remap: dict[str, str],
+) -> dict[str, Any]:
+    rewritten = deepcopy(pipeline)
+    tabs = rewritten.get('tabs')
+    if not isinstance(tabs, list):
+        raise ValueError("Imported pipeline must contain a 'tabs' array")
+
+    output_id_map: dict[str, str] = {}
+    tab_id_map: dict[str, str] = {}
+    step_id_map: dict[str, str] = {}
+
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            raise ValueError('Imported pipeline tabs must be objects')
+        old_tab_id = str(tab.get('id', ''))
+        new_tab_id = str(uuid.uuid4())
+        tab_id_map[old_tab_id] = new_tab_id
+        tab['id'] = new_tab_id
+        output = tab.get('output')
+        if not isinstance(output, dict):
+            raise ValueError('Imported pipeline tabs must include output')
+        old_output_id = str(output.get('result_id', ''))
+        new_output_id = str(uuid.uuid4())
+        output_id_map[old_output_id] = new_output_id
+        output['result_id'] = new_output_id
+        steps = tab.get('steps')
+        if not isinstance(steps, list):
+            raise ValueError('Imported pipeline steps must be a list')
+        for step in steps:
+            if not isinstance(step, dict):
+                raise ValueError('Imported pipeline steps must be objects')
+            old_step_id = str(step.get('id', ''))
+            new_step_id = str(uuid.uuid4())
+            step_id_map[old_step_id] = new_step_id
+            step['id'] = new_step_id
+            step['is_applied'] = True
+
+    for tab in tabs:
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict):
+            raise ValueError('Imported pipeline tabs must include datasource')
+        original_id = str(datasource.get('id', ''))
+        analysis_tab_id = datasource.get('analysis_tab_id')
+        if analysis_tab_id is not None:
+            upstream_tab_id = str(analysis_tab_id)
+            if upstream_tab_id not in tab_id_map:
+                raise ValueError(f"Imported tab references missing upstream tab '{upstream_tab_id}'")
+            datasource['analysis_tab_id'] = tab_id_map[upstream_tab_id]
+            if original_id not in output_id_map:
+                raise ValueError(f"Imported tab references missing upstream output '{original_id}'")
+            datasource['id'] = output_id_map[original_id]
+        elif original_id in datasource_remap:
+            datasource['id'] = datasource_remap[original_id]
+        steps = tab.get('steps', [])
+        for step in steps:
+            config = step.get('config')
+            if isinstance(config, dict):
+                right_source = config.get('right_source')
+                if isinstance(right_source, str):
+                    if right_source in output_id_map:
+                        config['right_source'] = output_id_map[right_source]
+                    elif right_source in tab_id_map:
+                        config['right_source'] = tab_id_map[right_source]
+                    elif right_source in datasource_remap:
+                        config['right_source'] = datasource_remap[right_source]
+                sources = config.get('sources')
+                if isinstance(sources, list):
+                    rewritten_sources: list[Any] = []
+                    for source in sources:
+                        if isinstance(source, str):
+                            rewritten_sources.append(
+                                output_id_map.get(source) or tab_id_map.get(source) or datasource_remap.get(source) or source
+                            )
+                        else:
+                            rewritten_sources.append(source)
+                    config['sources'] = rewritten_sources
+            depends_on = step.get('depends_on')
+            if isinstance(depends_on, list):
+                step['depends_on'] = [step_id_map.get(str(dep_id), str(dep_id)) for dep_id in depends_on]
+
+    return rewritten
+
+
+def _collect_missing_import_datasources(session: Session, pipeline: dict[str, Any]) -> list[str]:  # type: ignore[type-arg]
+    missing: set[str] = set()
+    tabs = pipeline.get('tabs')
+    if not isinstance(tabs, list):
+        return []
+    tab_ids = {str(tab.get('id', '')) for tab in tabs if isinstance(tab, dict)}
+    output_ids = {
+        str(tab.get('output', {}).get('result_id', '')) for tab in tabs if isinstance(tab, dict) and isinstance(tab.get('output'), dict)
+    }
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        datasource = tab.get('datasource')
+        if not isinstance(datasource, dict):
+            continue
+        datasource_id = str(datasource.get('id', ''))
+        if datasource.get('analysis_tab_id') is None and datasource_id not in output_ids and not session.get(DataSource, datasource_id):
+            missing.add(datasource_id)
+        for step in tab.get('steps', []):
+            if not isinstance(step, dict):
+                continue
+            config = step.get('config')
+            if not isinstance(config, dict):
+                continue
+            refs: list[str] = []
+            right_source = config.get('right_source')
+            if isinstance(right_source, str):
+                refs.append(right_source)
+            sources = config.get('sources')
+            if isinstance(sources, list):
+                refs.extend(str(source) for source in sources if isinstance(source, str))
+            for ref in refs:
+                if ref in tab_ids or ref in output_ids:
+                    continue
+                if not session.get(DataSource, ref):
+                    missing.add(ref)
+    return sorted(missing)
+
+
+def _resolved_generation_provider(provider: str | None = None) -> tuple[str, str, dict[str, str]]:
+    requested = provider.strip().lower() if provider else ''
+    if requested == 'openrouter':
+        api_key = get_resolved_openrouter_key()
+        if not api_key:
+            raise ValueError('OpenRouter is not configured')
+        return 'openrouter', '', {'api_key': api_key}
+    if requested == 'openai':
+        resolved = get_resolved_openai_settings()
+        if not resolved['api_key']:
+            raise ValueError('OpenAI is not configured')
+        return (
+            'openai',
+            str(resolved['default_model']),
+            {
+                'api_key': str(resolved['api_key']),
+                'endpoint_url': str(resolved['endpoint_url']),
+                'organization_id': str(resolved['organization_id']),
+            },
+        )
+    if requested == 'ollama':
+        resolved = get_resolved_ollama_settings()
+        return 'ollama', str(resolved['default_model']), {'endpoint_url': str(resolved['endpoint_url'])}
+    if requested == 'huggingface':
+        resolved = get_resolved_huggingface_settings()
+        if not resolved['api_token']:
+            raise ValueError('Hugging Face is not configured')
+        return 'huggingface', str(resolved['default_model']), {'api_key': str(resolved['api_token'])}
+
+    openrouter_key = get_resolved_openrouter_key()
+    if openrouter_key:
+        return 'openrouter', '', {'api_key': openrouter_key}
+    openai = get_resolved_openai_settings()
+    if openai['api_key']:
+        return (
+            'openai',
+            str(openai['default_model']),
+            {
+                'api_key': str(openai['api_key']),
+                'endpoint_url': str(openai['endpoint_url']),
+                'organization_id': str(openai['organization_id']),
+            },
+        )
+    ollama = get_resolved_ollama_settings()
+    if ollama['endpoint_url']:
+        return 'ollama', str(ollama['default_model']), {'endpoint_url': str(ollama['endpoint_url'])}
+    huggingface = get_resolved_huggingface_settings()
+    if huggingface['api_token']:
+        return 'huggingface', str(huggingface['default_model']), {'api_key': str(huggingface['api_token'])}
+    raise ValueError('No AI provider is configured')
 
 
 def validate_stored_pipeline_definition(
@@ -202,6 +519,279 @@ def list_analyses(
         defer(Analysis.owner_id),  # type: ignore[arg-type]
     )
     return [AnalysisGalleryItemSchema.model_validate(a) for a in session.execute(stmt).scalars()]
+
+
+def list_analysis_templates() -> list[dict[str, Any]]:
+    return list_templates()
+
+
+def get_analysis_template(template_id: str) -> dict[str, Any]:
+    return get_template(template_id).to_detail()
+
+
+def duplicate_analysis(
+    session: Session,  # type: ignore[type-arg]
+    analysis_id: str,
+    data: DuplicateAnalysisSchema,
+    owner_id: str | None = None,
+) -> AnalysisResponseSchema:
+    original = session.get(Analysis, analysis_id)
+    if not original:
+        raise AnalysisNotFoundError(analysis_id)
+
+    pipeline = deepcopy(original.pipeline_definition)
+    tabs = pipeline.get('tabs')
+    if not isinstance(tabs, list):
+        raise ValueError('Source analysis pipeline is invalid')
+
+    output_id_map: dict[str, str] = {}
+    tab_id_map: dict[str, str] = {}
+    step_id_map: dict[str, str] = {}
+
+    for index, tab in enumerate(tabs):
+        if not isinstance(tab, dict):
+            raise ValueError('Source analysis tabs are invalid')
+        old_tab_id = str(tab.get('id', ''))
+        new_tab_id = str(uuid.uuid4())
+        tab_id_map[old_tab_id] = new_tab_id
+        tab['id'] = new_tab_id
+
+        output = tab.get('output')
+        if not isinstance(output, dict):
+            raise ValueError('Source analysis tab output is invalid')
+        old_output_id = str(output.get('result_id', ''))
+        new_output_id = str(uuid.uuid4())
+        output_id_map[old_output_id] = new_output_id
+        output['result_id'] = new_output_id
+        branch = str(((output.get('iceberg') or {}) if isinstance(output.get('iceberg'), dict) else {}).get('branch') or 'master')
+        output_name = _default_output_name(data.name, str(tab.get('name') or f'tab_{index + 1}'), index)
+        output['filename'] = output_name
+        iceberg = output.get('iceberg')
+        if isinstance(iceberg, dict):
+            iceberg['table_name'] = output_name
+            iceberg['branch'] = str(iceberg.get('branch') or branch)
+
+        steps = tab.get('steps', [])
+        if not isinstance(steps, list):
+            raise ValueError('Source analysis tab steps are invalid')
+        for step in steps:
+            if not isinstance(step, dict):
+                raise ValueError('Source analysis steps are invalid')
+            old_step_id = str(step.get('id', ''))
+            new_step_id = str(uuid.uuid4())
+            step_id_map[old_step_id] = new_step_id
+            step['id'] = new_step_id
+
+    for tab in tabs:
+        if not isinstance(tab, dict):
+            continue
+        datasource = tab.get('datasource')
+        if isinstance(datasource, dict):
+            upstream_tab_id = datasource.get('analysis_tab_id')
+            if upstream_tab_id is not None:
+                mapped_tab_id = tab_id_map.get(str(upstream_tab_id))
+                if not mapped_tab_id:
+                    raise ValueError(f"Duplicate source references missing tab '{upstream_tab_id}'")
+                datasource['analysis_tab_id'] = mapped_tab_id
+                source_id = str(datasource.get('id', ''))
+                if source_id not in output_id_map:
+                    raise ValueError(f"Duplicate source references missing output '{source_id}'")
+                datasource['id'] = output_id_map[source_id]
+        for step in tab.get('steps', []):
+            if not isinstance(step, dict):
+                continue
+            depends_on = step.get('depends_on')
+            if isinstance(depends_on, list):
+                step['depends_on'] = [step_id_map.get(str(dep_id), str(dep_id)) for dep_id in depends_on]
+            config = step.get('config')
+            if isinstance(config, dict):
+                right_source = config.get('right_source')
+                if isinstance(right_source, str):
+                    config['right_source'] = output_id_map.get(right_source) or tab_id_map.get(right_source) or right_source
+                sources = config.get('sources')
+                if isinstance(sources, list):
+                    config['sources'] = [
+                        output_id_map.get(source) or tab_id_map.get(source) or source if isinstance(source, str) else source
+                        for source in sources
+                    ]
+
+    payload = AnalysisCreateSchema(
+        name=data.name,
+        description=data.description if data.description is not None else original.description,
+        tabs=tabs,
+    )
+    return create_analysis(session, payload, owner_id=owner_id)
+
+
+def import_analysis(
+    session: Session,  # type: ignore[type-arg]
+    data: ImportAnalysisSchema,
+    owner_id: str | None = None,
+) -> AnalysisResponseSchema:
+    rewritten = _rewrite_import_payload(data.pipeline, data.datasource_remap)
+    missing = _collect_missing_import_datasources(session, rewritten)
+    if missing:
+        raise AnalysisValidationError(
+            'Imported pipeline references datasources that do not exist',
+            details={'missing_datasource_ids': missing},
+        )
+    tabs = rewritten.get('tabs')
+    if not isinstance(tabs, list):
+        raise ValueError("Imported pipeline must contain a 'tabs' array")
+    payload = AnalysisCreateSchema(
+        name=data.name,
+        description=data.description,
+        tabs=tabs,
+    )
+    return create_analysis(session, payload, owner_id=owner_id)
+
+
+def generate_analysis_pipeline(
+    session: Session,  # type: ignore[type-arg]
+    data: GenerateAnalysisSchema,
+) -> dict[str, Any]:
+    if not data.datasources:
+        raise ValueError('At least one datasource is required for generation')
+
+    selected_datasources: list[DataSource] = []
+    datasource_schemas: list[dict[str, Any]] = []
+    for item in data.datasources:
+        datasource = session.get(DataSource, item.id)
+        if not datasource:
+            raise DataSourceNotFoundError(item.id)
+        selected_datasources.append(datasource)
+        schema_cache = datasource.schema_cache if isinstance(datasource.schema_cache, dict) else {}
+        datasource_schemas.append(
+            {
+                'id': datasource.id,
+                'name': datasource.name,
+                'source_type': datasource.source_type,
+                'branch': item.branch,
+                'columns': schema_cache.get('columns', []),
+            },
+        )
+
+    provider_name, default_model, client_kwargs = _resolved_generation_provider(data.provider)
+    model_name = data.model.strip() if data.model else default_model
+    if not model_name:
+        raise ValueError('No model configured for the selected AI provider')
+
+    operation_summaries = []
+    from modules.analysis.step_schemas import get_step_catalog
+
+    operation_catalog = get_step_catalog()
+    for operation in operation_catalog:
+        operation_summaries.append(
+            {
+                'type': operation['type'],
+                'description': operation['description'],
+                'config_schema': operation['config_schema'],
+            },
+        )
+
+    prompt = '\n'.join(
+        [
+            'Generate a JSON object for a new analysis pipeline.',
+            'Return JSON only. No markdown fences.',
+            'Schema:',
+            '{',
+            '  "explanation": "short explanation",',
+            '  "tabs": [',
+            '    {',
+            '      "name": "tab name",',
+            '      "datasource_id": "one of the datasource ids below",',
+            '      "steps": [',
+            '        {"type": "filter", "config": {...}},',
+            '        {"type": "select", "config": {...}}',
+            '      ]',
+            '    }',
+            '  ]',
+            '}',
+            '',
+            'Rules:',
+            '- Use only datasource ids listed below.',
+            '- Use only operation types listed below.',
+            '- Return at most one tab per datasource.',
+            '- Prefer concise, editable skeletons over complex configs.',
+            (
+                '- If multiple datasources are available and a join makes sense, '
+                'use the first datasource as the primary tab and reference the '
+                'second datasource id in join.right_source.'
+            ),
+            '',
+            f'Analysis name: {data.name}',
+            f'User request: {data.description}',
+            'Datasources:',
+            json.dumps(datasource_schemas, indent=2),
+            'Operations:',
+            json.dumps(operation_summaries, indent=2),
+        ],
+    )
+
+    client = get_ai_client(provider_name, **client_kwargs)
+    try:
+        raw_response = client.generate(prompt, model=model_name, options={'temperature': 0.2})
+    except AIError as exc:
+        raise ValueError(str(exc)) from exc
+
+    generated = _extract_json_object(raw_response)
+    raw_tabs = generated.get('tabs')
+    if not isinstance(raw_tabs, list) or not raw_tabs:
+        raise ValueError('AI response did not include any tabs')
+
+    datasource_inputs = {item.id: item for item in data.datasources}
+    tabs_payload: list[TabSchema] = []
+    for index, raw_tab in enumerate(raw_tabs):
+        if not isinstance(raw_tab, dict):
+            raise ValueError('AI tab entries must be objects')
+        datasource_id = str(raw_tab.get('datasource_id', '')).strip()
+        if not datasource_id or datasource_id not in datasource_inputs:
+            raise ValueError('AI response referenced an unknown datasource')
+        selected = datasource_inputs[datasource_id]
+        branch = selected.branch
+        tab_name = str(raw_tab.get('name') or f'Source {index + 1}')
+        steps = raw_tab.get('steps')
+        if not isinstance(steps, list):
+            raise ValueError('AI tab steps must be a list')
+        built_steps: list[dict[str, Any]] = []
+        for raw_step in steps:
+            if not isinstance(raw_step, dict):
+                raise ValueError('AI steps must be objects')
+            built_steps.append(
+                {
+                    'id': str(uuid.uuid4()),
+                    'type': str(raw_step.get('type', '')),
+                    'config': deepcopy(raw_step.get('config', {})) if isinstance(raw_step.get('config'), dict) else {},
+                    'depends_on': [],
+                    'is_applied': True,
+                },
+            )
+        tabs_payload.append(
+            TabSchema.model_validate(
+                {
+                    'id': str(uuid.uuid4()),
+                    'name': tab_name,
+                    'parent_id': None,
+                    'datasource': {
+                        'id': datasource_id,
+                        'analysis_tab_id': None,
+                        'config': _datasource_config_from_request(selected),
+                    },
+                    'output': _build_output_config(data.name, tab_name, branch, index),
+                    'steps': built_steps,
+                },
+            ),
+        )
+
+    payload = AnalysisCreateSchema(name=data.name, description=None, tabs=tabs_payload)
+    validation = validate_analysis(session, payload)
+    return {
+        'pipeline': payload,
+        'validation': validation,
+        'explanation': str(generated.get('explanation') or raw_response).strip(),
+        'provider': provider_name,
+        'model': model_name,
+    }
 
 
 def update_analysis(

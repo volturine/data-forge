@@ -64,6 +64,7 @@ _TENANT_TABLES = {
     'build_jobs',
     'build_runs',
     'datasources',
+    'datasource_column_metadata',
     'engine_runs',
     'healthcheck_results',
     'healthchecks',

@@ -25,6 +25,7 @@ function makeConfig(overrides: Partial<FrontendConfig> = {}): FrontendConfig {
 		telegram_enabled: false,
 		default_namespace: 'test-ns',
 		auth_required: true,
+		verify_email_address: true,
 		...overrides
 	};
 }
@@ -121,6 +122,10 @@ describe('ConfigStore', () => {
 		test('authRequired returns true', () => {
 			expect(store.authRequired).toBe(true);
 		});
+
+		test('verifyEmailAddress returns true', () => {
+			expect(store.verifyEmailAddress).toBe(true);
+		});
 	});
 
 	describe('fetch success', () => {
@@ -140,7 +145,8 @@ describe('ConfigStore', () => {
 				makeConfig({
 					timezone: 'America/New_York',
 					smtp_enabled: true,
-					auth_required: false
+					auth_required: false,
+					verify_email_address: false
 				})
 			);
 
@@ -149,6 +155,7 @@ describe('ConfigStore', () => {
 			expect(store.timezone).toBe('America/New_York');
 			expect(store.smtpEnabled).toBe(true);
 			expect(store.authRequired).toBe(false);
+			expect(store.verifyEmailAddress).toBe(false);
 		});
 	});
 

@@ -242,8 +242,8 @@ def test_init_db_bootstraps_public_and_tenant_schemas_in_postgres(monkeypatch, t
             assert _query_value(connection, 'SELECT count(*) FROM public.app_settings') == 1
             assert _query_value(connection, 'SELECT count(*) FROM public.users') == 1
             assert _query_value(connection, 'SELECT version_num FROM public.alembic_version') == '0001_runtime_public'
-            assert _query_value(connection, 'SELECT version_num FROM "default".alembic_version') == '0002_runtime_tenant'
-            assert _query_value(connection, 'SELECT version_num FROM alpha.alembic_version') == '0002_runtime_tenant'
+            assert _query_value(connection, 'SELECT version_num FROM "default".alembic_version') == '0003_runtime_tenant_initial'
+            assert _query_value(connection, 'SELECT version_num FROM alpha.alembic_version') == '0003_runtime_tenant_initial'
 
         _clear_database_state()
 

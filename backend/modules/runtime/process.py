@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import multiprocessing
+import multiprocessing.process
 import os
 import signal
 import socket
@@ -23,6 +24,7 @@ from modules.runtime_workers import service as runtime_worker_service
 from modules.runtime_workers.models import RuntimeWorkerKind
 
 logger = logging.getLogger(__name__)
+_SPAWN = multiprocessing.get_context('spawn')
 
 
 def _persist_engine_snapshot(worker_id: str, namespace: str, statuses) -> None:
@@ -143,7 +145,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     worker_id = manager_id()
     _register_manager(worker_id)
     heartbeat_task = asyncio.create_task(_manager_heartbeat_loop(local_stop, worker_id))
-    children: dict[int, multiprocessing.Process] = {}
+    children: dict[int, multiprocessing.process.BaseProcess] = {}
     last_seen = build_job_hub.version()
     try:
         while not local_stop.is_set():
@@ -155,7 +157,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
             queued = await asyncio.to_thread(queued_job_count)
             desired = min(settings.build_worker_max_processes, max(settings.build_worker_min_processes, queued))
             while len(children) < desired:
-                proc = multiprocessing.Process(target=_worker_main)
+                proc = _SPAWN.Process(target=_worker_main)
                 proc.start()
                 children[proc.pid or id(proc)] = proc
 

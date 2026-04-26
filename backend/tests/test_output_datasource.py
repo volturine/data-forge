@@ -97,6 +97,7 @@ class TestCreateAnalysisDatasourceHidden:
         result = create_analysis_datasource(
             session=test_db_session,
             name='Hidden Output',
+            description=None,
             analysis_id=sample_analysis.id,
             analysis_tab_id='tab1',
             is_hidden=True,
@@ -112,6 +113,7 @@ class TestCreateAnalysisDatasourceHidden:
         result = create_analysis_datasource(
             session=test_db_session,
             name='Visible Source',
+            description=None,
             analysis_id=sample_analysis.id,
         )
         ds = test_db_session.get(DataSource, result.id)
@@ -696,6 +698,7 @@ class TestSourceTypeCreatedBy:
         result = create_analysis_datasource(
             session=test_db_session,
             name='Input Ref',
+            description=None,
             analysis_id=sample_analysis.id,
         )
         ds = test_db_session.get(DataSource, result.id)
@@ -708,6 +711,7 @@ class TestSourceTypeCreatedBy:
         result = create_analysis_datasource(
             session=test_db_session,
             name='Output',
+            description=None,
             analysis_id=sample_analysis.id,
             analysis_tab_id='tab1',
             is_hidden=True,

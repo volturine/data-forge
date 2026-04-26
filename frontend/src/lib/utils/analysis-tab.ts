@@ -36,17 +36,19 @@ export function buildOutputConfig(args: {
 	outputId: string;
 	name: string;
 	branch: string;
+	namespace?: string;
 }): AnalysisTabOutput {
 	const outputId = requireString(args.outputId, 'outputId');
 	const tableName = toSlug(args.name, 'name');
 	const branch = requireString(args.branch, 'branch');
+	const namespace = requireString(args.namespace ?? 'outputs', 'namespace');
 	return {
 		result_id: outputId,
 		format: 'parquet',
 		filename: tableName,
 		build_mode: 'full',
 		iceberg: {
-			namespace: 'outputs',
+			namespace,
 			table_name: tableName,
 			branch
 		}

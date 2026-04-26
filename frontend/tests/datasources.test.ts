@@ -6,13 +6,28 @@ import { screenshot } from './utils/visual.js';
 import {
 	selectDatasourceAndWaitForConfig,
 	openSchemaTabAndWait,
-	waitForDatasourceList
+	waitForDatasourceList,
+	waitForLayoutReady
 } from './utils/readiness.js';
 
 /**
  * E2E tests for datasources – mirrors test_datasource.py / test_datasource_extended.py.
  */
 test.describe('Datasources – list & management', () => {
+	test('list shows datasource description preview', async ({ page, request }) => {
+		const ds = `e2e-description-list-${uid()}`;
+		const description = 'Primary customer dataset for retention analysis and reporting.';
+		await createDatasource(request, ds, undefined, description);
+		try {
+			await page.goto('/datasources');
+			const row = page.locator(`[data-ds-row="${ds}"]`);
+			await expect(row).toBeVisible();
+			await expect(row.getByText(description)).toBeVisible();
+		} finally {
+			await deleteDatasourceViaUI(page, ds);
+		}
+	});
+
 	test('lists datasource after API create', async ({ page, request }) => {
 		const ds = `e2e-visible-${uid()}`;
 		await createDatasource(request, ds);
@@ -116,6 +131,19 @@ test.describe('Datasources – list & management', () => {
 });
 
 test.describe('Datasources – upload page', () => {
+	test('upload page shows description fields for file and database flows', async ({ page }) => {
+		await page.goto('/datasources/new');
+		await waitForLayoutReady(page);
+		await page.locator('#file-input').setInputFiles({
+			name: 'upload-description.csv',
+			mimeType: 'text/csv',
+			buffer: Buffer.from('id,name\n1,Alice\n')
+		});
+		await expect(page.locator('#file-description')).toBeVisible();
+		await page.getByRole('button', { name: 'External DB' }).click();
+		await expect(page.locator('#db-description')).toBeVisible();
+	});
+
 	test('upload page has "File Upload" and "External DB" tabs', async ({ page }) => {
 		await page.goto('/datasources/new');
 		await expect(page.getByRole('button', { name: 'File Upload' })).toBeVisible();
@@ -189,6 +217,27 @@ test.describe('Datasources – detail view', () => {
 		await screenshot(page, 'datasources', 'detail-config-panel');
 	});
 
+	test('general tab allows editing and clearing the datasource description', async ({ page }) => {
+		await page.goto('/datasources');
+		await selectDatasourceAndWaitForConfig(page, ds);
+
+		const config = page.locator('[data-ds-config]');
+		const descriptionField = config.locator('textarea[id^="datasource-description-"]');
+		await expect(config.getByText('No description added yet.')).toBeVisible();
+
+		await descriptionField.fill('Initial dataset guidance for weekly commercial reporting.');
+		await config.getByRole('button', { name: /Save Changes/i }).click();
+		await expect(config.getByText('Changes saved successfully!')).toBeVisible();
+		await expect(descriptionField).toHaveValue(
+			'Initial dataset guidance for weekly commercial reporting.'
+		);
+
+		await descriptionField.fill('');
+		await config.getByRole('button', { name: /Save Changes/i }).click();
+		await expect(config.getByText('Changes saved successfully!')).toBeVisible();
+		await expect(config.getByText('No description added yet.')).toBeVisible();
+	});
+
 	test('Schema tab shows actual column names from CSV', async ({ page }) => {
 		await page.goto('/datasources');
 		await selectDatasourceAndWaitForConfig(page, ds);
@@ -199,6 +248,28 @@ test.describe('Datasources – detail view', () => {
 		await expect(config.locator('[data-schema-column="name"]')).toBeVisible();
 		await expect(config.locator('[data-schema-column="age"]')).toBeVisible();
 		await expect(config.locator('[data-schema-column="city"]')).toBeVisible();
+	});
+
+	test('Schema tab allows editing and viewing column descriptions', async ({ page }) => {
+		await page.goto('/datasources');
+		await selectDatasourceAndWaitForConfig(page, ds);
+		await openSchemaTabAndWait(page);
+
+		const config = page.locator('[data-ds-config]');
+		const editButton = config.getByRole('button', { name: 'Edit description for city' });
+		await editButton.click();
+		await config.locator('textarea').fill('Primary city label used for regional rollups');
+		await config.getByRole('button', { name: 'Save' }).click();
+		await expect(editButton).toBeVisible({ timeout: 10_000 });
+
+		await expect(config.locator('[data-schema-description="city"]')).toContainText(
+			'Primary city label used for regional rollups'
+		);
+
+		await config.locator('[data-schema-column="city"]').click();
+		const panel = page.getByTestId('column-stats-panel');
+		await expect(panel).toContainText('Description');
+		await expect(panel).toContainText('Primary city label used for regional rollups');
 	});
 
 	test('General tab shows row count from actual data', async ({ page }) => {
