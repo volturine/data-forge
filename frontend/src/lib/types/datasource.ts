@@ -3,6 +3,7 @@ export interface ColumnSchema {
 	dtype: string;
 	nullable: boolean;
 	sample_value?: string | null;
+	description?: string | null;
 }
 
 export interface SchemaInfo {

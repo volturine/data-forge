@@ -201,6 +201,26 @@ test.describe('Datasources – detail view', () => {
 		await expect(config.locator('[data-schema-column="city"]')).toBeVisible();
 	});
 
+	test('Schema tab allows editing and viewing column descriptions', async ({ page }) => {
+		await page.goto('/datasources');
+		await selectDatasourceAndWaitForConfig(page, ds);
+		await openSchemaTabAndWait(page);
+
+		const config = page.locator('[data-ds-config]');
+		await config.getByRole('button', { name: 'Edit description for city' }).click();
+		await config.locator('textarea').fill('Primary city label used for regional rollups');
+		await config.getByRole('button', { name: 'Save' }).click();
+
+		await expect(config.locator('[data-schema-description="city"]')).toContainText(
+			'Primary city label used for regional rollups'
+		);
+
+		await config.locator('[data-schema-column="city"]').click();
+		const panel = page.getByTestId('column-stats-panel');
+		await expect(panel).toContainText('Description');
+		await expect(panel).toContainText('Primary city label used for regional rollups');
+	});
+
 	test('General tab shows row count from actual data', async ({ page }) => {
 		await page.goto('/datasources');
 		await page.locator(`[data-ds-row="${ds}"]`).click();

@@ -317,6 +317,11 @@ export interface DataSourceUpdate {
 	is_hidden?: boolean;
 }
 
+export interface ColumnDescriptionPatch {
+	column_name: string;
+	description: string | null;
+}
+
 export function updateDatasource(
 	id: string,
 	update: DataSourceUpdate
@@ -324,5 +329,15 @@ export function updateDatasource(
 	return apiRequest<DataSource>(`/v1/datasource/${id}`, {
 		method: 'PUT',
 		body: JSON.stringify(update)
+	});
+}
+
+export function updateDatasourceColumnDescriptions(
+	id: string,
+	columns: ColumnDescriptionPatch[]
+): ResultAsync<SchemaInfo, ApiError> {
+	return apiRequest<SchemaInfo>(`/v1/datasource/${id}/column-metadata`, {
+		method: 'PATCH',
+		body: JSON.stringify({ columns })
 	});
 }

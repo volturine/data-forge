@@ -28,6 +28,7 @@ _TENANT_TABLES = frozenset(
         'build_jobs',
         'build_runs',
         'datasources',
+        'datasource_column_metadata',
         'engine_runs',
         'healthcheck_results',
         'healthchecks',
@@ -300,7 +301,7 @@ def _tenant_tables():
     from modules.analysis_versions.models import AnalysisVersion
     from modules.build_jobs.models import BuildJob
     from modules.build_runs.models import BuildEvent, BuildRun
-    from modules.datasource.models import DataSource
+    from modules.datasource.models import DataSource, DataSourceColumnMetadata
     from modules.engine_runs.models import EngineRun
     from modules.healthcheck.models import HealthCheck, HealthCheckResult
     from modules.locks.models import ResourceLock
@@ -316,6 +317,7 @@ def _tenant_tables():
         BuildJob.__tablename__,
         BuildRun.__tablename__,
         DataSource.__tablename__,
+        DataSourceColumnMetadata.__tablename__,
         EngineRun.__tablename__,
         HealthCheck.__tablename__,
         HealthCheckResult.__tablename__,

@@ -11,12 +11,20 @@
 	interface Props {
 		datasourceId: string;
 		columnName: string | null;
+		columnDescription?: string | null;
 		open: boolean;
 		datasourceConfig?: Record<string, unknown> | null;
 		onClose: () => void;
 	}
 
-	let { datasourceId, columnName, open, datasourceConfig = null, onClose }: Props = $props();
+	let {
+		datasourceId,
+		columnName,
+		columnDescription = null,
+		open,
+		datasourceConfig = null,
+		onClose
+	}: Props = $props();
 
 	const ns = useNamespace();
 
@@ -216,6 +224,31 @@
 										>
 									</div>
 								{/if}
+								<div class={css({ marginTop: '3' })}>
+									<div
+										class={css({
+											fontSize: '2xs',
+											fontWeight: 'semibold',
+											textTransform: 'uppercase',
+											letterSpacing: 'wider',
+											color: 'fg.muted',
+											marginBottom: '1.5'
+										})}
+									>
+										Description
+									</div>
+									<p
+										class={css({
+											margin: '0',
+											fontSize: 'xs',
+											color: columnDescription ? 'fg.primary' : 'fg.muted',
+											whiteSpace: 'pre-wrap',
+											wordBreak: 'break-word'
+										})}
+									>
+										{columnDescription || 'No description'}
+									</p>
+								</div>
 							</div>
 
 							<!-- Numeric stats -->

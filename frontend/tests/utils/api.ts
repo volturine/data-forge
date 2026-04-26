@@ -167,16 +167,27 @@ const frontendOrigin = process.env.PLAYWRIGHT_FRONTEND_ORIGIN || `http://localho
 const apiStorageOrigin = new URL(API_BASE).origin;
 const cookieDomain = process.env.PLAYWRIGHT_COOKIE_DOMAIN || 'localhost';
 
+interface StorageStateOptions {
+	apiOrigin?: string;
+	cookieDomain?: string;
+	frontendOrigin?: string;
+}
+
 export function buildStorageState(
-	sessionToken: string | undefined
+	sessionToken: string | undefined,
+	options?: StorageStateOptions
 ): NonNullable<BrowserContextOptions['storageState']> {
+	const resolvedApiOrigin = options?.apiOrigin ?? apiStorageOrigin;
+	const resolvedCookieDomain = options?.cookieDomain ?? cookieDomain;
+	const resolvedFrontendOrigin = options?.frontendOrigin ?? frontendOrigin;
+
 	return {
 		cookies: sessionToken
 			? [
 					{
 						name: 'session_token',
 						value: sessionToken,
-						domain: cookieDomain,
+						domain: resolvedCookieDomain,
 						path: '/',
 						expires: -1,
 						httpOnly: true,
@@ -186,8 +197,8 @@ export function buildStorageState(
 				]
 			: [],
 		origins: [
-			{ origin: apiStorageOrigin, localStorage: [] },
-			{ origin: frontendOrigin, localStorage: [] }
+			{ origin: resolvedApiOrigin, localStorage: [] },
+			{ origin: resolvedFrontendOrigin, localStorage: [] }
 		]
 	} satisfies NonNullable<BrowserContextOptions['storageState']>;
 }

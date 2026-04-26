@@ -137,6 +137,65 @@ class AnalysisGalleryItemSchema(BaseModel):
     updated_at: datetime
 
 
+class AnalysisTemplateSummarySchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    id: str
+    name: str
+    description: str
+    icon: str
+    step_count: int
+
+
+class AnalysisTemplateDetailSchema(AnalysisTemplateSummarySchema):
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DuplicateAnalysisSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    description: str | None = None
+
+
+class ImportAnalysisSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    description: str | None = None
+    pipeline: dict[str, Any]
+    datasource_remap: dict[str, str] = Field(default_factory=dict)
+
+
+class AnalysisGenerationDatasourceSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    id: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    branch: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)] = 'master'
+    snapshot_id: str | None = None
+    snapshot_timestamp_ms: int | None = None
+
+
+class GenerateAnalysisSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+    description: str = Field(min_length=1)
+    datasources: list[AnalysisGenerationDatasourceSchema] = Field(default_factory=list)
+    provider: str | None = None
+    model: str | None = None
+
+
+class GeneratedAnalysisResponseSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    pipeline: AnalysisCreateSchema
+    validation: dict[str, Any]
+    explanation: str
+    provider: str
+    model: str
+
+
 class CodeExportFormat(StrEnum):
     POLARS = 'polars'
     SQL = 'sql'

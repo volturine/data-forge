@@ -189,6 +189,19 @@ describe('ColumnStatsPanel', () => {
 			renderPanel();
 			expect(screen.getByText('Overview')).toBeInTheDocument();
 		});
+
+		test('shows column description when provided', () => {
+			queryState = makeQueryResult({ data: makeStats() });
+			renderPanel({ columnDescription: 'Revenue in USD before tax' });
+			expect(screen.getByText('Description')).toBeInTheDocument();
+			expect(screen.getByText('Revenue in USD before tax')).toBeInTheDocument();
+		});
+
+		test('shows empty description state when missing', () => {
+			queryState = makeQueryResult({ data: makeStats() });
+			renderPanel({ columnDescription: null });
+			expect(screen.getByText('No description')).toBeInTheDocument();
+		});
 	});
 
 	describe('numeric distribution', () => {

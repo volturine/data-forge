@@ -5,7 +5,8 @@
 		getDatasource,
 		getDatasourceSchema,
 		refreshDatasource,
-		updateDatasource
+		updateDatasource,
+		updateDatasourceColumnDescriptions
 	} from '$lib/api/datasource';
 	import { type EngineRun } from '$lib/api/engine-runs';
 	import { EngineRunsStore } from '$lib/stores/engine-runs.svelte';
@@ -15,6 +16,7 @@
 		Loader,
 		CircleAlert,
 		RefreshCw,
+		Pencil,
 		Eye,
 		EyeOff,
 		Download,
@@ -129,6 +131,29 @@
 	let statsOpen = $state(false);
 	let statsColumn = $state<string | null>(null);
 	let showPreviews = $state(false);
+	let editingColumn = $state<string | null>(null);
+	let descriptionDraft = $state('');
+	let descriptionError = $state<string | null>(null);
+	let descriptionExpanded = $state<Record<string, boolean>>({});
+
+	const descriptionMutation = createMutation(() => ({
+		mutationFn: async (payload: { columnName: string; description: string | null }) => {
+			const result = await updateDatasourceColumnDescriptions(datasource.id, [
+				{ column_name: payload.columnName, description: payload.description }
+			]);
+			if (result.isErr()) throw new Error(result.error.message);
+			return result.value;
+		},
+		onSuccess: (schema) => {
+			setSchema(schema);
+			queryClient.setQueryData(['datasource-schema', datasource.id], schema);
+			queryClient.invalidateQueries({ queryKey: ['datasource-schema', datasource.id] });
+			editingColumn = null;
+			descriptionDraft = '';
+			descriptionError = null;
+			onSave?.();
+		}
+	}));
 
 	// Subscription: $derived can't reset state on datasource changes.
 	// Subscription: $derived can't sync schema into local state.
@@ -148,6 +173,10 @@
 		activeTab = 'general';
 		statsOpen = false;
 		statsColumn = null;
+		editingColumn = null;
+		descriptionDraft = '';
+		descriptionError = null;
+		descriptionExpanded = {};
 
 		// Initialize type-specific config
 		const fileSource = getFileSource(ds);
@@ -239,6 +268,53 @@
 			...col,
 			dtype: resolveColumnType(col.dtype)
 		}));
+	}
+
+	function getSelectedDescription(name: string | null): string | null {
+		if (!name) return null;
+		return columns.find((column) => column.name === name)?.description ?? null;
+	}
+
+	function isDescriptionExpanded(name: string): boolean {
+		return descriptionExpanded[name] ?? false;
+	}
+
+	function isDescriptionLong(value: string | null | undefined): boolean {
+		return (value?.length ?? 0) > 140;
+	}
+
+	function getDescriptionPreview(value: string | null | undefined, expanded: boolean): string {
+		if (!value) return 'No description';
+		if (expanded || !isDescriptionLong(value)) return value;
+		return `${value.slice(0, 140).trimEnd()}...`;
+	}
+
+	function toggleDescription(name: string) {
+		descriptionExpanded = { ...descriptionExpanded, [name]: !isDescriptionExpanded(name) };
+	}
+
+	function startEditingDescription(column: ColumnSchema) {
+		editingColumn = column.name;
+		descriptionDraft = column.description ?? '';
+		descriptionError = null;
+	}
+
+	function cancelEditingDescription() {
+		editingColumn = null;
+		descriptionDraft = '';
+		descriptionError = null;
+	}
+
+	async function saveDescription(columnName: string) {
+		descriptionError = null;
+		try {
+			await descriptionMutation.mutateAsync({
+				columnName,
+				description: descriptionDraft
+			});
+		} catch (error) {
+			descriptionError = error instanceof Error ? error.message : 'Failed to save description';
+		}
 	}
 
 	function getFileSource(ds: DataSource): FileDataSourceConfig | null {
@@ -1076,7 +1152,7 @@
 						<div
 							class={css({
 								display: 'grid',
-								gridTemplateColumns: '24px 1fr 140px',
+								gridTemplateColumns: '24px minmax(0, 1fr) 140px minmax(0, 1.6fr)',
 								alignItems: 'center',
 								columnGap: '2',
 								backgroundColor: 'bg.tertiary',
@@ -1093,37 +1169,173 @@
 							<span>#</span>
 							<span>Column</span>
 							<span>Type</span>
+							<span>Description</span>
 						</div>
 						{#each columns as column, index (index)}
-							<button
-								type="button"
+							<div
 								class={css(
 									{
 										display: 'grid',
-										gridTemplateColumns: '24px 1fr 140px',
+										gridTemplateColumns: '24px minmax(0, 1fr) 140px minmax(0, 1.6fr)',
 										alignItems: 'center',
 										columnGap: '2',
 										paddingX: '3',
 										paddingY: '1.5',
-										_hover: { backgroundColor: 'bg.hover' },
-										cursor: 'pointer',
-										border: 'none',
-										backgroundColor: 'transparent',
-										width: '100%',
-										textAlign: 'left'
+										backgroundColor: 'transparent'
 									},
 									index > 0 && { borderTopWidth: '1' }
 								)}
-								data-schema-column={column.name}
-								onclick={() => {
-									statsColumn = column.name;
-									statsOpen = true;
-								}}
 							>
 								<span class={css({ fontSize: 'xs', color: 'fg.faint' })}>{index + 1}</span>
-								<span class={css({ fontSize: 'xs' })}>{column.name}</span>
-								<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
-							</button>
+								<button
+									type="button"
+									class={css({
+										fontSize: 'xs',
+										textAlign: 'left',
+										backgroundColor: 'transparent',
+										borderColor: 'transparent',
+										padding: '0',
+										minWidth: '0',
+										overflow: 'hidden',
+										textOverflow: 'ellipsis',
+										whiteSpace: 'nowrap',
+										_hover: { color: 'accent.primary' }
+									})}
+									data-schema-column={column.name}
+									onclick={() => {
+										statsColumn = column.name;
+										statsOpen = true;
+									}}
+								>
+									{column.name}
+								</button>
+								<div>
+									<ColumnTypeBadge columnType={column.dtype} size="sm" showIcon={true} />
+								</div>
+								<div class={css({ minWidth: '0' })}>
+									{#if editingColumn === column.name}
+										<div class={css({ display: 'flex', flexDirection: 'column', gap: '2' })}>
+											<textarea
+												value={descriptionDraft}
+												oninput={(e) => (descriptionDraft = e.currentTarget.value)}
+												rows="4"
+												maxlength="2000"
+												class={css({
+													width: 'full',
+													fontSize: 'xs',
+													paddingX: '2',
+													paddingY: '1.5',
+													borderWidth: '1',
+													backgroundColor: 'bg.primary',
+													resize: 'vertical',
+													_focus: { outline: 'none' },
+													_focusVisible: { borderColor: 'border.accent' }
+												})}
+											></textarea>
+											<div class={css({ display: 'flex', alignItems: 'center', gap: '2' })}>
+												<button
+													type="button"
+													class={css({
+														borderWidth: '1',
+														backgroundColor: 'accent.primary',
+														color: 'fg.inverse',
+														fontSize: 'xs',
+														paddingX: '2',
+														paddingY: '1'
+													})}
+													onclick={() => saveDescription(column.name)}
+													disabled={descriptionMutation.isPending}
+												>
+													{#if descriptionMutation.isPending}
+														Saving...
+													{:else}
+														Save
+													{/if}
+												</button>
+												<button
+													type="button"
+													class={css({
+														borderWidth: '1',
+														backgroundColor: 'transparent',
+														fontSize: 'xs',
+														paddingX: '2',
+														paddingY: '1'
+													})}
+													onclick={cancelEditingDescription}
+													disabled={descriptionMutation.isPending}
+												>
+													Cancel
+												</button>
+												<span class={css({ fontSize: '2xs', color: 'fg.muted' })}>
+													{descriptionDraft.length}/2000
+												</span>
+											</div>
+											{#if descriptionError}
+												<p class={css({ margin: '0', fontSize: '2xs', color: 'fg.error' })}>
+													{descriptionError}
+												</p>
+											{/if}
+										</div>
+									{:else}
+										<div class={css({ display: 'flex', alignItems: 'flex-start', gap: '2' })}>
+											<div
+												class={css({
+													flex: '1',
+													minWidth: '0',
+													fontSize: 'xs',
+													color: column.description ? 'fg.primary' : 'fg.muted',
+													whiteSpace: 'pre-wrap',
+													wordBreak: 'break-word'
+												})}
+												data-schema-description={column.name}
+											>
+												{getDescriptionPreview(
+													column.description ?? null,
+													isDescriptionExpanded(column.name)
+												)}
+												{#if column.description && isDescriptionLong(column.description)}
+													<button
+														type="button"
+														class={css({
+															marginLeft: '1',
+															padding: '0',
+															borderColor: 'transparent',
+															backgroundColor: 'transparent',
+															fontSize: '2xs',
+															color: 'accent.primary'
+														})}
+														onclick={() => toggleDescription(column.name)}
+													>
+														{#if isDescriptionExpanded(column.name)}
+															Show less
+														{:else}
+															Show more
+														{/if}
+													</button>
+												{/if}
+											</div>
+											<button
+												type="button"
+												class={css({
+													display: 'inline-flex',
+													alignItems: 'center',
+													justifyContent: 'center',
+													borderWidth: '1',
+													backgroundColor: 'transparent',
+													paddingX: '1.5',
+													paddingY: '1',
+													color: 'fg.secondary',
+													_hover: { backgroundColor: 'bg.hover' }
+												})}
+												aria-label={`Edit description for ${column.name}`}
+												onclick={() => startEditingDescription(column)}
+											>
+												<Pencil size={12} />
+											</button>
+										</div>
+									{/if}
+								</div>
+							</div>
 						{/each}
 					</div>
 				{:else}
@@ -1519,6 +1731,7 @@
 <ColumnStatsPanel
 	datasourceId={datasource.id}
 	columnName={statsColumn}
+	columnDescription={getSelectedDescription(statsColumn)}
 	open={statsOpen}
 	datasourceConfig={datasource.config as Record<string, unknown>}
 	onClose={() => {

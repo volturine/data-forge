@@ -659,6 +659,17 @@ def get_datasource_schema(
     return service.get_datasource_schema(session, parse_datasource_id(datasource_id), sheet_name=sheet_name, refresh=refresh)
 
 
+@router.patch('/{datasource_id}/column-metadata', response_model=schemas.SchemaInfo, mcp=True)
+@handle_errors(operation='update datasource column metadata', value_error_status=400)
+def update_datasource_column_metadata(
+    datasource_id: DataSourceId,
+    payload: schemas.BatchColumnDescriptionUpdate,
+    session: Session = Depends(get_db),
+):
+    """Update one or more datasource column descriptions and return the active schema."""
+    return service.update_column_descriptions(session, parse_datasource_id(datasource_id), payload)
+
+
 @router.post('/{datasource_id}/compare-snapshots', response_model=schemas.SnapshotCompareResponse, mcp=True)
 @handle_errors(operation='compare datasource snapshots')
 def compare_snapshots(

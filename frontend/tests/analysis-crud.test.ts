@@ -103,7 +103,7 @@ test.describe('Analyses – create wizard', () => {
 		await page.locator('#name').fill('Back Test');
 		await page.getByRole('button', { name: /Next/i }).click();
 		await page.getByRole('button', { name: /Back/i }).click();
-		await expect(page.getByRole('heading', { name: /Analysis Details/i })).toBeVisible();
+		await expect(page.getByRole('heading', { name: /How do you want to start\?/i })).toBeVisible();
 	});
 
 	test('Cancel on step 1 returns to home', async ({ page }) => {
@@ -133,7 +133,15 @@ test.describe('Analyses – create wizard', () => {
 			await expect(page.getByRole('button', { name: /Next/i })).toBeEnabled();
 			await page.getByRole('button', { name: /Next/i }).click();
 
-			// Step 3 – review
+			// Step 3 – design
+			await expect(page.getByRole('heading', { name: /Choose Template/i })).toBeVisible();
+			await page.getByRole('button', { name: /Next/i }).click();
+
+			// Step 4 – output
+			await expect(page.getByRole('heading', { name: /Configure Outputs/i })).toBeVisible();
+			await page.getByRole('button', { name: /Next/i }).click();
+
+			// Step 5 – review
 			await expect(page.getByRole('heading', { name: /Review/i })).toBeVisible();
 			await expect(page.locator('main')).toContainText(aName);
 			await page.getByRole('button', { name: /Create Analysis/i }).click();

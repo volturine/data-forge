@@ -13,6 +13,7 @@ class ColumnSchema(BaseModel):
     dtype: str
     nullable: bool
     sample_value: str | None = None
+    description: str | None = None
 
 
 class SchemaInfo(BaseModel):
@@ -21,6 +22,15 @@ class SchemaInfo(BaseModel):
     columns: list[ColumnSchema]
     row_count: int | None = None
     sheet_names: list[str] | None = None
+
+
+class ColumnDescriptionPatch(BaseModel):
+    column_name: str
+    description: str | None = None
+
+
+class BatchColumnDescriptionUpdate(BaseModel):
+    columns: list[ColumnDescriptionPatch]
 
 
 class SnapshotCompareRequest(BaseModel):

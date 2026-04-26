@@ -88,6 +88,42 @@ async def create_analysis(
     return service.create_analysis(session, data, owner_id=owner_id)
 
 
+@router.get('/templates', response_model=list[schemas.AnalysisTemplateSummarySchema], mcp=True)
+@handle_errors(operation='list analysis templates', value_error_status=404)
+async def list_analysis_templates():
+    """List built-in analysis templates available in the guided creation flow."""
+    return service.list_analysis_templates()
+
+
+@router.get('/templates/{template_id}', response_model=schemas.AnalysisTemplateDetailSchema, mcp=True)
+@handle_errors(operation='get analysis template', value_error_status=404)
+async def get_analysis_template(template_id: str):
+    """Get one analysis template including the step skeleton used for creation."""
+    return service.get_analysis_template(template_id)
+
+
+@router.post('/generate', response_model=schemas.GeneratedAnalysisResponseSchema, mcp=True)
+@handle_errors(operation='generate analysis pipeline', value_error_status=400)
+async def generate_analysis_pipeline(
+    data: schemas.GenerateAnalysisSchema,
+    session: Session = Depends(get_db),
+):
+    """Generate an analysis pipeline skeleton from a natural-language description."""
+    return service.generate_analysis_pipeline(session, data)
+
+
+@router.post('/import', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='import analysis', value_error_status=400)
+async def import_analysis(
+    data: schemas.ImportAnalysisSchema,
+    session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Import an analysis pipeline definition and persist it as a new analysis."""
+    owner_id = user.id if user else None
+    return service.import_analysis(session, data, owner_id=owner_id)
+
+
 @router.get('', response_model=list[schemas.AnalysisGalleryItemSchema], mcp=True)
 @handle_errors(operation='list analyses')
 async def list_analyses(session: Session = Depends(get_db)):
@@ -118,6 +154,19 @@ async def get_analysis(
     response.headers['ETag'] = _analysis_etag(analysis)
     response.headers['X-Analysis-Version'] = _analysis_version(analysis)
     return analysis
+
+
+@router.post('/{analysis_id}/duplicate', response_model=schemas.AnalysisResponseSchema, mcp=True)
+@handle_errors(operation='duplicate analysis', value_error_status=400)
+async def duplicate_analysis(
+    analysis_id: AnalysisId,
+    data: schemas.DuplicateAnalysisSchema,
+    session: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    """Duplicate an analysis while regenerating output identities and derived references."""
+    owner_id = user.id if user else None
+    return service.duplicate_analysis(session, parse_analysis_id(analysis_id), data, owner_id=owner_id)
 
 
 @router.put('/{analysis_id}', response_model=schemas.AnalysisResponseSchema, mcp=True)

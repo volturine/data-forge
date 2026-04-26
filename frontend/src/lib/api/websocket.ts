@@ -4,6 +4,7 @@ import { requireNamespace } from '$lib/stores/namespace.svelte';
 const CLOSE_NORMAL = 1000;
 const CLOSE_GOING_AWAY = 1001;
 const CLOSE_NO_STATUS = 1005;
+const CLOSE_UNLOAD = 1000;
 const UNLOAD_REASON = 'Page unloading';
 
 const sockets = new Set<WebSocket>();
@@ -18,7 +19,7 @@ function closeSocket(socket: WebSocket, code: number, reason?: string): void {
 
 function closeOwnedSockets(): void {
 	for (const socket of [...sockets]) {
-		closeSocket(socket, CLOSE_GOING_AWAY, UNLOAD_REASON);
+		closeSocket(socket, CLOSE_UNLOAD, UNLOAD_REASON);
 	}
 }
 

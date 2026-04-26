@@ -7,10 +7,11 @@
 		analyses: AnalysisGalleryItem[];
 		selectedIds: Set<string>;
 		onDelete: (id: string) => void;
+		onDuplicate?: (analysis: AnalysisGalleryItem) => void;
 		onToggleSelect: (id: string) => void;
 	}
 
-	let { analyses, selectedIds, onDelete, onToggleSelect }: Props = $props();
+	let { analyses, selectedIds, onDelete, onDuplicate, onToggleSelect }: Props = $props();
 </script>
 
 <div
@@ -23,6 +24,12 @@
 	})}
 >
 	{#each analyses as analysis (analysis.id)}
-		<AnalysisCard {analysis} selected={selectedIds.has(analysis.id)} {onDelete} {onToggleSelect} />
+		<AnalysisCard
+			{analysis}
+			selected={selectedIds.has(analysis.id)}
+			{onDelete}
+			{onDuplicate}
+			{onToggleSelect}
+		/>
 	{/each}
 </div>
