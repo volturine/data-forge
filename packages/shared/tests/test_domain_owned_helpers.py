@@ -1,6 +1,8 @@
 from contracts.datasource.models import DataSource, DataSourceCreatedBy, DataSourceTargetKind
 from contracts.datasource.source_types import DataSourceType
 from contracts.healthcheck_models import HealthCheckType
+from contracts.runtime.ipc import RuntimePayloadKind
+from contracts.step_config_enums import FillNullStrategy
 
 
 def test_datasource_target_kind_is_model_owned() -> None:
@@ -38,3 +40,16 @@ def test_datasource_target_kind_is_model_owned() -> None:
 def test_healthcheck_type_owns_uniqueness_rule() -> None:
     assert HealthCheckType.ROW_COUNT.requires_unique_per_datasource is True
     assert HealthCheckType.COLUMN_NULL.requires_unique_per_datasource is False
+
+
+def test_runtime_payload_kind_is_model_owned() -> None:
+    assert RuntimePayloadKind.from_payload({'kind': RuntimePayloadKind.BUILD.value}) == RuntimePayloadKind.BUILD
+    assert RuntimePayloadKind.from_payload({'kind': 'unknown'}) is None
+    assert RuntimePayloadKind.from_payload({}) is None
+
+
+def test_fill_null_strategy_owns_special_modes() -> None:
+    assert FillNullStrategy.LITERAL.uses_literal_value is True
+    assert FillNullStrategy.ZERO.uses_literal_value is False
+    assert FillNullStrategy.DROP_ROWS.drops_rows is True
+    assert FillNullStrategy.MEAN.drops_rows is False

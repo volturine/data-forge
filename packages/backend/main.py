@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from contracts.runtime import ipc as runtime_ipc
+from contracts.runtime.ipc import RuntimeListenerKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import build_runs_service as build_run_service
 from core import runtime_workers_service as runtime_worker_service
@@ -180,7 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Start background cleanup task
     stop_event = asyncio.Event()
-    ipc_server = await runtime_ipc.start_api_server(listener="api")
+    ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.API)
 
     chat_sweep_task = asyncio.create_task(chat_sweep_loop(stop_event))
     api_heartbeat_task = asyncio.create_task(api_worker_heartbeat_loop(stop_event, api_worker_id))
@@ -218,7 +219,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if ipc_task is not None:
         shutdown_tasks.append(ipc_task)
     await asyncio.gather(*shutdown_tasks)
-    await runtime_ipc.stop_api_server(ipc_server, listener="api")
+    await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.API)
     await close_clients()
     await asyncio.to_thread(_stop_api_worker, api_worker_id)
 

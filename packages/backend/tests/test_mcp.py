@@ -10,6 +10,7 @@ from modules.mcp.decorators import (
     deterministic_tool,
     get_mcp_tool_meta,
 )
+from modules.mcp.models import MCPToolSafety
 from modules.mcp.registry import _build_tool, _openapi_to_json_schema
 from modules.mcp.router import MCP_ROUTE_META, MCPRouter, get_mcp_route_meta
 
@@ -49,14 +50,14 @@ class TestMCPToolListing:
         tools = response.json()
         get_tools = [t for t in tools if t["method"] == "GET"]
         for tool in get_tools:
-            assert tool["safety"] == "safe"
+            assert tool["safety"] == MCPToolSafety.SAFE.value
 
     def test_delete_tools_are_mutating(self, client: TestClient) -> None:
         response = client.get("/api/v1/mcp/tools")
         tools = response.json()
         delete_tools = [t for t in tools if t["method"] == "DELETE"]
         for tool in delete_tools:
-            assert tool["safety"] == "mutating"
+            assert tool["safety"] == MCPToolSafety.MUTATING.value
 
     def test_mcp_tools_not_in_registry(self, client: TestClient) -> None:
         response = client.get("/api/v1/mcp/tools")
@@ -686,7 +687,7 @@ class TestMCPContractGuardrails:
                 "method": "POST",
                 "path": "/api/v1/test/{item_id}",
                 "description": "Broken for confirm test",
-                "safety": "mutating",
+                "safety": MCPToolSafety.MUTATING.value,
                 "confirm_required": False,
                 "input_schema": {
                     "type": "object",
@@ -802,6 +803,29 @@ class TestRouterDecoratorOnboarding:
         tools = reg.build_tool_registry(app)
         assert len(tools) == 1
         assert tools[0]["id"] == "endpoint"
+
+    def test_deterministic_tool_decorator_onboards_route(self) -> None:
+        from fastapi import APIRouter, FastAPI
+
+        from modules.mcp import registry as reg
+
+        leaf = MCPRouter(prefix="/demo", tags=["demo"])
+
+        @leaf.get("/decorated")
+        @deterministic_tool
+        def endpoint() -> dict[str, str]:
+            """Decorated endpoint."""
+            return {"ok": "yes"}
+
+        v1 = APIRouter(prefix="/api/v1")
+        v1.include_router(leaf)
+        app = FastAPI()
+        app.include_router(v1)
+
+        tools = reg.build_tool_registry(app)
+        assert len(tools) == 1
+        assert tools[0]["id"] == "endpoint"
+        assert tools[0]["description"] == "Decorated endpoint."
 
     def test_confirm_required_override_from_router_decorator(self) -> None:
         from fastapi import APIRouter, FastAPI
@@ -1024,7 +1048,7 @@ class TestPathParameterReliability:
                 "method": "GET",
                 "path": "/api/v1/test/{item_id}",
                 "description": "Broken for test",
-                "safety": "safe",
+                "safety": MCPToolSafety.SAFE.value,
                 "confirm_required": False,
                 "input_schema": {
                     "type": "object",

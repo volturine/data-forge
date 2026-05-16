@@ -10,8 +10,9 @@ from backend_core.error_handlers import handle_errors
 from modules.auth.dependencies import get_current_user
 from modules.auth.models import User
 from modules.mcp.executor import build_tool_context, call_tool
+from modules.mcp.models import MCPHttpMethod
 from modules.mcp.pending import pending_store
-from modules.mcp.registry import MUTATING_METHODS, build_tool_registry
+from modules.mcp.registry import build_tool_registry
 from modules.mcp.validation import check_schema_supported, validate_args
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -99,7 +100,7 @@ async def call(request: Request, body: ToolRequest, user: User = Depends(get_cur
     path = tool["path"]
     context = _request_tool_context(request)
 
-    if method in MUTATING_METHODS:
+    if MCPHttpMethod.require(method).is_mutating:
         token = pending_store.create(body.tool_id, method, path, normalized, context)
         return {
             "status": "pending",

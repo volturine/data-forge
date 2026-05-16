@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from contracts.build_runs.models import BuildRunStatus
 from contracts.runtime import ipc as runtime_ipc
+from contracts.runtime.ipc import RuntimeListenerKind, RuntimePayloadKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from contracts.scheduler.models import Schedule
 from core import (
@@ -81,13 +82,13 @@ async def build_worker_loop(
         daemon=True,
     )
     heartbeat_thread.start()
-    ipc_server = await runtime_ipc.start_api_server(listener="job")
+    ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.JOB)
     if ipc_server is None:
         raise RuntimeError("Build worker requires runtime IPC listener")
     wake_event = asyncio.Event()
 
     async def handle_runtime_payload(payload: dict[str, object]) -> None:
-        if payload.get("kind") == "job":
+        if RuntimePayloadKind.from_payload(payload) == RuntimePayloadKind.JOB:
             wake_event.set()
 
     ipc_task = asyncio.create_task(runtime_ipc.serve_api_notifications(ipc_server, stop_event, handle_runtime_payload))
@@ -112,7 +113,7 @@ async def build_worker_loop(
     finally:
         stop_event.set()
         await asyncio.gather(ipc_task, return_exceptions=True)
-        await runtime_ipc.stop_api_server(ipc_server, listener="job")
+        await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.JOB)
         heartbeat_stop.set()
         heartbeat_thread.join()
         _release_worker_jobs(worker_id)

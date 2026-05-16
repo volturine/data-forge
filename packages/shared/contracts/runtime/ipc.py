@@ -5,17 +5,42 @@ import json
 import logging
 import threading
 from collections.abc import Awaitable, Callable
-from typing import Literal
 
 import psycopg
 from psycopg import Notify
 
+from contracts.enums import DataForgeStrEnum
 from core.config import settings
 
 logger = logging.getLogger(__name__)
 
 _CHANNEL = 'runtime_events'
-ListenerKind = Literal['api', 'job']
+
+
+class RuntimeListenerKind(DataForgeStrEnum):
+    API = 'api'
+    JOB = 'job'
+
+
+class RuntimePayloadKind(DataForgeStrEnum):
+    BUILD = 'build'
+    ENGINE = 'engine'
+    JOB = 'job'
+    COMPUTE_REQUEST = 'compute_request'
+    COMPUTE_RESPONSE = 'compute_response'
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, object]) -> RuntimePayloadKind | None:
+        kind = payload.get('kind')
+        if not isinstance(kind, str):
+            return None
+        try:
+            return cls(kind)
+        except ValueError:
+            return None
+
+
+ListenerKind = RuntimeListenerKind | str
 _notify_connection_state: tuple[psycopg.Connection, str] | None = None
 _notify_connection_lock = threading.Lock()
 
@@ -24,7 +49,7 @@ def _psycopg_conninfo() -> str:
     return settings.database_url.replace('postgresql+psycopg://', 'postgresql://', 1)
 
 
-async def start_api_server(listener: ListenerKind = 'api') -> psycopg.Connection | None:
+async def start_api_server(listener: ListenerKind = RuntimeListenerKind.API) -> psycopg.Connection | None:
     del listener
     connection = psycopg.connect(_psycopg_conninfo(), autocommit=True)
     connection.execute(f'LISTEN {_CHANNEL}')
@@ -94,7 +119,7 @@ def _notify_payload(notify: Notify) -> str:
     return notify.payload
 
 
-async def stop_api_server(server: psycopg.Connection | None, *, listener: ListenerKind = 'api') -> None:
+async def stop_api_server(server: psycopg.Connection | None, *, listener: ListenerKind = RuntimeListenerKind.API) -> None:
     del listener
     if server is None:
         return
@@ -102,23 +127,26 @@ async def stop_api_server(server: psycopg.Connection | None, *, listener: Listen
 
 
 def notify_api_build(namespace: str, build_id: str, latest_sequence: int) -> None:
-    _send_api_message({'kind': 'build', 'namespace': namespace, 'build_id': build_id, 'latest_sequence': latest_sequence}, listener='api')
+    _send_api_message(
+        {'kind': RuntimePayloadKind.BUILD.value, 'namespace': namespace, 'build_id': build_id, 'latest_sequence': latest_sequence},
+        listener=RuntimeListenerKind.API,
+    )
 
 
 def notify_api_engine(namespace: str) -> None:
-    _send_api_message({'kind': 'engine', 'namespace': namespace}, listener='api')
+    _send_api_message({'kind': RuntimePayloadKind.ENGINE.value, 'namespace': namespace}, listener=RuntimeListenerKind.API)
 
 
 def notify_build_job() -> None:
-    _send_api_message({'kind': 'job'}, listener='job')
+    _send_api_message({'kind': RuntimePayloadKind.JOB.value}, listener=RuntimeListenerKind.JOB)
 
 
 def notify_compute_request(request_id: str) -> None:
-    _send_api_message({'kind': 'compute_request', 'request_id': request_id}, listener='job')
+    _send_api_message({'kind': RuntimePayloadKind.COMPUTE_REQUEST.value, 'request_id': request_id}, listener=RuntimeListenerKind.JOB)
 
 
 def notify_compute_response(request_id: str) -> None:
-    _send_api_message({'kind': 'compute_response', 'request_id': request_id}, listener='api')
+    _send_api_message({'kind': RuntimePayloadKind.COMPUTE_RESPONSE.value, 'request_id': request_id}, listener=RuntimeListenerKind.API)
 
 
 def _send_api_message(payload: dict[str, object], *, listener: ListenerKind) -> None:

@@ -346,7 +346,7 @@ async def export_analysis_code(
     return export_service.export_analysis_code(
         session,
         parse_analysis_id(analysis_id),
-        format_name=data.format.value,
+        format_name=data.format,
         tab_id=data.tab_id,
     )
 

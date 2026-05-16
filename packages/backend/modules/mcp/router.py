@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 
 MCP_ROUTE_META = "__mcp_route_meta__"
 MCP_ENDPOINT_META = "__mcp_endpoint_meta__"
+MCP_TOOL_META = "__mcp_tool_meta__"
 
 
 def _response_model_name(route: APIRoute) -> str | None:
@@ -41,6 +42,17 @@ def build_inputs(fn: Callable[..., Any]) -> list[dict[str, Any]]:
     return items
 
 
+def _decorated_tool_meta(endpoint: Callable[..., Any]) -> dict[str, Any] | None:
+    root = inspect.unwrap(endpoint)
+    endpoint_meta = getattr(endpoint, MCP_TOOL_META, None)
+    if isinstance(endpoint_meta, dict):
+        return dict(endpoint_meta)
+    root_meta = getattr(root, MCP_TOOL_META, None)
+    if isinstance(root_meta, dict):
+        return dict(root_meta)
+    return None
+
+
 def set_mcp_endpoint_meta(
     endpoint: Callable[..., Any],
     *,
@@ -49,17 +61,19 @@ def set_mcp_endpoint_meta(
     mcp_tool_id: str | None,
 ) -> None:
     root = inspect.unwrap(endpoint)
-    if not mcp:
+    decorator_meta = _decorated_tool_meta(endpoint)
+    if not mcp and decorator_meta is None:
         setattr(endpoint, MCP_ENDPOINT_META, None)
         setattr(root, MCP_ENDPOINT_META, None)
         return
 
-    doc = inspect.getdoc(root) or ""
-    meta: dict[str, Any] = {
-        "name": mcp_tool_id or getattr(root, "__name__", getattr(endpoint, "__name__", "tool")),
-        "docstring": doc,
+    meta = decorator_meta or {
+        "name": getattr(root, "__name__", getattr(endpoint, "__name__", "tool")),
+        "docstring": inspect.getdoc(root) or "",
         "inputs": build_inputs(root),
     }
+    if mcp_tool_id is not None:
+        meta["name"] = mcp_tool_id
     if mcp_confirm_required is not None:
         meta["confirm_required"] = mcp_confirm_required
 

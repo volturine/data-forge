@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from contracts.analysis.step_types import is_step_type
-from contracts.enums import DataForgeStrEnum
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -12,6 +11,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from modules.export.models import CodeExportFormat
 
 
 class PipelineStepSchema(BaseModel):
@@ -213,11 +214,6 @@ class GeneratedAnalysisResponseSchema(BaseModel):
     explanation: str
     provider: str
     model: str
-
-
-class CodeExportFormat(DataForgeStrEnum):
-    POLARS = "polars"
-    SQL = "sql"
 
 
 class CodeExportRequestSchema(BaseModel):

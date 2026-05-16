@@ -24,6 +24,7 @@ from modules.auth.models import User
 from modules.chat.openrouter import OpenRouterError, chat_with_tools, list_models
 from modules.chat.sessions import LiveSession, session_store
 from modules.mcp.executor import build_tool_context, call_tool
+from modules.mcp.models import MCPToolSafety
 from modules.mcp.tool_output import format_output_hint
 from modules.mcp.validation import validate_args
 
@@ -336,8 +337,8 @@ async def _run_agent_turn(
         if tool_ids:
             id_set = set(tool_ids)
             registry = [t for t in registry if t["id"] in id_set]
-        safe_tools = [t for t in registry if t["safety"] == "safe"]
-        mutating_tools = [t for t in registry if t["safety"] == "mutating"]
+        safe_tools = [t for t in registry if t["safety"] == MCPToolSafety.SAFE.value]
+        mutating_tools = [t for t in registry if t["safety"] == MCPToolSafety.MUTATING.value]
         all_tools = safe_tools + mutating_tools
 
         tool_system_msg = {"role": "system", "content": _build_tool_system_message(all_tools)} if all_tools else None

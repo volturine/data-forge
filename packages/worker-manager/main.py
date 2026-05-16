@@ -15,6 +15,7 @@ from multiprocessing.synchronize import Event as ProcessEvent
 
 from contracts.build_jobs.live import hub as build_job_hub
 from contracts.runtime import ipc as runtime_ipc
+from contracts.runtime.ipc import RuntimeListenerKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import (
     build_jobs_service as build_job_service,
@@ -239,7 +240,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
     configure_logging()
     logger.info("Starting build worker manager process...")
     local_stop = stop_event or asyncio.Event()
-    ipc_server = await runtime_ipc.start_api_server(listener="job")
+    ipc_server = await runtime_ipc.start_api_server(listener=RuntimeListenerKind.JOB)
     ipc_task = None
     if ipc_server is not None:
         ipc_task = asyncio.create_task(runtime_ipc.serve_api_notifications(ipc_server, local_stop, handle_runtime_payload))
@@ -308,7 +309,7 @@ async def run_build_manager_process(*, stop_event: asyncio.Event | None = None) 
         heartbeat_thread.join()
         if ipc_task is not None:
             await asyncio.gather(ipc_task)
-        await runtime_ipc.stop_api_server(ipc_server, listener="job")
+        await runtime_ipc.stop_api_server(ipc_server, listener=RuntimeListenerKind.JOB)
         for child in children.values():
             _stop_worker_process(child)
         manager.shutdown_all()

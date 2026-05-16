@@ -10,6 +10,7 @@ import uuid
 
 from contracts.build_jobs.live import hub as build_job_hub
 from contracts.runtime import ipc as runtime_ipc
+from contracts.runtime.ipc import RuntimePayloadKind
 from contracts.runtime_workers.models import RuntimeWorkerKind
 from core import runtime_workers_service as runtime_worker_service
 from core.config import settings
@@ -172,7 +173,7 @@ def scheduler_id() -> str:
 
 
 async def handle_runtime_payload(payload: dict[str, object]) -> None:
-    if payload.get("kind") == "job":
+    if RuntimePayloadKind.from_payload(payload) == RuntimePayloadKind.JOB:
         build_job_hub.publish()
 
 

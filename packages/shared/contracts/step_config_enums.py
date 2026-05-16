@@ -77,3 +77,21 @@ class WithColumnsExprType(DataForgeStrEnum):
     LITERAL = 'literal'
     COLUMN = 'column'
     UDF = 'udf'
+
+
+class FillNullStrategy(DataForgeStrEnum):
+    FORWARD = 'forward'
+    BACKWARD = 'backward'
+    MEAN = 'mean'
+    MEDIAN = 'median'
+    ZERO = 'zero'
+    LITERAL = 'literal'
+    DROP_ROWS = 'drop_rows'
+
+    @property
+    def uses_literal_value(self) -> bool:
+        return self == FillNullStrategy.LITERAL
+
+    @property
+    def drops_rows(self) -> bool:
+        return self == FillNullStrategy.DROP_ROWS

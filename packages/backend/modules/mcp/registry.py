@@ -2,29 +2,15 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
+from modules.mcp.models import MCPHttpMethod
 from modules.mcp.router import get_mcp_route_meta
 from modules.mcp.tool_output import format_output_hint, top_level_output_fields
 from modules.mcp.validation import check_schema_supported
-
-SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-
-CONFIRM_REQUIRED_PATTERNS: list[tuple[str, str]] = [
-    ("DELETE", r"^/api/v1/datasource/"),
-    ("DELETE", r"^/api/v1/scheduler/"),
-    ("DELETE", r"^/api/v1/healthchecks/"),
-    ("DELETE", r"^/api/v1/analysis/"),
-]
-
-
-def _requires_confirm(method: str, path: str) -> bool:
-    return any(method == m and re.match(pattern, path) for m, pattern in CONFIRM_REQUIRED_PATTERNS)
 
 
 def _route_openapi_operation(route: APIRoute, schema: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -50,11 +36,11 @@ def _description(op: dict[str, Any], meta: dict[str, Any], method: str, path: st
     return f"{method} {path}"
 
 
-def _confirm_required(method: str, path: str, meta: dict[str, Any]) -> bool:
+def _confirm_required(method: MCPHttpMethod, path: str, meta: dict[str, Any]) -> bool:
     value = meta.get("confirm_required")
     if isinstance(value, bool):
         return value
-    return _requires_confirm(method, path)
+    return method.requires_confirmation_for_path(path)
 
 
 def _tag_list(route: APIRoute, op: dict[str, Any]) -> list[str]:
@@ -134,7 +120,9 @@ def _output_schema(op: dict[str, Any], meta: dict[str, Any], components: dict) -
 
 
 def _build_tool(route_data: dict, components: dict) -> dict:
-    method = route_data["method"]
+    method = MCPHttpMethod.from_route_method(route_data["method"])
+    if method is None:
+        raise ValueError(f"Unsupported MCP route method: {route_data['method']!r}")
     path = route_data["path"]
     op = route_data["operation"]
     onboard = route_data.get("meta", {})
@@ -198,7 +186,7 @@ def _build_tool(route_data: dict, components: dict) -> dict:
     if required:
         tool_schema["required"] = required
 
-    tool_id = route_data.get("name") or f"{method.lower()}_{path.replace('/', '_').replace('{', '').replace('}', '').strip('_')}"
+    tool_id = route_data.get("name") or f"{method.value.lower()}_{path.replace('/', '_').replace('{', '').replace('}', '').strip('_')}"
 
     tags = op.get("tags", [])
     if isinstance(route, APIRoute):
@@ -207,10 +195,10 @@ def _build_tool(route_data: dict, components: dict) -> dict:
 
     return {
         "id": tool_id,
-        "method": method,
+        "method": method.value,
         "path": path,
         "description": description,
-        "safety": "safe" if method in SAFE_METHODS else "mutating",
+        "safety": method.safety.value,
         "confirm_required": _confirm_required(method, path, onboard),
         "input_schema": tool_schema,
         "arg_metadata": {
@@ -231,7 +219,6 @@ def _build_tool(route_data: dict, components: dict) -> dict:
 
 def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
     """Return metadata for routes onboarded via MCP route registration."""
-    allowed_methods = SAFE_METHODS | MUTATING_METHODS
     marked: list[dict[str, Any]] = []
     for route in app.routes:
         if not isinstance(route, APIRoute):
@@ -244,7 +231,7 @@ def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
             continue
         # Routes in this codebase are single-method; MCP exposes one tool per route.
         method = next(
-            (m.upper() for m in (route.methods or set()) if m.upper() in allowed_methods),
+            (candidate for raw in (route.methods or set()) if (candidate := MCPHttpMethod.from_route_method(raw)) is not None),
             None,
         )
         if method is None:
@@ -252,7 +239,7 @@ def _marked_routes(app: FastAPI) -> list[dict[str, Any]]:
         endpoint = route.endpoint
         fallback = endpoint.__name__ if hasattr(endpoint, "__name__") else route.name
         name = meta.get("name") or fallback
-        marked.append({"route": route, "method": method, "name": name, "meta": meta})
+        marked.append({"route": route, "method": method.value, "name": name, "meta": meta})
     return marked
 
 

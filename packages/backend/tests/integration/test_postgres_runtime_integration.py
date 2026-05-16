@@ -449,6 +449,7 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
     require_docker()
 
     from contracts.runtime import ipc as runtime_ipc
+    from contracts.runtime.ipc import RuntimePayloadKind
     from core.config import settings
 
     with PostgresContainer() as container:
@@ -472,12 +473,12 @@ async def test_postgres_runtime_ipc_delivers_notifications(monkeypatch, tmp_path
             job_payload = await asyncio.wait_for(received.get(), timeout=15)
 
             assert build_payload == {
-                "kind": "build",
+                "kind": RuntimePayloadKind.BUILD.value,
                 "namespace": "default",
                 "build_id": "build-1",
                 "latest_sequence": 7,
             }
-            assert job_payload == {"kind": "job"}
+            assert job_payload == {"kind": RuntimePayloadKind.JOB.value}
         finally:
             stop_event.set()
             with contextlib.suppress(asyncio.TimeoutError):

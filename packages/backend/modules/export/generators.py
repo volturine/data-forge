@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +11,7 @@ from contracts.analysis.pipeline_types import PipelineDefinition, PipelineTab
 from contracts.datasource.models import DataSource
 
 from modules.analysis.step_schemas import FilterConfig
+from modules.export.models import CodeExportFormat
 from modules.export.utils import export_slug
 
 _FILTER_BINARY_OPERATORS = {"=", "==", "!=", ">", "<", ">=", "<="}
@@ -53,6 +55,26 @@ class ExportSelection:
     ordered_tabs: list[PipelineTab]
     target_tab: PipelineTab
     tab_map: dict[str, PipelineTab]
+
+
+CodeGenerator = Callable[[ExportSelection, dict[str, DataSource]], tuple[str, list[str]]]
+_CODE_GENERATORS: dict[CodeExportFormat, CodeGenerator] = {}
+
+
+def code_generator(format_name: CodeExportFormat) -> Callable[[CodeGenerator], CodeGenerator]:
+    def register(generator: CodeGenerator) -> CodeGenerator:
+        _CODE_GENERATORS[format_name] = generator
+        return generator
+
+    return register
+
+
+def generate_code(format_name: CodeExportFormat, selection: ExportSelection, datasources_by_id: dict[str, DataSource]) -> tuple[str, list[str]]:
+    try:
+        generator = _CODE_GENERATORS[format_name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported export format '{format_name.value}'") from exc
+    return generator(selection, datasources_by_id)
 
 
 def _identifier(value: str) -> str:
@@ -339,6 +361,7 @@ def _sql_group_agg_expr(aggregation: dict[str, Any]) -> str | None:
     return f"{rendered} AS {_sql_quote(alias_name)}"
 
 
+@code_generator(CodeExportFormat.POLARS)
 def generate_polars_code(
     selection: ExportSelection,
     datasources_by_id: dict[str, DataSource],
@@ -644,6 +667,7 @@ def generate_polars_code(
     return "\n".join(lines).strip() + "\n", warnings
 
 
+@code_generator(CodeExportFormat.SQL)
 def generate_sql_code(
     selection: ExportSelection,
     datasources_by_id: dict[str, DataSource],
